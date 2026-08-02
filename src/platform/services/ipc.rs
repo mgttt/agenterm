@@ -20,75 +20,15 @@ pub(crate) fn trusted_user_identity() -> io::Result<TrustedUserIdentity> {
 }
 
 pub(crate) fn default_native_endpoint(scope: &ServerScopeId) -> IpcEndpoint {
-    match agenterm_platform::platform_kind() {
-        agenterm_platform::PlatformKind::Windows => {
-            IpcEndpoint::NamedPipe(format!(r"\\.\pipe\agenterm-{}", scope.as_str()))
-        }
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-            IpcEndpoint::UnixSocket(
-                agenterm_platform::ipc::native_runtime_directory()
-                    .join("agenterm")
-                    .join(format!("{}.sock", scope.as_str()))
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        }
-        _ => IpcEndpoint::UnixSocket(
-            std::env::temp_dir()
-                .join("agenterm")
-                .join(format!("{}.sock", scope.as_str()))
-                .to_string_lossy()
-                .into_owned(),
-        ),
-    }
+    crate::platform::ipc_default_native_endpoint(scope)
 }
 
 pub(crate) fn default_workspace_path(scope: &ServerScopeId) -> PathBuf {
-    match agenterm_platform::platform_kind() {
-        agenterm_platform::PlatformKind::Windows => windows_scoped_workspace_root()
-            .join("workspaces")
-            .join(format!("{}.json", scope.as_str())),
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-            unix_data_root_from(
-                std::env::var_os("XDG_DATA_HOME"),
-                std::env::var_os("HOME"),
-                std::env::temp_dir(),
-            )
-            .join("workspaces")
-            .join(format!("{}.json", scope.as_str()))
-        }
-        _ => std::env::temp_dir()
-            .join("agenterm")
-            .join("workspaces")
-            .join(format!("{}.json", scope.as_str())),
-    }
+    crate::platform::ipc_default_workspace_path(scope)
 }
 
 pub(crate) fn default_workspace_path_for(scope: &ServerScopeId, is_main: bool) -> PathBuf {
-    if is_main
-        && matches!(
-            agenterm_platform::platform_kind(),
-            agenterm_platform::PlatformKind::Windows
-        )
-    {
-        windows_main_workspace_root().join("workspace.json")
-    } else {
-        default_workspace_path(scope)
-    }
-}
-
-fn windows_scoped_workspace_root() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("AgenTerm")
-}
-
-fn windows_main_workspace_root() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("AgenTerm")
+    crate::platform::ipc_default_workspace_path_for(scope, is_main)
 }
 
 /// Pure Unix persistence-root policy kept callable on every host so settings

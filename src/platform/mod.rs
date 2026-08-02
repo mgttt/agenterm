@@ -233,6 +233,140 @@ pub(crate) fn hosted_script_worker_available() -> bool {
     )
 }
 
+pub(crate) fn is_windows_host() -> bool {
+    matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Windows)
+}
+
+pub(crate) fn is_macos_host() -> bool {
+    matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+}
+
+pub(crate) fn is_unix_host() -> bool {
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
+    )
+}
+
+pub(crate) fn product_directory_name() -> &'static str {
+    if is_windows_host() {
+        "AgenTerm"
+    } else {
+        "agenterm"
+    }
+}
+
+pub(crate) const fn script_worker_default_executable_name() -> &'static str {
+    "agenterm-rhai"
+}
+
+pub(crate) fn terminal_default_font_size() -> u16 {
+    if is_macos_host() { 14 } else { 12 }
+}
+
+pub(crate) fn default_audit_path() -> std::path::PathBuf {
+    if is_windows_host() {
+        std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join(product_directory_name())
+            .join("script-audit.jsonl")
+    } else if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
+        std::path::PathBuf::from(path)
+            .join(product_directory_name())
+            .join("script-audit.jsonl")
+    } else if let Some(home) = std::env::var_os("HOME") {
+        std::path::PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join(product_directory_name())
+            .join("script-audit.jsonl")
+    } else {
+        std::env::temp_dir().join("agenterm-rhai-audit.jsonl")
+    }
+}
+
+pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static str> {
+    let (provider, roots) = if is_windows_host() {
+        (ureq::tls::TlsProvider::NativeTls, ureq::tls::RootCerts::PlatformVerifier)
+    } else if is_unix_host() {
+        (ureq::tls::TlsProvider::Rustls, ureq::tls::RootCerts::WebPki)
+    } else {
+        return Err("http_tls_backend_unsupported");
+    };
+    Ok(ureq::tls::TlsConfig::builder()
+        .provider(provider)
+        .root_certs(roots)
+        .build())
+}
+
+pub(crate) fn ipc_default_native_endpoint(
+    scope: &crate::platform::contract::ipc::ServerScopeId,
+) -> crate::platform::contract::ipc::IpcEndpoint {
+    if is_windows_host() {
+        crate::platform::contract::ipc::IpcEndpoint::NamedPipe(format!(
+            r"\\.\pipe\agenterm-{}",
+            scope.as_str()
+        ))
+    } else {
+        crate::platform::contract::ipc::IpcEndpoint::UnixSocket(
+            agenterm_platform::ipc::native_runtime_directory()
+                .join("agenterm")
+                .join(format!("{}.sock", scope.as_str()))
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+}
+
+pub(crate) fn ipc_default_workspace_path(
+    scope: &crate::platform::contract::ipc::ServerScopeId,
+) -> std::path::PathBuf {
+    if is_windows_host() {
+        std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join(product_directory_name())
+            .join("workspaces")
+            .join(format!("{}.json", scope.as_str()))
+    } else {
+        crate::platform::services::ipc::unix_data_root_from(
+            std::env::var_os("XDG_DATA_HOME"),
+            std::env::var_os("HOME"),
+            std::env::temp_dir(),
+        )
+        .join("workspaces")
+        .join(format!("{}.json", scope.as_str()))
+    }
+}
+
+pub(crate) fn ipc_default_workspace_path_for(
+    scope: &crate::platform::contract::ipc::ServerScopeId,
+    is_main: bool,
+) -> std::path::PathBuf {
+    if is_main && is_windows_host() {
+        std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(product_directory_name())
+            .join("workspace.json")
+    } else {
+        ipc_default_workspace_path(scope)
+    }
+}
+
+pub(crate) fn config_root_for_product_directory(
+    directories: &agenterm_platform::filesystem::HostDirectories,
+) -> std::path::PathBuf {
+    directories.config.join(product_directory_name())
+}
+
+pub(crate) fn local_data_root_for_product_directory(
+    directories: &agenterm_platform::filesystem::HostDirectories,
+) -> std::path::PathBuf {
+    directories.local_data.join(product_directory_name())
+}
+
 pub(crate) fn platform_info_json() -> serde_json::Value {
     let kind = agenterm_platform::platform_kind();
     let display = agenterm_platform::window::display_backend_facts();

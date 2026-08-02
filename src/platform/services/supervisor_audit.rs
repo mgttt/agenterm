@@ -81,29 +81,7 @@ impl NamedAuditLock {
 }
 
 pub(crate) fn default_audit_path() -> PathBuf {
-    match agenterm_platform::platform_kind() {
-        agenterm_platform::PlatformKind::Windows => std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("AgenTerm")
-            .join("script-audit.jsonl"),
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-            if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
-                PathBuf::from(path)
-                    .join("agenterm")
-                    .join("script-audit.jsonl")
-            } else if let Some(home) = std::env::var_os("HOME") {
-                PathBuf::from(home)
-                    .join(".local")
-                    .join("share")
-                    .join("agenterm")
-                    .join("script-audit.jsonl")
-            } else {
-                std::env::temp_dir().join("agenterm-rhai-audit.jsonl")
-            }
-        }
-        _ => std::env::temp_dir().join("agenterm-rhai-audit.jsonl"),
-    }
+    crate::platform::default_audit_path()
 }
 
 fn process_tree_error(message: String) -> SupervisorAuditError {

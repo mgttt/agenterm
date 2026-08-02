@@ -53,14 +53,12 @@ mod tests {
     #[test]
     fn native_control_center_renderers_own_linux_and_macos_capture_requests() {
         let strategy = control_center_screenshot_strategy();
-        match agenterm_platform::platform_kind() {
-            agenterm_platform::PlatformKind::Windows => {
-                assert_eq!(strategy, ScreenshotStrategy::DirectNativeWindow)
-            }
-            agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-                assert_eq!(strategy, ScreenshotStrategy::RendererRequest)
-            }
-            _ => assert_eq!(strategy, ScreenshotStrategy::Unsupported),
+        if crate::platform::is_windows_host() {
+            assert_eq!(strategy, ScreenshotStrategy::DirectNativeWindow);
+        } else if crate::platform::is_unix_host() {
+            assert_eq!(strategy, ScreenshotStrategy::RendererRequest);
+        } else {
+            assert_eq!(strategy, ScreenshotStrategy::Unsupported);
         }
     }
 
