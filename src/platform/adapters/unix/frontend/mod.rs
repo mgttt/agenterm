@@ -38,7 +38,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     platform::services::frontend::{
-        attempt_gui_handoff, parse_gui_launch_target, gui_help_result, GuiHandoffResult, GuiLaunchResult,
+        attempt_gui_handoff, gui_launch_argument_error, parse_gui_launch_target, gui_help_result,
+        GuiHandoffResult, GuiLaunchResult,
         UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE,
     },
     platform::services::frontend::request_gui_wake_best_effort,
@@ -533,7 +534,7 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let options = match parse_gui_launch_target(&arguments, UNIX_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(message) => {
-            eprintln!("AgenTerm GUI argument error: {message}\\n\\n{UNIX_GUI_USAGE}");
+            eprintln!("{}", gui_launch_argument_error(&message, UNIX_GUI_USAGE, false));
             return GuiLaunchResult::UsageError;
         }
     };

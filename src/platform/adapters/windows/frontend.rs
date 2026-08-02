@@ -2,8 +2,8 @@ use std::env;
 
 use crate::wake_signal::WakeSignal;
 use crate::platform::services::frontend::{
-    attempt_gui_handoff, gui_help_result, parse_gui_launch_target, GuiHandoffResult,
-    GuiLaunchResult, GuiWakeResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
+    attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
+    GuiHandoffResult, GuiLaunchResult, GuiWakeResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
 };
 
 /// Wake the Win32 message loop without posting one message per producer event.
@@ -35,21 +35,10 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     if let Some(result) = gui_help_result(&arguments, WINDOWS_GUI_USAGE) {
         return result;
     }
-    if arguments
-        .first()
-        .is_some_and(|argument| !argument.starts_with("--"))
-    {
-        write_best_effort_stderr(&gui_cli_guidance(&arguments));
-        return GuiLaunchResult::UsageError;
-    }
     let launch_options = match parse_gui_launch_target(&arguments, WINDOWS_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(error) => {
-            write_best_effort_stderr(&format!(
-                "AgenTerm GUI argument error: {error:#}\n\
-                 No GUI server was started by this invocation.\n\
-                 More CLI commands: agenterm-cli.exe -h"
-            ));
+            write_best_effort_stderr(&gui_launch_argument_error(&error, "", true));
             return GuiLaunchResult::UsageError;
         }
     };

@@ -57,6 +57,25 @@ pub(crate) fn gui_help_result(arguments: &[String], usage: &str) -> Option<GuiLa
     None
 }
 
+pub(crate) fn gui_launch_argument_error(
+    message: &str,
+    usage: &str,
+    include_server_hint: bool,
+) -> String {
+    let mut rendered = format!("AgenTerm GUI argument error: {message}");
+    if include_server_hint {
+        rendered.push_str(
+            "\nNo GUI server was started by this invocation.\nMore CLI commands: agenterm-cli.exe -h",
+        );
+    }
+    if !usage.is_empty() {
+        rendered.push('\n');
+        rendered.push('\n');
+        rendered.push_str(usage);
+    }
+    rendered
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GuiLaunchResult {
     Launched,
