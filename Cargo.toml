@@ -85,3 +85,8 @@ inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
+
+# Vendored with one change: macOS frames are tagged with the display's color
+# space so Core Animation presents without a per-frame vImage conversion.
+[patch.crates-io]
+softbuffer = { path = "third_party/softbuffer" }
