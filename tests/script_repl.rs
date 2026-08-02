@@ -4,7 +4,7 @@ use std::{
 };
 
 fn run_repl(input: &str, arguments: &[&str]) -> std::process::Output {
-    run_repl_with(env!("CARGO_BIN_EXE_agenterm-script"), input, arguments)
+    run_repl_with(env!("CARGO_BIN_EXE_agenterm-rhai"), input, arguments)
 }
 
 fn run_repl_with(executable: &str, input: &str, arguments: &[&str]) -> std::process::Output {
@@ -15,7 +15,7 @@ fn run_repl_with(executable: &str, input: &str, arguments: &[&str]) -> std::proc
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().expect("spawn agenterm-script repl");
+    let mut child = command.spawn().expect("spawn agenterm-rhai repl");
     child
         .stdin
         .take()

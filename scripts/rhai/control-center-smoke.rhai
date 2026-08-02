@@ -542,7 +542,7 @@ let cli_executable = std::path::join(
 ).display;
 let script_executable = std::path::join(
     executable_directory,
-    "agenterm-script.exe"
+    "agenterm-rhai.exe"
 ).display;
 let gui_executable = std::path::join(
     executable_directory,

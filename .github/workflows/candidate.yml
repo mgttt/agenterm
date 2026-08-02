@@ -196,10 +196,10 @@ jobs:
         shell: cmd
         run: |
           @if not exist target\qualification\timing.json exit /b 0
-          @if exist dist\agenterm-script.exe (
-            dist\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          @if exist dist\agenterm-rhai.exe (
+            dist\agenterm-rhai.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
           ) else (
-            target\debug\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+            target\debug\agenterm-rhai.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
           )
 
       - name: Upload Candidate quality timing
@@ -215,7 +215,7 @@ jobs:
         if: matrix.platform_id == 'windows-x86_64'
         shell: cmd
         run: >-
-          dist\agenterm-script.exe task run package-release-qualified
+          dist\agenterm-rhai.exe task run package-release-qualified
           --manifest agenterm.tasks.json
 
       - name: Install Windows ARM64 cross-build tooling
@@ -464,7 +464,7 @@ jobs:
           if result.get("status") != "Accepted":
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
-          target/aarch64-apple-darwin/release/agenterm-script \
+          target/aarch64-apple-darwin/release/agenterm-rhai \
             run scripts/rhai/finalize-macos-provenance.rhai -- \
             "$ARCHIVE" "$ARCHIVE.provenance.json"
 
@@ -531,7 +531,7 @@ jobs:
           if result.get("status") != "Accepted":
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
-          target/x86_64-apple-darwin/release/agenterm-script \
+          target/x86_64-apple-darwin/release/agenterm-rhai \
             run scripts/rhai/finalize-macos-provenance.rhai -- \
             "$ARCHIVE" "$ARCHIVE.provenance.json"
 
@@ -660,7 +660,7 @@ jobs:
           test -n "$archive"
           mkdir -p "$RUNNER_TEMP/agenterm-candidate-tool"
           tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-candidate-tool"
-          chmod +x "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-script"
+          chmod +x "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rhai"
 
       - name: Seal exact candidate bundle
         run: |
@@ -669,7 +669,7 @@ jobs:
           test -f candidate-input/qualification-receipt.json
           mkdir -p candidate-output/payload
           cp candidate-input/* candidate-output/payload/
-          "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-script" \
+          "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rhai" \
             run scripts/rhai/candidate-aggregate.rhai --project-root . -- \
             . candidate-metadata.json candidate-output/payload \
             "candidate-output/agenterm-$version-candidate-manifest.json"

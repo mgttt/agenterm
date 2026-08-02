@@ -260,7 +260,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     );
     let spec = std::path::join(
         context.owned_root,
-        "../../../docs/agenterm-script-runtime.md"
+        "../../../docs/agenterm-rhai-runtime.md"
     ).display;
     // Resolve from the repository supplied to the context rather than trusting
     // the current directory of a nested child.
@@ -277,7 +277,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             "--profile", "local", "--",
             std::path::join(
                 repo,
-                "docs/agenterm-script-runtime.md"
+                "docs/agenterm-rhai-runtime.md"
             ).display,
             catalog_path
         ],
@@ -1509,7 +1509,7 @@ fn assert_supervisor(
         "script_supervisor_hard_timeout_untyped"
     );
 
-    let existing = helper::process_ids("agenterm-script.exe");
+    let existing = helper::process_ids("agenterm-rhai.exe");
     let crash_client = helper::start_script_client(
         context,
         cli,
@@ -1521,7 +1521,7 @@ fn assert_supervisor(
         audit_path
     );
     let crash_worker = helper::wait_new_process(
-        "agenterm-script.exe",
+        "agenterm-rhai.exe",
         existing,
         3000
     );
@@ -2175,7 +2175,7 @@ let receipt=fleet.tabs.set_note(
             "script_fleet_note_restore_failed"
         );
 
-        print("STEP direct agenterm-script north-star named task");
+        print("STEP direct agenterm-rhai north-star named task");
         let source_project = std::path::join(
             repo,
             "examples/script-daily-check"
@@ -2274,7 +2274,7 @@ let receipt=fleet.tabs.set_note(
         );
         require(
             direct_help.contains("AgenTerm Script Runtime")
-                && direct_help.contains("agenterm-script task run"),
+                && direct_help.contains("agenterm-rhai task run"),
             "script_direct_help_mismatch"
         );
         require(
@@ -2309,7 +2309,7 @@ let receipt=fleet.tabs.set_note(
         );
         require(
             direct_catalog.project_id ==
-                "agenterm-script-daily-check"
+                "agenterm-rhai-daily-check"
                 && direct_catalog.schema_version == 3
                 && direct_catalog.compatible
                 && direct_catalog.tasks.len == 1

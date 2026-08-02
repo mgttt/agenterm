@@ -92,9 +92,9 @@ jobs:
       - name: Build isolated Rhai experiment driver
         shell: cmd
         run: |
-          @cargo build --quiet --locked --bin agenterm-script
+          @cargo build --quiet --locked --bin agenterm-rhai
           @if errorlevel 1 exit /b 1
-          @copy /y target\debug\agenterm-script.exe "%RUNNER_TEMP%\agenterm-perf-tool.exe" >nul
+          @copy /y target\debug\agenterm-rhai.exe "%RUNNER_TEMP%\agenterm-perf-tool.exe" >nul
           @if errorlevel 1 exit /b 1
 
       - name: Run ordered cold-to-warm Quick samples
@@ -108,7 +108,7 @@ jobs:
       - name: Aggregate typed experiment evidence
         shell: cmd
         run: >-
-          cargo run --quiet --bin agenterm-script --
+          cargo run --quiet --bin agenterm-rhai --
           run scripts/rhai/performance-summary.rhai --project-root . --
           performance-evidence\performance-summary.json
           "${{ inputs.runner_class }}"

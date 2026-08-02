@@ -381,7 +381,7 @@
       "responsibility": "preflight fail-closed self-test",
       "replacement_task": "check",
       "replacement": "tests/rhai_migration.rs",
-      "evidence": "public agenterm-script task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports",
+      "evidence": "public agenterm-rhai task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports",
       "status": "deleted",
       "callers": [
         "check task"
@@ -407,7 +407,7 @@
         {
           "id": "migration-parity:ps1-script-preflight-selftest",
           "owner": "check",
-          "proof": "public agenterm-script task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports"
+          "proof": "public agenterm-rhai task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports"
         }
       ]
     },

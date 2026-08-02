@@ -1161,7 +1161,7 @@ if !skip_smoke {
     }
 }
 let worker =
-    std::path::join(repo, "dist/agenterm-script.exe").display;
+    std::path::join(repo, "dist/agenterm-rhai.exe").display;
 
 let ordinary_gates = [
     #{

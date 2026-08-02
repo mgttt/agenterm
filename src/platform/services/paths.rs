@@ -29,11 +29,11 @@ pub(crate) fn terminal_default_font_size() -> u16 {
 }
 
 pub(crate) fn script_worker_executable_names() -> Vec<String> {
-    let native = agenterm_platform::filesystem::executable_name("agenterm-script");
+    let native = agenterm_platform::filesystem::executable_name("agenterm-rhai");
     if native.ends_with(".exe") {
         vec![native]
     } else {
-        vec![native, "agenterm-script.exe".to_owned()]
+        vec![native, "agenterm-rhai.exe".to_owned()]
     }
 }
 

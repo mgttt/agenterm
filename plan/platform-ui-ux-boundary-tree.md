@@ -1,0 +1,129 @@
+# 跨平台 UI/UX 边界树（执行版）
+
+- [x] 目标：让 `agenterm-platform` 只承载「能力」与「机制」；主进程 `src/` 承载「产品语义」。
+- [x] [已完成] 启动参数解析已抽离到 `src/frontend.rs` 的共享策略器，Windows/Unix 前端入口复用同一 `parse_gui_launch_arguments` 规则，仅保留平台能力差异（地址校验/ui-client 开关）。启动/唤醒分发已收敛到统一能力入口。
+- [x] [已完成] 客户端控制入口的服务端自动拉起也统一到 `src/frontend_server.rs`：`src/client/mod.rs` 的 `start_server_process` 仅委托 `start_frontend_server_process`，不再重复构造端点参数与 autostart 决策。
+
+```text
+src/platform
+├─ services
+│  ├─ frontend.rs
+│  │  ├─ run_gui_entry(): only dispatch by PlatformKind
+│  │  ├─ request_gui_wake(): only dispatch by PlatformKind
+│  │  └─ 当前已是能力路由起点，下一步目标是统一启动/唤醒失败语义
+│  ├─ ipc.rs / paths.rs / control_center.rs / process.rs / supervisor_audit.rs
+│  │  ├─ 保留：跨平台能力拼装（端点/路径/截图/进程/审计）
+│  │  └─ 风险点：避免继续在此层引入 UI 语义条件分支
+│  └─ control_center_shell.rs / script_*：保持协议与脚本宿主语义
+│
+├─ adapters/windows
+│  ├─ frontend.rs
+│  │  ├─ Windows GUI launcher（参数规范化、handoff、server handoff）
+│  │  └─ 仅承载 Win32 启动方式与错误文案
+│  ├─ remote_frontend.rs
+│  │  ├─ Win32 控件 + 交互主循环 + 远程替代客户端渲染层
+│  │  ├─ 负责：native hwnd/消息、输入底稿、raw 鼠标等主机行为
+│  │  ├─ 不应持有产品分支策略；仅消费 control_dispatch/ui_bridge 快照语义
+│  │  └─ 当前差距：产品语义仍需持续用树结构核对
+│  ├─ wake.rs
+│  ├─ font.rs / input.rs / clipboard.rs / window.rs / toolbar.rs / integration.rs
+│  └─ 具体机制均通过 crate `agenterm-platform` 内部能力化对齐
+│
+├─ adapters/unix/frontend
+│  ├─ mod.rs
+│  │  ├─ Unix 嵌入式窗口生命周期（open、render、focus、输入循环）
+│  │  ├─ 产品状态机（侧栏/terminal/compose/setting/screenshot/paste）在主仓保留
+│  │  └─ 与 win 对齐目标：统一点击/滚轮/选区/焦点语义而非平台条件分支
+│  ├─ input.rs
+│  │  ├─ winit/输入事件归一化的主机入口
+│  │  └─ 与 product policy 的快捷键/行为映射应保持契约一致
+│  ├─ font.rs / render.rs / wake.rs
+│  └─ 统一目标：平台差异留在能力层（字体/缩放/激活/截图）
+
+agenterm-platform crate（复用层）
+├─ window/input/clipboard/font/screenshot/pty/ipc/process/integration
+│  ├─ 提供跨平台能力定义与错误码
+│  ├─ selected.rs 统一宿主适配器选择
+│  └─ product 只消费能力，不持有 winit/windows-sys/libc/直接 OS 条件分支
+```
+
+## 统一语义分支清单（当前 vs 目标）
+
+```text
+行为分支
+├─ 启动入口（run_gui_entry）
+│  ├─ 当前：run_gui_entry 做 OS dispatch
+│  └─ 目标：dispatch 后返回统一失败类语义（supported/unsupported/failed）
+│
+├─ 启动唤醒（request_gui_wake）
+│  ├─ 当前：Windows 发 HWND wake；Unix 发 proxy/通道信号
+│  └─ 目标：统一返回与回退策略，避免产品层猜测 host 语义
+│
+├─ 焦点与恢复行为
+│  ├─ 当前：Windows 和 Unix 分别通过各自窗口主机实现
+│  └─ 目标：在共享快照/契约层可比较差异，只在能力缺口上分歧
+│
+└─ 输入/选择/滚轮
+   ├─ 当前：事件源归一化在 host 后进入同一产品处理管线
+   └─ 目标：抽象测试场景与证据，用“行为不一致=能力缺口”记录
+```
+
+## 下一步动作树（建议并行）
+
+```text
+- O1A（Platform）：统一 startup/wake 结果为可归并失败码（本轮收口完成，准备并行证据回归）
+  - owner: Platform services
+  - output: 运行时错误码（supported/unsupported/failed）文档；本轮要求 `request_gui_wake` 调用都通过 `request_gui_wake_best_effort` 上报失败语义
+  - acceptance: 无策略分支猜测、证据可归集
+  - 当前收敛: `replaceable_ui_client` 投影名与共享系统菜单/投影常量从 `src/ui_snapshot.rs` 统一引用到 `server_app`/`client`/Windows 远端前端，减少平台/模块内重复。
+  - 已完成: 启动/恢复 server 的决策逻辑从 `src/platform/adapters/windows/remote_frontend.rs` 提取为独立产品域 `src/frontend_server.rs`，并由 `src/platform/adapters/windows/remote_frontend.rs` 仅消费该域接口（`connect_or_start_frontend_gui_client` / `FrontendServerRecovery*`），减少平台适配器中的生命周期分支。
+  - 本轮补充: 控制平面 CLI 的 `start_server_process` 也已委托给 `frontend_server::start_frontend_server_process`，避免服务端启动策略在 `src/client/mod.rs` 和 `remote_frontend` 中重复定义。
+  - 本轮收口: 新增 `FrontendContractState`，并由 `GuiLaunchResult` / `GuiWakeResult` / `FrontendServerRecovery` 映射统一状态（Supported/Unsupported/Failed）；便于 evidence 统一归档与分支阻断。
+
+- O1B（UI）：统一输入-选择-滚轮场景模板
+  - owner: Human Workspace + ui_bridge
+  - output: Given/When/Then 场景清单 + 对应快照锚点
+  - acceptance: windows/unix 场景映射同名字段一致
+
+- O1C（验收）：并发回归与阻断
+  - owner: QA
+  - output: 平台缺口矩阵（Unsupported/Failed/Supported）+ 统一脚本入口
+  - handoff: 更新 `plan/platform-ux-parity-evidence-matrix.md` 与 `plan/plan-unix-gui-win-parity.md`
+  - acceptance: 平台证据树完整，分支失败可快速定位
+```
+
+## 首轮能力缺口矩阵（可执行）
+
+```text
+能力面（UI/UX 启动与唤醒层）
+├─ GUI 入口路由（run_gui_entry）
+│  ├─ Windows：Supported
+│  │  ├─ 方式：`src/platform/adapters/windows/frontend.rs`
+│  │  ├─ 参数：`--no-activate`, `--not-foreground`, `--ui-client`, `--endpoint`, `--address`, `--instance`
+│  │  └─ 回退：参数错误 => 含具体错误码的 stderr + 2，handoff 被拒绝 => 1（无静默失败）
+│  ├─ Linux/macOS：Supported
+│  │  ├─ 方式：`src/platform/adapters/unix/frontend/mod.rs`
+│  │  ├─ 参数：`--no-activate`, `--not-foreground`, `--endpoint`, `--address`, `--instance`
+│  │  └─ 回退：参数错误 => 含具体错误码的 stderr + 2（无静默失败）
+│  └─ 其他OS：Unsupported（`frontend` 返回 1）
+├─ 前台唤醒（request_gui_wake）
+│  ├─ Windows：Supported（`post_application_wake`）
+│  ├─ Linux/macOS：Supported（`unix` wake proxy）
+│  └─ 其他OS：Unsupported（已去 panic，no-op）
+├─ 入口分发层
+│  ├─ 目标状态：统一能力选择，不内嵌 UI 语义分支
+│  ├─ 当前状态：`src/platform/services/frontend.rs` 已收敛到统一 `frontend_host()`
+│  └─ 下一动作：把失败语义映射为 `supported/unsupported/failed` 文本标签供证据采集
+```
+
+```text
+能力面（snapshot 与交互可观测层）
+├─ 窗口快照（`ui-snapshot` 形态）
+│  ├─ 对齐目标：`projection`、`layout.sidebar`、`selection` 字段在 Win/Unix 语义等价
+│  ├─ 当前状态：P0/P1/P2 已有多个已完成项；跨场景回放矩阵尚待闭环
+│  └─ 回退：能力缺口先记录为 `Unsupported` 而不是字段重映射
+├─ 选择/滚轮/焦点
+│  ├─ 对齐目标：同场景同字段差异最小化，差异只发生在能力缺口
+│  ├─ 当前状态：行为主逻辑趋同，残差收敛交由 O1B/O1C 场景脚本
+│  └─ 回退：以回归脚本证据为唯一判定，禁止“口头对齐”放行
+```

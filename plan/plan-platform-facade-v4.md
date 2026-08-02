@@ -58,7 +58,7 @@ passes this state.
   process-termination native calls.
 - Safe failure: typed `process_list_*` / `process_kill_*` error, including
   explicit Unsupported where an adapter cannot provide the operation.
-- Public black-box owner: `agenterm-script` `std.process` API.
+- Public black-box owner: `agenterm-rhai` `std.process` API.
 - Excluded scope: top-level window inspection/control, clipboard, stream-handle
   probing, filesystem replacement, and any authorization policy.
 

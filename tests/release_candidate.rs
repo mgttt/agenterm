@@ -209,7 +209,7 @@ fn fixture(name: &str) -> Fixture {
 
 fn run_script(script: &str, arguments: &[&Path]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .arg("run")
@@ -236,7 +236,7 @@ fn aggregate(fixture: &Fixture) -> Output {
 fn verify(fixture: &Fixture, now: u64) -> Output {
     let now = now.to_string();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .arg("run")
         .arg(repo.join("scripts/rhai/candidate-verify.rhai"))

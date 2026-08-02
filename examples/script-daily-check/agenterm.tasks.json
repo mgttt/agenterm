@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "project": {
-    "id": "agenterm-script-daily-check",
+    "id": "agenterm-rhai-daily-check",
     "version": "1.0.0",
     "requires": {
       "script_api": {

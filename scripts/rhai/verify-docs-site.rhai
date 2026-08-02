@@ -23,7 +23,7 @@ require(
     "docs index must use the case-exact workspace image reference"
 );
 require(
-    html.contains("docs/agenterm-script-runtime.md"),
+    html.contains("docs/agenterm-rhai-runtime.md"),
     "docs index must use the case-exact script specification path"
 );
 require(

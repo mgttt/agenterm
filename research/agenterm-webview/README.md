@@ -93,7 +93,7 @@ WebView2 development support on Windows, Xcode command-line tools on macOS, or
 dynamic-loader failure, runtime query failure or WebView creation failure to a
 typed unavailable receipt with exit code 69.
 
-Run `tools/measure.rhai` through `agenterm-script` on a real Windows desktop to
+Run `tools/measure.rhai` through `agenterm-rhai` on a real Windows desktop to
 build both layers and write a local JSON receipt containing build times, binary
 sizes, runtime probe and event-driven load time. Root process RSS is recorded as
 unavailable until the public Script process facts expose it; the measurement
@@ -110,13 +110,13 @@ that phase, writes `status=timed_out`, folds an incomplete receipt and stops the
 run. Validate journal folding without building anything with:
 
 ```powershell
-.\dist\agenterm-script.exe run --timeout-ms 60000 --max-operations 10000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- . --self-check
+.\dist\agenterm-rhai.exe run --timeout-ms 60000 --max-operations 10000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- . --self-check
 ```
 
 Run the full Windows measurement from the repository root with:
 
 ```powershell
-.\dist\agenterm-script.exe run --timeout-ms 3600000 --max-operations 100000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- .
+.\dist\agenterm-rhai.exe run --timeout-ms 3600000 --max-operations 100000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- .
 ```
 
 The result goes under ignored `evidence/local/` unless an operator explicitly

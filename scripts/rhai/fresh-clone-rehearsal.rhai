@@ -588,7 +588,7 @@ try {
         let bootstrap_worker =
             std::path::join(
                 clone_target,
-                "debug/agenterm-script.exe"
+                "debug/agenterm-rhai.exe"
             ).display;
         if evidence.stage0.worker_observed_at_ms == ()
                 && std::fs::exists(bootstrap_worker) {
@@ -601,7 +601,7 @@ try {
         if names.contains("rustc.exe") {
             evidence.stage0.rustc_observed = true;
         }
-        if names.contains("agenterm-script.exe") {
+        if names.contains("agenterm-rhai.exe") {
             evidence.stage0.script_worker_observed = true;
         }
         if now >= next_timeline {

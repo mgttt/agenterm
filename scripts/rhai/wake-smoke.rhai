@@ -7,10 +7,11 @@
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
-let declared_evidence = ["fleet.wake-coalescing"];
+let declared_evidence = ["fleet.wake-coalescing", "ux-parity.wake-coalescing"];
 
 if args.len == 1 && args[0] == "--list-evidence" {
     print("fleet.wake-coalescing");
+    print("ux-parity.wake-coalescing");
     return;
 }
 
@@ -246,6 +247,11 @@ try {
         "wake_smoke_server_shutdown_timeout"
     );
     require(server_output.success, "wake_smoke_server_exit_failure");
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "ux-parity.wake-coalescing"
+    );
     print(
         "PASS: coalesced wake delivery preserved IPC, PTY, and mutation correctness"
     );

@@ -30,7 +30,7 @@ Every shipped leaf must state the user problem, governing invariant or
 authority boundary, observable success evidence, safe failure result, public
 black-box owner, and excluded scope.
 
-`agenterm-script.exe` is an unrestricted general-purpose local runtime. Never
+`agenterm-rhai.exe` is an unrestricted general-purpose local runtime. Never
 put Agent permission, approval, path, process, network, credential, or tool
 visibility policy into Rhai profiles, API registration, or the Script broker.
 Those policies belong to the future Agent harness that chooses how to invoke
@@ -101,7 +101,7 @@ Use PowerShell from the repository root:
 .\check.cmd              # full public-interface regression
 .\check.cmd --release    # local release gate; skips event-journal load stress
 .\check.cmd --release --include-stress # exact qualification + receipt
-.\dist\agenterm-script.exe task run package-qualified --manifest .\agenterm.tasks.json
+.\dist\agenterm-rhai.exe task run package-qualified --manifest .\agenterm.tasks.json
 .\build.bat release     # distributable release artifact
 .\release.cmd --rehearse # read-only release validation/rehearsal
 ```
@@ -210,7 +210,7 @@ owned by a dedicated smoke or qualification gate. Do not hide GUI, network,
 stress, packaging, or release work inside a lane whose name says it skips that
 work.
 
-For repository-wide Rhai syntax validation, use the bounded `agenterm-script
+For repository-wide Rhai syntax validation, use the bounded `agenterm-rhai
 check-many --manifest` path owned by `scripts/rhai/lint.rhai`, rather than
 spawning one Script process per file. It retains a fresh Engine and typed
 result for each input, while bounding the manifest, file count, source bytes,
@@ -344,16 +344,16 @@ LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
 build commands per cell (all four binaries: `agenterm` GUI plus
-`agenterm-cli`, `agenterm-mux`, `agenterm-script`):
+`agenterm-cli`, `agenterm-mux`, `agenterm-rhai`):
 
 | Cell | Host | Build |
 |------|------|-------|
 | **win × x86_64** | Linux + `cargo-xwin` | `cargo xwin build --target x86_64-pc-windows-msvc` (all four bins) |
 | **win × aarch64** | Linux + `cargo-xwin` | `cargo xwin build --target aarch64-pc-windows-msvc` (all four bins) |
-| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
-| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
-| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
-| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
+| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
+| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
+| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
 
 Clippy (all four bins unless noted): append `-- -D warnings` to the matching
 `cargo clippy` or `cargo xwin clippy` invocation with the same `--target` and
@@ -389,5 +389,5 @@ lint/build/unit-test and control-plane sanity loop, not a full end-to-end
 terminal environment.
 
 On Linux/macOS, `agenterm-cli script` hosting is Windows-only for now — invoke
-`agenterm-script` directly. Instance discovery uses
+`agenterm-rhai` directly. Instance discovery uses
 `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).

@@ -33,16 +33,16 @@ esac
 
 TARGET_ROOT=${CARGO_TARGET_DIR:-target}
 CACHE_DIR="$TARGET_ROOT/bootstrap-worker-cache/$AGENTERM_HOST_OS-$AGENTERM_HOST_ARCH"
-CACHE_WORKER="$CACHE_DIR/agenterm-script"
+CACHE_WORKER="$CACHE_DIR/agenterm-rhai"
 CACHE_STAMP="$CACHE_DIR/compatibility.stamp"
 IDENTITY_FILE="$CACHE_DIR/identity-$$.txt"
 POST_IDENTITY_FILE="$CACHE_DIR/post-identity-$$.txt"
 UNTRACKED_FILE="$CACHE_DIR/untracked-$$.txt"
 CACHE_TEMP="$CACHE_DIR/worker-$$.tmp"
 STAMP_TEMP="$CACHE_DIR/stamp-$$.tmp"
-SOURCE="$TARGET_ROOT/debug/agenterm-script"
+SOURCE="$TARGET_ROOT/debug/agenterm-rhai"
 BOOTSTRAP_DIR="$TARGET_ROOT/task-bootstrap-$$"
-WORKER="$BOOTSTRAP_DIR/agenterm-script"
+WORKER="$BOOTSTRAP_DIR/agenterm-rhai"
 
 cleanup() {
     rm -f -- "$WORKER" "$IDENTITY_FILE" "$POST_IDENTITY_FILE" \
@@ -59,15 +59,15 @@ write_identity() {
         cargo -Vv
         printf '%s\n' 'tracked-index'
         git ls-files -s -- Cargo.toml Cargo.lock build.rs \
-            rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md \
+            rust-toolchain.toml .cargo crates src docs/agenterm-rhai-runtime.md \
             assets/agenterm.ico agenterm.tasks.json
         printf '%s\n' 'tracked-worktree'
         git diff --no-ext-diff --binary -- Cargo.toml Cargo.lock build.rs \
-            rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md \
+            rust-toolchain.toml .cargo crates src docs/agenterm-rhai-runtime.md \
             assets/agenterm.ico agenterm.tasks.json
         git ls-files --others --exclude-standard -- Cargo.toml Cargo.lock \
             build.rs rust-toolchain.toml .cargo crates src \
-            docs/agenterm-script-runtime.md assets/agenterm.ico \
+            docs/agenterm-rhai-runtime.md assets/agenterm.ico \
             agenterm.tasks.json > "$UNTRACKED_FILE"
         printf '%s\n' 'untracked-paths'
         cat "$UNTRACKED_FILE"
@@ -102,7 +102,7 @@ if [ "$CACHE_VALID" = true ]; then
     AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable
 else
     AGENTERM_BOOTSTRAP_CARGO_START_MS=$(clock_ms)
-    cargo build --quiet --locked --bin agenterm-script
+    cargo build --quiet --locked --bin agenterm-rhai
     AGENTERM_BOOTSTRAP_CARGO_END_MS=$(clock_ms)
     AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=$((
         AGENTERM_BOOTSTRAP_CARGO_END_MS - AGENTERM_BOOTSTRAP_CARGO_START_MS

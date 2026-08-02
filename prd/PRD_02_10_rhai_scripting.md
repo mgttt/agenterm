@@ -2,23 +2,23 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
-Runtime contract: [AgenTerm Script Runtime specification](../docs/agenterm-script-runtime.md)
+Runtime contract: [AgenTerm Script Runtime specification](../docs/agenterm-rhai-runtime.md)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Shipped baseline
 
-- [x] `agenterm-script.exe` is the public `run`, `eval`, `repl`, `check`,
+- [x] `agenterm-rhai.exe` is the public `run`, `eval`, `repl`, `check`,
   `api`, and named-task CLI while retaining private
   `--worker`/`--framed-worker` modes;
   on Windows, `agenterm-cli.exe script repl ...` is a thin process-forwarding
-  compatibility route to the adjacent `agenterm-script` sidecar, inherits
+  compatibility route to the adjacent `agenterm-rhai` sidecar, inherits
   stdio and exit status, and never links a second Rhai engine into the control
-  client. Linux and macOS callers invoke `agenterm-script` directly because the
+  client. Linux and macOS callers invoke `agenterm-rhai` directly because the
   CLI-hosted Script route is not available there. The existing one-shot
   supervisor routes retain their single worker topology. All expose the same
   catalog, parser, supervisor, and runtime.
-- [x] v0.1.12 retains `agenterm-script.exe` / `agenterm-script` as the canonical
+- [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
   introducing a second name during convergence would expand packaging,
@@ -82,7 +82,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Persistent REPL slice (designed 2026-07-31)
 
-- [x] `agenterm-script repl [OPTIONS] [--] [ARGS...]` starts a true
+- [x] `agenterm-rhai repl [OPTIONS] [--] [ARGS...]` starts a true
   process-local Rhai session. Variables and script-defined functions survive
   from one successful cell to the next; it does not loop over the one-shot
   `eval` command.
@@ -145,7 +145,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   cell and its owned nested process; the same outer CLI continues with a fresh
   worker, emits `reason=hard_interrupt` and `side_effects_replayed=false`, and
   leaves no worker or nested-process orphan. Linux/macOS retain the direct
-  `agenterm-script` protocol and compile/unit coverage, but no Unix hosted-CLI
+  `agenterm-rhai` protocol and compile/unit coverage, but no Unix hosted-CLI
   or native interactive Ctrl+C parity is claimed without its own public native
   journey. Ordinary CI run `30716123255` exposed that a nested Script command
   can create another Unix process group outside the outer worker's `killpg`.
@@ -160,7 +160,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## v0.1.9 product position
 
-`agenterm-script.exe` is AgenTerm's general-purpose local scripting runtime:
+`agenterm-rhai.exe` is AgenTerm's general-purpose local scripting runtime:
 Rhai language plus a Rust-shaped selected `std::` subset, Rhai-native
 extensions, and the AgenTerm-bound Fleet domain. This is a capability overlay,
 not Rust, Node.js, Bun, npm, Cargo, or another Rhai host compatibility layer,
@@ -206,7 +206,7 @@ and it is not positioned as a restricted security plugin.
 ## v0.1.9 runtime architecture
 
 - [x] one-shot `run`, `eval`, `check`, `api`, and task invocations still own
-  one fresh `agenterm-script.exe` sidecar. `repl` owns one explicit,
+  one fresh `agenterm-rhai.exe` sidecar. `repl` owns one explicit,
   foreground, process-local session; neither form creates a persistent system
   daemon or mutable state that survives its public process.
 - [x] an invocation may own a bounded task scheduler. Asynchronous APIs return
@@ -325,7 +325,7 @@ and it is not positioned as a restricted security plugin.
     10-second hard deadline, stable privacy-safe error codes, and the shared
     bounded `Stream`/`Task` contracts.
   - [x] the 2026-07-29 standard Windows release measurement for the complete
-    v0.1.9 `agenterm-script.exe` is 2,740,224 bytes with the reviewed
+    v0.1.9 `agenterm-rhai.exe` is 2,740,224 bytes with the reviewed
     native-TLS feature set, 405,504 bytes below the existing 3 MiB artifact
     gate; the gate was not raised.
 - [x] `std::net::TcpStream` provides unrestricted DNS/IPv4/IPv6 TCP client
@@ -561,7 +561,7 @@ Migration ledger:
 | Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | `b9d1906` | public CLI fixture plus live PowerShell/Rhai field parity, reconfirmed on 2026-07-29 against an absent target | deleted; Git history is the rollback source |
 | Internal-only version policy | `scripts/rhai/internal-version-policy.rhai` | `scripts/archive/powershell/internal-version-policy.ps1` | `b0010f5` | public CLI `check` plus identical live PowerShell/Rhai PASS result, reconfirmed on 2026-07-29 | deleted; Git history is the rollback source |
 | README artifact and command alignment | `scripts/rhai/readme-examples.rhai` | `tests/readme_examples.ps1` | `667f6d6` | exact live stdout parity against the six-artifact manifest and offline CLI/Mux catalogs on 2026-07-29; Rhai candidate `a20655a` | deleted; Git history is the rollback source |
-| Locked and obsolete staged-artifact cleanup | `scripts/rhai/clean-locked-artifacts.rhai` | `scripts/clean-locked-artifacts.ps1` | `be9a538` | public `agenterm-script task run` black-box tests prove owned-name cleanup, unrelated-file retention, obsolete-name cleanup, and path-escape rejection | deleted; both normal stage-build callers use the named Rhai task |
+| Locked and obsolete staged-artifact cleanup | `scripts/rhai/clean-locked-artifacts.rhai` | `scripts/clean-locked-artifacts.ps1` | `be9a538` | public `agenterm-rhai task run` black-box tests prove owned-name cleanup, unrelated-file retention, obsolete-name cleanup, and path-escape rejection | deleted; both normal stage-build callers use the named Rhai task |
 | Cargo target cleanup preparation | `scripts/rhai/prepare-target-clean.rhai` | `scripts/prepare-target-clean.ps1` | `c20acc7` | public CLI black-box tests prove Git-native exact-root binding (including Windows short/long path aliases), allowed target set, idempotent cache-tag creation, and invalid-path/tag rejection | deleted; release build calls the named Rhai task before `cargo clean` |
 | Single executable staging | `scripts/rhai/stage-artifact.rhai` | `scripts/stage-artifact.ps1` | `e087842` | public CLI black-box tests prove normal replacement, invalid-name rejection, and Windows running-image parking before replacement | deleted; shared Rhai staging orchestration reuses the same module for each manifest artifact |
 | Local executable manifest validation | `scripts/rhai/validate-artifact-manifest.rhai` | `scripts/artifact-manifest.ps1` | `e2276cc` | public CLI black-box tests prove the canonical schema and reject duplicate/invalid names, invalid subsystem/probe contracts, empty roles, and missing size budgets | deleted; build staging, metadata writing, and artifact verification invoke the named Rhai task |
@@ -655,7 +655,7 @@ Migration ledger:
   Every repository-owned `.cmd` or `.bat` must therefore either be replaced by
   a named Rhai task or have an equivalent checked-in `.sh` entry for
   Linux/macOS. Matching names alone are insufficient: the cross-platform audit
-  and CI must execute the Unix entry through the native `agenterm-script` task
+  and CI must execute the Unix entry through the native `agenterm-rhai` task
   host and verify argument, exit-status, side-effect, and evidence parity.
 - [x] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and

@@ -370,7 +370,7 @@ track remains planned, but every declared dependency must still pass.
     Script API v2 protocol version, including reviewed Node.js/Bun research
     analogues, and add an explicit server-independent `local`
     unrestricted local-runtime foundation
-  - [x] make unrestricted local execution the ordinary `agenterm-script.exe` behavior and
+  - [x] make unrestricted local execution the ordinary `agenterm-rhai.exe` behavior and
     deliver the Rust-shaped `std::{fs,path,env,process,time}` subset plus
     `rhai::{task,http,json,bytes,runtime}` extensions without moving future
     Agent approval policy into the runtime
@@ -424,7 +424,7 @@ track remains planned, but every declared dependency must still pass.
     pane-content resources, embedding the unrestricted Rhai runtime into
     autonomous agent flows, brain/flow, Agent-harness permissions, and
     autonomous scheduling remain later independently approved integration
-    gates; these gates never reduce standalone `agenterm-script.exe` APIs
+    gates; these gates never reduce standalone `agenterm-rhai.exe` APIs
   - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
 - [x] M10 / v0.1.11 Control Center and native local-IPC foundation

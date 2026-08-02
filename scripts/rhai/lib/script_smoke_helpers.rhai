@@ -430,7 +430,7 @@ fn invoke_framed_worker(
     let output = command.output();
     test_harness::append_command_record(
         context,
-        ["[agenterm-script]", "--framed-worker"],
+        ["[agenterm-rhai]", "--framed-worker"],
         output,
         false,
         []

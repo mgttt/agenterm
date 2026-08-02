@@ -61,7 +61,7 @@ fn candidate_runs_one_full_gate_and_seals_six_platform_parts() {
     assert!(CANDIDATE.contains("candidate-aggregate.rhai"));
     assert!(CANDIDATE.contains("--project-root . --"));
     assert!(CANDIDATE.contains("path: candidate-output/"));
-    assert!(!CANDIDATE.contains(".agenterm-script.bin"));
+    assert!(!CANDIDATE.contains(".agenterm-rhai.bin"));
     assert!(CANDIDATE.contains("name: release-candidate-${{ github.run_id }}"));
     assert!(CANDIDATE.contains("retention-days: 14"));
 }
@@ -143,7 +143,7 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(PROMOTION.contains("gh release upload \"$TAG\" \"$file\""));
     assert!(PROMOTION.contains("sha256sum \"$remote_file\""));
     assert!(PROMOTION.contains("path: candidate/"));
-    assert!(!PROMOTION.contains(".agenterm-script.bin"));
+    assert!(!PROMOTION.contains(".agenterm-rhai.bin"));
     for forbidden in [
         "--clobber",
         "cargo ",

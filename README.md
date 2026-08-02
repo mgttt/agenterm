@@ -36,7 +36,7 @@ client, and a deliberately bounded tmux/RMUX frontend.
   clipboard.
 - Snapshot-positioned bounded event reads and waits expose explicit restart,
   gap, and timeout results.
-- `agenterm-script.exe` is the public Rhai CLI for local automation, persistent
+- `agenterm-rhai.exe` is the public Rhai CLI for local automation, persistent
   REPL sessions, observable Fleet tools, and versioned named tasks without
   linking the scripting engine into the GUI.
 - `agenterm-mcp.exe` is the on-demand read-only MCP sidecar. Its first
@@ -137,7 +137,7 @@ build metadata under `dist/`:
 - `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
-- `dist/agenterm-script.exe` — public Rhai scripting CLI and worker, including
+- `dist/agenterm-rhai.exe` — public Rhai scripting CLI and worker, including
   persistent REPL and one-shot execution modes.
 - `dist/agenterm-mcp.exe` — on-demand read-only MCP stdio sidecar.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
@@ -168,7 +168,7 @@ relabeled as available.
 ### Linux GUI (preview)
 
 Native Linux `agenterm` and `agenterm-cc` use winit. Control clients
-(`agenterm-cli`, `agenterm-mux`, `agenterm-script`, `agenterm-mcp`) do not need
+(`agenterm-cli`, `agenterm-mux`, `agenterm-rhai`, `agenterm-mcp`) do not need
 display libraries.
 
 **Release tarballs** ship a small `lib/` directory plus `agenterm` and

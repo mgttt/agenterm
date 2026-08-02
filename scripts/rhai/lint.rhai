@@ -133,7 +133,7 @@ fn assert_rhai(worker, paths, repo) {
         manifest_path,
         rhai::json::stringify_pretty(#{
             schema_version: 1,
-            kind: "agenterm-script-check-manifest",
+            kind: "agenterm-rhai-check-manifest",
             files: files
         }) + "\n"
     );
@@ -192,12 +192,12 @@ fn rust_lint(repo) {
 fn default_worker(repo) {
     let windows = std::path::join(
         repo,
-        "target/debug/agenterm-script.exe"
+        "target/debug/agenterm-rhai.exe"
     ).display;
     if std::fs::exists(windows) {
         return windows;
     }
-    std::path::join(repo, "target/debug/agenterm-script").display
+    std::path::join(repo, "target/debug/agenterm-rhai").display
 }
 
 fn self_test(repo, worker) {

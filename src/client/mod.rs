@@ -43,6 +43,7 @@ use crate::{
     },
     protocol::{IpcRequest, IpcResponse},
     ui_bridge,
+    ui_snapshot::PROJECTION_REPLACEABLE_UI_CLIENT,
     upgrade_identity::UpgradeIdentity,
 };
 
@@ -272,16 +273,16 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
 fn script_help_text() -> &'static str {
     "AgenTerm Script Runtime\n\
          Usage:\n\
-           agenterm-script api [MODULE] [--status STATE] [--tree|--json]\n\
-           agenterm-script check [OPTIONS] FILE.rhai|-\n\
-           agenterm-script check-many --manifest FILE [OPTIONS]\n\
-           agenterm-script eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
-           agenterm-script repl [OPTIONS] [--] [ARGS...]\n\
-           agenterm-script run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
-           agenterm-script task list [--manifest PATH] [--json]\n\
-           agenterm-script task show TASK [--manifest PATH] [--json]\n\
-           agenterm-script task check [TASK] [--manifest PATH] [--json]\n\
-           agenterm-script task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
+           agenterm-rhai api [MODULE] [--status STATE] [--tree|--json]\n\
+           agenterm-rhai check [OPTIONS] FILE.rhai|-\n\
+           agenterm-rhai check-many --manifest FILE [OPTIONS]\n\
+           agenterm-rhai eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
+           agenterm-rhai repl [OPTIONS] [--] [ARGS...]\n\
+           agenterm-rhai run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
+           agenterm-rhai task list [--manifest PATH] [--json]\n\
+           agenterm-rhai task show TASK [--manifest PATH] [--json]\n\
+           agenterm-rhai task check [TASK] [--manifest PATH] [--json]\n\
+           agenterm-rhai task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
          REPL commands: :help :quit :reset :history :vars :functions :limits \
          :api [MODULE] :load FILE :json on|off\n\
          Options: --timeout-ms N --max-operations N --max-collection-items N \
@@ -842,7 +843,7 @@ fn repl_worker_executable() -> Result<PathBuf, String> {
     if current
         .file_stem()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("agenterm-script"))
+        .is_some_and(|name| name.eq_ignore_ascii_case("agenterm-rhai"))
     {
         return Ok(current);
     }
@@ -2212,7 +2213,7 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
     if !crate::platform::services::script_host::hosted_worker_available() {
         eprintln!(
             "agenterm-cli script hosting is not yet available on this platform; \
-             invoke agenterm-script directly"
+             invoke agenterm-rhai directly"
         );
         return 2;
     }
@@ -2249,7 +2250,7 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
     {
         Ok(status) => status.code().unwrap_or(1),
         Err(error) => {
-            eprintln!("host_worker_spawn: could not start agenterm-script: {error}");
+            eprintln!("host_worker_spawn: could not start agenterm-rhai: {error}");
             1
         }
     }
@@ -2276,7 +2277,7 @@ fn script_worker_executable() -> Result<PathBuf, String> {
         format!("host_worker_missing: could not locate current executable: {error}")
     })?;
     let parent = current.parent().ok_or_else(|| {
-        "host_worker_missing: agenterm-script is not installed next to the invoking executable"
+        "host_worker_missing: agenterm-rhai is not installed next to the invoking executable"
             .to_owned()
     })?;
     for name in crate::platform::paths::script_worker_executable_names() {
@@ -2286,7 +2287,7 @@ fn script_worker_executable() -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "host_worker_missing: agenterm-script is not installed next to {}; \
+        "host_worker_missing: agenterm-rhai is not installed next to {}; \
          scripting is an optional component",
         current.display()
     ))
@@ -2606,7 +2607,7 @@ fn run_script_command_with_context(
             return report_audit_error(error);
         }
         eprintln!(
-            "agenterm-script returned a mismatched protocol result \
+            "agenterm-rhai returned a mismatched protocol result \
              (envelope/API/invocation/operation/profile identity)"
         );
         return 1;
@@ -2629,7 +2630,7 @@ fn run_script_command_with_context(
         if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
             return report_audit_error(error);
         }
-        eprintln!("agenterm-script returned an inconsistent result envelope");
+        eprintln!("agenterm-rhai returned an inconsistent result envelope");
         return 1;
     }
     if let Some(view) = api_view.as_ref() {
@@ -2646,7 +2647,7 @@ fn run_script_command_with_context(
             if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(error);
             }
-            eprintln!("agenterm-script returned an API result without a catalog");
+            eprintln!("agenterm-rhai returned an API result without a catalog");
             return 1;
         };
         if let Err(error) = filter_script_api_catalog(catalog, view) {
@@ -2662,7 +2663,7 @@ fn run_script_command_with_context(
             if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(audit_error);
             }
-            eprintln!("agenterm-script returned an invalid API catalog: {error}");
+            eprintln!("agenterm-rhai returned an invalid API catalog: {error}");
             return 1;
         }
     }
@@ -2691,7 +2692,7 @@ fn run_script_command_with_context(
                         output.push('\n');
                     }
                     Err(error) => {
-                        eprintln!("agenterm-script returned an invalid API catalog: {error}");
+                        eprintln!("agenterm-rhai returned an invalid API catalog: {error}");
                         return 1;
                     }
                 }
@@ -4467,7 +4468,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                 let tab_editor_matches = expected_tab_editor_state.is_none_or(|state| {
                     let editor = &snapshot["tab_editor"];
                     let replaceable_projection =
-                        snapshot["projection"].as_str() == Some("replaceable_ui_client");
+                        snapshot["projection"].as_str() == Some(PROJECTION_REPLACEABLE_UI_CLIENT);
                     let target_present = target.as_deref().is_some_and(|expected| {
                         snapshot["tabs"].as_array().is_some_and(|tabs| {
                             tabs.iter().any(|tab| tab["id"].as_str() == Some(expected))
@@ -4673,14 +4674,10 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
 }
 
 fn start_server_process() -> Result<bool> {
-    let endpoint = ipc_endpoint()?;
-    let parameter = if let Some(address) = endpoint.legacy_address() {
-        ("--address", address)
-    } else {
-        ("--endpoint", endpoint.to_string())
-    };
-    crate::platform::process::autostart_server(parameter.0, &parameter.1)
-        .context("failed to launch independent AgenTerm server")
+    crate::frontend_server::start_frontend_server_process()
+        .map(|()| true)
+        .map_err(anyhow::Error::msg)
+        .with_context(|| "failed to launch independent AgenTerm server")
 }
 
 fn print_help() {
@@ -4955,8 +4952,8 @@ mod tests {
     #[test]
     fn script_source_accepts_shebang_without_shifting_lines() {
         assert_eq!(
-            normalize_script_source("#!/usr/bin/env agenterm-script\nprint(1);".to_owned()),
-            "///usr/bin/env agenterm-script\nprint(1);"
+            normalize_script_source("#!/usr/bin/env agenterm-rhai\nprint(1);".to_owned()),
+            "///usr/bin/env agenterm-rhai\nprint(1);"
         );
         assert_eq!(normalize_script_source("print(1);".to_owned()), "print(1);");
     }

@@ -2,7 +2,7 @@
 
 Status: Stable Script API v2 specification for v0.1.9
 
-Specification ID: `agenterm-script-runtime`
+Specification ID: `agenterm-rhai-runtime`
 
 Script API currently shipped: v2
 
@@ -52,7 +52,7 @@ Stability values:
 - `research`: no compatibility promise.
 
 ```text
-agenterm-script
+agenterm-rhai
 │  AgenTerm's general-purpose Rhai automation runtime.
 │  [shipped v0.1.9 product slice; stable; designed 2026-07-28]
 │
@@ -585,8 +585,8 @@ The initial comparison set was reviewed on 2026-07-29 against
 Those versions identify research inputs only. Updating a comparison never
 renames or changes a stable AgenTerm Rhai interface.
 
-`agenterm-script api --tree` renders a compact Rust/Node.js/Bun index from the
-same entries returned by `agenterm-script api --json`. Long-form prose may add
+`agenterm-rhai api --tree` renders a compact Rust/Node.js/Bun index from the
+same entries returned by `agenterm-rhai api --json`. Long-form prose may add
 examples and rationale, but exact callable identity, status, signatures,
 availability, limits, and comparisons come from the machine catalog.
 
@@ -1290,7 +1290,7 @@ The named task manifest is `agenterm.tasks.json`. It describes local task
 execution and is not a package manifest. `task list`, `task show`, and
 `task check` MUST NOT execute user code. Invalid tasks remain discoverable with
 a degraded reason.
-The public executable is `agenterm-script.exe`; `agenterm-cli.exe script ...`
+The public executable is `agenterm-rhai.exe`; `agenterm-cli.exe script ...`
 is a compatibility route to the same parser, catalog, supervisor, and runtime.
 The reserved `--worker` and `--framed-worker` modes are internal host protocol
 entry points, not alternate user APIs.
@@ -1547,7 +1547,7 @@ std::fs::write(
     output.display,
     rhai::json::stringify_pretty(#{
         ok: true,
-        source: "agenterm-script",
+        source: "agenterm-rhai",
         input_extension: path.extension
     })
 );
@@ -1600,7 +1600,7 @@ print(#{
 
 ## 19.1 Persistent REPL contract
 
-`agenterm-script repl [OPTIONS] [--] [ARGS...]` MUST create one explicit
+`agenterm-rhai repl [OPTIONS] [--] [ARGS...]` MUST create one explicit
 foreground session. It MUST NOT implement persistence by repeatedly invoking
 the one-shot `eval` command.
 

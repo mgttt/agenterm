@@ -9,7 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const BUILD_TASK: &str = include_str!("../scripts/rhai/build.rhai");
-const SCRIPT_BINARY: &str = include_str!("../src/bin/agenterm-script.rs");
+const SCRIPT_BINARY: &str = include_str!("../src/bin/agenterm-rhai.rs");
 
 fn fixture_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -73,7 +73,7 @@ fn session_lock(unit: &Path, timestamp: &str, random: &str) -> PathBuf {
 
 fn run_prune(root: &Path) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "prune-target-incremental", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -92,7 +92,7 @@ fn run_prune(root: &Path) -> Output {
 
 fn run_prune_with_manifest(root: &Path, manifest: &Path, invocation: &str) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "prune-target-incremental", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -272,7 +272,7 @@ fn rustc_wrapper_snapshots_under_cargo_lock_and_finalizes_exact_touch_manifest()
     let state = target.join("debug/.agenterm-incremental").join(invocation);
     fs::create_dir_all(&state).expect("create producer state");
     let touched = incremental.join("probe-root");
-    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     let compiler_probe = Path::new(env!("CARGO_BIN_EXE_agenterm-cli"));
     let compiler_arguments = [
         "--crate-name".to_owned(),
@@ -356,7 +356,7 @@ fn hot_build_without_a_real_incremental_rustc_cannot_authorize_roots() {
     let state = target.join("debug/.agenterm-incremental").join(invocation);
     fs::create_dir_all(&state).expect("create empty producer state");
     let manifest = state.join("manifest.json");
-    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     let finalized = Command::new(executable)
         .env(
             "AGENTERM_INTERNAL_RUSTC_WRAPPER",

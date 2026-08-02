@@ -2,7 +2,7 @@
 
 状态：讨论稿  
 工作主题：**通用 Script Runtime 成型**  
-版本定位：把已经可靠但能力有限的 `agenterm-script.exe` 从 pure/observe
+版本定位：把已经可靠但能力有限的 `agenterm-rhai.exe` 从 pure/observe
 脚本 sidecar，推进为真正适合日常本地自动化、Fleet 编程和未来 Agent
 工具层的通用 Rhai 运行时。
 
@@ -12,12 +12,12 @@
 
 ## 〇、核心判断
 
-v0.1.9 先完善 `agenterm-script.exe`，再在 v0.1.10 交付只读 MCP。
+v0.1.9 先完善 `agenterm-rhai.exe`，再在 v0.1.10 交付只读 MCP。
 
 原因不是 MCP 不重要，而是 Script Runtime 是更底层、更高复用的能力：
 
 ```text
-agenterm-script.exe
+agenterm-rhai.exe
   本地自动化标准库
   模块与命名任务
   task / stream / cancellation
@@ -61,7 +61,7 @@ surface，不是内部 Rust 模块树，也不是 Node/Bun 兼容表；交付状
 函数和 deferred 节点在后文 Catalog 能力树展开。
 
 ```text
-agenterm-script
+agenterm-rhai
 │
 ├─ Rhai language                    语言本身，不伪装 Rust
 │  ├─ args / print(value)
@@ -274,7 +274,7 @@ v0.1.9  通用 Script Runtime 成型
 
 “完善”不能理解为一次实现整个 Node/Bun 生态。v0.1.9 的完成标准是：
 
-> 用户可以只依赖 `agenterm-script.exe` 和一个本地项目目录，编写、检查、
+> 用户可以只依赖 `agenterm-rhai.exe` 和一个本地项目目录，编写、检查、
 > 发现并运行可组合任务；任务能可靠处理文件、环境、子进程、HTTP、时间、
 > JSON/文本/字节和 AgenTerm Fleet，并在成功、失败、取消、超时和崩溃后
 > 给出可验证结果且不留下残余资源。
@@ -295,11 +295,11 @@ v0.1.9  通用 Script Runtime 成型
 一个全新的示例项目必须完成：
 
 ```text
-agenterm-script.exe task list
+agenterm-rhai.exe task list
   -> 发现 task "daily-check"
-     -> agenterm-script.exe task show daily-check --json
+     -> agenterm-rhai.exe task show daily-check --json
         -> 显示入口、参数、profile、cwd、API、limits
-           -> agenterm-script.exe task run daily-check -- target
+           -> agenterm-rhai.exe task run daily-check -- target
               -> 读取 Unicode 配置文件
               -> 创建 owned temp directory
               -> 并行启动两个 argv-safe child
@@ -362,15 +362,15 @@ agenterm-script.exe task list
 主入口：
 
 ```text
-agenterm-script.exe run [OPTIONS] FILE.rhai|- [--] [ARGS...]
-agenterm-script.exe eval [OPTIONS] EXPRESSION [--] [ARGS...]
-agenterm-script.exe check [OPTIONS] FILE.rhai|-
-agenterm-script.exe api [MODULE] [--status STATE]
-agenterm-script.exe api --json
-agenterm-script.exe api --compare rust|node|bun|all
-agenterm-script.exe task list [--manifest PATH] [--json]
-agenterm-script.exe task show TASK [--manifest PATH] [--json]
-agenterm-script.exe task run TASK [--manifest PATH] [--] [ARGS...]
+agenterm-rhai.exe run [OPTIONS] FILE.rhai|- [--] [ARGS...]
+agenterm-rhai.exe eval [OPTIONS] EXPRESSION [--] [ARGS...]
+agenterm-rhai.exe check [OPTIONS] FILE.rhai|-
+agenterm-rhai.exe api [MODULE] [--status STATE]
+agenterm-rhai.exe api --json
+agenterm-rhai.exe api --compare rust|node|bun|all
+agenterm-rhai.exe task list [--manifest PATH] [--json]
+agenterm-rhai.exe task show TASK [--manifest PATH] [--json]
+agenterm-rhai.exe task run TASK [--manifest PATH] [--] [ARGS...]
 ```
 
 如保留 `agenterm-cli.exe script ...`，它只能是同一 catalog/runtime 的薄
@@ -551,7 +551,7 @@ API 不使用一张不断变长的平面函数表，而使用稳定的
 [x] 已交付    [~] 已有基础但需扩展    [ ] v0.1.9
 [>] 明确延后  [-] 有意不兼容/不属于 Script Runtime
 
-agenterm-script
+agenterm-rhai
 ├─ runtime
 │  ├─ entry
 │  │  ├─ [x] run / eval / check
@@ -794,7 +794,7 @@ let output = command.output();
 let response = rhai::http::request("GET", url, #{});
 ```
 
-这里“阻塞”的只是本次 `agenterm-script.exe` 的 Rhai evaluation thread，
+这里“阻塞”的只是本次 `agenterm-rhai.exe` 的 Rhai evaluation thread，
 不会阻塞 AgenTerm GUI、PTY、server 或其他 invocation。需要并行时，只有
 可能长时间运行的 API 提供语义不同的 `start`/`spawn`：
 
@@ -874,7 +874,7 @@ agenterm-cli supervisor
   ├─ deadline / Ctrl+C / Job Object / forced cleanup
   └─ framed protocol
        |
-agenterm-script process
+agenterm-rhai process
   ├─ frame loop
   │    └─ 即使 Rhai 正在 wait，仍能接收 cancel frame
   ├─ Rhai evaluation thread
@@ -1010,7 +1010,7 @@ operation spec
   availability/degraded reason
        |
        ├─ agenterm-cli
-       ├─ agenterm-script local/observe
+       ├─ agenterm-rhai local/observe
        ├─ v0.1.10 agenterm-mcp
        └─ future agenterm-agent
 ```
@@ -1072,12 +1072,12 @@ Rhai surface_path / object semantics
 人类默认看到树，机器看到同一棵树的 JSON：
 
 ```text
-agenterm-script.exe api
-agenterm-script.exe api std::fs
-agenterm-script.exe api rhai::task
-agenterm-script.exe api --status planned
-agenterm-script.exe api --compare rust|node|bun|all
-agenterm-script.exe api --json
+agenterm-rhai.exe api
+agenterm-rhai.exe api std::fs
+agenterm-rhai.exe api rhai::task
+agenterm-rhai.exe api --status planned
+agenterm-rhai.exe api --compare rust|node|bun|all
+agenterm-rhai.exe api --json
 ```
 
 树、横向比较表、参考手册索引和实现覆盖率都从 catalog 生成；仓库不维护
@@ -1109,7 +1109,7 @@ compatibility planning，`agenterm-mcp.exe`/`agenterm-agent.exe` 也能解释
 
 - `agenterm.tasks.json` 描述如何运行本地任务，不承担下载、签名或安装；
 - future package manifest 描述分发单元、文件、hash、签名、依赖和入口；
-- `agenterm-script.exe` 可以提供文件、HTTP、进程等通用自动化能力，
+- `agenterm-rhai.exe` 可以提供文件、HTTP、进程等通用自动化能力，
   hashing/crypto 是否加入须另立需求，
   但不能自行成为信任根或绕过 `agenterm-softmgr.exe` 的事务边界；
 - v0.1.9 不扫描全机组件、不访问公共 registry、不安装任何 package；
@@ -1118,7 +1118,7 @@ compatibility planning，`agenterm-mcp.exe`/`agenterm-agent.exe` 也能解释
 
 ## 十二、运行时架构
 
-避免继续把所有逻辑塞进 `src/bin/agenterm-script.rs`：
+避免继续把所有逻辑塞进 `src/bin/agenterm-rhai.rs`：
 
 ```text
 src/script_runtime.rs
@@ -1160,7 +1160,7 @@ src/script_fleet.rs
   operation-catalog adapter
   receipt/post-state
 
-src/bin/agenterm-script.rs
+src/bin/agenterm-rhai.rs
   argument parsing and worker entry
 ```
 
@@ -1326,13 +1326,13 @@ v0.1.9 不切换以下关键流程的默认实现，但允许提前编写 Rhai �
 v0.1.9 不增加新 executable，集中完善现有：
 
 ```text
-agenterm-script.exe
+agenterm-rhai.exe
 ```
 
 预算：
 
 - `agenterm.exe` 4 MiB 上限不提高；
-- `agenterm-script.exe` 原 2 MiB 建议值经 HTTP/native-TLS spike 复核：
+- `agenterm-rhai.exe` 原 2 MiB 建议值经 HTTP/native-TLS spike 复核：
   完整 v0.1.9 的 2026-07-29 Windows 标准 release 实测为 2,740,224
   bytes；Windows 采用系统 TLS/root verifier，Unix 保留 Rustls/WebPKI，
   关闭 ureq 默认 feature，并保留仓库已经审核的 3 MiB artifact gate，
@@ -1344,8 +1344,8 @@ agenterm-script.exe
 - clean candidate 仍只构建一次，package 消费同一批字节。
 
 README 增加一个简短 script task 示例；稳定运行时合同由
-[`docs/agenterm-script-runtime.md`](../docs/agenterm-script-runtime.md)
-承载，机器事实由 `agenterm-script.exe api --json` 承载，PRD 拥有产品
+[`docs/agenterm-rhai-runtime.md`](../docs/agenterm-rhai-runtime.md)
+承载，机器事实由 `agenterm-rhai.exe api --json` 承载，PRD 拥有产品
 状态，避免 README 或计划变成第二份手写手册。
 
 ## 十六、依赖与并行波次
@@ -1404,7 +1404,7 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 | Fleet | `script_fleet.rs` |
 | Tests | new script runtime black-box suites |
 
-`Cargo.toml`、`src/bin/agenterm-script.rs`、worker protocol、catalog alignment 和
+`Cargo.toml`、`src/bin/agenterm-rhai.rs`、worker protocol、catalog alignment 和
 最终 qualification 是热点，只允许一个串行 owner 收口。
 
 ## 十七、验收门
@@ -1478,7 +1478,7 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 建议接受：
 
-1. v0.1.9 主线是 `agenterm-script.exe`，MCP 顺延 v0.1.10。
+1. v0.1.9 主线是 `agenterm-rhai.exe`，MCP 顺延 v0.1.10。
 2. ordinary run/eval 默认 `local`。
 3. pure/observe 保持专用 profile。
 4. 首版能力锁定 `std::{fs,path,env,process,time}` 与
@@ -1560,7 +1560,7 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] observe/local 权限、receipt/event/post-state 与迁移诊断
 
 提交 8
-  [x] north-star dogfood（直接 agenterm-script task list/show/check/run）
+  [x] north-star dogfood（直接 agenterm-rhai task list/show/check/run）
   [x] self-host dual-run
   [x] release rehearsal：五个 release 二进制均低于既有预算
   [x] qualification：clean release + stress 全绿，receipt 绑定当前

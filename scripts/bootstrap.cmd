@@ -9,14 +9,14 @@ pushd "%AGENTERM_BOOTSTRAP_REPO%"
 
 set "AGENTERM_BOOTSTRAP_TARGET=target"
 if defined CARGO_TARGET_DIR set "AGENTERM_BOOTSTRAP_TARGET=%CARGO_TARGET_DIR%"
-set "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\debug\agenterm-script.exe"
+set "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\debug\agenterm-rhai.exe"
 rem A staged release reclaims repository Cargo targets. Keep this content-
 rem validated worker outside Cargo output so Windows never holds an in-target
 rem executable open while release cleanup runs.
 if not defined AGENTERM_BOOTSTRAP_CACHE_ROOT set "AGENTERM_BOOTSTRAP_CACHE_ROOT=%LOCALAPPDATA%\AgenTerm\build-cache"
 if "%AGENTERM_BOOTSTRAP_CACHE_ROOT%"=="\AgenTerm\build-cache" set "AGENTERM_BOOTSTRAP_CACHE_ROOT=%TEMP%\AgenTerm-build-cache"
 set "AGENTERM_BOOTSTRAP_CACHE_DIR=%AGENTERM_BOOTSTRAP_CACHE_ROOT%\windows-%PROCESSOR_ARCHITECTURE%"
-set "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\agenterm-script.exe"
+set "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\agenterm-rhai.exe"
 set "AGENTERM_BOOTSTRAP_CACHE_STAMP=%AGENTERM_BOOTSTRAP_CACHE_DIR%\compatibility.stamp"
 set "AGENTERM_BOOTSTRAP_IDENTITY=%AGENTERM_BOOTSTRAP_CACHE_DIR%\identity-%RANDOM%-%RANDOM%.txt"
 set "AGENTERM_BOOTSTRAP_POST_IDENTITY=%AGENTERM_BOOTSTRAP_CACHE_DIR%\post-identity-%RANDOM%-%RANDOM%.txt"
@@ -33,7 +33,7 @@ if not defined AGENTERM_BOOTSTRAP_FINGERPRINT goto :failed
 call :validate_cache
 if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
-cargo build --quiet --locked --bin agenterm-script
+cargo build --quiet --locked --bin agenterm-rhai
 if errorlevel 1 goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_CARGO_START_CS% %AGENTERM_BOOTSTRAP_CARGO_END_CS% AGENTERM_BOOTSTRAP_CARGO_CS
@@ -64,14 +64,14 @@ set "AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable"
 set "AGENTERM_BOOTSTRAP_DIR=%AGENTERM_BOOTSTRAP_CACHE_DIR%\task-%RANDOM%-%RANDOM%"
 call :clock_cs AGENTERM_BOOTSTRAP_COPY_START_CS
 mkdir "%AGENTERM_BOOTSTRAP_DIR%" >nul 2>nul
-copy /y "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm-script.exe" >nul
+copy /y "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rhai.exe" >nul
 if errorlevel 1 goto :failed
-for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_DIR%\agenterm-script.exe"') do set "AGENTERM_BOOTSTRAP_INVOKED_HASH=%%H"
+for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rhai.exe"') do set "AGENTERM_BOOTSTRAP_INVOKED_HASH=%%H"
 if not "%AGENTERM_BOOTSTRAP_INVOKED_HASH%"=="%AGENTERM_BOOTSTRAP_CACHE_HASH%" goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_COPY_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_COPY_START_CS% %AGENTERM_BOOTSTRAP_COPY_END_CS% AGENTERM_BOOTSTRAP_COPY_CS
 set /a AGENTERM_BOOTSTRAP_WORKER_COPY_MS=AGENTERM_BOOTSTRAP_COPY_CS*10
-set "AGENTERM_BOOTSTRAP_WORKER=%AGENTERM_BOOTSTRAP_DIR%\agenterm-script.exe"
+set "AGENTERM_BOOTSTRAP_WORKER=%AGENTERM_BOOTSTRAP_DIR%\agenterm-rhai.exe"
 call :clock_cs AGENTERM_BOOTSTRAP_SETUP_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_START_CS% %AGENTERM_BOOTSTRAP_SETUP_END_CS% AGENTERM_BOOTSTRAP_SETUP_CS
 set /a AGENTERM_BOOTSTRAP_SETUP_MS=AGENTERM_BOOTSTRAP_SETUP_CS*10
@@ -116,12 +116,12 @@ if errorlevel 1 exit /b 1
 >> "%~1" cargo -Vv
 if errorlevel 1 exit /b 1
 >> "%~1" echo tracked-index
->> "%~1" git ls-files -s -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
+        >> "%~1" git ls-files -s -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-rhai-runtime.md assets/agenterm.ico agenterm.tasks.json
 if errorlevel 1 exit /b 1
 >> "%~1" echo tracked-worktree
->> "%~1" git diff --no-ext-diff --binary -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
+        >> "%~1" git diff --no-ext-diff --binary -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-rhai-runtime.md assets/agenterm.ico agenterm.tasks.json
 if errorlevel 1 exit /b 1
-> "%AGENTERM_BOOTSTRAP_UNTRACKED%" git ls-files --others --exclude-standard -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
+> "%AGENTERM_BOOTSTRAP_UNTRACKED%" git ls-files --others --exclude-standard -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-rhai-runtime.md assets/agenterm.ico agenterm.tasks.json
 if errorlevel 1 exit /b 1
 >> "%~1" echo untracked-paths
 >> "%~1" type "%AGENTERM_BOOTSTRAP_UNTRACKED%"

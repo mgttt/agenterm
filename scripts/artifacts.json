@@ -42,7 +42,7 @@
       "release_budget_bytes": 2097152
     },
     {
-      "name": "agenterm-script.exe",
+      "name": "agenterm-rhai.exe",
       "role": "scripting-cli",
       "pe_subsystem": 3,
       "documentation_role": "public Rhai scripting CLI and worker",
@@ -105,7 +105,7 @@
           "release_budget_bytes": 2097152
         },
         {
-          "name": "agenterm-script.exe",
+          "name": "agenterm-rhai.exe",
           "role": "scripting-cli",
           "pe_subsystem": 3,
           "documentation_role": "public Rhai scripting CLI and worker",
@@ -164,7 +164,7 @@
           "offline_probe": ["--version"]
         },
         {
-          "name": "agenterm-script.exe",
+          "name": "agenterm-rhai.exe",
           "role": "scripting-cli",
           "pe_subsystem": 3,
           "documentation_role": "public Rhai scripting CLI and worker",
@@ -216,7 +216,7 @@
           "offline_probe": ["--version"]
         },
         {
-          "name": "agenterm-script",
+          "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
@@ -266,7 +266,7 @@
           "offline_probe": ["--version"]
         },
         {
-          "name": "agenterm-script",
+          "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
@@ -316,7 +316,7 @@
           "offline_probe": ["--version"]
         },
         {
-          "name": "agenterm-script",
+          "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
@@ -366,7 +366,7 @@
           "offline_probe": ["--version"]
         },
         {
-          "name": "agenterm-script",
+          "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]

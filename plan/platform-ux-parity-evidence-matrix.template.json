@@ -1,0 +1,122 @@
+{
+  "run_id": "",
+  "timestamp_utc": "",
+  "suite": "platform-ux-parity-smoke",
+  "environment": {
+    "branch": "",
+    "commit": "",
+    "runner": ""
+  },
+  "result": [
+    {
+      "branch": "startup",
+      "scenario": "first-window-startup",
+      "evidence_id": "ux-parity.startup",
+      "windows": "Supported",
+      "linux": "Supported",
+      "macos": "Supported",
+      "state": "Supported",
+      "root_cause": "",
+      "owner": "platform"
+    },
+    {
+      "branch": "startup",
+      "scenario": "startup-title",
+      "evidence_id": "ux-parity.startup-title",
+      "windows": "Supported",
+      "linux": "Supported",
+      "macos": "Supported",
+      "state": "Supported",
+      "root_cause": "",
+      "owner": "platform"
+    },
+    {
+      "branch": "ux-startup",
+      "scenario": "gui-wake-contract",
+      "evidence_id": "ux-parity.wake-coalescing",
+      "windows": "Supported",
+      "linux": "Supported",
+      "macos": "Supported",
+      "state": "Supported",
+      "root_cause": "",
+      "owner": "platform"
+    },
+    {
+      "branch": "ux-startup",
+      "scenario": "window-focus-contract",
+      "evidence_id": "ux-parity.window-focus-contract",
+      "windows": "Supported",
+      "linux": "Supported",
+      "macos": "Supported",
+      "state": "Supported",
+      "root_cause": "",
+      "owner": "ui"
+    },
+    {
+      "branch": "frontend-lx",
+      "scenario": "linux-workbench",
+      "evidence_id": "ux-parity.linux.unix-frontend.workbench",
+      "windows": "Unsupported",
+      "linux": "Unsupported",
+      "macos": "Unsupported",
+      "state": "Unsupported",
+      "root_cause": "not-executed-yet",
+      "owner": "ui"
+    },
+    {
+      "branch": "frontend-mx",
+      "scenario": "macos-workbench",
+      "evidence_id": "ux-parity.macos.unix-frontend.workbench",
+      "windows": "Unsupported",
+      "linux": "Unsupported",
+      "macos": "Unsupported",
+      "state": "Unsupported",
+      "root_cause": "not-executed-yet",
+      "owner": "ui"
+    },
+    {
+      "branch": "frontend-lx",
+      "scenario": "linux-clipboard",
+      "evidence_id": "ux-parity.linux.unix-frontend.clipboard",
+      "windows": "Unsupported",
+      "linux": "Unsupported",
+      "macos": "Unsupported",
+      "state": "Unsupported",
+      "root_cause": "not-executed-yet",
+      "owner": "platform"
+    },
+    {
+      "branch": "frontend-mx",
+      "scenario": "macos-clipboard",
+      "evidence_id": "ux-parity.macos.unix-frontend.clipboard",
+      "windows": "Unsupported",
+      "linux": "Unsupported",
+      "macos": "Unsupported",
+      "state": "Unsupported",
+      "root_cause": "not-executed-yet",
+      "owner": "platform"
+    },
+    {
+      "branch": "remote-ui",
+      "scenario": "replaceable-client",
+      "evidence_id": "ux-parity.remote-ui.replaceable-client",
+      "windows": "Supported",
+      "linux": "Unsupported",
+      "macos": "Unsupported",
+      "state": "Unsupported",
+      "root_cause": "windows-only-contract",
+      "owner": "ui"
+    },
+    {
+      "branch": "remote-ui",
+      "scenario": "selection",
+      "evidence_id": "ux-parity.remote-ui.selection",
+      "windows": "Supported",
+      "linux": "Unsupported",
+      "macos": "Unsupported",
+      "state": "Unsupported",
+      "root_cause": "windows-only-contract",
+      "owner": "ui"
+    }
+  ]
+}

@@ -487,7 +487,7 @@ try {
         "agenterm-server.exe",
         "agenterm-cli.exe",
         "agenterm-mux.exe",
-        "agenterm-script.exe",
+        "agenterm-rhai.exe",
         "agenterm-mcp.exe"
     ];
     let names = #{};

@@ -24,8 +24,8 @@ name = "agenterm-mux"
 path = "src/bin/agenterm-mux.rs"
 
 [[bin]]
-name = "agenterm-script"
-path = "src/bin/agenterm-script.rs"
+name = "agenterm-rhai"
+path = "src/bin/agenterm-rhai.rs"
 
 [[bin]]
 name = "agenterm-server"

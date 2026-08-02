@@ -24,6 +24,16 @@ fn checked_git_prefix(repo) {
     prefix
 }
 
+fn source_name_for_artifact(artifact_name) {
+    if artifact_name == "agenterm-rhai.exe" {
+        return "agenterm-rhai.exe";
+    }
+    if artifact_name == "agenterm-rhai" {
+        return "agenterm-rhai";
+    }
+    artifact_name
+}
+
 require(
     args.len == 4,
     "expected: REPO SOURCE_DIRECTORY DESTINATION_DIRECTORY PROFILE"
@@ -48,7 +58,11 @@ std::fs::create_dir_all(destination_directory);
 let artifact_manifest_path =
     std::path::join(repo, "scripts/artifacts.json").display;
 let manifest = artifact_manifest::load(artifact_manifest_path);
-let obsolete = ["agentermctl.exe"];
+let obsolete = [
+    "agentermctl.exe",
+    "agenterm-rhai.exe",
+    "agenterm-rhai"
+];
 
 artifact_files::clean_locked(
     destination_directory,
@@ -56,11 +70,21 @@ artifact_files::clean_locked(
     obsolete
 );
 for artifact in manifest.executables {
-    artifact_files::stage(
-        source_directory,
-        destination_directory,
-        artifact.name
-    );
+    let source_name = source_name_for_artifact(artifact.name);
+    if source_name == artifact.name {
+        artifact_files::stage(
+            source_directory,
+            destination_directory,
+            source_name
+        );
+    } else {
+        artifact_files::stage_as(
+            source_directory,
+            destination_directory,
+            source_name,
+            artifact.name
+        );
+    }
 }
 
 let output_manifest =

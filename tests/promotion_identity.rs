@@ -59,7 +59,7 @@ fn write_manifest(path: &Path, channel: &str, source: &str) {
 
 fn generate(root: &Path, manifest: &Path, source: &str) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .arg("run")
         .arg(repo.join("scripts/rhai/promotion-identity.rhai"))

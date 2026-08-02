@@ -718,7 +718,7 @@ fn run() -> anyhow::Result<u8> {
         [mode] if mode == "--framed-worker" => run_framed_worker(),
         [mode, rest @ ..] if mode == "check-many" => run_check_many(rest),
         [mode] if mode == "--version" || mode == "-V" => {
-            println!("agenterm-script {}", env!("CARGO_PKG_VERSION"));
+            println!("agenterm-rhai {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
         }
         _ => u8::try_from(agenterm::run_script_entry_with_args(arguments))
@@ -940,7 +940,7 @@ fn run_check_many(arguments: &[String]) -> anyhow::Result<u8> {
     }
     let report = CheckManyReport {
         schema_version: 1,
-        kind: "agenterm-script-check-many",
+        kind: "agenterm-rhai-check-many",
         ok: failures.is_empty(),
         checked_files,
         total_source_bytes,
@@ -1009,7 +1009,7 @@ fn read_check_many_manifest(path: &std::path::Path) -> anyhow::Result<CheckManyM
     }
     let manifest: CheckManyManifest = serde_json::from_slice(&bytes)
         .map_err(|error| anyhow::anyhow!("check_many_manifest_json: {error}"))?;
-    if manifest.schema_version != 1 || manifest.kind != "agenterm-script-check-manifest" {
+    if manifest.schema_version != 1 || manifest.kind != "agenterm-rhai-check-manifest" {
         anyhow::bail!("check_many_manifest_schema");
     }
     if manifest.files.is_empty() || manifest.files.len() > CHECK_MANY_FILES_MAX {

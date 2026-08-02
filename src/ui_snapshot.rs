@@ -195,6 +195,17 @@ pub(crate) fn embedded_window_json_with_state(
     })
 }
 
+pub(crate) fn is_replaceable_ui_client_snapshot_visible(snapshot_json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(snapshot_json) else {
+        return false;
+    };
+    let Some(window) = value.get("window").and_then(serde_json::Value::as_object) else {
+        return false;
+    };
+    window.get("detached").and_then(serde_json::Value::as_bool) != Some(true)
+        && window.get("visible").and_then(serde_json::Value::as_bool) == Some(true)
+}
+
 pub(crate) fn schema_version_json() -> u32 {
     UI_CLIENT_STATE_SCHEMA_VERSION
 }
@@ -249,6 +260,25 @@ mod tests {
         assert_eq!(json["minimized"], true);
         assert_eq!(json["state"], "minimized");
         assert_eq!(json["detached"], false);
+    }
+
+    #[test]
+    fn replaceable_ui_client_snapshot_visible_recognizes_detached_or_hidden_clients_as_invisible() {
+        let visible = serde_json::json!({
+            "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
+            "window": {"visible": true, "detached": false},
+        });
+        let detached = serde_json::json!({
+            "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
+            "window": {"visible": true, "detached": true},
+        });
+        let hidden = serde_json::json!({
+            "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
+            "window": {"visible": false, "detached": false},
+        });
+        assert!(is_replaceable_ui_client_snapshot_visible(&visible.to_string()));
+        assert!(!is_replaceable_ui_client_snapshot_visible(&detached.to_string()));
+        assert!(!is_replaceable_ui_client_snapshot_visible(&hidden.to_string()));
     }
 
     #[test]

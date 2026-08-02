@@ -1,7 +1,7 @@
 // Report stage-0 inputs without performing a build or changing the repository.
 //
 // Named task:
-//   agenterm-script task run bootstrap-info --json
+//   agenterm-rhai task run bootstrap-info --json
 
 fn checked_output(program, argv, step) {
     let command = std::process::command(program);

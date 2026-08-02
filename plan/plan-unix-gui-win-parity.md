@@ -63,6 +63,59 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 - [ ] TTF/FreeType 路径，使 `terminal_font_family` 影响像素而非仅行距
 - [x] 树连接器绘制（Win `paint_tabs` 连续分支线）
 
+## 结构重构：Platform 与 Frontend 职责剥离（新增）
+
+### O0 行为一致性目标
+
+- [x] 明确跨平台统一UX清单（点击、滚轮、选区、焦点、窗口恢复）
+- [x] 建立统一验收：`Given/When/Then` + 对应证据脚本
+- [ ] 明确平台能力缺口：每个OS的 `Unsupported/Failed` 和回退策略
+
+```text
+O1 并发树（并行）
+├─ O1A 能力注入层（Owner: Platform）[x]
+│  ├─ 目标：保持入口分发在平台能力上，不在入口层承载UI策略
+│  ├─ 交付：`src/platform/services/frontend.rs` 只保留 run/request 能力路由
+│  ├─ 交付：`agenterm` 启动参数解析进入 `src/frontend.rs` 共享策略器（Windows/Unix 同步）
+│  ├─ 约束：`run_gui_entry` 与 `request_gui_wake` 返回码一致，启动失败原因可归并为统一证据
+│  └─ 风险：handoff 与服务端接管回退回归
+├─ O1B 窗口生命周期（Owner: Product-UI）
+│  ├─ 目标：统一窗口恢复/焦点行为的语义形状
+│  ├─ 交付：`focus/query/state` 的产品行为一致，能力不足返回清晰失败而非静默降级
+│  ├─ 约束：Windows hide/show 与 Unix 激活策略在契约上可比较
+│  └─ 风险：macOS 重开时序与焦点事件的竞态
+└─ O1C 输入语义层（Owner: Product-UI）
+   ├─ 目标：统一坐标、点击、滚轮、选区、拖拽与快捷键的产品语义
+   ├─ 交付：同一场景在两套前端下产生同字段 `ui-snapshot` 变更
+   ├─ 约束：平台特性只保留在 `agenterm-platform` 能力返回，不进产品策略
+   └─ 风险：`TerminalPoint`、`selection_generation` 与自动滚动边界
+```
+
+### O2 汇聚后验收
+
+- [ ] 所有交互分支都以 `agenterm-platform` 能力结果驱动，不再通过OS cfg做策略选择
+- [ ] `ui-snapshot`、`terminal_state`、`selection` 与可见行为在同场景可回放比对
+- [x] 文档同步：跨平台UX能力缺口矩阵同步到 PRD_02_20 与 plan
+
+### O3 验证循环（Rhai 首选）
+
+- [x] `scripts/rhai/platform-ux-parity-smoke.rhai` 覆盖 Windows startup+remote-ui 与 Unix startup+unix-frontend
+- [x] 三平台统一入口与 `--list-evidence` 已通 (`platform-ux-parity-smoke`, `platform-ux-parity-smoke-linux`, `platform-ux-parity-smoke-macos`)
+- [~] 按 3 平台并发执行实体验收：已就绪；按 `plan/platform-ux-parity-evidence-matrix.md` 聚合分支并阻断
+- [ ] 形成“分支-场景-证据”表，失败立即阻断该分支收敛，避免局部通过掩盖能力缺口
+
+### 并发执行与收敛回路
+
+```text
+执行循环：
+1) 并行提案（O1A/O1B/O1C）
+2) 同步汇聚：统一能力缺口文档 + 统一证据标签
+3) Rhai 回归循环：platform-ux-parity-smoke 全场景
+4) 复测：`ui-snapshot` 与 PNG 证据差异归一化
+```
+
+> 详细分支树与边界归集说明请参见：`plan/platform-ui-ux-boundary-tree.md`
+
 ## 验收证据
 
 | 能力 | 证据 |

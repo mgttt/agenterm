@@ -117,7 +117,7 @@
 ## 已知缺口（主控 review，供分身验证）
 
 1. `task check` 在 Linux 上对 `platforms: windows` 任务仍返回 OK（未 host fail-closed）。
-2. `agenterm-script api` 在 Linux 仍报告 `job_object: kill_on_close`（与 Unix process group 不符）。
+2. `agenterm-rhai api` 在 Linux 仍报告 `job_object: kill_on_close`（与 Unix process group 不符）。
 3. Linux `./check.sh --quick` 不自动跑 `migration-audit`（需显式 task）。
 4. （分身1）unix `check.sh --quick` 硬编码 `target/debug` ↔ 独立 `CARGO_TARGET_DIR` → 请示#1。
 5. （分身1）`build-linux-clients.sh` 传裸 `dev` → 请示#2。

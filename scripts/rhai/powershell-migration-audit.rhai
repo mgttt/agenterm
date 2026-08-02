@@ -1,7 +1,7 @@
 // Enforce the frozen v0.1.10 PowerShell migration ledger.
 //
 // Named task:
-//   agenterm-script task run migration-audit --json
+//   agenterm-rhai task run migration-audit --json
 
 fn require(condition, message) {
     if !condition {
@@ -333,7 +333,7 @@ require(
 );
 require(
     bootstrap_source.contains(
-        "cargo build --quiet --locked --bin agenterm-script"
+        "cargo build --quiet --locked --bin agenterm-rhai"
     ),
     "migration_batch_bootstrap_worker_build"
 );
@@ -405,7 +405,7 @@ require(
         `task run "$agenterm_bootstrap_task"`
     )
         && shell_bootstrap.contains(
-            "cargo build --quiet --locked --bin agenterm-script"
+            "cargo build --quiet --locked --bin agenterm-rhai"
         )
         && shell_bootstrap_operational_lines <= 160,
     "migration_shell_bootstrap_not_generic"

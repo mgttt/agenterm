@@ -334,7 +334,7 @@ let document = #{
         "https://agenterm.local/spdx/cargo-lock/" + cargo_lock_hash,
     creationInfo: #{
         created: "1970-01-01T00:00:00Z",
-        creators: ["Tool: agenterm-script task run supply-chain"],
+        creators: ["Tool: agenterm-rhai task run supply-chain"],
         comment:
             "Generation time is fixed so identical Cargo.lock inputs produce identical bytes."
     },

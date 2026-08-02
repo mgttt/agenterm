@@ -35,10 +35,12 @@ use crate::{
         UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant,
     },
     ui_command::{
-        UI_CLIENT_COMMAND_MAX_ARGUMENTS, UI_CLIENT_COMMAND_MAX_BYTES,
-        UI_CLIENT_COMMAND_SCHEMA_VERSION, UiClientCommandQueue, UiClientCommandResult,
+        is_ui_client_handoff_command, UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_MAX_ARGUMENTS,
+        UI_CLIENT_COMMAND_MAX_BYTES, UI_CLIENT_COMMAND_SCHEMA_VERSION,
+        UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommandQueue, UiClientCommandResult,
     },
     ui_interaction::{UiInteraction, parse_ui_interaction},
+    ui_snapshot::{is_replaceable_ui_client_snapshot_visible, PROJECTION_REPLACEABLE_UI_CLIENT},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
     wake_signal::WakeSignal,
     working_context::{CwdSource, cwd_command, validate_path},
@@ -88,9 +90,12 @@ fn validate_ui_client_snapshot(
             "UI client snapshot schema_version must be {UI_CLIENT_STATE_SCHEMA_VERSION}"
         ));
     }
-    if object.get("projection").and_then(serde_json::Value::as_str) != Some("replaceable_ui_client")
+    if object.get("projection").and_then(serde_json::Value::as_str)
+        != Some(PROJECTION_REPLACEABLE_UI_CLIENT)
     {
-        return Err("UI client snapshot projection must be replaceable_ui_client".to_owned());
+        return Err(format!(
+            "UI client snapshot projection must be {PROJECTION_REPLACEABLE_UI_CLIENT}"
+        ));
     }
     if object.get("client_pid").and_then(serde_json::Value::as_u64) != Some(u64::from(client_pid)) {
         return Err("UI client snapshot client_pid does not match the lease owner".to_owned());
@@ -909,7 +914,7 @@ impl ServerState {
                 if response.ok
                     && let Ok(mut value) =
                         serde_json::from_str::<serde_json::Value>(&response.output)
-                    && value["projection"].as_str() == Some("replaceable_ui_client")
+                    && value["projection"].as_str() == Some(PROJECTION_REPLACEABLE_UI_CLIENT)
                 {
                     let position = self.event_journal.position();
                     value["event_position"]["epoch"] = serde_json::Value::String(position.epoch);
@@ -942,7 +947,7 @@ impl ServerState {
                     if response.ok
                         && let Ok(mut value) =
                             serde_json::from_str::<serde_json::Value>(&response.output)
-                        && value["projection"].as_str() == Some("replaceable_ui_client")
+                        && value["projection"].as_str() == Some(PROJECTION_REPLACEABLE_UI_CLIENT)
                     {
                         value["event_position"]["epoch"] =
                             serde_json::Value::String(position.epoch);
@@ -970,7 +975,7 @@ impl ServerState {
                     && serde_json::from_str::<serde_json::Value>(&response.output)
                         .ok()
                         .and_then(|value| {
-                            (value["projection"].as_str() == Some("replaceable_ui_client"))
+                            (value["projection"].as_str() == Some(PROJECTION_REPLACEABLE_UI_CLIENT))
                                 .then_some(value)
                         })
                         .is_some()
@@ -1076,6 +1081,19 @@ impl ServerState {
         if self.ui_lease.active().is_none() {
             return IpcResponse::typed_failure(
                 "no interactive GUI client is attached to this server",
+                "ui_client_unavailable",
+                "availability",
+                true,
+            );
+        }
+        if is_ui_client_handoff_command(args)
+            && !self
+                .ui_client_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| is_replaceable_ui_client_snapshot_visible(&snapshot.json))
+        {
+            return IpcResponse::typed_failure(
+                "no interactive GUI client is currently visible",
                 "ui_client_unavailable",
                 "availability",
                 true,
@@ -1343,8 +1361,8 @@ impl ServerState {
                         | "screenshot"
                         | "screenshot-pane"
                         | "screenshot-tab"
-                        | "__focus"
-                        | "__show-no-activate"
+                        | UI_CLIENT_COMMAND_FOCUS
+                        | UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE
                 )
             })
         {
@@ -1392,12 +1410,14 @@ impl ServerState {
                 self.shutdown_requested = true;
                 IpcResponse::success("")
             }
-            Some("__focus") | Some("__show-no-activate") => IpcResponse::typed_failure(
-                "no interactive GUI client is attached to this server",
-                "ui_client_unavailable",
-                "availability",
-                true,
-            ),
+            Some(UI_CLIENT_COMMAND_FOCUS) | Some(UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE) => {
+                IpcResponse::typed_failure(
+                    "no interactive GUI client is attached to this server",
+                    "ui_client_unavailable",
+                    "availability",
+                    true,
+                )
+            }
             Some(command) => IpcResponse::typed_failure(
                 format!("headless AgenTerm server does not implement `{command}`"),
                 "server_command_unsupported",
@@ -1950,7 +1970,7 @@ mod tests {
     fn ui_client_snapshot_is_bounded_causal_and_owned() {
         let valid = serde_json::json!({
             "schema_version": 1,
-            "projection": "replaceable_ui_client",
+            "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
             "client_pid": 42,
             "server_pid": 7,
             "event_position": {
@@ -1992,7 +2012,7 @@ mod tests {
         );
         let missing_tabs = serde_json::json!({
             "schema_version": 1,
-            "projection": "replaceable_ui_client",
+            "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
             "client_pid": 42,
             "server_pid": 7,
             "event_position": {

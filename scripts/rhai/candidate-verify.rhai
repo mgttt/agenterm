@@ -1,7 +1,7 @@
 // Verify an exact-SHA Candidate manifest and every payload byte.
 //
 // Usage:
-//   agenterm-script run scripts/rhai/candidate-verify.rhai \
+//   agenterm-rhai run scripts/rhai/candidate-verify.rhai \
 //     -- SOURCE_ROOT MANIFEST ASSET_DIRECTORY [NOW_UNIX_MS]
 //
 // NOW_UNIX_MS exists for deterministic fixture tests.  Production callers

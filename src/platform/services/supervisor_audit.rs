@@ -26,7 +26,7 @@ impl ConcurrencyPermit {
         }
         match agenterm_platform::locking::SlotPermit::try_acquire(
             &std::env::temp_dir(),
-            "agenterm-script-supervisor-v1",
+            "agenterm-rhai-supervisor-v1",
             global_limit,
         ) {
             Ok(global) => Ok(Self { global, active }),
@@ -99,10 +99,10 @@ pub(crate) fn default_audit_path() -> PathBuf {
                     .join("agenterm")
                     .join("script-audit.jsonl")
             } else {
-                std::env::temp_dir().join("agenterm-script-audit.jsonl")
+                std::env::temp_dir().join("agenterm-rhai-audit.jsonl")
             }
         }
-        _ => std::env::temp_dir().join("agenterm-script-audit.jsonl"),
+        _ => std::env::temp_dir().join("agenterm-rhai-audit.jsonl"),
     }
 }
 

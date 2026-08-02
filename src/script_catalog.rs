@@ -2086,7 +2086,7 @@ mod tests {
 
     #[test]
     fn public_runtime_spec_starts_with_the_english_dated_object_tree() {
-        let specification = include_str!("../docs/agenterm-script-runtime.md");
+        let specification = include_str!("../docs/agenterm-rhai-runtime.md");
         assert!(specification.starts_with("# AgenTerm Script Runtime Specification"));
         assert!(specification.contains("## 1. Complete public object and interface tree"));
         assert!(specification.matches("designed 2026-07-28").count() >= 60);

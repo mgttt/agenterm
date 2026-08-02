@@ -13,8 +13,6 @@ mod ui_snapshot;
 mod wake;
 mod window_state;
 
-pub(crate) use wake::request_gui_wake;
-
 use std::{
     collections::HashSet,
     env,
@@ -38,12 +36,16 @@ use agenterm_platform::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
+    frontend::{
+        attempt_gui_handoff, parse_gui_launch_target, gui_help_result, GuiHandoffResult, GuiLaunchResult,
+        UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE,
+    },
+    frontend::request_gui_wake_best_effort,
     client::no_activate_from_environment,
     commands::{alternate_screen_wheel_bytes, option_value, screenshot_output_path},
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
     instances::{mark_intentional_shutdown, register_instance},
-    ipc_endpoint::EndpointSelectorArgs,
     ipc_transport::{IpcEnvelope, IpcServer, start_ipc_server},
     operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
     protocol::IpcResponse,
@@ -84,16 +86,6 @@ use self::{
     },
 };
 
-const GUI_USAGE: &str = "\
-Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]
-
-Options:
-  --endpoint ENDPOINT   Select a typed local IPC endpoint
-  --address HOST:PORT   Select a legacy loopback TCP endpoint
-  --instance NAME       Select a logical instance (main or dev)
-  --no-activate         Open without taking foreground focus
-  --not-foreground      Alias for --no-activate
-  -h, --help            Show this help";
 
 use cursor_blink::CursorBlink;
 use font::resolved_font_name;
@@ -532,108 +524,45 @@ impl TabEditorFocus {
     }
 }
 
-pub fn run_gui_entry() -> i32 {
+pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
-    if arguments
-        .iter()
-        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
-    {
-        if arguments.len() == 1 {
-            println!("{GUI_USAGE}");
-            return 0;
-        }
-        eprintln!("AgenTerm GUI argument error: --help cannot be combined with other options");
-        return 2;
+    if let Some(result) = gui_help_result(&arguments, UNIX_GUI_USAGE) {
+        return result;
     }
-    let (argument_no_activate, selectors) = match parse_gui_launch(&arguments) {
-        Ok(launch) => launch,
+    let options = match parse_gui_launch_target(&arguments, UNIX_GUI_LAUNCH_POLICY) {
+        Ok(options) => options,
         Err(message) => {
-            eprintln!("AgenTerm GUI argument error: {message}\n\n{GUI_USAGE}");
-            return 2;
+            eprintln!("AgenTerm GUI argument error: {message}\\n\\n{UNIX_GUI_USAGE}");
+            return GuiLaunchResult::UsageError;
         }
     };
-    if let Err(error) = crate::client::set_ipc_selectors(selectors) {
-        eprintln!("AgenTerm GUI argument error: {error:#}\n\n{GUI_USAGE}");
-        return 2;
+    let no_activate = options.no_activate || no_activate_from_environment();
+
+    match attempt_gui_handoff(no_activate, true) {
+        GuiHandoffResult::HandedOff => return GuiLaunchResult::Reused,
+        GuiHandoffResult::Continue => {}
+        GuiHandoffResult::Blocked(error) => {
+            eprintln!("The running AgenTerm server rejected the launcher handoff: {error}\n\
+                Restart that server to use this launcher capability.");
+            return GuiLaunchResult::BlockedByServer(error);
+        }
     }
-    let no_activate = argument_no_activate || no_activate_from_environment();
 
     if !display_available() {
         eprintln!(
             "AgenTerm GUI could not start: no graphical display was detected.\n\
              Set DISPLAY (X11) or WAYLAND_DISPLAY, or run from a desktop session."
         );
-        return 1;
+        return GuiLaunchResult::StartupFailed("no graphical display was detected".to_owned());
     }
 
     match run_gui(no_activate) {
-        Ok(()) => 0,
+        Ok(()) => GuiLaunchResult::Launched,
         Err(error) => {
             eprintln!("AgenTerm GUI failed: {error:#}");
-            1
+            GuiLaunchResult::StartupFailed(error.to_string())
         }
     }
-}
-
-fn parse_gui_launch(
-    arguments: &[String],
-) -> std::result::Result<(bool, EndpointSelectorArgs), String> {
-    let mut no_activate = false;
-    let mut selectors = EndpointSelectorArgs::default();
-    let mut position = 0;
-    while position < arguments.len() {
-        let option = arguments[position].as_str();
-        match option {
-            "--no-activate" | "--not-foreground" => {
-                if no_activate {
-                    return Err(
-                        "--no-activate/--not-foreground may be specified only once".to_owned()
-                    );
-                }
-                no_activate = true;
-                position += 1;
-            }
-            "--endpoint" | "--address" | "--instance" => {
-                let value = arguments
-                    .get(position + 1)
-                    .filter(|value| !value.starts_with("--"))
-                    .ok_or_else(|| format!("{option} requires a value"))?
-                    .clone();
-                let target = match option {
-                    "--endpoint" => &mut selectors.endpoint,
-                    "--address" => &mut selectors.address,
-                    "--instance" => &mut selectors.instance,
-                    _ => unreachable!(),
-                };
-                if target.is_some() {
-                    return Err(format!("{option} may be specified only once"));
-                }
-                *target = Some(value);
-                position += 2;
-            }
-            other if other.starts_with('-') => {
-                return Err(format!("unknown option: {other}"));
-            }
-            other => {
-                return Err(format!(
-                    "unexpected positional argument: {other}; \
-                     the GUI launcher does not accept shell commands"
-                ));
-            }
-        }
-    }
-    let selector_count = [
-        selectors.endpoint.is_some(),
-        selectors.address.is_some(),
-        selectors.instance.is_some(),
-    ]
-    .into_iter()
-    .filter(|selected| *selected)
-    .count();
-    if selector_count > 1 {
-        return Err("--endpoint, --address, and --instance are mutually exclusive".to_owned());
-    }
-    Ok((no_activate, selectors))
 }
 
 fn display_available() -> bool {
@@ -3024,7 +2953,7 @@ impl UnixApp {
                 let result = clipboard::get_clipboard_text_bounded(TERMINAL_PASTE_LIMIT_BYTES)
                     .map_err(TerminalPasteFailure::Clipboard);
                 let _ = sender.send(result);
-                request_gui_wake(0, &wake_signal);
+                request_gui_wake_best_effort(0, &wake_signal, "unix-clipboard-read");
             })
             .map_err(|error| TerminalPasteFailure::WorkerStart(error.to_string()))?;
         self.pending_terminal_paste = Some(PendingTerminalPaste { tab_id, receiver });
@@ -5512,7 +5441,8 @@ fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_jso
 mod system_menu_tests {
     use super::{
         RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure, UnixFocusSurface,
-        compact_cwd_for_status, parse_gui_launch, scale_frame_nearest, scale_rect_to_frame,
+        compact_cwd_for_status, gui_help_result, parse_gui_launch_target, scale_frame_nearest,
+        scale_rect_to_frame,
         system_menu_clipboard_state_pure, terminal_paste_bytes, terminal_paste_target_is_current,
         workspace_toolbar_snapshot_json,
     };
@@ -5524,6 +5454,14 @@ mod system_menu_tests {
     };
 
     #[test]
+    fn gui_launch_help_is_supported_by_frontend_contract() {
+        assert!(matches!(
+            gui_help_result(&["--help".to_owned()], crate::frontend::UNIX_GUI_USAGE),
+            Some(crate::frontend::GuiLaunchResult::UsageHelpPrinted)
+        ));
+    }
+
+    #[test]
     fn gui_launch_parser_accepts_each_selector_and_preserves_no_activate() {
         for option in ["--endpoint", "--address", "--instance"] {
             let value = match option {
@@ -5532,23 +5470,26 @@ mod system_menu_tests {
                 "--instance" => "dev",
                 _ => unreachable!(),
             };
-            let (no_activate, selectors) = parse_gui_launch(&[
-                "--no-activate".to_owned(),
-                option.to_owned(),
-                value.to_owned(),
-            ])
+            let options = parse_gui_launch_target(
+                &[
+                    "--no-activate".to_owned(),
+                    option.to_owned(),
+                    value.to_owned(),
+                ],
+                crate::frontend::UNIX_GUI_LAUNCH_POLICY,
+            )
             .unwrap();
-            assert!(no_activate);
+            assert!(options.no_activate);
             assert_eq!(
-                selectors.endpoint.as_deref(),
+                options.selectors.endpoint.as_deref(),
                 (option == "--endpoint").then_some(value)
             );
             assert_eq!(
-                selectors.address.as_deref(),
+                options.selectors.address.as_deref(),
                 (option == "--address").then_some(value)
             );
             assert_eq!(
-                selectors.instance.as_deref(),
+                options.selectors.instance.as_deref(),
                 (option == "--instance").then_some(value)
             );
         }
@@ -5573,7 +5514,10 @@ mod system_menu_tests {
             vec!["--endpoint".to_owned(), "--no-activate".to_owned()],
         ];
         for arguments in invalid {
-            assert!(parse_gui_launch(&arguments).is_err(), "{arguments:?}");
+            assert!(
+                parse_gui_launch_target(&arguments, crate::frontend::UNIX_GUI_LAUNCH_POLICY).is_err(),
+                "{arguments:?}"
+            );
         }
     }
 
@@ -5855,3 +5799,4 @@ mod system_menu_tests {
         );
     }
 }
+

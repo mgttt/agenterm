@@ -33,8 +33,8 @@ stable active renderer at native.
 The ignored machine-readable source receipt is reproduced by:
 
 ```powershell
-.\dist\agenterm-script.exe run --timeout-ms 60000 --max-operations 10000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- . --self-check
-.\dist\agenterm-script.exe run --timeout-ms 3600000 --max-operations 100000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- .
+.\dist\agenterm-rhai.exe run --timeout-ms 60000 --max-operations 10000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- . --self-check
+.\dist\agenterm-rhai.exe run --timeout-ms 3600000 --max-operations 100000000 --max-string-bytes 8388608 --max-collection-items 100000 --max-output-bytes 1048576 --project-root . .\research\agenterm-webview\tools\measure.rhai -- .
 ```
 
 The measurement writes a uniquely named append-only JSONL journal and

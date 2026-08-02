@@ -191,3 +191,86 @@ fn stage(source_directory_value, destination_directory_value, name) {
         #{ destination: destination, parked: parked }
     }
 }
+
+fn stage_as(
+    source_directory_value,
+    destination_directory_value,
+    source_name,
+    destination_name
+) {
+    let source_directory =
+        std::path::absolute(source_directory_value).display;
+    let destination_directory =
+        std::path::absolute(destination_directory_value).display;
+    require(
+        artifact_manifest::is_artifact_name(destination_name),
+        "stage_artifact_as_destination_invalid:" + destination_name
+    );
+
+    require(
+        source_name != "",
+        "stage_artifact_as_source_empty"
+    );
+
+    let source = std::path::join(source_directory, source_name).display;
+    let destination =
+        std::path::join(destination_directory, destination_name).display;
+    require(
+        std::fs::exists(source),
+        "stage_artifact_as_source_missing:" + source
+    );
+    let source_metadata = std::fs::symlink_metadata(source);
+    require(
+        source_metadata.is_file
+            && !source_metadata.is_symlink
+            && !source_metadata.is_reparse_point,
+        "stage_artifact_as_source_invalid:" + source
+    );
+
+    try {
+        std::fs::copy(source, destination);
+        print("Staged artifact: " + destination);
+        return #{ destination: destination, parked: "" };
+    } catch (initial_error) {
+        require(
+            std::fs::exists(destination),
+            "stage_artifact_as_copy_failed:" + initial_error.to_string()
+        );
+
+        let destination_metadata = std::fs::symlink_metadata(destination);
+        require(
+            destination_metadata.is_file
+                && !destination_metadata.is_symlink
+                && !destination_metadata.is_reparse_point,
+            "stage_artifact_as_destination_invalid:" + destination
+        );
+
+        let stem = destination_name;
+        stem.replace(".exe", "");
+        let suffix = std::time::SystemTime::now().unix_millis;
+        let parked_name = stem + ".locked-" + suffix + ".exe";
+        let parked =
+            std::path::join(destination_directory, parked_name).display;
+        std::fs::rename(destination, parked);
+        try {
+            std::fs::copy(source, destination);
+        } catch (replacement_error) {
+            try {
+                std::fs::rename(parked, destination);
+            } catch (rollback_error) {
+                let failure =
+                    "stage_artifact_as_copy_and_rollback_failed:" +
+                    replacement_error.to_string() + ":" +
+                    rollback_error.to_string();
+                throw failure;
+            }
+            let failure =
+                "stage_artifact_as_copy_after_park_failed:" +
+                replacement_error.to_string();
+            throw failure;
+        }
+
+        print("Staged new artifact; running copy remains at " + parked);
+        #{ destination: destination, parked: parked }
+    }
+}

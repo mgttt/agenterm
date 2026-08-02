@@ -11,6 +11,7 @@ use crate::{
     protocol::IpcResponse,
     pty::{NativeInputOwnership, NativeTerminalKey, PtyError},
     settings::clamp_tabs_width,
+    ui_snapshot::PROJECTION_REPLACEABLE_UI_CLIENT,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
     theme::ThemeId,
@@ -239,7 +240,7 @@ fn ui_hello_response(
         capabilities.push("lease_gated_interaction".to_owned());
     }
     if facts.replaceable_ui {
-        capabilities.push("replaceable_ui_client".to_owned());
+        capabilities.push(PROJECTION_REPLACEABLE_UI_CLIENT.to_owned());
         capabilities.push("lease_owned_client_state".to_owned());
         capabilities.push("lease_owned_client_commands".to_owned());
     }

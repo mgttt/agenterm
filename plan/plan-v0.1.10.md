@@ -162,7 +162,7 @@ AgenTerm 不需要通过堆叠可见按钮与竞品竞争。v0.1.10 延续以下
 这一轮的能力主要出现在工具链与接口层，而不是 GUI：
 
 - 默认工作台不增加 MCP 面板、连接列表、授权弹窗或常驻状态动画；
-- `agenterm-script.exe` 接替仓库自有 PowerShell 脚本的业务编排职责；
+- `agenterm-rhai.exe` 接替仓库自有 PowerShell 脚本的业务编排职责；
 - 构建、lint、测试、资格认证和发布使用同一套 Rhai task graph；
 - `agenterm.exe` 继续只负责窗口、终端、标签与 Fleet authority；
 - `agenterm-mcp.exe` 是按需启动、可独立退出的 stdio sidecar；
@@ -189,7 +189,7 @@ v0.1.10  Rhai 完整接替 PowerShell 与可验证的只读 Agent 桥梁
 │  └─ 完成门：仓库自有 .ps1 与 PowerShell 执行依赖均为零
 │
 ├─ 最高优先级：可自举且跨平台的开发入口
-│  ├─ stage 0 仅定位 Rust 工具链并构建 agenterm-script.exe
+│  ├─ stage 0 仅定位 Rust 工具链并构建 agenterm-rhai.exe
 │  ├─ stage 1 起全部业务判断交给 Rhai task
 │  ├─ build.bat 只保留 Windows 薄入口，不承载测试/发布逻辑
 │  ├─ CI 只负责环境准备和调用同名 Rhai task
@@ -267,7 +267,7 @@ v0.1.10  Rhai 完整接替 PowerShell 与可验证的只读 Agent 桥梁
    ├─ agenterm-net.exe、libp2p/IPFS 和去中心化应用
    ├─ agenterm-mux.exe 原生 mux server、完整 pane 与多后端
    ├─ agenterm.exe 与 agenterm-cli.exe 单文件合并
-   ├─ agenterm-script.exe 完整 Node/Bun 级标准库的剩余扩展
+   ├─ agenterm-rhai.exe 完整 Node/Bun 级标准库的剩余扩展
    ├─ agenterm-softmgr.exe、签名包/应用市场与联网软件分发
    ├─ agenterm-desktop.exe companion 与可选 Shell Replacement
    └─ 安装器、自动更新、联网组件安装与未单独批准的公开发布
@@ -282,10 +282,10 @@ v0.1.10 必须能够通过以下两条完整旅程解释自身价值。
 ```text
 一个干净 checkout，没有依赖仓库 .ps1
   -> build.bat / CI 完成最小 stage-0 bootstrap
-     -> agenterm-script.exe task run check
+     -> agenterm-rhai.exe task run check
         -> Rhai task graph 执行 fmt、lint、unit 与公共黑盒
            -> GUI 测试保持 no-activate，并通过 typed wait 获取结果
-              -> agenterm-script.exe task run qualify-release
+              -> agenterm-rhai.exe task run qualify-release
                  -> 生成绑定 commit、源码状态和制品 hash 的资格收据
                     -> package/release 只消费这批已验证字节
                        -> 全程无 PowerShell 业务逻辑和残留测试资源
@@ -438,7 +438,7 @@ stage-0 bootstrap
 这些平台入口，但它们只能：
 
 1. 定位或安装明确版本的 Rust 工具链；
-2. 构建/定位 `agenterm-script`；
+2. 构建/定位 `agenterm-rhai`；
 3. 把参数和退出码原样转交给公开 Rhai task。
 
 入口不得包含能力选择、测试清单、预算、制品判断、发布条件或清理策略。
@@ -500,7 +500,7 @@ inventory
 ```
 
 禁止逐行翻译 PowerShell。重复的进程、环境、文件、JSON、等待、诊断和清理
-逻辑必须进入 `agenterm-script` 的 typed API 或共享 Rhai module。平台差异由
+逻辑必须进入 `agenterm-rhai` 的 typed API 或共享 Rhai module。平台差异由
 明确的 adapter/capability 表达；脚本不得通过 shell 字符串拼接模拟 argv。
 
 ### Task graph
@@ -529,7 +529,7 @@ task 必须公开 stable ID、依赖、平台、输入、产物、副作用、�
 
 ### 自举与失败恢复
 
-- stage 0 使用 Cargo 只构建 `agenterm-script` 及必要共享库；
+- stage 0 使用 Cargo 只构建 `agenterm-rhai` 及必要共享库；
 - stage 0 失败输出工具链/编译错误并原样返回非零退出码；
 - stage 1 由 Rhai 校验 runtime/build identity 后接管 task graph；
 - runtime 源码变化时自动重建一次，禁止递归自举；

@@ -1,0 +1,11 @@
+run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,startup,first-window-startup,ux-parity.startup,windows,Supported,,platform
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,startup,startup-title,ux-parity.startup-title,windows,Supported,,platform
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,ux-startup,gui-wake-contract,ux-parity.wake-coalescing,windows,Supported,,platform
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,ux-startup,window-focus-contract,ux-parity.window-focus-contract,windows,Supported,,ui
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,frontend-lx,linux-workbench,ux-parity.linux.unix-frontend.workbench,linux,Unsupported,not-executed-yet,ui
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,frontend-mx,macos-workbench,ux-parity.macos.unix-frontend.workbench,macos,Unsupported,not-executed-yet,ui
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,frontend-lx,linux-clipboard,ux-parity.linux.unix-frontend.clipboard,linux,Unsupported,not-executed-yet,platform
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,frontend-mx,macos-clipboard,ux-parity.macos.unix-frontend.clipboard,macos,Unsupported,not-executed-yet,platform
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,remote-ui,replaceable-client,ux-parity.remote-ui.replaceable-client,windows,Supported,windows-only-contract,ui
+{{RUN_ID}},{{TIMESTAMP_UTC}},platform-ux-parity-smoke,remote-ui,selection,ux-parity.remote-ui.selection,windows,Supported,windows-only-contract,ui

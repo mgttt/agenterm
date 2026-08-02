@@ -1,4 +1,4 @@
-// First repository dogfood for agenterm-script.
+// First repository dogfood for agenterm-rhai.
 //
 // This standalone verifier consumes explicit specification and catalog
 // fixtures. It is intentionally outside the ready named-task catalog until a

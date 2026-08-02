@@ -205,7 +205,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   contracts, and its absence, crash, renderer failure or upgrade never ends a
   server, PTY or terminal GUI. Detailed product scope belongs to
   [Control Center](PRD_02_21_control_center.md).
-- [~] `agenterm-script.exe`: optional general-purpose local Rhai runtime with
+- [~] `agenterm-rhai.exe`: optional general-purpose local Rhai runtime with
   one-shot run/eval/check/task entry points and an explicit persistent REPL
   session. Each one-shot invocation owns a fresh supervised worker; the
   foreground REPL instead owns bounded supervised worker generations and
@@ -214,13 +214,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   never replays already-observed external side effects. On Windows,
   `agenterm-cli script repl ...` remains a thin stdio/exit-code forwarding
   adapter to this adjacent optional executable and does not embed the Rhai
-  engine; Linux/macOS callers invoke `agenterm-script` directly because CLI
+  engine; Linux/macOS callers invoke `agenterm-rhai` directly because CLI
   Script hosting is not available there. Existing one-shot commands retain
   their single-worker supervisor. Both paths reuse one runtime library, API
   graph, local scheduler, standard library, modules, named tasks, and typed
   Fleet APIs without becoming a persistent daemon or an Agent permission layer
-- [x] v0.1.12 executable-name decision: retain `agenterm-script.exe` /
-  `agenterm-script` as the canonical name for the same unrestricted Rhai
+- [x] v0.1.12 executable-name decision: retain `agenterm-rhai.exe` /
+  `agenterm-rhai` as the canonical name for the same unrestricted Rhai
   runtime. Renaming is deferred until measured external usage and a complete
   bootstrap/package/test/documentation caller inventory justify a migration.
   Any future compatibility entry must forward to one implementation and one

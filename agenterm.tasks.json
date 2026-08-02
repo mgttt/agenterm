@@ -62,7 +62,7 @@
       "id": "agenterm"
     },
     "provenance": {
-      "producer": "agenterm-script",
+      "producer": "agenterm-rhai",
       "revision": "v0.1.12-rc-unpublished"
     }
   },
@@ -321,6 +321,27 @@
       "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": ["loopback"],
       "evidence": ["task.remote-ui-upgrade-smoke"]
+    },
+    "platform-ux-parity-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["platform-ux-parity-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.platform-ux-parity-smoke"]
+    },
+    "platform-ux-parity-smoke-linux": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["platform-ux-parity-linux-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.platform-ux-parity-smoke-linux"]
+    },
+    "platform-ux-parity-smoke-macos": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["platform-ux-parity-macos-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.platform-ux-parity-smoke-macos"]
     },
     "mcp-conformance": {
       "inputs": ["candidate-mcp", "staged-binaries", "isolated-workspace"],
@@ -616,7 +637,7 @@
       "entry": "scripts/rhai/diagnostic-bundle-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"],
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-rhai.exe", "dist/agenterm.exe"],
       "dependencies": ["theme-smoke", "script-smoke"],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
@@ -847,7 +868,7 @@
       "entry": "scripts/rhai/script-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"],
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-rhai.exe", "dist/agenterm.exe"],
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
@@ -872,6 +893,39 @@
       "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm-server.exe"],
       "dependencies": [],
       "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
+    },
+    {
+      "id": "platform-ux-parity-smoke",
+      "description": "Run startup + platform-native UX parity smoke and emit cross-platform parity evidence",
+      "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-rhai.exe", "dist/agenterm-cli.exe", "windows"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
+    },
+    {
+      "id": "platform-ux-parity-smoke-linux",
+      "description": "Run startup + embedded-linux frontend parity smoke and emit cross-platform parity evidence",
+      "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm", "dist/agenterm-rhai", "dist/agenterm-cli", "linux"],
+      "dependencies": [],
+      "platforms": ["linux"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
+    },
+    {
+      "id": "platform-ux-parity-smoke-macos",
+      "description": "Run startup + embedded-macOS frontend parity smoke and emit cross-platform parity evidence",
+      "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm", "dist/agenterm-rhai", "dist/agenterm-cli", "macos"],
+      "dependencies": [],
+      "platforms": ["macos"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {

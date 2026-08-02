@@ -21,7 +21,7 @@ fn fixture() -> Fixture {
         .expect("clock before epoch")
         .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "agenterm-script-check-many-{}-{nonce}",
+        "agenterm-rhai-check-many-{}-{nonce}",
         std::process::id()
     ));
     fs::create_dir_all(&root).expect("create fixture");
@@ -36,7 +36,7 @@ fn write_manifest(root: &Path, files: Vec<String>) -> PathBuf {
             "{}\n",
             serde_json::to_string_pretty(&json!({
                 "schema_version": 1,
-                "kind": "agenterm-script-check-manifest",
+                "kind": "agenterm-rhai-check-manifest",
                 "files": files,
             }))
             .expect("encode manifest")
@@ -47,12 +47,12 @@ fn write_manifest(root: &Path, files: Vec<String>) -> PathBuf {
 }
 
 fn run(root: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(root)
         .args(arguments)
         .env("AGENTERM_SCRIPT_AUDIT_PATH", root.join("audit.jsonl"))
         .output()
-        .expect("run agenterm-script")
+        .expect("run agenterm-rhai")
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn check_many_preserves_typed_check_failures_and_plain_diagnostics() {
     assert_eq!(batch.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&batch.stdout).expect("decode batch report");
     assert_eq!(report["schema_version"], 1);
-    assert_eq!(report["kind"], "agenterm-script-check-many");
+    assert_eq!(report["kind"], "agenterm-rhai-check-many");
     assert_eq!(report["ok"], false);
     assert_eq!(report["checked_files"], 2);
     assert_eq!(report["failures"].as_array().map(Vec::len), Some(1));

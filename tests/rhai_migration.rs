@@ -55,7 +55,7 @@ fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
     let artifacts = repo.join("scripts").join("artifacts.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .args(["task", "run", "clean-locked-artifacts", "--manifest"])
@@ -70,7 +70,7 @@ fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .args(["task", "run", "prepare-target-clean", "--manifest"])
@@ -86,7 +86,7 @@ fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "stage-artifact", "--manifest"])
         .arg(manifest)
@@ -102,7 +102,7 @@ fn run_validate_artifact_manifest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "validate-artifact-manifest", "--manifest"])
         .arg(manifest)
@@ -113,7 +113,7 @@ fn run_validate_artifact_manifest() -> Output {
 fn run_validate_artifact_manifest_fixture(path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args([
             "run",
@@ -131,7 +131,7 @@ fn run_release_validate(repo_under_test: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "release", "--manifest"])
         .arg(manifest)
@@ -152,7 +152,7 @@ fn run_build_identity(repo_under_test: &Path, profile: &str, output_path: &Path)
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "build-identity", "--manifest"])
         .arg(manifest)
@@ -184,7 +184,7 @@ fn run_write_build_metadata(
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .args(["task", "run", "write-build-metadata", "--manifest"])
@@ -227,7 +227,7 @@ fn run_stage_build(
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .args(["task", "run", "stage-build", "--manifest"])
@@ -248,7 +248,7 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "migration-audit", "--manifest"])
         .arg(manifest)
@@ -262,7 +262,7 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
 fn run_prd_alignment(repo_under_test: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .arg("run")
         .arg(repo.join("scripts/rhai/prd-alignment.rhai"))
@@ -287,7 +287,7 @@ fn run_harness_cleanup_selftest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "harness-cleanup-selftest", "--manifest"])
         .arg(manifest)
@@ -300,7 +300,7 @@ fn run_harness_cleanup_selftest() -> Output {
 fn run_diagnostic_bundle_selftest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args([
             "run",
@@ -319,7 +319,7 @@ fn run_diagnostic_bundle_selftest() -> Output {
         ])
         .arg(repo)
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
-        .arg(env!("CARGO_BIN_EXE_agenterm-script"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .arg(env!("CARGO_BIN_EXE_agenterm"))
         .env("AGENTERM_NO_ACTIVATE", "1")
         .output()
@@ -330,7 +330,7 @@ fn run_diagnostic_bundle_selftest() -> Output {
 fn run_qualification_selftest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args([
             "run",
@@ -358,7 +358,7 @@ fn run_qualification_selftest() -> Output {
 fn run_package_qualified_selftest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args([
             "run",
@@ -388,7 +388,7 @@ fn run_package_qualified_selftest() -> Output {
 fn run_working_context_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/working-context-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -412,7 +412,7 @@ fn run_working_context_smoke() -> Output {
 fn run_server_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/server-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -436,7 +436,7 @@ fn run_server_smoke() -> Output {
 fn run_wake_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/wake-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -460,7 +460,7 @@ fn run_wake_smoke() -> Output {
 fn run_startup_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/startup-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -485,7 +485,7 @@ fn run_startup_smoke() -> Output {
 fn run_cli_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/cli-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -509,7 +509,7 @@ fn run_cli_smoke() -> Output {
 fn run_script_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/script-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -527,7 +527,7 @@ fn run_script_smoke() -> Output {
         ])
         .arg(repo)
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
-        .arg(env!("CARGO_BIN_EXE_agenterm-script"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .arg(env!("CARGO_BIN_EXE_agenterm"))
         .env("AGENTERM_NO_ACTIVATE", "1")
         .output()
@@ -538,7 +538,7 @@ fn run_script_smoke() -> Output {
 fn run_theme_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/theme-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -562,7 +562,7 @@ fn run_theme_smoke() -> Output {
 fn run_workbench_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/workbench-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -586,7 +586,7 @@ fn run_workbench_smoke() -> Output {
 fn run_remote_ui_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/remote-ui-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -610,7 +610,7 @@ fn run_remote_ui_smoke() -> Output {
 fn run_fleet_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["run", "scripts/rhai/fleet-smoke.rhai"])
         .args(["--profile", "local", "--project-root"])
@@ -635,7 +635,7 @@ fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "preflight", "--manifest"])
         .arg(manifest)
@@ -652,7 +652,7 @@ fn run_preflight_benchmark(repo_under_test: &Path, output_path: &Path) -> Output
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let worker = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let worker = Path::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     Command::new(worker)
         .current_dir(repo)
         .args(["task", "run", "preflight-benchmark", "--manifest"])
@@ -675,7 +675,7 @@ fn run_quality_timing_fixture(
 ) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .arg("run")
         .arg(fixture_script)
@@ -715,7 +715,7 @@ fn run_quality_timing_fixture(
 fn run_timing_summary(report: &Path, summary: Option<&Path>) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .arg("run")
@@ -741,7 +741,7 @@ fn run_failing_check_timing(report: &Path, options: &[&str]) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let failing_worker = PathBuf::from(env!("CARGO_BIN_EXE_agenterm-cli"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
     command
         .current_dir(repo)
         .arg("run")
@@ -771,7 +771,7 @@ fn run_supply_chain(output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "supply-chain", "--manifest"])
         .arg(manifest)
@@ -863,10 +863,10 @@ fn copy_fixture_file(repo: &Path, fixture: &Path, relative: &str) {
 
 fn run_script_eval(expression: &str, profile: &str) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .args(["eval", expression, "--profile", profile, "--json"])
         .output()
-        .expect("run agenterm-script eval")
+        .expect("run agenterm-rhai eval")
 }
 
 fn format_script_output(output: &Output) -> String {
@@ -899,7 +899,7 @@ fn legacy_profile_spellings_share_the_unrestricted_runtime() {
 
 #[test]
 fn public_operation_budget_supports_long_orchestration() {
-    let accepted = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    let accepted = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .args(["eval", "1", "--max-operations", "100000000", "--json"])
         .output()
         .expect("evaluate with maximum operation budget");
@@ -909,7 +909,7 @@ fn public_operation_budget_supports_long_orchestration() {
         String::from_utf8_lossy(&accepted.stderr)
     );
 
-    let rejected = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    let rejected = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .args(["eval", "1", "--max-operations", "100000001", "--json"])
         .output()
         .expect("reject excessive operation budget");
@@ -1006,7 +1006,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
         "agenterm-server",
         "agenterm-cli",
         "agenterm-mux",
-        "agenterm-script",
+        "agenterm-rhai",
         "agenterm-mcp",
     ] {
         fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
@@ -1058,7 +1058,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
         .trim()
         .to_owned();
     for architecture in ["aarch64", "x86_64"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
             .current_dir(repo)
             .args(["task", "run", "package-client-release", "--manifest"])
             .arg(repo.join("agenterm.tasks.json"))
@@ -1166,7 +1166,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             "agenterm-mcp",
             "agenterm-mux",
             "agenterm-sbom.spdx.json",
-            "agenterm-script",
+            "agenterm-rhai",
             "agenterm-server",
             "artifacts.json",
         ];
@@ -1202,7 +1202,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
                 "agenterm-server",
                 "agenterm-cli",
                 "agenterm-mux",
-                "agenterm-script",
+                "agenterm-rhai",
                 "agenterm-mcp",
             ] {
                 assert_ne!(
@@ -1233,7 +1233,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
         "agenterm-server",
         "agenterm-cli",
         "agenterm-mux",
-        "agenterm-script",
+        "agenterm-rhai",
         "agenterm-mcp",
     ] {
         fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
@@ -1248,7 +1248,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
     } else {
         "windows"
     };
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "package-client-release", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -1295,7 +1295,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
 #[test]
 fn native_ipc_task_uses_a_bounded_runtime_without_bootstrap_environment() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .args(["task", "run", "native-ipc-smoke", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -1959,7 +1959,7 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     let workflow = repo.join(".github").join("workflows").join("release.yml");
     fs::create_dir_all(workflow.parent().expect("workflow parent"))
         .expect("create workflow parent");
-    fs::write(&workflow, b"run: agenterm-script task run package\n").expect("write clean workflow");
+    fs::write(&workflow, b"run: agenterm-rhai task run package\n").expect("write clean workflow");
     let generic_shell = repo.join("scripts").join("fixture.sh");
     fs::write(&generic_shell, b"#!/usr/bin/env sh\nset -eu\n").expect("write clean shell fixture");
     let generic_rhai = repo.join("scripts").join("fixture.rhai");
@@ -2019,7 +2019,7 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
         .contains("migration_powershell_automation_reference:")
     );
 
-    fs::write(&workflow, b"run: agenterm-script task run package\n")
+    fs::write(&workflow, b"run: agenterm-rhai task run package\n")
         .expect("remove stale workflow reference");
 
     let bootstrap = repo.join("scripts").join("bootstrap.cmd");
@@ -3156,7 +3156,7 @@ fn supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph() {
     assert_eq!(document["dataLicense"], "CC0-1.0");
     assert_eq!(
         document["creationInfo"]["creators"][0],
-        "Tool: agenterm-script task run supply-chain"
+        "Tool: agenterm-rhai task run supply-chain"
     );
     let packages = document["packages"].as_array().expect("SPDX packages");
     let relationships = document["relationships"]
@@ -3256,10 +3256,10 @@ fn stage_artifact_task_parks_a_running_windows_image() {
     let destination = root.join("destination");
     fs::create_dir_all(&source).expect("create source fixture");
     fs::create_dir_all(&destination).expect("create destination fixture");
-    let name = "agenterm-script.exe";
+    let name = "agenterm-rhai.exe";
     fs::write(source.join(name), b"replacement-image").expect("write replacement fixture");
     fs::copy(
-        env!("CARGO_BIN_EXE_agenterm-script"),
+        env!("CARGO_BIN_EXE_agenterm-rhai"),
         destination.join(name),
     )
     .expect("copy runnable artifact fixture");
@@ -3292,7 +3292,7 @@ fn stage_artifact_task_parks_a_running_windows_image() {
         .find(|path| {
             path.file_name().is_some_and(|file_name| {
                 let file_name = file_name.to_string_lossy();
-                file_name.starts_with("agenterm-script.locked-") && file_name.ends_with(".exe")
+                file_name.starts_with("agenterm-rhai.locked-") && file_name.ends_with(".exe")
             })
         })
         .expect("running image was not parked");

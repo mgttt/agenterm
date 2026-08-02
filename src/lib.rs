@@ -46,6 +46,7 @@ mod ui_command;
 mod ui_geometry;
 mod ui_interaction;
 mod ui_lease;
+mod ui_snapshot;
 mod upgrade_identity;
 pub mod webview_host;
 pub use upgrade_identity::UpgradeIdentity;
@@ -66,18 +67,20 @@ mod worker_supervisor;
 
 mod server_app;
 mod terminal_runtime;
+mod frontend_server;
+mod frontend;
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;
 pub use mcp_catalog::run_mcp_entry_with_args;
 
-pub use platform::services::frontend::run_gui_entry;
+pub use frontend::run_gui_entry;
 
 pub use server_app::run_server_entry;
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
-pub(crate) use platform::services::frontend::request_gui_wake;
+pub(crate) use frontend::request_gui_wake;
 
 pub(crate) fn ipc_address() -> String {
     client::ipc_address()

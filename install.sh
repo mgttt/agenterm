@@ -154,7 +154,7 @@ if [[ -n "$LOCAL_BUILD_DIR" ]]; then
   [[ "$OS" == "macos" ]] || fail "--local-build currently supports macOS only"
   [[ -d "$LOCAL_BUILD_DIR" ]] || fail "local build directory does not exist: $LOCAL_BUILD_DIR"
   LOCAL_BUILD_DIR="$(cd "$LOCAL_BUILD_DIR" && pwd -P)"
-  REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-mux agenterm-script agenterm-mcp)
+  REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-mux agenterm-rhai agenterm-mcp)
   for executable in "${REQUIRED_EXECUTABLES[@]}"; do
     SOURCE_PATH="$LOCAL_BUILD_DIR/$executable"
     [[ -f "$SOURCE_PATH" && ! -L "$SOURCE_PATH" && -x "$SOURCE_PATH" ]] ||
@@ -285,7 +285,7 @@ REQUIRED_EXECUTABLES=(
   agenterm
   agenterm-cli
   agenterm-mux
-  agenterm-script
+  agenterm-rhai
   agenterm-mcp
 )
 for executable in "${REQUIRED_EXECUTABLES[@]}"; do
@@ -355,7 +355,7 @@ fi
 say "Installed AgenTerm $VERSION to $RELEASE_DIR"
 say "Commands are available in $BIN_DIR"
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  say "Add $BIN_DIR to PATH to use agenterm-cli, agenterm-mux, and agenterm-script"
+  say "Add $BIN_DIR to PATH to use agenterm-cli, agenterm-mux, and agenterm-rhai"
 fi
 
 if [[ "$NO_LAUNCH" != "1" ]]; then

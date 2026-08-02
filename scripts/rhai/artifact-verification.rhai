@@ -172,14 +172,14 @@ require(!release || !metadata.git_dirty, "artifact_release_dirty");
 
 let cli = std::path::join(dist, "agenterm-cli.exe").display;
 let mux = std::path::join(dist, "agenterm-mux.exe").display;
-let script = std::path::join(dist, "agenterm-script.exe").display;
+let rhai = std::path::join(dist, "agenterm-rhai.exe").display;
 let mcp = std::path::join(dist, "agenterm-mcp.exe").display;
 let control_center =
     std::path::join(dist, "agenterm-cc.exe").display;
 require(
-    output(script, ["--version"], repo, "artifact_script_version")
-        == "agenterm-script " + metadata.version,
-    "artifact_script_version_mismatch"
+    output(rhai, ["--version"], repo, "artifact_rhai_version")
+        == "agenterm-rhai " + metadata.version,
+    "artifact_rhai_version_mismatch"
 );
 require(
     output(cli, ["--version"], repo, "artifact_cli_version")

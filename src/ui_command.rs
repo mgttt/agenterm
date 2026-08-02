@@ -9,6 +9,15 @@ pub(crate) const UI_CLIENT_COMMAND_QUEUE_LIMIT: usize = 64;
 pub(crate) const UI_CLIENT_COMMAND_MAX_ARGUMENTS: usize = 64;
 pub(crate) const UI_CLIENT_COMMAND_MAX_BYTES: usize = 256 * 1024;
 pub(crate) const UI_CLIENT_COMMAND_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
+pub(crate) const UI_CLIENT_COMMAND_FOCUS: &str = "__focus";
+pub(crate) const UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE: &str = "__show-no-activate";
+
+pub(crate) fn is_ui_client_handoff_command(args: &[String]) -> bool {
+    matches!(
+        args.first().map(String::as_str),
+        Some(UI_CLIENT_COMMAND_FOCUS) | Some(UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE)
+    )
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct UiClientCommand {
@@ -290,5 +299,15 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn handoff_commands_are_normatively_identified_by_shared_helper() {
+        let focus = vec![UI_CLIENT_COMMAND_FOCUS.to_owned()];
+        let show = vec![UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE.to_owned()];
+        let other = vec!["focus".to_owned()];
+        assert!(is_ui_client_handoff_command(&focus));
+        assert!(is_ui_client_handoff_command(&show));
+        assert!(!is_ui_client_handoff_command(&other));
     }
 }

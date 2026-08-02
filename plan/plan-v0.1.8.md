@@ -73,7 +73,7 @@ v0.1.8  可编程的日用舰队
 │  ├─ 捕获丢失、切换标签、弹窗和关闭时安全取消
 │  └─ 输入、缩放、转义序列、中文和长输出资格矩阵
 │
-├─ 最高优先级：通用 Rhai 脚本运行时 (agenterm-script.exe）
+├─ 最高优先级：通用 Rhai 脚本运行时 (agenterm-rhai.exe）
 │  ├─ 产品能力对标 Node.js / Bun，而不是受限插件语言
 │  ├─ 文件、路径、环境、进程、网络、定时器和流式输入输出
 │  ├─ 本地模块、任务清单、命名命令和可发现标准库
@@ -142,7 +142,7 @@ v0.1.8  可编程的日用舰队
   威胁与失败模型、依赖门和版本归属，不能由本计划自动变成承诺。
 
 仓库辅助脚本的长期 self-hosting 属于未来计划，不是 v0.1.8 交付项。
-只有当 `agenterm-script.exe` 的通用标准库、进程、文件、JSON、流、
+只有当 `agenterm-rhai.exe` 的通用标准库、进程、文件、JSON、流、
 稳定退出码和 Windows 语义都通过公共资格门后，才按以下顺序迁移：
 
 ```text
@@ -220,7 +220,7 @@ agenterm-net.exe
 |   +-- 可组合的 dApp 工具协议
 |
 +-- AgenTerm 原生协作
-    +-- agenterm-script.exe 的 net / ipfs / p2p 标准库
+    +-- agenterm-rhai.exe 的 net / ipfs / p2p 标准库
     +-- agenterm-agent.exe 的结构化网络工具
     +-- Fleet 标签中的传输任务与实时状态
     +-- 状态条中的受限进度和连接摘要
@@ -246,10 +246,10 @@ agenterm-net.exe
 
 任何暂未支持的参数必须明确报错，不能静默忽略。
 
-#### 与 `agenterm-script.exe` 的关系
+#### 与 `agenterm-rhai.exe` 的关系
 
 ```text
-agenterm-script.exe
+agenterm-rhai.exe
   通用脚本语言和任务编排
   |
   +-- 直接提供轻量 HTTP 标准库，满足普通脚本
@@ -318,7 +318,7 @@ agenterm-net.exe
 
 v0.1.8 只允许做不会偷跑组件实现的接口准备：
 
-- `agenterm-script.exe` 的 HTTP 标准库不要封死未来 typed net backend；
+- `agenterm-rhai.exe` 的 HTTP 标准库不要封死未来 typed net backend；
 - 工具 schema 能表达 network、peer、CID、stream、credential 和预算事实；
 - executable/component manifest 可以在未来增加新的 sidecar role；
 - Observable Fleet 的 operation、event 和 receipt 模型不把网络任务排除在外；
@@ -811,7 +811,7 @@ command / behavior
 #### 与 script、agent 和 net 的协作
 
 ```text
-agenterm-script.exe
+agenterm-rhai.exe
   通过统一 typed API 控制任意 mux backend
 
 agenterm-agent.exe
@@ -950,7 +950,7 @@ v0.1.8
 
 v0.1.7 让 AgenTerm 的内部状态和交付过程更诚实。v0.1.8 要把这种诚实变成日常用户可以直接感知的价值：
 
-> 人可以把 AgenTerm 当作专业终端每天使用；`agenterm-script.exe` 可以像 Node.js / Bun 一样承担通用本地自动化，并原生控制同一套舰队；产品可以证明发布出去的那批字节完整通过了真实用户旅程。
+> 人可以把 AgenTerm 当作专业终端每天使用；`agenterm-rhai.exe` 可以像 Node.js / Bun 一样承担通用本地自动化，并原生控制同一套舰队；产品可以证明发布出去的那批字节完整通过了真实用户旅程。
 
 ### 版本级成功条件
 
@@ -1007,7 +1007,7 @@ Rhai 的语言实现可以被隔离运行，但这不等于产品必须被定位
 
 本轮采用的新定位：
 
-> `agenterm-script.exe` 是 AgenTerm 自己的通用本地脚本运行时。产品能力和开发体验对标 Node.js / Bun；Rhai 是语言，Fleet 是原生领域能力，专用受限执行方式只是附加能力。
+> `agenterm-rhai.exe` 是 AgenTerm 自己的通用本地脚本运行时。产品能力和开发体验对标 Node.js / Bun；Rhai 是语言，Fleet 是原生领域能力，专用受限执行方式只是附加能力。
 
 “对标 Node.js / Bun”指用途和能力面，不声称 JavaScript、Node API、npm 或 Bun 二进制兼容。
 
@@ -1031,7 +1031,7 @@ Rhai 的语言实现可以被隔离运行，但这不等于产品必须被定位
 ### 能力树
 
 ```text
-agenterm-script.exe
+agenterm-rhai.exe
 |
 +-- Rhai 语言执行
 |   +-- run / eval / check
@@ -1075,14 +1075,14 @@ agenterm-script.exe
 
 ### 两个层次的协作设计
 
-`agenterm-script.exe` 与未来的 `agenterm-agent.exe` 不是同一层，也不应互相吞并：
+`agenterm-rhai.exe` 与未来的 `agenterm-agent.exe` 不是同一层，也不应互相吞并：
 
 ```text
 人直接运行脚本
   |
   +------------------------+
                            v
-                    agenterm-script.exe
+                    agenterm-rhai.exe
                     通用执行能力层
                     文件 / 进程 / 网络 / Fleet
                            |
@@ -1103,7 +1103,7 @@ agentic 工具与治理层
   |
   | 调用经过选择和约束的工具
   v
-agenterm-script.exe
+agenterm-rhai.exe
 通用执行能力层
   |
   v
@@ -1113,7 +1113,7 @@ Windows + AgenTerm Server
 职责边界：
 
 ```text
-agenterm-script.exe
+agenterm-rhai.exe
   负责“能不能可靠执行”
   不负责“这个 agent 有没有资格执行”
 
@@ -1122,7 +1122,7 @@ agenterm-agent.exe
   不重新实现文件、进程、网络和 Fleet 运行时
 ```
 
-#### `agenterm-script.exe` 负责
+#### `agenterm-rhai.exe` 负责
 
 - 完整、稳定、可发现的运行时能力；
 - 用户明确运行一个本地脚本，就等价于运行一个普通本地程序；运行时不为每个文件、进程、网络或 Fleet 调用弹权限确认；
@@ -1157,7 +1157,7 @@ agenterm-agent.exe
 
 ### 协作接口
 
-为了让未来 agentic 层不必猜测脚本能力，`agenterm-script.exe` 应提供机器可读工具描述：
+为了让未来 agentic 层不必猜测脚本能力，`agenterm-rhai.exe` 应提供机器可读工具描述：
 
 ```text
 script api --json
@@ -1237,7 +1237,7 @@ v0.1.8 至少需要确定：
 
 ```text
 agenterm.exe / agenterm-cli.exe
-  -> 启动 agenterm-script.exe worker
+  -> 启动 agenterm-rhai.exe worker
       -> worker 拥有 Rhai engine + 标准库 + 事件循环
       -> 通过 typed broker 使用 Fleet API
       -> 崩溃、退出或取消不影响 GUI / PTY
@@ -1247,7 +1247,7 @@ agenterm.exe / agenterm-cli.exe
 
 | 问题 | 候选 | 当前倾向 |
 |---|---|---|
-| 默认模式 | local、observe | `agenterm-script.exe` 的普通本地入口使用 local；未来 agent 层自行选择工具入口 |
+| 默认模式 | local、observe | `agenterm-rhai.exe` 的普通本地入口使用 local；未来 agent 层自行选择工具入口 |
 | 模块格式 | 单文件 import、包目录 | 先支持本地文件和目录模块 |
 | 任务清单 | JSON、TOML、Rhai | 优先 TOML 或现有 manifest 风格，避免执行配置 |
 | 网络 API | 低层 socket、HTTP/fetch | 先做 HTTP/fetch，socket 延后 |
@@ -2157,7 +2157,7 @@ v0.1.7 typed operations + receipt
 
 - 接受的最高优先级叶子已经进入规范 PRD。
 - 每个叶子都有所有者、公共证据和明确非目标。
-- `agenterm-script.exe` 与未来 `agenterm-agent.exe` 的职责边界已经明确，不把 agent 权限系统塞进运行时。
+- `agenterm-rhai.exe` 与未来 `agenterm-agent.exe` 的职责边界已经明确，不把 agent 权限系统塞进运行时。
 
 ### 门一：终端
 
@@ -2219,7 +2219,7 @@ v0.1.7 typed operations + receipt
 
 - 不能明显提升专业终端、通用脚本运行时、自反馈或同字节交付。
 - 为了强调安全而把正常本地脚本能力人为阉割。
-- 把 agent 权限、审批或自然语言决策塞进 `agenterm-script.exe`。
+- 把 agent 权限、审批或自然语言决策塞进 `agenterm-rhai.exe`。
 - 没有实测需求却增加系统级常驻 daemon；脚本自身按任务存活不属于此项。
 - 没有先设计命令发现和键盘路径，就增加永久 UI。
 - 削弱 remain-on-exit、显式关闭、树循环安全、隐私、no-activate、大小或第一窗口不变量。
@@ -2299,4 +2299,4 @@ v0.1.7 typed operations + receipt
   矩形选择
 ```
 
-这一刀能够让 v0.1.8 同时做到：用户明显感觉终端更专业，`agenterm-script.exe` 第一次成为真正的通用自动化运行时，并为未来 `agenterm-agent.exe` 提供强大的工具基础；发布过程仍然复用同一批合格字节。
+这一刀能够让 v0.1.8 同时做到：用户明显感觉终端更专业，`agenterm-rhai.exe` 第一次成为真正的通用自动化运行时，并为未来 `agenterm-agent.exe` 提供强大的工具基础；发布过程仍然复用同一批合格字节。

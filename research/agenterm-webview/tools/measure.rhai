@@ -1,7 +1,7 @@
 // Append-safe Windows system-WebView comparison measurement.
 //
 // Usage:
-//   agenterm-script run [RUNTIME LIMITS] measure.rhai -- REPO [OPTIONS]
+//   agenterm-rhai run [RUNTIME LIMITS] measure.rhai -- REPO [OPTIONS]
 //
 // Options:
 //   --self-check

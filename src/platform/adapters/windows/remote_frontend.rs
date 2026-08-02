@@ -10,11 +10,10 @@ use std::{
 };
 
 use crate::{
-    client::{ipc_address, ipc_endpoint, resolved_ipc_endpoint},
+    client::{ipc_address, resolved_ipc_endpoint},
     commands::{
         option_value, positional_values, screenshot_output_path, tmux_key_bytes_with_modifiers,
     },
-    instances::intentional_shutdown_matches,
     locale::UiText,
     platform::{
         KeyClassification, action,
@@ -33,8 +32,10 @@ use crate::{
         UiTabBootstrap,
     },
     ui_client::{UiClientModel, tab_by_id},
-    ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
-    ui_command::UiClientCommand,
+        ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
+    ui_command::{
+        UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand,
+    },
     ui_geometry::{
         PixelRect as ProductPixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH,
         TerminalScrollbarGeometry, TreeRowActionDensity, TreeRowGeometry, TreeRowMode,
@@ -43,7 +44,13 @@ use crate::{
         tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y,
         workspace_layout,
     },
-    working_context::parse_proxy_url,
+        working_context::parse_proxy_url,
+};
+use crate::ui_snapshot::{
+    PROJECTION_REPLACEABLE_UI_CLIENT,
+    SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
+    SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
+    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID,
 };
 use agenterm_platform::{
     clipboard,
@@ -123,9 +130,10 @@ const SETTINGS_SIZE_INHERIT_ID: ControlId = ControlId(2135);
 const SETTINGS_THEME_INHERIT_ID: ControlId = ControlId(2136);
 const SETTINGS_RESET_OVERRIDES_ID: ControlId = ControlId(2137);
 const CONTROL_CENTER_ID: ControlId = ControlId(2138);
-const SYSTEM_MENU_COPY_ID: MenuCommandId = MenuCommandId(0x1f00);
-const SYSTEM_MENU_PASTE_ID: MenuCommandId = MenuCommandId(0x1f10);
-const SYSTEM_MENU_TOGGLE_TABS_ID: MenuCommandId = MenuCommandId(0x1f20);
+const SYSTEM_MENU_COPY_ID: MenuCommandId = MenuCommandId(SHARED_SYSTEM_MENU_COPY_ID);
+const SYSTEM_MENU_PASTE_ID: MenuCommandId = MenuCommandId(SHARED_SYSTEM_MENU_PASTE_ID);
+const SYSTEM_MENU_TOGGLE_TABS_ID: MenuCommandId =
+    MenuCommandId(SHARED_SYSTEM_MENU_TOGGLE_TABS_ID);
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
 
@@ -153,8 +161,6 @@ const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
-const SERVER_RESTART_INTERVAL: Duration = Duration::from_secs(5);
-const START_TIMEOUT: Duration = Duration::from_secs(8);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
 trait CanvasRgb {
@@ -266,7 +272,8 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         std::process::id(),
         crate::client::unix_time_ms()
     );
-    let client = connect_or_start_server(&client_id)?;
+    let client = crate::frontend_server::connect_or_start_frontend_gui_client(&client_id)
+        .map_err(anyhow::Error::msg)?;
     let title = format!(
         "AgenTerm-{}:{}",
         env!("CARGO_PKG_VERSION"),
@@ -308,50 +315,6 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         }),
     )
     .map_err(|error| anyhow::anyhow!(error))
-}
-
-fn connect_or_start_server(client_id: &str) -> Result<UiClientModel> {
-    match UiClientModel::connect(client_id.to_owned()) {
-        Ok(client) => return Ok(client),
-        Err(error) => {
-            if server_endpoint_is_listening() {
-                return Err(error).context("running server rejected replaceable UI");
-            }
-        }
-    }
-    start_server_process()?;
-    let deadline = Instant::now() + START_TIMEOUT;
-    let mut last_error = None;
-    while Instant::now() < deadline {
-        match UiClientModel::connect(client_id.to_owned()) {
-            Ok(client) => return Ok(client),
-            Err(error) => last_error = Some(error),
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("server did not become ready")))
-        .context("could not start independent AgenTerm server")
-}
-
-fn server_endpoint_is_listening() -> bool {
-    ipc_endpoint().is_ok_and(|endpoint| {
-        crate::ipc_transport::IpcStream::connect(&endpoint, Duration::from_millis(100)).is_ok()
-    })
-}
-
-fn start_server_process() -> Result<()> {
-    let endpoint = ipc_endpoint()?;
-    let parameter = if let Some(address) = endpoint.legacy_address() {
-        ("--address", address)
-    } else {
-        ("--endpoint", endpoint.to_string())
-    };
-    let started = crate::platform::process::autostart_server(parameter.0, &parameter.1)
-        .context("failed to launch independent AgenTerm server")?;
-    if !started {
-        anyhow::bail!("independent AgenTerm server autostart is unavailable");
-    }
-    Ok(())
 }
 
 struct RemoteControls {
@@ -733,8 +696,7 @@ struct RemoteWindowState {
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
-    server_restart_after: Instant,
-    server_restart_suppressed: bool,
+            server_recovery: crate::frontend_server::FrontendServerRecoveryState,
     last_message: Option<String>,
     last_error: Option<String>,
     tabs_visible: bool,
@@ -918,8 +880,7 @@ impl RemoteWindowState {
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
-            server_restart_after: Instant::now(),
-            server_restart_suppressed: false,
+            server_recovery: crate::frontend_server::FrontendServerRecoveryState::new(Instant::now()),
             last_message: None,
             last_error: None,
             tabs_visible: config.tabs_visible,
@@ -1031,11 +992,11 @@ impl RemoteWindowState {
                 self.client = None;
                 self.pending_terminal_resize = None;
                 self.pending_terminal_paste = None;
-                if disconnected_server_pid
-                    .is_some_and(|pid| intentional_shutdown_matches(&ipc_address(), pid))
-                {
-                    self.server_restart_suppressed = true;
-                }
+                let server_address = ipc_address();
+                self.server_recovery.on_disconnected(
+                    &server_address,
+                    disconnected_server_pid,
+                );
                 self.show_workspace_controls(false);
                 self.show_tab_editor(false);
                 self.show_tab_close_controls(false);
@@ -1045,8 +1006,7 @@ impl RemoteWindowState {
                     match UiClientModel::connect(self.client_id.clone()) {
                         Ok(client) => {
                             self.client = Some(client);
-                            self.server_restart_after = Instant::now();
-                            self.server_restart_suppressed = false;
+                            self.server_recovery.on_reconnected(Instant::now());
                             self.last_published_snapshot = None;
                             self.editing_tab_id = None;
                             self.terminal_selection = None;
@@ -1073,24 +1033,18 @@ impl RemoteWindowState {
                         }
                         Err(reconnect_error) => {
                             let now = Instant::now();
-                            let recovery = if now >= self.server_restart_after
-                                && !self.server_restart_suppressed
-                                && !server_endpoint_is_listening()
-                            {
-                                self.server_restart_after = now + SERVER_RESTART_INTERVAL;
-                                match start_server_process() {
-                                    Ok(()) => Some(
-                                        "Server disappeared; recovery server started".to_owned(),
-                                    ),
-                                    Err(error) => {
-                                        Some(format!("Server recovery failed: {error:#}"))
-                                    }
+                            let recovery = self.server_recovery.maybe_recover(now);
+                            let recovery_message = match recovery {
+                                crate::frontend_server::FrontendServerRecovery::NoAction => None,
+                                crate::frontend_server::FrontendServerRecovery::Started => {
+                                    Some("Server disappeared; recovery server started".to_owned())
                                 }
-                            } else {
-                                None
+                                crate::frontend_server::FrontendServerRecovery::Failed(error) => {
+                                    Some(format!("Server recovery failed: {error:#}"))
+                                }
                             };
                             self.last_error =
-                                Some(recovery.unwrap_or_else(|| {
+                                Some(recovery_message.unwrap_or_else(|| {
                                     format!("Disconnected: {reconnect_error:#}")
                                 }));
                         }
@@ -1152,7 +1106,9 @@ impl RemoteWindowState {
         if response.ok
             && serde_json::from_str::<serde_json::Value>(&response.output)
                 .ok()
-                .is_some_and(|value| value["projection"].as_str() == Some("replaceable_ui_client"))
+                .is_some_and(|value| {
+                    value["projection"].as_str() == Some(PROJECTION_REPLACEABLE_UI_CLIENT)
+                })
         {
             self.last_published_snapshot = Some(response.output);
         }
@@ -1611,11 +1567,11 @@ impl RemoteWindowState {
                     .map_err(|error| anyhow::anyhow!(error))?;
                 output = Some(path.display().to_string());
             }
-            "__focus" => {
+            UI_CLIENT_COMMAND_FOCUS => {
                 self.window.set_presentation(WindowPresentation::Restored);
                 self.window.focus();
             }
-            "__show-no-activate" => self.window.show_without_activation(),
+            UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE => self.window.show_without_activation(),
             other => anyhow::bail!("unsupported relayed UI command: {other}"),
         }
         self.window.request_redraw();
@@ -2124,7 +2080,7 @@ impl RemoteWindowState {
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
-            "projection": "replaceable_ui_client",
+            "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
             "client_pid": std::process::id(),
             "server_pid": source.server_pid,
             "event_position": {
@@ -3037,15 +2993,17 @@ impl RemoteWindowState {
 
     fn desired_terminal_grid(&self) -> (u16, u16) {
         let (_, terminal, _, _) = self.layout_rects();
-        let rows = ((terminal.bottom - terminal.top) / self.cell_height)
-            .clamp(1, 512)
+        let cell_height = self.cell_height.max(1);
+        let cell_width = self.cell_width.max(1);
+        let rows = ((terminal.bottom - terminal.top).max(cell_height) / cell_height)
+            .clamp(2, 512)
             .try_into()
-            .unwrap_or(1);
-        let columns = ((terminal.right - terminal.left - TERMINAL_SCROLLBAR_WIDTH)
-            / self.cell_width)
-            .clamp(1, 512)
+            .unwrap_or(2);
+        let columns = ((terminal.right - terminal.left - TERMINAL_SCROLLBAR_WIDTH).max(cell_width)
+            / cell_width)
+            .clamp(2, 512)
             .try_into()
-            .unwrap_or(1);
+            .unwrap_or(2);
         (rows, columns)
     }
 

@@ -1,4 +1,4 @@
-//! Black-box tests for the public `agenterm-script` CLI on Unix hosts.
+//! Black-box tests for the public `agenterm-rhai` CLI on Unix hosts.
 //! Uses `Command::output()` so exit codes are read from `ExitStatus`, not shell pipes.
 
 #[cfg(unix)]
@@ -14,7 +14,7 @@ mod unix {
     }
 
     fn script_bin() -> &'static str {
-        env!("CARGO_BIN_EXE_agenterm-script")
+        env!("CARGO_BIN_EXE_agenterm-rhai")
     }
 
     fn run(args: &[&str]) -> std::process::Output {
@@ -23,7 +23,7 @@ mod unix {
             .current_dir(repo_root())
             .args(args)
             .output()
-            .expect("spawn agenterm-script")
+            .expect("spawn agenterm-rhai")
     }
 
     fn format_output(output: &std::process::Output) -> String {
@@ -132,6 +132,6 @@ mod unix {
             .expect("spawn agenterm-cli");
         assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("invoke agenterm-script directly"));
+        assert!(stderr.contains("invoke agenterm-rhai directly"));
     }
 }

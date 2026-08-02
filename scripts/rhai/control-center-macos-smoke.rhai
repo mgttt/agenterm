@@ -551,7 +551,7 @@ let server_executable =
 let cli_executable = std::path::absolute(cli_executable_value).display;
 let script_executable = std::path::join(
     std::path::parent(control_center).display,
-    "agenterm-script"
+    "agenterm-rhai"
 ).display;
 for executable in [
     control_center,

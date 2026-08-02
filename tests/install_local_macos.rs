@@ -36,7 +36,7 @@ fn local_build_installs_a_dock_safe_app_bundle() {
         "agenterm",
         "agenterm-cli",
         "agenterm-mux",
-        "agenterm-script",
+        "agenterm-rhai",
         "agenterm-mcp",
     ] {
         let body = if name == "agenterm-cli" {

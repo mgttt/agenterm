@@ -16,11 +16,11 @@ use crate::pty::{
 };
 
 use crate::{
-    SCROLLBACK_LINES, request_gui_wake,
+    SCROLLBACK_LINES,
     terminal_cursor::{DecscusrTracker, TerminalCursorAppearance},
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
-    wake_signal::WakeSignal,
+    request_gui_wake_best_effort, wake_signal::WakeSignal,
     working_context::{
         CwdTracker, ProxyConfirmationMarker, ProxyState, SecretValue, ShellKind, parse_osc7,
     },
@@ -334,7 +334,11 @@ impl TerminalTab {
                 match reader.io().read(&mut buffer) {
                     Ok(0) => {
                         if output_sender.send(PtyEvent::ReaderClosed).is_ok() {
-                            request_gui_wake(wake_window, &output_wake_signal);
+                            request_gui_wake_best_effort(
+                                wake_window,
+                                &output_wake_signal,
+                                "terminal-runtime-reader-close",
+                            );
                         }
                         break;
                     }
@@ -345,14 +349,22 @@ impl TerminalTab {
                         {
                             break;
                         }
-                        request_gui_wake(wake_window, &output_wake_signal);
+                        request_gui_wake_best_effort(
+                            wake_window,
+                            &output_wake_signal,
+                            "terminal-runtime-output",
+                        );
                     }
                     Err(error) => {
                         if output_sender
                             .send(PtyEvent::ReaderError(error.to_string()))
                             .is_ok()
                         {
-                            request_gui_wake(wake_window, &output_wake_signal);
+                            request_gui_wake_best_effort(
+                                wake_window,
+                                &output_wake_signal,
+                                "terminal-runtime-reader-error",
+                            );
                         }
                         break;
                     }
@@ -371,7 +383,11 @@ impl TerminalTab {
                 Err(error) => PtyEvent::ProcessError(format!("process wait failed: {error}")),
             };
             if sender.send(event).is_ok() {
-                request_gui_wake(wake_window, &wait_wake_signal);
+                request_gui_wake_best_effort(
+                    wake_window,
+                    &wait_wake_signal,
+                    "terminal-runtime-wait-exit",
+                );
             }
             let _ = worker_completion_sender.send(TerminalWorkerCompletion::Waiter);
         });

@@ -268,7 +268,7 @@ mod server {
     use crate::{
         IPC_TIMEOUT, client,
         protocol::{IpcRequest, IpcResponse},
-        request_gui_wake,
+        request_gui_wake_best_effort,
         wake_signal::WakeSignal,
     };
 
@@ -399,7 +399,11 @@ mod server {
                                 true,
                             )
                         } else {
-                            request_gui_wake(wake_window, wake_signal);
+                            request_gui_wake_best_effort(
+                                wake_window,
+                                wake_signal,
+                                "ipc-connection-handle",
+                            );
                             response_receiver
                                 .recv_timeout(IPC_TIMEOUT)
                                 .unwrap_or_else(|_| {
