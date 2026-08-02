@@ -71,7 +71,7 @@ agenterm-platform crate（复用层）
 ## 下一步动作树（建议并行）
 
 ```text
-- O1A（Platform）：统一 startup/wake 结果为可归并失败码（本轮收口完成，准备并行证据回归）
+- O1A（Platform）：统一 startup/wake 结果为可归并失败码（已完成）
   - owner: Platform services
   - output: 运行时错误码（supported/unsupported/failed）文档；本轮要求 `request_gui_wake` 调用都通过 `request_gui_wake_best_effort` 上报失败语义
   - acceptance: 无策略分支猜测、证据可归集
@@ -80,7 +80,7 @@ agenterm-platform crate（复用层）
   - 本轮补充: 控制平面 CLI 的 `start_server_process` 也已委托给 `frontend_server::start_frontend_server_process`，避免服务端启动策略在 `src/client/mod.rs` 和 `remote_frontend` 中重复定义。
   - 本轮收口: 新增 `FrontendContractState`，并由 `GuiLaunchResult` / `GuiWakeResult` / `FrontendServerRecovery` 映射统一状态（Supported/Unsupported/Failed）；便于 evidence 统一归档与分支阻断。
 
-- O1B（UI）：统一输入-选择-滚轮场景模板
+- O1B（UI）：统一输入-选择-滚轮场景模板（进行中）
   - owner: Human Workspace + ui_bridge
   - output: Given/When/Then 场景清单 + 对应快照锚点
   - acceptance: windows/unix 场景映射同名字段一致

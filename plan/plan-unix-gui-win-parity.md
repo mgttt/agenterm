@@ -93,7 +93,7 @@ O1 并发树（并行）
 
 ### O2 汇聚后验收
 
-- [ ] 所有交互分支都以 `agenterm-platform` 能力结果驱动，不再通过OS cfg做策略选择
+- [~] 所有交互分支都以 `agenterm-platform` 能力结果驱动，不再通过OS cfg做策略选择（进行中：platform facade 已统一，下一步收口交互决策）
 - [ ] `ui-snapshot`、`terminal_state`、`selection` 与可见行为在同场景可回放比对
 - [x] 文档同步：跨平台UX能力缺口矩阵同步到 PRD_02_20 与 plan
 
