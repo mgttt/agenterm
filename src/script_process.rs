@@ -1303,6 +1303,7 @@ mod tests {
         let (program, command_arguments) = wrapped_shell_command(shell_command, arguments);
         let mut process = process_command(&program).expect("shell command should be runnable");
         process.arguments = command_arguments;
+        process.timeout = Duration::from_secs(30);
         process
     }
 
