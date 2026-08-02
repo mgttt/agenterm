@@ -1386,7 +1386,7 @@ pub(crate) fn dispatch_shared_command(
                 },
                 None => None,
             };
-            let mut child_command = if let Some(program) = option_value(args, "--program") {
+            let child_command = if let Some(program) = option_value(args, "--program") {
                 let mut command = vec![program.to_owned()];
                 if has_option(args, "--yolo") {
                     command.push("--dangerously-bypass-approvals-and-sandbox".to_owned());

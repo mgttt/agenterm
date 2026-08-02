@@ -725,7 +725,12 @@ pub(crate) fn shell_command_for_child(
     }
     match shell {
         ShellKind::Cmd => {
-            for value in arguments.iter().chain(std::iter::once(&command.to_owned())) {
+            if command.contains(['"', '%', '!']) {
+                bail!(
+                    "cmd shell argument contains a character that cannot be quoted safely"
+                );
+            }
+            for value in std::iter::once(command).chain(arguments.iter().map(String::as_str)) {
                 if value.contains(['"', '%', '!']) {
                     bail!(
                         "cmd shell argument contains a character that cannot be quoted safely"
@@ -757,7 +762,7 @@ pub(crate) fn shell_command_for_child(
         ShellKind::Bash | ShellKind::Unknown => {
             let mut segments = Vec::with_capacity(1 + arguments.len());
             segments.push(quote_for_bash(command));
-            segments.extend(arguments.iter().map(quote_for_bash));
+            segments.extend(arguments.iter().map(|argument| quote_for_bash(argument)));
             Ok(vec![
                 shell_program.to_owned(),
                 "-lc".to_owned(),
@@ -1172,5 +1177,69 @@ mod tests {
             secret.0.as_mut_vec().fill(0);
         }
         assert!(secret.0.bytes().all(|byte| byte == 0));
+    }
+
+    #[test]
+    fn shell_command_for_child_builds_child_commands_per_shell_kind() {
+        let command = "codex".to_owned();
+        assert_eq!(
+            shell_command_for_child("C:\\Windows\\System32\\cmd.exe", &command, &vec![])
+                .unwrap(),
+            vec![
+                r"C:\Windows\System32\cmd.exe".to_owned(),
+                "/d".to_owned(),
+                "/s".to_owned(),
+                "/c".to_owned(),
+                command.clone(),
+            ]
+        );
+        assert_eq!(
+            shell_command_for_child("cmd.exe", &command, &vec!["hello world".to_owned()])
+                .unwrap(),
+            vec![
+                "cmd.exe".to_owned(),
+                "/d".to_owned(),
+                "/s".to_owned(),
+                "/c".to_owned(),
+                command.clone(),
+                "hello world".to_owned(),
+            ]
+        );
+        assert_eq!(
+            shell_command_for_child("powershell", &command, &vec!["hello".to_owned(), "O'Neil".to_owned()])
+                .unwrap(),
+            vec![
+                "powershell".to_owned(),
+                "-NoLogo".to_owned(),
+                "-NoProfile".to_owned(),
+                "-Command".to_owned(),
+                "codex 'hello' 'O''Neil'".to_owned(),
+            ]
+        );
+        assert_eq!(
+            shell_command_for_child("bash", &command, &vec!["hello".to_owned(), "O'Neil".to_owned()])
+                .unwrap(),
+            vec![
+                "bash".to_owned(),
+                "-lc".to_owned(),
+                "'codex' 'hello' 'O'\\''Neil'".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_command_for_child_rejects_unsafe_cmd_shell_arguments() {
+        assert!(
+            shell_command_for_child("cmd.exe", "codex", &["safe".to_owned(), "bad%arg".to_owned()])
+                .is_err()
+        );
+        assert!(
+            shell_command_for_child(
+                "C:\\Windows\\System32\\cmd.exe",
+                "safe\"cmd",
+                &["arg".to_owned()],
+            )
+            .is_err()
+        );
     }
 }
