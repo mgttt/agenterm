@@ -32,6 +32,7 @@ use crate::{
         TerminalAppearanceOverride, clamp_tabs_width, config_path, load_config, save_config,
     },
     tab_tree::{TabTreeNode, tree_rows},
+    terminal_selection::SelectionGesturePhase,
     theme::{Rgb, ThemeId, ThemePalette},
     ui_bridge::{
         UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,
@@ -474,27 +475,8 @@ struct RemoteTerminalSelection {
     columns: u32,
     anchor: RemoteTerminalPoint,
     active: RemoteTerminalPoint,
-    phase: RemoteSelectionPhase,
+    phase: SelectionGesturePhase,
     cached_text: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteSelectionPhase {
-    Prepared,
-    Dragging,
-    Completed,
-    Cancelled,
-}
-
-impl RemoteSelectionPhase {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Prepared => "prepared",
-            Self::Dragging => "dragging",
-            Self::Completed => "completed",
-            Self::Cancelled => "cancelled",
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -535,7 +517,7 @@ impl RemoteTerminalSelection {
     fn active_gesture(&self) -> bool {
         matches!(
             self.phase,
-            RemoteSelectionPhase::Prepared | RemoteSelectionPhase::Dragging
+            SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
         )
     }
 
@@ -545,23 +527,23 @@ impl RemoteTerminalSelection {
         }
         self.active = point;
         self.phase = if self.is_empty() {
-            RemoteSelectionPhase::Prepared
+            SelectionGesturePhase::Prepared
         } else {
-            RemoteSelectionPhase::Dragging
+            SelectionGesturePhase::Dragging
         };
     }
 
     fn complete(&mut self) -> bool {
-        if self.phase != RemoteSelectionPhase::Dragging || self.is_empty() {
-            self.phase = RemoteSelectionPhase::Cancelled;
+        if self.phase != SelectionGesturePhase::Dragging || self.is_empty() {
+            self.phase = SelectionGesturePhase::Cancelled;
             return false;
         }
-        self.phase = RemoteSelectionPhase::Completed;
+        self.phase = SelectionGesturePhase::Completed;
         true
     }
 
     fn can_copy(&self) -> bool {
-        self.phase == RemoteSelectionPhase::Completed
+        self.phase == SelectionGesturePhase::Completed
             && !self.is_empty()
             && self
                 .cached_text
@@ -4216,7 +4198,7 @@ impl RemoteWindowState {
             columns,
             anchor: point,
             active: point,
-            phase: RemoteSelectionPhase::Prepared,
+            phase: SelectionGesturePhase::Prepared,
             cached_text: None,
         });
         self.last_error = None;
@@ -4279,7 +4261,7 @@ impl RemoteWindowState {
             .is_some_and(RemoteTerminalSelection::active_gesture)
         {
             if let Some(selection) = self.terminal_selection.as_mut() {
-                selection.phase = RemoteSelectionPhase::Cancelled;
+                selection.phase = SelectionGesturePhase::Cancelled;
             }
             self.terminal_selection = None;
         }
@@ -4291,7 +4273,7 @@ impl RemoteWindowState {
             .as_ref()
             .is_some_and(RemoteTerminalSelection::active_gesture);
         if let Some(selection) = self.terminal_selection.as_mut() {
-            selection.phase = RemoteSelectionPhase::Cancelled;
+            selection.phase = SelectionGesturePhase::Cancelled;
         }
         self.terminal_selection = None;
         if captured && let Err(error) = self.window.set_pointer_capture(false) {
@@ -6475,7 +6457,7 @@ mod tests {
             columns: 8,
             anchor: RemoteTerminalPoint { row: 0, column: 1 },
             active: RemoteTerminalPoint { row: 1, column: 1 },
-            phase: RemoteSelectionPhase::Completed,
+            phase: SelectionGesturePhase::Completed,
             cached_text: Some("cached".to_owned()),
         };
         assert_eq!(screen_selection_text(&screen, &selection), "界B\r\nta");
@@ -6510,7 +6492,7 @@ mod tests {
             columns: 8,
             anchor: RemoteTerminalPoint { row: 0, column: 2 },
             active: RemoteTerminalPoint { row: 2, column: 3 },
-            phase: RemoteSelectionPhase::Dragging,
+            phase: SelectionGesturePhase::Dragging,
             cached_text: None,
         };
         assert_eq!(
@@ -6557,11 +6539,11 @@ mod tests {
             columns: 8,
             anchor: RemoteTerminalPoint { row: 0, column: 1 },
             active: RemoteTerminalPoint { row: 0, column: 1 },
-            phase: RemoteSelectionPhase::Prepared,
+            phase: SelectionGesturePhase::Prepared,
             cached_text: None,
         };
         selection.drag_to(RemoteTerminalPoint { row: 1, column: 1 });
-        assert_eq!(selection.phase, RemoteSelectionPhase::Dragging);
+        assert_eq!(selection.phase, SelectionGesturePhase::Dragging);
         assert!(selection.complete());
         selection.cached_text = Some("selected".to_owned());
         assert!(selection.can_copy());
@@ -6602,11 +6584,11 @@ mod tests {
             columns: 80,
             anchor: RemoteTerminalPoint { row: 2, column: 3 },
             active: RemoteTerminalPoint { row: 2, column: 3 },
-            phase: RemoteSelectionPhase::Prepared,
+            phase: SelectionGesturePhase::Prepared,
             cached_text: None,
         };
         assert!(!selection.complete());
-        assert_eq!(selection.phase, RemoteSelectionPhase::Cancelled);
+        assert_eq!(selection.phase, SelectionGesturePhase::Cancelled);
         assert!(!selection.can_copy());
     }
 
@@ -6618,13 +6600,13 @@ mod tests {
             columns: 80,
             anchor: RemoteTerminalPoint { row: 2, column: 3 },
             active: RemoteTerminalPoint { row: 2, column: 8 },
-            phase: RemoteSelectionPhase::Prepared,
+            phase: SelectionGesturePhase::Prepared,
             cached_text: None,
         };
         assert!(!selection_claims_copy_shortcut(None));
         assert!(!selection_claims_copy_shortcut(Some(&selection)));
 
-        selection.phase = RemoteSelectionPhase::Completed;
+        selection.phase = SelectionGesturePhase::Completed;
         assert!(!selection_claims_copy_shortcut(Some(&selection)));
         selection.cached_text = Some("selected".to_owned());
         assert!(selection_claims_copy_shortcut(Some(&selection)));
