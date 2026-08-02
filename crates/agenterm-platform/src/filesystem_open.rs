@@ -14,13 +14,28 @@ pub enum ExistingEntryType {
     Directory,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ExistingEntryAccess {
+    ReadOnly,
+    SecurityDescriptor,
+}
+
 /// Opens an existing path without following a link-like final component.
 ///
 /// The returned object is verified through the same opened handle. Intermediate
 /// components are resolved by the host; callers that need component-wise
 /// containment should retain a directory handle and use [`open_existing_child`].
 pub fn open_existing(path: &Path, expected: ExistingEntryType) -> io::Result<File> {
-    let file = crate::selected::filesystem_open::open_existing(path, expected)?;
+    open_existing_with_access(path, expected, ExistingEntryAccess::ReadOnly)
+}
+
+pub fn open_existing_with_access(
+    path: &Path,
+    expected: ExistingEntryType,
+    access: ExistingEntryAccess,
+) -> io::Result<File> {
+    let file = crate::selected::filesystem_open::open_existing(path, expected, access)?;
     verify_opened_type(file, expected)
 }
 
@@ -33,9 +48,124 @@ pub fn open_existing_child(
     name: &OsStr,
     expected: ExistingEntryType,
 ) -> io::Result<File> {
+    open_existing_child_with_access(parent, name, expected, ExistingEntryAccess::ReadOnly)
+}
+
+pub fn open_existing_child_with_access(
+    parent: &File,
+    name: &OsStr,
+    expected: ExistingEntryType,
+    access: ExistingEntryAccess,
+) -> io::Result<File> {
     validate_child_name(name)?;
-    let file = crate::selected::filesystem_open::open_existing_child(parent, name, expected)?;
+    let file =
+        crate::selected::filesystem_open::open_existing_child(parent, name, expected, access)?;
     verify_opened_type(file, expected)
+}
+
+/// Opens an existing path one component at a time from its host root.
+///
+/// Every intermediate component is opened as a real directory through the
+/// retained parent object, so a junction/symlink/reparse component cannot be
+/// silently traversed. The final object is verified with the requested type.
+pub fn open_existing_path(path: &Path, expected: ExistingEntryType) -> io::Result<File> {
+    open_existing_path_with_access(path, expected, ExistingEntryAccess::ReadOnly)
+}
+
+pub fn open_existing_path_with_access(
+    path: &Path,
+    expected: ExistingEntryType,
+    access: ExistingEntryAccess,
+) -> io::Result<File> {
+    let absolute = lexical_absolute(path)?;
+    let (anchor, components) = split_root(&absolute)?;
+    if components.is_empty() {
+        return if expected == ExistingEntryType::Directory {
+            open_existing_with_access(&anchor, ExistingEntryType::Directory, access)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "root path cannot be opened as a file",
+            ))
+        };
+    }
+    let mut current = open_existing_with_access(
+        &anchor,
+        ExistingEntryType::Directory,
+        ExistingEntryAccess::ReadOnly,
+    )?;
+    let mut components = components.into_iter().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "path contains a non-normal component after its root",
+            ));
+        };
+        let is_final = components.peek().is_none();
+        let child_type = if !is_final {
+            ExistingEntryType::Directory
+        } else {
+            expected
+        };
+        let child_access = if is_final {
+            access
+        } else {
+            ExistingEntryAccess::ReadOnly
+        };
+        current = open_existing_child_with_access(&current, name, child_type, child_access)?;
+    }
+    Ok(current)
+}
+
+fn lexical_absolute(path: &Path) -> io::Result<std::path::PathBuf> {
+    let input = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut output = std::path::PathBuf::new();
+    for component in input.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                output.pop();
+            }
+            _ => output.push(component.as_os_str()),
+        }
+    }
+    Ok(output)
+}
+
+fn split_root(path: &Path) -> io::Result<(std::path::PathBuf, Vec<Component<'_>>)> {
+    let mut components = path.components();
+    let mut anchor = std::path::PathBuf::new();
+    match components.next() {
+        Some(Component::Prefix(prefix)) => {
+            anchor.push(prefix.as_os_str());
+            match components.next() {
+                Some(Component::RootDir) => anchor.push(std::path::Path::new("\\")),
+                Some(other) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("unexpected root component: {other:?}"),
+                    ));
+                }
+                None => {}
+            }
+        }
+        Some(Component::RootDir) => {
+            anchor.push(std::path::Path::new(std::path::MAIN_SEPARATOR_STR))
+        }
+        Some(other) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("absolute path has no root: {other:?}"),
+            ));
+        }
+        None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty path")),
+    }
+    Ok((anchor, components.collect()))
 }
 
 fn validate_child_name(name: &OsStr) -> io::Result<()> {
@@ -101,6 +231,25 @@ mod tests {
         drop(file);
         drop(directory);
         fs::remove_dir_all(root).expect("remove typed fixture");
+    }
+
+    #[test]
+    fn opens_existing_path_componentwise() {
+        let root = fixture("componentwise");
+        let nested = root.join("nested");
+        let file_path = nested.join("state");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).expect("create componentwise fixture");
+        fs::write(&file_path, b"componentwise").expect("write componentwise fixture");
+
+        let mut file = open_existing_path(&file_path, ExistingEntryType::File)
+            .expect("open componentwise file");
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)
+            .expect("read componentwise file");
+        assert_eq!(contents, "componentwise");
+        drop(file);
+        fs::remove_dir_all(root).expect("remove componentwise fixture");
     }
 
     #[test]
@@ -190,6 +339,7 @@ mod tests {
         fs::create_dir_all(&root).expect("create junction root");
         fs::create_dir(&outside).expect("create junction target");
         fs::write(outside.join("canary"), b"outside").expect("write outside canary");
+        fs::create_dir(outside.join("nested")).expect("create nested junction target");
         let junction = root.join("junction");
         let status = std::process::Command::new("cmd.exe")
             .args(["/d", "/c", "mklink", "/J"])
@@ -209,6 +359,9 @@ mod tests {
                 ExistingEntryType::Directory
             )
             .is_err()
+        );
+        assert!(
+            open_existing_path(&junction.join("nested"), ExistingEntryType::Directory).is_err()
         );
         assert_eq!(fs::read(outside.join("canary")).unwrap(), b"outside");
 

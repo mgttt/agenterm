@@ -9,9 +9,13 @@ use std::{
     path::Path,
 };
 
-use crate::filesystem_open::ExistingEntryType;
+use crate::filesystem_open::{ExistingEntryAccess, ExistingEntryType};
 
-pub(crate) fn open_existing(path: &Path, expected: ExistingEntryType) -> io::Result<File> {
+pub(crate) fn open_existing(
+    path: &Path,
+    expected: ExistingEntryType,
+    _access: ExistingEntryAccess,
+) -> io::Result<File> {
     let path = c_string(path.as_os_str())?;
     descriptor(unsafe { libc::open(path.as_ptr(), flags(expected)) })
 }
@@ -20,6 +24,7 @@ pub(crate) fn open_existing_child(
     parent: &File,
     name: &OsStr,
     expected: ExistingEntryType,
+    _access: ExistingEntryAccess,
 ) -> io::Result<File> {
     let name = c_string(name)?;
     descriptor(unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags(expected)) })

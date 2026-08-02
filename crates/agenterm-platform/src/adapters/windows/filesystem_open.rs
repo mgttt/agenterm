@@ -18,7 +18,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::filesystem_open::ExistingEntryType;
+use crate::filesystem_open::{ExistingEntryAccess, ExistingEntryType};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_READ_DATA: u32 = 0x0001;
@@ -71,10 +71,14 @@ unsafe extern "system" {
     ) -> i32;
 }
 
-pub(crate) fn open_existing(path: &Path, expected: ExistingEntryType) -> io::Result<File> {
+pub(crate) fn open_existing(
+    path: &Path,
+    expected: ExistingEntryType,
+    access: ExistingEntryAccess,
+) -> io::Result<File> {
     reject_nul(path.as_os_str())?;
     OpenOptions::new()
-        .access_mode(desired_access(expected))
+        .access_mode(desired_access(expected, access))
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
@@ -84,6 +88,7 @@ pub(crate) fn open_existing_child(
     parent: &File,
     name: &OsStr,
     expected: ExistingEntryType,
+    access: ExistingEntryAccess,
 ) -> io::Result<File> {
     let mut name: Vec<u16> = name.encode_wide().collect();
     if name.contains(&0) {
@@ -124,7 +129,7 @@ pub(crate) fn open_existing_child(
     let status = unsafe {
         NtCreateFile(
             &raw mut opened,
-            desired_access(expected),
+            desired_access(expected, access),
             &raw mut attributes,
             &raw mut io_status,
             std::ptr::null_mut(),
@@ -146,12 +151,20 @@ pub(crate) fn open_existing_child(
     }
 }
 
-const fn desired_access(expected: ExistingEntryType) -> u32 {
+fn desired_access(expected: ExistingEntryType, access: ExistingEntryAccess) -> u32 {
+    let security = match access {
+        ExistingEntryAccess::ReadOnly => 0,
+        ExistingEntryAccess::SecurityDescriptor => {
+            windows_sys::Win32::Storage::FileSystem::READ_CONTROL
+                | windows_sys::Win32::Storage::FileSystem::WRITE_DAC
+        }
+    };
     (match expected {
         ExistingEntryType::File => FILE_READ_DATA,
         ExistingEntryType::Directory => FILE_LIST_DIRECTORY,
     }) | FILE_READ_ATTRIBUTES
         | SYNCHRONIZE_ACCESS
+        | security
 }
 
 fn reject_nul(value: &OsStr) -> io::Result<()> {
