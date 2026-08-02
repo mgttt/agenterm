@@ -271,4 +271,16 @@ mod tests {
         let escaped = anchor.join("..").join("path-lock-root");
         assert_eq!(lexical_normalize(&escaped), anchor.join("path-lock-root"));
     }
+
+    #[test]
+    fn lexical_normalize_preserves_unc_and_extended_prefix_roots() {
+        assert_eq!(
+            lexical_normalize(Path::new(r"\\server\share\..\path-lock-root")),
+            PathBuf::from(r"\\server\share\path-lock-root")
+        );
+        assert_eq!(
+            lexical_normalize(Path::new(r"\\?\C:\..\path-lock-root")),
+            PathBuf::from(r"\\?\C:\path-lock-root")
+        );
+    }
 }
