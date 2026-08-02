@@ -9,9 +9,11 @@ use std::{fmt, ptr::NonNull};
 use windows_sys::Win32::{
     Foundation::{GetLastError, LocalFree},
     Security::{
-        Authorization::ConvertSidToStringSidW, FreeSid, GetLengthSid, IsValidSid,
-        Isolation::CreateAppContainerProfile, Isolation::DeleteAppContainerProfile,
-        Isolation::DeriveAppContainerSidFromAppContainerName, SID_AND_ATTRIBUTES,
+        Authorization::ConvertSidToStringSidW, CreateWellKnownSid, FreeSid, GetLengthSid,
+        IsValidSid, Isolation::CreateAppContainerProfile, Isolation::DeleteAppContainerProfile,
+        Isolation::DeriveAppContainerSidFromAppContainerName, WinCapabilityInternetClientServerSid,
+        WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
+        SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES, WELL_KNOWN_SID_TYPE,
     },
 };
 
@@ -40,6 +42,7 @@ pub struct AppContainerProfileError {
     kind: AppContainerProfileErrorKind,
     operation: &'static str,
     hresult: Option<u32>,
+    win32_code: Option<u32>,
     detail: String,
 }
 
@@ -56,11 +59,16 @@ impl AppContainerProfileError {
         self.hresult
     }
 
+    pub const fn win32_code(&self) -> Option<u32> {
+        self.win32_code
+    }
+
     fn invalid(operation: &'static str, detail: impl Into<String>) -> Self {
         Self {
             kind: AppContainerProfileErrorKind::InvalidInput,
             operation,
             hresult: None,
+            win32_code: None,
             detail: detail.into(),
         }
     }
@@ -75,7 +83,18 @@ impl AppContainerProfileError {
             },
             operation,
             hresult: Some(raw),
+            win32_code: None,
             detail: format!("HRESULT=0x{raw:08X}"),
+        }
+    }
+
+    fn win32(operation: &'static str, code: u32) -> Self {
+        Self {
+            kind: AppContainerProfileErrorKind::NativeFailure,
+            operation,
+            hresult: None,
+            win32_code: Some(code),
+            detail: format!("GetLastError={code}"),
         }
     }
 
@@ -97,6 +116,93 @@ impl std::error::Error for AppContainerProfileError {}
 pub struct AppContainerCapability<'a> {
     sid: &'a [u8],
     attributes: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AppContainerCapabilityKind {
+    InternetClient,
+    InternetClientServer,
+    PrivateNetworkClientServer,
+}
+
+impl AppContainerCapabilityKind {
+    pub const ALL: [Self; 3] = [
+        Self::InternetClient,
+        Self::InternetClientServer,
+        Self::PrivateNetworkClientServer,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InternetClient => "internet-client",
+            Self::InternetClientServer => "internet-client-server",
+            Self::PrivateNetworkClientServer => "private-network-client-server",
+        }
+    }
+
+    const fn native(self) -> WELL_KNOWN_SID_TYPE {
+        match self {
+            Self::InternetClient => WinCapabilityInternetClientSid,
+            Self::InternetClientServer => WinCapabilityInternetClientServerSid,
+            Self::PrivateNetworkClientServer => WinCapabilityPrivateNetworkClientServerSid,
+        }
+    }
+}
+
+/// A caller-buffer-owned well-known AppContainer capability SID.
+#[derive(Debug)]
+pub struct AppContainerCapabilitySid {
+    kind: AppContainerCapabilityKind,
+    storage: Vec<usize>,
+    len: usize,
+}
+
+impl AppContainerCapabilitySid {
+    pub fn well_known(kind: AppContainerCapabilityKind) -> Result<Self, AppContainerProfileError> {
+        const OPERATION: &str = "CreateWellKnownSid";
+        let capacity = SECURITY_MAX_SID_SIZE as usize;
+        let mut storage = vec![0_usize; words_for_bytes(capacity)];
+        let mut len = capacity as u32;
+        if unsafe {
+            CreateWellKnownSid(
+                kind.native(),
+                std::ptr::null_mut(),
+                storage.as_mut_ptr().cast(),
+                &raw mut len,
+            )
+        } == 0
+        {
+            return Err(AppContainerProfileError::win32(OPERATION, unsafe {
+                GetLastError()
+            }));
+        }
+        let len = len as usize;
+        if len > capacity {
+            return Err(AppContainerProfileError::invalid(
+                OPERATION,
+                "native API returned a SID larger than the caller buffer",
+            ));
+        }
+        let sid = unsafe { std::slice::from_raw_parts(storage.as_ptr().cast::<u8>(), len) };
+        validate_sid_bytes(OPERATION, sid)?;
+        Ok(Self { kind, storage, len })
+    }
+
+    pub const fn kind(&self) -> AppContainerCapabilityKind {
+        self.kind
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.storage.as_ptr().cast(), self.len) }
+    }
+
+    pub fn as_raw_sid(&self) -> *mut std::ffi::c_void {
+        self.storage.as_ptr().cast_mut().cast()
+    }
+
+    pub fn string(&self) -> Result<String, AppContainerProfileError> {
+        sid_string(self.as_bytes())
+    }
 }
 
 impl<'a> AppContainerCapability<'a> {
@@ -150,14 +256,11 @@ impl OwnedAppContainerSid {
 /// Formats one exact, validated SID byte sequence using Windows canonical form.
 pub fn sid_string(sid: &[u8]) -> Result<String, AppContainerProfileError> {
     const OPERATION: &str = "ConvertSidToStringSidW";
-    validate_sid_bytes(OPERATION, sid)?;
+    let aligned = aligned_sid_copy(OPERATION, sid)?;
     let mut text = std::ptr::null_mut();
-    if unsafe { ConvertSidToStringSidW(sid.as_ptr().cast_mut().cast(), &raw mut text) } == 0 {
+    if unsafe { ConvertSidToStringSidW(aligned.as_ptr().cast_mut().cast(), &raw mut text) } == 0 {
         let code = unsafe { GetLastError() };
-        return Err(AppContainerProfileError::invalid(
-            OPERATION,
-            format!("GetLastError={code}"),
-        ));
+        return Err(AppContainerProfileError::win32(OPERATION, code));
     }
     let value = unsafe {
         let mut len = 0;
@@ -187,10 +290,15 @@ pub fn create_profile(
     let name = wide_required(OPERATION, "name", name)?;
     let display_name = wide_required(OPERATION, "display name", display_name)?;
     let description = wide_required(OPERATION, "description", description)?;
+    let aligned_capabilities = capabilities
+        .iter()
+        .map(|capability| aligned_sid_copy(OPERATION, capability.sid))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut native_capabilities = capabilities
         .iter()
-        .map(|capability| SID_AND_ATTRIBUTES {
-            Sid: capability.sid.as_ptr().cast_mut().cast(),
+        .zip(&aligned_capabilities)
+        .map(|(capability, sid)| SID_AND_ATTRIBUTES {
+            Sid: sid.as_ptr().cast_mut().cast(),
             Attributes: capability.attributes,
         })
         .collect::<Vec<_>>();
@@ -269,6 +377,12 @@ fn validate_sid_bytes(operation: &'static str, sid: &[u8]) -> Result<(), AppCont
             "SID bytes are invalid",
         ));
     }
+    if sid[0] != 1 {
+        return Err(AppContainerProfileError::invalid(
+            operation,
+            "SID revision is unsupported",
+        ));
+    }
     let sub_authorities = usize::from(sid[1]);
     let Some(expected_len) = sub_authorities
         .checked_mul(std::mem::size_of::<u32>())
@@ -285,20 +399,23 @@ fn validate_sid_bytes(operation: &'static str, sid: &[u8]) -> Result<(), AppCont
             "SID byte length is not exact",
         ));
     }
-    if unsafe { IsValidSid(sid.as_ptr().cast_mut().cast()) } == 0 {
-        return Err(AppContainerProfileError::invalid(
-            operation,
-            "SID bytes are invalid",
-        ));
-    }
-    let native_len = unsafe { GetLengthSid(sid.as_ptr().cast_mut().cast()) } as usize;
-    if native_len != sid.len() {
-        return Err(AppContainerProfileError::invalid(
-            operation,
-            "SID byte length is not exact",
-        ));
-    }
     Ok(())
+}
+
+fn aligned_sid_copy(
+    operation: &'static str,
+    sid: &[u8],
+) -> Result<Vec<usize>, AppContainerProfileError> {
+    validate_sid_bytes(operation, sid)?;
+    let mut aligned = vec![0_usize; words_for_bytes(sid.len())];
+    unsafe {
+        std::ptr::copy_nonoverlapping(sid.as_ptr(), aligned.as_mut_ptr().cast(), sid.len());
+    }
+    Ok(aligned)
+}
+
+const fn words_for_bytes(bytes: usize) -> usize {
+    bytes.div_ceil(std::mem::size_of::<usize>())
 }
 
 #[cfg(test)]
@@ -364,5 +481,58 @@ mod tests {
             sid_string(&[1, 2, 3]).unwrap_err().kind(),
             AppContainerProfileErrorKind::InvalidInput
         );
+        assert_eq!(
+            sid_string(&[0; 8]).unwrap_err().kind(),
+            AppContainerProfileErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn well_known_capability_sids_have_stable_kind_and_windows_identity() {
+        for (kind, expected) in [
+            (AppContainerCapabilityKind::InternetClient, "S-1-15-3-1"),
+            (
+                AppContainerCapabilityKind::InternetClientServer,
+                "S-1-15-3-2",
+            ),
+            (
+                AppContainerCapabilityKind::PrivateNetworkClientServer,
+                "S-1-15-3-3",
+            ),
+        ] {
+            let sid = AppContainerCapabilitySid::well_known(kind).expect("create capability SID");
+            assert_eq!(sid.kind(), kind);
+            assert_eq!(sid.string().unwrap(), expected);
+            assert_eq!(
+                sid.as_raw_sid().cast_const().cast::<u8>(),
+                sid.as_bytes().as_ptr()
+            );
+        }
+        assert_eq!(
+            AppContainerCapabilityKind::ALL.map(AppContainerCapabilityKind::as_str),
+            [
+                "internet-client",
+                "internet-client-server",
+                "private-network-client-server"
+            ]
+        );
+    }
+
+    #[test]
+    fn borrowed_capability_sids_may_be_unaligned() {
+        let sid = AppContainerCapabilitySid::well_known(AppContainerCapabilityKind::InternetClient)
+            .expect("create capability SID");
+        let mut unaligned = vec![0_u8; sid.as_bytes().len() + 1];
+        unaligned[1..].copy_from_slice(sid.as_bytes());
+
+        assert_eq!(sid_string(&unaligned[1..]).unwrap(), "S-1-15-3-1");
+        AppContainerCapability::new(&unaligned[1..], 4).expect("borrow unaligned SID");
+
+        let aligned = aligned_sid_copy("test", &unaligned[1..]).expect("align SID bytes");
+        assert_eq!(aligned.as_ptr() as usize % std::mem::align_of::<usize>(), 0);
+        let round_trip = unsafe {
+            std::slice::from_raw_parts(aligned.as_ptr().cast::<u8>(), sid.as_bytes().len())
+        };
+        assert_eq!(round_trip, sid.as_bytes());
     }
 }
