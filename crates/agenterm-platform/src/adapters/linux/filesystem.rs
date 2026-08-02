@@ -2,7 +2,7 @@ use std::path::PathBuf;
 #[cfg(feature = "filesystem")]
 use std::{
     fs::OpenOptions,
-    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
+    os::{fd::AsRawFd as _, unix::fs::OpenOptionsExt as _},
 };
 
 use crate::filesystem::{FilesystemError, HostDirectories};
@@ -53,7 +53,22 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
             "private directory must be an existing real directory",
         ));
     }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    let facts = crate::filesystem_entry::opened_file_entry_facts(&directory)?;
+    if !facts.is_real_directory() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "private directory must be an existing real directory",
+        ));
+    }
+    if unsafe { libc::fchmod(directory.as_raw_fd(), 0o700) } != 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "filesystem")]

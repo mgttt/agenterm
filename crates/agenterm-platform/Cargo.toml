@@ -188,6 +188,7 @@ filesystem = [
     "file-identity",
     "user-identity",
     "windows-sys/Win32_Security_Authorization",
+    "windows-sys/Win32_System_SystemServices",
 ]
 locking = [
     "dep:libc",
