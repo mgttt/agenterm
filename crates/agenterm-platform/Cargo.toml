@@ -194,6 +194,7 @@ filesystem = [
 ]
 locking = [
     "filesystem-conventions",
+    "file-identity",
     "dep:libc",
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",

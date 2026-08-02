@@ -14,8 +14,8 @@ use windows_sys::Win32::{
 use crate::locking::{LockError, LockErrorKind};
 
 pub struct PathLock {
-    handle: HANDLE,
-    identity: String,
+    handles: Vec<HANDLE>,
+    identities: Vec<String>,
 }
 
 impl PathLock {
@@ -28,30 +28,54 @@ impl PathLock {
     }
 
     fn acquire_with_timeout(path: &Path, timeout: u32) -> Result<Self, LockError> {
-        let identity = format!("path-{:016x}", fingerprint(&normalized_path(path)?));
-        if !reserve_local(&identity) {
-            return Err(LockError::new(
-                LockErrorKind::Contended,
-                "path lock is already held in this process",
-            ));
-        }
-        match acquire_named(&identity, timeout) {
-            Ok(handle) => Ok(Self { handle, identity }),
-            Err(error) => {
-                release_local(&identity);
-                Err(error)
+        let identities = lock_identities(path)?;
+        let mut reserved: Vec<String> = Vec::with_capacity(identities.len());
+        let mut handles = Vec::with_capacity(identities.len());
+        for identity in &identities {
+            if !reserve_local(identity) {
+                for reserved_identity in &reserved {
+                    release_local(reserved_identity);
+                }
+                return Err(LockError::new(
+                    LockErrorKind::Contended,
+                    "path lock is already held in this process",
+                ));
+            }
+            reserved.push((*identity).clone());
+            match acquire_named(identity, timeout) {
+                Ok(handle) => handles.push(handle),
+                Err(error) => {
+                    for handle in handles {
+                        unsafe {
+                            ReleaseMutex(handle);
+                            CloseHandle(handle);
+                        }
+                    }
+                    for reserved_identity in reserved {
+                        release_local(&reserved_identity);
+                    }
+                    return Err(error);
+                }
             }
         }
+        Ok(Self {
+            handles,
+            identities,
+        })
     }
 }
 
 impl Drop for PathLock {
     fn drop(&mut self) {
-        unsafe {
-            ReleaseMutex(self.handle);
-            CloseHandle(self.handle);
+        for handle in self.handles.drain(..) {
+            unsafe {
+                ReleaseMutex(handle);
+                CloseHandle(handle);
+            }
         }
-        release_local(&self.identity);
+        for identity in self.identities.drain(..) {
+            release_local(&identity);
+        }
     }
 }
 
@@ -175,6 +199,25 @@ fn normalized_path(path: &Path) -> Result<String, LockError> {
     Ok(value.to_lowercase())
 }
 
+/// Keep a textual path lock when the target is replaced, and add the opened
+/// object identity for existing files so hard-link aliases converge. Both
+/// identities are acquired in sorted order to avoid alias-induced inversions.
+fn lock_identities(path: &Path) -> Result<Vec<String>, LockError> {
+    let path_identity = format!("path-{:016x}", fingerprint(&normalized_path(path)?));
+    let mut identities = vec![path_identity];
+    match crate::file_identity::path_identity(path) {
+        Ok(identity) => identities.push(format!(
+            "object-{:016x}-{:016x}",
+            identity.filesystem_id, identity.object_id
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(open_error(error)),
+    }
+    identities.sort_unstable();
+    identities.dedup();
+    Ok(identities)
+}
+
 fn lexical_normalize(path: &Path) -> PathBuf {
     crate::filesystem::lexical_normalize(path)
 }
@@ -256,6 +299,30 @@ mod tests {
         drop(first);
         PathLock::try_acquire(&alias).expect("Unicode case alias is released");
         std::fs::remove_dir_all(directory).expect("remove Unicode path alias fixture");
+    }
+
+    #[test]
+    fn hard_link_aliases_share_one_path_lock_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "agenterm-platform-hard-link-lock-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).expect("create hard-link lock fixture");
+        let original = directory.join("original.lock");
+        let alias = directory.join("alias.lock");
+        std::fs::write(&original, b"hard-link-path-lock").expect("create lock target");
+        std::fs::hard_link(&original, &alias).expect("create hard-link alias");
+
+        let first = PathLock::acquire(&original).expect("acquire original lock");
+        let error = match PathLock::try_acquire(&alias) {
+            Ok(_) => panic!("hard-link alias bypassed the existing lock"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), LockErrorKind::Contended);
+        drop(first);
+        PathLock::try_acquire(&alias).expect("hard-link alias is released");
+        std::fs::remove_dir_all(directory).expect("remove hard-link lock fixture");
     }
 
     #[test]
