@@ -1,6 +1,6 @@
 # macOS CPU usage investigation and improvement plan
 
-Status: analysis complete, fixes not started
+Status: P0 (dirty-row repaint) and P2 (present pacing) shipped; P1/P3 open
 Date: 2026-08-02
 Owner module: [`prd/PRD_02_01_terminal_runtime.md`](../prd/PRD_02_01_terminal_runtime.md)
 (rendering performance) — this file is an execution projection, not product truth.
@@ -57,7 +57,15 @@ passes over ~26 M pixels at 4K:
 
 ## Fix plan, ranked
 
-- **P0 — Dirty-row repaint.** The vt100 screen knows which rows changed
+- **P0 — Dirty-row repaint. [DONE]** Shipped: `TerminalGrid` tracks per-row
+  damage during `sync_from_screen` (cell compare plus cursor rows); a
+  persistent physical-resolution terminal layer repaints only dirty rows and
+  is blitted per present; `scale_frame_nearest` skips the layer rectangle.
+  Measured on the `date`-loop load at 960×600: 54% CPU @ 22 fps → 33% CPU @
+  29 fps, with per-frame cost ~3× lower; larger windows gain more because the
+  removed passes scaled with area. Rendered evidence (colors, CJK wide cells,
+  scrollback up/down, streaming tail) verified ghost-free via `screenshot`.
+  Original scope: The vt100 screen knows which rows changed
   between frames. Repaint only dirty rows plus the cursor cells into a
   persistent physical-resolution terminal layer; leave clean rows untouched.
   Streaming output typically touches the last few rows only, so this should
@@ -70,7 +78,10 @@ passes over ~26 M pixels at 4K:
   directly into the physical-resolution buffer and delete the
   `scale_frame_nearest` full-frame pass (and the double terminal render).
   Halves the remaining fixed cost per present.
-- **P2 — Present pacing.** Coalesce output-driven redraws to a ~30 fps cap
+- **P2 — Present pacing. [DONE]** Shipped: PTY-output-driven redraws are
+  coalesced to ~30 presents/s (`request_output_redraw`); interactive paths
+  still redraw immediately. Without this, cheap frames let the present rate
+  balloon (measured 113 fps) and ate the P0 win. Original scope: Coalesce output-driven redraws to a ~30 fps cap
   (schedule via `WaitUntil` instead of immediate `request_redraw` when the
   last present is recent). Bounded win today because frames are currently
   CPU-bound below that rate, but it protects the win from P0/P1.

@@ -102,10 +102,11 @@ use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
     NewTerminalModalView, SettingsHit, SettingsModalView, SidebarTabRow, StatusBarView,
-    TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid, TerminalPaint,
-    ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics,
-    effective_palette, grid_dimensions_for_terminal, render_frame, render_terminal_grid_hidpi,
-    scrollbar_view_from_geometry, sidebar_row_at_y,
+    TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid, TerminalLayerGeometry,
+    TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView,
+    blit_terminal_layer, cell_metrics, effective_palette, grid_dimensions_for_terminal,
+    render_frame, render_terminal_layer, scrollbar_view_from_geometry, sidebar_row_at_y,
+    terminal_layer_geometry,
 };
 use window_state::{
     UnixAppWindowHandle, WindowStateTracker, WindowUiActionResult, apply_ui_action,
@@ -183,9 +184,26 @@ struct TerminalDoubleClick {
     expires_at: Instant,
 }
 
+/// Inputs that invalidate the persistent terminal layer beyond per-row grid
+/// damage. A geometry or selection difference forces a full layer repaint; a
+/// cursor difference repaints only the previous and current cursor rows.
+#[derive(Clone, Copy, PartialEq)]
+struct TerminalLayerKey {
+    geometry: TerminalLayerGeometry,
+    cols: u16,
+    rows: u16,
+    palette: usize,
+    selection: Option<TerminalSelection>,
+    cursor: (u16, u16, bool),
+    cursor_style: TerminalCursorStyle,
+    cursor_shape: crate::terminal_cursor::TerminalCursorShape,
+}
+
 #[derive(Default)]
 struct RenderBuffers {
     logical: Vec<u32>,
+    terminal_layer: Vec<u32>,
+    terminal_layer_key: Option<TerminalLayerKey>,
     captured: Option<(u32, u32, Vec<u32>)>,
     capture_next: bool,
 }
@@ -660,6 +678,8 @@ struct UnixApp {
     ime_cursor: Option<(usize, usize)>,
     cursor_blink: CursorBlink,
     window_focused: bool,
+    last_present: Option<Instant>,
+    output_redraw_pending: bool,
     pointer_modifiers: agenterm_platform::input::ModifierState,
     mouse_report_button: Option<u8>,
     mouse_report_cell: Option<(u16, u16)>,
@@ -763,6 +783,8 @@ impl UnixApp {
                 no_activate,
             )
             .initial_window_focused,
+            last_present: None,
+            output_redraw_pending: false,
             pointer_modifiers: agenterm_platform::input::ModifierState::empty(),
             mouse_report_button: None,
             mouse_report_cell: None,
@@ -3818,6 +3840,7 @@ impl UnixApp {
 
     fn render_window(&mut self, frame: &mut XrgbPixelFrame<'_>) {
         note_frame_for_diagnostics();
+        self.last_present = Some(Instant::now());
         let width = frame.width();
         let height = frame.height();
         self.render_pixels(width, height, frame.pixels_mut());
@@ -4013,18 +4036,8 @@ impl UnixApp {
                 resize_grip,
             },
         );
-        scale_frame_nearest(
-            logical_pixels,
-            logical_width,
-            logical_height,
-            buffer,
-            width,
-            height,
-        );
-        if hidpi_terminal_active {
-            render_terminal_grid_hidpi(
-                buffer,
-                width,
+        let layer_geometry = if hidpi_terminal_active {
+            terminal_layer_geometry(
                 width,
                 height,
                 logical_width,
@@ -4034,17 +4047,93 @@ impl UnixApp {
                 layout.terminal.top.max(0) as u32,
                 cell_width,
                 cell_height,
-                TerminalPaint {
-                    grid,
-                    selection: terminal_selection,
-                    cursor_style,
-                    cursor_shape: cursor_appearance.shape,
-                },
-                palette,
+                grid.cols,
+                grid.rows,
+            )
+        } else {
+            None
+        };
+        scale_frame_nearest(
+            logical_pixels,
+            logical_width,
+            logical_height,
+            buffer,
+            width,
+            height,
+            layer_geometry.map(|geometry| {
+                (
+                    geometry.offset_x,
+                    geometry.offset_y,
+                    geometry.width,
+                    geometry.height,
+                )
+            }),
+        );
+        if let Some(geometry) = layer_geometry {
+            let key = TerminalLayerKey {
+                geometry,
+                cols: grid.cols,
+                rows: grid.rows,
+                palette: std::ptr::from_ref(palette) as usize,
+                selection: terminal_selection,
+                cursor: grid.cursor_key(),
+                cursor_style,
+                cursor_shape: cursor_appearance.shape,
+            };
+            let previous = self.render_buffers.terminal_layer_key;
+            let layer_len = geometry.width as usize * geometry.height as usize;
+            let repaint_all = match previous {
+                Some(previous) => {
+                    previous.geometry != key.geometry
+                        || previous.cols != key.cols
+                        || previous.rows != key.rows
+                        || previous.palette != key.palette
+                        || previous.selection != key.selection
+                        || self.render_buffers.terminal_layer.len() != layer_len
+                }
+                None => true,
+            };
+            let cursor_rows = match previous {
+                Some(previous)
+                    if !repaint_all
+                        && (previous.cursor != key.cursor
+                            || previous.cursor_style != key.cursor_style
+                            || previous.cursor_shape != key.cursor_shape) =>
+                {
+                    [Some(previous.cursor.0), Some(key.cursor.0)]
+                }
+                _ => [None, None],
+            };
+            if repaint_all || cursor_rows.iter().any(Option::is_some) || grid.any_row_dirty() {
+                self.render_buffers.terminal_layer.resize(layer_len, 0);
+                render_terminal_layer(
+                    &mut self.render_buffers.terminal_layer,
+                    geometry,
+                    TerminalPaint {
+                        grid,
+                        selection: terminal_selection,
+                        cursor_style,
+                        cursor_shape: cursor_appearance.shape,
+                    },
+                    palette,
+                    repaint_all,
+                    cursor_rows,
+                );
+            }
+            self.render_buffers.terminal_layer_key = Some(key);
+            blit_terminal_layer(
+                buffer,
+                width,
+                height,
+                &self.render_buffers.terminal_layer,
+                geometry,
             );
         }
         self.render_buffers
             .capture_if_requested(width, height, buffer);
+        if hidpi_terminal_active && let Some(grid) = self.grid.as_mut() {
+            grid.clear_dirty_rows();
+        }
     }
 
     fn request_close_tab(&mut self, id: u64) {
@@ -4609,7 +4698,7 @@ impl UnixApp {
                 let pty_changed = self.drain_wake_and_pty();
                 let clipboard_changed = self.drain_terminal_clipboard_paste();
                 if pty_changed || clipboard_changed {
-                    self.request_redraw();
+                    self.request_output_redraw();
                 }
             }
             PixelWindowEvent::Reopen => {
@@ -4891,9 +4980,31 @@ impl UnixApp {
         }
     }
 
+    /// Coalesces PTY-output-driven redraws to at most ~30 presents per
+    /// second. Interactive paths keep calling `request_redraw` directly, so
+    /// input latency is unaffected; only streaming output is paced.
+    fn request_output_redraw(&mut self) {
+        const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
+        let due = self
+            .last_present
+            .map(|at| at + OUTPUT_FRAME_INTERVAL)
+            .unwrap_or_else(Instant::now);
+        if Instant::now() >= due {
+            self.output_redraw_pending = false;
+            self.request_redraw();
+        } else {
+            self.output_redraw_pending = true;
+        }
+    }
+
     fn next_window_directive(&mut self, now: Instant) -> PixelWindowDirective {
+        const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
         let mut changed = self.drain_wake_and_pty();
         changed |= self.drain_terminal_clipboard_paste();
+        if changed {
+            self.output_redraw_pending = true;
+            changed = false;
+        }
         let cursor_active = self.window_focused
             && self.focus_surface == UnixFocusSurface::Terminal
             && !self.modal_surface_active()
@@ -4922,6 +5033,20 @@ impl UnixApp {
         }
         if changed && let Some(window) = self.window.as_ref() {
             window.request_redraw();
+        }
+        if self.output_redraw_pending {
+            let due = self
+                .last_present
+                .map(|at| at + OUTPUT_FRAME_INTERVAL)
+                .unwrap_or(now);
+            if now >= due {
+                self.output_redraw_pending = false;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            } else {
+                wake_at = Some(wake_at.map_or(due, |deadline| deadline.min(due)));
+            }
         }
         if self.close_requested {
             PixelWindowDirective::Exit
@@ -4975,6 +5100,9 @@ impl PixelWindowApplication for UnixApp {
     }
 }
 
+/// Nearest-neighbour upscale of the logical frame. `skip` excludes a
+/// destination rectangle that the persistent terminal layer overwrites
+/// afterwards, so those pixels are never produced twice.
 fn scale_frame_nearest(
     source: &[u32],
     source_width: u32,
@@ -4982,6 +5110,7 @@ fn scale_frame_nearest(
     destination: &mut [u32],
     destination_width: u32,
     destination_height: u32,
+    skip: Option<(u32, u32, u32, u32)>,
 ) {
     if source_width == 0 || source_height == 0 || destination_width == 0 || destination_height == 0
     {
@@ -4990,11 +5119,21 @@ fn scale_frame_nearest(
     for y in 0..destination_height {
         let source_y =
             (u64::from(y) * u64::from(source_height) / u64::from(destination_height)) as u32;
-        for x in 0..destination_width {
-            let source_x =
-                (u64::from(x) * u64::from(source_width) / u64::from(destination_width)) as u32;
-            destination[(y * destination_width + x) as usize] =
-                source[(source_y * source_width + source_x) as usize];
+        let skip_span = skip.filter(|(_, top, _, height)| y >= *top && y < top + height);
+        let mut scale_span = |from: u32, to: u32| {
+            for x in from..to {
+                let source_x =
+                    (u64::from(x) * u64::from(source_width) / u64::from(destination_width)) as u32;
+                destination[(y * destination_width + x) as usize] =
+                    source[(source_y * source_width + source_x) as usize];
+            }
+        };
+        match skip_span {
+            Some((left, _, width, _)) => {
+                scale_span(0, left.min(destination_width));
+                scale_span((left + width).min(destination_width), destination_width);
+            }
+            None => scale_span(0, destination_width),
         }
     }
 }
@@ -5233,7 +5372,7 @@ mod system_menu_tests {
     fn nearest_scaling_expands_logical_pixels_to_retina_framebuffer() {
         let source = [1, 2, 3, 4];
         let mut destination = [0; 16];
-        scale_frame_nearest(&source, 2, 2, &mut destination, 4, 4);
+        scale_frame_nearest(&source, 2, 2, &mut destination, 4, 4, None);
         assert_eq!(
             destination,
             [1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]

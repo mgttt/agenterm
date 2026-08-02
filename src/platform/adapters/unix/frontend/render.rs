@@ -185,6 +185,9 @@ pub(super) struct TerminalGrid {
     cells: Vec<TerminalCell>,
     cursor: TerminalCursor,
     palette: &'static ThemePalette,
+    /// Rows whose cells changed since the persistent terminal layer last
+    /// consumed them; the layer repaints only these rows.
+    dirty_rows: Vec<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +209,7 @@ impl TerminalGrid {
                 visible: cols > 0 && rows > 0,
             },
             palette,
+            dirty_rows: vec![true; usize::from(rows)],
         }
     }
 
@@ -217,10 +221,13 @@ impl TerminalGrid {
         self.cursor.row = self.cursor.row.min(rows.saturating_sub(1));
         self.cursor.col = self.cursor.col.min(cols.saturating_sub(1));
         self.cursor.visible &= cols > 0 && rows > 0;
+        self.dirty_rows.clear();
+        self.dirty_rows.resize(usize::from(rows), true);
     }
 
     pub(super) fn sync_from_screen(&mut self, screen: &vt100::Screen) {
         for row in 0..self.rows {
+            let mut row_changed = false;
             for col in 0..self.cols {
                 let cell = screen
                     .cell(row, col)
@@ -240,15 +247,52 @@ impl TerminalGrid {
                             attributes: TerminalAttributes::from_cell(cell),
                         }
                     });
-                self.set_cell(col, row, cell);
+                let index = self.index(col, row);
+                if self.cells[index] != cell {
+                    self.cells[index] = cell;
+                    row_changed = true;
+                }
+            }
+            if row_changed && let Some(dirty) = self.dirty_rows.get_mut(usize::from(row)) {
+                *dirty = true;
             }
         }
         let (row, col) = screen.cursor_position();
-        self.cursor = TerminalCursor {
+        let cursor = TerminalCursor {
             row: row.min(self.rows.saturating_sub(1)),
             col: col.min(self.cols.saturating_sub(1)),
             visible: !screen.hide_cursor() && self.cols > 0 && self.rows > 0,
         };
+        if cursor != self.cursor {
+            self.mark_row_dirty(self.cursor.row);
+            self.mark_row_dirty(cursor.row);
+            self.cursor = cursor;
+        }
+    }
+
+    pub(super) fn row_dirty(&self, row: u16) -> bool {
+        self.dirty_rows
+            .get(usize::from(row))
+            .copied()
+            .unwrap_or(true)
+    }
+
+    pub(super) fn any_row_dirty(&self) -> bool {
+        self.dirty_rows.iter().any(|dirty| *dirty)
+    }
+
+    pub(super) fn clear_dirty_rows(&mut self) {
+        self.dirty_rows.fill(false);
+    }
+
+    fn mark_row_dirty(&mut self, row: u16) {
+        if let Some(dirty) = self.dirty_rows.get_mut(usize::from(row)) {
+            *dirty = true;
+        }
+    }
+
+    pub(super) const fn cursor_key(&self) -> (u16, u16, bool) {
+        (self.cursor.row, self.cursor.col, self.cursor.visible)
     }
 
     pub(super) fn cell(&self, col: u16, row: u16) -> TerminalCell {
@@ -907,9 +951,24 @@ pub(super) fn render_frame(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn render_terminal_grid_hidpi(
-    buffer: &mut [u32],
-    stride: u32,
+/// Physical-resolution geometry of the persistent terminal layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TerminalLayerGeometry {
+    pub(super) offset_x: u32,
+    pub(super) offset_y: u32,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) cell_width: u32,
+    pub(super) cell_height: u32,
+    pub(super) padding_x: u32,
+    pub(super) padding_y: u32,
+}
+
+/// Maps the logical terminal viewport onto physical framebuffer pixels for
+/// the persistent terminal layer. Returns `None` when no drawable cell area
+/// remains.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn terminal_layer_geometry(
     physical_width: u32,
     physical_height: u32,
     logical_width: u32,
@@ -919,36 +978,126 @@ pub(super) fn render_terminal_grid_hidpi(
     logical_offset_y: u32,
     logical_cell_width: u32,
     logical_cell_height: u32,
+    cols: u16,
+    rows: u16,
+) -> Option<TerminalLayerGeometry> {
+    if logical_width == 0 || logical_height == 0 {
+        return None;
+    }
+    let scale_w = |value: u32| {
+        (u64::from(value) * u64::from(physical_width) / u64::from(logical_width)) as u32
+    };
+    let scale_h = |value: u32| {
+        (u64::from(value) * u64::from(physical_height) / u64::from(logical_height)) as u32
+    };
+    let cell_width = scale_w(logical_cell_width).max(1);
+    let cell_height = scale_h(logical_cell_height).max(1);
+    let offset_x = scale_w(logical_offset_x);
+    let offset_y = scale_h(logical_offset_y);
+    let scrollbar_width = scale_w(SCROLLBAR_WIDTH).max(1);
+    let content_height = scale_h(logical_content_height).min(physical_height);
+    let available_width = physical_width
+        .saturating_sub(offset_x)
+        .saturating_sub(scrollbar_width);
+    let available_height = content_height.saturating_sub(offset_y);
+    let width = (u32::from(cols) * cell_width).min(available_width);
+    let height = (u32::from(rows) * cell_height).min(available_height);
+    (width > 0 && height > 0).then_some(TerminalLayerGeometry {
+        offset_x,
+        offset_y,
+        width,
+        height,
+        cell_width,
+        cell_height,
+        padding_x: scale_w(CELL_PADDING_X).max(1),
+        padding_y: scale_h(CELL_PADDING_Y).max(1),
+    })
+}
+
+/// Repaints the persistent physical-resolution terminal layer.
+///
+/// Only rows flagged dirty on the grid (plus `extra_dirty_rows`, used for the
+/// previous and current cursor rows) are repainted; clean rows keep their
+/// pixels from earlier frames. `repaint_all` refreshes every row after
+/// geometry, palette, or selection changes.
+pub(super) fn render_terminal_layer(
+    layer: &mut [u32],
+    geometry: TerminalLayerGeometry,
     terminal: TerminalPaint<'_>,
     palette: &ThemePalette,
+    repaint_all: bool,
+    extra_dirty_rows: [Option<u16>; 2],
 ) {
-    if physical_width == logical_width && physical_height == logical_height {
+    let layout = TerminalGridLayout {
+        width: geometry.width,
+        height: geometry.height,
+        offset_x: 0,
+        offset_y: 0,
+        cell_width: geometry.cell_width,
+        cell_height: geometry.cell_height,
+        padding_x: geometry.padding_x,
+        padding_y: geometry.padding_y,
+        scrollbar_width: 0,
+    };
+    let background = rgb_to_pixel(palette.terminal_background);
+    let cursor_row = terminal.grid.cursor_key().0;
+    let mut cursor_row_repainted = false;
+    for row in 0..terminal.grid.rows {
+        let repaint = repaint_all
+            || terminal.grid.row_dirty(row)
+            || extra_dirty_rows.iter().flatten().any(|extra| *extra == row);
+        if !repaint {
+            continue;
+        }
+        let y = u32::from(row) * geometry.cell_height;
+        if y >= geometry.height {
+            break;
+        }
+        fill_rect(
+            layer,
+            geometry.width,
+            0,
+            y,
+            geometry.width,
+            geometry.cell_height.min(geometry.height - y),
+            background,
+        );
+        render_terminal_grid_row(layer, geometry.width, &terminal, palette, layout, row);
+        if row == cursor_row {
+            cursor_row_repainted = true;
+        }
+    }
+    if cursor_row_repainted {
+        render_terminal_cursor(layer, geometry.width, &terminal, palette, layout);
+    }
+}
+
+/// Copies the terminal layer into the output frame at its physical offset.
+pub(super) fn blit_terminal_layer(
+    destination: &mut [u32],
+    stride: u32,
+    destination_height: u32,
+    layer: &[u32],
+    geometry: TerminalLayerGeometry,
+) {
+    let copy_width = geometry.width.min(stride.saturating_sub(geometry.offset_x)) as usize;
+    if copy_width == 0 {
         return;
     }
-    let scale = |value: u32, logical: u32, physical: u32| {
-        if logical == 0 {
-            0
-        } else {
-            (u64::from(value) * u64::from(physical) / u64::from(logical)) as u32
-        }
-    };
-    render_terminal_grid(
-        buffer,
-        stride,
-        terminal,
-        palette,
-        TerminalGridLayout {
-            width: physical_width,
-            height: scale(logical_content_height, logical_height, physical_height),
-            offset_x: scale(logical_offset_x, logical_width, physical_width),
-            offset_y: scale(logical_offset_y, logical_height, physical_height),
-            cell_width: scale(logical_cell_width, logical_width, physical_width).max(1),
-            cell_height: scale(logical_cell_height, logical_height, physical_height).max(1),
-            padding_x: scale(CELL_PADDING_X, logical_width, physical_width).max(1),
-            padding_y: scale(CELL_PADDING_Y, logical_height, physical_height).max(1),
-            scrollbar_width: scale(SCROLLBAR_WIDTH, logical_width, physical_width).max(1),
-        },
-    );
+    let rows = geometry
+        .height
+        .min(destination_height.saturating_sub(geometry.offset_y));
+    for row in 0..rows {
+        let source_start = (row * geometry.width) as usize;
+        let destination_start = ((geometry.offset_y + row) * stride + geometry.offset_x) as usize;
+        let (Some(source), Some(target)) = (
+            layer.get(source_start..source_start + copy_width),
+            destination.get_mut(destination_start..destination_start + copy_width),
+        ) else {
+            continue;
+        };
+        target.copy_from_slice(source);
+    }
 }
 
 fn render_ime_preedit(
@@ -1724,13 +1873,27 @@ fn render_terminal_grid(
     palette: &ThemePalette,
     layout: TerminalGridLayout,
 ) {
+    for row in 0..terminal.grid.rows {
+        render_terminal_grid_row(buffer, stride, &terminal, palette, layout, row);
+    }
+    render_terminal_cursor(buffer, stride, &terminal, palette, layout);
+}
+
+fn render_terminal_grid_row(
+    buffer: &mut [u32],
+    stride: u32,
+    terminal: &TerminalPaint<'_>,
+    palette: &ThemePalette,
+    layout: TerminalGridLayout,
+    row: u16,
+) {
     let terminal_width = layout
         .width
         .saturating_sub(layout.offset_x)
         .saturating_sub(layout.scrollbar_width);
     let selection_fg = palette.selection_foreground;
     let selection_bg = palette.selection_background;
-    for row in 0..terminal.grid.rows {
+    {
         let mut col = 0;
         while col < terminal.grid.cols {
             let x = layout.offset_x + u32::from(col) * layout.cell_width;
@@ -1776,6 +1939,19 @@ fn render_terminal_grid(
             col += if wide { 2 } else { 1 };
         }
     }
+}
+
+fn render_terminal_cursor(
+    buffer: &mut [u32],
+    stride: u32,
+    terminal: &TerminalPaint<'_>,
+    palette: &ThemePalette,
+    layout: TerminalGridLayout,
+) {
+    let terminal_width = layout
+        .width
+        .saturating_sub(layout.offset_x)
+        .saturating_sub(layout.scrollbar_width);
     if terminal.cursor_style != TerminalCursorStyle::Hidden && terminal.grid.cursor.visible {
         let cursor = terminal.grid.cursor;
         let x = layout.offset_x + u32::from(cursor.col) * layout.cell_width;
@@ -3206,6 +3382,79 @@ mod tests {
     }
 
     #[test]
+    fn sync_marks_only_changed_rows_dirty_and_layer_repaints_them() {
+        let palette = ThemeId::Dark.palette();
+        let mut parser = vt100::Parser::new(3, 4, 0);
+        parser.process(b"aaaa\r\nbbbb\r\ncccc\x1b[?25l");
+        let mut grid = TerminalGrid::new(4, 3, palette);
+        grid.sync_from_screen(parser.screen());
+        assert!(grid.any_row_dirty());
+        grid.clear_dirty_rows();
+
+        // Change only the middle row; park the cursor back where it was so
+        // only the cell change dirties a row.
+        parser.process(b"\x1b[2;1HBBBB\x1b[3;5H");
+        grid.sync_from_screen(parser.screen());
+        assert!(!grid.row_dirty(0));
+        assert!(grid.row_dirty(1));
+        assert!(!grid.row_dirty(2));
+
+        // A partial layer repaint updates the dirty row and leaves clean rows.
+        let (cell_width, cell_height) = cell_metrics(12);
+        let geometry = TerminalLayerGeometry {
+            offset_x: 0,
+            offset_y: 0,
+            width: cell_width * 4,
+            height: cell_height * 3,
+            cell_width,
+            cell_height,
+            padding_x: CELL_PADDING_X,
+            padding_y: CELL_PADDING_Y,
+        };
+        fn paint(grid: &TerminalGrid) -> TerminalPaint<'_> {
+            TerminalPaint {
+                grid,
+                selection: None,
+                cursor_style: TerminalCursorStyle::Hidden,
+                cursor_shape: TerminalCursorShape::Block,
+            }
+        }
+        let sentinel = 0x00ff_00ffu32;
+        let mut layer = vec![sentinel; (geometry.width * geometry.height) as usize];
+        render_terminal_layer(
+            &mut layer,
+            geometry,
+            paint(&grid),
+            palette,
+            false,
+            [None, None],
+        );
+        let row_pixels = (geometry.width * cell_height) as usize;
+        assert!(layer[..row_pixels].iter().all(|pixel| *pixel == sentinel));
+        assert!(
+            layer[row_pixels..2 * row_pixels]
+                .iter()
+                .all(|pixel| *pixel != sentinel)
+        );
+        assert!(
+            layer[2 * row_pixels..]
+                .iter()
+                .all(|pixel| *pixel == sentinel)
+        );
+
+        // A full repaint covers every row.
+        render_terminal_layer(
+            &mut layer,
+            geometry,
+            paint(&grid),
+            palette,
+            true,
+            [None, None],
+        );
+        assert!(layer.iter().all(|pixel| *pixel != sentinel));
+    }
+
+    #[test]
     fn hidpi_terminal_grid_rasterizes_at_physical_resolution() {
         let palette = ThemeId::Dark.palette();
         let (cell_width, cell_height) = cell_metrics(14);
@@ -3254,9 +3503,7 @@ mod tests {
         }
         let nearest = physical.clone();
 
-        render_terminal_grid_hidpi(
-            &mut physical,
-            physical_width,
+        let geometry = terminal_layer_geometry(
             physical_width,
             physical_height,
             logical_width,
@@ -3266,8 +3513,18 @@ mod tests {
             0,
             cell_width,
             cell_height,
-            paint(),
-            palette,
+            grid.cols,
+            grid.rows,
+        )
+        .expect("layer geometry");
+        let mut layer = vec![0; (geometry.width * geometry.height) as usize];
+        render_terminal_layer(&mut layer, geometry, paint(), palette, true, [None, None]);
+        blit_terminal_layer(
+            &mut physical,
+            physical_width,
+            physical_height,
+            &layer,
+            geometry,
         );
 
         assert_ne!(physical, nearest);
