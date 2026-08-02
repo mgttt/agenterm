@@ -170,55 +170,57 @@ fn classify_failure_root(failure) {
     "bug/unknown"
 }
 
-fn platform_state_for(profile, run_platform, emitted, succeeded, failure) {
+fn platform_state_for(profile, run_platform, emitted, failure) {
     let pending = "not-executed-yet";
-    let windows_state = if profile.windows_supported { pending } else { "Unsupported" };
-    let linux_state = if profile.linux_supported { pending } else { "Unsupported" };
-    let macos_state = if profile.macos_supported { pending } else { "Unsupported" };
-    let windows_root = if profile.windows_supported { "" } else { profile.unsupported_root_cause };
-    let linux_root = if profile.linux_supported { "" } else { profile.unsupported_root_cause };
-    let macos_root = if profile.macos_supported { "" } else { profile.unsupported_root_cause };
-
-    if run_platform == "windows" {
-        if profile.windows_supported {
-            if succeeded && emitted.contains(profile.id) {
-                windows_state = "Supported";
-            } else if profile.windows_supported {
-                windows_state = "Failed";
-            }
-            if windows_state == "Failed" {
-                windows_root = classify_failure_root(failure);
-            } else {
-                windows_root = "";
-            }
-        }
-    } else if run_platform == "linux" {
-        if profile.linux_supported {
-            if succeeded && emitted.contains(profile.id) {
-                linux_state = "Supported";
-            } else if profile.linux_supported {
-                linux_state = "Failed";
-            }
-            if linux_state == "Failed" {
-                linux_root = classify_failure_root(failure);
-            } else {
-                linux_root = "";
-            }
-        }
+    let windows_state = if !profile.windows_supported {
+        "Unsupported"
+    } else if run_platform == "windows" && failure == "" && emitted.contains(profile.id) {
+        "Supported"
+    } else if run_platform == "windows" && failure != "" {
+        "Failed"
     } else {
-        if profile.macos_supported {
-            if succeeded && emitted.contains(profile.id) {
-                macos_state = "Supported";
-            } else if profile.macos_supported {
-                macos_state = "Failed";
-            }
-            if macos_state == "Failed" {
-                macos_root = classify_failure_root(failure);
-            } else {
-                macos_root = "";
-            }
-        }
-    }
+        pending
+    };
+    let linux_state = if !profile.linux_supported {
+        "Unsupported"
+    } else if run_platform == "linux" && failure == "" && emitted.contains(profile.id) {
+        "Supported"
+    } else if run_platform == "linux" && failure != "" {
+        "Failed"
+    } else {
+        pending
+    };
+    let macos_state = if !profile.macos_supported {
+        "Unsupported"
+    } else if run_platform == "macos" && failure == "" && emitted.contains(profile.id) {
+        "Supported"
+    } else if run_platform == "macos" && failure != "" {
+        "Failed"
+    } else {
+        pending
+    };
+
+    let windows_root = if windows_state == "Unsupported" {
+        profile.unsupported_root_cause
+    } else if windows_state == "Failed" {
+        classify_failure_root(failure)
+    } else {
+        ""
+    };
+    let linux_root = if linux_state == "Unsupported" {
+        profile.unsupported_root_cause
+    } else if linux_state == "Failed" {
+        classify_failure_root(failure)
+    } else {
+        ""
+    };
+    let macos_root = if macos_state == "Unsupported" {
+        profile.unsupported_root_cause
+    } else if macos_state == "Failed" {
+        classify_failure_root(failure)
+    } else {
+        ""
+    };
 
     #{
         windows: windows_state,
@@ -230,7 +232,7 @@ fn platform_state_for(profile, run_platform, emitted, succeeded, failure) {
     }
 }
 
-fn write_matrix_reports(context, platform, emitted, succeeded, failure, emit_matrix, profiles) {
+fn write_matrix_reports(context, platform, emitted, failure, emit_matrix, profiles) {
     if !emit_matrix {
         return;
     }
@@ -248,7 +250,7 @@ fn write_matrix_reports(context, platform, emitted, succeeded, failure, emit_mat
 
     let matrix_result = [];
     for profile in profiles {
-        let per_platform = platform_state_for(profile, platform, emitted, succeeded, failure);
+        let per_platform = platform_state_for(profile, platform, emitted, failure);
         let row_state = if platform == "windows" {
             per_platform.windows
         } else if platform == "linux" {
@@ -298,7 +300,7 @@ fn write_matrix_reports(context, platform, emitted, succeeded, failure, emit_mat
             "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
         ];
         for profile in profiles {
-            let per_platform = platform_state_for(profile, platform, emitted, succeeded, failure);
+            let per_platform = platform_state_for(profile, platform, emitted, failure);
             let row_state = if platform == "windows" {
                 per_platform.windows
             } else if platform == "linux" {
@@ -495,7 +497,6 @@ write_matrix_reports(
     context,
     platform,
     read_emitted_evidence(context),
-    succeeded,
     failure,
     emit_matrix,
     evidence_profiles
