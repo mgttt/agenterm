@@ -141,7 +141,7 @@ O1 并发树（并行）
 ├─ D1 [x] src/platform/mod.rs `action` → src/frontend/action.rs
 ├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
 ├─ D1 [ ] src/platform/control_center.rs → src/frontend/control_center.rs
-├─ D2 [~] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures}（input/control_center 已拆）
+├─ D2 [~] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures}（input/control_center/runtime/test_fixtures 已拆，paths 部分）
 ├─ D3 [ ] Win remote vs Unix embedded 共享交互管线（selection/wheel/focus 单一策略）
 └─ D4 [ ] 每条可见差进入 evidence matrix；无 adapter 内产品 if
 ```

@@ -1265,7 +1265,7 @@ mod tests {
     }
 
     fn process_shell_test_host_supported() -> bool {
-        crate::platform::script_process_test_host_supported()
+        crate::platform::policy::runtime::script_process_test_host_supported()
     }
 
     fn wrapped_shell_command(shell_command: &str, arguments: &[&str]) -> (String, Vec<String>) {
@@ -1287,11 +1287,11 @@ mod tests {
     }
 
     fn long_running_shell_command() -> (&'static str, &'static [&'static str]) {
-        crate::platform::long_running_process_command_fixture()
+        crate::platform::policy::test_fixtures::long_running_process_command_fixture()
     }
 
     fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
-        crate::platform::long_running_process_command_timeout()
+        crate::platform::policy::test_fixtures::long_running_process_command_timeout()
     }
 
     fn shell_wrapped_process_command(

@@ -6,3 +6,6 @@
 
 pub(crate) mod control_center;
 pub(crate) mod input;
+pub(crate) mod paths;
+pub(crate) mod runtime;
+pub(crate) mod test_fixtures;

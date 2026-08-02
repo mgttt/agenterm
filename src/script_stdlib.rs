@@ -1079,8 +1079,8 @@ mod tests {
     #[test]
     fn atomic_replace_supports_verbatim_paths_beyond_max_path() {
         if !matches!(
-            crate::platform::atomic_path_semantics(),
-            crate::platform::AtomicPathSemantics::VerbatimLongPath
+            crate::platform::policy::paths::atomic_path_semantics(),
+            crate::platform::policy::paths::AtomicPathSemantics::VerbatimLongPath
         ) {
             return;
         }

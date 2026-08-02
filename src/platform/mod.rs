@@ -26,6 +26,8 @@ pub(crate) use policy::input::{
     terminal_shortcut_empty_copy_action_is_suppressed,
 };
 
+pub(crate) use policy::runtime::hosted_script_worker_available;
+
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
 };
@@ -106,16 +108,6 @@ pub(crate) fn workspace_layout_kind() -> WorkspaceLayoutKind {
     } else {
         WorkspaceLayoutKind::DirectoryByScope
     }
-}
-
-#[allow(dead_code)]
-pub(crate) fn script_process_test_host_supported() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Windows
-            | agenterm_platform::PlatformKind::Linux
-            | agenterm_platform::PlatformKind::Macos
-    )
 }
 
 /// Capability surface an adapter may expose (capability-oriented, not one
@@ -200,47 +192,6 @@ pub(crate) fn project_capability_status(
             code: failed_code,
             message: "platform capability returned an unknown status".to_owned(),
         },
-    }
-}
-
-pub(crate) fn hosted_script_worker_available() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Windows
-    )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
-pub(crate) enum AtomicPathSemantics {
-    VerbatimLongPath,
-    CanonicalSafe,
-}
-
-#[allow(dead_code)]
-pub(crate) fn atomic_path_semantics() -> AtomicPathSemantics {
-    if is_windows_host() {
-        AtomicPathSemantics::VerbatimLongPath
-    } else {
-        AtomicPathSemantics::CanonicalSafe
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
-    if is_windows_host() {
-        ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
-    } else {
-        ("sleep", &["30"])
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
-    if is_windows_host() {
-        ("ping", &["-n", "6", "127.0.0.1"])
-    } else {
-        ("sleep", &["5"])
     }
 }
 
