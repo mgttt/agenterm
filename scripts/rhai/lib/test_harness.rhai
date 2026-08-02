@@ -9,6 +9,12 @@ fn require(condition, message) {
 fn new_context(repo_value, suite) {
     require(suite != "", "test_harness_suite_empty");
     let repo = std::path::absolute(repo_value).display;
+    let shared_evidence = std::env::get("AGENTERM_TEST_EVIDENCE_PATH");
+    let evidence_file = if shared_evidence != () && shared_evidence != "" {
+        std::path::absolute(shared_evidence).display
+    } else {
+        ""
+    };
     let owned_root = std::path::join(
         repo,
         "target/smoke/test-runs"
@@ -58,10 +64,14 @@ fn new_context(repo_value, suite) {
             "settings.json"
         ).display,
         instance_directory: instance_directory,
-        evidence_path: std::path::join(
-            evidence_directory,
-            "emitted.txt"
-        ).display,
+        evidence_path: if evidence_file != () && evidence_file != "" {
+            evidence_file
+        } else {
+            std::path::join(
+                evidence_directory,
+                "emitted.txt"
+            ).display
+        },
         failure_directory: std::path::join(
             run_directory,
             "failure"

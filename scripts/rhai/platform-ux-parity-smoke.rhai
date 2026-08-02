@@ -483,6 +483,7 @@ fn run_script_task(context, script_bin, repository, task_file, task_args, task_l
     command.env("AGENTERM_WORKSPACE_PATH", context.workspace_path);
     command.env("AGENTERM_SETTINGS_PATH", context.settings_path);
     command.env("AGENTERM_INSTANCE_DIR", context.instance_directory);
+    command.env("AGENTERM_TEST_EVIDENCE_PATH", context.evidence_path);
     command.env("AGENTERM_NO_ACTIVATE", "1");
 
     let output = command.output();
