@@ -424,11 +424,14 @@ fn resolve_script_binary(script_exe, repository) {
     throw "no_available_script_runtime";
 }
 
-fn run_script_task(context, script_bin, repository, task_file, task_args, task_label) {
+fn run_script_task(context, script_bin, repository, task_file, task_args, task_label, use_separator) {
     let command = std::process::command(script_bin);
     command.current_dir(repository);
     let invoked = ["task", "run", task_file, repository];
     command.args(invoked);
+    if use_separator {
+        command.args(["--"]);
+    }
     command.args(task_args);
     command.timeout(std::time::Duration::from_secs(300));
     command.capture_limit(262144);
@@ -496,7 +499,8 @@ fn execute_phase(
     task_label,
     declared_evidence,
     evidence_ids,
-    evidence_states
+    evidence_states,
+    use_separator
 ) {
     try {
         run_script_task(
@@ -505,7 +509,8 @@ fn execute_phase(
             repository,
             task_file,
             task_args,
-            task_label
+            task_label,
+            use_separator
         );
         for evidence_id in evidence_ids {
             if evidence_id != "" {
@@ -553,7 +558,8 @@ let startup_result = execute_phase(
     "startup",
     declared_evidence,
     startup_evidence,
-    evidence_states
+    evidence_states,
+    false
 );
 if !startup_result.success {
     succeeded = false;
@@ -571,7 +577,8 @@ let wake_result = execute_phase(
     "wake-contract",
     declared_evidence,
     ["ux-parity.wake-coalescing"],
-    evidence_states
+    evidence_states,
+    false
 );
 if !wake_result.success {
     succeeded = false;
@@ -594,7 +601,8 @@ if platform == "windows" {
             "ux-parity.remote-ui.selection",
             "ux-parity.window-focus-contract"
         ],
-        evidence_states
+        evidence_states,
+        false
     );
     if !remote_result.success {
         succeeded = false;
@@ -609,12 +617,13 @@ if platform == "windows" {
         context,
         runtime_script,
         repository,
-        "unix-frontend-" + platform + "-smoke",
+        "unix-frontend-smoke",
         [gui_exe, cli_exe, "--platform", platform],
         "unix-frontend",
         declared_evidence,
         [workbench_evidence, clipboard_evidence, "ux-parity.window-focus-contract"],
-        evidence_states
+        evidence_states,
+        true
     );
     if !unix_result.success {
         succeeded = false;
