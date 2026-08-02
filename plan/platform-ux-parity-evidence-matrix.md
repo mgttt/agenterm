@@ -207,7 +207,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 ## 本轮实测化进展（2026-08-02）
 
 - 已落地收口：非平台目录 `src/` 里的平台差异判定，除必要 UI/UX 可见性场景外已从编译期 `cfg` 分裂收拢到平台能力入口：
-  - `src/script_process.rs`：`long_running_process_*` 与 `shell_wrapped_process_command` 改为统一 `crate::platform::is_windows_host() || crate::platform::is_unix_host()` 运行时分支。
+  - `src/script_process.rs`：`long_running_process_*` 与 `shell_wrapped_process_command` 改为统一 `crate::platform::script_process_test_host_supported()` 运行时分支。
   - `src/script_stdlib.rs`：windows 特有路径替换测试改为运行时 `is_windows_host()` 返回早退。
   - `src/workspace.rs`：`unix_default_workspace_contains_workspaces_component` 改为运行时 host 早退。
 - 与 O1C 对齐的当前建议：
@@ -216,23 +216,23 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 
 ### 最近一次 Windows 回归（`platform-ux-parity-smoke -- --emit-matrix`）
 
-- `run_id`: `1785675327036-13860`
-- `timestamp_utc`: `2026-08-02T12:55:49.953Z`
-- `suite`: `platform-ux-parity-smoke`
-- `failure`: `ui/control-missing`（`remote-ui-smoke` 内 `double_click_tab_text` 与 `window_control` 空控件路径）
+- `run_id`: `1785676650739-164412`
+- `timestamp_utc`: 未在输出摘要中直接给出（由 manifest 提供）
+- `suite`: `platform-ux-parity`
+- `failure`: 无（`result_class: success`）
 
 | 分支 | 场景 | evidence_id | Windows | Linux | macOS | 归因 |
 |---|---|---|---|---|---|---|
-| startup | first-window-startup | `ux-parity.startup` | Supported | not-executed-yet | not-executed-yet | - |
-| startup | startup-title | `ux-parity.startup-title` | Supported | not-executed-yet | not-executed-yet | - |
-| ux-startup | gui-wake-contract | `ux-parity.wake-coalescing` | Supported | not-executed-yet | not-executed-yet | - |
+| startup | first-window-startup | `ux-parity.startup` | Supported | Failed | Failed | infra/platform-binary-missing |
+| startup | startup-title | `ux-parity.startup-title` | Supported | Failed | Failed | infra/platform-binary-missing |
+| ux-startup | gui-wake-contract | `ux-parity.wake-coalescing` | Supported | Failed | Failed | infra/platform-binary-missing |
 | frontend-lx | linux-workbench | `ux-parity.linux.unix-frontend.workbench` | Unsupported | not-executed-yet | Unsupported | platform-gap |
 | frontend-lx | linux-clipboard | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | not-executed-yet | Unsupported | platform-gap |
 | frontend-mx | macos-workbench | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | not-executed-yet | platform-gap |
 | frontend-mx | macos-clipboard | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | not-executed-yet | platform-gap |
-| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Failed | Unsupported | Unsupported | ui/control-missing |
-| remote-ui | selection | `ux-parity.remote-ui.selection` | Failed | Unsupported | Unsupported | ui/control-missing |
-| ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Failed | not-executed-yet | not-executed-yet | infra/rhai-runtime |
+| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Supported | Failed | Failed | infra/platform-binary-missing |
+| remote-ui | selection | `ux-parity.remote-ui.selection` | Supported | Failed | Failed | infra/platform-binary-missing |
+| ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Supported | Failed | Failed | infra/platform-binary-missing |
 
 下轮建议：
 - 用 `platform-ux-parity-smoke-linux -- --emit-matrix` 补齐 Linux 列。
@@ -241,13 +241,13 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 ### 最近一次平台预检（Windows 主机）
 
 - `platform-ux-parity-smoke-linux -- --emit-matrix`
-  - `run_id: 1785675131350-143268`
+  - `run_id: 1785676718989-216772`
   - `suite: platform-ux-parity-smoke`
   - `failure: platform_gui_missing`
   - 根因归类：`infra/platform-binary-missing`
   - Linux 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（非脚本异常中断）。
 - `platform-ux-parity-smoke-macos -- --emit-matrix`
-  - `run_id: 1785675170802-256968`
+  - `run_id: 1785676727428-266076`
   - `suite: platform-ux-parity-smoke`
   - `failure: platform_gui_missing`
   - 根因归类：`infra/platform-binary-missing`
