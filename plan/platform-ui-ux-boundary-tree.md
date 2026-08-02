@@ -206,6 +206,7 @@ src/platform/目录其余适配层
 
 - 实测验收（src 非平台层）：
 - 截止 `2026-08-02`，`src` 非平台目录未发现剩余 `#[cfg(windows)]`/`#[cfg(unix)]` 或 `cfg!(windows)`/`cfg!(unix)` 直接分支；`script_process` 的测试分支改为运行时能力判断，测试行为与 `platform` 能力入口一致。
+- 新增并入回归约束：`tests/platform_boundary_regressions.rs` 对 `src/`（排除 `src/platform`）执行上述关键词扫描；若未来出现平台判定回流，测试会直接失败，作为非平台层行为边界失败前置。
 - 追加（2026-08-02）：对 `src`（排除 `src/platform/**`）执行直接扫描验证：
   - 搜索项：`is_windows_host(`、`is_unix_host(`、`platform_kind`、`cfg!("windows")`、`cfg!("unix")`、`#\[cfg(windows)]`、`#\[cfg(unix)]`
   - 扫描结果：均无命中（除 `src/platform` 外）
