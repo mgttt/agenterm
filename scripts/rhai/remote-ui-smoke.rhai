@@ -373,16 +373,16 @@ fn find_tab(snapshot, id) {
 fn double_click_tab_text(context, cli, gui_child, id) {
     let snapshot = json_cli(context, cli, ["ui-snapshot"]);
     let tab = find_tab(snapshot, id);
+    require(tab != (), "remote_ui_tab_missing");
+    let text_geometry = tab.render.text;
     require(
-        tab != ()
-            && tab.render.text.width > 0
-            && tab.render.text.height > 0,
+        text_geometry.width > 0 && text_geometry.height > 0,
         "remote_ui_tab_text_geometry_missing"
     );
     double_click_point(
         gui_child,
-        tab.render.text.left + tab.render.text.width / 2,
-        tab.render.text.top + tab.render.text.height / 2
+        text_geometry.left + text_geometry.width / 2,
+        text_geometry.top + text_geometry.height / 2
     );
 }
 
