@@ -1,12 +1,12 @@
-use std::{os::windows::ffi::OsStrExt as _, path::Path, ptr::null_mut};
+use std::{os::windows::io::AsRawHandle as _, path::Path, ptr::null_mut};
 
 use windows_sys::Win32::{
-    Foundation::{GENERIC_EXECUTE, GENERIC_READ, GetLastError, LocalFree},
+    Foundation::{GENERIC_EXECUTE, GENERIC_READ, GetLastError, HANDLE, LocalFree},
     Security::{
         ACL,
         Authorization::{
-            EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
-            SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+            EXPLICIT_ACCESS_W, GetSecurityInfo, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
+            SetSecurityInfo, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
         },
         CreateWellKnownSid, DACL_SECURITY_INFORMATION, GetLengthSid, IsValidSid, NO_INHERITANCE,
         PSECURITY_DESCRIPTOR, SECURITY_MAX_SID_SIZE, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
@@ -20,6 +20,7 @@ use crate::{
         DirectoryTreeAccess, WellKnownDirectoryPrincipal,
     },
     filesystem_entry,
+    filesystem_open::{ExistingEntryAccess, ExistingEntryType},
 };
 
 const OPERATION: &str = "grant-directory-tree-access";
@@ -145,12 +146,23 @@ fn grant_entry(
     sid: &[usize],
     access: u32,
 ) -> Result<(), DirectoryAccessError> {
-    let wide = wide_path(path)?;
+    let entry_type = if is_dir {
+        ExistingEntryType::Directory
+    } else {
+        ExistingEntryType::File
+    };
+    let file = crate::filesystem_open::open_existing_path_with_access(
+        path,
+        entry_type,
+        ExistingEntryAccess::SecurityDescriptor,
+    )
+    .map_err(|source| io_error("open-entry", path, source))?;
+    let handle = file.as_raw_handle() as HANDLE;
     let mut old_dacl: *mut ACL = null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
     let code = unsafe {
-        GetNamedSecurityInfoW(
-            wide.as_ptr(),
+        GetSecurityInfo(
+            handle,
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
             null_mut(),
@@ -165,7 +177,7 @@ fn grant_entry(
             DirectoryAccessErrorKind::NativeFailure,
             path,
             Some(code),
-            "GetNamedSecurityInfoW failed",
+            "GetSecurityInfo failed",
         ));
     }
     let _descriptor = LocalGuard(descriptor.cast());
@@ -197,8 +209,8 @@ fn grant_entry(
     }
     let _new_dacl = LocalGuard(new_dacl.cast());
     let code = unsafe {
-        SetNamedSecurityInfoW(
-            wide.as_ptr(),
+        SetSecurityInfo(
+            handle,
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
             null_mut(),
@@ -212,7 +224,7 @@ fn grant_entry(
             DirectoryAccessErrorKind::NativeFailure,
             path,
             Some(code),
-            "SetNamedSecurityInfoW failed",
+            "SetSecurityInfo failed",
         ));
     }
     Ok(())
@@ -227,18 +239,6 @@ const fn access_mask(access: DirectoryTreeAccess) -> u32 {
 
 fn metadata(path: &Path) -> Result<std::fs::Metadata, DirectoryAccessError> {
     std::fs::symlink_metadata(path).map_err(|source| io_error("read-metadata", path, source))
-}
-
-fn wide_path(path: &Path) -> Result<Vec<u16>, DirectoryAccessError> {
-    if path.as_os_str().encode_wide().any(|unit| unit == 0) {
-        return Err(error(
-            DirectoryAccessErrorKind::InvalidInput,
-            path,
-            None,
-            "path contains NUL",
-        ));
-    }
-    Ok(path.as_os_str().encode_wide().chain(Some(0)).collect())
 }
 
 fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> DirectoryAccessError {
