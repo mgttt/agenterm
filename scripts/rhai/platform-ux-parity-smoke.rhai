@@ -206,6 +206,9 @@ fn classify_failure_root(failure) {
     if failure.contains("runtime_error") || failure.contains("script_runtime") {
         return "infra/rhai-runtime";
     }
+    if failure.contains("unsupported platform") {
+        return "infra/unsupported-platform";
+    }
     if failure.contains("platform_gui_missing") ||
             failure.contains("platform_cli_missing") ||
             failure.contains("platform_script_missing") {
@@ -559,7 +562,10 @@ let platform = parsed.platform;
 let evidence_states = init_evidence_states(evidence_profiles);
 let failure_messages = [];
 let succeeded = true;
-let preflight_message = if std::fs::exists(gui_exe) {
+let is_supported_platform = platform == "windows" || platform == "linux" || platform == "macos";
+let preflight_message = if !is_supported_platform {
+    "unsupported platform (windows|linux|macos)"
+} else if std::fs::exists(gui_exe) {
     if std::fs::exists(cli_exe) {
         let runtime_script = resolve_script_binary(script_exe, repository);
         if std::fs::exists(runtime_script) {
@@ -595,11 +601,6 @@ let context = test_harness::new_context(repository, "platform-ux-parity");
 let owned_children = [];
 
 if preflight_message == () {
-    require(
-        platform == "windows" || platform == "linux" || platform == "macos",
-        "unsupported platform (windows|linux|macos)"
-    );
-
     print("STEP startup contract and first-window behavior");
     let startup_evidence = ["ux-parity.startup", "ux-parity.startup-title"];
     let startup_result = execute_phase(
