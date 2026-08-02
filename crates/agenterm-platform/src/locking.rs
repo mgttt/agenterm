@@ -118,6 +118,7 @@ mod tests {
         let child = directory.join("child");
         std::fs::create_dir_all(&child).expect("create alias fixture");
         let canonical = directory.join("state.lock");
+        std::fs::write(&canonical, b"path-lock-alias").expect("create existing lock target");
         let alias = child.join("..").join("STATE.LOCK");
 
         let first = PathLock::acquire(&canonical).expect("acquire canonical path");
