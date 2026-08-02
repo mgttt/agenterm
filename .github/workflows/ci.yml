@@ -41,6 +41,17 @@ jobs:
           --target ${{ matrix.target }}
           --no-default-features
           --features filesystem-conventions
+      - name: Assert filesystem conventions dependency surface
+        shell: pwsh
+        env:
+          CARGO_TARGET: ${{ matrix.target }}
+        run: |
+          $tree = cargo tree --locked -p agenterm-platform --target $env:CARGO_TARGET --no-default-features --features filesystem-conventions --edges normal --format '{p}' | Out-String
+          foreach ($native in @('libc', 'windows-sys')) {
+            if ($tree -match "(?m)^$([regex]::Escape($native)) ") {
+              throw "filesystem-conventions unexpectedly enables native dependency '$native'"
+            }
+          }
       - name: Check filesystem minimal feature
         run: >-
           cargo check --locked -p agenterm-platform
