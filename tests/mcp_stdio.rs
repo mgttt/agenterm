@@ -1883,8 +1883,8 @@ fn reply_snapshot_backend(mut stream: TcpStream, snapshot: &Value) {
         "error_category": "",
         "retryable": false
     });
-    writeln!(stream, "{response}").expect("write snapshot backend response");
-    stream.flush().expect("flush snapshot backend response");
+    let _ = writeln!(stream, "{response}");
+    let _ = stream.flush();
     let mut trailing = Vec::new();
     let _ = stream.read_to_end(&mut trailing);
 }
