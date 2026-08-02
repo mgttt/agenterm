@@ -38,6 +38,12 @@ jobs:
           --target ${{ matrix.target }}
           --no-default-features
           --features filesystem-conventions
+      - name: Check filesystem minimal feature
+        run: >-
+          cargo check --locked -p agenterm-platform
+          --target ${{ matrix.target }}
+          --no-default-features
+          --features filesystem
 
   windows:
     runs-on: windows-latest
