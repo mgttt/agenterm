@@ -40,6 +40,7 @@ pub enum Capability {
     ProcessSecurity,
     ProcessImage,
     ProcessMetrics,
+    ProcessConventions,
     ProcessSpawn,
     SharedMemory,
     Process,
@@ -95,6 +96,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::ProcessSecurity => (cfg!(feature = "process-security"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
+        Capability::ProcessConventions => (cfg!(feature = "process-conventions"), true),
         Capability::ProcessSpawn => (cfg!(feature = "process-spawn"), true),
         Capability::SharedMemory => (cfg!(feature = "shared-memory"), true),
         Capability::Process => (cfg!(feature = "process"), true),
@@ -229,6 +231,8 @@ pub mod process_control;
 #[cfg(feature = "process-image")]
 pub mod process_image;
 
+#[cfg(feature = "process-conventions")]
+pub mod process_conventions;
 #[cfg(feature = "process-metrics")]
 pub mod process_metrics;
 #[cfg(feature = "process-observation")]
@@ -287,6 +291,22 @@ mod tests {
         #[cfg(not(feature = "filesystem"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "process-conventions")]
+    #[test]
+    fn process_conventions_do_not_claim_process_spawn() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessConventions),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "process-spawn"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessSpawn),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }

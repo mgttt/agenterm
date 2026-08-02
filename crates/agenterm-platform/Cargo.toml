@@ -72,6 +72,7 @@ app-container-profile = [
     "windows-sys/Win32_Security_Authorization",
     "windows-sys/Win32_Security_Isolation",
 ]
+process-conventions = []
 process-control = [
     "dep:libc",
     "dep:windows-sys",
@@ -228,6 +229,7 @@ full = [
     "console-interrupt",
     "user-identity",
     "shared-memory",
+    "process-conventions",
     "process",
     "filesystem",
     "filesystem-entry",

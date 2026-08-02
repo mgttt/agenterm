@@ -26,6 +26,7 @@ pub mod native_virtualization;
 pub mod process;
 #[cfg(feature = "process-control")]
 pub mod process_control;
+pub mod process_conventions;
 #[cfg(feature = "process-image")]
 pub mod process_image;
 #[cfg(feature = "process-metrics")]
