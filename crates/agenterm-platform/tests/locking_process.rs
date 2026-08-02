@@ -42,6 +42,18 @@ fn path_lock_is_cross_process_and_released() {
     run_test_child(&unicode_alias, "contended");
     drop(unicode_guard);
     run_test_child(&unicode_alias, "available");
+
+    let hard_link_path = directory.join("hard-link-original.lock");
+    let hard_link_alias = directory.join("hard-link-alias.lock");
+    std::fs::write(&hard_link_path, b"hard-link-process-lock")
+        .expect("create hard-link process-lock target");
+    std::fs::hard_link(&hard_link_path, &hard_link_alias)
+        .expect("create hard-link process-lock alias");
+    let hard_link_guard = PathLock::acquire(&hard_link_path).expect("hard-link parent lock");
+    run_test_child(&hard_link_alias, "contended");
+    drop(hard_link_guard);
+    run_test_child(&hard_link_alias, "available");
+
     std::fs::remove_dir_all(directory).expect("remove process-lock fixture");
 }
 
