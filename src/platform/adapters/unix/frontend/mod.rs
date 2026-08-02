@@ -1030,6 +1030,11 @@ impl UnixApp {
         }
         if self.focus_surface == UnixFocusSurface::Terminal {
             let text = input::normalize_ime_commit(raw, false);
+            // Empty commits happen on bare IME state toggles (Shift switches
+            // CN/EN in macOS Chinese IMEs); they must not clear a selection.
+            if text.is_empty() {
+                return;
+            }
             let _ = self.cancel_terminal_selection(true);
             self.queue_pty_input(text.into_bytes());
         }
@@ -2775,8 +2780,9 @@ impl UnixApp {
             self.recent_terminal_click = None;
             if let Some((start, end)) =
                 visible_row_selection(self.tabs[position].parser.screen(), row)
+                && self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
             {
-                let _ = self.set_completed_terminal_selection(tab_id, start, end, rows, cols);
+                let _ = self.copy_terminal_selection();
             }
             self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
             self.request_redraw();
@@ -2790,7 +2796,9 @@ impl UnixApp {
         }) {
             self.recent_terminal_click = None;
             if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point) {
-                let _ = self.set_completed_terminal_selection(tab_id, start, end, rows, cols);
+                if self.set_completed_terminal_selection(tab_id, start, end, rows, cols) {
+                    let _ = self.copy_terminal_selection();
+                }
                 self.terminal_double_click = now
                     .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
                     .map(|expires_at| TerminalDoubleClick {
@@ -2892,6 +2900,7 @@ impl UnixApp {
         if let Some(selection) = completed.completed_selection() {
             self.terminal_selection = Some(selection);
             self.terminal_selection_gesture = Some(completed);
+            let _ = self.copy_terminal_selection();
         } else {
             self.terminal_selection = None;
             self.terminal_selection_gesture = None;
