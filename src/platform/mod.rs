@@ -114,6 +114,15 @@ pub(crate) fn workspace_layout_kind() -> WorkspaceLayoutKind {
     }
 }
 
+pub(crate) fn script_process_test_host_supported() -> bool {
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Windows
+            | agenterm_platform::PlatformKind::Linux
+            | agenterm_platform::PlatformKind::Macos
+    )
+}
+
 /// Capability surface an adapter may expose (capability-oriented, not one
 /// global `OsLayer` object).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

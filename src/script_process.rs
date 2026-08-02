@@ -1261,7 +1261,7 @@ mod tests {
     }
 
     fn process_shell_test_host_supported() -> bool {
-        crate::platform::is_windows_host() || crate::platform::is_unix_host()
+        crate::platform::script_process_test_host_supported()
     }
 
     fn wrapped_shell_command(
