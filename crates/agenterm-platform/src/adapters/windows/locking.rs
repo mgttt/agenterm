@@ -62,7 +62,7 @@ pub struct SlotPermit {
 
 impl SlotPermit {
     pub fn try_acquire(directory: &Path, namespace: &str, limit: usize) -> Result<Self, LockError> {
-        let scope = format!("{}:{namespace}", directory.to_string_lossy());
+        let scope = format!("{}:{namespace}", normalized_path(directory)?);
         for slot in 0..limit {
             let identity = format!("slot-{:016x}-{slot}", fingerprint(&scope));
             if !reserve_local(&identity) {
@@ -221,5 +221,26 @@ mod tests {
         assert_eq!(wait_error_kind(WAIT_TIMEOUT, 0), LockErrorKind::Contended);
         assert_eq!(wait_error_kind(WAIT_FAILED, 0), LockErrorKind::Wait);
         assert_eq!(wait_error_kind(WAIT_TIMEOUT, INFINITE), LockErrorKind::Wait);
+    }
+
+    #[test]
+    fn slot_aliases_share_one_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "agenterm-platform-slot-alias-{}",
+            std::process::id()
+        ));
+        let child = directory.join("child");
+        std::fs::create_dir_all(&child).expect("create slot alias fixture");
+        let alias = child.join("..");
+
+        let first = SlotPermit::try_acquire(&directory, "alias", 1).expect("first slot");
+        let error = match SlotPermit::try_acquire(&alias, "alias", 1) {
+            Ok(_) => panic!("directory alias bypassed the existing slot"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), LockErrorKind::Contended);
+        drop(first);
+        SlotPermit::try_acquire(&alias, "alias", 1).expect("alias slot is released");
+        std::fs::remove_dir_all(directory).expect("remove slot alias fixture");
     }
 }
