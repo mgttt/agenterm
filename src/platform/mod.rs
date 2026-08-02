@@ -33,6 +33,8 @@ pub(crate) use policy::paths::{
     workspace_instance_scope,
 };
 pub(crate) use policy::runtime::hosted_script_worker_available;
+#[allow(unused_imports)]
+pub(crate) use policy::workspace::{WorkspaceLayoutKind, workspace_layout_kind};
 
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
@@ -95,22 +97,6 @@ pub(crate) fn frontend_host() -> FrontendHost {
             FrontendHost::Unix
         }
         _ => FrontendHost::Unsupported,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
-pub(crate) enum WorkspaceLayoutKind {
-    WindowsFlat,
-    DirectoryByScope,
-}
-
-#[allow(dead_code)]
-pub(crate) fn workspace_layout_kind() -> WorkspaceLayoutKind {
-    if is_windows_host() {
-        WorkspaceLayoutKind::WindowsFlat
-    } else {
-        WorkspaceLayoutKind::DirectoryByScope
     }
 }
 
