@@ -292,4 +292,97 @@ mod tests {
         }
         std::fs::remove_dir_all(directory).expect("remove ACL fixture");
     }
+
+    #[test]
+    fn private_directory_acl_propagates_to_new_children() {
+        use std::os::windows::ffi::OsStrExt as _;
+        use std::ptr::null_mut;
+        use windows_sys::Win32::{
+            Foundation::{GENERIC_ALL, LocalFree},
+            Security::{
+                Authorization::{
+                    GetExplicitEntriesFromAclW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+                    TRUSTEE_IS_SID,
+                },
+                DACL_SECURITY_INFORMATION, EqualSid, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            },
+        };
+
+        let directory = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-acl-child-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).expect("create ACL child fixture");
+        protect_private_directory(&directory).expect("protect ACL child fixture");
+        let child_directory = directory.join("child");
+        std::fs::create_dir(&child_directory).expect("create protected child directory");
+        let child_file = child_directory.join("state");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&child_file)
+            .expect("create protected child file");
+
+        let identity = crate::user_identity::current_user_identity().expect("current user SID");
+        let sid = identity.windows_sid().expect("Windows SID identity");
+        let mut aligned_sid = vec![0_usize; sid.len().div_ceil(std::mem::size_of::<usize>())];
+        unsafe {
+            std::ptr::copy_nonoverlapping(sid.as_ptr(), aligned_sid.as_mut_ptr().cast(), sid.len());
+        }
+
+        for path in [&child_directory, &child_file] {
+            let wide = std::fs::canonicalize(path)
+                .expect("canonical protected child")
+                .as_os_str()
+                .encode_wide()
+                .chain(Some(0))
+                .collect::<Vec<_>>();
+            let mut dacl = null_mut();
+            let mut descriptor = null_mut();
+            let result = unsafe {
+                GetNamedSecurityInfoW(
+                    wide.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    &mut dacl,
+                    null_mut(),
+                    &mut descriptor,
+                )
+            };
+            assert_eq!(result, 0, "read child ACL: {}", win32_error(result));
+            let mut count = 0;
+            let mut entries_ptr = null_mut();
+            let result = unsafe { GetExplicitEntriesFromAclW(dacl, &mut count, &mut entries_ptr) };
+            assert_eq!(result, 0, "expand child ACL: {}", win32_error(result));
+            assert!(count > 0, "protected child ACL has no inherited ACE");
+            let entries = unsafe { std::slice::from_raw_parts(entries_ptr, count as usize) };
+            for entry in entries {
+                assert_eq!(entry.Trustee.TrusteeForm, TRUSTEE_IS_SID);
+                assert_ne!(
+                    unsafe {
+                        EqualSid(
+                            entry.Trustee.ptstrName.cast(),
+                            aligned_sid.as_mut_ptr().cast(),
+                        )
+                    },
+                    0,
+                    "protected child ACL contains a non-user trustee"
+                );
+                assert_eq!(entry.grfAccessPermissions, GENERIC_ALL);
+                assert_eq!(
+                    entry.grfInheritance & SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+                    SUB_CONTAINERS_AND_OBJECTS_INHERIT
+                );
+            }
+            unsafe {
+                LocalFree(entries_ptr.cast());
+                LocalFree(descriptor);
+            }
+        }
+
+        std::fs::remove_dir_all(directory).expect("remove ACL child fixture");
+    }
 }
