@@ -240,6 +240,17 @@ pub(crate) use crate::adapters::windows::process_reference;
 #[path = "adapters/windows/process_containment.rs"]
 pub(crate) mod process_containment;
 
+#[cfg(all(feature = "app-container-process", windows))]
+#[path = "adapters/windows/app_container_process.rs"]
+pub(crate) mod app_container_process;
+
+#[cfg(all(
+    feature = "app-container-process",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/app_container_process.rs"]
+pub(crate) mod app_container_process;
+
 #[cfg(all(
     feature = "process-containment",
     any(target_os = "linux", target_os = "macos")

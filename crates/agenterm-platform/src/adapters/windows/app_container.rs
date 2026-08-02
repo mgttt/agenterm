@@ -368,7 +368,10 @@ fn wide_required(
     Ok(value.encode_utf16().chain(std::iter::once(0)).collect())
 }
 
-fn validate_sid_bytes(operation: &'static str, sid: &[u8]) -> Result<(), AppContainerProfileError> {
+pub(crate) fn validate_sid_bytes(
+    operation: &'static str,
+    sid: &[u8],
+) -> Result<(), AppContainerProfileError> {
     const SID_HEADER_BYTES: usize = 8;
     const MAX_SUB_AUTHORITIES: usize = 15;
     if sid.len() < SID_HEADER_BYTES {
@@ -402,7 +405,7 @@ fn validate_sid_bytes(operation: &'static str, sid: &[u8]) -> Result<(), AppCont
     Ok(())
 }
 
-fn aligned_sid_copy(
+pub(crate) fn aligned_sid_copy(
     operation: &'static str,
     sid: &[u8],
 ) -> Result<Vec<usize>, AppContainerProfileError> {

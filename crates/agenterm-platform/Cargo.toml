@@ -72,6 +72,15 @@ app-container-profile = [
     "windows-sys/Win32_Security_Authorization",
     "windows-sys/Win32_Security_Isolation",
 ]
+app-container-process = [
+    "app-container-profile",
+    "process-conventions",
+    "process-control",
+    "process-reference",
+    "process-spawn",
+    "windows-sys/Win32_Security",
+    "windows-sys/Win32_System_Threading",
+]
 process-conventions = []
 process-control = [
     "dep:libc",
@@ -232,6 +241,7 @@ font = [
 ]
 webview = []
 full = [
+    "app-container-process",
     "hardware",
     "cache-hierarchy",
     "virtualization-probe",

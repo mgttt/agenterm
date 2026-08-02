@@ -38,6 +38,7 @@ pub enum Capability {
     ProcessObservation,
     ProcessReference,
     ProcessContainment,
+    AppContainerProcess,
     ProcessSecurity,
     ProcessImage,
     ProcessMetrics,
@@ -96,6 +97,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
         Capability::ProcessReference => (cfg!(feature = "process-reference"), true),
         Capability::ProcessContainment => (cfg!(feature = "process-containment"), true),
+        Capability::AppContainerProcess => (cfg!(feature = "app-container-process"), cfg!(windows)),
         Capability::ProcessSecurity => (cfg!(feature = "process-security"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
@@ -250,6 +252,9 @@ pub mod process_reference;
 
 #[cfg(feature = "process-containment")]
 pub mod process_containment;
+
+#[cfg(feature = "app-container-process")]
+pub mod app_container_process;
 
 #[cfg(feature = "process-security")]
 pub mod process_security;
@@ -551,6 +556,30 @@ mod tests {
         assert_eq!(
             crate::capability_status(crate::Capability::ProcessSpawn),
             crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "process"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Process),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "app-container-process")]
+    #[test]
+    fn app_container_process_is_host_explicit_and_does_not_claim_full_process() {
+        #[cfg(windows)]
+        assert_eq!(
+            crate::capability_status(crate::Capability::AppContainerProcess),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::AppContainerProcess),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("capability-not-yet-implemented")
+            }
         );
         #[cfg(not(feature = "process"))]
         assert_eq!(
