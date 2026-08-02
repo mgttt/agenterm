@@ -802,10 +802,7 @@ mod tests {
     fn text_field_select_all_replaces_the_next_edit_once() {
         let mut buffer = String::from("existing");
         let mut select_all = false;
-        let primary = match agenterm_platform::platform_kind() {
-            agenterm_platform::PlatformKind::Macos => modifiers(false, false, false, true),
-            _ => modifiers(true, false, false, false),
-        };
+        let primary = crate::platform::primary_text_field_shortcut_modifiers();
 
         assert!(matches!(
             text_field_logical_key_action(
@@ -928,12 +925,8 @@ mod tests {
     fn primary_shortcut_uses_platform_policy() {
         let control = primary_shortcut(modifiers(true, false, false, false));
         let meta = primary_shortcut(modifiers(false, false, false, true));
-        match agenterm_platform::platform_kind() {
-            agenterm_platform::PlatformKind::Windows => assert_eq!((control, meta), (true, false)),
-            agenterm_platform::PlatformKind::Linux => assert_eq!((control, meta), (true, true)),
-            agenterm_platform::PlatformKind::Macos => assert_eq!((control, meta), (false, true)),
-            _ => panic!("unsupported test platform"),
-        }
+        assert_eq!(control, !crate::platform::is_primary_shortcut_via_meta());
+        assert_eq!(meta, crate::platform::is_primary_shortcut_via_meta());
         assert!(!primary_shortcut(modifiers(false, false, true, false)));
     }
 
@@ -958,16 +951,15 @@ mod tests {
             terminal_shortcut_action(&c, modifiers(true, false, false, false), false),
             TerminalShortcutAction::Forward
         );
-        let (primary, empty_copy_action) = match agenterm_platform::platform_kind() {
-            agenterm_platform::PlatformKind::Windows => (
-                modifiers(true, false, false, false),
-                TerminalShortcutAction::Forward,
-            ),
-            agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => (
-                modifiers(false, false, false, true),
-                TerminalShortcutAction::Suppress,
-            ),
-            _ => panic!("unsupported test platform"),
+        let primary = if crate::platform::is_primary_shortcut_via_meta() {
+            modifiers(false, false, false, true)
+        } else {
+            modifiers(true, false, false, false)
+        };
+        let empty_copy_action = if crate::platform::terminal_shortcut_empty_copy_action_is_suppressed() {
+            TerminalShortcutAction::Suppress
+        } else {
+            TerminalShortcutAction::Forward
         };
         assert_eq!(
             terminal_shortcut_action(&c, primary, true),

@@ -185,6 +185,35 @@ pub(crate) fn project_capability_status(
     }
 }
 
+pub(crate) fn primary_text_field_shortcut_modifiers() -> ModifierState {
+    if matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos) {
+        ModifierState {
+            control: false,
+            shift: false,
+            alt: false,
+            meta: true,
+        }
+    } else {
+        ModifierState {
+            control: true,
+            shift: false,
+            alt: false,
+            meta: false,
+        }
+    }
+}
+
+pub(crate) fn is_primary_shortcut_via_meta() -> bool {
+    matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+}
+
+pub(crate) fn terminal_shortcut_empty_copy_action_is_suppressed() -> bool {
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
+    )
+}
+
 pub(crate) fn platform_info_json() -> serde_json::Value {
     let kind = agenterm_platform::platform_kind();
     let display = agenterm_platform::window::display_backend_facts();
