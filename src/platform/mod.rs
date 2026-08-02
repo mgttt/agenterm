@@ -237,6 +237,10 @@ pub(crate) fn is_windows_host() -> bool {
     matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Windows)
 }
 
+pub(crate) fn workspace_path_uses_windows_flat_layout() -> bool {
+    is_windows_host()
+}
+
 pub(crate) fn is_macos_host() -> bool {
     matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
 }
