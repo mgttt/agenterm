@@ -1,5 +1,4 @@
 use std::env;
-
 use crate::wake_signal::WakeSignal;
 use crate::platform::services::frontend::{
     attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
@@ -38,7 +37,11 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let launch_options = match parse_gui_launch_target(&arguments, WINDOWS_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(error) => {
-            write_best_effort_stderr(&gui_launch_argument_error(&error, "", true));
+            write_best_effort_stderr(&gui_launch_argument_error(
+                &error,
+                WINDOWS_GUI_USAGE,
+                true,
+            ));
             return GuiLaunchResult::UsageError;
         }
     };
@@ -69,32 +72,6 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     GuiLaunchResult::Launched
 }
 
-fn quote_argument_for_display(argument: &str) -> String {
-    if argument.is_empty() || argument.chars().any(char::is_whitespace) {
-        format!("\"{}\"", argument.replace('"', "\\\""))
-    } else {
-        argument.to_owned()
-    }
-}
-
-fn gui_cli_guidance(arguments: &[String]) -> String {
-    let forwarded = arguments
-        .iter()
-        .map(|argument| quote_argument_for_display(argument))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!(
-        "AgenTerm GUI entry point\n\n\
-         No CLI command was executed and no GUI server was started by this invocation.\n\n\
-         Use instead:\nagenterm-cli.exe {forwarded}\n\n\
-         Launcher PID: {}\nConfigured server address: {}\n\n\
-         List running server PID and port: agenterm-cli.exe server-list\n\
-         More CLI commands: agenterm-cli.exe -h",
-        std::process::id(),
-        crate::ipc_address()
-    )
-}
-
 fn gui_console_summary(address: &str) -> String {
     format!(
         "Launcher PID: {}\n\
@@ -116,26 +93,9 @@ fn show_startup_error(error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_cli_guidance, gui_help_result, parse_gui_launch_target, GuiLaunchResult,
+        gui_help_result, parse_gui_launch_target, GuiLaunchResult,
         WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
     };
-
-    #[test]
-    fn gui_cli_guidance_preserves_arguments_and_names_the_real_cli() {
-        let guidance = gui_cli_guidance(&[
-            "list-windows".to_owned(),
-            "-F".to_owned(),
-            "#{window_id} #{window_name}".to_owned(),
-        ]);
-        assert!(guidance.contains("No CLI command was executed"));
-        assert!(
-            guidance.contains("agenterm-cli.exe list-windows -F \"#{window_id} #{window_name}\"")
-        );
-        assert!(guidance.contains("Launcher PID:"));
-        assert!(guidance.contains("Configured server address:"));
-        assert!(guidance.contains("agenterm-cli.exe server-list"));
-        assert!(guidance.contains("agenterm-cli.exe -h"));
-    }
 
     #[test]
     fn gui_launcher_accepts_no_activate_and_address_in_either_order() {

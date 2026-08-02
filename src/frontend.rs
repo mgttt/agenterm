@@ -372,8 +372,8 @@ fn gui_wake_result_is_terminal(result: &GuiWakeResult) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_wake_result_is_terminal, parse_gui_launch_arguments, FrontendContractState,
-        FrontendServerRecovery, GuiLaunchResult, GuiWakeResult,
+        gui_launch_argument_error, gui_wake_result_is_terminal, parse_gui_launch_arguments,
+        FrontendContractState, FrontendServerRecovery, GuiLaunchResult, GuiWakeResult,
         UNIX_GUI_LAUNCH_POLICY, WINDOWS_GUI_LAUNCH_POLICY,
     };
 
@@ -471,6 +471,19 @@ mod tests {
             result.is_err(),
             "ui-client flag should be rejected when platform parser disallows it"
         );
+    }
+
+    #[test]
+    fn gui_launch_argument_error_renders_shared_shape() {
+        let rendered = gui_launch_argument_error(
+            "bad argument",
+            "Usage: agenterm [--no-activate]",
+            true,
+        );
+        assert!(rendered.contains("AgenTerm GUI argument error: bad argument"));
+        assert!(rendered.contains("No GUI server was started by this invocation."));
+        assert!(rendered.contains("Usage: agenterm [--no-activate]"));
+        assert!(rendered.contains("More CLI commands: agenterm-cli.exe -h"));
     }
 }
 

@@ -534,7 +534,7 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let options = match parse_gui_launch_target(&arguments, UNIX_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(message) => {
-            eprintln!("{}", gui_launch_argument_error(&message, UNIX_GUI_USAGE, false));
+            eprintln!("{}", gui_launch_argument_error(&message, UNIX_GUI_USAGE, true));
             return GuiLaunchResult::UsageError;
         }
     };
