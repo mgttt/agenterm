@@ -20,6 +20,10 @@ pub const CONTRACT_REVISION: u32 = 3;
 pub(crate) mod toolbar;
 pub(crate) mod window;
 
+pub(crate) use agenterm_platform::console_interrupt::{
+    ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
+};
+
 // Platform Facade services. Product modules consume these typed services;
 // their selected OS implementations stay private to this boundary.
 // Several services are staged ahead of their final product-caller migration;
