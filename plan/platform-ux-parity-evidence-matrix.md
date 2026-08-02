@@ -222,6 +222,8 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | modal focus state | `src/frontend/interaction.rs` | `FocusState`（surface+gate），语义 surface 由两端存储，modal 打开时禁止 focus transition/navigation；两端 adapter 以 `focus_gate()` 单点映射原生 modal flags | Supported | Supported | Supported |
 | wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | Supported | Supported |
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
+| pointer modifiers | `agenterm-platform::contract::input::ModifierState` | Windows `ControlWindowEvent` 与 Unix `PixelWindowEvent` 都携带 modifiers；Win32 鼠标消息从同一 `current_modifiers()` 读取 | Supported | Supported | Supported |
+| mouse report encoding | `src/frontend/interaction.rs` | `MouseReportEncoding` + `mouse_report_bytes`；Windows remote 与 Unix embedded 共用同一编码器 | Supported | Supported | Supported |
 | raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_report_outcome` 统一裁决/编码，组合 `mouse_delivery` 与 `mouse_report_bytes`；两端 adapter 只映射原生事件 | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
