@@ -469,13 +469,18 @@ track remains planned, but every declared dependency must still pass.
       Clean Windows SHA `274f971` subsequently passed both owning tasks:
       current named-pipe/TCP/schema/stale recovery plus exact published
       v0.1.10/v0.1.11 native upgrade, HEAD state write and rollback reads.
-      New Linux matching-host and refreshed macOS matching-host compatibility
-      evidence remain open, so this is not three-platform completion.
+      Exact-SHA `b4f1622` ordinary CI run `30724960474` subsequently passed the
+      Windows named-pipe and Linux/macOS Unix-socket authority journeys plus all
+      applicable published upgrade/rollback journeys in the six-cell matrix.
+      This closes the matching-host compatibility receipt gap without erasing
+      the separately listed destructive credential and legacy-client limits.
   - [~] close the Linux/macOS main-workbench evidence gap with separate
     matching-host receipts for no-activate launch, native activation truth,
     renderer-owned snapshot/PNG, asynchronous native clipboard paste and stale
     completion cancellation. The shared journey/task/CI ownership is integrated;
-    neither platform is complete until its own ordinary-CI execution passes.
+    Exact-SHA `b4f1622` run `30724960474` passed the complete journey on Linux
+    x86_64 and both macOS architectures, closing this matching-host receipt leaf.
+    Broader workspace follow-ups remain governed by the owning PRD.
   - [ ] deepen the independent Control Center only through a useful read-only
     Cockpit and complete platform evidence; Unix renderer-owned screenshots,
     incompatible/renderer-failure cases and caller-instance selection close

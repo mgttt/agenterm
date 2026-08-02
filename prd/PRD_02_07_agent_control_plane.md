@@ -260,3 +260,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       v0.1.11-to-HEAD upgrade then rollback. It never commits historical bytes.
       Unix v0.1.10 is explicitly skipped because that published package lacks
       `agenterm-server`; v0.1.11 remains the native predecessor there.
+    - [x] exact-SHA `b4f1622` ordinary CI run `30724960474` refreshed the
+      matching-host matrix: Windows named-pipe and Linux/macOS Unix-socket
+      native authority journeys passed together with every applicable published
+      predecessor upgrade/rollback journey on both macOS architectures and
+      Linux x86_64. Cross-built Windows/Linux ARM64 cells separately retained
+      compile and manifest-artifact evidence without pretending foreign runtime
+      execution. This closes the stale matching-host evidence gap, but does not
+      replace the still-listed destructive different-credential and legacy
+      client limitations.

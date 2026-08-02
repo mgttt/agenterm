@@ -24,8 +24,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   owner, so the product adapter truthfully returned `clipboard_backend_error`.
   The Linux fixture now retains a foreground `xclip -silent -loops 2` child:
   one native read proves readiness, AgenTerm consumes the second, and the
-  process then exits under the shared orphan-free cleanup contract. A succeeding
-  Linux matching-host receipt remains open. Win alignment execution map:
+  process then exits under the shared orphan-free cleanup contract. Exact-SHA
+  `b4f1622` run `30724960474` passed the repaired Linux journey, including
+  no-activate/activation, renderer-owned snapshot plus PNG, native clipboard
+  paste into the live PTY, delayed stale-target cancellation, and orphan-free
+  cleanup. Together with both macOS cells in the same run, this closes the
+  matching-host receipt gap; the broader workspace remains partial for the
+  explicitly listed follow-up product leaves. Win alignment execution map:
   [`plan/plan-unix-gui-win-parity.md`](plan/plan-unix-gui-win-parity.md)
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane

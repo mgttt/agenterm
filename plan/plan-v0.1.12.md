@@ -944,6 +944,13 @@ Cockpit
   因而产品 adapter 的真实读取 exit 1。fixture 现以前台 `xclip -silent -loops 2` 作为
   owned child，一次 native read 证明 readiness，第二次由 AgenTerm 消费，随后自然退出并
   进入同一 orphan-free cleanup。该根因修复仍等待下一 exact-SHA Linux 回执；
+- exact-SHA `b4f1622` ordinary CI run `30724960474` 随后六格全绿：Linux x64
+  原生工作台完整通过 no-activate/activation、renderer snapshot+PNG、真实 X11 clipboard
+  到 PTY、stale paste cancellation 与 orphan-free cleanup，关闭 xclip owner 根因；同一 run
+  的 Windows named-pipe、Linux/macOS Unix-socket native authority 以及所有适用的 published
+  upgrade/rollback journey 全部通过。该回执关闭 Unix 主工作台和 native IPC 的 matching-host
+  证据缺口，但不替代 Windows 持续高输出视觉/物理 Shift+Tab、macOS 真人 pointer、Candidate
+  qualification 或 Promotion 授权；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 
