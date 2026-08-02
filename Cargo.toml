@@ -90,3 +90,7 @@ incremental = true
 # space so Core Animation presents without a per-frame vImage conversion.
 [patch.crates-io]
 softbuffer = { path = "third_party/softbuffer" }
+# Vendored with one change: the col_wrap row bookkeeping saturates instead of
+# underflowing (and aborting) when a resize or one-line scroll region leaves
+# the cursor on the scroll region's top row.
+vt100 = { path = "third_party/vt100" }

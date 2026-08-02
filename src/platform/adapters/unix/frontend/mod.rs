@@ -722,6 +722,8 @@ struct UnixApp {
     window_focused: bool,
     last_present: Option<Instant>,
     output_redraw_pending: bool,
+    last_workspace_save: Option<Instant>,
+    last_saved_workspace: Option<SavedWorkspace>,
     pointer_modifiers: agenterm_platform::input::ModifierState,
     mouse_report_button: Option<u8>,
     mouse_report_cell: Option<(u16, u16)>,
@@ -827,6 +829,8 @@ impl UnixApp {
             .initial_window_focused,
             last_present: None,
             output_redraw_pending: false,
+            last_workspace_save: None,
+            last_saved_workspace: None,
             pointer_modifiers: agenterm_platform::input::ModifierState::empty(),
             mouse_report_button: None,
             mouse_report_cell: None,
@@ -1531,6 +1535,9 @@ impl UnixApp {
             return;
         }
         self.window_close_pending = false;
+        if !matches!(choice, WindowCloseChoice::Cancel) {
+            let _ = self.persist_workspace();
+        }
         match choice {
             WindowCloseChoice::KeepServerRunning => {
                 if let Some(window) = self.window.as_ref() {
@@ -3468,37 +3475,105 @@ impl UnixApp {
         );
         let grid = TerminalGrid::new(cols, rows, self.palette());
 
-        let id = self.next_tab_id;
-        self.next_tab_id += 1;
-        let tab = TerminalTab::spawn(TerminalLaunch {
-            id,
-            index: 0,
-            parent_id: None,
-            title: None,
-            command_line: Vec::new(),
-            tab_environment: Vec::new(),
-            session_name: self.session_name.clone(),
-            window: 0,
-            wake_signal: Arc::clone(&self.wake_signal),
-            initial_size: TerminalSize { rows, cols },
-        })
-        .map_err(|error| PixelWindowError::failed("pixel_window_initial_terminal_failed", error))?;
+        // Normal restart restores the saved tab tree with honestly restarted
+        // PTY processes; a missing or empty workspace starts one fresh tab.
+        let saved = crate::workspace::load_workspace().filter(|saved| !saved.tabs.is_empty());
+        let mut restore_errors = Vec::new();
+        if let Some(saved) = saved {
+            for saved_tab in &saved.tabs {
+                match TerminalTab::spawn(TerminalLaunch {
+                    id: saved_tab.id,
+                    index: saved_tab.index,
+                    parent_id: saved_tab.parent_id,
+                    title: None,
+                    command_line: saved_tab.command_line.clone(),
+                    tab_environment: Vec::new(),
+                    session_name: self.session_name.clone(),
+                    window: 0,
+                    wake_signal: Arc::clone(&self.wake_signal),
+                    initial_size: TerminalSize { rows, cols },
+                }) {
+                    Ok(mut tab) => {
+                        tab.note = saved_tab.note.clone();
+                        tab.composer = saved_tab.composer.clone();
+                        self.next_tab_id = self.next_tab_id.max(saved_tab.id + 1);
+                        self.tabs.push(tab);
+                        self.event_journal_mut().commit(
+                            EventKind::TabCreated,
+                            Some(saved_tab.id),
+                            serde_json::json!({
+                                "index": saved_tab.index,
+                                "parent_id": saved_tab.parent_id,
+                                "selected": false,
+                                "restored": true,
+                            }),
+                        );
+                    }
+                    Err(error) => restore_errors.push(format!("@{}: {error:#}", saved_tab.id)),
+                }
+            }
+            self.tabs.sort_by_key(|tab| tab.index);
+            self.collapsed_tabs = saved
+                .collapsed_ids
+                .iter()
+                .copied()
+                .filter(|id| self.tabs.iter().any(|tab| tab.id == *id))
+                .collect();
+            self.active = saved
+                .active_id
+                .filter(|id| self.tabs.iter().any(|tab| tab.id == *id))
+                .or_else(|| self.tabs.first().map(|tab| tab.id));
+        }
+        if !restore_errors.is_empty() {
+            self.set_status_message(format!(
+                "Could not restore {} tab(s): {}",
+                restore_errors.len(),
+                restore_errors.join("; ")
+            ));
+        }
+        if self.tabs.is_empty() {
+            let id = self.next_tab_id;
+            self.next_tab_id += 1;
+            let tab = TerminalTab::spawn(TerminalLaunch {
+                id,
+                index: 0,
+                parent_id: None,
+                title: None,
+                command_line: Vec::new(),
+                tab_environment: Vec::new(),
+                session_name: self.session_name.clone(),
+                window: 0,
+                wake_signal: Arc::clone(&self.wake_signal),
+                initial_size: TerminalSize { rows, cols },
+            })
+            .map_err(|error| {
+                PixelWindowError::failed("pixel_window_initial_terminal_failed", error)
+            })?;
+            self.active = Some(id);
+            self.tabs.push(tab);
+            self.event_journal_mut().commit(
+                EventKind::TabCreated,
+                Some(id),
+                serde_json::json!({
+                    "index": 0,
+                    "parent_id": None::<u64>,
+                    "selected": true,
+                }),
+            );
+        }
 
         window.request_redraw();
         self.grid = Some(grid);
-        self.active = Some(id);
-        self.tabs.push(tab);
-        self.event_journal_mut().commit(
-            EventKind::TabCreated,
-            Some(id),
-            serde_json::json!({
-                "index": 0,
-                "parent_id": None::<u64>,
-                "selected": true,
-            }),
-        );
-        self.event_journal_mut()
-            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
+        let active = self.active;
+        if let Some(id) = active {
+            self.event_journal_mut().commit(
+                EventKind::TabSelected,
+                Some(id),
+                serde_json::json!({}),
+            );
+        }
+        self.load_composer_buffer_from_tab();
+        self.sync_grid_from_tab();
         Ok(())
     }
 
@@ -3566,10 +3641,42 @@ impl UnixApp {
     }
 
     fn persist_workspace(&mut self) -> anyhow::Result<()> {
-        save_workspace(&self.saved_workspace())?;
+        let workspace = self.saved_workspace();
+        save_workspace(&workspace)?;
+        self.last_saved_workspace = Some(workspace);
+        self.last_workspace_save = Some(Instant::now());
         self.event_journal
             .commit(EventKind::WorkspaceSaved, None, serde_json::json!({}));
         Ok(())
+    }
+
+    /// Debounced workspace autosave. Every structural or draft change lands
+    /// on disk within a second, so a quit or crash never loses the tab tree;
+    /// nothing is written while the workspace is unchanged. Returns the next
+    /// deadline while a change is still waiting on the debounce interval.
+    fn autosave_workspace(&mut self, now: Instant) -> Option<Instant> {
+        const WORKSPACE_AUTOSAVE_INTERVAL: Duration = Duration::from_secs(1);
+        let workspace = self.saved_workspace();
+        if self.last_saved_workspace.as_ref() == Some(&workspace) {
+            return None;
+        }
+        let due = self
+            .last_workspace_save
+            .map(|at| at + WORKSPACE_AUTOSAVE_INTERVAL)
+            .unwrap_or(now);
+        if now < due {
+            return Some(due);
+        }
+        if let Err(error) = save_workspace(&workspace) {
+            self.set_status_message(format!("Could not save workspace: {error:#}"));
+            self.last_workspace_save = Some(now);
+            return None;
+        }
+        self.last_saved_workspace = Some(workspace);
+        self.last_workspace_save = Some(now);
+        self.event_journal
+            .commit(EventKind::WorkspaceSaved, None, serde_json::json!({}));
+        None
     }
 
     fn handle_ipc(&mut self, envelope: IpcEnvelope) {
@@ -5175,6 +5282,9 @@ impl UnixApp {
         }
         if changed && let Some(window) = self.window.as_ref() {
             window.request_redraw();
+        }
+        if let Some(save_due) = self.autosave_workspace(now) {
+            wake_at = Some(wake_at.map_or(save_due, |deadline| deadline.min(save_due)));
         }
         if self.output_redraw_pending {
             let due = self

@@ -3,7 +3,7 @@ use std::{env, path::PathBuf};
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct SavedWorkspace {
     pub(crate) version: u32,
@@ -13,7 +13,7 @@ pub(crate) struct SavedWorkspace {
     pub(crate) tabs: Vec<SavedTab>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct SavedTab {
     pub(crate) id: u64,
