@@ -4123,7 +4123,18 @@ fn read_script_source(
     if bytes.len() > limit {
         return Err((3, format!("script source exceeds the {limit} byte limit")));
     }
-    String::from_utf8(bytes).map_err(|error| (1, format!("script source is not UTF-8: {error}")))
+    let source = String::from_utf8(bytes)
+        .map_err(|error| (1, format!("script source is not UTF-8: {error}")))?;
+    Ok(normalize_script_source(source))
+}
+
+/// Accept the conventional Unix shebang on the first line while retaining
+/// source line numbers and leaving the remainder of the source untouched.
+fn normalize_script_source(mut source: String) -> String {
+    if source.starts_with("#!") {
+        source.replace_range(..2, "//");
+    }
+    source
 }
 
 fn script_operand(arguments: &[String]) -> Option<&str> {
@@ -4907,7 +4918,9 @@ fn print_mux_compatibility(json: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_loopback_ipc_address, parse_terminal_grid, run_wait_ui};
+    use super::{
+        normalize_script_source, parse_loopback_ipc_address, parse_terminal_grid, run_wait_ui,
+    };
 
     #[test]
     fn accepts_only_loopback_ipc_addresses() {
@@ -4937,5 +4950,14 @@ mod tests {
         assert_eq!(parse_terminal_grid("0x80"), None);
         assert_eq!(parse_terminal_grid("24x"), None);
         assert_eq!(parse_terminal_grid("24x80x2"), None);
+    }
+
+    #[test]
+    fn script_source_accepts_shebang_without_shifting_lines() {
+        assert_eq!(
+            normalize_script_source("#!/usr/bin/env agenterm-script\nprint(1);".to_owned()),
+            "///usr/bin/env agenterm-script\nprint(1);"
+        );
+        assert_eq!(normalize_script_source("print(1);".to_owned()), "print(1);");
     }
 }

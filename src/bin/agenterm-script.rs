@@ -1035,13 +1035,21 @@ fn read_check_many_source(
             "limit",
         ));
     }
-    String::from_utf8(bytes).map_err(|error| {
+    let source = String::from_utf8(bytes).map_err(|error| {
         (
             "host_source_read",
             format!("script source is not UTF-8: {error}"),
             "host",
         )
-    })
+    })?;
+    Ok(normalize_script_source(source))
+}
+
+fn normalize_script_source(mut source: String) -> String {
+    if source.starts_with("#!") {
+        source.replace_range(..2, "//");
+    }
+    source
 }
 
 fn check_many_host_failure(

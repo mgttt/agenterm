@@ -248,6 +248,11 @@ fn register_types(engine: &mut Engine) {
     engine.register_fn("stderr_text", |output: &mut ScriptOutput| {
         output_text(&output.stderr, "process_stderr_not_utf8")
     });
+    engine.register_fn("combined_text", |output: &mut ScriptOutput| {
+        let stdout = output_text(&output.stdout, "process_stdout_not_utf8")?;
+        let stderr = output_text(&output.stderr, "process_stderr_not_utf8")?;
+        Ok::<String, Box<EvalAltResult>>(stdout + stderr.as_str())
+    });
     engine.register_fn("error", output_error);
     engine.register_fn("require_success", output_require_success);
 }

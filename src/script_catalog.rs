@@ -948,7 +948,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.output",
             "system/process/output",
-            "Output.success/exit_code/stdout/stderr/complete/truncated/stdout_text/stderr_text/error/require_success",
+            "Output.success/exit_code/stdout/stderr/complete/truncated/stdout_text/stderr_text/combined_text/error/require_success",
             Some("std::process::Output"),
             RustMapping::Adapted,
             "output.success / output.exit_code / output.stdout / output.stderr / output.require_success(code)",
