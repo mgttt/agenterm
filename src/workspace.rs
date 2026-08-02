@@ -70,9 +70,11 @@ mod tests {
         assert!(default.is_absolute());
     }
 
-    #[cfg(unix)]
     #[test]
     fn unix_default_workspace_contains_workspaces_component() {
+        if crate::platform::is_windows_host() {
+            return;
+        }
         let default = default_workspace_path();
         assert!(
             default
