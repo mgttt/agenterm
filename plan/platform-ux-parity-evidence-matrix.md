@@ -22,10 +22,10 @@
 | startup | 启动标题/窗口恢复 | `ux-parity.startup-title` | Supported | Supported | Supported | - | - |
 | ux-startup | 唤醒契约 | `ux-parity.wake-coalescing` | Supported | Supported | Supported | - | - |
 | ux-startup | 焦点恢复 | `ux-parity.window-focus-contract` | Supported | Supported | Supported | - | - |
-| frontend-lx | Workbench 与窗口行为（linux） | `ux-parity.linux.unix-frontend.workbench` | Unsupported | Unsupported | Unsupported | platform-gap | - |
-| frontend-lx | 剪贴板语义（linux） | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | Unsupported | Unsupported | platform-gap | - |
-| frontend-mx | Workbench 与窗口行为（macos） | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | Unsupported | platform-gap | - |
-| frontend-mx | 剪贴板语义（macos） | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | Unsupported | platform-gap | - |
+| frontend-lx | Workbench 与窗口行为（linux） | `ux-parity.linux.unix-frontend.workbench` | Unsupported | Supported | Unsupported | - | - |
+| frontend-lx | 剪贴板语义（linux） | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | Supported | Unsupported | - | - |
+| frontend-mx | Workbench 与窗口行为（macos） | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | Supported | - | - |
+| frontend-mx | 剪贴板语义（macos） | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | Supported | - | - |
 | remote-ui | replaceable 客户端 | `ux-parity.remote-ui.replaceable-client` | Supported | Unsupported | Unsupported | windows-only-contract | - |
 | remote-ui | selection 语义 | `ux-parity.remote-ui.selection` | Supported | Unsupported | Unsupported | windows-only-contract | - |
 
@@ -216,15 +216,15 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 
 | 收敛项 | 共享位置 | 行为证据 | Windows | Linux | macOS |
 |---|---|---|---|---|---|
-| selection phase | `src/terminal_selection.rs` | `SelectionGesturePhase` 单份定义，Windows remote 与 Unix 共用 | Supported | not-executed-yet | not-executed-yet |
-| focus navigation | `src/frontend/interaction.rs` | `focus_surface_navigation`，两侧只映射原生事件 | Supported | not-executed-yet | not-executed-yet |
-| wheel accumulation | `src/frontend/interaction.rs` | `WheelAccumulator`，高分辨率增量按 `WHEEL_DELTA` 统一累积 | Supported | not-executed-yet | not-executed-yet |
-| modal focus gate | `src/frontend/interaction.rs` | `FocusTransitionGate`，modal 打开时禁止 focus transition | Supported | not-executed-yet | not-executed-yet |
-| wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | not-executed-yet | not-executed-yet |
-| scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | not-executed-yet | not-executed-yet |
-| raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_delivery`，xterm mouse 阶段/shift/scrollback 仲裁统一 | Supported | not-executed-yet | not-executed-yet |
+| selection phase | `src/terminal_selection.rs` | `SelectionGesturePhase` 单份定义，Windows remote 与 Unix 共用 | Supported | Supported | Supported |
+| focus navigation | `src/frontend/interaction.rs` | `focus_surface_navigation`，两侧只映射原生事件 | Supported | Supported | Supported |
+| wheel accumulation | `src/frontend/interaction.rs` | `WheelAccumulator`，高分辨率增量按 `WHEEL_DELTA` 统一累积 | Supported | Supported | Supported |
+| modal focus gate | `src/frontend/interaction.rs` | `FocusTransitionGate`，modal 打开时禁止 focus transition | Supported | Supported | Supported |
+| wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | Supported | Supported |
+| scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
+| raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_delivery`，xterm mouse 阶段/shift/scrollback 仲裁统一 | Supported | Supported | Supported |
 
-说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 的真机交互 smoke 仍受 `infra/platform-binary-missing` 限制，列状态保留为 `not-executed-yet`，不把结构单测冒充真机 UX 证据。
+说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 
 
 - 已落地收口：非平台目录 `src/` 里的平台差异判定，除必要 UI/UX 可见性场景外已从编译期 `cfg` 分裂收拢到平台能力入口：
@@ -295,3 +295,12 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
   - macOS 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（`infra/platform-binary-missing`）。
 
 说明：这是当前 Windows 开发机的执行边界，不是回归逻辑失败；脚本已改为在该场景输出 `matrix` 与失败根因，便于三平台聚合不阻塞。
+
+## 本轮 D4 真机 UX 证据（2026-08-02 CI run 30767566925）
+
+| 场景 | evidence_id | Linux | macOS | 证据来源 |
+|---|---|---|---|---|
+| Unix workbench | `ux.unix-frontend-linux-workbench` / `ux.unix-frontend-macos-workbench` | Supported | Supported | Linux x86_64 与 macOS aarch64 真机 smoke PASS |
+| Unix native clipboard | `ux.unix-frontend-linux-native-clipboard` / `ux.unix-frontend-macos-native-clipboard` | Supported | Supported | Linux x86_64 与 macOS aarch64 真机 smoke PASS |
+| stale paste isolation | `ux.unix-frontend-linux-stale-paste` / `ux.unix-frontend-macos-stale-paste` | Supported | Supported | Linux x86_64 与 macOS aarch64 真机 smoke PASS |
+| no-activate launch | `ux.unix-frontend-linux-no-activate` / `ux.unix-frontend-macos-no-activate` | Supported | Supported | Linux x86_64 与 macOS aarch64 真机 smoke PASS |

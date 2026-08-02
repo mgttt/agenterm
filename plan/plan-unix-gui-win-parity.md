@@ -102,16 +102,22 @@ O1 并发树（并行）
 
 - [x] `scripts/rhai/platform-ux-parity-smoke.rhai` 覆盖 Windows startup+remote-ui 与 Unix startup+unix-frontend
 - [x] 三平台统一入口与 `--list-evidence` 已通 (`platform-ux-parity-smoke`, `platform-ux-parity-smoke-linux`, `platform-ux-parity-smoke-macos`)
-- [~] 按 3 平台并发执行实体验收：Windows 与 Linux/macOS 的入口已执行并聚合到 `plan/platform-ux-parity-evidence-matrix.md`，Linux/macOS 当前为环境边界失败（`platform-binary-missing`）不归为回归脚本缺陷
+- [x] 按 3 平台并发执行实体验收：Windows、Linux x86_64 与 macOS aarch64 的入口已执行并聚合到 `plan/platform-ux-parity-evidence-matrix.md`；CI run `30767566925` 的 Unix 真机 workbench/clipboard smoke 已 PASS
 - [x] 形成“分支-场景-证据”表结构：见 `plan/platform-ux-parity-evidence-matrix.md`
 
 #### O3 最近执行分派（按 owner）
 
+
+- 2026-08-02 CI run `30767566925`（linux-x86_64）：`ux.unix-frontend-linux-workbench` / `ux.unix-frontend-linux-native-clipboard` 真机 PASS
+- 2026-08-02 CI run `30767566925`（macos-aarch64）：`ux.unix-frontend-macos-workbench` / `ux.unix-frontend-macos-native-clipboard` 真机 PASS
 - Owner: Platform（P2）
   - `platform-ux-parity-smoke-linux -- --emit-matrix`  
     - `run_id: 1785678831415-84776`
     - 结果：`platform_gui_missing`，`infra/platform-binary-missing`
     - 处置：补齐 Linux GUI 二进制可执行链路后补跑
+
+- 2026-08-02 CI run `30767566925`（linux-x86_64）：`ux.unix-frontend-linux-workbench` / `ux.unix-frontend-linux-native-clipboard` 真机 PASS
+- 2026-08-02 CI run `30767566925`（macos-aarch64）：`ux.unix-frontend-macos-workbench` / `ux.unix-frontend-macos-native-clipboard` 真机 PASS
 - Owner: Platform（P2）
   - `platform-ux-parity-smoke-macos -- --emit-matrix`  
     - `run_id: 1785678837047-34972`
