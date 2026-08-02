@@ -77,7 +77,7 @@ use crate::frontend::interaction::{
     WheelAccumulator, WheelTarget, mouse_report_outcome, route_wheel,
     sidebar_scroll_offset_for_thumb_top,
 };
-use crate::terminal_selection::{
+use crate::frontend::selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
 };

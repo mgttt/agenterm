@@ -36,12 +36,13 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
   interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state（语义 surface 存 FocusState + adapter focus_gate()，Win/Unix 共用）；raw-mouse arbitration/report outcome 策略与 xterm mouse report 编码器（Unix embedded 与 Windows remote 共用）
+  selection.rs               线性选区 / autoscroll 语义（SelectionGesturePhase 供 Win/Unix 共用，Unix embedded 完整使用 SelectionGesture）
   control_center.rs         Control Center 产品 facade（native 能力仍走 platform services）
 
 src/frontend_server.rs       server 拉起 / 恢复（非 IPC 代理）
 
 src/ui_*.rs + control_*      共享产品语义：geometry / snapshot / bridge /
-                             clipboard / dispatch / terminal_selection（Win/Unix 应对齐字段）
+                             clipboard / dispatch（terminal selection 语义已归 src/frontend/selection.rs）
 
 src/platform/adapters/       主机实现（物理目录）
   windows/                   replaceable remote UI ↔ agenterm-server

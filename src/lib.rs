@@ -69,7 +69,7 @@ mod frontend;
 mod frontend_server;
 mod server_app;
 mod terminal_runtime;
-mod terminal_selection;
+
 #[allow(unused_imports)]
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;

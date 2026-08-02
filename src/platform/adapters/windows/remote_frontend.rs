@@ -27,6 +27,7 @@ use crate::{
     },
     frontend::{
         action,
+        selection::SelectionGesturePhase,
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
@@ -38,7 +39,6 @@ use crate::{
         TerminalAppearanceOverride, clamp_tabs_width, config_path, load_config, save_config,
     },
     tab_tree::{TabTreeNode, tree_rows},
-    terminal_selection::SelectionGesturePhase,
     theme::{Rgb, ThemeId, ThemePalette},
     ui_bridge::{
         UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,

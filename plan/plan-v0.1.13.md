@@ -350,7 +350,7 @@ adapters/unix/frontend/*   Unix 主机：embedded pixel window + 产品状态机
 ~~`frontend.rs` 三处 `#[path]`~~ → `platform::adapters::{windows,unix}` 正规声明；
 `frontend` 只 `use` host `frontend`。Win `super::remote_frontend` 现为真实 sibling。
 `boundary_tests`：`FRONTEND_PATH_ATTR_BUDGET=0`。  
-残留：~~`unix/frontend` 内对 `terminal_selection.rs` 的嵌套 `#[path]`~~ → 已收为 crate 级 `terminal_selection` 共享模块（2026-08-03）。
+残留：~~`unix/frontend` 内对 `terminal_selection.rs` 的嵌套 `#[path]`~~ → 已收为 `src/frontend/selection` 共享模块（2026-08-03）。
 
 #### L2 — 双 GUI 架构未收敛语义，仅收敛了启动皮（**高，UX 根因**）
 
