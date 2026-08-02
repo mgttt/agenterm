@@ -236,3 +236,20 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 下轮建议：
 - 用 `platform-ux-parity-smoke-linux -- --emit-matrix` 补齐 Linux 列。
 - 用 `platform-ux-parity-smoke-macos -- --emit-matrix` 补齐 macOS 列。
+
+### 最近一次平台预检（Windows 主机）
+
+- `platform-ux-parity-smoke-linux -- --emit-matrix`
+  - `run_id: 1785675131350-143268`
+  - `suite: platform-ux-parity-smoke`
+  - `failure: platform_gui_missing`
+  - 根因归类：`infra/platform-binary-missing`
+  - Linux 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（非脚本异常中断）。
+- `platform-ux-parity-smoke-macos -- --emit-matrix`
+  - `run_id: 1785675170802-256968`
+  - `suite: platform-ux-parity-smoke`
+  - `failure: platform_gui_missing`
+  - 根因归类：`infra/platform-binary-missing`
+  - macOS 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（非脚本异常中断）。
+
+说明：这是当前 Windows 开发机的执行边界，不是回归逻辑失败；脚本已改为在该场景输出 `matrix` 与失败根因，便于三平台聚合不阻塞。

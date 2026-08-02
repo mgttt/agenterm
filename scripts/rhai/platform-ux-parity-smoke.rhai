@@ -206,10 +206,33 @@ fn classify_failure_root(failure) {
     if failure.contains("runtime_error") || failure.contains("script_runtime") {
         return "infra/rhai-runtime";
     }
+    if failure.contains("platform_gui_missing") ||
+            failure.contains("platform_cli_missing") ||
+            failure.contains("platform_script_missing") {
+        return "infra/platform-binary-missing";
+    }
     if failure.contains("script_not_found") || failure.contains("task_not_found") {
         return "infra/script-task-mapping";
     }
     "bug/unknown"
+}
+
+fn fail_supported_profiles_for_platform(evidence_states, platform, evidence_profiles, message) {
+    let updated = evidence_states;
+    let ids = [];
+    for profile in evidence_profiles {
+        let supported = if platform == "windows" {
+            profile.windows_supported
+        } else if platform == "linux" {
+            profile.linux_supported
+        } else {
+            profile.macos_supported
+        };
+        if supported {
+            ids.push(profile.id);
+        }
+    }
+    mark_evidence_state(updated, ids, message)
 }
 
 fn platform_state_for(profile, run_platform, emitted) {
@@ -532,104 +555,135 @@ let gui_exe = parsed.gui_exe;
 let script_exe = parsed.script_exe;
 let cli_exe = parsed.cli_exe;
 let platform = parsed.platform;
-require(
-    platform == "windows" || platform == "linux" || platform == "macos",
-    "unsupported platform (windows|linux|macos)"
-);
-require(std::fs::exists(gui_exe), "platform_gui_missing");
-require(std::fs::exists(cli_exe), "platform_cli_missing");
-let runtime_script = resolve_script_binary(script_exe, repository);
-require(std::fs::exists(runtime_script), "platform_script_missing");
 
-let context = test_harness::new_context(repository, "platform-ux-parity");
-let owned_children = [];
 let evidence_states = init_evidence_states(evidence_profiles);
 let failure_messages = [];
 let succeeded = true;
+let preflight_message = if std::fs::exists(gui_exe) {
+    if std::fs::exists(cli_exe) {
+        let runtime_script = resolve_script_binary(script_exe, repository);
+        if std::fs::exists(runtime_script) {
+            ()
+        } else {
+            "platform_script_missing"
+        }
+    } else {
+        "platform_cli_missing"
+    }
+} else {
+    "platform_gui_missing"
+};
 
-print("STEP startup contract and first-window behavior");
-let startup_evidence = ["ux-parity.startup", "ux-parity.startup-title"];
-let startup_result = execute_phase(
-    context,
-    runtime_script,
-    repository,
-    "startup-smoke",
-    [gui_exe, cli_exe, "1000"],
-    "startup",
-    declared_evidence,
-    startup_evidence,
-    evidence_states,
-    false
-);
-if !startup_result.success {
+if preflight_message != () {
+    evidence_states = fail_supported_profiles_for_platform(
+        evidence_states,
+        platform,
+        evidence_profiles,
+        preflight_message
+    );
+    failure_messages.push(preflight_message);
     succeeded = false;
-    failure_messages.push(startup_result.error);
 }
-evidence_states = startup_result.evidence_states;
 
-print("STEP wake contract");
-let wake_result = execute_phase(
-    context,
-    runtime_script,
-    repository,
-    "wake-smoke",
-    [gui_exe, cli_exe],
-    "wake-contract",
-    declared_evidence,
-    ["ux-parity.wake-coalescing"],
-    evidence_states,
-    false
-);
-if !wake_result.success {
-    succeeded = false;
-    failure_messages.push(wake_result.error);
-}
-evidence_states = wake_result.evidence_states;
+let runtime_script = if preflight_message == () {
+    resolve_script_binary(script_exe, repository)
+} else {
+    ""
+};
 
-if platform == "windows" {
-    print("STEP windows remote-ui behavior (replaceable client + selection + clipboard)");
-    let remote_result = execute_phase(
+let context = test_harness::new_context(repository, "platform-ux-parity");
+let owned_children = [];
+
+if preflight_message == () {
+    require(
+        platform == "windows" || platform == "linux" || platform == "macos",
+        "unsupported platform (windows|linux|macos)"
+    );
+
+    print("STEP startup contract and first-window behavior");
+    let startup_evidence = ["ux-parity.startup", "ux-parity.startup-title"];
+    let startup_result = execute_phase(
         context,
         runtime_script,
         repository,
-        "remote-ui-smoke",
-        [gui_exe, cli_exe],
-        "remote-ui",
+        "startup-smoke",
+        [gui_exe, cli_exe, "1000"],
+        "startup",
         declared_evidence,
-        [
-            "ux-parity.remote-ui.replaceable-client",
-            "ux-parity.remote-ui.selection",
-            "ux-parity.window-focus-contract"
-        ],
+        startup_evidence,
         evidence_states,
         false
     );
-    if !remote_result.success {
+    if !startup_result.success {
         succeeded = false;
-        failure_messages.push(remote_result.error);
+        failure_messages.push(startup_result.error);
     }
-    evidence_states = remote_result.evidence_states;
-} else {
-    let workbench_evidence = "ux-parity." + platform + ".unix-frontend.workbench";
-    let clipboard_evidence = "ux-parity." + platform + ".unix-frontend.clipboard";
-    print("STEP unix frontend behavior by platform (workbench + focus contract)");
-    let unix_result = execute_phase(
+    evidence_states = startup_result.evidence_states;
+
+    print("STEP wake contract");
+    let wake_result = execute_phase(
         context,
         runtime_script,
         repository,
-        "unix-frontend-smoke",
-        [gui_exe, cli_exe, "--platform", platform],
-        "unix-frontend",
+        "wake-smoke",
+        [gui_exe, cli_exe],
+        "wake-contract",
         declared_evidence,
-        [workbench_evidence, clipboard_evidence, "ux-parity.window-focus-contract"],
+        ["ux-parity.wake-coalescing"],
         evidence_states,
-        true
+        false
     );
-    if !unix_result.success {
+    if !wake_result.success {
         succeeded = false;
-        failure_messages.push(unix_result.error);
+        failure_messages.push(wake_result.error);
     }
-    evidence_states = unix_result.evidence_states;
+    evidence_states = wake_result.evidence_states;
+
+    if platform == "windows" {
+        print("STEP windows remote-ui behavior (replaceable client + selection + clipboard)");
+        let remote_result = execute_phase(
+            context,
+            runtime_script,
+            repository,
+            "remote-ui-smoke",
+            [gui_exe, cli_exe],
+            "remote-ui",
+            declared_evidence,
+            [
+                "ux-parity.remote-ui.replaceable-client",
+                "ux-parity.remote-ui.selection",
+                "ux-parity.window-focus-contract"
+            ],
+            evidence_states,
+            false
+        );
+        if !remote_result.success {
+            succeeded = false;
+            failure_messages.push(remote_result.error);
+        }
+        evidence_states = remote_result.evidence_states;
+    } else {
+        let workbench_evidence = "ux-parity." + platform + ".unix-frontend.workbench";
+        let clipboard_evidence = "ux-parity." + platform + ".unix-frontend.clipboard";
+        print("STEP unix frontend behavior by platform (workbench + focus contract)");
+        let unix_result = execute_phase(
+            context,
+            runtime_script,
+            repository,
+            "unix-frontend-smoke",
+            [gui_exe, cli_exe, "--platform", platform],
+            "unix-frontend",
+            declared_evidence,
+            [workbench_evidence, clipboard_evidence, "ux-parity.window-focus-contract"],
+            evidence_states,
+            true
+        );
+        if !unix_result.success {
+            succeeded = false;
+            failure_messages.push(unix_result.error);
+        }
+        evidence_states = unix_result.evidence_states;
+    }
 }
 
 let failure = aggregate_failure_message(failure_messages);
