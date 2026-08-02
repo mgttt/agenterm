@@ -8,10 +8,9 @@ use agenterm_platform::{
 };
 
 use crate::platform::control_center::ScreenshotStrategy;
-use crate::platform;
 
-pub(crate) const fn screenshot_strategy() -> ScreenshotStrategy {
-    platform::control_center_screenshot_strategy()
+pub(crate) fn screenshot_strategy() -> ScreenshotStrategy {
+    crate::platform::control_center_screenshot_strategy()
 }
 
 pub(crate) fn protect_state_directory(path: &Path) -> io::Result<()> {
@@ -52,7 +51,7 @@ mod tests {
 
     #[test]
     fn native_control_center_renderers_own_linux_and_macos_capture_requests() {
-        let strategy = control_center_screenshot_strategy();
+        let strategy = crate::platform::control_center_screenshot_strategy();
         if crate::platform::is_windows_host() {
             assert_eq!(strategy, ScreenshotStrategy::DirectNativeWindow);
         } else if crate::platform::is_unix_host() {

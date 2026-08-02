@@ -2,6 +2,7 @@
 // `platform::services::frontend`.
 pub(crate) use crate::frontend::{
     attempt_gui_handoff,
+    gui_launch_argument_error,
     gui_help_result,
     parse_gui_launch_target,
     request_gui_wake,

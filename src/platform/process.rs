@@ -19,10 +19,13 @@ pub(crate) fn autostart_server(
     parameter_name: &str,
     parameter_value: &str,
 ) -> std::io::Result<bool> {
-    autostart_server_impl(parameter_name, parameter_value)
+    if crate::platform::is_windows_host() {
+        autostart_server_impl(parameter_name, parameter_value)
+    } else {
+        Ok(false)
+    }
 }
 
-#[cfg(windows)]
 fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io::Result<bool> {
     let current = std::env::current_exe()?;
     let server = current.with_file_name("agenterm-server.exe");
@@ -49,11 +52,6 @@ fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io
         );
     }
     Ok(true)
-}
-
-#[cfg(not(windows))]
-fn autostart_server_impl(_parameter_name: &str, _parameter_value: &str) -> std::io::Result<bool> {
-    Ok(false)
 }
 
 #[cfg(test)]

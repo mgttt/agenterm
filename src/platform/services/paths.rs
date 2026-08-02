@@ -73,7 +73,7 @@ pub(crate) fn instance_registry_dir(override_path: Option<OsString>) -> PathBuf 
         .unwrap_or_else(|| {
             host_directories()
                 .local_data
-                .join(product_directory_name())
+                .join(crate::platform::product_directory_name())
                 .join("instances")
         })
 }

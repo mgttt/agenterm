@@ -12,11 +12,11 @@ pub(crate) enum ScreenshotStrategy {
     Unsupported,
 }
 
-pub(crate) const fn screenshot_strategy() -> ScreenshotStrategy {
+pub(crate) fn screenshot_strategy() -> ScreenshotStrategy {
     crate::platform::services::control_center::screenshot_strategy()
 }
 
-pub(crate) const fn screenshot_capability() -> &'static str {
+pub(crate) fn screenshot_capability() -> &'static str {
     match screenshot_strategy() {
         ScreenshotStrategy::DirectNativeWindow | ScreenshotStrategy::RendererRequest => "available",
         ScreenshotStrategy::Unsupported => "unavailable",
@@ -59,11 +59,12 @@ mod tests {
 
     #[test]
     fn strategy_preserves_platform_product_behavior() {
-        let expected = match agenterm_platform::platform_kind() {
-            agenterm_platform::PlatformKind::Windows => ScreenshotStrategy::DirectNativeWindow,
-            agenterm_platform::PlatformKind::Macos => ScreenshotStrategy::RendererRequest,
-            agenterm_platform::PlatformKind::Linux => ScreenshotStrategy::RendererRequest,
-            _ => ScreenshotStrategy::Unsupported,
+        let expected = if crate::platform::is_windows_host() {
+            ScreenshotStrategy::DirectNativeWindow
+        } else if crate::platform::is_unix_host() {
+            ScreenshotStrategy::RendererRequest
+        } else {
+            ScreenshotStrategy::Unsupported
         };
         assert_eq!(screenshot_strategy(), expected);
     }
