@@ -126,19 +126,14 @@ let evidence_profiles = [
     }
 ];
 
-fn read_emitted_evidence(context) {
-    let emitted = [];
-    if !std::fs::exists(context.evidence_path) {
-        return emitted;
-    }
-
-    for line in std::fs::read_to_string(context.evidence_path).split("\n") {
-        let trimmed = line.trim();
-        if trimmed != "" {
-            emitted.push(trimmed);
+fn has_emitted_evidence(emitted, evidence_id) {
+    let hit = false;
+    for entry in emitted {
+        if entry == evidence_id {
+            hit = true;
         }
     }
-    emitted
+    hit
 }
 
 fn classify_failure_root(failure) {
@@ -172,9 +167,10 @@ fn classify_failure_root(failure) {
 
 fn platform_state_for(profile, run_platform, emitted, failure) {
     let pending = "not-executed-yet";
+    let emitted_for_profile = has_emitted_evidence(emitted, profile.id);
     let windows_state = if !profile.windows_supported {
         "Unsupported"
-    } else if run_platform == "windows" && failure == "" && emitted.contains(profile.id) {
+    } else if run_platform == "windows" && failure == "" && emitted_for_profile {
         "Supported"
     } else if run_platform == "windows" && failure != "" {
         "Failed"
@@ -183,7 +179,7 @@ fn platform_state_for(profile, run_platform, emitted, failure) {
     };
     let linux_state = if !profile.linux_supported {
         "Unsupported"
-    } else if run_platform == "linux" && failure == "" && emitted.contains(profile.id) {
+    } else if run_platform == "linux" && failure == "" && emitted_for_profile {
         "Supported"
     } else if run_platform == "linux" && failure != "" {
         "Failed"
@@ -192,7 +188,7 @@ fn platform_state_for(profile, run_platform, emitted, failure) {
     };
     let macos_state = if !profile.macos_supported {
         "Unsupported"
-    } else if run_platform == "macos" && failure == "" && emitted.contains(profile.id) {
+    } else if run_platform == "macos" && failure == "" && emitted_for_profile {
         "Supported"
     } else if run_platform == "macos" && failure != "" {
         "Failed"
@@ -405,22 +401,52 @@ fn run_script_task(context, script_bin, repository, task_file, task_args, task_l
     return output;
 }
 
-fn emit(context, declared, id) {
+fn emit(context, declared, id, observed_evidence) {
     test_harness::emit_evidence(context, declared, id);
+    let observed = observed_evidence;
+    observed.push(id);
+    observed
 }
 
-require(positional_args.len >= 4, "expected: REPO GUI_EXE [SCRIPT_EXE] CLI_EXE PLATFORM");
-let repository = absolute(positional_args[0]);
-let gui_exe = absolute(positional_args[1]);
-let cli_index = if positional_args.len == 4 { 2 } else { 3 };
-let platform_index = if positional_args.len == 4 { 3 } else { 4 };
-let script_exe = if positional_args.len >= 5 {
-    absolute(positional_args[2])
-} else {
-    ""
-};
-let cli_exe = absolute(positional_args[cli_index]);
-let platform = positional_args[platform_index].to_lower();
+fn parse_platform_args(positional_args) {
+    let args_len = positional_args.len;
+    require(args_len >= 4, "expected: REPO GUI_EXE [SCRIPT_EXE] CLI_EXE PLATFORM");
+
+    let platform = positional_args[args_len - 1].to_lower();
+
+    let attempt_repo = absolute(positional_args[args_len - 4]);
+    let attempt_gui = absolute(positional_args[args_len - 3]);
+    let attempt_cli = absolute(positional_args[args_len - 2]);
+    let short = #{
+        repository: attempt_repo,
+        gui_exe: attempt_gui,
+        script_exe: "",
+        cli_exe: attempt_cli,
+        platform: platform
+    };
+    if args_len >= 5 {
+        let maybe_repo = absolute(positional_args[args_len - 5]);
+        let maybe_gui = absolute(positional_args[args_len - 4]);
+        let maybe_script = absolute(positional_args[args_len - 3]);
+        let maybe_cli = absolute(positional_args[args_len - 2]);
+        if maybe_script.to_lower().contains("agenterm-rhai") &&
+                maybe_gui.ends_with("agenterm.exe") &&
+                maybe_cli.ends_with("agenterm-cli.exe") {
+            short.repository = maybe_repo;
+            short.gui_exe = maybe_gui;
+            short.script_exe = maybe_script;
+            short.cli_exe = maybe_cli;
+        }
+    }
+    short
+}
+
+let parsed = parse_platform_args(positional_args);
+let repository = parsed.repository;
+let gui_exe = parsed.gui_exe;
+let script_exe = parsed.script_exe;
+let cli_exe = parsed.cli_exe;
+let platform = parsed.platform;
 require(
     platform == "windows" || platform == "linux" || platform == "macos",
     "unsupported platform (windows|linux|macos)"
@@ -447,8 +473,8 @@ try {
         [gui_exe, cli_exe, "1000"],
         "startup"
     );
-        emit(context, declared_evidence, "ux-parity.startup");
-        emit(context, declared_evidence, "ux-parity.startup-title");
+    emitted = emit(context, declared_evidence, "ux-parity.startup", emitted);
+    emitted = emit(context, declared_evidence, "ux-parity.startup-title", emitted);
     run_script_task(
         context,
         runtime_script,
@@ -457,7 +483,7 @@ try {
         [gui_exe, cli_exe],
         "wake-contract"
     );
-        emit(context, declared_evidence, "ux-parity.wake-coalescing");
+    emitted = emit(context, declared_evidence, "ux-parity.wake-coalescing", emitted);
 
     if platform == "windows" {
         print("STEP windows remote-ui behavior (replaceable client + selection + clipboard)");
@@ -469,9 +495,19 @@ try {
             [gui_exe, cli_exe],
             "remote-ui"
         );
-        emit(context, declared_evidence, "ux-parity.remote-ui.replaceable-client");
-        emit(context, declared_evidence, "ux-parity.remote-ui.selection");
-        emit(context, declared_evidence, "ux-parity.window-focus-contract");
+        emitted = emit(
+            context,
+            declared_evidence,
+            "ux-parity.remote-ui.replaceable-client",
+            emitted
+        );
+        emitted = emit(
+            context,
+            declared_evidence,
+            "ux-parity.remote-ui.selection",
+            emitted
+        );
+        emitted = emit(context, declared_evidence, "ux-parity.window-focus-contract", emitted);
     } else {
         let workbench_evidence = "ux-parity." + platform + ".unix-frontend.workbench";
         let clipboard_evidence = "ux-parity." + platform + ".unix-frontend.clipboard";
@@ -484,9 +520,9 @@ try {
             [gui_exe, cli_exe, "--platform", platform],
             "unix-frontend"
         );
-        emit(context, declared_evidence, workbench_evidence);
-        emit(context, declared_evidence, clipboard_evidence);
-        emit(context, declared_evidence, "ux-parity.window-focus-contract");
+        emitted = emit(context, declared_evidence, workbench_evidence, emitted);
+        emitted = emit(context, declared_evidence, clipboard_evidence, emitted);
+        emitted = emit(context, declared_evidence, "ux-parity.window-focus-contract", emitted);
     }
 
     succeeded = true;
@@ -496,7 +532,7 @@ try {
 write_matrix_reports(
     context,
     platform,
-    read_emitted_evidence(context),
+    emitted,
     failure,
     emit_matrix,
     evidence_profiles
