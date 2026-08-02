@@ -63,6 +63,7 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
 pub struct ProcessTreeGuard {
     process_group: libc::pid_t,
     root_start_identity: Option<String>,
+    root_reference: Option<crate::process_reference::ProcessReference>,
     active: bool,
 }
 
@@ -90,9 +91,11 @@ impl ProcessTreeGuard {
             } => Some(identity),
             _ => None,
         };
+        let root_reference = crate::process_reference::ProcessReference::open(child.id()).ok();
         Ok(Self {
             process_group,
             root_start_identity,
+            root_reference,
             active: true,
         })
     }
@@ -113,10 +116,14 @@ impl ProcessTreeGuard {
             ) => *current == *expected,
             _ => false,
         };
-        if !root_is_owned {
+        let root_alive = self
+            .root_reference
+            .as_ref()
+            .is_some_and(|reference| reference.is_alive().unwrap_or(false));
+        if !root_is_owned || !root_alive {
             // Once the original root is reaped, its PID and process-group ID
             // can be reused by unrelated processes. Only terminate a tree while
-            // the exact observed root is still live.
+            // the exact pidfd-backed root is still live.
             self.active = false;
             return Ok(());
         }
