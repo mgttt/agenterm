@@ -81,6 +81,7 @@ agenterm-platform crate（复用层）
   - 本轮收口: 新增 `FrontendContractState`，并由 `GuiLaunchResult` / `GuiWakeResult` / `FrontendServerRecovery` 映射统一状态（Supported/Unsupported/Failed）；便于 evidence 统一归档与分支阻断。
   - 本轮补充: 把 `autostart_server` 的平台分支下沉到 `src/platform/process.rs` 的编译期分支（Windows 真正执行、非 Windows 返回 `Ok(false)`），去掉运行时 `platform_kind` 条件，提高平台能力边界清晰度。
   - 本轮补充: `src/frontend.rs` 不再直接维护平台 host 分流，改为消费 `platform::frontend_host()`，统一 host 判定入口。
+  - 本轮补充（已合并）：把 `platform/services` 的平台策略集中收口到 `src/platform/mod.rs`，删除 `control_center/script_http/ipc/paths/supervisor_audit` 在服务层的直接 `platform_kind` 分支，`agenterm-script` 名称残留清理为 `agenterm-rhai`。
 
 - O1B（UI）：统一输入-选择-滚轮场景模板（进行中）
   - owner: Human Workspace + ui_bridge
