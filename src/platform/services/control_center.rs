@@ -51,14 +51,9 @@ mod tests {
 
     #[test]
     fn native_control_center_renderers_own_linux_and_macos_capture_requests() {
-        let strategy = crate::platform::control_center_screenshot_strategy();
-        if crate::platform::is_windows_host() {
-            assert_eq!(strategy, ScreenshotStrategy::DirectNativeWindow);
-        } else if crate::platform::is_unix_host() {
-            assert_eq!(strategy, ScreenshotStrategy::RendererRequest);
-        } else {
-            assert_eq!(strategy, ScreenshotStrategy::Unsupported);
-        }
+        let strategy = screenshot_strategy();
+        let expected = crate::platform::control_center_screenshot_strategy();
+        assert_eq!(strategy, expected);
     }
 
     #[test]

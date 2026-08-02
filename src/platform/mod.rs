@@ -286,6 +286,65 @@ pub(crate) fn default_audit_path() -> std::path::PathBuf {
     }
 }
 
+fn host_directories() -> agenterm_platform::filesystem::HostDirectories {
+    agenterm_platform::filesystem::host_directories().unwrap_or_else(|_| {
+        let fallback = std::env::temp_dir();
+        agenterm_platform::filesystem::HostDirectories {
+            config: fallback.clone(),
+            local_data: fallback,
+        }
+    })
+}
+
+pub(crate) fn default_workspace_path() -> std::path::PathBuf {
+    if is_windows_host() {
+        local_data_root_for_product_directory(&host_directories())
+            .join("workspace.json")
+    } else {
+        let scope = std::env::var("AGENTERM_INSTANCE")
+            .ok()
+            .and_then(|value| value.parse::<crate::platform::contract::ipc::LogicalInstance>().ok())
+            .and_then(|instance| {
+                crate::platform::contract::ipc::ServerScopeId::current(&instance).ok()
+            });
+        scope
+            .map(|scope_id| crate::platform::ipc::default_workspace_path(&scope_id))
+            .unwrap_or_else(|| {
+                local_data_root_for_product_directory(&host_directories())
+                    .join("workspaces")
+                    .join("main.json")
+            })
+    }
+}
+
+pub(crate) fn settings_root_path() -> std::path::PathBuf {
+    let directories = host_directories();
+    if is_windows_host() {
+        local_data_root_for_product_directory(&directories)
+    } else {
+        config_root_for_product_directory(&directories)
+    }
+}
+
+pub(crate) fn workspace_instance_scope()
+-> Option<crate::platform::contract::ipc::ServerScopeId> {
+    if !is_unix_host() {
+        return None;
+    }
+    std::env::var("AGENTERM_INSTANCE")
+        .ok()
+        .and_then(|value| value.parse::<crate::platform::contract::ipc::LogicalInstance>().ok())
+        .and_then(|instance| {
+            crate::platform::contract::ipc::ServerScopeId::current(&instance).ok()
+        })
+}
+
+pub(crate) fn instance_registry_directory_root() -> std::path::PathBuf {
+    host_directories()
+        .local_data
+        .join(product_directory_name())
+}
+
 pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static str> {
     let (provider, roots) = if is_windows_host() {
         (ureq::tls::TlsProvider::NativeTls, ureq::tls::RootCerts::PlatformVerifier)
@@ -298,6 +357,18 @@ pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static 
         .provider(provider)
         .root_certs(roots)
         .build())
+}
+
+pub(crate) fn script_http_tls_expectation()
+-> (ureq::tls::TlsProvider, ureq::tls::RootCerts) {
+    if is_windows_host() {
+        (
+            ureq::tls::TlsProvider::NativeTls,
+            ureq::tls::RootCerts::PlatformVerifier,
+        )
+    } else {
+        (ureq::tls::TlsProvider::Rustls, ureq::tls::RootCerts::WebPki)
+    }
 }
 
 pub(crate) fn ipc_default_native_endpoint(

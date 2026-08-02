@@ -11,16 +11,9 @@ mod tests {
     #[test]
     fn tls_provider_matches_the_selected_platform() {
         let config = tls_config().expect("supported platform TLS config");
-        if crate::platform::is_windows_host() {
-                assert_eq!(config.provider(), ureq::tls::TlsProvider::NativeTls);
-                assert!(matches!(
-                    config.root_certs(),
-                    &ureq::tls::RootCerts::PlatformVerifier
-                ));
-        } else {
-                assert_eq!(config.provider(), ureq::tls::TlsProvider::Rustls);
-                assert!(matches!(config.root_certs(), &ureq::tls::RootCerts::WebPki));
-        }
+        let (expected_provider, expected_roots) = crate::platform::script_http_tls_expectation();
+        assert_eq!(config.provider(), expected_provider);
+        assert_eq!(config.root_certs(), expected_roots);
     }
 }
 

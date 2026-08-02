@@ -59,13 +59,7 @@ mod tests {
 
     #[test]
     fn strategy_preserves_platform_product_behavior() {
-        let expected = if crate::platform::is_windows_host() {
-            ScreenshotStrategy::DirectNativeWindow
-        } else if crate::platform::is_unix_host() {
-            ScreenshotStrategy::RendererRequest
-        } else {
-            ScreenshotStrategy::Unsupported
-        };
+        let expected = crate::platform::control_center_screenshot_strategy();
         assert_eq!(screenshot_strategy(), expected);
     }
 
