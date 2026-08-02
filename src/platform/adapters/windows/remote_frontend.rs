@@ -11,8 +11,7 @@ use std::{
 
 use crate::frontend::interaction::{
     FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag,
-    WheelAccumulator, WheelTarget, focus_surface_navigation, route_wheel,
-    sidebar_scroll_offset_for_thumb_top,
+    WheelAccumulator, WheelTarget, route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -604,23 +603,6 @@ fn terminal_selection_highlight_rects(
             }
         })
         .collect()
-}
-
-fn remote_surface_navigation(
-    source: RemoteFocusSurface,
-    control: bool,
-    shift: bool,
-    alt: bool,
-    key: u32,
-) -> Option<RemoteFocusSurface> {
-    let target = focus_surface_navigation(
-        source.to_shared(),
-        FocusDirection::from_virtual_key_code(key)?,
-        control,
-        shift,
-        alt,
-    )?;
-    Some(RemoteFocusSurface::from_shared(target))
 }
 
 fn remote_composer_identity(
@@ -4452,12 +4434,14 @@ impl RemoteWindowState {
         shift: bool,
         alt: bool,
     ) -> bool {
-        let Some(target) =
-            remote_surface_navigation(self.current_focus_surface(), control, shift, alt, key)
-        else {
+        let Some(direction) = FocusDirection::from_virtual_key_code(key) else {
             return false;
         };
-        self.set_focus_surface(target)
+        let state = FocusState::new(self.current_focus_surface().to_shared(), self.focus_gate());
+        let Some(target) = state.navigate(direction, control, shift, alt) else {
+            return false;
+        };
+        self.set_focus_surface(RemoteFocusSurface::from_shared(target))
     }
 
     fn handle_keyboard_navigation_with_modifiers(
@@ -6882,32 +6866,48 @@ mod tests {
 
     #[test]
     fn surface_navigation_is_directional_and_modifier_exact() {
+        fn navigate(
+            source: RemoteFocusSurface,
+            control: bool,
+            shift: bool,
+            alt: bool,
+            key: u32,
+        ) -> Option<RemoteFocusSurface> {
+            let state = FocusState::new(source.to_shared(), FocusTransitionGate::default());
+            let target = state.navigate(
+                FocusDirection::from_virtual_key_code(key)?,
+                control,
+                shift,
+                alt,
+            )?;
+            Some(RemoteFocusSurface::from_shared(target))
+        }
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, false, 0x28),
+            navigate(RemoteFocusSurface::Terminal, true, false, false, 0x28),
             Some(RemoteFocusSurface::Composer)
         );
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Composer, true, false, false, 0x26),
+            navigate(RemoteFocusSurface::Composer, true, false, false, 0x26),
             Some(RemoteFocusSurface::Terminal)
         );
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, false, 0x25),
+            navigate(RemoteFocusSurface::Terminal, true, false, false, 0x25),
             Some(RemoteFocusSurface::Tabs)
         );
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Tabs, true, false, false, 0x27),
+            navigate(RemoteFocusSurface::Tabs, true, false, false, 0x27),
             Some(RemoteFocusSurface::Terminal)
         );
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Composer, true, false, false, 0x25),
+            navigate(RemoteFocusSurface::Composer, true, false, false, 0x25),
             None
         );
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Terminal, true, true, false, 0x28),
+            navigate(RemoteFocusSurface::Terminal, true, true, false, 0x28),
             None
         );
         assert_eq!(
-            remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, true, 0x28),
+            navigate(RemoteFocusSurface::Terminal, true, false, true, 0x28),
             None
         );
     }
