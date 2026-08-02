@@ -348,9 +348,7 @@ fn atomic_write_json(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
 fn read_bounded_json<T: for<'de> Deserialize<'de>>(path: &Path) -> anyhow::Result<T> {
     let metadata = std::fs::symlink_metadata(path)?;
     anyhow::ensure!(
-            metadata.is_file()
-            && agenterm::is_direct_file(path)
-            && metadata.len() <= 4 * 1024 * 1024,
+        metadata.is_file() && agenterm::is_direct_file(path) && metadata.len() <= 4 * 1024 * 1024,
         "incremental state file is absent, indirect, or oversized"
     );
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)

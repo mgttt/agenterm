@@ -33,7 +33,14 @@ fn optional_sysctl_integer(name: &CStr) -> Result<Option<u64>, CacheHierarchyErr
     match sysctl_integer(name) {
         Ok(0) => Ok(None),
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.raw_os_error() == Some(libc::ENOENT) => Ok(None),
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(libc::ENOENT) | Some(libc::EINVAL)
+            ) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(CacheHierarchyError::new(
             CacheHierarchyErrorKind::Query,
             format!("{}: {error}", name.to_string_lossy()),

@@ -12,8 +12,14 @@ const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 12] = [
     ("cfg(target_os", "compile-time OS branch"),
     ("cfg(target_family", "compile-time OS branch"),
     ("cfg(target_arch", "compile-time architecture branch"),
-    ("cfg(feature = \"windows\")", "compile-time windows feature branch"),
-    ("cfg(feature = \"unix\")", "compile-time unix feature branch"),
+    (
+        "cfg(feature = \"windows\")",
+        "compile-time windows feature branch",
+    ),
+    (
+        "cfg(feature = \"unix\")",
+        "compile-time unix feature branch",
+    ),
 ];
 
 #[test]
@@ -67,7 +73,10 @@ fn collect_rs_files(directory: &Path, files: &mut Vec<PathBuf>) -> std::io::Resu
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
-        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         if path.is_dir() {
             if file_name == "platform" {
                 continue;

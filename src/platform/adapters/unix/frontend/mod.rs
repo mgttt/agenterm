@@ -8,8 +8,6 @@ mod render;
 mod screenshot;
 #[path = "../../../../terminal_selection.rs"]
 mod terminal_selection;
-#[path = "../../../../ui_snapshot.rs"]
-mod ui_snapshot;
 mod wake;
 pub(crate) use wake::request_gui_wake;
 mod window_state;
@@ -37,16 +35,15 @@ use agenterm_platform::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    platform::services::frontend::{
-        attempt_gui_handoff, gui_launch_argument_error, parse_gui_launch_target, gui_help_result,
-        GuiHandoffResult, GuiLaunchResult,
-        UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE,
-    },
-    platform::services::frontend::request_gui_wake_best_effort,
     client::no_activate_from_environment,
     commands::{alternate_screen_wheel_bytes, option_value, screenshot_output_path},
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
+    frontend::{
+        GuiHandoffResult, GuiLaunchResult, UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE,
+        attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
+        request_gui_wake_best_effort,
+    },
     instances::{mark_intentional_shutdown, register_instance},
     ipc_transport::{IpcEnvelope, IpcServer, start_ipc_server},
     operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
@@ -74,20 +71,17 @@ use crate::{
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
-use self::wake::install_unix_wake;
-use self::{
-    terminal_selection::{
-        AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
-        autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
-    },
-    ui_snapshot::{
-        PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
-        embedded_window_json, event_position_json, locale_json, schema_version_json,
-        scrollbar_state_json, settings_json, system_menu_json, terminal_interaction_json,
-        working_context_json,
-    },
+use self::terminal_selection::{
+    AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
+    autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
 };
-
+use self::wake::install_unix_wake;
+use crate::ui_snapshot::{
+    PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
+    embedded_window_json, event_position_json, locale_json, schema_version_json,
+    scrollbar_state_json, settings_json, system_menu_json, terminal_interaction_json,
+    working_context_json,
+};
 
 use cursor_blink::CursorBlink;
 use font::resolved_font_name;
@@ -534,7 +528,10 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let options = match parse_gui_launch_target(&arguments, UNIX_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(message) => {
-            eprintln!("{}", gui_launch_argument_error(&message, UNIX_GUI_USAGE, true));
+            eprintln!(
+                "{}",
+                gui_launch_argument_error(&message, UNIX_GUI_USAGE, true)
+            );
             return GuiLaunchResult::UsageError;
         }
     };
@@ -544,8 +541,10 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
         GuiHandoffResult::HandedOff => return GuiLaunchResult::Reused,
         GuiHandoffResult::Continue => {}
         GuiHandoffResult::Blocked(error) => {
-            eprintln!("The running AgenTerm server rejected the launcher handoff: {error}\n\
-                Restart that server to use this launcher capability.");
+            eprintln!(
+                "The running AgenTerm server rejected the launcher handoff: {error}\n\
+                Restart that server to use this launcher capability."
+            );
             return GuiLaunchResult::BlockedByServer(error);
         }
     }
@@ -5442,10 +5441,9 @@ fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_jso
 #[cfg(test)]
 mod system_menu_tests {
     use super::{
-        RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure, UnixFocusSurface,
-        compact_cwd_for_status, gui_help_result, parse_gui_launch_target, scale_frame_nearest,
-        scale_rect_to_frame,
-        UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, GuiLaunchResult,
+        GuiLaunchResult, RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure,
+        UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, UnixFocusSurface, compact_cwd_for_status,
+        gui_help_result, parse_gui_launch_target, scale_frame_nearest, scale_rect_to_frame,
         system_menu_clipboard_state_pure, terminal_paste_bytes, terminal_paste_target_is_current,
         workspace_toolbar_snapshot_json,
     };
@@ -5802,4 +5800,3 @@ mod system_menu_tests {
         );
     }
 }
-

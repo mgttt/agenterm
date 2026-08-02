@@ -213,3 +213,10 @@ src/platform/目录其余适配层
   - 结论：非平台层当前无新增平台宿主分支回流，收口状态继续保持。
 ```
 
+## 2026-08-02 同步
+
+- `src/frontend.rs` 已作为产品 UI/UX ingress，移除 `platform::services::frontend` 兼容层；`ui_snapshot` 在根层单点复用。
+- `agenterm-platform` macOS 缓存/内存/坐标/共享内存差异已收口，`process` 产品 facade 不再持有编译期 OS 分支。
+- `wake-smoke` 证据声明同步为 `fleet.wake-coalescing` + `ux-parity.wake-coalescing`，并补齐 PRD alignment。
+- Quick gate 已绿：rustfmt、PRD alignment、all-target Clippy、530 项 library unit tests。
+

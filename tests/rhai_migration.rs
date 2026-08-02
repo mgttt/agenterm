@@ -3258,11 +3258,8 @@ fn stage_artifact_task_parks_a_running_windows_image() {
     fs::create_dir_all(&destination).expect("create destination fixture");
     let name = "agenterm-rhai.exe";
     fs::write(source.join(name), b"replacement-image").expect("write replacement fixture");
-    fs::copy(
-        env!("CARGO_BIN_EXE_agenterm-rhai"),
-        destination.join(name),
-    )
-    .expect("copy runnable artifact fixture");
+    fs::copy(env!("CARGO_BIN_EXE_agenterm-rhai"), destination.join(name))
+        .expect("copy runnable artifact fixture");
 
     let running = Command::new(destination.join(name))
         .arg("--worker")

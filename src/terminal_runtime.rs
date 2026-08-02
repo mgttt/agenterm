@@ -17,10 +17,10 @@ use crate::pty::{
 
 use crate::{
     SCROLLBACK_LINES,
+    frontend::request_gui_wake_best_effort,
     terminal_cursor::{DecscusrTracker, TerminalCursorAppearance},
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
-    platform::services::frontend::request_gui_wake_best_effort,
     wake_signal::WakeSignal,
     working_context::{
         CwdTracker, ProxyConfirmationMarker, ProxyState, SecretValue, ShellKind, parse_osc7,

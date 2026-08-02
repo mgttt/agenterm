@@ -2,7 +2,6 @@
 
 pub(crate) mod control_center;
 pub(crate) mod control_center_shell;
-pub(crate) mod frontend;
 pub(crate) mod ipc;
 pub(crate) mod paths;
 #[allow(unused_imports)]

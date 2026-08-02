@@ -108,7 +108,8 @@
     {
       "id": "wake-smoke",
       "evidence": [
-        "fleet.wake-coalescing"
+        "fleet.wake-coalescing",
+        "ux-parity.wake-coalescing"
       ]
     },
     {

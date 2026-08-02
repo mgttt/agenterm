@@ -6,17 +6,17 @@
 
 use crate::client::{parse_loopback_ipc_address, set_ipc_selectors};
 use crate::ipc_endpoint::EndpointSelectorArgs;
-use crate::frontend_server::{
-    FrontendServerRecovery, FrontendServerRecoveryState,
-};
-use crate::wake_signal::WakeSignal;
+use crate::platform::{FrontendHost, frontend_host};
 use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE};
-use crate::platform::{frontend_host, FrontendHost};
+use crate::wake_signal::WakeSignal;
 
+#[allow(dead_code)]
 #[path = "platform/adapters/windows/remote_frontend.rs"]
 mod remote_frontend;
+#[allow(dead_code)]
 #[path = "platform/adapters/unix/frontend/mod.rs"]
 mod unix_frontend;
+#[allow(dead_code)]
 #[path = "platform/adapters/windows/frontend.rs"]
 mod windows_frontend;
 
@@ -30,7 +30,10 @@ Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --i
 Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main or dev)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help";
 
 pub(crate) fn gui_help_result(arguments: &[String], usage: &str) -> Option<GuiLaunchResult> {
-    if arguments.iter().any(|argument| matches!(argument.as_str(), "-h" | "--help")) {
+    if arguments
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
         if arguments.len() == 1 {
             println!("{usage}");
             return Some(GuiLaunchResult::UsageHelpPrinted);
@@ -72,6 +75,7 @@ pub(crate) enum GuiLaunchResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum FrontendContractState {
     Supported,
     Unsupported,
@@ -81,6 +85,7 @@ pub(crate) enum FrontendContractState {
 }
 
 impl GuiLaunchResult {
+    #[allow(dead_code)]
     pub(crate) const fn contract_state(&self) -> FrontendContractState {
         match self {
             Self::Launched | Self::Reused | Self::UsageHelpPrinted => {
@@ -183,7 +188,12 @@ pub(crate) fn parse_gui_launch_arguments(
                 let value = arguments
                     .get(position + 1)
                     .filter(|value| !value.starts_with("--"))
-                    .ok_or_else(|| format!("{name} --address requires HOST:PORT", name = policy.launcher_name))?;
+                    .ok_or_else(|| {
+                        format!(
+                            "{name} --address requires HOST:PORT",
+                            name = policy.launcher_name
+                        )
+                    })?;
                 if policy.validate_address {
                     parse_loopback_ipc_address(value).map_err(|error| error.to_string())?;
                 }
@@ -200,7 +210,12 @@ pub(crate) fn parse_gui_launch_arguments(
                 let value = arguments
                     .get(position + 1)
                     .filter(|value| !value.starts_with("--"))
-                    .ok_or_else(|| format!("{name} --endpoint requires ENDPOINT", name = policy.launcher_name))?;
+                    .ok_or_else(|| {
+                        format!(
+                            "{name} --endpoint requires ENDPOINT",
+                            name = policy.launcher_name
+                        )
+                    })?;
                 selectors.endpoint = Some(value.to_owned());
                 position += 2;
             }
@@ -214,7 +229,12 @@ pub(crate) fn parse_gui_launch_arguments(
                 let value = arguments
                     .get(position + 1)
                     .filter(|value| !value.starts_with("--"))
-                    .ok_or_else(|| format!("{name} --instance requires NAME", name = policy.launcher_name))?;
+                    .ok_or_else(|| {
+                        format!(
+                            "{name} --instance requires NAME",
+                            name = policy.launcher_name
+                        )
+                    })?;
                 selectors.instance = Some(value.to_owned());
                 position += 2;
             }
@@ -291,6 +311,7 @@ pub(crate) enum GuiWakeResult {
 }
 
 impl GuiWakeResult {
+    #[allow(dead_code)]
     pub(crate) const fn contract_state(&self) -> FrontendContractState {
         match self {
             Self::Woke | Self::Throttled => FrontendContractState::Supported,
@@ -300,7 +321,10 @@ impl GuiWakeResult {
     }
 }
 
-pub(crate) fn attempt_gui_handoff(no_activate: bool, skip_when_in_server: bool) -> GuiHandoffResult {
+pub(crate) fn attempt_gui_handoff(
+    no_activate: bool,
+    skip_when_in_server: bool,
+) -> GuiHandoffResult {
     if skip_when_in_server && std::env::var_os("AGENTERM_SERVER").is_some() {
         return GuiHandoffResult::Continue;
     }
@@ -325,16 +349,18 @@ pub(crate) fn attempt_gui_handoff(no_activate: bool, skip_when_in_server: bool) 
 /// Start the product frontend for the current platform.
 pub fn run_gui_entry() -> i32 {
     match run_gui_entry_result() {
-        GuiLaunchResult::Launched | GuiLaunchResult::Reused | GuiLaunchResult::UsageHelpPrinted => 0,
+        GuiLaunchResult::Launched | GuiLaunchResult::Reused | GuiLaunchResult::UsageHelpPrinted => {
+            0
+        }
         GuiLaunchResult::UsageError => 2,
         GuiLaunchResult::UnsupportedHost => {
             eprintln!("AgenTerm GUI is unsupported on this platform");
             1
         }
-    GuiLaunchResult::BlockedByServer(error) | GuiLaunchResult::StartupFailed(error) => {
-        eprintln!("AgenTerm GUI launch failed: {error}");
-        1
-    }
+        GuiLaunchResult::BlockedByServer(error) | GuiLaunchResult::StartupFailed(error) => {
+            eprintln!("AgenTerm GUI launch failed: {error}");
+            1
+        }
     }
 }
 
@@ -346,6 +372,7 @@ fn run_gui_entry_result() -> GuiLaunchResult {
     }
 }
 
+#[allow(dead_code)]
 fn gui_wake_result_is_terminal(result: &GuiWakeResult) -> bool {
     matches!(
         result,
@@ -354,12 +381,14 @@ fn gui_wake_result_is_terminal(result: &GuiWakeResult) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        gui_launch_argument_error, gui_wake_result_is_terminal, parse_gui_launch_arguments,
-        FrontendContractState, FrontendServerRecovery, GuiLaunchResult, GuiWakeResult,
-        UNIX_GUI_LAUNCH_POLICY, WINDOWS_GUI_LAUNCH_POLICY,
+        FrontendContractState, GuiLaunchResult, GuiWakeResult, UNIX_GUI_LAUNCH_POLICY,
+        WINDOWS_GUI_LAUNCH_POLICY, gui_launch_argument_error, gui_wake_result_is_terminal,
+        parse_gui_launch_arguments,
     };
+    use crate::frontend_server::FrontendServerRecovery;
 
     #[test]
     fn gui_launch_result_maps_to_exit_code() {
@@ -382,7 +411,9 @@ mod tests {
         assert!(!gui_wake_result_is_terminal(&GuiWakeResult::Throttled));
         assert!(gui_wake_result_is_terminal(&GuiWakeResult::Unsupported));
         assert!(gui_wake_result_is_terminal(&GuiWakeResult::NoTarget));
-        assert!(gui_wake_result_is_terminal(&GuiWakeResult::Failed("x".to_owned())));
+        assert!(gui_wake_result_is_terminal(&GuiWakeResult::Failed(
+            "x".to_owned()
+        )));
     }
 
     #[test]
@@ -447,10 +478,8 @@ mod tests {
 
     #[test]
     fn shared_gui_launch_parser_rejects_unsupported_ui_client_for_unix() {
-        let result = parse_gui_launch_arguments(
-            &["--ui-client".to_owned()],
-            UNIX_GUI_LAUNCH_POLICY,
-        );
+        let result =
+            parse_gui_launch_arguments(&["--ui-client".to_owned()], UNIX_GUI_LAUNCH_POLICY);
         assert!(
             result.is_err(),
             "ui-client flag should be rejected when platform parser disallows it"
@@ -459,11 +488,8 @@ mod tests {
 
     #[test]
     fn gui_launch_argument_error_renders_shared_shape() {
-        let rendered = gui_launch_argument_error(
-            "bad argument",
-            "Usage: agenterm [--no-activate]",
-            true,
-        );
+        let rendered =
+            gui_launch_argument_error("bad argument", "Usage: agenterm [--no-activate]", true);
         assert!(rendered.contains("AgenTerm GUI argument error: bad argument"));
         assert!(rendered.contains("No GUI server was started by this invocation."));
         assert!(rendered.contains("Usage: agenterm [--no-activate]"));
@@ -474,9 +500,7 @@ mod tests {
 /// Notify the running frontend host to refresh wake state.
 pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) -> GuiWakeResult {
     match frontend_host() {
-        FrontendHost::Windows => {
-            windows_frontend::request_gui_wake(wake_window, wake_signal)
-        }
+        FrontendHost::Windows => windows_frontend::request_gui_wake(wake_window, wake_signal),
         FrontendHost::Unix => unix_frontend::request_gui_wake(wake_window, wake_signal),
         FrontendHost::Unsupported => GuiWakeResult::Unsupported,
     }

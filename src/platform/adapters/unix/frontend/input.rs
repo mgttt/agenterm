@@ -956,11 +956,12 @@ mod tests {
         } else {
             modifiers(true, false, false, false)
         };
-        let empty_copy_action = if crate::platform::terminal_shortcut_empty_copy_action_is_suppressed() {
-            TerminalShortcutAction::Suppress
-        } else {
-            TerminalShortcutAction::Forward
-        };
+        let empty_copy_action =
+            if crate::platform::terminal_shortcut_empty_copy_action_is_suppressed() {
+                TerminalShortcutAction::Suppress
+            } else {
+                TerminalShortcutAction::Forward
+            };
         assert_eq!(
             terminal_shortcut_action(&c, primary, true),
             TerminalShortcutAction::Copy

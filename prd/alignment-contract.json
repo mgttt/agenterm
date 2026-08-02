@@ -370,7 +370,7 @@
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "producer notifications share one atomic wake signal",
-      "evidence_ids": ["fleet.wake-coalescing"]
+      "evidence_ids": ["fleet.wake-coalescing", "ux-parity.wake-coalescing"]
     },
     {
       "id": "control.event-transition-catalog",

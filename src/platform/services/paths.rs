@@ -33,18 +33,14 @@ pub(crate) fn settings_path(override_path: Option<OsString>) -> PathBuf {
     override_path
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            crate::platform::settings_root_path().join("settings.json")
-        })
+        .unwrap_or_else(|| crate::platform::settings_root_path().join("settings.json"))
 }
 
 pub(crate) fn instance_registry_dir(override_path: Option<OsString>) -> PathBuf {
     override_path
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            crate::platform::instance_registry_directory_root().join("instances")
-        })
+        .unwrap_or_else(|| crate::platform::instance_registry_directory_root().join("instances"))
 }
 
 #[cfg(test)]

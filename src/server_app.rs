@@ -35,13 +35,13 @@ use crate::{
         UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant,
     },
     ui_command::{
-        is_ui_client_handoff_command, UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_MAX_ARGUMENTS,
-        UI_CLIENT_COMMAND_MAX_BYTES, UI_CLIENT_COMMAND_SCHEMA_VERSION,
-        UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommandQueue, UiClientCommandResult,
+        UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_MAX_ARGUMENTS, UI_CLIENT_COMMAND_MAX_BYTES,
+        UI_CLIENT_COMMAND_SCHEMA_VERSION, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommandQueue,
+        UiClientCommandResult, is_ui_client_handoff_command,
     },
     ui_interaction::{UiInteraction, parse_ui_interaction},
-    ui_snapshot::{is_replaceable_ui_client_snapshot_visible, PROJECTION_REPLACEABLE_UI_CLIENT},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
+    ui_snapshot::{PROJECTION_REPLACEABLE_UI_CLIENT, is_replaceable_ui_client_snapshot_visible},
     wake_signal::WakeSignal,
     working_context::{CwdSource, cwd_command, validate_path},
     workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
@@ -1952,7 +1952,7 @@ fn default_workspace() -> SavedWorkspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        configure_server_launch, validate_ui_client_snapshot, PROJECTION_REPLACEABLE_UI_CLIENT,
+        PROJECTION_REPLACEABLE_UI_CLIENT, configure_server_launch, validate_ui_client_snapshot,
     };
 
     #[test]

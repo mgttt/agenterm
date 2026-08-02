@@ -17,27 +17,22 @@
 #[allow(dead_code)]
 pub const CONTRACT_REVISION: u32 = 3;
 
+pub(crate) mod filesystem;
 pub(crate) mod toolbar;
 pub(crate) mod window;
-pub(crate) mod filesystem;
 
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
 };
 pub use filesystem::{
-    metadata_is_link_like, replace_file, sync_parent,
-    is_direct_directory, is_direct_file,
+    is_direct_directory, is_direct_file, metadata_is_link_like, replace_file, sync_parent,
 };
 
-pub fn install_console_interrupt_ignore_guard()
--> anyhow::Result<ConsoleInterruptIgnoreGuard>
-{
+pub fn install_console_interrupt_ignore_guard() -> anyhow::Result<ConsoleInterruptIgnoreGuard> {
     ConsoleInterruptIgnoreGuard::install().map_err(|error| anyhow::anyhow!("{error}"))
 }
 
-pub fn install_console_interrupt_observer()
--> anyhow::Result<ConsoleInterruptObserver>
-{
+pub fn install_console_interrupt_observer() -> anyhow::Result<ConsoleInterruptObserver> {
     ConsoleInterruptObserver::install().map_err(|error| anyhow::anyhow!("{error}"))
 }
 
@@ -122,11 +117,13 @@ pub(crate) fn frontend_host() -> FrontendHost {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub(crate) enum WorkspaceLayoutKind {
     WindowsFlat,
     DirectoryByScope,
 }
 
+#[allow(dead_code)]
 pub(crate) fn workspace_layout_kind() -> WorkspaceLayoutKind {
     if is_windows_host() {
         WorkspaceLayoutKind::WindowsFlat
@@ -135,6 +132,7 @@ pub(crate) fn workspace_layout_kind() -> WorkspaceLayoutKind {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn script_process_test_host_supported() -> bool {
     matches!(
         agenterm_platform::platform_kind(),
@@ -229,8 +227,12 @@ pub(crate) fn project_capability_status(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn primary_text_field_shortcut_modifiers() -> ModifierState {
-    if matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos) {
+    if matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Macos
+    ) {
         ModifierState {
             control: false,
             shift: false,
@@ -247,10 +249,15 @@ pub(crate) fn primary_text_field_shortcut_modifiers() -> ModifierState {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn is_primary_shortcut_via_meta() -> bool {
-    matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Macos
+    )
 }
 
+#[allow(dead_code)]
 pub(crate) fn terminal_shortcut_empty_copy_action_is_suppressed() -> bool {
     matches!(
         agenterm_platform::platform_kind(),
@@ -258,7 +265,8 @@ pub(crate) fn terminal_shortcut_empty_copy_action_is_suppressed() -> bool {
     )
 }
 
-pub(crate) fn control_center_screenshot_strategy() -> crate::platform::control_center::ScreenshotStrategy {
+pub(crate) fn control_center_screenshot_strategy()
+-> crate::platform::control_center::ScreenshotStrategy {
     match agenterm_platform::platform_kind() {
         agenterm_platform::PlatformKind::Windows => {
             crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
@@ -278,11 +286,13 @@ pub(crate) fn hosted_script_worker_available() -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub(crate) enum AtomicPathSemantics {
     VerbatimLongPath,
     CanonicalSafe,
 }
 
+#[allow(dead_code)]
 pub(crate) fn atomic_path_semantics() -> AtomicPathSemantics {
     if is_windows_host() {
         AtomicPathSemantics::VerbatimLongPath
@@ -291,6 +301,7 @@ pub(crate) fn atomic_path_semantics() -> AtomicPathSemantics {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
     if is_windows_host() {
         ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
@@ -299,6 +310,7 @@ pub(crate) fn long_running_process_command_fixture() -> (&'static str, &'static 
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
     if is_windows_host() {
         ("ping", &["-n", "6", "127.0.0.1"])
@@ -308,10 +320,17 @@ pub(crate) fn long_running_process_command_timeout() -> (&'static str, &'static 
 }
 
 pub(crate) fn is_windows_host() -> bool {
-    matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Windows)
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Windows
+    )
 }
 
-pub(crate) fn shell_command_for_host<'a>(windows_command: &'a str, unix_command: &'a str) -> &'a str {
+#[allow(dead_code)]
+pub(crate) fn shell_command_for_host<'a>(
+    windows_command: &'a str,
+    unix_command: &'a str,
+) -> &'a str {
     if is_windows_host() {
         windows_command
     } else {
@@ -320,7 +339,10 @@ pub(crate) fn shell_command_for_host<'a>(windows_command: &'a str, unix_command:
 }
 
 pub(crate) fn is_macos_host() -> bool {
-    matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Macos
+    )
 }
 
 pub(crate) fn is_unix_host() -> bool {
@@ -380,12 +402,15 @@ fn host_directories() -> agenterm_platform::filesystem::HostDirectories {
 
 pub(crate) fn default_workspace_path() -> std::path::PathBuf {
     if is_windows_host() {
-        local_data_root_for_product_directory(&host_directories())
-            .join("workspace.json")
+        local_data_root_for_product_directory(&host_directories()).join("workspace.json")
     } else {
         let scope = std::env::var("AGENTERM_INSTANCE")
             .ok()
-            .and_then(|value| value.parse::<crate::platform::contract::ipc::LogicalInstance>().ok())
+            .and_then(|value| {
+                value
+                    .parse::<crate::platform::contract::ipc::LogicalInstance>()
+                    .ok()
+            })
             .and_then(|instance| {
                 crate::platform::contract::ipc::ServerScopeId::current(&instance).ok()
             });
@@ -408,28 +433,30 @@ pub(crate) fn settings_root_path() -> std::path::PathBuf {
     }
 }
 
-pub(crate) fn workspace_instance_scope()
--> Option<crate::platform::contract::ipc::ServerScopeId> {
+pub(crate) fn workspace_instance_scope() -> Option<crate::platform::contract::ipc::ServerScopeId> {
     if !is_unix_host() {
         return None;
     }
     std::env::var("AGENTERM_INSTANCE")
         .ok()
-        .and_then(|value| value.parse::<crate::platform::contract::ipc::LogicalInstance>().ok())
-        .and_then(|instance| {
-            crate::platform::contract::ipc::ServerScopeId::current(&instance).ok()
+        .and_then(|value| {
+            value
+                .parse::<crate::platform::contract::ipc::LogicalInstance>()
+                .ok()
         })
+        .and_then(|instance| crate::platform::contract::ipc::ServerScopeId::current(&instance).ok())
 }
 
 pub(crate) fn instance_registry_directory_root() -> std::path::PathBuf {
-    host_directories()
-        .local_data
-        .join(product_directory_name())
+    host_directories().local_data.join(product_directory_name())
 }
 
 pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static str> {
     let (provider, roots) = if is_windows_host() {
-        (ureq::tls::TlsProvider::NativeTls, ureq::tls::RootCerts::PlatformVerifier)
+        (
+            ureq::tls::TlsProvider::NativeTls,
+            ureq::tls::RootCerts::PlatformVerifier,
+        )
     } else if is_unix_host() {
         (ureq::tls::TlsProvider::Rustls, ureq::tls::RootCerts::WebPki)
     } else {
@@ -441,6 +468,7 @@ pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static 
         .build())
 }
 
+#[allow(dead_code)]
 pub(crate) fn script_http_tls_provider() -> ureq::tls::TlsProvider {
     if is_windows_host() {
         ureq::tls::TlsProvider::NativeTls
@@ -449,9 +477,8 @@ pub(crate) fn script_http_tls_provider() -> ureq::tls::TlsProvider {
     }
 }
 
-pub(crate) fn script_http_tls_root_certs_are_expected(
-    root_certs: &ureq::tls::RootCerts,
-) -> bool {
+#[allow(dead_code)]
+pub(crate) fn script_http_tls_root_certs_are_expected(root_certs: &ureq::tls::RootCerts) -> bool {
     if is_windows_host() {
         matches!(root_certs, ureq::tls::RootCerts::PlatformVerifier)
     } else {
@@ -791,7 +818,10 @@ mod tests {
     fn primary_shortcut_policy_matches_runtime_kind() {
         assert_eq!(
             is_primary_shortcut_via_meta(),
-            matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+            matches!(
+                agenterm_platform::platform_kind(),
+                agenterm_platform::PlatformKind::Macos
+            )
         );
     }
 
@@ -803,8 +833,7 @@ mod tests {
                 agenterm_platform::PlatformKind::Windows => {
                     crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
                 }
-                agenterm_platform::PlatformKind::Linux
-                | agenterm_platform::PlatformKind::Macos => {
+                agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
                     crate::platform::control_center::ScreenshotStrategy::RendererRequest
                 }
                 _ => crate::platform::control_center::ScreenshotStrategy::Unsupported,
@@ -816,7 +845,10 @@ mod tests {
     fn hosted_script_worker_available_tracks_host_runtime() {
         assert_eq!(
             hosted_script_worker_available(),
-            matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Windows)
+            matches!(
+                agenterm_platform::platform_kind(),
+                agenterm_platform::PlatformKind::Windows
+            )
         );
     }
 }

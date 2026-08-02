@@ -22,13 +22,13 @@ pub(crate) fn autostart_server(
     autostart_server_impl(parameter_name, parameter_value)
 }
 
-#[cfg(not(windows))]
-fn autostart_server_impl(_parameter_name: &str, _parameter_value: &str) -> std::io::Result<bool> {
-    Ok(false)
-}
-
-#[cfg(windows)]
 fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io::Result<bool> {
+    if !matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Windows
+    ) {
+        return Ok(false);
+    }
     let current = std::env::current_exe()?;
     let server = current.with_file_name("agenterm-server.exe");
     if !server.is_file() {

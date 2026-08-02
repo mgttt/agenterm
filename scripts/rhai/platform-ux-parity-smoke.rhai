@@ -377,6 +377,7 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
             run_id: context.run_id,
             timestamp_utc: timestamp,
             suite: suite,
+            platform: platform,
             environment: #{
                 branch: "",
                 commit: "",

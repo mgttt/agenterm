@@ -1264,10 +1264,7 @@ mod tests {
         crate::platform::script_process_test_host_supported()
     }
 
-    fn wrapped_shell_command(
-        shell_command: &str,
-        arguments: &[&str],
-    ) -> (String, Vec<String>) {
+    fn wrapped_shell_command(shell_command: &str, arguments: &[&str]) -> (String, Vec<String>) {
         if !process_shell_test_host_supported() {
             panic!("process-shell tests unsupported on this platform");
         }
@@ -1521,13 +1518,11 @@ mod tests {
         if !process_shell_test_host_supported() {
             return;
         }
-        let mut command = shell_wrapped_process_command(
-            "set",
-            "printenv",
-            &[],
+        let mut command = shell_wrapped_process_command("set", "printenv", &[]);
+        command.environment.insert(
+            "AGENTERM_PROCESS_TEST".to_owned(),
+            Some("argv-safe".to_owned()),
         );
-        command.environment
-            .insert("AGENTERM_PROCESS_TEST".to_owned(), Some("argv-safe".to_owned()));
         let output = command_output(&mut command).unwrap();
         assert!(output.success);
         assert_eq!(output.exit_code, 0);
@@ -1624,18 +1619,9 @@ mod tests {
         let error = output_require_success(&mut output, "test-child").unwrap_err();
         let fields = crate::script_error::runtime_error_fields(&error).expect("error fields");
         assert_eq!(fields.class, "child");
-        assert_eq!(
-            fields.code,
-            "child_nonzero"
-        );
-        assert_eq!(
-            fields.operation,
-            "std.process.Output.require_success"
-        );
-        assert_eq!(
-            fields.target_kind,
-            "child_process"
-        );
+        assert_eq!(fields.code, "child_nonzero");
+        assert_eq!(fields.operation, "std.process.Output.require_success");
+        assert_eq!(fields.target_kind, "child_process");
         assert!(!fields.retryable);
         assert!(!fields.truncated);
         assert_eq!(fields.cause_class.as_deref(), Some("exit_status"));
@@ -1671,11 +1657,8 @@ mod tests {
             return;
         }
         let (timeout_command, timeout_arguments) = long_running_process_command_timeout();
-        let mut command = shell_wrapped_process_command(
-            timeout_command,
-            timeout_command,
-            timeout_arguments,
-        );
+        let mut command =
+            shell_wrapped_process_command(timeout_command, timeout_command, timeout_arguments);
         command.timeout = Duration::from_millis(10);
         assert!(
             command_output(&mut command)
@@ -1792,16 +1775,12 @@ mod tests {
 
     #[test]
     fn child_streams_are_live_bounded_and_preserve_final_capture() {
-        let mut command = shell_wrapped_process_command(
-            "echo abcdef",
-            "printf abcdef",
-            &[],
-        );
+        let mut command = shell_wrapped_process_command("echo abcdef", "printf abcdef", &[]);
         let mut child = command_start(&mut command).unwrap();
-        let mut stream = child_stdout(&mut child).unwrap();
+        let stream = child_stdout(&mut child).unwrap();
         let mut scope = rhai::Scope::new();
         scope.push("stream", stream.clone());
-        let mut engine = engine();
+        let engine = engine();
         let first = engine
             .eval_with_scope::<String>(
                 &mut scope,
@@ -1820,20 +1799,18 @@ mod tests {
         let output = child_wait_with_output(&mut child).unwrap();
         assert_eq!(first, "ab");
         assert!(rest.starts_with("cdef"));
-        assert!(output_text(&output.stdout, "process_stdout_not_utf8")
-            .unwrap()
-            .starts_with("abcdef"));
+        assert!(
+            output_text(&output.stdout, "process_stdout_not_utf8")
+                .unwrap()
+                .starts_with("abcdef")
+        );
         assert!(stream_complete);
         assert!(output.complete);
     }
 
     #[test]
     fn truncated_process_capture_is_not_reported_as_complete() {
-        let mut command = shell_wrapped_process_command(
-            "echo abcdefgh",
-            "printf abcdefgh",
-            &[],
-        );
+        let mut command = shell_wrapped_process_command("echo abcdefgh", "printf abcdefgh", &[]);
         command_capture_limit(&mut command, 4).unwrap();
         let output = command_output(&mut command).unwrap();
         assert_eq!(output.stdout.0, b"abcd");
@@ -1841,4 +1818,3 @@ mod tests {
         assert!(!output.complete);
     }
 }
-

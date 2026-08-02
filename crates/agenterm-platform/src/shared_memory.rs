@@ -72,16 +72,18 @@ impl SharedMemory {
     }
 }
 
+const PORTABLE_NAME_MAX_LEN: usize = 31;
+
 fn validate(name: &str, len: usize) -> Result<(), SharedMemoryError> {
     if name.is_empty()
-        || name.len() > 120
+        || name.len() > PORTABLE_NAME_MAX_LEN
         || !name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
     {
         return Err(SharedMemoryError::new(
             SharedMemoryErrorKind::InvalidName,
-            "name must be 1..=120 ASCII letters, digits, '.', '_' or '-'",
+            "name must be 1..=31 ASCII letters, digits, '.', '_' or '-'",
         ));
     }
     if len == 0 || len > isize::MAX as usize {
@@ -98,11 +100,18 @@ mod tests {
     use super::*;
 
     fn unique_name(label: &str) -> String {
+        let mut label = label.to_owned();
+        label.truncate(12);
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock after Unix epoch")
-            .as_nanos();
-        format!("agenterm-platform-{label}-{}-{nonce}", std::process::id())
+            .as_nanos()
+            % 0x1_0000_0000_u128;
+        format!(
+            "a-{label}-{:04x}-{:08x}",
+            std::process::id() % 0x1_0000,
+            nonce
+        )
     }
 
     #[test]

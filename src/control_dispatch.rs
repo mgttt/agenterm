@@ -11,7 +11,6 @@ use crate::{
     protocol::IpcResponse,
     pty::{NativeInputOwnership, NativeTerminalKey, PtyError},
     settings::clamp_tabs_width,
-    ui_snapshot::PROJECTION_REPLACEABLE_UI_CLIENT,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
     theme::ThemeId,
@@ -24,6 +23,7 @@ use crate::{
         UiHelloResponse, UiProtocolRange, UiScreenSnapshot, UiTabBootstrap,
         UiWorkingContextSnapshot, negotiate,
     },
+    ui_snapshot::PROJECTION_REPLACEABLE_UI_CLIENT,
     workspace::workspace_path,
 };
 
@@ -1396,8 +1396,7 @@ pub(crate) fn dispatch_shared_command(
             } else {
                 let mut command_arguments = agent_arguments;
                 if has_option(args, "--yolo") {
-                    command_arguments
-                        .push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+                    command_arguments.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
                 }
                 match crate::working_context::shell_command_for_child(
                     &crate::platform::runtime::default_terminal_shell(),

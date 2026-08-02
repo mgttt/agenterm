@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::frontend::GuiWakeResult;
 use crate::wake_signal::WakeSignal;
-use crate::platform::services::frontend::GuiWakeResult;
 
 /// User-event payload used by the selected Unix window host.
 pub type UnixWake = ();

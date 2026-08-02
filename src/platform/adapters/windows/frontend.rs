@@ -1,15 +1,12 @@
-use std::env;
-use crate::wake_signal::WakeSignal;
-use crate::platform::services::frontend::{
-    attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
+use crate::frontend::{
     GuiHandoffResult, GuiLaunchResult, GuiWakeResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
+    attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
 };
+use crate::wake_signal::WakeSignal;
+use std::env;
 
 /// Wake the Win32 message loop without posting one message per producer event.
-pub(crate) fn request_gui_wake(
-    wake_window: isize,
-    wake_signal: &WakeSignal,
-) -> GuiWakeResult {
+pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) -> GuiWakeResult {
     if wake_signal.request() {
         // SAFETY: the GUI owns the wake HWND for the duration of this call.
         if let Some(window) =
@@ -37,11 +34,7 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let launch_options = match parse_gui_launch_target(&arguments, WINDOWS_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(error) => {
-            write_best_effort_stderr(&gui_launch_argument_error(
-                &error,
-                WINDOWS_GUI_USAGE,
-                true,
-            ));
+            write_best_effort_stderr(&gui_launch_argument_error(&error, WINDOWS_GUI_USAGE, true));
             return GuiLaunchResult::UsageError;
         }
     };
@@ -93,51 +86,60 @@ fn show_startup_error(error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_help_result, parse_gui_launch_target, GuiLaunchResult,
-        WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
+        GuiLaunchResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE, gui_help_result,
+        parse_gui_launch_target,
     };
 
     #[test]
     fn gui_launcher_accepts_no_activate_and_address_in_either_order() {
         let options = parse_gui_launch_target(
             &[
-            "--no-activate".to_owned(),
-            "--address".to_owned(),
-            "127.0.0.1:48815".to_owned(),
-        ],
+                "--no-activate".to_owned(),
+                "--address".to_owned(),
+                "127.0.0.1:48815".to_owned(),
+            ],
             WINDOWS_GUI_LAUNCH_POLICY,
         )
         .unwrap();
         assert!(options.no_activate);
         assert!(!options.ui_client);
-        assert_eq!(options.selectors.address.as_deref(), Some("127.0.0.1:48815"));
+        assert_eq!(
+            options.selectors.address.as_deref(),
+            Some("127.0.0.1:48815")
+        );
 
         let options = parse_gui_launch_target(
             &[
-            "--address".to_owned(),
-            "127.0.0.1:48816".to_owned(),
-            "--not-foreground".to_owned(),
-        ],
+                "--address".to_owned(),
+                "127.0.0.1:48816".to_owned(),
+                "--not-foreground".to_owned(),
+            ],
             WINDOWS_GUI_LAUNCH_POLICY,
         )
         .unwrap();
         assert!(options.no_activate);
         assert!(!options.ui_client);
-        assert_eq!(options.selectors.address.as_deref(), Some("127.0.0.1:48816"));
+        assert_eq!(
+            options.selectors.address.as_deref(),
+            Some("127.0.0.1:48816")
+        );
 
         let options = parse_gui_launch_target(
             &[
-            "--ui-client".to_owned(),
-            "--address".to_owned(),
-            "127.0.0.1:48817".to_owned(),
-            "--no-activate".to_owned(),
-        ],
+                "--ui-client".to_owned(),
+                "--address".to_owned(),
+                "127.0.0.1:48817".to_owned(),
+                "--no-activate".to_owned(),
+            ],
             WINDOWS_GUI_LAUNCH_POLICY,
         )
         .unwrap();
         assert!(options.ui_client);
         assert!(options.no_activate);
-        assert_eq!(options.selectors.address.as_deref(), Some("127.0.0.1:48817"));
+        assert_eq!(
+            options.selectors.address.as_deref(),
+            Some("127.0.0.1:48817")
+        );
     }
 
     #[test]
@@ -168,7 +170,7 @@ mod tests {
                     &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
                     WINDOWS_GUI_LAUNCH_POLICY,
                 )
-                    .is_err()
+                .is_err()
             );
         }
     }

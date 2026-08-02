@@ -65,23 +65,21 @@ mod platform;
 mod script_audit;
 mod worker_supervisor;
 
+mod frontend;
+mod frontend_server;
 mod server_app;
 mod terminal_runtime;
-mod frontend_server;
-mod frontend;
+#[allow(unused_imports)]
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;
+#[allow(unused_imports)]
 pub use mcp_catalog::run_mcp_entry_with_args;
 pub use platform::{
-    install_console_interrupt_ignore_guard,
-    install_console_interrupt_observer,
-    metadata_is_link_like,
-    is_direct_directory,
-    is_direct_file,
-    replace_file,
-    sync_parent,
+    install_console_interrupt_ignore_guard, install_console_interrupt_observer,
+    is_direct_directory, is_direct_file, metadata_is_link_like, replace_file, sync_parent,
 };
 
+#[allow(unused_imports)]
 pub use frontend::run_gui_entry;
 
 pub use server_app::run_server_entry;
@@ -89,6 +87,7 @@ pub use server_app::run_server_entry;
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
+#[allow(unused_imports)]
 pub(crate) use frontend::{request_gui_wake, request_gui_wake_best_effort};
 
 pub(crate) fn ipc_address() -> String {

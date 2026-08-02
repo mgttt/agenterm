@@ -9,6 +9,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::ui_snapshot::{
+    PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
+    SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
+    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID,
+};
 use crate::{
     client::{ipc_address, resolved_ipc_endpoint},
     commands::{
@@ -32,10 +37,8 @@ use crate::{
         UiTabBootstrap,
     },
     ui_client::{UiClientModel, tab_by_id},
-        ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
-    ui_command::{
-        UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand,
-    },
+    ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
+    ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand},
     ui_geometry::{
         PixelRect as ProductPixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH,
         TerminalScrollbarGeometry, TreeRowActionDensity, TreeRowGeometry, TreeRowMode,
@@ -44,13 +47,7 @@ use crate::{
         tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y,
         workspace_layout,
     },
-        working_context::parse_proxy_url,
-};
-use crate::ui_snapshot::{
-    PROJECTION_REPLACEABLE_UI_CLIENT,
-    SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
-    SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
-    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID,
+    working_context::parse_proxy_url,
 };
 use agenterm_platform::{
     clipboard,
@@ -696,7 +693,7 @@ struct RemoteWindowState {
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
-            server_recovery: crate::frontend_server::FrontendServerRecoveryState,
+    server_recovery: crate::frontend_server::FrontendServerRecoveryState,
     last_message: Option<String>,
     last_error: Option<String>,
     tabs_visible: bool,
@@ -880,7 +877,9 @@ impl RemoteWindowState {
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
-            server_recovery: crate::frontend_server::FrontendServerRecoveryState::new(Instant::now()),
+            server_recovery: crate::frontend_server::FrontendServerRecoveryState::new(
+                Instant::now(),
+            ),
             last_message: None,
             last_error: None,
             tabs_visible: config.tabs_visible,
@@ -993,10 +992,8 @@ impl RemoteWindowState {
                 self.pending_terminal_resize = None;
                 self.pending_terminal_paste = None;
                 let server_address = ipc_address();
-                self.server_recovery.on_disconnected(
-                    &server_address,
-                    disconnected_server_pid,
-                );
+                self.server_recovery
+                    .on_disconnected(&server_address, disconnected_server_pid);
                 self.show_workspace_controls(false);
                 self.show_tab_editor(false);
                 self.show_tab_close_controls(false);

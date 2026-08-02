@@ -44,7 +44,10 @@ impl FrontendServerRecoveryState {
             self.server_restart_after,
             self.server_restart_suppressed,
         );
-        if matches!(recovery, FrontendServerRecovery::Started | FrontendServerRecovery::Failed(_)) {
+        if matches!(
+            recovery,
+            FrontendServerRecovery::Started | FrontendServerRecovery::Failed(_)
+        ) {
             self.server_restart_after = next_frontend_server_restart_after(now);
         }
         recovery
@@ -59,6 +62,7 @@ pub(crate) enum FrontendServerRecovery {
 }
 
 impl FrontendServerRecovery {
+    #[allow(dead_code)]
     pub(crate) fn contract_state(self) -> crate::frontend::FrontendContractState {
         match self {
             Self::NoAction | Self::Started => crate::frontend::FrontendContractState::Supported,
@@ -99,7 +103,10 @@ pub(crate) fn maybe_recover_frontend_server(
     server_restart_after: Instant,
     server_restart_suppressed: bool,
 ) -> FrontendServerRecovery {
-    if server_restart_suppressed || now < server_restart_after || is_frontend_server_endpoint_listening() {
+    if server_restart_suppressed
+        || now < server_restart_after
+        || is_frontend_server_endpoint_listening()
+    {
         return FrontendServerRecovery::NoAction;
     }
 
@@ -137,7 +144,10 @@ pub(crate) fn start_frontend_server_process() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_frontend_server_restart_after, FrontendServerRecovery, GUI_FRONTEND_SERVER_RESTART_INTERVAL};
+    use super::{
+        FrontendServerRecovery, GUI_FRONTEND_SERVER_RESTART_INTERVAL,
+        next_frontend_server_restart_after,
+    };
     use std::time::{Duration, Instant};
 
     #[test]

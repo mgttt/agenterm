@@ -276,9 +276,15 @@ mod tests {
             "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
             "window": {"visible": false, "detached": false},
         });
-        assert!(is_replaceable_ui_client_snapshot_visible(&visible.to_string()));
-        assert!(!is_replaceable_ui_client_snapshot_visible(&detached.to_string()));
-        assert!(!is_replaceable_ui_client_snapshot_visible(&hidden.to_string()));
+        assert!(is_replaceable_ui_client_snapshot_visible(
+            &visible.to_string()
+        ));
+        assert!(!is_replaceable_ui_client_snapshot_visible(
+            &detached.to_string()
+        ));
+        assert!(!is_replaceable_ui_client_snapshot_visible(
+            &hidden.to_string()
+        ));
     }
 
     #[test]

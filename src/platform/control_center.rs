@@ -96,4 +96,3 @@ mod tests {
         std::fs::remove_file(root).expect("remove test file");
     }
 }
-

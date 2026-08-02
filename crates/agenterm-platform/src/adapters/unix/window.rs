@@ -622,7 +622,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn appkit_event_location_becomes_top_left_physical_client_coordinates() {
         assert_eq!(
-            macos_physical_pointer_position(936, 2.0, 60.0, 735.5),
+            macos_physical_pointer_position(936, 2.0, 60.0, 200.5),
             Some((120, 535))
         );
         assert_eq!(

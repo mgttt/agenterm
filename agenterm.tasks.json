@@ -280,7 +280,7 @@
       "outputs": ["wake-evidence"],
       "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": ["loopback"],
-      "evidence": ["task.wake-smoke"]
+      "evidence": ["fleet.wake-coalescing", "ux-parity.wake-coalescing"]
     },
     "startup-smoke": {
       "inputs": ["staged-binaries", "isolated-workspace"],

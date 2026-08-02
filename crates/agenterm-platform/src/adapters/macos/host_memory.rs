@@ -59,12 +59,13 @@ pub(crate) fn availability() -> Result<HostMemoryAvailability, HostMemoryError> 
             format!("host_statistics64 returned Mach status {result}"),
         ));
     }
-    if count < libc::HOST_VM_INFO64_COUNT {
+    let minimum_required_count = 5;
+    if count < minimum_required_count {
         return Err(HostMemoryError::new(
             HostMemoryErrorKind::InvalidValue,
             format!(
                 "host_statistics64 returned {count} integers, expected {}",
-                libc::HOST_VM_INFO64_COUNT
+                minimum_required_count
             ),
         ));
     }

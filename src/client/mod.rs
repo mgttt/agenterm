@@ -330,15 +330,15 @@ impl ReplInterruptWatcher {
         let (shutdown, shutdown_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
             let observer = match crate::platform::install_console_interrupt_observer() {
-                    Ok(observer) => {
-                        let _ = ready_tx.send(Ok(()));
-                        observer
-                    }
-                    Err(error) => {
-                        let _ = ready_tx.send(Err(error.to_string()));
-                        return;
-                    }
-                };
+                Ok(observer) => {
+                    let _ = ready_tx.send(Ok(()));
+                    observer
+                }
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
             loop {
                 match shutdown_rx.recv_timeout(Duration::from_millis(10)) {
                     Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
