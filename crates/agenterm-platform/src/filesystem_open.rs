@@ -125,11 +125,18 @@ fn lexical_absolute(path: &Path) -> io::Result<std::path::PathBuf> {
         std::env::current_dir()?.join(path)
     };
     let mut output = std::path::PathBuf::new();
+    let mut root_components = 0;
     for component in input.components() {
         match component {
+            Component::Prefix(_) | Component::RootDir => {
+                output.push(component.as_os_str());
+                root_components += 1;
+            }
             Component::CurDir => {}
             Component::ParentDir => {
-                output.pop();
+                if output.components().count() > root_components {
+                    output.pop();
+                }
             }
             _ => output.push(component.as_os_str()),
         }
@@ -250,6 +257,15 @@ mod tests {
         assert_eq!(contents, "componentwise");
         drop(file);
         fs::remove_dir_all(root).expect("remove componentwise fixture");
+    }
+
+    #[test]
+    fn lexical_absolute_does_not_pop_past_the_host_root() {
+        let current = std::env::current_dir().expect("read current directory");
+        let (anchor, _) = split_root(&current).expect("split current directory root");
+        let escaped = anchor.join("..").join("componentwise-root");
+        let normalized = lexical_absolute(&escaped).expect("normalize escaped root path");
+        assert_eq!(normalized, anchor.join("componentwise-root"));
     }
 
     #[test]
