@@ -531,6 +531,18 @@ integrated validation recorded below):
   union. Default and each individual capability compile independently; on
   Windows the minimal process/filesystem dependency trees contain only
   `windows-sys -> windows-link` and do not activate UI/GDI/clipboard modules.
+- [x] The optional Windows `app-container-profile` feature owns profile/SID
+  mechanics needed by external platform-crate callers without making them
+  reconstruct native capability identities or pass potentially unaligned SID
+  storage to Win32. The adapter exposes caller-owned, canonically printable
+  Internet Client, Internet Client/Server, and Private Network Client/Server
+  well-known SIDs; profile creation/deletion remains explicit, and invalid
+  input, existing profile, HRESULT, and `GetLastError` failures remain typed
+  without an implicit retry or mutation. This is a native lifecycle primitive,
+  not Agent authorization, a Script Runtime restriction, an allowlist, or an
+  automatically applied sandbox policy. Windows-hosted tests own exact SID
+  identity, unaligned borrowed input, deterministic profile derivation, and
+  explicit create/existing/delete behavior.
 - [x] Window minimized/maximized/restored semantic state and native-flag
   precedence are public platform-neutral window contracts. AgenTerm's 320x240
   CLI resize minimum and error wording remain product policy in the main crate.

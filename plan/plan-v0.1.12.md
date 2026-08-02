@@ -899,6 +899,12 @@ Cockpit
   避免只凭可复用 PID 观察退出。public facade 只保留 `open/id/is_alive` 与平台中立 handle
   retention trait；BorrowedHandle/AsHandle/AsFd 只在 adapters。169 项 all-feature tests、
   native static boundary 与三个已安装 x86_64 target compile checks 已通过；
+- Windows `app-container-profile` feature 现由 adapter 直接创建并拥有三种 well-known
+  network capability SID，借用输入先复制到对齐 storage 再进入 Win32，避免外部仓库复制
+  SID 常量或依赖未对齐裸指针。API 保留 exact kind/string、显式 profile create/delete 与
+  typed HRESULT/Win32 failure；它只是平台 lifecycle primitive，不给 Script Runtime 加权限、
+  endpoint allowlist 或自动 sandbox policy。Windows-hosted 5/5 定向测试已通过，exact-SHA
+  `c12b3a0` 的六格 ordinary CI 回执仍在运行；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。
