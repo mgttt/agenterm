@@ -207,7 +207,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 ## 本轮实测化进展（2026-08-02）
 
 - 已落地收口：非平台目录 `src/` 里的平台差异判定，除必要 UI/UX 可见性场景外已从编译期 `cfg` 分裂收拢到平台能力入口：
-  - `src/script_process.rs`：`long_running_process_*` 与 `shell_wrapped_process_command` 改为统一 `crate::platform::is_windows_host()` 运行时分支。
+  - `src/script_process.rs`：`long_running_process_*` 与 `shell_wrapped_process_command` 改为统一 `crate::platform::is_windows_host() || crate::platform::is_unix_host()` 运行时分支。
   - `src/script_stdlib.rs`：windows 特有路径替换测试改为运行时 `is_windows_host()` 返回早退。
   - `src/workspace.rs`：`unix_default_workspace_contains_workspaces_component` 改为运行时 host 早退。
 - 与 O1C 对齐的当前建议：
