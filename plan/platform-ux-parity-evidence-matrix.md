@@ -26,8 +26,14 @@
 | frontend-lx | 剪贴板语义（linux） | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | Unsupported | Unsupported | platform-gap | - |
 | frontend-mx | Workbench 与窗口行为（macos） | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | Unsupported | platform-gap | - |
 | frontend-mx | 剪贴板语义（macos） | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | Unsupported | platform-gap | - |
-| remote-ui | replaceable 客户端 | `ux-parity.remote-ui.replaceable-client` | Failed | Unsupported | Unsupported | infra/rhai-runtime | - |
-| remote-ui | selection 语义 | `ux-parity.remote-ui.selection` | Failed | Unsupported | Unsupported | infra/rhai-runtime | - |
+| remote-ui | replaceable 客户端 | `ux-parity.remote-ui.replaceable-client` | Supported | Unsupported | Unsupported | windows-only-contract | - |
+| remote-ui | selection 语义 | `ux-parity.remote-ui.selection` | Supported | Unsupported | Unsupported | windows-only-contract | - |
+
+### 当前轮次优先级归类（P0/P1/P2）
+
+- P0（功能主线阻塞）：`startup` / `startup-title` / `window-focus-contract` 在目标平台失败且为非能力缺口时，阻断该 run 全量下游（当前 Windows 侧本轮为 Windows 通过、Linux/macOS 预检为环境缺口，不进入 P0）。
+- P1（交互行为偏差）：`remote-ui`（Windows-only）与 `front-end`（跨 Unix host）出现行为缺口，影响体验一致性，按平台 owner 分拆修复。
+- P2（能力边界）：`platform-gap` / `infra/platform-binary-missing` 归类为能力边界，需在对应 host pipeline 补齐后重试，而不阻塞其他平台分支。
 
 > 说明：
 > - `Supported`/`Failed`/`Unsupported` 只允许取 `Unsupported` 来表示“当前平台能力缺口”。`Failed` 代表脚本执行失败（回归阻断）。
