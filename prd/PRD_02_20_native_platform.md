@@ -644,6 +644,10 @@ integrated validation recorded below):
   modal focus gating are shared by Windows remote and Unix embedded
   frontends; both adapters only map native events/states into shared types.
   Evidence: `src/frontend/interaction.rs` unit tests and Quick Gate.
+- [x] Product capability mapping and native IPC endpoint naming now live in
+  `src/platform/policy/{capability,ipc}.rs`; `src/platform/mod.rs` re-exports
+  the tables and no longer owns those implementations.
+  Evidence: Quick Gate and platform contract tests.
 - [x] Root IPC, Script-host availability, supervisor-audit path policy and XRGB
   screenshot encoding no longer require selected adapter modules. They compose
   product paths/capability facts from the crate `PlatformKind` or call the crate
