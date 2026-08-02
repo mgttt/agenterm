@@ -84,13 +84,14 @@ agenterm-platform crate（复用层）
   - 本轮补充: `src/frontend.rs` 不再直接维护平台 host 分流，改为消费 `platform::frontend_host()`，统一 host 判定入口。
   - 本轮补充（已合并）：把 `platform/services` 的平台策略集中收口到 `src/platform/mod.rs`，删除 `control_center/script_http/ipc/paths/supervisor_audit` 在服务层的直接 `platform_kind` 分支，`agenterm-script` 名称残留清理为 `agenterm-rhai`。
 
-- O1B（UI）：统一输入-选择-滚轮场景模板（进行中）
+- O1B（UI）：统一输入-选择-滚轮场景模板（已完成）
   - owner: Human Workspace + ui_bridge
   - output: Given/When/Then 场景清单 + 对应快照锚点
   - acceptance: windows/unix 场景映射同名字段一致
   - 本轮动作：`unix` 前端渲染层中，移除 `platform_kind` 直接分支，`NewShellChoice::label` 改为复用 `platform::runtime::primary_terminal_shell().label`，让“主终端命名”由平台能力层提供，前端仅消费显示字段。
-  - 本轮补充：把 `unix` 输入单测中的 `platform_kind` 断言改为走平台策略能力（`primary_text_field_shortcut_modifiers` / `is_primary_shortcut_via_meta` / `terminal_shortcut_empty_copy_action_is_suppressed`），减少测试层面的平台分支直接感知。
-  - 本轮补充：增加 `platform` 侧输入策略一致性测试（`primary_shortcut_policy_is_internal_consistent` / `primary_shortcut_policy_matches_runtime_kind`），把“平台策略边界”收敛为可验证产物。
+  - 已完成：把 `unix` 输入单测中的 `platform_kind` 断言改为走平台策略能力（`primary_text_field_shortcut_modifiers` / `is_primary_shortcut_via_meta` / `terminal_shortcut_empty_copy_action_is_suppressed`），减少测试层面的平台分支直接感知。
+  - 已完成：增加 `platform` 侧输入策略一致性测试（`primary_shortcut_policy_is_internal_consistent` / `primary_shortcut_policy_matches_runtime_kind`），把“平台策略边界”收敛为可验证产物。
+  - 本轮补充：`scripts/rhai/platform-ux-parity-smoke.rhai` 改为按已上报证据逐条计算状态，避免一次失败掩盖已通过场景的 `Supported`。 
 
 - O1C（验收）：并发回归与阻断
   - owner: QA
