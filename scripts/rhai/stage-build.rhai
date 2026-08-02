@@ -60,8 +60,8 @@ let artifact_manifest_path =
 let manifest = artifact_manifest::load(artifact_manifest_path);
 let obsolete = [
     "agentermctl.exe",
-    "agenterm-rhai.exe",
-    "agenterm-rhai"
+    "agenterm-script.exe",
+    "agenterm-script"
 ];
 
 artifact_files::clean_locked(
