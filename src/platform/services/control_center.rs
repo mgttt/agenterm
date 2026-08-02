@@ -3,24 +3,15 @@
 use std::{borrow::Cow, fs::OpenOptions, io, path::Path};
 
 use agenterm_platform::{
-    PlatformKind,
     contract::ui_screenshot::UiScreenshotError,
     screenshot::{NativeCaptureArea, ScreenshotWindowHandle},
 };
 
 use crate::platform::control_center::ScreenshotStrategy;
+use crate::platform;
 
 pub(crate) const fn screenshot_strategy() -> ScreenshotStrategy {
-    screenshot_strategy_for(agenterm_platform::platform_kind())
-}
-
-const fn screenshot_strategy_for(platform: PlatformKind) -> ScreenshotStrategy {
-    match platform {
-        PlatformKind::Windows => ScreenshotStrategy::DirectNativeWindow,
-        PlatformKind::Macos => ScreenshotStrategy::RendererRequest,
-        PlatformKind::Linux => ScreenshotStrategy::RendererRequest,
-        _ => ScreenshotStrategy::Unsupported,
-    }
+    platform::control_center_screenshot_strategy()
 }
 
 pub(crate) fn protect_state_directory(path: &Path) -> io::Result<()> {
@@ -61,18 +52,16 @@ mod tests {
 
     #[test]
     fn native_control_center_renderers_own_linux_and_macos_capture_requests() {
-        assert_eq!(
-            screenshot_strategy_for(PlatformKind::Windows),
-            ScreenshotStrategy::DirectNativeWindow
-        );
-        assert_eq!(
-            screenshot_strategy_for(PlatformKind::Linux),
-            ScreenshotStrategy::RendererRequest
-        );
-        assert_eq!(
-            screenshot_strategy_for(PlatformKind::Macos),
-            ScreenshotStrategy::RendererRequest
-        );
+        let strategy = control_center_screenshot_strategy();
+        match agenterm_platform::platform_kind() {
+            agenterm_platform::PlatformKind::Windows => {
+                assert_eq!(strategy, ScreenshotStrategy::DirectNativeWindow)
+            }
+            agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
+                assert_eq!(strategy, ScreenshotStrategy::RendererRequest)
+            }
+            _ => assert_eq!(strategy, ScreenshotStrategy::Unsupported),
+        }
     }
 
     #[test]

@@ -214,6 +214,25 @@ pub(crate) fn terminal_shortcut_empty_copy_action_is_suppressed() -> bool {
     )
 }
 
+pub(crate) fn control_center_screenshot_strategy() -> crate::platform::control_center::ScreenshotStrategy {
+    match agenterm_platform::platform_kind() {
+        agenterm_platform::PlatformKind::Windows => {
+            crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
+        }
+        agenterm_platform::PlatformKind::Macos | agenterm_platform::PlatformKind::Linux => {
+            crate::platform::control_center::ScreenshotStrategy::RendererRequest
+        }
+        _ => crate::platform::control_center::ScreenshotStrategy::Unsupported,
+    }
+}
+
+pub(crate) fn hosted_script_worker_available() -> bool {
+    matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Windows
+    )
+}
+
 pub(crate) fn platform_info_json() -> serde_json::Value {
     let kind = agenterm_platform::platform_kind();
     let display = agenterm_platform::window::display_backend_facts();
@@ -480,6 +499,31 @@ mod tests {
         assert_eq!(
             is_primary_shortcut_via_meta(),
             matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+        );
+    }
+
+    #[test]
+    fn control_center_screenshot_strategy_matches_runtime_kind() {
+        assert_eq!(
+            control_center_screenshot_strategy(),
+            match agenterm_platform::platform_kind() {
+                agenterm_platform::PlatformKind::Windows => {
+                    crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
+                }
+                agenterm_platform::PlatformKind::Linux
+                | agenterm_platform::PlatformKind::Macos => {
+                    crate::platform::control_center::ScreenshotStrategy::RendererRequest
+                }
+                _ => crate::platform::control_center::ScreenshotStrategy::Unsupported,
+            }
+        );
+    }
+
+    #[test]
+    fn hosted_script_worker_available_tracks_host_runtime() {
+        assert_eq!(
+            hosted_script_worker_available(),
+            matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Windows)
         );
     }
 }
