@@ -25,10 +25,16 @@ fn path_lock_is_cross_process_and_released() {
     std::fs::create_dir_all(&directory).expect("create process-lock fixture");
     let child_directory = directory.join("child");
     std::fs::create_dir(&child_directory).expect("create process-lock alias fixture");
+    // Case-different aliases name the same file only on case-insensitive
+    // filesystems (Windows and the macOS default); on Linux they are distinct
+    // paths, so contention through the alias is asserted only where the alias
+    // actually resolves to the locked file.
     let path = directory.join("state.lock");
     let alias = child_directory.join("..").join("STATE.LOCK");
     let guard = PathLock::acquire(&path).expect("parent lock");
-    run_test_child(&alias, "contended");
+    if alias_resolves_to(&alias, &path) {
+        run_test_child(&alias, "contended");
+    }
     drop(guard);
     run_test_child(&path, "available");
     run_test_child(&path, "exit-without-drop");
@@ -39,7 +45,9 @@ fn path_lock_is_cross_process_and_released() {
         .expect("create Unicode process-lock target");
     let unicode_alias = child_directory.join("..").join("å-STATE.LOCK");
     let unicode_guard = PathLock::acquire(&unicode_path).expect("Unicode parent lock");
-    run_test_child(&unicode_alias, "contended");
+    if alias_resolves_to(&unicode_alias, &unicode_path) {
+        run_test_child(&unicode_alias, "contended");
+    }
     drop(unicode_guard);
     run_test_child(&unicode_alias, "available");
 
@@ -75,6 +83,16 @@ fn path_lock_is_cross_process_and_released() {
     }
 
     std::fs::remove_dir_all(directory).expect("remove process-lock fixture");
+}
+
+/// Reports whether `alias` names the same existing file as `path` on this
+/// filesystem, so case-folding assumptions stay observations rather than
+/// portability claims.
+fn alias_resolves_to(alias: &Path, path: &Path) -> bool {
+    match (alias.canonicalize(), path.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 fn run_child(mode: &std::ffi::OsStr, path: &Path) {
