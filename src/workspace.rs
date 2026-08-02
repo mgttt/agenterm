@@ -68,12 +68,16 @@ mod tests {
     fn unix_default_workspace_is_absolute_and_not_cwd_relative() {
         let default = default_workspace_path();
         assert!(default.is_absolute());
-        if crate::platform::is_unix_host() {
-            assert!(
-                default
-                    .components()
-                    .any(|component| component.as_os_str() == "workspaces")
-            );
-        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_default_workspace_contains_workspaces_component() {
+        let default = default_workspace_path();
+        assert!(
+            default
+                .components()
+                .any(|component| component.as_os_str() == "workspaces")
+        );
     }
 }

@@ -1076,11 +1076,9 @@ mod tests {
         std::fs::remove_dir(root).unwrap();
     }
 
+    #[cfg(windows)]
     #[test]
     fn atomic_replace_supports_verbatim_paths_beyond_max_path() {
-        if !crate::platform::is_windows_host() {
-            return;
-        }
         let root = std::env::temp_dir().join(format!(
             "agenterm-rhai-long-atomic-{}-{}",
             std::process::id(),
