@@ -137,9 +137,11 @@ agenterm-platform crate（复用层）
 
 - 目标：确认 UI/UX 体验分支是否真正集中在 `src/platform` 能力层。
 - 结果：
-  - `src/platform/adapters/unix/frontend/input.rs`/`render.rs`/`new_terminal.rs` 已以 `platform` 能力 API 驱动快捷键与主终端 shell 命名，不再出现新的 OS/主机策略分支外泄。
+- `src/platform/adapters/unix/frontend/input.rs`/`render.rs`/`new_terminal.rs` 已以 `platform` 能力 API 驱动快捷键与主终端 shell 命名，不再出现新的 OS/主机策略分支外泄。
   - `src/platform/adapters/windows/remote_frontend.rs` 继续承担 Win32 交互宿主职责，但未新增产品语义分支。
-  - 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；剩余主要是 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs` 的测试/兼容性路径适配点。
+- 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；本轮已完成 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs` 的测试与兼容性路径适配收口，全部改为基于 `platform` 能力契约分支。
 - 下一步：
-  - 将这 4 个非平台文件中的平台条件测试断言进一步替换为 `platform` 的能力契约断言，形成一条稳定的回归路径。
+- O1C 补强：
+  - 将行为差异记录到 `plan/platform-ux-parity-evidence-matrix.md` 的 P0/P1/P2 回归条目，并补齐 GUI/CLI 双端最小冒烟证据脚本的证据汇聚策略。
+  - 对 `script_process` 中的运行时主机判定场景，优先统一为能力入口返回值语义（supported/unsupported/failed）而非直接 `cfg!(windows)` 语义分支。
 ```
