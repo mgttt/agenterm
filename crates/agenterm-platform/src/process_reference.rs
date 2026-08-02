@@ -56,6 +56,43 @@ impl ProcessReference {
     pub fn is_member_of(&self, group: impl ProcessContainmentGroup) -> io::Result<bool> {
         group.contains_process(self)
     }
+
+    /// Duplicates a current-process HANDLE into this exact target process.
+    ///
+    /// The returned receipt rolls the target HANDLE back unless the caller
+    /// explicitly commits delivery with [`RemoteHandleTransfer::into_raw_handle`].
+    /// This is a Windows extension because Unix descriptor passing has a
+    /// different transport and ownership contract.
+    #[cfg(windows)]
+    pub fn duplicate_handle_into<'a>(
+        &'a self,
+        source: std::os::windows::io::BorrowedHandle<'_>,
+    ) -> io::Result<RemoteHandleTransfer<'a>> {
+        self.0
+            .duplicate_handle_into(source)
+            .map(RemoteHandleTransfer)
+    }
+}
+
+/// A rollback-capable receipt for a HANDLE duplicated into another process.
+#[cfg(windows)]
+pub struct RemoteHandleTransfer<'a>(crate::selected::process_reference::RemoteHandleTransfer<'a>);
+
+#[cfg(windows)]
+impl RemoteHandleTransfer<'_> {
+    /// Returns the numeric HANDLE value in the target process.
+    #[must_use]
+    pub fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.0.as_raw_handle()
+    }
+
+    /// Commits delivery and returns the numeric HANDLE value in the target.
+    ///
+    /// After commit, the target process owns the HANDLE and this receipt no
+    /// longer closes it on drop.
+    pub fn into_raw_handle(self) -> std::os::windows::io::RawHandle {
+        self.0.into_raw_handle()
+    }
 }
 
 /// A target-specific native containment group that can query exact process
@@ -183,5 +220,25 @@ mod tests {
             wait_handle(TestHandle, Some(Duration::ZERO)).expect("generic native handle wait"),
             ProcessWait::TimedOut
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn public_remote_handle_transfer_can_be_committed() {
+        use std::os::windows::io::{
+            AsHandle as _, BorrowedHandle, FromRawHandle as _, OwnedHandle, RawHandle,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        let file = std::fs::File::open(std::env::current_exe().expect("test executable"))
+            .expect("open transfer fixture");
+        let current = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess() as RawHandle) };
+        let target = ProcessReference::duplicate_from(current).expect("retained current process");
+        let transfer = target
+            .duplicate_handle_into(file.as_handle())
+            .expect("duplicate handle into current process");
+        let remote = transfer.into_raw_handle();
+        assert!(!remote.is_null());
+        drop(unsafe { OwnedHandle::from_raw_handle(remote) });
     }
 }

@@ -77,7 +77,7 @@ impl ProcessReference {
     }
 }
 
-pub struct RemoteHandleTransfer<'a> {
+pub(crate) struct RemoteHandleTransfer<'a> {
     target: &'a ProcessReference,
     remote: std::os::windows::io::RawHandle,
     committed: bool,
@@ -92,16 +92,6 @@ impl RemoteHandleTransfer<'_> {
         self.committed = true;
         self.remote
     }
-}
-
-/// Duplicates a current-process HANDLE into an exact retained target process.
-///
-/// Dropping the returned receipt before committing it closes the remote HANDLE.
-pub fn duplicate_handle_into<'a>(
-    target: &'a crate::process_reference::ProcessReference,
-    source: BorrowedHandle<'_>,
-) -> io::Result<RemoteHandleTransfer<'a>> {
-    target.0.duplicate_handle_into(source)
 }
 
 impl Drop for RemoteHandleTransfer<'_> {
@@ -382,8 +372,9 @@ mod tests {
                 .expect("retain child process HANDLE");
 
         let current = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess() as RawHandle) };
-        let transfer =
-            duplicate_handle_into(&reference, current).expect("duplicate rollback fixture");
+        let transfer = reference
+            .duplicate_handle_into(current)
+            .expect("duplicate rollback fixture");
         let stale_remote = transfer.as_raw_handle();
         drop(transfer);
         let mut unexpected = std::ptr::null_mut();
@@ -403,8 +394,9 @@ mod tests {
             "dropped transfer left a live target-process HANDLE"
         );
 
-        let transfer =
-            duplicate_handle_into(&reference, current).expect("duplicate delivered fixture");
+        let transfer = reference
+            .duplicate_handle_into(current)
+            .expect("duplicate delivered fixture");
         writeln!(
             child.stdin.as_mut().expect("child stdin"),
             "{}",

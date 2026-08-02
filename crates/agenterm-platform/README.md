@@ -50,7 +50,7 @@ clipboard, IPC, or screenshot modules.
 | `process-conventions` | pure Windows CRT command-line and sorted Unicode environment-block encoding with typed malformed-input policy; does not spawn a process | none |
 | `process-control` | typed single-process termination, exact Windows HANDLE termination, and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-observation` | fail-closed single-process liveness and stable start identity | target `libc` / minimal `windows-sys` |
-| `process-reference` | owned stable process reference plus bounded or indefinite exact-object exit waits via HANDLE, pidfd, or kqueue; Windows raw exit-code, target-process HANDLE delivery and exact Job membership | target `libc` / minimal `windows-sys` |
+| `process-reference` | owned stable process reference plus bounded or indefinite exact-object exit waits via HANDLE, pidfd, or kqueue; Windows raw exit-code, public rollback-capable target-process HANDLE delivery and exact Job membership | target `libc` / minimal `windows-sys` |
 | `process-containment` | exact process assignment, membership, member snapshots, termination and native memory/CPU/process limits for owned or named containment objects | `process-reference` + minimal Windows Job APIs |
 | `process-security` | effective process principal plus typed sandbox identity, with handle-bound Windows queries | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
