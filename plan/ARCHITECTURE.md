@@ -17,6 +17,8 @@ crates/agenterm-platform     机制：窗口/输入/截图/进程/IPC/PTY/字体
                              typed Unsupported / Failed；无 AgenTerm 产品名
 
 src/platform/                产品平台 glue：FrontendHost、目录名、快捷键/CC
+  policy/                    host 无关产品策略表
+    input.rs                 shortcut / empty-copy 输入策略（Win/Unix 共用）
                              策略表、services facade（应薄，勿第三套 OS adapter）
 
 src/frontend/                产品 GUI 入口 + UI/UX 语义
@@ -80,7 +82,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | L1 | ~~`frontend.rs` `#[path]` 虚树~~ | **已收**：`platform::adapters::{windows,unix}` 正规 mod；`frontend` 只 `use` |
 | L1b | ~~`windows/frontend` 靠 sibling `#[path]`~~ | **已收**：同目录 `windows::{frontend,remote_frontend}` |
 | L2 | Win remote vs Unix embedded 双主机 | 共享交互语义单点；主机只 present/wake/IME |
-| L3 | `platform/mod.rs` 策略过肥 + `allow(dead_code)` | 拆 `policy/*`；禁新顶层 `is_windows_host` 蔓延 |
+| L3 | `platform/mod.rs` 策略过肥（input 已拆 `policy/input.rs`；其余仍在）+ `allow(dead_code)` | 拆 `policy/{input,paths,control_center,runtime,test_fixtures}`；禁新顶层 `is_windows_host` 蔓延 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
 
 已清理：`src/platform/services/frontend.rs` 孤儿 re-export（无人 `mod`）——删除；入口以 `src/frontend/` 为准。

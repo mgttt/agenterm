@@ -381,8 +381,7 @@ CC screenshot strategy、hosted script worker、atomic path、long-running fixtu
 - **坏**：与 `agenterm-platform` 边界模糊；fixture 与用户默认同级；allow 掩盖
   未接线 API。
 
-**0.1.13 目标**：拆 `policy/{input,paths,control_center,runtime,test_fixtures}`；
-每表单测；禁止新的顶层 `is_windows_host()` 蔓延。
+**0.1.13 目标**：拆 `policy/{input,paths,control_center,runtime,test_fixtures}`；`policy/input.rs` 已落地（2026-08-03），其余待拆；每表单测；禁止新的顶层 `is_windows_host()` 蔓延。
 
 #### L4 — 文档与代码漂移（**中** → 文档包已收）
 
@@ -442,7 +441,8 @@ src/frontend_server.rs          # server autostart/recovery only
 src/platform/
   mod.rs                        # re-export 薄 + FrontendHost
   policy/                       # 产品策略表（cfg-free）
-    input.rs  paths.rs  control_center.rs  runtime.rs
+    input.rs                    # 已拆：shortcut / empty-copy
+    paths.rs  control_center.rs  runtime.rs  test_fixtures.rs  # 待拆
   adapters/
     windows/
       mod.rs                    # 正规 mod，无 #[path] 从 frontend 刺入

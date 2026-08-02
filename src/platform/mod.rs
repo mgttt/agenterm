@@ -19,6 +19,12 @@ pub const CONTRACT_REVISION: u32 = 3;
 
 pub(crate) mod adapters;
 pub(crate) mod filesystem;
+pub(crate) mod policy;
+#[allow(dead_code, unused_imports)]
+pub(crate) use policy::input::{
+    is_primary_shortcut_via_meta, primary_text_field_shortcut_modifiers,
+    terminal_shortcut_empty_copy_action_is_suppressed,
+};
 
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
@@ -195,44 +201,6 @@ pub(crate) fn project_capability_status(
             message: "platform capability returned an unknown status".to_owned(),
         },
     }
-}
-
-#[allow(dead_code)]
-pub(crate) fn primary_text_field_shortcut_modifiers() -> ModifierState {
-    if matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Macos
-    ) {
-        ModifierState {
-            control: false,
-            shift: false,
-            alt: false,
-            meta: true,
-        }
-    } else {
-        ModifierState {
-            control: true,
-            shift: false,
-            alt: false,
-            meta: false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_primary_shortcut_via_meta() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Macos
-    )
-}
-
-#[allow(dead_code)]
-pub(crate) fn terminal_shortcut_empty_copy_action_is_suppressed() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Macos
-    )
 }
 
 pub(crate) fn control_center_screenshot_strategy()
