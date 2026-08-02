@@ -1284,45 +1284,36 @@ mod tests {
         long_running_process_command_fixture()
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, unix))]
     fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
-        ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
+        if crate::platform::is_windows_host() {
+            ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
+        } else {
+            ("sleep", &["30"])
+        }
     }
 
-    #[cfg(unix)]
-    fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
-        ("sleep", &["30"])
-    }
-
-    #[cfg(windows)]
+    #[cfg(any(windows, unix))]
     fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
-        ("ping", &["-n", "6", "127.0.0.1"])
+        if crate::platform::is_windows_host() {
+            ("ping", &["-n", "6", "127.0.0.1"])
+        } else {
+            ("sleep", &["5"])
+        }
     }
 
-    #[cfg(unix)]
-    fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
-        ("sleep", &["5"])
-    }
-
-    #[cfg(windows)]
+    #[cfg(any(windows, unix))]
     fn shell_wrapped_process_command(
         windows_command: &str,
         unix_command: &str,
         arguments: &[&str],
     ) -> ScriptCommand {
-        let (program, command_arguments) = wrapped_shell_command(windows_command, arguments);
-        let mut process = process_command(&program).expect("shell command should be runnable");
-        process.arguments = command_arguments;
-        process
-    }
-
-    #[cfg(unix)]
-    fn shell_wrapped_process_command(
-        windows_command: &str,
-        unix_command: &str,
-        arguments: &[&str],
-    ) -> ScriptCommand {
-        let (program, command_arguments) = wrapped_shell_command(unix_command, arguments);
+        let shell_command = if crate::platform::is_windows_host() {
+            windows_command
+        } else {
+            unix_command
+        };
+        let (program, command_arguments) = wrapped_shell_command(shell_command, arguments);
         let mut process = process_command(&program).expect("shell command should be runnable");
         process.arguments = command_arguments;
         process
