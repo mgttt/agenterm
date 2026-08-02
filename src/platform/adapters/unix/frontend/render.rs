@@ -3296,9 +3296,11 @@ mod tests {
         assert!(std::mem::size_of::<TerminalCell>() <= 32);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn terminal_cell_renders_combining_marks() {
+        if !crate::platform::is_macos_host() {
+            return;
+        }
         let foreground = Rgb {
             red: 240,
             green: 240,
@@ -3580,9 +3582,11 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn terminal_cell_renders_cjk_system_fallback() {
+        if !crate::platform::is_macos_host() {
+            return;
+        }
         let foreground = Rgb {
             red: 240,
             green: 240,

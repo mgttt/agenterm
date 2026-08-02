@@ -364,9 +364,11 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn macos_system_fonts_cover_latin_and_cjk() {
+        if !crate::platform::is_macos_host() {
+            return;
+        }
         assert_eq!(super::resolved_font_name(), "SF Mono");
         for ch in ['A', '繁'] {
             let glyph = super::raster_glyph(ch, 14).expect("system glyph");
@@ -376,9 +378,11 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn linux_resolved_font_matches_platform_primary() {
+        if crate::platform::is_macos_host() {
+            return;
+        }
         let platform_primary =
             agenterm_platform::font::primary_family_name().unwrap_or("bitmap-8x8");
         assert_eq!(super::resolved_font_name(), platform_primary);
