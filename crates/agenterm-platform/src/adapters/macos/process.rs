@@ -139,6 +139,20 @@ impl ProcessTreeGuard {
         }
         let root_id = u32::try_from(self.process_group)
             .map_err(|_| "owned process group is outside the process ID range".to_owned())?;
+        let root_observation = observe(root_id);
+        let root_is_owned = match (&self.root_start_identity, &root_observation) {
+            (
+                Some(expected),
+                ProcessObservation::Live {
+                    start_identity: Some(current),
+                },
+            ) => *current == *expected,
+            _ => false,
+        };
+        if !root_is_owned && !matches!(root_observation, ProcessObservation::Dead { .. }) {
+            self.active = false;
+            return Ok(());
+        }
         let descendants = list()
             .map(|processes| {
                 crate::contract::process::transitive_descendant_ids(root_id, &processes)
@@ -152,15 +166,6 @@ impl ProcessTreeGuard {
                     .collect::<Vec<_>>()
             })
             .map_err(|error| format!("owned process inventory failed: {error}"));
-        let root_is_owned = match (&self.root_start_identity, observe(root_id)) {
-            (
-                Some(expected),
-                ProcessObservation::Live {
-                    start_identity: Some(current),
-                },
-            ) => current == *expected,
-            _ => false,
-        };
         let group_result =
             if root_is_owned && unsafe { libc::killpg(self.process_group, libc::SIGKILL) } == 0 {
                 Ok(())

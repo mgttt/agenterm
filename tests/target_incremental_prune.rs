@@ -252,9 +252,8 @@ fn wrapper_source_owns_the_cargo_lock_barrier_and_exact_touch_evidence() {
     assert!(SCRIPT_BINARY.contains("barrier.lock()?"));
     assert!(SCRIPT_BINARY.contains("full-tree-metadata-v1"));
     assert!(SCRIPT_BINARY.contains("!incremental_poison_present(&state.join(\"invalid\"))"));
-    assert!(
-        SCRIPT_BINARY.contains("!agenterm_platform::filesystem::metadata_is_link_like(&metadata)")
-    );
+    assert!(SCRIPT_BINARY.contains("agenterm::is_direct_directory(&entry.path())"));
+    assert!(SCRIPT_BINARY.contains("agenterm::is_direct_file(path)"));
 }
 
 #[test]
