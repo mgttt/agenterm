@@ -461,7 +461,9 @@ impl NewShellChoice {
     pub(super) fn label(self) -> String {
         match self {
             Self::Default => "Default".to_owned(),
-            Self::Primary => crate::platform::runtime::primary_terminal_shell().label,
+            Self::Primary => {
+                crate::platform::runtime::primary_terminal_shell().label.to_owned()
+            }
             Self::Bash => "bash".to_owned(),
         }
     }
