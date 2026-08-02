@@ -8,9 +8,10 @@ use agenterm_platform::{
 };
 
 use crate::platform::control_center::ScreenshotStrategy;
+use crate::platform::policy::control_center::screenshot_strategy as policy_screenshot_strategy;
 
 pub(crate) fn screenshot_strategy() -> ScreenshotStrategy {
-    crate::platform::control_center_screenshot_strategy()
+    policy_screenshot_strategy()
 }
 
 pub(crate) fn protect_state_directory(path: &Path) -> io::Result<()> {
@@ -52,7 +53,7 @@ mod tests {
     #[test]
     fn native_control_center_renderers_own_linux_and_macos_capture_requests() {
         let strategy = screenshot_strategy();
-        let expected = crate::platform::control_center_screenshot_strategy();
+        let expected = policy_screenshot_strategy();
         assert_eq!(strategy, expected);
     }
 

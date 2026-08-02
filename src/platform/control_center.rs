@@ -5,12 +5,7 @@
 
 use std::{fs::OpenOptions, io, path::Path};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScreenshotStrategy {
-    DirectNativeWindow,
-    RendererRequest,
-    Unsupported,
-}
+pub(crate) use crate::platform::policy::control_center::ScreenshotStrategy;
 
 pub(crate) fn screenshot_strategy() -> ScreenshotStrategy {
     crate::platform::services::control_center::screenshot_strategy()
@@ -59,7 +54,7 @@ mod tests {
 
     #[test]
     fn strategy_preserves_platform_product_behavior() {
-        let expected = crate::platform::control_center_screenshot_strategy();
+        let expected = crate::platform::policy::control_center::screenshot_strategy();
         assert_eq!(screenshot_strategy(), expected);
     }
 

@@ -4,4 +4,5 @@
 //! with no native API implementation. Host adapters consume them through the
 //! `crate::platform` re-exports.
 
+pub(crate) mod control_center;
 pub(crate) mod input;

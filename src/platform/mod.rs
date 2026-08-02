@@ -203,19 +203,6 @@ pub(crate) fn project_capability_status(
     }
 }
 
-pub(crate) fn control_center_screenshot_strategy()
--> crate::platform::control_center::ScreenshotStrategy {
-    match agenterm_platform::platform_kind() {
-        agenterm_platform::PlatformKind::Windows => {
-            crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
-        }
-        agenterm_platform::PlatformKind::Macos | agenterm_platform::PlatformKind::Linux => {
-            crate::platform::control_center::ScreenshotStrategy::RendererRequest
-        }
-        _ => crate::platform::control_center::ScreenshotStrategy::Unsupported,
-    }
-}
-
 pub(crate) fn hosted_script_worker_available() -> bool {
     matches!(
         agenterm_platform::platform_kind(),
@@ -771,7 +758,7 @@ mod tests {
     #[test]
     fn control_center_screenshot_strategy_matches_runtime_kind() {
         assert_eq!(
-            control_center_screenshot_strategy(),
+            crate::platform::policy::control_center::screenshot_strategy(),
             match agenterm_platform::platform_kind() {
                 agenterm_platform::PlatformKind::Windows => {
                     crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
