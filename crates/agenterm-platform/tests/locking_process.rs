@@ -33,6 +33,15 @@ fn path_lock_is_cross_process_and_released() {
     run_test_child(&path, "available");
     run_test_child(&path, "exit-without-drop");
     PathLock::try_acquire(&path).expect("lock released when owner process exits");
+
+    let unicode_path = directory.join("Å-state.lock");
+    std::fs::write(&unicode_path, b"unicode-process-lock")
+        .expect("create Unicode process-lock target");
+    let unicode_alias = child_directory.join("..").join("å-STATE.LOCK");
+    let unicode_guard = PathLock::acquire(&unicode_path).expect("Unicode parent lock");
+    run_test_child(&unicode_alias, "contended");
+    drop(unicode_guard);
+    run_test_child(&unicode_alias, "available");
     std::fs::remove_dir_all(directory).expect("remove process-lock fixture");
 }
 
