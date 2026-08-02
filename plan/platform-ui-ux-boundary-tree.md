@@ -142,7 +142,7 @@ agenterm-platform crate（复用层）
 - `src/platform/adapters/unix/frontend/input.rs`/`render.rs`/`new_terminal.rs` 已以 `platform` 能力 API 驱动快捷键与主终端 shell 命名，不再出现新的 OS/主机策略分支外泄。
   - `src/platform/adapters/windows/remote_frontend.rs` 继续承担 Win32 交互宿主职责，但未新增产品语义分支。
 - 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；本轮已完成 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs`、`script_process.rs` 的测试与兼容性路径适配收口，全部改为基于 `platform` 能力契约分支。
-- `script_process.rs` 测试辅助中与 shell/超时进程相关的 host 分支已从运行时 `is_*_host` 收敛为 `#[cfg(windows)]`/`#[cfg(unix)]` 的编译期分支，避免在通用 API 上重复注入 host 语义。
+- `script_process.rs` 测试辅助中与 shell/超时进程相关的 host 分支已从编译期 `#[cfg(windows)]`/`#[cfg(unix)]` 改为统一 `crate::platform::is_windows_host()` 的运行时能力分支，避免在通用 API 上重复注入主机策略。
 - 本次同步进度（2026-08-02）：再向下沉 3 个测试分支（`script_process` 的 runtime 分支、`script_stdlib`/`working_context`/`workspace` 的 OS 条件），确保非平台层的运行时 `host` 判断继续收敛。
 - 下一步：
   - O1C 补强：
@@ -152,3 +152,4 @@ agenterm-platform crate（复用层）
 - 实测验收（src 非平台层）：
   - 截止 `2026-08-02`，`src` 非平台目录未发现剩余 `#[cfg(windows)]`/`#[cfg(unix)]` 或 `cfg!(windows)`/`cfg!(unix)` 直接分支；仅保留与行为可见性相关的测试辅助路径分支（如 `script_process` 的兼容性路径）并通过 `platform` 能力入口落地。
 ```
+
