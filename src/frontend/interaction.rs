@@ -234,6 +234,73 @@ pub(crate) fn mouse_report_bytes(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MouseReportInput {
+    pub mode: ApplicationMouseMode,
+    pub encoding: MouseReportEncoding,
+    pub shift: bool,
+    pub alt: bool,
+    pub control: bool,
+    pub scrolled_back: bool,
+    pub motion: bool,
+    pub dragging: bool,
+    pub pressed: bool,
+    pub button: Option<u8>,
+    pub current_button: Option<u8>,
+    pub current_cell: Option<(u16, u16)>,
+    pub column: u16,
+    pub row: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum MouseReportOutcome {
+    LocalSelection,
+    Deduplicated,
+    Send(Vec<u8>),
+}
+
+pub(crate) fn mouse_report_outcome(input: MouseReportInput) -> MouseReportOutcome {
+    let MouseReportInput {
+        mode,
+        encoding,
+        shift,
+        alt,
+        control,
+        scrolled_back,
+        motion,
+        dragging,
+        pressed,
+        button,
+        current_button,
+        current_cell,
+        column,
+        row,
+    } = input;
+    if mouse_delivery(mode, shift, scrolled_back, motion, dragging, pressed)
+        != MouseDelivery::Application
+    {
+        return MouseReportOutcome::LocalSelection;
+    }
+    if motion && current_cell == Some((column, row)) {
+        return MouseReportOutcome::Deduplicated;
+    }
+    let mut code = match button.or(current_button) {
+        Some(code) => code,
+        None if motion => 3,
+        None => return MouseReportOutcome::LocalSelection,
+    };
+    if motion {
+        code |= 32;
+    }
+    if alt {
+        code |= 8;
+    }
+    if control {
+        code |= 16;
+    }
+    mouse_report_bytes(encoding, code, column, row, pressed)
+        .map_or(MouseReportOutcome::LocalSelection, MouseReportOutcome::Send)
+}
 pub(crate) fn mouse_delivery(
     mode: ApplicationMouseMode,
     shift_override: bool,
@@ -305,8 +372,9 @@ pub(crate) fn sidebar_scroll_offset_for_thumb_top(
 mod tests {
     use super::{
         ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-        MouseDelivery, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
-        mouse_delivery, route_wheel, sidebar_scroll_offset_for_thumb_top,
+        MouseDelivery, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
+        ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
+        mouse_delivery, mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
     };
 
     #[test]
@@ -573,5 +641,59 @@ mod tests {
         };
         assert_eq!(sidebar_scroll_offset_for_thumb_top(geometry, 0, 100), 0);
         assert_eq!(sidebar_scroll_offset_for_thumb_top(geometry, 80, 100), 100);
+    }
+
+    #[test]
+    fn mouse_report_outcome_dedupes_motion_and_encodes_modifiers() {
+        let deduplicated = MouseReportInput {
+            mode: ApplicationMouseMode::AnyMotion,
+            encoding: MouseReportEncoding::Sgr,
+            shift: false,
+            alt: true,
+            control: true,
+            scrolled_back: false,
+            motion: true,
+            dragging: true,
+            pressed: true,
+            button: None,
+            current_button: Some(2),
+            current_cell: Some((5, 5)),
+            column: 5,
+            row: 5,
+        };
+        assert_eq!(
+            mouse_report_outcome(deduplicated),
+            MouseReportOutcome::Deduplicated
+        );
+        let sent = MouseReportInput {
+            column: 6,
+            ..deduplicated
+        };
+        assert_eq!(
+            mouse_report_outcome(sent),
+            MouseReportOutcome::Send(vec![
+                0x1b, b'[', b'<', b'5', b'8', b';', b'7', b';', b'6', b'M'
+            ])
+        );
+        let local = MouseReportInput {
+            mode: ApplicationMouseMode::Press,
+            encoding: MouseReportEncoding::Sgr,
+            shift: true,
+            scrolled_back: false,
+            alt: false,
+            control: false,
+            motion: false,
+            dragging: false,
+            pressed: true,
+            button: Some(0),
+            current_button: None,
+            current_cell: None,
+            column: 0,
+            row: 0,
+        };
+        assert_eq!(
+            mouse_report_outcome(local),
+            MouseReportOutcome::LocalSelection
+        );
     }
 }

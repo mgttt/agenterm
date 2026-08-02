@@ -148,7 +148,7 @@ O1 并发树（并行）
 ├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
 ├─ D1 [x] src/platform/control_center.rs → src/frontend/control_center.rs
 ├─ D2 [x] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures,workspace,host,script_http,capability,ipc}
-├─ D3 [x] Win remote vs Unix embedded 共享交互管线（selection phase、focus 导航、wheel 累积/路由、scrollbar thumb drag 已收为 crate 共享；`FocusState` 存储语义 surface + adapter `focus_gate()` 共享 modal/focus 规则；raw-mouse 仲裁函数与 report 编码已共享，Unix embedded 与 Windows remote 均已接入）
+├─ D3 [x] Win remote vs Unix embedded 共享交互管线（selection phase、focus 导航、wheel 累积/路由、scrollbar thumb drag 已收为 crate 共享；`FocusState` 存储语义 surface + adapter `focus_gate()` 共享 modal/focus 规则；raw-mouse 仲裁/report outcome 与编码已共享，Unix embedded 与 Windows remote 均已接入）
 └─ D4 [~] 每条可见差进入 evidence matrix；无 adapter 内产品 if（D3 结构证据已入 matrix；Linux/macOS 真机列待 host smoke）
 ```
 

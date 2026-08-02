@@ -73,8 +73,9 @@ use crate::{
 use self::wake::install_unix_wake;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-    MouseDelivery, MouseReportEncoding, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
-    mouse_delivery, mouse_report_bytes, route_wheel, sidebar_scroll_offset_for_thumb_top,
+    MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
+    WheelAccumulator, WheelTarget, mouse_report_outcome, route_wheel,
+    sidebar_scroll_offset_for_thumb_top,
 };
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -3199,48 +3200,39 @@ impl UnixApp {
             vt100::MouseProtocolMode::AnyMotion => ApplicationMouseMode::AnyMotion,
         };
         let dragging = self.mouse_report_button.is_some();
-        if mouse_delivery(
-            product_mode,
-            self.pointer_modifiers.shift,
-            scrollback != 0,
-            motion,
-            dragging,
-            pressed,
-        ) != MouseDelivery::Application
-        {
-            return false;
-        }
-        let Some((column, row)) = self.cell_at_client(x, y) else {
-            return false;
-        };
-        if motion && self.mouse_report_cell == Some((column, row)) {
-            return true;
-        }
-        let mut code = match button.or(self.mouse_report_button) {
-            Some(code) => code,
-            None if motion => 3,
-            None => return false,
-        };
-        if motion {
-            code |= 32;
-        }
-        if self.pointer_modifiers.alt {
-            code |= 8;
-        }
-        if self.pointer_modifiers.control {
-            code |= 16;
-        }
         let encoding = match encoding {
             vt100::MouseProtocolEncoding::Default => MouseReportEncoding::Default,
             vt100::MouseProtocolEncoding::Sgr => MouseReportEncoding::Sgr,
             vt100::MouseProtocolEncoding::Utf8 => MouseReportEncoding::Utf8,
         };
-        let Some(bytes) = mouse_report_bytes(encoding, code, column, row, pressed) else {
+        let Some((column, row)) = self.cell_at_client(x, y) else {
             return false;
         };
-        self.mouse_report_cell = Some((column, row));
-        self.queue_pty_input(bytes);
-        true
+        let input = MouseReportInput {
+            mode: product_mode,
+            encoding,
+            shift: self.pointer_modifiers.shift,
+            alt: self.pointer_modifiers.alt,
+            control: self.pointer_modifiers.control,
+            scrolled_back: scrollback != 0,
+            motion,
+            dragging,
+            pressed,
+            button,
+            current_button: self.mouse_report_button,
+            current_cell: self.mouse_report_cell,
+            column,
+            row,
+        };
+        match mouse_report_outcome(input) {
+            MouseReportOutcome::LocalSelection => false,
+            MouseReportOutcome::Deduplicated => true,
+            MouseReportOutcome::Send(bytes) => {
+                self.mouse_report_cell = Some((column, row));
+                self.queue_pty_input(bytes);
+                true
+            }
+        }
     }
 
     fn mouse_wheel(&mut self, x: f64, y: f64, vertical_delta: f64, line_based: bool) {

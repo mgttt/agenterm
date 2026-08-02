@@ -10,10 +10,10 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, MouseDelivery,
-    ScrollbarThumbDrag, WheelAccumulator, WheelTarget, mouse_delivery,
-    mouse_protocol_mode_from_str, mouse_report_bytes, mouse_report_encoding_from_str, route_wheel,
-    sidebar_scroll_offset_for_thumb_top,
+    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, MouseReportInput,
+    MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
+    mouse_protocol_mode_from_str, mouse_report_encoding_from_str, mouse_report_outcome,
+    route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -4579,43 +4579,34 @@ impl RemoteWindowState {
         let product_mode = mouse_protocol_mode_from_str(&tab.screen.mouse_protocol_mode);
         let encoding = mouse_report_encoding_from_str(&tab.screen.mouse_protocol_encoding);
         let dragging = self.mouse_report_button.is_some();
-        if mouse_delivery(
-            product_mode,
-            self.pointer_modifiers.shift,
-            tab.screen.scrollback_offset != 0,
-            motion,
-            dragging,
-            pressed,
-        ) != MouseDelivery::Application
-        {
-            return false;
-        }
         let Some((column, row)) = self.remote_cell(x, y) else {
             return false;
         };
-        if motion && self.mouse_report_cell == Some((column, row)) {
-            return true;
-        }
-        let mut code = match button.or(self.mouse_report_button) {
-            Some(code) => code,
-            None if motion => 3,
-            None => return false,
+        let input = MouseReportInput {
+            mode: product_mode,
+            encoding,
+            shift: self.pointer_modifiers.shift,
+            alt: self.pointer_modifiers.alt,
+            control: self.pointer_modifiers.control,
+            scrolled_back: tab.screen.scrollback_offset != 0,
+            motion,
+            dragging,
+            pressed,
+            button,
+            current_button: self.mouse_report_button,
+            current_cell: self.mouse_report_cell,
+            column,
+            row,
         };
-        if motion {
-            code |= 32;
+        match mouse_report_outcome(input) {
+            MouseReportOutcome::LocalSelection => false,
+            MouseReportOutcome::Deduplicated => true,
+            MouseReportOutcome::Send(bytes) => {
+                self.terminal_input(&bytes);
+                self.mouse_report_cell = Some((column, row));
+                true
+            }
         }
-        if self.pointer_modifiers.alt {
-            code |= 8;
-        }
-        if self.pointer_modifiers.control {
-            code |= 16;
-        }
-        let Some(bytes) = mouse_report_bytes(encoding, code, column, row, pressed) else {
-            return false;
-        };
-        self.terminal_input(&bytes);
-        self.mouse_report_cell = Some((column, row));
-        true
     }
 
     fn scroll_terminal(&mut self, wheel_notches: i32) {
