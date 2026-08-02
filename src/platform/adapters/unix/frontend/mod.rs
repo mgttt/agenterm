@@ -37,11 +37,11 @@ use agenterm_platform::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    frontend::{
+    platform::services::frontend::{
         attempt_gui_handoff, parse_gui_launch_target, gui_help_result, GuiHandoffResult, GuiLaunchResult,
         UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE,
     },
-    frontend::request_gui_wake_best_effort,
+    platform::services::frontend::request_gui_wake_best_effort,
     client::no_activate_from_environment,
     commands::{alternate_screen_wheel_bytes, option_value, screenshot_output_path},
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
@@ -5457,8 +5457,8 @@ mod system_menu_tests {
     #[test]
     fn gui_launch_help_is_supported_by_frontend_contract() {
         assert!(matches!(
-            gui_help_result(&["--help".to_owned()], crate::frontend::UNIX_GUI_USAGE),
-            Some(crate::frontend::GuiLaunchResult::UsageHelpPrinted)
+            gui_help_result(&["--help".to_owned()], crate::platform::services::frontend::UNIX_GUI_USAGE),
+            Some(crate::platform::services::frontend::GuiLaunchResult::UsageHelpPrinted)
         ));
     }
 
@@ -5477,7 +5477,7 @@ mod system_menu_tests {
                     option.to_owned(),
                     value.to_owned(),
                 ],
-                crate::frontend::UNIX_GUI_LAUNCH_POLICY,
+                crate::platform::services::frontend::UNIX_GUI_LAUNCH_POLICY,
             )
             .unwrap();
             assert!(options.no_activate);
@@ -5516,7 +5516,7 @@ mod system_menu_tests {
         ];
         for arguments in invalid {
             assert!(
-                parse_gui_launch_target(&arguments, crate::frontend::UNIX_GUI_LAUNCH_POLICY).is_err(),
+                parse_gui_launch_target(&arguments, crate::platform::services::frontend::UNIX_GUI_LAUNCH_POLICY).is_err(),
                 "{arguments:?}"
             );
         }

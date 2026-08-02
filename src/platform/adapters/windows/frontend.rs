@@ -1,7 +1,7 @@
 use std::env;
 
 use crate::wake_signal::WakeSignal;
-use crate::frontend::{
+use crate::platform::services::frontend::{
     attempt_gui_handoff, parse_gui_launch_target, gui_help_result, GuiLaunchResult,
     GuiHandoffResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
 };
@@ -10,20 +10,20 @@ use crate::frontend::{
 pub(crate) fn request_gui_wake(
     wake_window: isize,
     wake_signal: &WakeSignal,
-) -> crate::frontend::GuiWakeResult {
+) -> crate::platform::services::frontend::GuiWakeResult {
     if wake_signal.request() {
         // SAFETY: the GUI owns the wake HWND for the duration of this call.
         if let Some(window) =
             unsafe { agenterm_platform::activation::NativeWindowHandle::from_raw(wake_window) }
         {
             if agenterm_platform::activation::post_application_wake(window).is_ok() {
-                return crate::frontend::GuiWakeResult::Woke;
+                return crate::platform::services::frontend::GuiWakeResult::Woke;
             }
-            return crate::frontend::GuiWakeResult::Failed("post_application_wake failed".to_owned());
+            return crate::platform::services::frontend::GuiWakeResult::Failed("post_application_wake failed".to_owned());
         }
-        return crate::frontend::GuiWakeResult::NoTarget;
+        return crate::platform::services::frontend::GuiWakeResult::NoTarget;
     }
-    crate::frontend::GuiWakeResult::Throttled
+    crate::platform::services::frontend::GuiWakeResult::Throttled
 }
 
 /// Windows-subsystem launcher entry point.
@@ -153,7 +153,7 @@ mod tests {
             "--address".to_owned(),
             "127.0.0.1:48815".to_owned(),
         ],
-            crate::frontend::WINDOWS_GUI_LAUNCH_POLICY,
+            crate::platform::services::frontend::WINDOWS_GUI_LAUNCH_POLICY,
         )
         .unwrap();
         assert!(options.no_activate);
@@ -166,7 +166,7 @@ mod tests {
             "127.0.0.1:48816".to_owned(),
             "--not-foreground".to_owned(),
         ],
-            crate::frontend::WINDOWS_GUI_LAUNCH_POLICY,
+            crate::platform::services::frontend::WINDOWS_GUI_LAUNCH_POLICY,
         )
         .unwrap();
         assert!(options.no_activate);
@@ -180,7 +180,7 @@ mod tests {
             "127.0.0.1:48817".to_owned(),
             "--no-activate".to_owned(),
         ],
-            crate::frontend::WINDOWS_GUI_LAUNCH_POLICY,
+            crate::platform::services::frontend::WINDOWS_GUI_LAUNCH_POLICY,
         )
         .unwrap();
         assert!(options.ui_client);
@@ -214,7 +214,7 @@ mod tests {
             assert!(
                 parse_gui_launch_target(
                     &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
-                    crate::frontend::WINDOWS_GUI_LAUNCH_POLICY,
+                    crate::platform::services::frontend::WINDOWS_GUI_LAUNCH_POLICY,
                 )
                     .is_err()
             );
@@ -224,8 +224,8 @@ mod tests {
     #[test]
     fn gui_launcher_help_is_supported_by_frontend_contract() {
         assert!(matches!(
-            gui_help_result(&["--help".to_owned()], crate::frontend::WINDOWS_GUI_USAGE),
-            Some(crate::frontend::GuiLaunchResult::UsageHelpPrinted)
+            gui_help_result(&["--help".to_owned()], crate::platform::services::frontend::WINDOWS_GUI_USAGE),
+            Some(crate::platform::services::frontend::GuiLaunchResult::UsageHelpPrinted)
         ));
     }
 }
