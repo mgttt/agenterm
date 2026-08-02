@@ -62,6 +62,17 @@ fn lock_checksums(source) {
     checksums
 }
 
+// In-repo vendored dependencies carried as `[patch.crates-io]` path crates.
+// Each entry maps the package name to its reviewed tree location; the license
+// gate still applies, while the registry source/checksum gates do not because
+// the sources live in this repository.
+fn vendored_sources() {
+    let vendored = #{};
+    vendored["softbuffer"] = "third_party/softbuffer";
+    vendored["vt100"] = "third_party/vt100";
+    vendored
+}
+
 fn allowed_licenses() {
     let allowed = #{};
     for license in [
@@ -201,18 +212,32 @@ for pkg in dependencies {
         "supply_chain_license_unreviewed:" + pkg.name + ":" +
             pkg.version + ":" + license
     );
-    require(
-        package_source != "" && package_source != "()",
-        "supply_chain_source_missing:" + pkg.name + ":" + pkg.version
-    );
-    let key =
-        pkg.name + "\n" + pkg.version + "\n" + package_source;
-    if package_source.starts_with("registry+") {
+    let vendored = vendored_sources();
+    if vendored.contains(pkg.name) {
         require(
-            checksums.contains(key),
-            "supply_chain_checksum_missing:" + pkg.name + ":" +
-                pkg.version
+            package_source == "" || package_source == "()",
+            "supply_chain_vendored_source_unexpected:" + pkg.name + ":" + pkg.version
         );
+        let package_id = pkg.id.to_string();
+        package_id.replace("\\", "/");
+        require(
+            package_id.contains("/" + vendored[pkg.name]),
+            "supply_chain_vendored_path_mismatch:" + pkg.name + ":" + pkg.version
+        );
+    } else {
+        require(
+            package_source != "" && package_source != "()",
+            "supply_chain_source_missing:" + pkg.name + ":" + pkg.version
+        );
+        let key =
+            pkg.name + "\n" + pkg.version + "\n" + package_source;
+        if package_source.starts_with("registry+") {
+            require(
+                checksums.contains(key),
+                "supply_chain_checksum_missing:" + pkg.name + ":" +
+                    pkg.version
+            );
+        }
     }
 }
 
