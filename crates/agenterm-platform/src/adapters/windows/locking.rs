@@ -243,4 +243,27 @@ mod tests {
         SlotPermit::try_acquire(&alias, "alias", 1).expect("alias slot is released");
         std::fs::remove_dir_all(directory).expect("remove slot alias fixture");
     }
+
+    #[test]
+    fn unicode_case_aliases_share_one_path_lock_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "agenterm-platform-unicode-path-alias-{}",
+            std::process::id()
+        ));
+        let child = directory.join("child");
+        std::fs::create_dir_all(&child).expect("create Unicode path alias fixture");
+        let canonical = directory.join("Å-state.lock");
+        std::fs::write(&canonical, b"unicode-path-lock-alias").expect("create Unicode lock target");
+        let alias = child.join("..").join("å-STATE.LOCK");
+
+        let first = PathLock::acquire(&canonical).expect("acquire Unicode canonical path");
+        let error = match PathLock::try_acquire(&alias) {
+            Ok(_) => panic!("Unicode case alias bypassed the existing lock"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), LockErrorKind::Contended);
+        drop(first);
+        PathLock::try_acquire(&alias).expect("Unicode case alias is released");
+        std::fs::remove_dir_all(directory).expect("remove Unicode path alias fixture");
+    }
 }
