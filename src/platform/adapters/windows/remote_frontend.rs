@@ -10,8 +10,9 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag, WheelAccumulator,
-    WheelTarget, focus_surface_navigation, route_wheel, sidebar_scroll_offset_for_thumb_top,
+    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag,
+    WheelAccumulator, WheelTarget, focus_surface_navigation, route_wheel,
+    sidebar_scroll_offset_for_thumb_top,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -420,6 +421,24 @@ enum RemoteFocusSurface {
     Tabs,
 }
 
+impl RemoteFocusSurface {
+    const fn to_shared(self) -> FocusSurface {
+        match self {
+            Self::Terminal => FocusSurface::Terminal,
+            Self::Composer => FocusSurface::Composer,
+            Self::Tabs => FocusSurface::Sidebar,
+        }
+    }
+
+    const fn from_shared(surface: FocusSurface) -> Self {
+        match surface {
+            FocusSurface::Terminal => Self::Terminal,
+            FocusSurface::Composer => Self::Composer,
+            FocusSurface::Sidebar => Self::Tabs,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum RemoteTabAction {
     AddChild,
@@ -594,23 +613,14 @@ fn remote_surface_navigation(
     alt: bool,
     key: u32,
 ) -> Option<RemoteFocusSurface> {
-    let source = match source {
-        RemoteFocusSurface::Terminal => FocusSurface::Terminal,
-        RemoteFocusSurface::Composer => FocusSurface::Composer,
-        RemoteFocusSurface::Tabs => FocusSurface::Sidebar,
-    };
     let target = focus_surface_navigation(
-        source,
+        source.to_shared(),
         FocusDirection::from_virtual_key_code(key)?,
         control,
         shift,
         alt,
     )?;
-    Some(match target {
-        FocusSurface::Terminal => RemoteFocusSurface::Terminal,
-        FocusSurface::Composer => RemoteFocusSurface::Composer,
-        FocusSurface::Sidebar => RemoteFocusSurface::Tabs,
-    })
+    Some(RemoteFocusSurface::from_shared(target))
 }
 
 fn remote_composer_identity(
@@ -4388,16 +4398,18 @@ impl RemoteWindowState {
     }
 
     fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
-        if (FocusTransitionGate {
-            window_close_pending: self.window_close_pending,
-            settings_open: self.settings_open,
-            new_terminal_open: self.new_terminal_open,
-            tab_editor_open: self.editing_tab_id.is_some(),
-            close_confirmation_open: self.pending_close_tab_id.is_some(),
-            cwd_editor_open: self.cwd_edit_tab_id.is_some(),
-        })
-        .blocked()
-        {
+        let mut state = FocusState::new(
+            self.current_focus_surface().to_shared(),
+            FocusTransitionGate {
+                window_close_pending: self.window_close_pending,
+                settings_open: self.settings_open,
+                new_terminal_open: self.new_terminal_open,
+                tab_editor_open: self.editing_tab_id.is_some(),
+                close_confirmation_open: self.pending_close_tab_id.is_some(),
+                cwd_editor_open: self.cwd_edit_tab_id.is_some(),
+            },
+        );
+        if !state.transition(target.to_shared()) {
             return false;
         }
         match target {

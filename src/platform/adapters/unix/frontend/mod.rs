@@ -72,9 +72,9 @@ use crate::{
 
 use self::wake::install_unix_wake;
 use crate::frontend::interaction::{
-    ApplicationMouseMode, FocusDirection, FocusSurface, FocusTransitionGate, MouseDelivery,
-    ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation, mouse_delivery,
-    route_wheel, sidebar_scroll_offset_for_thumb_top,
+    ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
+    MouseDelivery, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, mouse_delivery, route_wheel,
+    sidebar_scroll_offset_for_thumb_top,
 };
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -4846,18 +4846,6 @@ impl ControlHost for UnixApp {
 
 impl UnixApp {
     fn handle_surface_navigation(&mut self, event: &NormalizedKeyEvent) -> bool {
-        if (FocusTransitionGate {
-            window_close_pending: self.window_close_pending,
-            settings_open: self.settings_open,
-            new_terminal_open: self.new_terminal_dialog.is_open(),
-            tab_editor_open: self.note_edit_target.is_some(),
-            close_confirmation_open: self.pending_close.is_some(),
-            cwd_editor_open: self.cwd_edit_target.is_some(),
-        })
-        .blocked()
-        {
-            return false;
-        }
         let direction = match &event.logical {
             Key::Named(NamedKey::ArrowUp) => FocusDirection::Up,
             Key::Named(NamedKey::ArrowDown) => FocusDirection::Down,
@@ -4871,8 +4859,18 @@ impl UnixApp {
             UnixFocusSurface::Sidebar => FocusSurface::Sidebar,
             UnixFocusSurface::Settings => return false,
         };
-        let Some(target) = focus_surface_navigation(
+        let state = FocusState::new(
             source,
+            FocusTransitionGate {
+                window_close_pending: self.window_close_pending,
+                settings_open: self.settings_open,
+                new_terminal_open: self.new_terminal_dialog.is_open(),
+                tab_editor_open: self.note_edit_target.is_some(),
+                close_confirmation_open: self.pending_close.is_some(),
+                cwd_editor_open: self.cwd_edit_target.is_some(),
+            },
+        );
+        let Some(target) = state.navigate(
             direction,
             event.modifiers.control,
             event.modifiers.shift,

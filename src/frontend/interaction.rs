@@ -88,6 +88,38 @@ impl FocusTransitionGate {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FocusState {
+    surface: FocusSurface,
+    gate: FocusTransitionGate,
+}
+
+impl FocusState {
+    pub(crate) const fn new(surface: FocusSurface, gate: FocusTransitionGate) -> Self {
+        Self { surface, gate }
+    }
+
+    pub(crate) fn transition(&mut self, target: FocusSurface) -> bool {
+        if self.gate.blocked() {
+            return false;
+        }
+        self.surface = target;
+        true
+    }
+
+    pub(crate) fn navigate(
+        &self,
+        direction: FocusDirection,
+        control: bool,
+        shift: bool,
+        alt: bool,
+    ) -> Option<FocusSurface> {
+        if self.gate.blocked() {
+            return None;
+        }
+        focus_surface_navigation(self.surface, direction, control, shift, alt)
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WheelTarget {
     Sidebar,
     Terminal,
@@ -179,8 +211,8 @@ pub(crate) fn sidebar_scroll_offset_for_thumb_top(
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplicationMouseMode, FocusDirection, FocusSurface, FocusTransitionGate, MouseDelivery,
-        ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
+        ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
+        MouseDelivery, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
         mouse_delivery, route_wheel, sidebar_scroll_offset_for_thumb_top,
     };
 
@@ -230,6 +262,33 @@ mod tests {
             }
             .blocked()
         );
+    }
+
+    #[test]
+    fn focus_state_applies_gate_to_navigation_and_transition() {
+        let mut idle = FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default());
+        assert_eq!(
+            idle.navigate(FocusDirection::Down, true, false, false),
+            Some(FocusSurface::Composer)
+        );
+        assert_eq!(idle.surface, FocusSurface::Terminal);
+        assert!(idle.transition(FocusSurface::Sidebar));
+        assert_eq!(idle.surface, FocusSurface::Sidebar);
+
+        let mut blocked = FocusState::new(
+            FocusSurface::Terminal,
+            FocusTransitionGate {
+                settings_open: true,
+                ..FocusTransitionGate::default()
+            },
+        );
+        assert_eq!(
+            blocked.navigate(FocusDirection::Down, true, false, false),
+            None
+        );
+        assert!(!blocked.transition(FocusSurface::Composer));
+        assert_eq!(blocked.surface, FocusSurface::Terminal);
+        assert!(blocked.gate.blocked());
     }
     #[test]
     fn focus_navigation_requires_control_without_shift_or_alt() {
