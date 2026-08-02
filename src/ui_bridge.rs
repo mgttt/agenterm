@@ -294,12 +294,26 @@ pub struct UiScreenSnapshot {
     /// Additive field. Older compatible servers do not expose bracketed paste.
     #[serde(default)]
     pub bracketed_paste: bool,
+    /// Additive field. Older compatible servers do not expose terminal mouse protocol.
+    #[serde(default = "default_mouse_protocol_mode")]
+    pub mouse_protocol_mode: String,
+    /// Additive field. Older compatible servers do not expose terminal mouse encoding.
+    #[serde(default = "default_mouse_protocol_encoding")]
+    pub mouse_protocol_encoding: String,
     pub scrollback_offset: usize,
     pub max_scrollback: usize,
     pub cursor: UiCursorSnapshot,
     pub runs: Vec<UiCellRun>,
     pub complete: bool,
     pub truncated: bool,
+}
+
+fn default_mouse_protocol_mode() -> String {
+    "none".to_owned()
+}
+
+fn default_mouse_protocol_encoding() -> String {
+    "default".to_owned()
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -656,6 +670,8 @@ mod tests {
             alternate_screen: false,
             application_cursor: false,
             bracketed_paste: false,
+            mouse_protocol_mode: "none".to_owned(),
+            mouse_protocol_encoding: "default".to_owned(),
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -792,12 +808,16 @@ mod tests {
         object.remove("alternate_screen");
         object.remove("application_cursor");
         object.remove("bracketed_paste");
+        object.remove("mouse_protocol_mode");
+        object.remove("mouse_protocol_encoding");
 
         let decoded: UiScreenSnapshot =
             serde_json::from_value(value).expect("decode additive screen fields");
         assert!(!decoded.alternate_screen);
         assert!(!decoded.application_cursor);
         assert!(!decoded.bracketed_paste);
+        assert_eq!(decoded.mouse_protocol_mode, "none");
+        assert_eq!(decoded.mouse_protocol_encoding, "default");
     }
 
     #[test]

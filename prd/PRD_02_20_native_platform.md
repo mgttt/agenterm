@@ -641,9 +641,9 @@ integrated validation recorded below):
   `ux.terminal-selection-copy`, `ui.replaceable-client`.
 - [x] Cross-platform product interaction policy now lives in
   `src/frontend/interaction.rs`: focus navigation, wheel accumulation, wheel routing, raw-mouse arbitration, scrollbar thumb drag and
-  modal/focus state is shared through `FocusState`; Unix embedded consumes raw-mouse
-  arbitration, while Windows remote publishes `raw_mouse_arbitration: false` until its
-  application mouse path is wired. Each adapter maps native controls/modal flags into `FocusState`\n  through one `focus_gate()` projection; both frontends store the semantic surface in\n  `FocusState` and keep native controls as projections.
+  modal/focus state is shared through `FocusState`; both adapters consume the same raw-mouse
+  arbitration and xterm mouse report encoder, and Windows remote publishes `raw_mouse_arbitration: true`.
+  Each adapter maps native controls/modal flags into `FocusState`\n  through one `focus_gate()` projection; both frontends store the semantic surface in\n  `FocusState` and keep native controls as projections.
   Evidence: `src/frontend/interaction.rs` unit tests and Quick Gate.
 - [x] Product capability mapping and native IPC endpoint naming now live in
   `src/platform/policy/{capability,ipc}.rs`; `src/platform/mod.rs` re-exports

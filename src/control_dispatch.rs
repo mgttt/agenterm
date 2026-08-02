@@ -7,6 +7,10 @@ use crate::{
         positional_values, supported_commands, tmux_key_bytes,
     },
     event_journal::{EventEnvelope, EventJournal, EventKind, EventPosition},
+    frontend::interaction::{
+        ApplicationMouseMode, MouseReportEncoding, mouse_protocol_mode_name,
+        mouse_report_encoding_name,
+    },
     operations::{UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE},
     protocol::IpcResponse,
     pty::{NativeInputOwnership, NativeTerminalKey, PtyError},
@@ -125,6 +129,22 @@ fn ui_screen_snapshot(tab: &mut TerminalTab, generation: u64) -> Result<UiScreen
         alternate_screen: screen.alternate_screen(),
         application_cursor: screen.application_cursor(),
         bracketed_paste: screen.bracketed_paste(),
+        mouse_protocol_mode: mouse_protocol_mode_name(match screen.mouse_protocol_mode() {
+            vt100::MouseProtocolMode::None => ApplicationMouseMode::None,
+            vt100::MouseProtocolMode::Press => ApplicationMouseMode::Press,
+            vt100::MouseProtocolMode::PressRelease => ApplicationMouseMode::PressRelease,
+            vt100::MouseProtocolMode::ButtonMotion => ApplicationMouseMode::ButtonMotion,
+            vt100::MouseProtocolMode::AnyMotion => ApplicationMouseMode::AnyMotion,
+        })
+        .to_owned(),
+        mouse_protocol_encoding: mouse_report_encoding_name(
+            match screen.mouse_protocol_encoding() {
+                vt100::MouseProtocolEncoding::Default => MouseReportEncoding::Default,
+                vt100::MouseProtocolEncoding::Sgr => MouseReportEncoding::Sgr,
+                vt100::MouseProtocolEncoding::Utf8 => MouseReportEncoding::Utf8,
+            },
+        )
+        .to_owned(),
         scrollback_offset: screen.scrollback(),
         max_scrollback,
         cursor: UiCursorSnapshot {

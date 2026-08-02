@@ -568,6 +568,8 @@ mod tests {
                 alternate_screen: false,
                 application_cursor: false,
                 bracketed_paste: false,
+                mouse_protocol_mode: "none".to_owned(),
+                mouse_protocol_encoding: "default".to_owned(),
                 scrollback_offset: 0,
                 max_scrollback: 0,
                 cursor: UiCursorSnapshot {

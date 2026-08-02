@@ -10,8 +10,10 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag,
-    WheelAccumulator, WheelTarget, route_wheel, sidebar_scroll_offset_for_thumb_top,
+    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, MouseDelivery,
+    ScrollbarThumbDrag, WheelAccumulator, WheelTarget, mouse_delivery,
+    mouse_protocol_mode_from_str, mouse_report_bytes, mouse_report_encoding_from_str, route_wheel,
+    sidebar_scroll_offset_for_thumb_top,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -50,8 +52,9 @@ use crate::{
         TerminalScrollbarGeometry, TreeRowActionDensity, TreeRowGeometry, TreeRowMode,
         WHEEL_ROWS_PER_NOTCH, WorkspaceLayout, WorkspaceLayoutInput, pixel_rect_json,
         reset_tabs_width, scrollback_for_thumb_top, sidebar_scrollbar_track,
-        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_scrollbar_geometry,
-        tree_connector_segments, tree_row_at_y, wheel_delta_units, workspace_layout,
+        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
+        terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y, wheel_delta_units,
+        workspace_layout,
     },
     working_context::parse_proxy_url,
 };
@@ -688,6 +691,9 @@ struct RemoteWindowState {
     settings_override_draft: TerminalAppearanceOverride,
     settings_target_tab_id: Option<String>,
     terminal_selection: Option<RemoteTerminalSelection>,
+    pointer_modifiers: input::ModifierState,
+    mouse_report_button: Option<u8>,
+    mouse_report_cell: Option<(u16, u16)>,
     wheel_accumulator: WheelAccumulator,
     scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_scroll_offset: usize,
@@ -876,6 +882,9 @@ impl RemoteWindowState {
             settings_override_draft: TerminalAppearanceOverride::default(),
             settings_target_tab_id: None,
             terminal_selection: None,
+            pointer_modifiers: input::ModifierState::empty(),
+            mouse_report_button: None,
+            mouse_report_cell: None,
             wheel_accumulator: WheelAccumulator::default(),
             scroll_drag: None,
             sidebar_scroll_offset: 0,
@@ -2211,7 +2220,7 @@ impl RemoteWindowState {
                         "autoscroll": {"active": false},
                     })
                 }),
-                "raw_mouse_arbitration": false,
+                "raw_mouse_arbitration": true,
                 "rectangular_selection": false,
             },
             "tabs": tabs,
@@ -4529,6 +4538,86 @@ impl RemoteWindowState {
         }
     }
 
+    fn remote_cell(&self, x: i32, y: i32) -> Option<(u16, u16)> {
+        let tab = self.active_tab()?;
+        terminal_cell_at(
+            self.workspace_geometry().terminal,
+            x,
+            y,
+            u16::try_from(tab.screen.rows).ok()?,
+            u16::try_from(tab.screen.columns).ok()?,
+            self.cell_width,
+            self.cell_height,
+        )
+    }
+
+    /// Forwards one pointer event to the running application when it
+    /// negotiated xterm mouse tracking on the active tab.
+    ///
+    /// Shift bypasses reporting so local selection and scrollback stay
+    /// reachable (the xterm convention), and reports are suppressed while the
+    /// viewport is scrolled back because reported cells would not match what
+    /// the application drew.
+    fn forward_terminal_mouse(
+        &mut self,
+        x: i32,
+        y: i32,
+        button: Option<u8>,
+        pressed: bool,
+        motion: bool,
+    ) -> bool {
+        if self.settings_open
+            || self.window_close_pending
+            || self.new_terminal_open
+            || self.pending_close_tab_id.is_some()
+        {
+            return false;
+        }
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        let product_mode = mouse_protocol_mode_from_str(&tab.screen.mouse_protocol_mode);
+        let encoding = mouse_report_encoding_from_str(&tab.screen.mouse_protocol_encoding);
+        let dragging = self.mouse_report_button.is_some();
+        if mouse_delivery(
+            product_mode,
+            self.pointer_modifiers.shift,
+            tab.screen.scrollback_offset != 0,
+            motion,
+            dragging,
+            pressed,
+        ) != MouseDelivery::Application
+        {
+            return false;
+        }
+        let Some((column, row)) = self.remote_cell(x, y) else {
+            return false;
+        };
+        if motion && self.mouse_report_cell == Some((column, row)) {
+            return true;
+        }
+        let mut code = match button.or(self.mouse_report_button) {
+            Some(code) => code,
+            None if motion => 3,
+            None => return false,
+        };
+        if motion {
+            code |= 32;
+        }
+        if self.pointer_modifiers.alt {
+            code |= 8;
+        }
+        if self.pointer_modifiers.control {
+            code |= 16;
+        }
+        let Some(bytes) = mouse_report_bytes(encoding, code, column, row, pressed) else {
+            return false;
+        };
+        self.terminal_input(&bytes);
+        self.mouse_report_cell = Some((column, row));
+        true
+    }
+
     fn scroll_terminal(&mut self, wheel_notches: i32) {
         self.cancel_terminal_selection();
         let Some(tab) = self.active_tab() else {
@@ -4818,6 +4907,12 @@ impl RemoteWindowState {
         } else if let Some(tab_id) = text_tab {
             self.begin_tab_edit_id(&tab_id);
             true
+        } else if self.forward_terminal_mouse(x, y, Some(0), true, false) {
+            self.cancel_terminal_selection();
+            self.mouse_report_button = Some(0);
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+            self.window.focus();
+            true
         } else {
             false
         }
@@ -4859,6 +4954,13 @@ impl RemoteWindowState {
         {
             return true;
         }
+        if self.forward_terminal_mouse(x, y, Some(0), true, false) {
+            self.cancel_terminal_selection();
+            self.mouse_report_button = Some(0);
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+            self.window.focus();
+            return true;
+        }
         let sidebar = self.layout_rects().0;
         if self.tabs_visible && x < sidebar.right {
             if !self.toggle_tree_at(x, y) {
@@ -4894,13 +4996,19 @@ impl RemoteWindowState {
         } else if self.tabs_resize_dragging {
             self.drag_tabs_resize(x);
             true
+        } else if self.forward_terminal_mouse(x, y, None, true, true) {
+            true
         } else {
             self.drag_terminal_selection(x, y)
         }
     }
 
     fn handle_left_button_up(&mut self, x: i32, y: i32) -> bool {
-        if self.sidebar_scroll_drag.is_some() {
+        if let Some(code) = self.mouse_report_button.take() {
+            let _ = self.forward_terminal_mouse(x, y, Some(code), false, false);
+            self.mouse_report_cell = None;
+            false
+        } else if self.sidebar_scroll_drag.is_some() {
             self.end_sidebar_scroll_drag();
             false
         } else if self.scroll_drag.is_some() {
@@ -4933,10 +5041,24 @@ impl RemoteWindowState {
         if notches == 0 {
             return;
         }
-        match target {
-            WheelTarget::Sidebar => self.scroll_sidebar(notches),
-            WheelTarget::Terminal => self.scroll_terminal(notches),
-            WheelTarget::Ignored => {}
+        if target == WheelTarget::Sidebar {
+            self.scroll_sidebar(notches);
+            return;
+        }
+        if target != WheelTarget::Terminal {
+            return;
+        }
+        let wheel_button = if notches > 0 { 64 } else { 65 };
+        let mut reported = false;
+        for _ in 0..notches.unsigned_abs().min(40) {
+            if self.forward_terminal_mouse(x, y, Some(wheel_button), true, false) {
+                reported = true;
+            } else {
+                break;
+            }
+        }
+        if !reported {
+            self.scroll_terminal(notches);
         }
     }
 
@@ -6023,7 +6145,11 @@ impl ControlWindowApplication for RemoteWindowApplication {
                     consumed = true;
                 }
             }
-            ControlWindowEvent::PointerMoved(position) => {
+            ControlWindowEvent::PointerMoved {
+                position,
+                modifiers,
+            } => {
+                state.pointer_modifiers = modifiers;
                 redraw = state.handle_pointer_moved(position.x, position.y);
             }
             ControlWindowEvent::PointerButton {
@@ -6031,7 +6157,9 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 state: ButtonState::Pressed,
                 position,
                 clicks,
+                modifiers,
             } => {
+                state.pointer_modifiers = modifiers;
                 redraw = if clicks > 1 {
                     state.handle_left_double_click(position.x, position.y)
                 } else {
@@ -6043,15 +6171,59 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 button: PointerButton::Left,
                 state: ButtonState::Released,
                 position,
-                ..
+                modifiers,
+                clicks: _,
             } => {
+                state.pointer_modifiers = modifiers;
                 redraw = state.handle_left_button_up(position.x, position.y);
                 consumed = true;
+            }
+            ControlWindowEvent::PointerButton {
+                button: button @ (PointerButton::Right | PointerButton::Middle),
+                state: button_state,
+                position,
+                modifiers,
+                ..
+            } => {
+                state.pointer_modifiers = modifiers;
+                let code = if button == PointerButton::Right { 2 } else { 1 };
+                match button_state {
+                    ButtonState::Pressed => {
+                        if state.forward_terminal_mouse(
+                            position.x,
+                            position.y,
+                            Some(code),
+                            true,
+                            false,
+                        ) {
+                            state.mouse_report_button = Some(code);
+                            consumed = true;
+                            redraw = true;
+                        }
+                    }
+                    ButtonState::Released if state.mouse_report_button == Some(code) => {
+                        state.mouse_report_button = None;
+                        let _ = state.forward_terminal_mouse(
+                            position.x,
+                            position.y,
+                            Some(code),
+                            false,
+                            false,
+                        );
+                        state.mouse_report_cell = None;
+                        consumed = true;
+                        redraw = true;
+                    }
+                    ButtonState::Released => {}
+                    _ => {}
+                }
             }
             ControlWindowEvent::Wheel {
                 delta: ControlWheelDelta::Lines(lines),
                 position,
+                modifiers,
             } => {
+                state.pointer_modifiers = modifiers;
                 state.handle_wheel(
                     position.x,
                     position.y,
@@ -6061,6 +6233,8 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 consumed = true;
             }
             ControlWindowEvent::CaptureChanged(false) => {
+                state.mouse_report_button = None;
+                state.mouse_report_cell = None;
                 state.tabs_resize_capture_lost();
                 state.sidebar_scrollbar_capture_lost();
                 state.scrollbar_capture_lost();
@@ -6426,6 +6600,8 @@ mod tests {
             alternate_screen: false,
             application_cursor: false,
             bracketed_paste: false,
+            mouse_protocol_mode: "none".to_owned(),
+            mouse_protocol_encoding: "default".to_owned(),
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -6476,6 +6652,8 @@ mod tests {
             alternate_screen: false,
             application_cursor: false,
             bracketed_paste: false,
+            mouse_protocol_mode: "none".to_owned(),
+            mouse_protocol_encoding: "default".to_owned(),
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -6559,6 +6737,8 @@ mod tests {
             alternate_screen: false,
             application_cursor: false,
             bracketed_paste: false,
+            mouse_protocol_mode: "none".to_owned(),
+            mouse_protocol_encoding: "default".to_owned(),
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {

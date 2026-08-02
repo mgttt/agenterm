@@ -145,6 +145,95 @@ pub(crate) enum MouseDelivery {
     Application,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MouseReportEncoding {
+    Default,
+    Sgr,
+    Utf8,
+}
+
+pub(crate) fn mouse_protocol_mode_name(mode: ApplicationMouseMode) -> &'static str {
+    match mode {
+        ApplicationMouseMode::None => "none",
+        ApplicationMouseMode::Press => "press",
+        ApplicationMouseMode::PressRelease => "press-release",
+        ApplicationMouseMode::ButtonMotion => "button-motion",
+        ApplicationMouseMode::AnyMotion => "any-motion",
+    }
+}
+
+pub(crate) fn mouse_protocol_mode_from_str(value: &str) -> ApplicationMouseMode {
+    match value {
+        "press" => ApplicationMouseMode::Press,
+        "press-release" => ApplicationMouseMode::PressRelease,
+        "button-motion" => ApplicationMouseMode::ButtonMotion,
+        "any-motion" => ApplicationMouseMode::AnyMotion,
+        _ => ApplicationMouseMode::None,
+    }
+}
+
+pub(crate) fn mouse_report_encoding_name(encoding: MouseReportEncoding) -> &'static str {
+    match encoding {
+        MouseReportEncoding::Default => "default",
+        MouseReportEncoding::Sgr => "sgr",
+        MouseReportEncoding::Utf8 => "utf8",
+    }
+}
+
+pub(crate) fn mouse_report_encoding_from_str(value: &str) -> MouseReportEncoding {
+    match value {
+        "sgr" => MouseReportEncoding::Sgr,
+        "utf8" => MouseReportEncoding::Utf8,
+        _ => MouseReportEncoding::Default,
+    }
+}
+
+/// Encodes one xterm mouse report for the PTY in the encoding the running
+/// application negotiated. Coordinates are zero-based grid cells; the classic
+/// encodings cannot express release button identity or cells past their byte
+/// range, so those degrade exactly like xterm (button 3, event dropped).
+pub(crate) fn mouse_report_bytes(
+    encoding: MouseReportEncoding,
+    code: u8,
+    column: u16,
+    row: u16,
+    pressed: bool,
+) -> Option<Vec<u8>> {
+    match encoding {
+        MouseReportEncoding::Sgr => {
+            let suffix = if pressed { 'M' } else { 'm' };
+            Some(
+                format!(
+                    "\x1b[<{code};{};{}{suffix}",
+                    u32::from(column) + 1,
+                    u32::from(row) + 1
+                )
+                .into_bytes(),
+            )
+        }
+        MouseReportEncoding::Default => {
+            let code = if pressed { code } else { (code & !0b11) | 3 };
+            let column = u8::try_from(column.checked_add(33)?).ok()?;
+            let row = u8::try_from(row.checked_add(33)?).ok()?;
+            Some(vec![0x1b, b'[', b'M', 32 + code, column, row])
+        }
+        MouseReportEncoding::Utf8 => {
+            let code = if pressed { code } else { (code & !0b11) | 3 };
+            let mut bytes = vec![0x1b, b'[', b'M'];
+            let mut push = |scalar: u32| {
+                let character = char::from_u32(scalar)?;
+                let mut buffer = [0u8; 4];
+                bytes.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                Some(())
+            };
+            push(u32::from(code) + 32)?;
+            push(u32::from(column) + 33)?;
+            push(u32::from(row) + 33)?;
+            Some(bytes)
+        }
+    }
+}
+
 pub(crate) fn mouse_delivery(
     mode: ApplicationMouseMode,
     shift_override: bool,

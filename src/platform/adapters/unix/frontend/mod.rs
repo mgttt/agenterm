@@ -73,8 +73,8 @@ use crate::{
 use self::wake::install_unix_wake;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-    MouseDelivery, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, mouse_delivery, route_wheel,
-    sidebar_scroll_offset_for_thumb_top,
+    MouseDelivery, MouseReportEncoding, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
+    mouse_delivery, mouse_report_bytes, route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -3230,7 +3230,12 @@ impl UnixApp {
         if self.pointer_modifiers.control {
             code |= 16;
         }
-        let Some(bytes) = input::mouse_report_bytes(encoding, code, column, row, pressed) else {
+        let encoding = match encoding {
+            vt100::MouseProtocolEncoding::Default => MouseReportEncoding::Default,
+            vt100::MouseProtocolEncoding::Sgr => MouseReportEncoding::Sgr,
+            vt100::MouseProtocolEncoding::Utf8 => MouseReportEncoding::Utf8,
+        };
+        let Some(bytes) = mouse_report_bytes(encoding, code, column, row, pressed) else {
             return false;
         };
         self.mouse_report_cell = Some((column, row));

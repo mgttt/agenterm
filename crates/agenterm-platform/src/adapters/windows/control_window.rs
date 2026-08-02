@@ -749,7 +749,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             KeyClassification::TextCommit(text) => Some(ControlWindowEvent::TextInput(text)),
             _ => None,
         },
-        WM_MOUSEMOVE => Some(ControlWindowEvent::PointerMoved(point_from_lparam(lp))),
+        WM_MOUSEMOVE => Some(ControlWindowEvent::PointerMoved {
+            position: point_from_lparam(lp),
+            modifiers: current_modifiers(),
+        }),
         WM_LBUTTONDOWN => Some(pointer_event(
             PointerButton::Left,
             ButtonState::Pressed,
@@ -803,6 +806,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             Some(ControlWindowEvent::Wheel {
                 delta: ControlWheelDelta::Lines(f32::from(high_i16(wp as isize)) / 120.0),
                 position: PixelPoint::new(p.x, p.y),
+                modifiers: current_modifiers(),
             })
         }
         WM_COMMAND => Some(ControlWindowEvent::Command(ControlId((wp & 0xffff) as u32))),
@@ -1103,6 +1107,7 @@ fn pointer_event(
         state,
         position: point_from_lparam(lp),
         clicks,
+        modifiers: current_modifiers(),
     }
 }
 fn key_event(key: u32, pressed: bool, lp: LPARAM) -> NormalizedKeyEvent {
@@ -1117,12 +1122,7 @@ fn key_event(key: u32, pressed: bool, lp: LPARAM) -> NormalizedKeyEvent {
             KeyPressState::Released
         },
         repeat: pressed && ((lp as usize >> 30) & 1) != 0,
-        modifiers: ModifierState {
-            control: key_down(VK_CONTROL),
-            shift: key_down(VK_SHIFT),
-            alt: key_down(VK_MENU),
-            meta: false,
-        },
+        modifiers: current_modifiers(),
     }
 }
 
@@ -1180,6 +1180,14 @@ fn normalized_key_identity(key: u32) -> (LogicalKey, PhysicalKeyCode) {
 }
 fn key_down(key: u16) -> bool {
     (unsafe { GetKeyState(i32::from(key)) }) < 0
+}
+fn current_modifiers() -> ModifierState {
+    ModifierState {
+        control: key_down(VK_CONTROL),
+        shift: key_down(VK_SHIFT),
+        alt: key_down(VK_MENU),
+        meta: false,
+    }
 }
 fn point_from_lparam(lp: LPARAM) -> PixelPoint {
     PixelPoint::new(low_i16(lp) as i32, high_i16(lp) as i32)

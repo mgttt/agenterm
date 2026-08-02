@@ -228,16 +228,21 @@ pub enum ControlWindowEvent {
         event: NormalizedKeyEvent,
     },
     TextInput(String),
-    PointerMoved(PixelPoint),
+    PointerMoved {
+        position: PixelPoint,
+        modifiers: ModifierState,
+    },
     PointerButton {
         button: PointerButton,
         state: ButtonState,
         position: PixelPoint,
         clicks: u8,
+        modifiers: ModifierState,
     },
     Wheel {
         delta: ControlWheelDelta,
         position: PixelPoint,
+        modifiers: ModifierState,
     },
     CaptureChanged(bool),
     Command(ControlId),

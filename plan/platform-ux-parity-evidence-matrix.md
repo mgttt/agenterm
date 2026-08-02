@@ -222,7 +222,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | modal focus state | `src/frontend/interaction.rs` | `FocusState`（surface+gate），语义 surface 由两端存储，modal 打开时禁止 focus transition/navigation；两端 adapter 以 `focus_gate()` 单点映射原生 modal flags | Supported | Supported | Supported |
 | wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | Supported | Supported |
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
-| raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_delivery` 已建；Unix embedded 消费，Windows remote 尚未接入（`raw_mouse_arbitration: false`） | Unsupported | Supported | Supported |
+| raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_delivery` 与 `mouse_report_bytes` 共享；Unix embedded 与 Windows remote 均消费同一策略 | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 

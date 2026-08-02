@@ -163,7 +163,7 @@ pub(crate) fn terminal_interaction_json(
             },
             "autoscroll": {"active": autoscroll_active},
         })),
-        "raw_mouse_arbitration": false,
+        "raw_mouse_arbitration": true,
         "rectangular_selection": false,
     })
 }
@@ -294,7 +294,7 @@ mod tests {
             json,
             serde_json::json!({
                 "selection": null,
-                "raw_mouse_arbitration": false,
+                "raw_mouse_arbitration": true,
                 "rectangular_selection": false,
             })
         );
@@ -326,7 +326,7 @@ mod tests {
                     },
                     "autoscroll": {"active": false},
                 },
-                "raw_mouse_arbitration": false,
+                "raw_mouse_arbitration": true,
                 "rectangular_selection": false,
             })
         );
