@@ -665,6 +665,33 @@ struct UnixApp {
     mouse_report_cell: Option<(u16, u16)>,
 }
 
+/// Counts presented frames and reports the rate on stderr every five seconds
+/// when `AGENTERM_FRAME_LOG` is set; free when the variable is absent.
+fn note_frame_for_diagnostics() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var_os("AGENTERM_FRAME_LOG").is_some()) {
+        return;
+    }
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    static WINDOW_START: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    let count = COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let Ok(mut window_start) = WINDOW_START.lock() else {
+        return;
+    };
+    let now = Instant::now();
+    let start = *window_start.get_or_insert(now);
+    let elapsed = now.duration_since(start);
+    if elapsed >= Duration::from_secs(5) {
+        eprintln!(
+            "agenterm-frame-log: {count} frames in {elapsed:.1?} ({:.1}/s)",
+            count as f64 / elapsed.as_secs_f64()
+        );
+        COUNT.store(0, Ordering::Relaxed);
+        *window_start = Some(now);
+    }
+}
+
 impl UnixApp {
     fn invalidate_sidebar_text_click(&mut self) {
         self.sidebar_geometry_generation = self.sidebar_geometry_generation.wrapping_add(1);
@@ -3790,6 +3817,7 @@ impl UnixApp {
     }
 
     fn render_window(&mut self, frame: &mut XrgbPixelFrame<'_>) {
+        note_frame_for_diagnostics();
         let width = frame.width();
         let height = frame.height();
         self.render_pixels(width, height, frame.pixels_mut());
