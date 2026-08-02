@@ -352,6 +352,45 @@ mod tests {
         std::fs::remove_dir_all(root).expect("remove symlink fixture");
     }
 
+    #[cfg(all(unix, feature = "filesystem"))]
+    #[test]
+    fn private_directory_protection_rejects_symbolic_link_ancestry() {
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-link-ancestry-{}",
+            std::process::id()
+        ));
+        let target = root.join("target");
+        let link = root.join("link");
+        let nested = link.join("nested");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(target.join("nested")).expect("create ancestry target");
+        symlink(&target, &link).expect("create ancestry symlink");
+        let mode_before = std::fs::metadata(target.join("nested"))
+            .expect("target metadata before protection")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(
+            protect_private_directory(&nested)
+                .expect_err("private directory protection must reject symlink ancestry")
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            std::fs::metadata(target.join("nested"))
+                .expect("target metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            mode_before
+        );
+        std::fs::remove_dir_all(root).expect("remove ancestry fixture");
+    }
+
     #[cfg(feature = "filesystem")]
     #[test]
     fn private_atomic_write_replaces_and_leaves_no_temporary() {

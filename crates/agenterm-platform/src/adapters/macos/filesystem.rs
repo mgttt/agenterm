@@ -1,9 +1,6 @@
 use std::path::PathBuf;
 #[cfg(feature = "filesystem")]
-use std::{
-    fs::OpenOptions,
-    os::{fd::AsRawFd as _, unix::fs::OpenOptionsExt as _},
-};
+use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt as _};
 
 use crate::filesystem::{FilesystemError, HostDirectories};
 
@@ -46,10 +43,13 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
             "private directory must be an existing real directory",
         ));
     }
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(path)?;
+    // Keep every ancestor open while traversing.  O_NOFOLLOW on only the
+    // final path component does not protect against a replaced symlink in an
+    // intermediate directory.
+    let directory = crate::filesystem_open::open_existing_path(
+        path,
+        crate::filesystem_open::ExistingEntryType::Directory,
+    )?;
     let facts = crate::filesystem_entry::opened_file_entry_facts(&directory)?;
     if !facts.is_real_directory() {
         return Err(std::io::Error::new(
@@ -57,6 +57,7 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
             "private directory must be an existing real directory",
         ));
     }
+    use std::os::fd::AsRawFd as _;
     if unsafe { libc::fchmod(directory.as_raw_fd(), 0o700) } != 0 {
         Err(std::io::Error::last_os_error())
     } else {
