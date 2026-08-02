@@ -6,7 +6,10 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancelling superseded runs is right for branches, but main hosts several
+  # agents pushing concurrently; cancelling there starves the release
+  # preflight, which requires a completed successful CI run for an exact SHA.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
