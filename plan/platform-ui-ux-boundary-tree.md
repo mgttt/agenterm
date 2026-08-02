@@ -85,6 +85,7 @@ agenterm-platform crate（复用层）
   - owner: Human Workspace + ui_bridge
   - output: Given/When/Then 场景清单 + 对应快照锚点
   - acceptance: windows/unix 场景映射同名字段一致
+  - 本轮动作：`unix` 前端渲染层中，移除 `platform_kind` 直接分支，`NewShellChoice::label` 改为复用 `platform::runtime::primary_terminal_shell().label`，让“主终端命名”由平台能力层提供，前端仅消费显示字段。
 
 - O1C（验收）：并发回归与阻断
   - owner: QA

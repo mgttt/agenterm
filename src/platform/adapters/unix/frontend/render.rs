@@ -458,20 +458,11 @@ pub(super) enum NewShellChoice {
 }
 
 impl NewShellChoice {
-    pub(super) const fn label(self) -> &'static str {
+    pub(super) fn label(self) -> String {
         match self {
-            Self::Default => "Default",
-            Self::Primary => {
-                if matches!(
-                    agenterm_platform::platform_kind(),
-                    agenterm_platform::PlatformKind::Macos
-                ) {
-                    "zsh"
-                } else {
-                    "sh"
-                }
-            }
-            Self::Bash => "bash",
+            Self::Default => "Default".to_owned(),
+            Self::Primary => crate::platform::runtime::primary_terminal_shell().label,
+            Self::Bash => "bash".to_owned(),
         }
     }
 }
