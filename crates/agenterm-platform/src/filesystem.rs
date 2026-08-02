@@ -247,6 +247,24 @@ mod tests {
 
     #[cfg(feature = "filesystem")]
     #[test]
+    fn private_directory_protection_rejects_a_file() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-not-directory-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        std::fs::File::create(&path).expect("create non-directory fixture");
+        assert_eq!(
+            protect_private_directory(&path)
+                .expect_err("private directory protection must reject a file")
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        std::fs::remove_file(path).expect("remove non-directory fixture");
+    }
+
+    #[cfg(feature = "filesystem")]
+    #[test]
     fn private_atomic_write_replaces_and_leaves_no_temporary() {
         let root = std::env::temp_dir().join(format!(
             "agenterm-platform-private-atomic-{}",
