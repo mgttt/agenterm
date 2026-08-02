@@ -97,7 +97,10 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
         Capability::ProcessReference => (cfg!(feature = "process-reference"), true),
         Capability::ProcessContainment => (cfg!(feature = "process-containment"), true),
-        Capability::AppContainerProcess => (cfg!(feature = "app-container-process"), cfg!(windows)),
+        Capability::AppContainerProcess => (
+            cfg!(feature = "app-container-process"),
+            crate::selected::app_container_process_supported(),
+        ),
         Capability::ProcessSecurity => (cfg!(feature = "process-security"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
@@ -248,12 +251,14 @@ pub mod process_metrics;
 pub mod process_observation;
 
 #[cfg(feature = "process-reference")]
+#[path = "adapters/process_reference.rs"]
 pub mod process_reference;
 
 #[cfg(feature = "process-containment")]
 pub mod process_containment;
 
 #[cfg(feature = "app-container-process")]
+#[path = "adapters/app_container_process.rs"]
 pub mod app_container_process;
 
 #[cfg(feature = "process-security")]
