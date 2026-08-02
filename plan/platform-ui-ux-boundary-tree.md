@@ -88,6 +88,7 @@ agenterm-platform crate（复用层）
   - acceptance: windows/unix 场景映射同名字段一致
   - 本轮动作：`unix` 前端渲染层中，移除 `platform_kind` 直接分支，`NewShellChoice::label` 改为复用 `platform::runtime::primary_terminal_shell().label`，让“主终端命名”由平台能力层提供，前端仅消费显示字段。
   - 本轮补充：把 `unix` 输入单测中的 `platform_kind` 断言改为走平台策略能力（`primary_text_field_shortcut_modifiers` / `is_primary_shortcut_via_meta` / `terminal_shortcut_empty_copy_action_is_suppressed`），减少测试层面的平台分支直接感知。
+  - 本轮补充：增加 `platform` 侧输入策略一致性测试（`primary_shortcut_policy_is_internal_consistent` / `primary_shortcut_policy_matches_runtime_kind`），把“平台策略边界”收敛为可验证产物。
 
 - O1C（验收）：并发回归与阻断
   - owner: QA

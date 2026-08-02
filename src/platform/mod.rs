@@ -459,4 +459,27 @@ mod tests {
             assert!(info["capabilities"][capability.as_str()]["status"].is_string());
         }
     }
+
+    #[test]
+    fn primary_shortcut_policy_is_internal_consistent() {
+        let by_meta = is_primary_shortcut_via_meta();
+        let modifiers = primary_text_field_shortcut_modifiers();
+        if by_meta {
+            assert!(modifiers.meta);
+            assert!(!modifiers.control);
+            assert!(terminal_shortcut_empty_copy_action_is_suppressed());
+        } else {
+            assert!(modifiers.control);
+            assert!(!modifiers.meta);
+            assert!(!terminal_shortcut_empty_copy_action_is_suppressed());
+        }
+    }
+
+    #[test]
+    fn primary_shortcut_policy_matches_runtime_kind() {
+        assert_eq!(
+            is_primary_shortcut_via_meta(),
+            matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Macos)
+        );
+    }
 }
