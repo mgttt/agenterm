@@ -140,13 +140,13 @@ O1 并发树（并行）
 ├─ D1 [x] src/platform/toolbar.rs → src/frontend/toolbar.rs
 ├─ D1 [x] src/platform/mod.rs `action` → src/frontend/action.rs
 ├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
-├─ D1 [ ] src/platform/control_center.rs → src/frontend/control_center.rs
+├─ D1 [x] src/platform/control_center.rs → src/frontend/control_center.rs
 ├─ D2 [x] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures}
 ├─ D3 [ ] Win remote vs Unix embedded 共享交互管线（selection/wheel/focus 单一策略）
 └─ D4 [ ] 每条可见差进入 evidence matrix；无 adapter 内产品 if
 ```
 
-下一波并发：D2 与 D3 独立；D1 剩余 control_center 依赖 D2；D4 依赖 D3 落地。
+下一波并发：D3 与 D4 串行；D4 依赖 D3 落地。
 
 > 现行结构 SSOT：`plan/ARCHITECTURE.md`。  
 > 历史边界叙事（非权威）：`plan/platform-ui-ux-boundary-tree.md`。

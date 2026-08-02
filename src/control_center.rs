@@ -1417,7 +1417,7 @@ fn capabilities() -> CapabilityDocument {
         owns_terminal_authority: false,
         process_reuse: true,
         no_activate: true,
-        screenshot: crate::platform::control_center::screenshot_capability(),
+        screenshot: crate::frontend::control_center::screenshot_capability(),
         views: ["cockpit", "workflows", "extensions", "info_hub"],
     }
 }
@@ -1436,14 +1436,14 @@ fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
 }
 
 fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument> {
-    match crate::platform::control_center::screenshot_strategy() {
-        crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow => {
+    match crate::frontend::control_center::screenshot_strategy() {
+        crate::frontend::control_center::ScreenshotStrategy::DirectNativeWindow => {
             capture_direct_native_screenshot(output)
         }
-        crate::platform::control_center::ScreenshotStrategy::RendererRequest => {
+        crate::frontend::control_center::ScreenshotStrategy::RendererRequest => {
             capture_renderer_requested_screenshot(output)
         }
-        crate::platform::control_center::ScreenshotStrategy::Unsupported => anyhow::bail!(
+        crate::frontend::control_center::ScreenshotStrategy::Unsupported => anyhow::bail!(
             "control_center_screenshot_unsupported: native Control Center screenshot capture is unavailable on this platform"
         ),
     }
@@ -1467,7 +1467,7 @@ fn capture_direct_native_screenshot(output: &Path) -> Result<ScreenshotDocument>
             .context("control_center_screenshot_current_directory_unavailable")?
             .join(output)
     };
-    crate::platform::control_center::capture_native_window_png(native_window, &output)
+    crate::frontend::control_center::capture_native_window_png(native_window, &output)
         .map_err(|error| anyhow::anyhow!("control_center_screenshot_capture_failed: {error}"))?;
 
     let still_exact_owner = read_registry(&registry).is_some_and(|current| {
@@ -1728,7 +1728,7 @@ fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             ".agenterm-cc-{}-{nonce}-{attempt}.tmp",
             std::process::id()
         ));
-        let options = crate::platform::control_center::private_create_new_options();
+        let options = crate::frontend::control_center::private_create_new_options();
         match options.open(&candidate) {
             Ok(mut file) => {
                 file.write_all(bytes)?;
@@ -1741,7 +1741,7 @@ fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
     let temporary = temporary.context("control_center_temporary_file_collision")?;
-    let result = crate::platform::control_center::replace_file(&temporary, path)
+    let result = crate::frontend::control_center::replace_file(&temporary, path)
         .map_err(anyhow::Error::from);
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -2178,11 +2178,11 @@ fn claim_registry(path: &Path) -> Result<RegistryClaim> {
             .file_name()
             .is_some_and(|name| name == "control-center")
         {
-            crate::platform::control_center::protect_state_directory(parent)?;
+            crate::frontend::control_center::protect_state_directory(parent)?;
         }
     }
     for _ in 0..2 {
-        let options = crate::platform::control_center::private_create_new_options();
+        let options = crate::frontend::control_center::private_create_new_options();
         match options.open(path) {
             Ok(mut file) => {
                 let _ = fs::remove_file(native_window_path(path));

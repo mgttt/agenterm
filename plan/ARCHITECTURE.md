@@ -30,6 +30,7 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
   action.rs                  canonical action identities（toolbar/shortcut 共用）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
+  control_center.rs         Control Center 产品 facade（native 能力仍走 platform services）
 
 src/frontend_server.rs       server 拉起 / 恢复（非 IPC 代理）
 

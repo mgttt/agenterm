@@ -7,7 +7,7 @@ use agenterm_platform::{
     screenshot::{NativeCaptureArea, ScreenshotWindowHandle},
 };
 
-use crate::platform::control_center::ScreenshotStrategy;
+use crate::platform::policy::control_center::ScreenshotStrategy;
 use crate::platform::policy::control_center::screenshot_strategy as policy_screenshot_strategy;
 
 pub(crate) fn screenshot_strategy() -> ScreenshotStrategy {

@@ -57,7 +57,6 @@ pub fn install_console_interrupt_observer() -> anyhow::Result<ConsoleInterruptOb
 mod boundary_tests;
 pub(crate) mod contract;
 #[allow(dead_code)]
-pub(crate) mod control_center;
 #[allow(dead_code)]
 pub(crate) mod ipc;
 #[allow(dead_code)]
@@ -571,12 +570,12 @@ mod tests {
             crate::platform::policy::control_center::screenshot_strategy(),
             match agenterm_platform::platform_kind() {
                 agenterm_platform::PlatformKind::Windows => {
-                    crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow
+                    crate::platform::policy::control_center::ScreenshotStrategy::DirectNativeWindow
                 }
                 agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-                    crate::platform::control_center::ScreenshotStrategy::RendererRequest
+                    crate::platform::policy::control_center::ScreenshotStrategy::RendererRequest
                 }
-                _ => crate::platform::control_center::ScreenshotStrategy::Unsupported,
+                _ => crate::platform::policy::control_center::ScreenshotStrategy::Unsupported,
             }
         );
     }

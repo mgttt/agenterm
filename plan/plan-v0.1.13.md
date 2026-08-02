@@ -436,6 +436,7 @@ src/frontend/mod.rs                 # 仅：parse, handoff, result types, dispat
 src/frontend/action.rs              # canonical action identities
 src/frontend/toolbar.rs             # 产品 toolbar action 映射
 src/frontend/window.rs              # 产品窗口语义（client-size / semantic state）
+src/frontend/control_center.rs    # Control Center 产品 facade（native 能力仍走 platform services）
 src/frontend_server.rs          # server autostart/recovery only
 
 src/platform/
