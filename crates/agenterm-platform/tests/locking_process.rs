@@ -54,6 +54,20 @@ fn path_lock_is_cross_process_and_released() {
     drop(hard_link_guard);
     run_test_child(&hard_link_alias, "available");
 
+    #[cfg(windows)]
+    {
+        let replacement = directory.join("replacement.lock");
+        std::fs::write(&replacement, b"old-replacement")
+            .expect("create replacement process-lock target");
+        let replacement_guard = PathLock::acquire(&replacement).expect("replacement parent lock");
+        std::fs::remove_file(&replacement).expect("remove locked replacement target");
+        std::fs::write(&replacement, b"new-replacement")
+            .expect("recreate replacement process-lock target");
+        run_test_child(&replacement, "contended");
+        drop(replacement_guard);
+        run_test_child(&replacement, "available");
+    }
+
     std::fs::remove_dir_all(directory).expect("remove process-lock fixture");
 }
 
