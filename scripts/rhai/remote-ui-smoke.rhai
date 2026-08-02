@@ -25,7 +25,10 @@ let declared_evidence = [
     "ux.system-menu-clipboard",
     "ux.theme-render-parity",
     "ux.terminal-selection-copy",
-    "ux.working-context-cwd"
+    "ux.working-context-cwd",
+    "ux-parity.remote-ui.replaceable-client",
+    "ux-parity.remote-ui.selection",
+    "ux-parity.window-focus-contract"
 ];
 
 if args.len == 1 && args[0] == "--list-evidence" {
@@ -568,6 +571,11 @@ try {
             && ui.locale.controls.send == "Send",
         "remote_ui_locale_contract_invalid"
     );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "ux-parity.remote-ui.replaceable-client"
+    );
 
     print("STEP drive semantic window state and client resize");
     let original_width = ui.window.client_width;
@@ -1090,6 +1098,11 @@ try {
     require(
         shift_tab_input_after == shift_tab_input_before + 3,
         "remote_ui_shift_tab_pty_bytes_invalid"
+    );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "ux-parity.window-focus-contract"
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
 
@@ -2496,6 +2509,11 @@ try {
     require(
         menu_copied == copy_marker,
         "remote_ui_terminal_system_menu_copy_invalid:" + menu_copied
+    );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "ux-parity.remote-ui.selection"
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let paste_marker = "REMOTE_PASTE_" + context.run_id;

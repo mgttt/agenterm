@@ -241,6 +241,21 @@ fn fail_supported_profiles_for_platform(evidence_states, platform, evidence_prof
     mark_evidence_state(updated, ids, message)
 }
 
+fn read_task_evidence(context) {
+    if !std::fs::exists(context.evidence_path) {
+        return [];
+    }
+    let observed = [];
+    for source_line in std::fs::read_to_string(context.evidence_path).split("\n") {
+        let evidence_id = source_line;
+        evidence_id.trim();
+        if evidence_id != "" {
+            observed.push(evidence_id);
+        }
+    }
+    observed
+}
+
 fn platform_state_for(profile, run_platform, emitted) {
     let pending = "not-executed-yet";
     let emitted_for_profile = emitted.contains(profile.id) && emitted[profile.id].executed;
@@ -550,7 +565,28 @@ fn execute_phase(
         return #{ success: true, error: (), evidence_states: evidence_states };
     } catch (error) {
         let failure = error.to_string();
-        let updated = mark_evidence_state(evidence_states, evidence_ids, failure);
+        let observed = read_task_evidence(context);
+        let updated = if observed.len == 0 {
+            mark_evidence_state(evidence_states, evidence_ids, failure)
+        } else {
+            let next_states = evidence_states;
+            for evidence_id in evidence_ids {
+                if observed.contains(evidence_id) {
+                    next_states = mark_evidence_state(
+                        next_states,
+                        [evidence_id],
+                        ()
+                    );
+                } else {
+                    next_states = mark_evidence_state(
+                        next_states,
+                        [evidence_id],
+                        failure
+                    );
+                }
+            }
+            next_states
+        };
         return #{ success: false, error: failure, evidence_states: updated };
     }
 }
