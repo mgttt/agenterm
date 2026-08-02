@@ -12,8 +12,13 @@ use windows_sys::Win32::{
         Authorization::ConvertSidToStringSidW, CreateWellKnownSid, FreeSid, GetLengthSid,
         IsValidSid, Isolation::CreateAppContainerProfile, Isolation::DeleteAppContainerProfile,
         Isolation::DeriveAppContainerSidFromAppContainerName, SECURITY_MAX_SID_SIZE,
-        SID_AND_ATTRIBUTES, WELL_KNOWN_SID_TYPE, WinCapabilityInternetClientServerSid,
-        WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
+        SID_AND_ATTRIBUTES, WELL_KNOWN_SID_TYPE, WinCapabilityAppointmentsSid,
+        WinCapabilityContactsSid, WinCapabilityDocumentsLibrarySid,
+        WinCapabilityEnterpriseAuthenticationSid, WinCapabilityInternetClientServerSid,
+        WinCapabilityInternetClientSid, WinCapabilityMusicLibrarySid,
+        WinCapabilityPicturesLibrarySid, WinCapabilityPrivateNetworkClientServerSid,
+        WinCapabilityRemovableStorageSid, WinCapabilitySharedUserCertificatesSid,
+        WinCapabilityVideosLibrarySid,
     },
 };
 
@@ -125,13 +130,31 @@ pub enum AppContainerCapabilityKind {
     InternetClient,
     InternetClientServer,
     PrivateNetworkClientServer,
+    PicturesLibrary,
+    VideosLibrary,
+    MusicLibrary,
+    DocumentsLibrary,
+    SharedUserCertificates,
+    EnterpriseAuthentication,
+    RemovableStorage,
+    Appointments,
+    Contacts,
 }
 
 impl AppContainerCapabilityKind {
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 12] = [
         Self::InternetClient,
         Self::InternetClientServer,
         Self::PrivateNetworkClientServer,
+        Self::PicturesLibrary,
+        Self::VideosLibrary,
+        Self::MusicLibrary,
+        Self::DocumentsLibrary,
+        Self::SharedUserCertificates,
+        Self::EnterpriseAuthentication,
+        Self::RemovableStorage,
+        Self::Appointments,
+        Self::Contacts,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -139,6 +162,15 @@ impl AppContainerCapabilityKind {
             Self::InternetClient => "internet-client",
             Self::InternetClientServer => "internet-client-server",
             Self::PrivateNetworkClientServer => "private-network-client-server",
+            Self::PicturesLibrary => "pictures-library",
+            Self::VideosLibrary => "videos-library",
+            Self::MusicLibrary => "music-library",
+            Self::DocumentsLibrary => "documents-library",
+            Self::SharedUserCertificates => "shared-user-certificates",
+            Self::EnterpriseAuthentication => "enterprise-authentication",
+            Self::RemovableStorage => "removable-storage",
+            Self::Appointments => "appointments",
+            Self::Contacts => "contacts",
         }
     }
 
@@ -147,6 +179,15 @@ impl AppContainerCapabilityKind {
             Self::InternetClient => WinCapabilityInternetClientSid,
             Self::InternetClientServer => WinCapabilityInternetClientServerSid,
             Self::PrivateNetworkClientServer => WinCapabilityPrivateNetworkClientServerSid,
+            Self::PicturesLibrary => WinCapabilityPicturesLibrarySid,
+            Self::VideosLibrary => WinCapabilityVideosLibrarySid,
+            Self::MusicLibrary => WinCapabilityMusicLibrarySid,
+            Self::DocumentsLibrary => WinCapabilityDocumentsLibrarySid,
+            Self::SharedUserCertificates => WinCapabilitySharedUserCertificatesSid,
+            Self::EnterpriseAuthentication => WinCapabilityEnterpriseAuthenticationSid,
+            Self::RemovableStorage => WinCapabilityRemovableStorageSid,
+            Self::Appointments => WinCapabilityAppointmentsSid,
+            Self::Contacts => WinCapabilityContactsSid,
         }
     }
 }
@@ -519,6 +560,21 @@ mod tests {
                 AppContainerCapabilityKind::PrivateNetworkClientServer,
                 "S-1-15-3-3",
             ),
+            (AppContainerCapabilityKind::PicturesLibrary, "S-1-15-3-4"),
+            (AppContainerCapabilityKind::VideosLibrary, "S-1-15-3-5"),
+            (AppContainerCapabilityKind::MusicLibrary, "S-1-15-3-6"),
+            (AppContainerCapabilityKind::DocumentsLibrary, "S-1-15-3-7"),
+            (
+                AppContainerCapabilityKind::SharedUserCertificates,
+                "S-1-15-3-9",
+            ),
+            (
+                AppContainerCapabilityKind::EnterpriseAuthentication,
+                "S-1-15-3-8",
+            ),
+            (AppContainerCapabilityKind::RemovableStorage, "S-1-15-3-10"),
+            (AppContainerCapabilityKind::Appointments, "S-1-15-3-11"),
+            (AppContainerCapabilityKind::Contacts, "S-1-15-3-12"),
         ] {
             let sid = AppContainerCapabilitySid::well_known(kind).expect("create capability SID");
             assert_eq!(sid.kind(), kind);
@@ -533,7 +589,16 @@ mod tests {
             [
                 "internet-client",
                 "internet-client-server",
-                "private-network-client-server"
+                "private-network-client-server",
+                "pictures-library",
+                "videos-library",
+                "music-library",
+                "documents-library",
+                "shared-user-certificates",
+                "enterprise-authentication",
+                "removable-storage",
+                "appointments",
+                "contacts",
             ]
         );
     }

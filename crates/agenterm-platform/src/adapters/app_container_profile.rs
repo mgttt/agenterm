@@ -122,13 +122,31 @@ mod unsupported {
         InternetClient,
         InternetClientServer,
         PrivateNetworkClientServer,
+        PicturesLibrary,
+        VideosLibrary,
+        MusicLibrary,
+        DocumentsLibrary,
+        SharedUserCertificates,
+        EnterpriseAuthentication,
+        RemovableStorage,
+        Appointments,
+        Contacts,
     }
 
     impl AppContainerCapabilityKind {
-        pub const ALL: [Self; 3] = [
+        pub const ALL: [Self; 12] = [
             Self::InternetClient,
             Self::InternetClientServer,
             Self::PrivateNetworkClientServer,
+            Self::PicturesLibrary,
+            Self::VideosLibrary,
+            Self::MusicLibrary,
+            Self::DocumentsLibrary,
+            Self::SharedUserCertificates,
+            Self::EnterpriseAuthentication,
+            Self::RemovableStorage,
+            Self::Appointments,
+            Self::Contacts,
         ];
 
         #[must_use]
@@ -137,6 +155,15 @@ mod unsupported {
                 Self::InternetClient => "internet-client",
                 Self::InternetClientServer => "internet-client-server",
                 Self::PrivateNetworkClientServer => "private-network-client-server",
+                Self::PicturesLibrary => "pictures-library",
+                Self::VideosLibrary => "videos-library",
+                Self::MusicLibrary => "music-library",
+                Self::DocumentsLibrary => "documents-library",
+                Self::SharedUserCertificates => "shared-user-certificates",
+                Self::EnterpriseAuthentication => "enterprise-authentication",
+                Self::RemovableStorage => "removable-storage",
+                Self::Appointments => "appointments",
+                Self::Contacts => "contacts",
             }
         }
     }
@@ -250,7 +277,16 @@ mod tests {
             [
                 "internet-client",
                 "internet-client-server",
-                "private-network-client-server"
+                "private-network-client-server",
+                "pictures-library",
+                "videos-library",
+                "music-library",
+                "documents-library",
+                "shared-user-certificates",
+                "enterprise-authentication",
+                "removable-storage",
+                "appointments",
+                "contacts",
             ]
         );
         assert_eq!(
