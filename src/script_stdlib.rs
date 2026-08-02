@@ -1078,7 +1078,7 @@ mod tests {
 
     #[test]
     fn atomic_replace_supports_verbatim_paths_beyond_max_path() {
-        if !crate::platform::is_windows_host() {
+        if !crate::platform::supports_verbatim_atomic_path_windows_semantics() {
             return;
         }
         let root = std::env::temp_dir().join(format!(

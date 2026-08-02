@@ -145,6 +145,7 @@ agenterm-platform crate（复用层）
 - `script_process.rs` 测试辅助中与 shell/超时进程相关的 host 分支已从编译期 `#[cfg(windows)]`/`#[cfg(unix)]` 改为统一 `crate::platform::is_windows_host()` 的运行时能力分支，避免在通用 API 上重复注入主机策略。
 - 本次同步进度（2026-08-02）：再向下沉 3 个测试分支（`script_process` 的 runtime 分支、`script_stdlib`/`working_context`/`workspace` 的 OS 条件），确保非平台层的运行时 `host` 判断继续收敛。
 - 本次同步进度（2026-08-02）：`remote-ui-smoke.rhai` 已加 `window_control` 空对象防护，回归脚本对平台差异改为“控制项缺失=明确证据项”而非直接 `()` 属性取值 panic；`src/workspace.rs` 的平台分支测试已改为调用 `platform` 能力语义。
+- 追加（2026-08-02）：`script_process` 与 `script_stdlib` 已将剩余 OS 分支下沉到 `platform` 能力函数（长任务命令、超时命令、shell 选择、Windows 长路径语义），减少上层测试路径对主机分支的直接判断。
 - 下一步：
   - O1C 补强：
     - 将行为差异记录到 `plan/platform-ux-parity-evidence-matrix.md` 的 P0/P1/P2 回归条目，并补齐 GUI/CLI 双端最小冒烟证据脚本的证据汇聚策略。

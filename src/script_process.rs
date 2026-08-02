@@ -1281,25 +1281,12 @@ mod tests {
 
     #[cfg(any(windows, unix))]
     fn long_running_shell_command() -> (&'static str, &'static [&'static str]) {
-        long_running_process_command_fixture()
-    }
-
-    #[cfg(any(windows, unix))]
-    fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
-        if crate::platform::is_windows_host() {
-            ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
-        } else {
-            ("sleep", &["30"])
-        }
+        crate::platform::long_running_process_command_fixture()
     }
 
     #[cfg(any(windows, unix))]
     fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
-        if crate::platform::is_windows_host() {
-            ("ping", &["-n", "6", "127.0.0.1"])
-        } else {
-            ("sleep", &["5"])
-        }
+        crate::platform::long_running_process_command_timeout()
     }
 
     #[cfg(any(windows, unix))]
@@ -1308,11 +1295,7 @@ mod tests {
         unix_command: &str,
         arguments: &[&str],
     ) -> ScriptCommand {
-        let shell_command = if crate::platform::is_windows_host() {
-            windows_command
-        } else {
-            unix_command
-        };
+        let shell_command = crate::platform::shell_command_for_host(windows_command, unix_command);
         let (program, command_arguments) = wrapped_shell_command(shell_command, arguments);
         let mut process = process_command(&program).expect("shell command should be runnable");
         process.arguments = command_arguments;

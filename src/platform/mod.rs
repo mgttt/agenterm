@@ -233,8 +233,36 @@ pub(crate) fn hosted_script_worker_available() -> bool {
     )
 }
 
+pub(crate) fn supports_verbatim_atomic_path_windows_semantics() -> bool {
+    is_windows_host()
+}
+
+pub(crate) fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
+    if is_windows_host() {
+        ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
+    } else {
+        ("sleep", &["30"])
+    }
+}
+
+pub(crate) fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
+    if is_windows_host() {
+        ("ping", &["-n", "6", "127.0.0.1"])
+    } else {
+        ("sleep", &["5"])
+    }
+}
+
 pub(crate) fn is_windows_host() -> bool {
     matches!(agenterm_platform::platform_kind(), agenterm_platform::PlatformKind::Windows)
+}
+
+pub(crate) fn shell_command_for_host<'a>(windows_command: &'a str, unix_command: &'a str) -> &'a str {
+    if is_windows_host() {
+        windows_command
+    } else {
+        unix_command
+    }
 }
 
 pub(crate) fn workspace_path_uses_windows_flat_layout() -> bool {
