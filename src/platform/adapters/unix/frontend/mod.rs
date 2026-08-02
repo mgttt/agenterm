@@ -72,7 +72,8 @@ use crate::{
 
 use self::wake::install_unix_wake;
 use crate::frontend::interaction::{
-    FocusDirection, FocusSurface, FocusTransitionGate, WheelAccumulator, focus_surface_navigation,
+    FocusDirection, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag, WheelAccumulator,
+    WheelTarget, focus_surface_navigation, route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -106,16 +107,6 @@ use window_state::{
 use layout::{
     scrollbar_geometry, sidebar_width_u32, terminal_pixel_rect, u32_rect, workspace_layout_for,
 };
-
-#[derive(Clone, Copy, Debug)]
-struct ScrollDrag {
-    thumb_grab_offset: i32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SidebarScrollDrag {
-    thumb_grab_offset: i32,
-}
 
 struct PixelWindowHandle<'a> {
     window: &'a PixelWindow,
@@ -631,9 +622,9 @@ struct UnixApp {
     tab_note_draft: String,
     tab_editor_focus: TabEditorFocus,
     wheel_accumulator: WheelAccumulator,
-    scroll_drag: Option<ScrollDrag>,
+    scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_scroll_offset: usize,
-    sidebar_scroll_drag: Option<SidebarScrollDrag>,
+    sidebar_scroll_drag: Option<ScrollbarThumbDrag>,
     terminal_selection: Option<TerminalSelection>,
     terminal_selection_gesture: Option<SelectionGesture>,
     terminal_selection_pointer: Option<(i32, i32)>,
@@ -3058,9 +3049,7 @@ impl UnixApp {
         }
         match hit {
             ScrollbarHit::Thumb => {
-                self.scroll_drag = Some(ScrollDrag {
-                    thumb_grab_offset: y - geometry.thumb.top,
-                });
+                self.scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
             }
             ScrollbarHit::TrackAbove | ScrollbarHit::TrackBelow => {
                 if let Some(position) = self.active_position() {
@@ -3086,7 +3075,7 @@ impl UnixApp {
             self.end_scroll_drag();
             return;
         };
-        let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
+        let offset = scrollback_for_thumb_top(geometry, drag.thumb_top(y), maximum);
         if let Some(position) = self.active_position() {
             let offset = self.tabs[position].set_scrollback(offset);
             self.on_viewport_scrolled(position, offset, "scrollbar-drag");
@@ -3120,9 +3109,7 @@ impl UnixApp {
             return true;
         }
         if geometry.thumb.contains(x, y) {
-            self.sidebar_scroll_drag = Some(SidebarScrollDrag {
-                thumb_grab_offset: y - geometry.thumb.top,
-            });
+            self.sidebar_scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
         } else {
             let page = self.sidebar_row_capacity().max(1);
             self.sidebar_scroll_offset = if y < geometry.thumb.top {
@@ -3144,18 +3131,8 @@ impl UnixApp {
             return;
         };
         self.invalidate_sidebar_text_click();
-        let travel = geometry.track.height() - geometry.thumb.height();
-        if maximum == 0 || travel <= 0 {
-            self.sidebar_scroll_offset = 0;
-        } else {
-            let top = (y - drag.thumb_grab_offset).clamp(
-                geometry.track.top,
-                geometry.track.bottom - geometry.thumb.height(),
-            );
-            self.sidebar_scroll_offset = ((i64::from(top - geometry.track.top) * maximum as i64
-                + i64::from(travel) / 2)
-                / i64::from(travel)) as usize;
-        }
+        self.sidebar_scroll_offset =
+            sidebar_scroll_offset_for_thumb_top(geometry, drag.thumb_top(y), maximum);
         self.request_redraw();
     }
 
@@ -3241,21 +3218,22 @@ impl UnixApp {
             return;
         }
         let layout = self.layout();
-        let units = wheel_delta_units(vertical_delta, line_based);
-        if self.config.tabs_visible && layout.sidebar_tree.contains(x as i32, y as i32) {
-            let notches = self.wheel_accumulator.push(units);
-            if notches != 0 {
-                self.scroll_sidebar(notches);
-                self.request_redraw();
-            }
-            return;
-        }
         let terminal = terminal_pixel_rect(&layout);
-        if !terminal.contains(x as i32, y as i32) {
+        let units = wheel_delta_units(vertical_delta, line_based);
+        let target = route_wheel(
+            self.config.tabs_visible && layout.sidebar_tree.contains(x as i32, y as i32),
+            terminal.contains(x as i32, y as i32),
+        );
+        if target == WheelTarget::Ignored {
             return;
         }
         let notches = self.wheel_accumulator.push(units);
         if notches == 0 {
+            return;
+        }
+        if target == WheelTarget::Sidebar {
+            self.scroll_sidebar(notches);
+            self.request_redraw();
             return;
         }
         let Some(position) = self.active_position() else {

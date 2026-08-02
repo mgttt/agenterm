@@ -10,7 +10,8 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusSurface, FocusTransitionGate, WheelAccumulator, focus_surface_navigation,
+    FocusDirection, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag, WheelAccumulator,
+    WheelTarget, focus_surface_navigation, route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -482,16 +483,6 @@ struct RemoteTerminalSelection {
     cached_text: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-struct RemoteScrollDrag {
-    thumb_grab_offset: i32,
-}
-
-#[derive(Clone, Copy)]
-struct RemoteSidebarScrollDrag {
-    thumb_grab_offset: i32,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RemoteSidebarTextClick {
     tab_id: String,
@@ -706,9 +697,9 @@ struct RemoteWindowState {
     settings_target_tab_id: Option<String>,
     terminal_selection: Option<RemoteTerminalSelection>,
     wheel_accumulator: WheelAccumulator,
-    scroll_drag: Option<RemoteScrollDrag>,
+    scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_scroll_offset: usize,
-    sidebar_scroll_drag: Option<RemoteSidebarScrollDrag>,
+    sidebar_scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_geometry_generation: u64,
     recent_sidebar_text_click: Option<RemoteSidebarTextClick>,
     focus_surface: RemoteFocusSurface,
@@ -4644,9 +4635,7 @@ impl RemoteWindowState {
             return true;
         }
         if geometry.thumb.contains(x, y) {
-            self.scroll_drag = Some(RemoteScrollDrag {
-                thumb_grab_offset: y - geometry.thumb.top,
-            });
+            self.scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
             let _ = self.window.set_pointer_capture(true);
         } else {
             let page = self
@@ -4671,7 +4660,7 @@ impl RemoteWindowState {
             self.end_scroll_drag();
             return false;
         };
-        let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
+        let offset = scrollback_for_thumb_top(geometry, drag.thumb_top(y), maximum);
         self.set_scrollback(offset);
         true
     }
@@ -4710,9 +4699,7 @@ impl RemoteWindowState {
             return true;
         }
         if geometry.thumb.contains(x, y) {
-            self.sidebar_scroll_drag = Some(RemoteSidebarScrollDrag {
-                thumb_grab_offset: y - geometry.thumb.top,
-            });
+            self.sidebar_scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
             let _ = self.window.set_pointer_capture(true);
         } else {
             let page = self.sidebar_row_capacity().max(1);
@@ -4735,18 +4722,8 @@ impl RemoteWindowState {
             return false;
         };
         self.invalidate_sidebar_text_click();
-        let travel = geometry.track.height() - geometry.thumb.height();
-        if maximum == 0 || travel <= 0 {
-            self.sidebar_scroll_offset = 0;
-        } else {
-            let top = (y - drag.thumb_grab_offset).clamp(
-                geometry.track.top,
-                geometry.track.bottom - geometry.thumb.height(),
-            );
-            self.sidebar_scroll_offset = ((i64::from(top - geometry.track.top) * maximum as i64
-                + i64::from(travel) / 2)
-                / i64::from(travel)) as usize;
-        }
+        self.sidebar_scroll_offset =
+            sidebar_scroll_offset_for_thumb_top(geometry, drag.thumb_top(y), maximum);
         self.layout_tab_editor();
         true
     }
@@ -4939,14 +4916,21 @@ impl RemoteWindowState {
         {
             return;
         }
+        let target = route_wheel(
+            self.workspace_geometry().sidebar_tree.contains(x, y),
+            self.workspace_geometry().terminal.contains(x, y),
+        );
+        if target == WheelTarget::Ignored {
+            return;
+        }
         let notches = self.wheel_accumulator.push(delta);
         if notches == 0 {
             return;
         }
-        if self.workspace_geometry().sidebar_tree.contains(x, y) {
-            self.scroll_sidebar(notches);
-        } else {
-            self.scroll_terminal(notches);
+        match target {
+            WheelTarget::Sidebar => self.scroll_sidebar(notches),
+            WheelTarget::Terminal => self.scroll_terminal(notches),
+            WheelTarget::Ignored => {}
         }
     }
 

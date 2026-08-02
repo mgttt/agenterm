@@ -640,7 +640,7 @@ integrated validation recorded below):
   recovery. Evidence: `a9f1c90`, `d056888`, `ux.system-menu-clipboard`,
   `ux.terminal-selection-copy`, `ui.replaceable-client`.
 - [x] Cross-platform product interaction policy now lives in
-  `src/frontend/interaction.rs`: focus navigation, wheel accumulation and
+  `src/frontend/interaction.rs`: focus navigation, wheel accumulation, wheel routing, scrollbar thumb drag and
   modal focus gating are shared by Windows remote and Unix embedded
   frontends; both adapters only map native events/states into shared types.
   Evidence: `src/frontend/interaction.rs` unit tests and Quick Gate.

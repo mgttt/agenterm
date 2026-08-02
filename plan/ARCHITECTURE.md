@@ -35,7 +35,7 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
   action.rs                  canonical action identities（toolbar/shortcut 共用）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
-  interaction.rs             focus navigation / wheel accumulation / modal focus gate（Win/Unix 共用）
+  interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal focus gate（Win/Unix 共用）
   control_center.rs         Control Center 产品 facade（native 能力仍走 platform services）
 
 src/frontend_server.rs       server 拉起 / 恢复（非 IPC 代理）
@@ -92,7 +92,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 |----|------|------|
 | L1 | ~~`frontend.rs` `#[path]` 虚树~~ | **已收**：`platform::adapters::{windows,unix}` 正规 mod；`frontend` 只 `use` |
 | L1b | ~~`windows/frontend` 靠 sibling `#[path]`~~ | **已收**：同目录 `windows::{frontend,remote_frontend}` |
-| L2 | Win remote vs Unix embedded 双主机（selection/focus/wheel 已共享） | 共享交互语义单点；主机只 present/wake/IME |
+| L2 | Win remote vs Unix embedded 双主机（selection/focus/wheel/scrollbar-drag 已共享） | 共享交互语义单点；主机只 present/wake/IME |
 | L3 | `platform/mod.rs` 策略过肥（input/paths/control_center/runtime/test_fixtures/workspace 已拆 `policy/`；FrontendHost 与 facade 是剩余薄层）+ `allow(dead_code)` | `policy/{input,paths,control_center,runtime,test_fixtures,workspace,host,script_http,capability,ipc}` 全拆；禁新顶层 `is_windows_host` 蔓延 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
 
