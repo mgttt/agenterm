@@ -131,4 +131,28 @@ mod tests {
         PathLock::try_acquire(&alias).expect("alias is released with the canonical guard");
         std::fs::remove_dir_all(directory).expect("remove alias fixture");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_directory_aliases_share_one_lock_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "agenterm-platform-unix-path-alias-{}",
+            std::process::id()
+        ));
+        let child = directory.join("child");
+        std::fs::create_dir_all(&child).expect("create Unix alias fixture");
+        let canonical = directory.join("state.lock");
+        std::fs::write(&canonical, b"path-lock-alias").expect("create existing lock target");
+        let alias = child.join("..").join("state.lock");
+
+        let first = PathLock::acquire(&canonical).expect("acquire canonical path");
+        let error = match PathLock::try_acquire(&alias) {
+            Ok(_) => panic!("Unix directory alias bypassed the existing lock"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), LockErrorKind::Contended);
+        drop(first);
+        PathLock::try_acquire(&alias).expect("alias is released with the canonical guard");
+        std::fs::remove_dir_all(directory).expect("remove Unix alias fixture");
+    }
 }
