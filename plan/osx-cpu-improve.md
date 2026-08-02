@@ -1,6 +1,6 @@
 # macOS CPU usage investigation and improvement plan
 
-Status: P0, P2, P3 shipped; P1 open
+Status: P0–P3 all shipped
 Date: 2026-08-02
 Owner module: [`prd/PRD_02_01_terminal_runtime.md`](../prd/PRD_02_01_terminal_runtime.md)
 (rendering performance) — this file is an execution projection, not product truth.
@@ -74,7 +74,13 @@ passes over ~26 M pixels at 4K:
   Acceptance: `AGENTERM_FRAME_LOG` unchanged rate but CPU under streaming
   load drops accordingly; `screenshot-pane` evidence shows no ghosting after
   scroll, resize, theme change, and alternate-screen switches.
-- **P1 — Render once at physical resolution.** Draw chrome and terminal
+- **P1 — Chrome rescale on change only. [DONE]** Shipped variant: a
+  persistent physical frame keeps the upscaled chrome; a chrome-only content
+  hash (terminal rect excluded) gates the full rescale, the scrollbar strip
+  and layer fringe are region-rescaled per present, and each present is one
+  full-frame copy. date-loop 16% → 13%; alternate-screen refresh (top)
+  ~5–10%. Original scope (render chrome directly at physical resolution)
+  remains a possible follow-up: Draw chrome and terminal
   directly into the physical-resolution buffer and delete the
   `scale_frame_nearest` full-frame pass (and the double terminal render).
   Halves the remaining fixed cost per present.

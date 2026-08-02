@@ -204,8 +204,50 @@ struct RenderBuffers {
     logical: Vec<u32>,
     terminal_layer: Vec<u32>,
     terminal_layer_key: Option<TerminalLayerKey>,
+    /// Persistent physical-resolution frame. The chrome upscale runs only
+    /// when the logical frame content changes; every present then costs one
+    /// full-frame copy instead of a full-frame rescale.
+    physical: Vec<u32>,
+    physical_size: (u32, u32),
+    logical_hash: u64,
     captured: Option<(u32, u32, Vec<u32>)>,
     capture_next: bool,
+}
+
+/// FNV-1a over the logical frame outside `exclude` (the terminal viewport,
+/// which the persistent layer owns); cheap relative to the upscale it avoids.
+fn frame_content_hash(pixels: &[u32], width: u32, exclude: Option<(u32, u32, u32, u32)>) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let mut feed = |slice: &[u32]| {
+        let mut chunks = slice.chunks_exact(2);
+        for pair in &mut chunks {
+            hash ^= u64::from(pair[0]) | (u64::from(pair[1]) << 32);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        for pixel in chunks.remainder() {
+            hash ^= u64::from(*pixel);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    let Some((left, top, exclude_width, exclude_height)) = exclude else {
+        feed(pixels);
+        return hash;
+    };
+    let width = width.max(1) as usize;
+    let (left, right) = (
+        (left as usize).min(width),
+        ((left + exclude_width) as usize).min(width),
+    );
+    for (row, row_pixels) in pixels.chunks(width).enumerate() {
+        let row = row as u32;
+        if row < top || row >= top + exclude_height {
+            feed(row_pixels);
+        } else {
+            feed(&row_pixels[..left]);
+            feed(&row_pixels[right.min(row_pixels.len())..]);
+        }
+    }
+    hash
 }
 
 impl RenderBuffers {
@@ -3996,6 +4038,14 @@ impl UnixApp {
         let hidpi_terminal_visible = !modal_active && ime_preedit.is_none();
         let hidpi_terminal_active =
             hidpi_terminal_visible && (width != logical_width || height != logical_height);
+        if self.render_buffers.physical_size != (width, height) {
+            self.render_buffers.physical.clear();
+            self.render_buffers
+                .physical
+                .resize(width as usize * height as usize, 0);
+            self.render_buffers.physical_size = (width, height);
+            self.render_buffers.logical_hash = 0;
+        }
         let logical_pixels = self
             .render_buffers
             .logical_frame(logical_width, logical_height);
@@ -4053,22 +4103,91 @@ impl UnixApp {
         } else {
             None
         };
-        scale_frame_nearest(
-            logical_pixels,
-            logical_width,
-            logical_height,
-            buffer,
-            width,
-            height,
-            layer_geometry.map(|geometry| {
-                (
-                    geometry.offset_x,
-                    geometry.offset_y,
-                    geometry.width,
-                    geometry.height,
-                )
-            }),
-        );
+        // While the persistent layer owns the terminal viewport, the skip and
+        // hash regions cover the whole logical terminal rect (scrollbar strip
+        // included); its fringe is rescaled per present below, so per-frame
+        // scrollbar movement never forces a full chrome rescale.
+        let logical_terminal_rect = layer_geometry.map(|_| {
+            (
+                sidebar_width,
+                layout.terminal.top.max(0) as u32,
+                (layout.terminal.right.max(0) as u32).saturating_sub(sidebar_width),
+                layout.terminal.height().max(0) as u32,
+            )
+        });
+        let physical_terminal_rect = logical_terminal_rect.map(|rect| {
+            scale_rect_to_frame(rect, (logical_width, logical_height), (width, height))
+        });
+        let RenderBuffers {
+            logical,
+            physical,
+            logical_hash,
+            ..
+        } = &mut self.render_buffers;
+        let content_hash = frame_content_hash(logical, logical_width, logical_terminal_rect);
+        if content_hash != *logical_hash {
+            *logical_hash = content_hash;
+            scale_frame_nearest(
+                logical,
+                logical_width,
+                logical_height,
+                physical,
+                width,
+                height,
+                physical_terminal_rect,
+            );
+        }
+        if let (Some((skip_x, skip_y, skip_width, skip_height)), Some(geometry)) =
+            (physical_terminal_rect, layer_geometry)
+        {
+            let layer_right = geometry.offset_x + geometry.width;
+            let layer_bottom = geometry.offset_y + geometry.height;
+            let skip_right = skip_x + skip_width;
+            let skip_bottom = skip_y + skip_height;
+            if layer_right < skip_right {
+                scale_frame_region(
+                    logical,
+                    logical_width,
+                    logical_height,
+                    physical,
+                    width,
+                    height,
+                    (layer_right, skip_y, skip_right - layer_right, skip_height),
+                );
+            }
+            if layer_bottom < skip_bottom {
+                scale_frame_region(
+                    logical,
+                    logical_width,
+                    logical_height,
+                    physical,
+                    width,
+                    height,
+                    (
+                        skip_x,
+                        layer_bottom,
+                        layer_right.saturating_sub(skip_x),
+                        skip_bottom - layer_bottom,
+                    ),
+                );
+            }
+            if geometry.offset_y > skip_y {
+                scale_frame_region(
+                    logical,
+                    logical_width,
+                    logical_height,
+                    physical,
+                    width,
+                    height,
+                    (
+                        skip_x,
+                        skip_y,
+                        layer_right.saturating_sub(skip_x),
+                        geometry.offset_y - skip_y,
+                    ),
+                );
+            }
+        }
         if let Some(geometry) = layer_geometry {
             let key = TerminalLayerKey {
                 geometry,
@@ -4122,13 +4241,15 @@ impl UnixApp {
             }
             self.render_buffers.terminal_layer_key = Some(key);
             blit_terminal_layer(
-                buffer,
+                &mut self.render_buffers.physical,
                 width,
                 height,
                 &self.render_buffers.terminal_layer,
                 geometry,
             );
         }
+        let frame_pixels = (width as usize * height as usize).min(buffer.len());
+        buffer[..frame_pixels].copy_from_slice(&self.render_buffers.physical[..frame_pixels]);
         self.render_buffers
             .capture_if_requested(width, height, buffer);
         if hidpi_terminal_active && let Some(grid) = self.grid.as_mut() {
@@ -5131,6 +5252,38 @@ fn scale_frame_nearest(
                 scale_span((left + width).min(destination_width), destination_width);
             }
             None => scale_span(0, destination_width),
+        }
+    }
+}
+
+/// Nearest-neighbour upscale of one destination rectangle only; used for the
+/// scrollbar strip and layer fringe that live inside the skipped terminal
+/// rect but are not covered by the terminal layer.
+#[allow(clippy::too_many_arguments)]
+fn scale_frame_region(
+    source: &[u32],
+    source_width: u32,
+    source_height: u32,
+    destination: &mut [u32],
+    destination_width: u32,
+    destination_height: u32,
+    rect: (u32, u32, u32, u32),
+) {
+    if source_width == 0 || source_height == 0 || destination_width == 0 || destination_height == 0
+    {
+        return;
+    }
+    let (left, top, rect_width, rect_height) = rect;
+    let right = (left + rect_width).min(destination_width);
+    let bottom = (top + rect_height).min(destination_height);
+    for y in top..bottom {
+        let source_y =
+            (u64::from(y) * u64::from(source_height) / u64::from(destination_height)) as u32;
+        for x in left..right {
+            let source_x =
+                (u64::from(x) * u64::from(source_width) / u64::from(destination_width)) as u32;
+            destination[(y * destination_width + x) as usize] =
+                source[(source_y * source_width + source_x) as usize];
         }
     }
 }

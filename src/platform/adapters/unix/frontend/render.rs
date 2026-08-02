@@ -1274,10 +1274,9 @@ fn render_composer(
             "  "
         };
         let visible_prefix = truncate_chars(row_prefix, max_chars);
-        let remaining_chars = max_chars.saturating_sub(visible_prefix.chars().count());
-        let visible_text = truncate_tail_chars(line, remaining_chars);
         let row_y = top + 20 + row as u32 * COMPOSER_LINE_HEIGHT;
-        let text_x = sidebar_width + 8 + visible_prefix.chars().count() as u32 * (GLYPH_WIDTH + 1);
+        let text_x = sidebar_width + 8 + ui_text_width(&visible_prefix);
+        let visible_text = truncate_tail_to_width(line, text_right.saturating_sub(text_x));
         draw_text(
             buffer,
             stride,
@@ -1288,7 +1287,7 @@ fn render_composer(
             &visible_prefix,
             palette.text,
         );
-        let visible_text_width = visible_text.chars().count() as u32 * (GLYPH_WIDTH + 1);
+        let visible_text_width = ui_text_width(&visible_text);
         if composer.selected_all && visible_text_width > 0 {
             fill_rect(
                 buffer,
@@ -2620,6 +2619,28 @@ fn ui_text_width(text: &str) -> u32 {
         });
     }
     x as u32
+}
+
+/// Keeps the tail of `text` whose rendered width fits `max_width` pixels,
+/// prefixing an ellipsis when anything was cut. Pixel-accurate so long lines
+/// never overrun their field into neighbouring controls.
+fn truncate_tail_to_width(text: &str, max_width: u32) -> String {
+    if ui_text_width(text) <= max_width {
+        return text.to_owned();
+    }
+    let ellipsis_width = ui_text_width("…");
+    let budget = max_width.saturating_sub(ellipsis_width);
+    let mut tail = String::new();
+    let mut used = 0u32;
+    for ch in text.chars().rev() {
+        let advance = ui_text_width(ch.encode_utf8(&mut [0u8; 4]));
+        if used + advance > budget {
+            break;
+        }
+        used += advance;
+        tail.insert(0, ch);
+    }
+    format!("…{tail}")
 }
 
 #[allow(clippy::too_many_arguments)]
