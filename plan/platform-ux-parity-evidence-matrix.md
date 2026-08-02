@@ -216,8 +216,8 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 
 ### 最近一次 Windows 回归（`platform-ux-parity-smoke -- --emit-matrix`）
 
-- `run_id`: `1785674769547-90168`
-- `timestamp_utc`: `2026-08-02T12:46:46.306Z`
+- `run_id`: `1785675088501-208432`
+- `timestamp_utc`: `2026-08-02T12:52:05.188Z`
 - `suite`: `platform-ux-parity-smoke`
 
 | 分支 | 场景 | evidence_id | Windows | Linux | macOS | 归因 |
