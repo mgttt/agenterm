@@ -213,3 +213,26 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 - 与 O1C 对齐的当前建议：
   - 先在该收口后执行一次 `platform-ux-parity-smoke` 的分支回归（Windows / Linux / macOS 各自任务）补齐 `run_id` 覆盖。
   - 回归结果应落入本文件“JSON/CSV”字段，按 `evidence_id` 覆盖本轮三端状态。
+
+### 最近一次 Windows 回归（`platform-ux-parity-smoke -- --emit-matrix`）
+
+- `run_id`: `1785674769547-90168`
+- `timestamp_utc`: `2026-08-02T12:46:46.306Z`
+- `suite`: `platform-ux-parity-smoke`
+
+| 分支 | 场景 | evidence_id | Windows | Linux | macOS | 归因 |
+|---|---|---|---|---|---|---|
+| startup | first-window-startup | `ux-parity.startup` | Supported | not-executed-yet | not-executed-yet | - |
+| startup | startup-title | `ux-parity.startup-title` | Supported | not-executed-yet | not-executed-yet | - |
+| ux-startup | gui-wake-contract | `ux-parity.wake-coalescing` | Supported | not-executed-yet | not-executed-yet | - |
+| frontend-lx | linux-workbench | `ux-parity.linux.unix-frontend.workbench` | Unsupported | not-executed-yet | Unsupported | platform-gap |
+| frontend-lx | linux-clipboard | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | not-executed-yet | Unsupported | platform-gap |
+| frontend-mx | macos-workbench | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | not-executed-yet | platform-gap |
+| frontend-mx | macos-clipboard | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | not-executed-yet | platform-gap |
+| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Supported | Unsupported | Unsupported | - |
+| remote-ui | selection | `ux-parity.remote-ui.selection` | Supported | Unsupported | Unsupported | - |
+| ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Supported | not-executed-yet | not-executed-yet | - |
+
+下轮建议：
+- 用 `platform-ux-parity-smoke-linux -- --emit-matrix` 补齐 Linux 列。
+- 用 `platform-ux-parity-smoke-macos -- --emit-matrix` 补齐 macOS 列。

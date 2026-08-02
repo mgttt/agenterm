@@ -101,8 +101,8 @@ O1 并发树（并行）
 
 - [x] `scripts/rhai/platform-ux-parity-smoke.rhai` 覆盖 Windows startup+remote-ui 与 Unix startup+unix-frontend
 - [x] 三平台统一入口与 `--list-evidence` 已通 (`platform-ux-parity-smoke`, `platform-ux-parity-smoke-linux`, `platform-ux-parity-smoke-macos`)
-- [~] 按 3 平台并发执行实体验收：已就绪；按 `plan/platform-ux-parity-evidence-matrix.md` 聚合分支并阻断
-- [ ] 形成“分支-场景-证据”表，失败立即阻断该分支收敛，避免局部通过掩盖能力缺口
+- [~] 按 3 平台并发执行实体验收：Windows 已有 `platform-ux-parity-smoke` 通过数据，Linux/macOS 待补齐并按 `plan/platform-ux-parity-evidence-matrix.md` 聚合
+- [x] 形成“分支-场景-证据”表结构：见 `plan/platform-ux-parity-evidence-matrix.md`
 
 ### 并发执行与收敛回路
 
