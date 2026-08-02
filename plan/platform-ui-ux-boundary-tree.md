@@ -132,4 +132,14 @@ agenterm-platform crate（复用层）
 │  ├─ 对齐目标：同场景同字段差异最小化，差异只发生在能力缺口
 │  ├─ 当前状态：行为主逻辑趋同，残差收敛交由 O1B/O1C 场景脚本
 │  └─ 回退：以回归脚本证据为唯一判定，禁止“口头对齐”放行
+
+## 本轮平台边界巡检（2026-08-02）
+
+- 目标：确认 UI/UX 体验分支是否真正集中在 `src/platform` 能力层。
+- 结果：
+  - `src/platform/adapters/unix/frontend/input.rs`/`render.rs`/`new_terminal.rs` 已以 `platform` 能力 API 驱动快捷键与主终端 shell 命名，不再出现新的 OS/主机策略分支外泄。
+  - `src/platform/adapters/windows/remote_frontend.rs` 继续承担 Win32 交互宿主职责，但未新增产品语义分支。
+  - 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；剩余主要是 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs` 的测试/兼容性路径适配点。
+- 下一步：
+  - 将这 4 个非平台文件中的平台条件测试断言进一步替换为 `platform` 的能力契约断言，形成一条稳定的回归路径。
 ```
