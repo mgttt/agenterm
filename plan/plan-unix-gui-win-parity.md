@@ -101,8 +101,26 @@ O1 并发树（并行）
 
 - [x] `scripts/rhai/platform-ux-parity-smoke.rhai` 覆盖 Windows startup+remote-ui 与 Unix startup+unix-frontend
 - [x] 三平台统一入口与 `--list-evidence` 已通 (`platform-ux-parity-smoke`, `platform-ux-parity-smoke-linux`, `platform-ux-parity-smoke-macos`)
-- [~] 按 3 平台并发执行实体验收：Windows 已有 `platform-ux-parity-smoke` 通过数据，Linux/macOS 待补齐并按 `plan/platform-ux-parity-evidence-matrix.md` 聚合
+- [~] 按 3 平台并发执行实体验收：Windows 与 Linux/macOS 的入口已执行并聚合到 `plan/platform-ux-parity-evidence-matrix.md`，Linux/macOS 当前为环境边界失败（`platform-binary-missing`）不归为回归脚本缺陷
 - [x] 形成“分支-场景-证据”表结构：见 `plan/platform-ux-parity-evidence-matrix.md`
+
+#### O3 最近执行分派（按 owner）
+
+- Owner: Platform（P2）
+  - `platform-ux-parity-smoke-linux -- --emit-matrix`  
+    - `run_id: 1785678831415-84776`
+    - 结果：`platform_gui_missing`，`infra/platform-binary-missing`
+    - 处置：补齐 Linux GUI 二进制可执行链路后补跑
+- Owner: Platform（P2）
+  - `platform-ux-parity-smoke-macos -- --emit-matrix`  
+    - `run_id: 1785678837047-34972`
+    - 结果：`platform_gui_missing`，`infra/platform-binary-missing`
+    - 处置：补齐 macOS GUI 二进制可执行链路后补跑
+- Owner: UX（P1）
+  - `platform-ux-parity-smoke -- --emit-matrix`  
+    - `run_id: 1785678683554-260172`
+    - 结果：Windows 侧 `ux-parity.remote-ui.replaceable-client`、`ux-parity.remote-ui.selection`、`ux-parity.window-focus-contract` 为 `Supported`
+    - 归因：`windows-only-contract` 与 `Supported` 条目已进入上限验证
 
 ### 并发执行与收敛回路
 
