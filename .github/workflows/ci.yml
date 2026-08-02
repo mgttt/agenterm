@@ -12,6 +12,33 @@ permissions:
   contents: read
 
 jobs:
+  platform-minimal:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+      - name: Check filesystem conventions minimal feature
+        run: >-
+          cargo check --locked -p agenterm-platform
+          --target ${{ matrix.target }}
+          --no-default-features
+          --features filesystem-conventions
+
   windows:
     runs-on: windows-latest
     steps:
