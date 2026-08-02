@@ -33,22 +33,30 @@ permissions:
   contents: read
 
 jobs:
-  platform-minimal:
+  # One job per platform runs every agenterm-platform check. Three separate
+  # matrices previously spread the same work across nine jobs, each paying its
+  # own checkout and toolchain setup for well under a minute of real work.
+  platform-contract:
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            unix_tests: false
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            unix_tests: true
           # macos-13 is being retired and its queue starves release CI;
           # macos-15-intel is the current x86_64 macOS image.
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            unix_tests: false
           - os: macos-14
             target: aarch64-apple-darwin
+            unix_tests: true
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -82,43 +90,19 @@ jobs:
           --target ${{ matrix.target }}
           --no-default-features
           --features filesystem
-
-  platform-unix-tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-14
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-        with:
-          persist-credentials: false
-      - name: Install target
-        run: rustup target add ${{ matrix.target }}
-      - name: Run platform Unix tests
-        run: cargo test --locked -p agenterm-platform --all-features --target ${{ matrix.target }}
-
-  platform-locking-minimal:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-14]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-        with:
-          persist-credentials: false
       - name: Run native locking minimal-feature tests
         run: >-
           cargo test --locked -p agenterm-platform
           --no-default-features --features locking
+      - name: Run platform Unix tests
+        if: matrix.unix_tests
+        run: >-
+          cargo test --locked -p agenterm-platform --all-features
+          --target ${{ matrix.target }}
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -132,7 +116,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
             cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-
       - name: Restore Windows x86_64 build target
@@ -143,9 +127,9 @@ jobs:
           path: |
             target/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
           restore-keys: |
-            cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install lint components
         id: install-lint
         shell: bash
@@ -255,7 +239,7 @@ jobs:
           path: |
             target/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
       - name: Save Cargo downloads
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -265,10 +249,11 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
 
   linux-x86_64:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -282,7 +267,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
             cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-
       - name: Restore Linux x86_64 build targets
@@ -294,9 +279,9 @@ jobs:
             target/debug/
             target/x86_64-unknown-linux-gnu/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
           restore-keys: |
-            cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install host dependencies
         id: install-deps
         run: |
@@ -482,7 +467,7 @@ jobs:
             target/debug/
             target/x86_64-unknown-linux-gnu/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
       - name: Save Cargo downloads
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -492,12 +477,13 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
 
   linux-aarch64:
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -511,7 +497,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
             cargo-home-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-
       - name: Restore Linux ARM64 build target
@@ -522,9 +508,9 @@ jobs:
           path: |
             target/aarch64-unknown-linux-gnu/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
           restore-keys: |
-            cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install target dependencies
         id: install-deps
         run: |
@@ -589,7 +575,7 @@ jobs:
           path: |
             target/aarch64-unknown-linux-gnu/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
       - name: Save Linux ARM64 Cargo downloads
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -599,7 +585,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
 
   macos:
     strategy:
@@ -610,6 +596,7 @@ jobs:
           - arch: x86_64
             target: x86_64-apple-darwin
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -623,7 +610,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-macos-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-macos-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
             cargo-home-v2-macos-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.97-
       - name: Restore macOS build target
@@ -634,9 +621,9 @@ jobs:
           path: |
             target/${{ matrix.target }}/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
           restore-keys: |
-            cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install target
         id: install-target
         run: |
@@ -820,7 +807,7 @@ jobs:
           path: |
             target/${{ matrix.target }}/debug/
             target/.rustc_info.json
-          key: cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
       - name: Save macOS Cargo downloads
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -830,10 +817,11 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-macos-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-macos-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
 
   windows-aarch64:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -848,7 +836,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
             cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-
       - name: Restore Windows ARM64 build target
@@ -859,9 +847,9 @@ jobs:
           path: |
             target/aarch64-pc-windows-msvc/
             ~/.cache/cargo-xwin/
-          key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
           restore-keys: |
-            cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install cross tooling
         id: install-cross-tooling
         run: |
@@ -953,7 +941,7 @@ jobs:
           path: |
             target/aarch64-pc-windows-msvc/
             ~/.cache/cargo-xwin/
-          key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
       - name: Save Windows ARM64 Cargo downloads
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -964,4 +952,4 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'build.rs', 'scripts/artifacts.json') }}
