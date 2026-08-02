@@ -24,6 +24,7 @@ const ERROR_ALREADY_EXISTS: u32 = 183;
 pub enum AppContainerProfileErrorKind {
     InvalidInput,
     AlreadyExists,
+    Unsupported,
     NativeFailure,
 }
 
@@ -32,6 +33,7 @@ impl AppContainerProfileErrorKind {
         match self {
             Self::InvalidInput => "invalid-input",
             Self::AlreadyExists => "already-exists",
+            Self::Unsupported => "unsupported",
             Self::NativeFailure => "native-failure",
         }
     }
@@ -214,6 +216,16 @@ impl<'a> AppContainerCapability<'a> {
     pub fn new(sid: &'a [u8], attributes: u32) -> Result<Self, AppContainerProfileError> {
         validate_sid_bytes("AppContainerCapability", sid)?;
         Ok(Self { sid, attributes })
+    }
+
+    #[must_use]
+    pub const fn sid(self) -> &'a [u8] {
+        self.sid
+    }
+
+    #[must_use]
+    pub const fn attributes(self) -> u32 {
+        self.attributes
     }
 }
 

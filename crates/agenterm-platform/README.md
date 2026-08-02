@@ -45,7 +45,7 @@ clipboard, IPC, or screenshot modules.
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `console-interrupt` | RAII Ctrl-C/SIGINT observation or temporary ignore with typed failures | target `libc` / minimal `windows-sys` |
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
-| `app-container-profile` | target-specific Windows AppContainer profile and owned SID primitives; lifecycle policy stays with the caller | minimal `windows-sys` |
+| `app-container-profile` | public owned AppContainer profile/SID/capability primitives; non-Windows hosts return typed unsupported and lifecycle policy stays with the caller | minimal `windows-sys` |
 | `app-container-process` | fail-closed suspended AppContainer process creation with explicit environment/HANDLE allowlists and exact process ownership | profile + minimal process mechanisms |
 | `process-conventions` | pure Windows CRT command-line and sorted Unicode environment-block encoding with typed malformed-input policy; does not spawn a process | none |
 | `process-control` | typed single-process termination, exact Windows HANDLE termination, and Unix suspend/resume | target `libc` / minimal `windows-sys` |

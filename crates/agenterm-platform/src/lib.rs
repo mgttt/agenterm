@@ -38,6 +38,7 @@ pub enum Capability {
     ProcessObservation,
     ProcessReference,
     ProcessContainment,
+    AppContainerProfile,
     AppContainerProcess,
     ProcessSecurity,
     ProcessImage,
@@ -97,6 +98,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
         Capability::ProcessReference => (cfg!(feature = "process-reference"), true),
         Capability::ProcessContainment => (cfg!(feature = "process-containment"), true),
+        Capability::AppContainerProfile => (cfg!(feature = "app-container-profile"), cfg!(windows)),
         Capability::AppContainerProcess => (
             cfg!(feature = "app-container-process"),
             crate::selected::app_container_process_supported(),
@@ -256,6 +258,10 @@ pub mod process_reference;
 
 #[cfg(feature = "process-containment")]
 pub mod process_containment;
+
+#[cfg(feature = "app-container-profile")]
+#[path = "adapters/app_container_profile.rs"]
+pub mod app_container_profile;
 
 #[cfg(feature = "app-container-process")]
 #[path = "adapters/app_container_process.rs"]
