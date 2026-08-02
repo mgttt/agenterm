@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     ffi::OsString,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     ptr,
     sync::{Mutex, OnceLock},
 };
@@ -176,24 +176,7 @@ fn normalized_path(path: &Path) -> Result<String, LockError> {
 }
 
 fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut result = PathBuf::new();
-    let mut root_components = 0;
-    for component in path.components() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => {
-                result.push(component.as_os_str());
-                root_components += 1;
-            }
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if result.components().count() > root_components {
-                    result.pop();
-                }
-            }
-            _ => result.push(component.as_os_str()),
-        }
-    }
-    result
+    crate::filesystem::lexical_normalize(path)
 }
 
 fn canonicalize_with_missing_tail(path: &Path) -> std::io::Result<PathBuf> {
@@ -222,6 +205,7 @@ fn open_error(error: std::io::Error) -> LockError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Component;
 
     #[test]
     fn only_nonblocking_timeout_is_contention() {

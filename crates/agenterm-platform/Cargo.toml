@@ -166,6 +166,7 @@ directory-access = [
     "windows-sys/Win32_Security_Authorization",
 ]
 filesystem-open = [
+    "filesystem-conventions",
     "filesystem-entry",
     "dep:libc",
     "dep:windows-sys",
@@ -191,6 +192,7 @@ filesystem = [
     "windows-sys/Win32_System_SystemServices",
 ]
 locking = [
+    "filesystem-conventions",
     "dep:libc",
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",

@@ -76,6 +76,36 @@ pub fn sibling_executable(current_executable: &Path, base: &str) -> PathBuf {
     current_executable.with_file_name(executable_name(base))
 }
 
+/// Lexically normalize a path without resolving filesystem entries.
+///
+/// Absolute paths never pop past their host root. Relative leading `..`
+/// components are preserved, so callers can decide whether escaping their
+/// own logical root is valid. This helper deliberately does not canonicalize
+/// symlinks or touch the filesystem.
+#[must_use]
+pub fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    let mut root_components = 0;
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                result.push(component.as_os_str());
+                root_components += 1;
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if result.components().count() > root_components {
+                    result.pop();
+                } else if root_components == 0 {
+                    result.push(component.as_os_str());
+                }
+            }
+            std::path::Component::Normal(value) => result.push(value),
+        }
+    }
+    result
+}
+
 #[cfg(feature = "filesystem")]
 pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     selected::filesystem::replace_file(source, destination)
@@ -197,6 +227,28 @@ mod tests {
         assert_eq!(
             actual.file_stem().and_then(|value| value.to_str()),
             Some("worker")
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_preserves_root_and_relative_parent_semantics() {
+        let current = std::env::current_dir().expect("read current directory");
+        let mut anchor = PathBuf::new();
+        for component in current.components() {
+            match component {
+                std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                    anchor.push(component.as_os_str())
+                }
+                _ => break,
+            }
+        }
+        assert_eq!(
+            lexical_normalize(&anchor.join("..").join("conventions-root")),
+            anchor.join("conventions-root")
+        );
+        assert_eq!(
+            lexical_normalize(Path::new("../conventions-relative")),
+            PathBuf::from("../conventions-relative")
         );
     }
 

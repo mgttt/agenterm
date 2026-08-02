@@ -124,24 +124,7 @@ fn lexical_absolute(path: &Path) -> io::Result<std::path::PathBuf> {
     } else {
         std::env::current_dir()?.join(path)
     };
-    let mut output = std::path::PathBuf::new();
-    let mut root_components = 0;
-    for component in input.components() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => {
-                output.push(component.as_os_str());
-                root_components += 1;
-            }
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if output.components().count() > root_components {
-                    output.pop();
-                }
-            }
-            _ => output.push(component.as_os_str()),
-        }
-    }
-    Ok(output)
+    Ok(crate::filesystem::lexical_normalize(&input))
 }
 
 fn split_root(path: &Path) -> io::Result<(std::path::PathBuf, Vec<Component<'_>>)> {
