@@ -71,7 +71,10 @@ fn map_link_like_error(error: std::io::Error) -> std::io::Error {
     // O_NOFOLLOW reports a refused symlink as ELOOP for the final component
     // and as ENOTDIR when an intermediate component is the link, so both
     // describe the same rejected ancestry.
-    if matches!(error.raw_os_error(), Some(libc::ELOOP) | Some(libc::ENOTDIR)) {
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::ELOOP) | Some(libc::ENOTDIR)
+    ) {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "private directory path contains a symbolic link",

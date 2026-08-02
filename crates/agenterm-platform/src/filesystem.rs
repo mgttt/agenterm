@@ -1,8 +1,8 @@
 //! Host filesystem conventions without product-specific directory names.
 
-use std::path::{Path, PathBuf};
 #[cfg(all(test, feature = "file-identity", not(feature = "filesystem")))]
 use std::io;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "filesystem")]
 use std::{
     ffi::OsString,
@@ -317,7 +317,7 @@ mod tests {
         std::fs::remove_file(path).expect("remove non-directory fixture");
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "filesystem"))]
     #[test]
     fn private_directory_protection_rejects_a_symbolic_link() {
         use std::os::unix::fs::PermissionsExt as _;
