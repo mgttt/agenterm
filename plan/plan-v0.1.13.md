@@ -63,7 +63,7 @@ Promotion 彩排 → 人工批准；**不是**再开大功能波次。
 
 | 缺口 | 说明 |
 |------|------|
-| Frontend 边界半收敛 | 产品 `src/frontend.rs` / `frontend_server.rs` 与
+| Frontend 边界半收敛 | 产品 `src/frontend/mod.rs` / `frontend_server.rs` 与
   `platform::services::frontend` 曾并存；半删 orphan shim、import 迁移动作
   易残留。目标：单一产品入口，无死文件、无 `#[allow(unused_imports)]`
   创可贴式压制。 |
@@ -315,7 +315,7 @@ src/platform/*             产品平台 glue：目录名、实例布局、shell 
                            CC 截图策略选择、快捷键 primary 策略表
                            （应是表驱动/薄，不是第三套 OS adapter）
 
-src/frontend.rs            产品入口：参数解析、handoff、统一结果码、
+src/frontend/mod.rs            产品入口：参数解析、handoff、统一结果码、
                            按 FrontendHost 分发到主机
 
 src/frontend_server.rs     server 拉起/恢复（非 IPC 代理）
@@ -334,7 +334,7 @@ adapters/unix/frontend/*   Unix 主机：embedded pixel window + 产品状态机
 
 | 点 | 评价 |
 |----|------|
-| 启动参数 / help / 错误文案收敛到 `src/frontend.rs` 共享策略 + policy 差异（Win `ui-client`/地址校验 vs Unix 关闭） | **对**：产品语义一处 |
+| 启动参数 / help / 错误文案收敛到 `src/frontend/mod.rs` 共享策略 + policy 差异（Win `ui-client`/地址校验 vs Unix 关闭） | **对**：产品语义一处 |
 | Win/Unix launcher 都 `use crate::frontend::{parse…, attempt_gui_handoff…}` | **对**：入口不再各解析一套 |
 | `frontend_host()` 统一 host 判定；`run_gui_entry` / `request_gui_wake` 分发 | **对**：能力路由形状 |
 | `GuiLaunchResult` / `GuiWakeResult` / `FrontendContractState` 统一失败类 | **对**：证据可归并 |
@@ -389,7 +389,7 @@ CC screenshot strategy、hosted script worker、atomic path、long-running fixtu
 | 曾写 | 现行 |
 |------|------|
 | boundary-tree 当结构权威 + `services/frontend` 路由 | **SSOT=`plan/ARCHITECTURE.md`**；boundary-tree=历史文 |
-| unix-win-parity O1A：`services/frontend` | 实际 `src/frontend.rs` + `platform::frontend_host` |
+| unix-win-parity O1A：`services/frontend` | 实际 `src/frontend/mod.rs` + `platform::frontend_host` |
 
 **剩余**：parity 正文里旧交付句可随叶改写；禁再开第二棵现行树。
 
@@ -433,7 +433,9 @@ usage 字符串有没有共用。
 ### 8.5 建议的目标模块树（0.1.13 收口后）
 
 ```text
-src/frontend.rs                 # 仅：parse, handoff, result types, dispatch
+src/frontend/mod.rs                 # 仅：parse, handoff, result types, dispatch
+src/frontend/toolbar.rs             # 产品 toolbar action 映射
+src/frontend/window.rs              # 产品窗口语义（client-size / semantic state）
 src/frontend_server.rs          # server autostart/recovery only
 
 src/platform/

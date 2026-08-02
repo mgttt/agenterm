@@ -546,18 +546,18 @@ fn platform_services_have_no_orphan_source_files() {
     );
 }
 
-/// Tracked L1 debt: `src/frontend.rs` must not compile adapters via `#[path]`.
+/// Tracked L1 debt: `src/frontend/mod.rs` must not compile adapters via `#[path]`.
 /// Budget 0 after L1 ownership fix.
 const FRONTEND_PATH_ATTR_BUDGET: usize = 0;
 
 #[test]
 fn frontend_path_attr_debt_does_not_grow() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = fs::read_to_string(root.join("src/frontend.rs")).expect("read frontend.rs");
+    let source = fs::read_to_string(root.join("src/frontend/mod.rs")).expect("read frontend.rs");
     let count = source.matches("#[path").count();
     assert_eq!(
         count, FRONTEND_PATH_ATTR_BUDGET,
-        "src/frontend.rs has {count} #[path] attrs (budget {FRONTEND_PATH_ATTR_BUDGET}). \
+        "src/frontend/mod.rs has {count} #[path] attrs (budget {FRONTEND_PATH_ATTR_BUDGET}). \
          Do not add more; L1 removes them — see plan/ARCHITECTURE.md §4"
     );
 }

@@ -19,12 +19,12 @@ use crate::{
     commands::{
         option_value, positional_values, screenshot_output_path, tmux_key_bytes_with_modifiers,
     },
-    locale::UiText,
-    platform::{
-        KeyClassification, action,
+    frontend::{
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
+    locale::UiText,
+    platform::{KeyClassification, action},
     protocol::IpcResponse,
     settings::{
         AppConfig, EffectiveTerminalAppearance, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,

@@ -16,8 +16,8 @@
 //! `visible`, `detached`, `client_width`, `client_height`, and `title`.
 
 use crate::commands::option_value;
-use crate::platform::window::ClientSize;
-pub(crate) use crate::platform::window::WindowSemanticState;
+use crate::frontend::window::ClientSize;
+pub(crate) use crate::frontend::window::WindowSemanticState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowStateTracker {

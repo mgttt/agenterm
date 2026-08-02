@@ -75,9 +75,9 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 O1 并发树（并行）
 ├─ O1A 能力注入层（Owner: Platform）[x]
 │  ├─ 目标：保持入口分发在平台能力上，不在入口层承载UI策略
-│  ├─ 交付：能力路由在 `src/frontend.rs` + `platform::frontend_host`（曾写
+│  ├─ 交付：能力路由在 `src/frontend/mod.rs` + `platform::frontend_host`（曾写
 │  │     `services/frontend.rs`；该路径已删除，见 `plan/ARCHITECTURE.md`）
-│  ├─ 交付：`agenterm` 启动参数解析进入 `src/frontend.rs` 共享策略器（Windows/Unix 同步）
+│  ├─ 交付：`agenterm` 启动参数解析进入 `src/frontend/mod.rs` 共享策略器（Windows/Unix 同步）
 │  ├─ 约束：`run_gui_entry` 与 `request_gui_wake` 返回码一致，启动失败原因可归并为统一证据
 │  └─ 风险：handoff 与服务端接管回退回归
 ├─ O1B 窗口生命周期（Owner: Product-UI）
@@ -132,6 +132,20 @@ O1 并发树（并行）
 3) Rhai 回归循环：platform-ux-parity-smoke 全场景
 4) 复测：`ui-snapshot` 与 PNG 证据差异归一化
 ```
+
+### O1D 产品 UI/UX 物理归属（2026-08-03）
+
+```text
+目标：UI/UX 语义住在 src/frontend/，platform 只保留能力契约与主机 adapter
+├─ D1 [x] src/platform/toolbar.rs → src/frontend/toolbar.rs
+├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
+├─ D1 [ ] src/platform/control_center.rs → src/frontend/control_center.rs
+├─ D2 [ ] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures}
+├─ D3 [ ] Win remote vs Unix embedded 共享交互管线（selection/wheel/focus 单一策略）
+└─ D4 [ ] 每条可见差进入 evidence matrix；无 adapter 内产品 if
+```
+
+下一波并发：D2 与 D3 独立；D1 剩余 control_center 依赖 D2；D4 依赖 D3 落地。
 
 > 现行结构 SSOT：`plan/ARCHITECTURE.md`。  
 > 历史边界叙事（非权威）：`plan/platform-ui-ux-boundary-tree.md`。

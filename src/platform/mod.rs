@@ -19,8 +19,6 @@ pub const CONTRACT_REVISION: u32 = 3;
 
 pub(crate) mod adapters;
 pub(crate) mod filesystem;
-pub(crate) mod toolbar;
-pub(crate) mod window;
 
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
@@ -680,7 +678,7 @@ mod tests {
 
     #[test]
     fn native_toolbar_order_matches_contract() {
-        use crate::platform::toolbar::NativeToolbarHit;
+        use crate::frontend::toolbar::NativeToolbarHit;
         assert_eq!(
             NativeToolbarHit::ORDER.map(NativeToolbarHit::action_id),
             action::TOOLBAR_ACTION_ORDER

@@ -1,6 +1,6 @@
 # AgenTerm architecture map（现行结构 SSOT）
 
-状态：active（2026-08-02）  
+状态：active（2026-08-03）  
 权威范围：**代码分层、入口、所有权、禁令**。  
 非权威：发版资格、能力 shipped 状态（见 `prd/`）、波次任务列表（见 `plan/plan-v0.1.*.md`）。
 
@@ -19,8 +19,10 @@ crates/agenterm-platform     机制：窗口/输入/截图/进程/IPC/PTY/字体
 src/platform/                产品平台 glue：FrontendHost、目录名、快捷键/CC
                              策略表、services facade（应薄，勿第三套 OS adapter）
 
-src/frontend.rs              产品 GUI 入口：parse / handoff / 统一结果码 /
-                             按 FrontendHost 分发到主机
+src/frontend/                产品 GUI 入口 + UI/UX 语义
+  mod.rs                     parse / handoff / 统一结果码 / dispatch
+  toolbar.rs                 toolbar action 映射（Win/Unix 共用）
+  window.rs                  client-size / window semantic state（Win/Unix 共用）
 
 src/frontend_server.rs       server 拉起 / 恢复（非 IPC 代理）
 
@@ -58,7 +60,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 
 | 区域 | 路径 | 备注 |
 |------|------|------|
-| GUI ingress | `src/frontend.rs`, `src/frontend_server.rs` | 参数/唤醒/结果码 |
+| GUI ingress | `src/frontend/`, `src/frontend_server.rs` | 参数/唤醒/结果码 |
 | 共享 UX | `src/ui_geometry.rs`, `src/ui_snapshot.rs`, `src/ui_bridge.rs`, `src/control_dispatch.rs` | 对齐契约 |
 | 产品策略表 | `src/platform/mod.rs` | 已知偏肥；0.1.13 目标拆 `policy/` |
 | Win 主机 | `src/platform/adapters/windows/{frontend,remote_frontend}.rs` | remote 客户端 |
@@ -80,7 +82,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | L3 | `platform/mod.rs` 策略过肥 + `allow(dead_code)` | 拆 `policy/*`；禁新顶层 `is_windows_host` 蔓延 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
 
-已清理：`src/platform/services/frontend.rs` 孤儿 re-export（无人 `mod`）——删除；入口以 `src/frontend.rs` 为准。
+已清理：`src/platform/services/frontend.rs` 孤儿 re-export（无人 `mod`）——删除；入口以 `src/frontend/` 为准。
 
 ---
 

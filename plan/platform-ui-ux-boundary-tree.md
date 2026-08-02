@@ -3,10 +3,10 @@
 > **现行结构 SSOT**：[`plan/ARCHITECTURE.md`](ARCHITECTURE.md)  
 > 本文保留 0.1.12 前后执行叙事，**不再**作为「代码现在怎么分层」的权威。  
 > 与 ARCHITECTURE / `boundary_tests` / 真实模块树冲突时，以三者为准。  
-> GUI 入口是 `src/frontend.rs`，**不是**已删除的 `platform/services/frontend.rs`。
+> GUI 入口是 `src/frontend/mod.rs`，**不是**已删除的 `platform/services/frontend.rs`。
 
 - [x] 目标：让 `agenterm-platform` 只承载「能力」与「机制」；主进程 `src/` 承载「产品语义」。
-- [x] [已完成] 启动参数解析已抽离到 `src/frontend.rs` 的共享策略器，Windows/Unix 前端入口复用同一 `parse_gui_launch_arguments` 规则，仅保留平台能力差异（地址校验/ui-client 开关）。启动/唤醒分发已收敛到统一能力入口。
+- [x] [已完成] 启动参数解析已抽离到 `src/frontend/mod.rs` 的共享策略器，Windows/Unix 前端入口复用同一 `parse_gui_launch_arguments` 规则，仅保留平台能力差异（地址校验/ui-client 开关）。启动/唤醒分发已收敛到统一能力入口。
 - [x] [已完成] 客户端控制入口的服务端自动拉起也统一到 `src/frontend_server.rs`：`src/client/mod.rs` 的 `start_server_process` 仅委托 `start_frontend_server_process`，不再重复构造端点参数与 autostart 决策。
 
 ```text
@@ -86,7 +86,7 @@ agenterm-platform crate（复用层）
   - 本轮收口: 新增 `FrontendContractState`，并由 `GuiLaunchResult` / `GuiWakeResult` / `FrontendServerRecovery` 映射统一状态（Supported/Unsupported/Failed）；便于 evidence 统一归档与分支阻断。
   - 本轮补充: 把 `autostart_server` 的平台分支下沉到 `src/platform/process.rs` 的编译期分支（Windows 真正执行、非 Windows 返回 `Ok(false)`），去掉运行时 `platform_kind` 条件，提高平台能力边界清晰度。
   - 本轮补充: 客户端启动链路因此不再依赖 `platform::is_windows_host()` 做 `autostart_server` 的运行时分支判断。
-  - 本轮补充: `src/frontend.rs` 不再直接维护平台 host 分流，改为消费 `platform::frontend_host()`，统一 host 判定入口。
+  - 本轮补充: `src/frontend/mod.rs` 不再直接维护平台 host 分流，改为消费 `platform::frontend_host()`，统一 host 判定入口。
   - 本轮补充（已合并）：把 `platform/services` 的平台策略集中收口到 `src/platform/mod.rs`，删除 `control_center/script_http/ipc/paths/supervisor_audit` 在服务层的直接 `platform_kind` 分支，并将 `agenterm-script` 名称残留统一清理为 `agenterm-rhai`。
 
 - O1B（UI）：统一输入-选择-滚轮场景模板（已完成）
@@ -144,7 +144,7 @@ agenterm-platform crate（复用层）
 ## OS×Windows/macOS 统一分支树（当前可验证）
 
 ```text
-src/frontend.rs
+src/frontend/mod.rs
 ├─ 统一入口：run_gui_entry / run_gui_entry_result
 │  ├─ Windows：platform/adapters/windows/frontend.rs
 │  ├─ Unix(macos/linux)：platform/adapters/unix/frontend/mod.rs
@@ -220,7 +220,7 @@ src/platform/目录其余适配层
 
 ## 2026-08-02 同步
 
-- `src/frontend.rs` 已作为产品 UI/UX ingress，移除 `platform::services::frontend` 兼容层；`ui_snapshot` 在根层单点复用。
+- `src/frontend/mod.rs` 已作为产品 UI/UX ingress，移除 `platform::services::frontend` 兼容层；`ui_snapshot` 在根层单点复用。
 - `agenterm-platform` macOS 缓存/内存/坐标/共享内存差异已收口，`process` 产品 facade 不再持有编译期 OS 分支。
 - `wake-smoke` 证据声明同步为 `fleet.wake-coalescing` + `ux-parity.wake-coalescing`，并补齐 PRD alignment。
 - Quick gate 已绿：rustfmt、PRD alignment、all-target Clippy、530 项 library unit tests。

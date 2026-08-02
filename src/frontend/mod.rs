@@ -12,6 +12,9 @@ use crate::platform::{FrontendHost, frontend_host};
 use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE};
 use crate::wake_signal::WakeSignal;
 
+pub(crate) mod toolbar;
+pub(crate) mod window;
+
 // Shared GUI launch usage for both platform frontends.
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\
 Usage: agenterm.exe [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\n\
