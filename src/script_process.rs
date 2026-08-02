@@ -100,8 +100,8 @@ struct ChildState {
 
 impl Drop for ChildState {
     fn drop(&mut self) {
-        let _ = self.process_tree.terminate();
         if let Some(child) = self.child.as_mut() {
+            let _ = self.process_tree.terminate();
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -763,6 +763,9 @@ fn child_kill_tree(child: &mut ScriptChild) -> Result<(), Box<EvalAltResult>> {
 }
 
 fn terminate_child_tree(state: &mut ChildState) -> Result<(), String> {
+    if state.child.is_none() {
+        return Ok(());
+    }
     let tree_result = state.process_tree.terminate();
     if let Some(process) = state.child.as_mut() {
         let _ = process.kill();
@@ -1129,10 +1132,11 @@ fn finish_output(
     status: ExitStatus,
     deadline: Instant,
 ) -> Result<ScriptOutput, Box<EvalAltResult>> {
-    let tree_result = state.process_tree.terminate();
+    // The root is already reaped here. Reusing its PID or process-group ID
+    // for cleanup would be unsafe, so successful output does not call into
+    // the process-tree guard.
     let (stdout, stderr) = finish_capture(state, output_drain_deadline(deadline))?;
     state.child.take();
-    tree_result.map_err(|error| format!("process_tree_kill: {error}"))?;
     Ok(ScriptOutput {
         success: status.success(),
         exit_code: i64::from(status.code().unwrap_or(-1)),
