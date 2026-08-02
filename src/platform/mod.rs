@@ -19,9 +19,13 @@ pub const CONTRACT_REVISION: u32 = 3;
 
 pub(crate) mod toolbar;
 pub(crate) mod window;
+pub(crate) mod filesystem;
 
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
+};
+pub use filesystem::{
+    metadata_is_link_like, replace_file, sync_parent,
 };
 
 pub fn install_console_interrupt_ignore_guard()

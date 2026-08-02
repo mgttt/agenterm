@@ -1270,10 +1270,10 @@ mod tests {
 
     fn wait_for_original_process_exit(pid: u32, identity: &str, deadline: Instant) {
         loop {
-            let observation = agenterm_platform::process::observe(pid);
+            let observation = crate::platform::process::observe(pid);
             match &observation {
-                agenterm_platform::contract::process::ProcessObservation::Dead { .. } => return,
-                agenterm_platform::contract::process::ProcessObservation::Live {
+                crate::platform::process::ProcessObservation::Dead { .. } => return,
+                crate::platform::process::ProcessObservation::Live {
                     start_identity: Some(current),
                 } if current != identity => return,
                 _ if Instant::now() < deadline => thread::yield_now(),
@@ -1544,7 +1544,7 @@ mod tests {
                 Err(error) => panic!("failed to read nested worker PID marker: {error}"),
             }
         };
-        let nested_identity = agenterm_platform::process::start_identity(nested_pid)
+        let nested_identity = crate::platform::process::start_identity(nested_pid)
             .expect("nested worker start identity");
         assert!(
             control.cancel().expect("blocking cancel control"),
@@ -1564,8 +1564,8 @@ mod tests {
         assert_ne!(replacement_pid, initial_pid);
         assert_eq!(fresh_reason, FreshSessionReason::HardInterrupt);
         assert!(matches!(
-            agenterm_platform::process::observe(interrupted_pid),
-            agenterm_platform::contract::process::ProcessObservation::Dead { .. }
+            crate::platform::process::observe(interrupted_pid),
+            crate::platform::process::ProcessObservation::Dead { .. }
         ));
         wait_for_original_process_exit(
             nested_pid,
@@ -1620,8 +1620,8 @@ mod tests {
         ));
         assert!(repl.worker.is_none(), "timed-out worker must be reaped");
         assert!(matches!(
-            agenterm_platform::process::observe(old_pid),
-            agenterm_platform::contract::process::ProcessObservation::Dead { .. }
+            crate::platform::process::observe(old_pid),
+            crate::platform::process::ProcessObservation::Dead { .. }
         ));
 
         let replacement = repl
@@ -1732,8 +1732,8 @@ mod tests {
         let dropped_pid = dropped.worker_pid();
         drop(dropped);
         assert!(matches!(
-            agenterm_platform::process::observe(dropped_pid),
-            agenterm_platform::contract::process::ProcessObservation::Dead { .. }
+            crate::platform::process::observe(dropped_pid),
+            crate::platform::process::ProcessObservation::Dead { .. }
         ));
     }
 }

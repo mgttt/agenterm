@@ -75,6 +75,9 @@ pub use mcp_catalog::run_mcp_entry_with_args;
 pub use platform::{
     install_console_interrupt_ignore_guard,
     install_console_interrupt_observer,
+    metadata_is_link_like,
+    replace_file,
+    sync_parent,
 };
 
 pub use frontend::run_gui_entry;
