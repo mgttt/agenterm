@@ -41,6 +41,14 @@ fn require(condition, message) {
     }
 }
 
+fn require_window_control(control, name) {
+    require(
+        control != (),
+        "remote_ui_control_missing:" + name
+    );
+    control
+}
+
 fn double_click_point(gui_child, x, y) {
     gui_child.window_pointer("click", x, y);
     gui_child.window_message(0x0203, 0, y * 65536 + x);
@@ -775,10 +783,10 @@ try {
     wait_observed(context, cli, rendered.position.sequence);
 
     print("STEP close only the GUI and retain server, PTY, and workspace");
-    let composer_editor = gui.window_control(2101);
-    let close_keep = gui.window_control(2109);
-    let close_stop = gui.window_control(2110);
-    let close_cancel = gui.window_control(2111);
+    let composer_editor = require_window_control(gui.window_control(2101), "composer_editor");
+    let close_keep = require_window_control(gui.window_control(2109), "close_keep");
+    let close_stop = require_window_control(gui.window_control(2110), "close_stop");
+    let close_cancel = require_window_control(gui.window_control(2111), "close_cancel");
     let draft_marker = "draft-" + context.run_id;
     composer_editor.set_text(draft_marker);
     gui.window_message(0x0010, 0, 0);
@@ -878,13 +886,13 @@ try {
     );
 
     print("STEP recover hidden Tabs from toolbar, system menu, and status bar");
-    let tabs_button = gui.window_control(2104);
-    let control_center_button = gui.window_control(2138);
-    let settings_button = gui.window_control(2112);
-    let new_button = gui.window_control(2103);
-    let locale_button = gui.window_control(2129);
-    let font_decrease_button = gui.window_control(2130);
-    let font_increase_button = gui.window_control(2131);
+    let tabs_button = require_window_control(gui.window_control(2104), "tabs_button");
+    let control_center_button = require_window_control(gui.window_control(2138), "control_center_button");
+    let settings_button = require_window_control(gui.window_control(2112), "settings_button");
+    let new_button = require_window_control(gui.window_control(2103), "new_button");
+    let locale_button = require_window_control(gui.window_control(2129), "locale_button");
+    let font_decrease_button = require_window_control(gui.window_control(2130), "font_decrease_button");
+    let font_increase_button = require_window_control(gui.window_control(2131), "font_increase_button");
     let toolbar = json_cli(context, cli, ["ui-snapshot"]);
     require(
         tabs_button.text == "<Tabs"
@@ -946,10 +954,10 @@ try {
     );
 
     print("STEP configure a new terminal before creation");
-    let initial_command = gui.window_control(2124);
-    let http_proxy = gui.window_control(2125);
-    let https_proxy = gui.window_control(2126);
-    let create_button = gui.window_control(2127);
+    let initial_command = require_window_control(gui.window_control(2124), "initial_command");
+    let http_proxy = require_window_control(gui.window_control(2125), "http_proxy");
+    let https_proxy = require_window_control(gui.window_control(2126), "https_proxy");
+    let create_button = require_window_control(gui.window_control(2127), "create_button");
     let before_new_count = json_cli(
         context,
         cli,
@@ -1086,13 +1094,13 @@ try {
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
 
     print("STEP preview, cancel, and apply client-owned Settings");
-    let replacement_composer = gui.window_control(2101);
-    let settings_font = gui.window_control(2113);
-    let settings_size = gui.window_control(2114);
-    let settings_dark = gui.window_control(2115);
-    let settings_light = gui.window_control(2116);
-    let settings_apply = gui.window_control(2117);
-    let settings_cancel = gui.window_control(2118);
+    let replacement_composer = require_window_control(gui.window_control(2101), "replacement_composer");
+    let settings_font = require_window_control(gui.window_control(2113), "settings_font");
+    let settings_size = require_window_control(gui.window_control(2114), "settings_size");
+    let settings_dark = require_window_control(gui.window_control(2115), "settings_dark");
+    let settings_light = require_window_control(gui.window_control(2116), "settings_light");
+    let settings_apply = require_window_control(gui.window_control(2117), "settings_apply");
+    let settings_cancel = require_window_control(gui.window_control(2118), "settings_cancel");
     settings_button.click();
     require(
         settings_font.visible
@@ -1306,8 +1314,8 @@ try {
             "--timeout-ms", "5000"
         ]
     );
-    let settings_current_scope = gui.window_control(2133);
-    let settings_reset_overrides = gui.window_control(2137);
+    let settings_current_scope = require_window_control(gui.window_control(2133), "settings_current_scope");
+    let settings_reset_overrides = require_window_control(gui.window_control(2137), "settings_reset_overrides");
     settings_button.click();
     settings_current_scope.click();
     settings_reset_overrides.click();
@@ -1341,7 +1349,7 @@ try {
         "cwd target"
     ).display;
     replacement_composer.set_text(cwd_path);
-    let replacement_send = gui.window_control(2102);
+    let replacement_send = require_window_control(gui.window_control(2102), "replacement_send");
     replacement_send.click();
     let cwd_prepared = json_cli(context, cli, ["ui-bootstrap"]);
     let cwd_tab = find_tab(cwd_prepared, tab_id);
@@ -1686,8 +1694,8 @@ try {
             && child_bootstrap.tabs.len == 2,
         "remote_ui_new_child_invalid"
     );
-    let child_title_editor = gui.window_control(2105);
-    let child_edit_cancel = gui.window_control(2108);
+    let child_title_editor = require_window_control(gui.window_control(2105), "child_title_editor");
+    let child_edit_cancel = require_window_control(gui.window_control(2108), "child_edit_cancel");
     require(
         child_title_editor.visible,
         "remote_ui_new_child_editor_missing"
@@ -1722,8 +1730,8 @@ try {
     );
 
     gui.window_pointer("click", 330, 64);
-    let tab_close_confirm = gui.window_control(2119);
-    let tab_close_cancel = gui.window_control(2120);
+    let tab_close_confirm = require_window_control(gui.window_control(2119), "tab_close_confirm");
+    let tab_close_cancel = require_window_control(gui.window_control(2120), "tab_close_cancel");
     require(
         tab_close_confirm.visible && tab_close_cancel.visible,
         "remote_ui_tab_close_modal_missing"
@@ -1740,8 +1748,8 @@ try {
         "remote_ui_tab_close_cancel_invalid"
     );
     gui.window_pointer("click", 330, 64);
-    let reopened_tab_close_confirm = gui.window_control(2119);
-    let reopened_tab_close_cancel = gui.window_control(2120);
+    let reopened_tab_close_confirm = require_window_control(gui.window_control(2119), "reopened_tab_close_confirm");
+    let reopened_tab_close_cancel = require_window_control(gui.window_control(2120), "reopened_tab_close_cancel");
     require(
         reopened_tab_close_confirm.visible
             && reopened_tab_close_cancel.visible,
@@ -1886,10 +1894,10 @@ try {
     let edited_title = "remote-edited-" + context.run_id;
     let edited_note = "note-" + context.run_id;
     double_click_tab_text(context, cli, gui, tab_id);
-    let title_editor = gui.window_control(2105);
-    let note_editor = gui.window_control(2106);
-    let save_button = gui.window_control(2107);
-    let cancel_button = gui.window_control(2108);
+    let title_editor = require_window_control(gui.window_control(2105), "title_editor");
+    let note_editor = require_window_control(gui.window_control(2106), "note_editor");
+    let save_button = require_window_control(gui.window_control(2107), "save_button");
+    let cancel_button = require_window_control(gui.window_control(2108), "cancel_button");
     require(
         title_editor.visible && save_button.visible,
         "remote_ui_inline_editor_missing"
@@ -2645,7 +2653,7 @@ try {
         "remote_ui_fault_server_did_not_exit"
     );
 
-    let composer_send = gui.window_control(2102);
+    let composer_send = require_window_control(gui.window_control(2102), "composer_send");
     let offline_observed = false;
     for attempt in 0..300 {
         if !composer_send.visible {
@@ -2659,7 +2667,7 @@ try {
         "remote_ui_server_loss_left_stale_input"
     );
     gui.window_message(0x0010, 0, 0);
-    let disconnected_keep = gui.window_control(2109);
+    let disconnected_keep = require_window_control(gui.window_control(2109), "disconnected_keep");
     require(
         disconnected_keep.visible,
         "remote_ui_disconnected_close_modal_missing"
@@ -2706,7 +2714,7 @@ try {
         "relay-close.json"
     );
     require(
-        gui.window_control(2109).visible,
+        require_window_control(gui.window_control(2109), "relay_keep_modal").visible,
         "remote_ui_relay_close_modal_invalid"
     );
     discard_cli(
@@ -2736,7 +2744,7 @@ try {
         "relay-stop-close.json"
     );
     require(
-        stop_gui.window_control(2110).visible,
+        require_window_control(stop_gui.window_control(2110), "stop_close_button").visible,
         "remote_ui_stop_close_modal_invalid"
     );
     discard_cli(
