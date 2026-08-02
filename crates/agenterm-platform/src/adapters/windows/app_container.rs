@@ -11,9 +11,9 @@ use windows_sys::Win32::{
     Security::{
         Authorization::ConvertSidToStringSidW, CreateWellKnownSid, FreeSid, GetLengthSid,
         IsValidSid, Isolation::CreateAppContainerProfile, Isolation::DeleteAppContainerProfile,
-        Isolation::DeriveAppContainerSidFromAppContainerName, WinCapabilityInternetClientServerSid,
+        Isolation::DeriveAppContainerSidFromAppContainerName, SECURITY_MAX_SID_SIZE,
+        SID_AND_ATTRIBUTES, WELL_KNOWN_SID_TYPE, WinCapabilityInternetClientServerSid,
         WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
-        SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES, WELL_KNOWN_SID_TYPE,
     },
 };
 
