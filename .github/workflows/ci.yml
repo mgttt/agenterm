@@ -24,7 +24,9 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-13
+          # macos-13 is being retired and its queue starves release CI;
+          # macos-15-intel is the current x86_64 macOS image.
+          - os: macos-15-intel
             target: x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
