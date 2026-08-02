@@ -216,28 +216,28 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 
 ### 最近一次 Windows 回归（`platform-ux-parity-smoke -- --emit-matrix`）
 
-- `run_id`: `1785677049067-85268`
-- `timestamp_utc`: `2026-08-02T13:24:51.560Z`
+- `run_id`: `1785678683554-260172`
+- `timestamp_utc`: `2026-08-02T13:52:00.636Z`
 - `suite`: `platform-ux-parity-smoke`
-- `failure`: `remote_ui_bracketed_paste_framing_invalid`
+- `failure`: 无（`result_class: success`）
 
 | 分支 | 场景 | evidence_id | Windows | Linux | macOS | 归因 |
 |---|---|---|---|---|---|---|
-| startup | first-window-startup | `ux-parity.startup` | Supported | Failed | Failed | infra/platform-binary-missing |
-| startup | startup-title | `ux-parity.startup-title` | Supported | Failed | Failed | infra/platform-binary-missing |
-| ux-startup | gui-wake-contract | `ux-parity.wake-coalescing` | Supported | Failed | Failed | infra/platform-binary-missing |
+| startup | first-window-startup | `ux-parity.startup` | Supported | not-executed-yet | not-executed-yet |  |
+| startup | startup-title | `ux-parity.startup-title` | Supported | not-executed-yet | not-executed-yet |  |
+| ux-startup | gui-wake-contract | `ux-parity.wake-coalescing` | Supported | not-executed-yet | not-executed-yet |  |
 | frontend-lx | linux-workbench | `ux-parity.linux.unix-frontend.workbench` | Unsupported | not-executed-yet | Unsupported | platform-gap |
 | frontend-lx | linux-clipboard | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | not-executed-yet | Unsupported | platform-gap |
 | frontend-mx | macos-workbench | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | not-executed-yet | platform-gap |
 | frontend-mx | macos-clipboard | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | not-executed-yet | platform-gap |
-| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Failed | Failed | Failed | infra/rhai-runtime |
-| remote-ui | selection | `ux-parity.remote-ui.selection` | Failed | Failed | Failed | infra/rhai-runtime |
-| ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Supported | Failed | Failed | infra/platform-binary-missing |
+| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Supported | Unsupported | Unsupported | windows-only-contract |
+| remote-ui | selection | `ux-parity.remote-ui.selection` | Supported | Unsupported | Unsupported | windows-only-contract |
+| ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Supported | not-executed-yet | not-executed-yet |  |
 
 ### 上次 Windows 通过回归（`platform-ux-parity-smoke -- --emit-matrix`）
 
-- `run_id`: `1785676650739-164412`
-- `timestamp_utc`: 未在输出摘要中直接给出（由 manifest 提供）
+- `run_id`: `1785678683554-260172`
+- `timestamp_utc`: `2026-08-02T13:52:00.636Z`
 - `suite`: `platform-ux-parity`
 - `failure`: 无（`result_class: success`）
 
@@ -261,16 +261,16 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 ### 最近一次平台预检（Windows 主机）
 
 - `platform-ux-parity-smoke-linux -- --emit-matrix`
-  - `run_id: 1785676718989-216772`
+- `run_id: 1785678831415-84776`
   - `suite: platform-ux-parity-smoke`
   - `failure: platform_gui_missing`
   - 根因归类：`infra/platform-binary-missing`
-  - Linux 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（非脚本异常中断）。
+  - Linux 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（`infra/platform-binary-missing`）。
 - `platform-ux-parity-smoke-macos -- --emit-matrix`
-  - `run_id: 1785676727428-266076`
+  - `run_id: 1785678837047-34972`
   - `suite: platform-ux-parity-smoke`
   - `failure: platform_gui_missing`
   - 根因归类：`infra/platform-binary-missing`
-  - macOS 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（非脚本异常中断）。
+  - macOS 相关可执行场景状态示例：`ux-parity.startup`、`ux-parity.wake-coalescing`、`ux-parity.window-focus-contract` 为 `Failed`（`infra/platform-binary-missing`）。
 
 说明：这是当前 Windows 开发机的执行边界，不是回归逻辑失败；脚本已改为在该场景输出 `matrix` 与失败根因，便于三平台聚合不阻塞。
