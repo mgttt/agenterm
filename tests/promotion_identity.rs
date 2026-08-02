@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const SOURCE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Fixture(PathBuf);
 
@@ -32,6 +33,7 @@ fn fixture() -> Fixture {
 }
 
 fn write_manifest(path: &Path, channel: &str, source: &str) {
+    let expected_tag = format!("v{CURRENT_VERSION}");
     fs::write(
         path,
         format!(
@@ -39,8 +41,8 @@ fn write_manifest(path: &Path, channel: &str, source: &str) {
             serde_json::to_string_pretty(&json!({
                 "schema_version": 1,
                 "kind": "agenterm-release-candidate",
-                "version": "0.1.11",
-                "expected_tag": "v0.1.11",
+                "version": CURRENT_VERSION,
+                "expected_tag": expected_tag,
                 "source_sha": source,
                 "run": {"id": 30616209992_u64},
                 "assets": [
@@ -90,7 +92,7 @@ fn promotion_identity_binds_candidate_and_exact_unsigned_preview_body() {
     assert_eq!(identity["kind"], "agenterm-promotion-identity");
     assert_eq!(identity["candidate_run_id"], "30616209992");
     assert_eq!(identity["source_sha"], SOURCE_SHA);
-    assert_eq!(identity["tag"], "v0.1.11");
+    assert_eq!(identity["tag"], format!("v{CURRENT_VERSION}"));
     assert_eq!(identity["mac_channel"], "macos-unsigned-preview");
     assert!(
         identity["marker"]

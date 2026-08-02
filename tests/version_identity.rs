@@ -9,13 +9,12 @@ fn package_version(path: impl AsRef<Path>) -> String {
             in_package = line == "[package]";
             continue;
         }
-        if in_package {
-            if let Some(value) = line
+        if in_package
+            && let Some(value) = line
                 .strip_prefix("version = \"")
                 .and_then(|value| value.strip_suffix('"'))
-            {
-                return value.to_owned();
-            }
+        {
+            return value.to_owned();
         }
     }
     panic!("missing [package] version in {}", path.as_ref().display());

@@ -6,6 +6,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn write_executable(path: &Path, body: &str) {
     fs::write(path, body).expect("write fixture executable");
     let mut permissions = fs::metadata(path).expect("fixture metadata").permissions();
@@ -38,11 +40,11 @@ fn local_build_installs_a_dock_safe_app_bundle() {
         "agenterm-mcp",
     ] {
         let body = if name == "agenterm-cli" {
-            "#!/bin/sh\necho 'agenterm-cli 0.1.11'\n"
+            format!("#!/bin/sh\necho 'agenterm-cli {CURRENT_VERSION}'\n")
         } else {
-            "#!/bin/sh\nexit 0\n"
+            "#!/bin/sh\nexit 0\n".to_owned()
         };
-        write_executable(&binaries.join(name), body);
+        write_executable(&binaries.join(name), &body);
     }
 
     let output = Command::new("bash")
@@ -97,7 +99,7 @@ fn local_build_installs_a_dock_safe_app_bundle() {
     assert!(
         install
             .join(format!(
-                "releases/0.1.11-local-macos-{architecture}/agenterm"
+                "releases/{CURRENT_VERSION}-local-macos-{architecture}/agenterm"
             ))
             .exists(),
         "versioned local payload is missing"
