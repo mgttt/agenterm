@@ -253,6 +253,17 @@ and the owning `agenterm-net-research` task pass locally. A succeeding Linux
 matching-host receipt remains required; this robustness repair does not change
 the executable's experimental or non-packaged status.
 
+Follow-up exact-SHA `cf420d0` run `30726126583` proved the phase reset and
+typed diagnostic were effective: the failure moved from an exhausted listener
+budget hidden as a missing field to the connector's explicit fresh
+`connector ping deadline exceeded`. That second matching-host result shows a
+10-second phase is itself below the default-parallel multi-process fixture's
+loaded scheduling budget. Only the public research self-test now declares a
+30-second per-phase deadline in its receipt; ordinary commands retain the
+10-second default, protocol timeout remains inside each owner phase, and Cargo/
+Rhai outer deadlines remain unchanged and bounded. The next Linux receipt must
+prove this measured budget under the same default-parallel topology.
+
 ## Gates before stable service integration
 
 - [~] durable identity and local key lifecycle are specified and migration-tested;

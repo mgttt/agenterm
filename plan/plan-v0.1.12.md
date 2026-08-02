@@ -1021,6 +1021,13 @@ typed fail；parent 先识别 `agenterm-net/error/v1`，不再把合法 child fa
 decoder、15 unit + 14 默认并行 CLI tests 与 owning Rhai task 均已通过；仍等待后继 Linux
 matching-host 回执，且不因此把 experimental binary 升为 stable/release asset。
 
+后继 exact-SHA `cf420d0` run `30726126583` 证明第一修复有效但 10 秒预算本身不足：
+listener 不再超时、child error 保留 typed code/message，失败精确移动为拥有完整新 phase 的
+`connector ping deadline exceeded`。因此仅 public research self-test 把每阶段显式预算校准为
+30 秒并写入 receipt；其他命令继续 10 秒，libp2p timeout 仍短于 owning phase，Cargo 300 秒/
+Rhai 120 秒 outer budget 不变。下一 Linux matching-host run 必须在相同默认并行拓扑下通过，
+不能用本地快速成功或串行测试代替。
+
 ## 九、系统 WebView / Tauri-compatible spike
 
 先以一个独立的 `agenterm-cc-web` 实验宿主验证系统 WebView，而不是把 Tauri

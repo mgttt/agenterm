@@ -68,6 +68,7 @@ fn force_kill_process(pid: u64) {
 fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
     let (status, value) = json_output(&["self-test", "--json"]);
     assert!(status.success(), "{value}");
+    assert_eq!(value["deadline_ms"], 30_000);
     let process = &value["result"]["process"];
     assert_ne!(process["listener_pid"], process["connector_pid"]);
     assert_eq!(process["handshake"], true);

@@ -26,6 +26,7 @@ use std::{
 };
 
 const DEFAULT_DEADLINE_MS: u64 = 10_000;
+const SELF_TEST_PHASE_DEADLINE_MS: u64 = 30_000;
 const MAX_BLOCK_BYTES: usize = 4 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES: u64 = 64 * 1024;
 
@@ -335,9 +336,9 @@ async fn run() -> Result<(), (String, &'static str, String)> {
             Ok(())
         }
         [command, flag] if command == "self-test" && flag == "--json" => {
-            let result = run_self_test(DEFAULT_DEADLINE_MS)
+            let result = run_self_test(SELF_TEST_PHASE_DEADLINE_MS)
                 .map_err(|message| (request_id.clone(), "self_test_failed", message))?;
-            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            print_envelope(&request_id, SELF_TEST_PHASE_DEADLINE_MS, result);
             Ok(())
         }
         [command, flag] if command == "mesh-self-test" && flag == "--json" => {
