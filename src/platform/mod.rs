@@ -26,6 +26,7 @@ pub(crate) use agenterm_platform::console_interrupt::{
 };
 pub use filesystem::{
     metadata_is_link_like, replace_file, sync_parent,
+    is_direct_directory, is_direct_file,
 };
 
 pub fn install_console_interrupt_ignore_guard()

@@ -207,15 +207,11 @@ fn exact_absolute(path: &OsStr) -> anyhow::Result<PathBuf> {
 }
 
 fn direct_file(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.is_file() && !agenterm::metadata_is_link_like(&metadata)
-    })
+    agenterm::is_direct_file(path)
 }
 
 fn direct_directory(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.is_dir() && !agenterm::metadata_is_link_like(&metadata)
-    })
+    agenterm::is_direct_directory(path)
 }
 
 fn modified_unix_millis(metadata: &std::fs::Metadata) -> anyhow::Result<u128> {
@@ -229,8 +225,7 @@ fn modified_unix_millis(metadata: &std::fs::Metadata) -> anyhow::Result<u128> {
 fn incremental_metadata_identity(root: &Path) -> anyhow::Result<String> {
     let root_metadata = std::fs::symlink_metadata(root)?;
     anyhow::ensure!(
-        root_metadata.is_dir()
-            && !agenterm::metadata_is_link_like(&root_metadata),
+        root_metadata.is_dir() && agenterm::is_direct_directory(root),
         "incremental root is not a direct directory"
     );
     let mut records = vec![format!(
@@ -253,7 +248,7 @@ fn incremental_metadata_identity(root: &Path) -> anyhow::Result<String> {
             let path = entry.path();
             let metadata = std::fs::symlink_metadata(&path)?;
             anyhow::ensure!(
-                !agenterm::metadata_is_link_like(&metadata),
+                agenterm::is_direct_directory(&path) || agenterm::is_direct_file(&path),
                 "incremental identity encountered an indirect entry"
             );
             let relative = path
@@ -302,7 +297,7 @@ fn snapshot_incremental_roots(root: &Path) -> anyhow::Result<Vec<IncrementalRoot
             continue;
         }
         anyhow::ensure!(
-            !agenterm::metadata_is_link_like(&metadata),
+            agenterm::is_direct_directory(&entry.path()),
             "incremental compilation-unit root is indirect"
         );
         let name = entry
@@ -353,8 +348,8 @@ fn atomic_write_json(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
 fn read_bounded_json<T: for<'de> Deserialize<'de>>(path: &Path) -> anyhow::Result<T> {
     let metadata = std::fs::symlink_metadata(path)?;
     anyhow::ensure!(
-        metadata.is_file()
-            && !agenterm::metadata_is_link_like(&metadata)
+            metadata.is_file()
+            && agenterm::is_direct_file(path)
             && metadata.len() <= 4 * 1024 * 1024,
         "incremental state file is absent, indirect, or oversized"
     );

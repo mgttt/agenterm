@@ -76,6 +76,8 @@ pub use platform::{
     install_console_interrupt_ignore_guard,
     install_console_interrupt_observer,
     metadata_is_link_like,
+    is_direct_directory,
+    is_direct_file,
     replace_file,
     sync_parent,
 };
