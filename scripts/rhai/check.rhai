@@ -187,6 +187,40 @@ fn tail(text, maximum) {
     text.sub_string(text.len - maximum, maximum)
 }
 
+/// Pull the innermost script diagnostic out of a nested gate failure.
+///
+/// A failing inner task reports a JSON envelope whose `message` embeds
+/// another envelope, so the actionable code (for example
+/// `supply_chain_source_missing:softbuffer:0.4.8`) ends up several quoted
+/// layers deep. Surfacing it first keeps the CI summary readable without
+/// discarding the full payload printed below it.
+fn innermost_diagnostic(text) {
+    let flat = text;
+    flat.replace(`\\"`, `"`);
+    flat.replace(`\\n`, "\n");
+    let marker = `"message":"Runtime error: `;
+    let rest = flat;
+    let found = "";
+    while true {
+        let at = rest.index_of(marker);
+        if at < 0 {
+            break;
+        }
+        rest = rest.sub_string(at + marker.len);
+        let stop = rest.index_of("\n");
+        let quote = rest.index_of(`"`);
+        if quote >= 0 && (stop < 0 || quote < stop) {
+            stop = quote;
+        }
+        let candidate = if stop < 0 { rest } else { rest.sub_string(0, stop) };
+        candidate.trim();
+        if candidate != "" {
+            found = candidate;
+        }
+    }
+    found
+}
+
 fn run_gate(context, id, label, specs, repo, scratch, sequence) {
     print("\n==> " + label);
     let started = std::time::SystemTime::now().unix_millis;
@@ -228,8 +262,15 @@ fn run_gate(context, id, label, specs, repo, scratch, sequence) {
             );
             context.timing =
                 qualification::timing_finish(context.timing, "failed");
+            let payload = result.stdout + result.stderr;
+            let diagnostic = innermost_diagnostic(payload);
+            let headline = if diagnostic == "" {
+                ""
+            } else {
+                "\n  cause: " + diagnostic
+            };
             throw label + " failed with exit code " + result.exit_code +
-                "\n" + tail(result.stdout + result.stderr, 16384);
+                headline + "\n" + tail(payload, 16384);
         }
     }
     let duration =
