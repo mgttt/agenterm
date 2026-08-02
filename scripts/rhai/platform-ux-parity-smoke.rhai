@@ -546,6 +546,7 @@ fn execute_phase(
     evidence_states,
     use_separator
 ) {
+    let evidence_before = read_task_evidence(context);
     try {
         run_script_task(
             context,
@@ -566,12 +567,34 @@ fn execute_phase(
     } catch (error) {
         let failure = error.to_string();
         let observed = read_task_evidence(context);
-        let updated = if observed.len == 0 {
+        let phase_emitted = [];
+        for evidence_id in evidence_ids {
+            let seen = false;
+            let newly_seen = false;
+            for old_evidence in evidence_before {
+                if old_evidence == evidence_id {
+                    seen = true;
+                    break;
+                }
+            }
+            if !seen {
+                for new_evidence in observed {
+                    if new_evidence == evidence_id {
+                        newly_seen = true;
+                        break;
+                    }
+                }
+            }
+            if newly_seen {
+                phase_emitted.push(evidence_id);
+            }
+        }
+        let updated = if phase_emitted.len == 0 {
             mark_evidence_state(evidence_states, evidence_ids, failure)
         } else {
             let next_states = evidence_states;
             for evidence_id in evidence_ids {
-                if observed.contains(evidence_id) {
+                if phase_emitted.contains(evidence_id) {
                     next_states = mark_evidence_state(
                         next_states,
                         [evidence_id],
