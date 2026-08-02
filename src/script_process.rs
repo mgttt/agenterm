@@ -1289,6 +1289,15 @@ mod tests {
     }
 
     #[cfg(any(windows, unix))]
+    fn long_running_process_command() -> (&'static str, &'static [&'static str]) {
+        if crate::platform::is_windows_host() {
+            ("ping", &["-n", "6", "127.0.0.1"])
+        } else {
+            ("sleep", &["5"])
+        }
+    }
+
+    #[cfg(any(windows, unix))]
     fn shell_wrapped_process_command(
         windows_command: &str,
         unix_command: &str,
@@ -1643,23 +1652,22 @@ mod tests {
         assert!(before > 0);
         assert_eq!(before, after);
         assert_eq!(state, "exited");
-        assert_eq!(facts.top_level_window_supported, crate::platform::is_windows_host());
+        assert_eq!(
+            facts.top_level_window_supported,
+            crate::platform::hosted_script_worker_available()
+        );
         assert!(!facts.top_level_window_present);
         assert_eq!(facts.top_level_window_id, 0);
     }
 
     #[test]
     fn command_timeout_is_typed() {
+        let (timeout_command, timeout_arguments) = long_running_process_command();
         let mut command = shell_wrapped_process_command(
-            "ping",
-            "sleep",
-            &[],
+            timeout_command,
+            timeout_command,
+            timeout_arguments,
         );
-        if crate::platform::is_windows_host() {
-            command.arguments.extend(["-n".to_string(), "6".to_string(), "127.0.0.1".to_string()]);
-        } else {
-            command.arguments.push("5".to_string());
-        }
         command.timeout = Duration::from_millis(10);
         assert!(
             command_output(&mut command)
