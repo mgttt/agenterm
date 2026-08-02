@@ -219,7 +219,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | selection phase | `src/terminal_selection.rs` | `SelectionGesturePhase` 单份定义，Windows remote 与 Unix 共用 | Supported | Supported | Supported |
 | focus navigation | `src/frontend/interaction.rs` | `focus_surface_navigation`，两侧只映射原生事件 | Supported | Supported | Supported |
 | wheel accumulation | `src/frontend/interaction.rs` | `WheelAccumulator`，高分辨率增量按 `WHEEL_DELTA` 统一累积 | Supported | Supported | Supported |
-| modal focus state | `src/frontend/interaction.rs` | `FocusState`（surface+gate），modal 打开时禁止 focus transition/navigation；两端 adapter 以 `focus_gate()` 单点映射原生 modal flags | Supported | Supported | Supported |
+| modal focus state | `src/frontend/interaction.rs` | `FocusState`（surface+gate），语义 surface 由两端存储，modal 打开时禁止 focus transition/navigation；两端 adapter 以 `focus_gate()` 单点映射原生 modal flags | Supported | Supported | Supported |
 | wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | Supported | Supported |
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
 | raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_delivery` 已建；Unix embedded 消费，Windows remote 尚未接入（`raw_mouse_arbitration: false`） | Unsupported | Supported | Supported |

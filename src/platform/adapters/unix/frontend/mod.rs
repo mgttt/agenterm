@@ -607,6 +607,7 @@ struct UnixApp {
     close_requested: bool,
     last_cursor: (f64, f64),
     focus_surface: UnixFocusSurface,
+    focus_state: FocusState,
     composer_buffer: String,
     composer_select_all: bool,
     text_field_select_all: bool,
@@ -712,6 +713,7 @@ impl UnixApp {
             close_requested: false,
             last_cursor: (0.0, 0.0),
             focus_surface: UnixFocusSurface::Terminal,
+            focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             composer_buffer: String::new(),
             composer_select_all: false,
             text_field_select_all: false,
@@ -876,6 +878,15 @@ impl UnixApp {
             self.composer_select_all = false;
         }
         self.focus_surface = surface;
+        let gate = self.focus_gate();
+        if let Some(semantic) = match surface {
+            UnixFocusSurface::Terminal => Some(FocusSurface::Terminal),
+            UnixFocusSurface::Composer => Some(FocusSurface::Composer),
+            UnixFocusSurface::Sidebar => Some(FocusSurface::Sidebar),
+            UnixFocusSurface::Settings => None,
+        } {
+            self.focus_state = FocusState::new(semantic, gate);
+        }
         self.reset_ime_context();
         self.cursor_blink.reset(Instant::now());
         if surface == UnixFocusSurface::Composer {
@@ -4859,12 +4870,7 @@ impl UnixApp {
             Key::Named(NamedKey::ArrowRight) => FocusDirection::Right,
             _ => return false,
         };
-        let source = match self.focus_surface {
-            UnixFocusSurface::Terminal => FocusSurface::Terminal,
-            UnixFocusSurface::Composer => FocusSurface::Composer,
-            UnixFocusSurface::Sidebar => FocusSurface::Sidebar,
-            UnixFocusSurface::Settings => return false,
-        };
+        let source = self.focus_state.surface();
         let state = FocusState::new(source, self.focus_gate());
         let Some(target) = state.navigate(
             direction,

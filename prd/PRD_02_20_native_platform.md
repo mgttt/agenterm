@@ -643,7 +643,7 @@ integrated validation recorded below):
   `src/frontend/interaction.rs`: focus navigation, wheel accumulation, wheel routing, raw-mouse arbitration, scrollbar thumb drag and
   modal/focus state is shared through `FocusState`; Unix embedded consumes raw-mouse
   arbitration, while Windows remote publishes `raw_mouse_arbitration: false` until its
-  application mouse path is wired. Each adapter maps native controls/modal flags into `FocusState`\n  through one `focus_gate()` projection.
+  application mouse path is wired. Each adapter maps native controls/modal flags into `FocusState`\n  through one `focus_gate()` projection; both frontends store the semantic surface in\n  `FocusState` and keep native controls as projections.
   Evidence: `src/frontend/interaction.rs` unit tests and Quick Gate.
 - [x] Product capability mapping and native IPC endpoint naming now live in
   `src/platform/policy/{capability,ipc}.rs`; `src/platform/mod.rs` re-exports

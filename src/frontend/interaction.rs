@@ -98,6 +98,10 @@ impl FocusState {
         Self { surface, gate }
     }
 
+    pub(crate) const fn surface(self) -> FocusSurface {
+        self.surface
+    }
+
     pub(crate) fn transition(&mut self, target: FocusSurface) -> bool {
         if self.gate.blocked() {
             return false;

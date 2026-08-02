@@ -35,7 +35,7 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
   action.rs                  canonical action identities（toolbar/shortcut 共用）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
-  interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state（FocusState + adapter focus_gate()，Win/Unix 共用）；raw-mouse arbitration 策略（Unix embedded 消费，Windows remote 未接入）
+  interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state（语义 surface 存 FocusState + adapter focus_gate()，Win/Unix 共用）；raw-mouse arbitration 策略（Unix embedded 消费，Windows remote 未接入）
   control_center.rs         Control Center 产品 facade（native 能力仍走 platform services）
 
 src/frontend_server.rs       server 拉起 / 恢复（非 IPC 代理）

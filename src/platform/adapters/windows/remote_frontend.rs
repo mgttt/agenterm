@@ -713,6 +713,7 @@ struct RemoteWindowState {
     sidebar_geometry_generation: u64,
     recent_sidebar_text_click: Option<RemoteSidebarTextClick>,
     focus_surface: RemoteFocusSurface,
+    focus_state: FocusState,
     pending_close_tab_id: Option<String>,
     cwd_edit_tab_id: Option<String>,
     last_published_snapshot: Option<String>,
@@ -900,6 +901,7 @@ impl RemoteWindowState {
             sidebar_geometry_generation: 0,
             recent_sidebar_text_click: None,
             focus_surface: RemoteFocusSurface::Terminal,
+            focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             pending_close_tab_id: None,
             cwd_edit_tab_id: None,
             last_published_snapshot: None,
@@ -1145,7 +1147,7 @@ impl RemoteWindowState {
                 self.finish_tab_edit(false);
                 self.sync_composer()?;
                 self.apply_client_command(&command.command_id)?;
-                self.focus_surface = RemoteFocusSurface::Terminal;
+                self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
                 self.last_active_id = self
                     .client
                     .as_ref()
@@ -2327,7 +2329,7 @@ impl RemoteWindowState {
             self.last_error = Some(format!("Tabs visibility save failed: {error:#}"));
         }
         if !visible && self.focus_surface == RemoteFocusSurface::Tabs {
-            self.focus_surface = RemoteFocusSurface::Terminal;
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
             self.window.focus();
         }
         self.layout();
@@ -3209,7 +3211,7 @@ impl RemoteWindowState {
         );
         self.set_control_text(self.send, "Prepare");
         self.focus_control(self.edit);
-        self.focus_surface = RemoteFocusSurface::Composer;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Composer);
         self.last_error = None;
     }
 
@@ -3246,7 +3248,7 @@ impl RemoteWindowState {
         self.cwd_edit_tab_id = None;
         self.set_control_text(self.send, "Send");
         self.load_composer();
-        self.focus_surface = RemoteFocusSurface::Composer;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Composer);
         self.focus_control(self.edit);
         self.last_error = None;
     }
@@ -3430,7 +3432,7 @@ impl RemoteWindowState {
             .and_then(|client| client.snapshot().active_tab_id.clone());
         self.load_composer();
         self.resize_active_terminal();
-        self.focus_surface = RemoteFocusSurface::Terminal;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
         self.window.focus();
     }
 
@@ -3478,7 +3480,7 @@ impl RemoteWindowState {
         if let Err(error) = result {
             self.last_error = Some(format!("Tab selection failed: {error:#}"));
         } else {
-            self.focus_surface = RemoteFocusSurface::Tabs;
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
             self.last_active_id = Some(tab_id);
             self.load_composer();
             self.resize_active_terminal();
@@ -3708,12 +3710,12 @@ impl RemoteWindowState {
         self.pending_close_tab_id = None;
         self.show_tab_close_controls(false);
         self.show_workspace_controls(true);
-        self.focus_surface = RemoteFocusSurface::Tabs;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
         self.window.focus();
     }
 
     fn begin_tab_edit(&mut self, tab: UiTabBootstrap) {
-        self.focus_surface = RemoteFocusSurface::Tabs;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
         self.editing_tab_id = Some(tab.id);
         self.set_control_text(self.tab_title_edit, &tab.title);
         self.set_control_text(self.tab_note_edit, &tab.note);
@@ -3771,7 +3773,7 @@ impl RemoteWindowState {
         }
         self.editing_tab_id = None;
         self.show_tab_editor(false);
-        self.focus_surface = RemoteFocusSurface::Tabs;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
         self.window.focus();
     }
 
@@ -4071,7 +4073,7 @@ impl RemoteWindowState {
         self.settings_target_tab_id = None;
         self.show_settings_controls(false);
         self.show_workspace_controls(true);
-        self.focus_surface = RemoteFocusSurface::Terminal;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
         self.layout();
         self.load_composer();
         self.resize_active_terminal();
@@ -4148,7 +4150,7 @@ impl RemoteWindowState {
                 self.window_close_pending = false;
                 self.show_close_controls(false);
                 self.show_workspace_controls(true);
-                self.focus_surface = RemoteFocusSurface::Terminal;
+                self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
                 self.window.focus();
             }
         }
@@ -4190,7 +4192,7 @@ impl RemoteWindowState {
         else {
             return false;
         };
-        self.focus_surface = RemoteFocusSurface::Terminal;
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
         self.window.focus();
         if let Err(error) = self.window.set_pointer_capture(true) {
             self.terminal_selection = None;
@@ -4378,7 +4380,7 @@ impl RemoteWindowState {
         if self.window.focused_target() == FocusTarget::Control(self.edit) {
             RemoteFocusSurface::Composer
         } else {
-            self.focus_surface
+            RemoteFocusSurface::from_shared(self.focus_state.surface())
         }
     }
 
@@ -4391,6 +4393,12 @@ impl RemoteWindowState {
             close_confirmation_open: self.pending_close_tab_id.is_some(),
             cwd_editor_open: self.cwd_edit_tab_id.is_some(),
         }
+    }
+
+    fn set_focus_surface_unchecked(&mut self, target: RemoteFocusSurface) {
+        let gate = self.focus_gate();
+        self.focus_surface = target;
+        self.focus_state = FocusState::new(target.to_shared(), gate);
     }
 
     fn native_focus_surface_code(&self) -> isize {
@@ -4416,21 +4424,21 @@ impl RemoteWindowState {
         }
         match target {
             RemoteFocusSurface::Terminal => {
-                self.focus_surface = RemoteFocusSurface::Terminal;
+                self.set_focus_surface_unchecked(target);
                 self.window.focus();
             }
             RemoteFocusSurface::Composer => {
                 if self.active_tab().is_none() {
                     return false;
                 }
-                self.focus_surface = RemoteFocusSurface::Composer;
+                self.set_focus_surface_unchecked(target);
                 self.focus_control(self.edit);
             }
             RemoteFocusSurface::Tabs => {
                 if !self.tabs_visible {
                     self.set_tabs_visible(true);
                 }
-                self.focus_surface = RemoteFocusSurface::Tabs;
+                self.set_focus_surface_unchecked(target);
                 self.window.focus();
             }
         }
