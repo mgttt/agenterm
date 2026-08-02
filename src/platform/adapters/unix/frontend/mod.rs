@@ -40,8 +40,9 @@ use crate::{
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
     frontend::{
-        GuiHandoffResult, GuiLaunchResult, UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE,
-        attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
+        GuiHandoffResult, GuiLaunchResult, UNIX_GUI_CLI_NAME, UNIX_GUI_LAUNCH_POLICY,
+        UNIX_GUI_USAGE, attempt_gui_handoff, gui_cli_guidance, gui_help_result,
+        gui_launch_argument_error, is_gui_cli_guidance_error, parse_gui_launch_target,
         request_gui_wake_best_effort,
     },
     instances::{mark_intentional_shutdown, register_instance},
@@ -528,10 +529,12 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let options = match parse_gui_launch_target(&arguments, UNIX_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(message) => {
-            eprintln!(
-                "{}",
+            let rendered = if is_gui_cli_guidance_error(&message) {
+                gui_cli_guidance(&arguments, UNIX_GUI_CLI_NAME, UNIX_GUI_USAGE)
+            } else {
                 gui_launch_argument_error(&message, UNIX_GUI_USAGE, true)
-            );
+            };
+            eprintln!("{rendered}");
             return GuiLaunchResult::UsageError;
         }
     };

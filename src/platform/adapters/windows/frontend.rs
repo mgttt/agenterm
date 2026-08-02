@@ -1,6 +1,7 @@
 use crate::frontend::{
-    GuiHandoffResult, GuiLaunchResult, GuiWakeResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE,
-    attempt_gui_handoff, gui_help_result, gui_launch_argument_error, parse_gui_launch_target,
+    GuiHandoffResult, GuiLaunchResult, GuiWakeResult, WINDOWS_GUI_CLI_NAME,
+    WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE, attempt_gui_handoff, gui_cli_guidance,
+    gui_help_result, gui_launch_argument_error, is_gui_cli_guidance_error, parse_gui_launch_target,
 };
 use crate::wake_signal::WakeSignal;
 use std::env;
@@ -34,7 +35,12 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let launch_options = match parse_gui_launch_target(&arguments, WINDOWS_GUI_LAUNCH_POLICY) {
         Ok(options) => options,
         Err(error) => {
-            write_best_effort_stderr(&gui_launch_argument_error(&error, WINDOWS_GUI_USAGE, true));
+            let rendered = if is_gui_cli_guidance_error(&error) {
+                gui_cli_guidance(&arguments, WINDOWS_GUI_CLI_NAME, WINDOWS_GUI_USAGE)
+            } else {
+                gui_launch_argument_error(&error, WINDOWS_GUI_USAGE, true)
+            };
+            write_best_effort_stderr(&rendered);
             return GuiLaunchResult::UsageError;
         }
     };

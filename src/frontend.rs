@@ -21,6 +21,10 @@ pub(crate) const UNIX_GUI_USAGE: &str = "\
 Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\
 Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main or dev)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help";
 
+pub(crate) const WINDOWS_GUI_CLI_NAME: &str = "agenterm-cli.exe";
+pub(crate) const UNIX_GUI_CLI_NAME: &str = "agenterm-cli";
+pub(crate) const GUI_CLI_GUIDANCE_MARKER: &str = "gui-cli-guidance";
+
 pub(crate) fn gui_help_result(arguments: &[String], usage: &str) -> Option<GuiLaunchResult> {
     if arguments
         .iter()
@@ -53,6 +57,38 @@ pub(crate) fn gui_launch_argument_error(
         rendered.push_str(usage);
     }
     rendered
+}
+
+fn quote_argument_for_display(argument: &str) -> String {
+    if argument.is_empty() || argument.chars().any(char::is_whitespace) {
+        format!("\"{}\"", argument.replace('"', "\\\""))
+    } else {
+        argument.to_owned()
+    }
+}
+
+pub(crate) fn gui_cli_guidance(
+    arguments: &[String],
+    command_client_name: &str,
+    usage: &str,
+) -> String {
+    let forwarded = arguments
+        .iter()
+        .map(|argument| quote_argument_for_display(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "AgenTerm GUI entry point\n\n\
+         No CLI command was executed and no GUI server was started by this invocation.\n\n\
+         Use instead:\n{command_client_name} {forwarded}\n\n\
+         List running server PID and port: {command_client_name} server-list\n\
+         More CLI commands: {command_client_name} -h\n\n\
+         {usage}"
+    )
+}
+
+pub(crate) fn is_gui_cli_guidance_error(message: &str) -> bool {
+    message.starts_with(GUI_CLI_GUIDANCE_MARKER)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,8 +271,9 @@ pub(crate) fn parse_gui_launch_arguments(
             }
             other => {
                 return Err(format!(
-                    "unexpected positional argument: {other}; \
-                     the GUI launcher does not accept shell commands"
+                    "{}: unexpected positional argument: {other}; \
+                     the GUI launcher does not accept shell commands",
+                    GUI_CLI_GUIDANCE_MARKER
                 ));
             }
         }
