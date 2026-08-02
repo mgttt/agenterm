@@ -94,27 +94,52 @@ pub fn executable_name(base: &str) -> String {
 #[cfg(feature = "filesystem")]
 pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::{
-        Foundation::{GENERIC_ALL, LocalFree},
+        Foundation::{GENERIC_ALL, INVALID_HANDLE_VALUE, LocalFree},
         Security::{
             Authorization::{
-                EXPLICIT_ACCESS_W, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
-                SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+                EXPLICIT_ACCESS_W, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW, SetSecurityInfo,
+                TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
             },
             DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
             SUB_CONTAINERS_AND_OBJECTS_INHERIT,
         },
+        Storage::FileSystem::{
+            CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL,
+            WRITE_DAC,
+        },
     };
 
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !crate::filesystem_entry::metadata_is_real_directory(&metadata) {
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            READ_CONTROL | WRITE_DAC,
+            FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+            null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error());
+    }
+    let file = unsafe { std::fs::File::from_raw_handle(handle.cast()) };
+    let facts = crate::filesystem_entry::opened_file_entry_facts(&file)?;
+    if !facts.is_real_directory() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "private directory must be an existing real directory",
         ));
     }
-    let canonical = std::fs::canonicalize(path)?;
     let identity = crate::user_identity::current_user_identity()?;
     let sid = identity.windows_sid().ok_or_else(|| {
         std::io::Error::new(
@@ -143,20 +168,15 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
     if result != 0 {
         return Err(win32_error(result));
     }
-    let wide = canonical
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
     let result = unsafe {
-        SetNamedSecurityInfoW(
-            wide.as_ptr(),
+        SetSecurityInfo(
+            file.as_raw_handle().cast(),
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             null_mut(),
             null_mut(),
             acl,
-            null(),
+            null_mut(),
         )
     };
     unsafe { LocalFree(acl.cast()) };
