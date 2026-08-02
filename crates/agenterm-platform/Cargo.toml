@@ -65,6 +65,13 @@ user-identity = [
     "windows-sys/Win32_Security",
     "windows-sys/Win32_System_Threading",
 ]
+app-container-profile = [
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_Security",
+    "windows-sys/Win32_Security_Authorization",
+    "windows-sys/Win32_Security_Isolation",
+]
 process-control = [
     "dep:libc",
     "dep:windows-sys",
