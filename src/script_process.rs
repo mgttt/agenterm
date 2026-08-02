@@ -1281,34 +1281,48 @@ mod tests {
 
     #[cfg(any(windows, unix))]
     fn long_running_shell_command() -> (&'static str, &'static [&'static str]) {
-        if crate::platform::is_windows_host() {
-            ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
-        } else {
-            ("sleep", &["30"])
-        }
+        long_running_process_command_fixture()
     }
 
-    #[cfg(any(windows, unix))]
-    fn long_running_process_command() -> (&'static str, &'static [&'static str]) {
-        if crate::platform::is_windows_host() {
-            ("ping", &["-n", "6", "127.0.0.1"])
-        } else {
-            ("sleep", &["5"])
-        }
+    #[cfg(windows)]
+    fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
+        ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
     }
 
-    #[cfg(any(windows, unix))]
+    #[cfg(unix)]
+    fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
+        ("sleep", &["30"])
+    }
+
+    #[cfg(windows)]
+    fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
+        ("ping", &["-n", "6", "127.0.0.1"])
+    }
+
+    #[cfg(unix)]
+    fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
+        ("sleep", &["5"])
+    }
+
+    #[cfg(windows)]
     fn shell_wrapped_process_command(
         windows_command: &str,
         unix_command: &str,
         arguments: &[&str],
     ) -> ScriptCommand {
-        let command = if crate::platform::is_windows_host() {
-            windows_command
-        } else {
-            unix_command
-        };
-        let (program, command_arguments) = wrapped_shell_command(command, arguments);
+        let (program, command_arguments) = wrapped_shell_command(windows_command, arguments);
+        let mut process = process_command(&program).expect("shell command should be runnable");
+        process.arguments = command_arguments;
+        process
+    }
+
+    #[cfg(unix)]
+    fn shell_wrapped_process_command(
+        windows_command: &str,
+        unix_command: &str,
+        arguments: &[&str],
+    ) -> ScriptCommand {
+        let (program, command_arguments) = wrapped_shell_command(unix_command, arguments);
         let mut process = process_command(&program).expect("shell command should be runnable");
         process.arguments = command_arguments;
         process
@@ -1662,7 +1676,7 @@ mod tests {
 
     #[test]
     fn command_timeout_is_typed() {
-        let (timeout_command, timeout_arguments) = long_running_process_command();
+        let (timeout_command, timeout_arguments) = long_running_process_command_timeout();
         let mut command = shell_wrapped_process_command(
             timeout_command,
             timeout_command,
