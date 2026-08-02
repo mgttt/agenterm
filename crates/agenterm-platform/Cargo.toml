@@ -100,6 +100,11 @@ process-reference = [
     "windows-sys/Win32_System_JobObjects",
     "windows-sys/Win32_System_Threading",
 ]
+process-containment = [
+    "process-reference",
+    "windows-sys/Win32_System_JobObjects",
+    "windows-sys/Win32_System_SystemServices",
+]
 process-metrics = [
     "dep:libc",
     "dep:windows-sys",
@@ -130,6 +135,7 @@ shared-memory = [
 process = [
     "process-observation",
     "process-reference",
+    "process-containment",
     "process-security",
     "process-control",
     "process-image",

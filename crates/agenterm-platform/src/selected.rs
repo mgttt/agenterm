@@ -236,6 +236,17 @@ pub(crate) mod process_security;
 #[cfg(all(feature = "process-reference", windows))]
 pub(crate) use crate::adapters::windows::process_reference;
 
+#[cfg(all(feature = "process-containment", windows))]
+#[path = "adapters/windows/process_containment.rs"]
+pub(crate) mod process_containment;
+
+#[cfg(all(
+    feature = "process-containment",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/process_containment.rs"]
+pub(crate) mod process_containment;
+
 #[cfg(all(feature = "process-reference", target_os = "linux"))]
 #[path = "adapters/linux/process_reference.rs"]
 pub(crate) mod process_reference;

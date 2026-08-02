@@ -115,11 +115,9 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
 }
 
 pub struct ProcessTreeGuard {
-    handle: windows_sys::Win32::Foundation::HANDLE,
+    containment: crate::process_containment::ProcessContainment,
     active: bool,
 }
-
-unsafe impl Send for ProcessTreeGuard {}
 
 pub(crate) fn configure_owned_command(_command: &mut Command) -> Result<(), String> {
     Ok(())
@@ -127,70 +125,40 @@ pub(crate) fn configure_owned_command(_command: &mut Command) -> Result<(), Stri
 
 impl ProcessTreeGuard {
     pub fn attach(child: &Child) -> Result<Self, String> {
-        use std::{ffi::c_void, mem, os::windows::io::AsRawHandle, ptr};
-        use windows_sys::Win32::{
-            Foundation::HANDLE,
-            System::JobObjects::{
-                AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-                JobObjectExtendedLimitInformation, SetInformationJobObject,
-            },
+        use crate::{
+            process_containment::{ProcessContainment, ProcessContainmentOptions},
+            process_reference::ProcessReference,
         };
-        let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-        if handle.is_null() {
-            return Err(format!(
-                "CreateJobObjectW failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
+        use std::os::windows::io::AsHandle as _;
+        let containment = ProcessContainment::create(
+            None,
+            ProcessContainmentOptions {
+                terminate_on_last_close: true,
+                allow_breakaway: true,
+                ..ProcessContainmentOptions::default()
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let process = ProcessReference::duplicate_from(child.as_handle())
+            .map_err(|error| format!("retain child process failed: {error}"))?;
+        containment
+            .assign(&process)
+            .map_err(|error| error.to_string())?;
         let guard = Self {
-            handle,
+            containment,
             active: true,
         };
-        let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
-        information.BasicLimitInformation.LimitFlags =
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-        if unsafe {
-            SetInformationJobObject(
-                guard.handle,
-                JobObjectExtendedLimitInformation,
-                (&information as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
-                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        } == 0
-        {
-            return Err(format!(
-                "SetInformationJobObject failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        if unsafe { AssignProcessToJobObject(guard.handle, child.as_raw_handle() as HANDLE) } == 0 {
-            return Err(format!(
-                "AssignProcessToJobObject failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
         Ok(guard)
     }
 
     pub fn terminate(&mut self) -> Result<(), String> {
-        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
         if !self.active {
             return Ok(());
         }
-        if unsafe { TerminateJobObject(self.handle, 1) } == 0 {
-            return Err(format!(
-                "TerminateJobObject failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
+        self.containment
+            .terminate(1)
+            .map_err(|error| error.to_string())?;
         self.active = false;
         Ok(())
-    }
-}
-
-impl Drop for ProcessTreeGuard {
-    fn drop(&mut self) {
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
     }
 }

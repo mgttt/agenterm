@@ -37,6 +37,7 @@ pub enum Capability {
     ProcessControl,
     ProcessObservation,
     ProcessReference,
+    ProcessContainment,
     ProcessSecurity,
     ProcessImage,
     ProcessMetrics,
@@ -94,6 +95,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
         Capability::ProcessReference => (cfg!(feature = "process-reference"), true),
+        Capability::ProcessContainment => (cfg!(feature = "process-containment"), true),
         Capability::ProcessSecurity => (cfg!(feature = "process-security"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
@@ -245,6 +247,9 @@ pub mod process_observation;
 
 #[cfg(feature = "process-reference")]
 pub mod process_reference;
+
+#[cfg(feature = "process-containment")]
+pub mod process_containment;
 
 #[cfg(feature = "process-security")]
 pub mod process_security;

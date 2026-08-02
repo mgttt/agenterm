@@ -50,6 +50,7 @@ clipboard, IPC, or screenshot modules.
 | `process-control` | typed single-process termination, exact Windows HANDLE termination, and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-observation` | fail-closed single-process liveness and stable start identity | target `libc` / minimal `windows-sys` |
 | `process-reference` | owned stable process reference plus bounded or indefinite exact-object exit waits via HANDLE, pidfd, or kqueue; Windows raw exit-code, target-process HANDLE delivery and exact Job membership | target `libc` / minimal `windows-sys` |
+| `process-containment` | exact process assignment, membership, member snapshots, termination and native memory/CPU/process limits for owned or named containment objects | `process-reference` + minimal Windows Job APIs |
 | `process-security` | effective process principal plus typed sandbox identity, with handle-bound Windows queries | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |
@@ -280,6 +281,15 @@ ABI incompatible and failed states while retaining an API version or native
 error code when one exists. Windows resolves `WHvGetCapability` dynamically so
 systems without Windows Hypervisor Platform still start normally; Linux accepts
 only KVM API version 12. The embedding product owns fallback and routing policy.
+
+`process_containment::ProcessContainment` keeps native containment ownership
+separate from product lifecycle. Windows creates or opens a Job Object, assigns
+an exact retained `ProcessReference`, reports membership and member IDs, and
+applies already-normalized memory-byte, CPU-hundredth-percent and active-process
+limits. Named creation is exclusive. Linux and macOS retain the same API but
+return typed `Unsupported` rather than equating process groups or cgroups with
+the Windows object model. Naming prefixes, retry windows, required close/kill
+policy, state transitions and exit-code interpretation remain with the caller.
 
 `shared_memory::SharedMemory` converts one portable ASCII name into a
 session-local page-file mapping on Windows or an owner-readable POSIX shared
