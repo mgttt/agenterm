@@ -26,8 +26,8 @@
 | frontend-lx | 剪贴板语义（linux） | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | Unsupported | Unsupported | platform-gap | - |
 | frontend-mx | Workbench 与窗口行为（macos） | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | Unsupported | platform-gap | - |
 | frontend-mx | 剪贴板语义（macos） | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | Unsupported | platform-gap | - |
-| remote-ui | replaceable 客户端 | `ux-parity.remote-ui.replaceable-client` | Supported | Unsupported | Unsupported | windows-only-contract | - |
-| remote-ui | selection 语义 | `ux-parity.remote-ui.selection` | Supported | Unsupported | Unsupported | windows-only-contract | - |
+| remote-ui | replaceable 客户端 | `ux-parity.remote-ui.replaceable-client` | Failed | Unsupported | Unsupported | infra/rhai-runtime | - |
+| remote-ui | selection 语义 | `ux-parity.remote-ui.selection` | Failed | Unsupported | Unsupported | infra/rhai-runtime | - |
 
 > 说明：
 > - `Supported`/`Failed`/`Unsupported` 只允许取 `Unsupported` 来表示“当前平台能力缺口”。`Failed` 代表脚本执行失败（回归阻断）。
@@ -215,6 +215,26 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
   - 回归结果应落入本文件“JSON/CSV”字段，按 `evidence_id` 覆盖本轮三端状态。
 
 ### 最近一次 Windows 回归（`platform-ux-parity-smoke -- --emit-matrix`）
+
+- `run_id`: `1785677049067-85268`
+- `timestamp_utc`: `2026-08-02T13:24:51.560Z`
+- `suite`: `platform-ux-parity-smoke`
+- `failure`: `remote_ui_bracketed_paste_framing_invalid`
+
+| 分支 | 场景 | evidence_id | Windows | Linux | macOS | 归因 |
+|---|---|---|---|---|---|---|
+| startup | first-window-startup | `ux-parity.startup` | Supported | Failed | Failed | infra/platform-binary-missing |
+| startup | startup-title | `ux-parity.startup-title` | Supported | Failed | Failed | infra/platform-binary-missing |
+| ux-startup | gui-wake-contract | `ux-parity.wake-coalescing` | Supported | Failed | Failed | infra/platform-binary-missing |
+| frontend-lx | linux-workbench | `ux-parity.linux.unix-frontend.workbench` | Unsupported | not-executed-yet | Unsupported | platform-gap |
+| frontend-lx | linux-clipboard | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | not-executed-yet | Unsupported | platform-gap |
+| frontend-mx | macos-workbench | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | not-executed-yet | platform-gap |
+| frontend-mx | macos-clipboard | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | not-executed-yet | platform-gap |
+| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Failed | Failed | Failed | infra/rhai-runtime |
+| remote-ui | selection | `ux-parity.remote-ui.selection` | Failed | Failed | Failed | infra/rhai-runtime |
+| ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Supported | Failed | Failed | infra/platform-binary-missing |
+
+### 上次 Windows 通过回归（`platform-ux-parity-smoke -- --emit-matrix`）
 
 - `run_id`: `1785676650739-164412`
 - `timestamp_utc`: 未在输出摘要中直接给出（由 manifest 提供）

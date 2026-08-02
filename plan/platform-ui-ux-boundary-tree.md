@@ -142,7 +142,7 @@ agenterm-platform crate（复用层）
 - `src/platform/adapters/unix/frontend/input.rs`/`render.rs`/`new_terminal.rs` 已以 `platform` 能力 API 驱动快捷键与主终端 shell 命名，不再出现新的 OS/主机策略分支外泄。
   - `src/platform/adapters/windows/remote_frontend.rs` 继续承担 Win32 交互宿主职责，但未新增产品语义分支。
 - 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；本轮已完成 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs`、`script_process.rs` 的测试与兼容性路径适配收口，全部改为基于 `platform` 能力契约分支。
-- `script_process.rs` 测试辅助中与 shell/超时进程相关的 host 分支已从编译期 `#[cfg(windows)]`/`#[cfg(unix)]` 改为统一 `crate::platform::is_windows_host() || crate::platform::is_unix_host()` 的运行时能力分支，避免在通用 API 上重复注入主机策略。
+- `script_process.rs` 测试辅助中与 shell/超时进程相关的 host 分支已从编译期 `#[cfg(windows)]`/`#[cfg(unix)]` 改为统一 `crate::platform::script_process_test_host_supported()` 的运行时能力分支，避免在通用 API 上重复注入主机策略。
 - 本次同步进度（2026-08-02）：再向下沉 3 个测试分支（`script_process` 的 runtime 分支、`script_stdlib`/`working_context`/`workspace` 的 OS 条件），确保非平台层的运行时 `host` 判断继续收敛。
 - 本次同步进度（2026-08-02）：`remote-ui-smoke.rhai` 已加 `window_control` 空对象防护，回归脚本对平台差异改为“控制项缺失=明确证据项”而非直接 `()` 属性取值 panic；`src/workspace.rs` 的平台分支测试已改为调用 `platform` 能力语义。
 - 追加（2026-08-02）：`platform/mod.rs` 增加 `workspace_layout_kind()` 语义类型，`workspace.rs` 测试改以 `WorkspaceLayoutKind::WindowsFlat` 显式表达“路径形态能力”，减少 bool 语义泄露。
