@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 7] = [
+const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 12] = [
     ("is_windows_host(", "host predicate usage"),
     ("is_unix_host(", "host predicate usage"),
     ("platform_kind(", "platform kind dispatch"),
@@ -9,6 +9,11 @@ const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 7] = [
     ("cfg!(unix)", "compile-time unix branch"),
     ("#[cfg(windows)]", "compile-time windows branch"),
     ("#[cfg(unix)]", "compile-time unix branch"),
+    ("cfg(target_os", "compile-time OS branch"),
+    ("cfg(target_family", "compile-time OS branch"),
+    ("cfg(target_arch", "compile-time architecture branch"),
+    ("cfg(feature = \"windows\")", "compile-time windows feature branch"),
+    ("cfg(feature = \"unix\")", "compile-time unix feature branch"),
 ];
 
 #[test]
@@ -32,9 +37,7 @@ fn non_platform_src_has_no_runtime_host_branching_references() {
                     ));
                 }
             }
-            if line.contains("PlatformKind::") && !line.contains("crate::platform::platform::PlatformKind")
-                && !line.contains("agenterm_platform::PlatformKind")
-            {
+            if line.contains("PlatformKind::") {
                 violations_in_line.push(format!(
                     "line {}: {} ({})",
                     line_index + 1,
