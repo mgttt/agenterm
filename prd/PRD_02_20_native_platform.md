@@ -644,9 +644,6 @@ integrated validation recorded below):
   modal focus gating are shared by Windows remote and Unix embedded
   frontends; both adapters only map native events/states into shared types.
   Evidence: `src/frontend/interaction.rs` unit tests and Quick Gate.
-- [x] Product GUI host selection now lives in `src/frontend/host.rs`;
-  `src/platform/mod.rs` no longer owns `FrontendHost` or `frontend_host`.
-  Evidence: `src/frontend/host.rs` unit tests and Quick Gate.
 - [x] Product capability mapping and native IPC endpoint naming now live in
   `src/platform/policy/{capability,ipc}.rs`; `src/platform/mod.rs` re-exports
   the tables and no longer owns those implementations.

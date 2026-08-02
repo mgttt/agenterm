@@ -16,7 +16,7 @@
 crates/agenterm-platform     机制：窗口/输入/截图/进程/IPC/PTY/字体/shm…
                              typed Unsupported / Failed；无 AgenTerm 产品名
 
-src/platform/                产品平台 glue：目录名、快捷键/CC、能力/IPC 命名（FrontendHost 见 src/frontend/host.rs）
+src/platform/                产品平台 glue：FrontendHost、目录名、快捷键/CC、能力/IPC 命名
   policy/                    host 无关产品策略表
     input.rs                 shortcut / empty-copy 输入策略（Win/Unix 共用）
     control_center.rs         CC screenshot 策略（Win/Unix 共用）
@@ -33,7 +33,6 @@ src/platform/                产品平台 glue：目录名、快捷键/CC、能�
 src/frontend/                产品 GUI 入口 + UI/UX 语义
   mod.rs                     parse / handoff / 统一结果码 / dispatch
   action.rs                  canonical action identities（toolbar/shortcut 共用）
-  host.rs                    GUI host selection（Win/Unix/Unsupported）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
   interaction.rs             focus navigation / wheel accumulation / wheel routing / raw-mouse arbitration / scrollbar thumb drag / modal focus gate（Win/Unix 共用）

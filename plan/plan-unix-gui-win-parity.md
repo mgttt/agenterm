@@ -147,7 +147,6 @@ O1 并发树（并行）
 ├─ D1 [x] src/platform/mod.rs `action` → src/frontend/action.rs
 ├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
 ├─ D1 [x] src/platform/control_center.rs → src/frontend/control_center.rs
-├─ D1 [x] src/platform/mod.rs FrontendHost/frontend_host → src/frontend/host.rs
 ├─ D2 [x] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures,workspace,host,script_http,capability,ipc}
 ├─ D3 [~] Win remote vs Unix embedded 共享交互管线（selection phase、focus 导航、wheel 累积/路由、raw-mouse 仲裁与 scrollbar thumb drag 已收为 crate 共享；modal/focus 进入规则已收为共享）
 └─ D4 [~] 每条可见差进入 evidence matrix；无 adapter 内产品 if（D3 结构证据已入 matrix；Linux/macOS 真机列待 host smoke）
