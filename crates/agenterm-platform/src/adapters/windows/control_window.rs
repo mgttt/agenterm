@@ -62,6 +62,13 @@ const AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
 const AUTOMATION_FOCUS_QUERY: u32 = WM_APP + 3;
 const AUTOMATION_RENDER_ACTIVITY_SAMPLE: u32 = WM_APP + 4;
 
+// windows-sys aliases SetWindowLongPtrW to SetWindowLongW on 32-bit targets.
+#[cfg(target_pointer_width = "32")]
+type NativeLongPtr = i32;
+#[cfg(target_pointer_width = "64")]
+type NativeLongPtr = isize;
+const _: () = assert!(std::mem::size_of::<NativeLongPtr>() == std::mem::size_of::<*mut ()>());
+
 struct Backend {
     window: Cell<HWND>,
     controls: HashMap<ControlId, HWND>,
@@ -600,7 +607,11 @@ pub(crate) fn run_control_window(
         destroying: false,
     });
     unsafe {
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut *state as *mut State) as isize);
+        SetWindowLongPtrW(
+            hwnd,
+            GWLP_USERDATA,
+            (&mut *state as *mut State) as NativeLongPtr,
+        );
     }
     let menu = unsafe { GetSystemMenu(hwnd, 0) };
     for item in &options.system_menu {
