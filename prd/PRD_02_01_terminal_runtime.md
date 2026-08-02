@@ -87,17 +87,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   exact `ESC[200~...ESC[201~` PTY bytes; Unix uses the same framing helper and
   rejects stale tab/focus/modal completions instead of pasting into a new target.
   The reusable Linux/macOS adapters preserve caller deadlines and stable
-  `Unsupported`/`Failed` clipboard causes. A new matching-host Unix workbench
+  `Unsupported`/`Failed` clipboard causes. The matching-host Unix workbench
   journey owns native clipboard-to-PTY delivery, `terminal.pasted`, and delayed
-  stale-target cancellation; its first Linux/macOS CI receipts are still pending.
+  stale-target cancellation. Exact-SHA `b4f1622` CI run `30724960474` passed
+  that complete journey on Linux x86_64 and both macOS architectures.
 - [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. White-box
   analysis found that the replaceable Windows GUI cleared and repainted directly
   on the window HDC and treated lease heartbeat as visible change. The current
   repair makes lease maintenance non-visual by type and composes a complete
   client frame in a compatible memory DC before one `BitBlt`, with bounded
-  allocation and a direct-paint fallback. Same-grid and duplicate in-flight
-  resize requests are now suppressed across the typed IPC boundary, keyed by
+  dimensions. Back-buffer allocation or presentation failure is a typed native
+  error that closes the affected replaceable window; it does not silently fall
+  back to partial direct painting and reintroduce the flicker path. Same-grid
+  and duplicate in-flight resize requests are now suppressed across the typed IPC boundary, keyed by
   server epoch and stable tab ID, and redundant class-wide resize redraw flags
   are removed. White-box comparison with the pre-platform-extraction host then
   found a concrete regression: the new parent window had lost

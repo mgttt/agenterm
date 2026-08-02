@@ -320,8 +320,9 @@ Release 全部是本轮明确非目标。
   `CS_HREDRAW|CS_VREDRAW`、NULL dirty region 与同尺寸 resize 是次级放大器。
   第一叶已实现 heartbeat/redraw 类型解耦：lease maintenance 仅返回成功/失败，
   tick 只有收到真实 delta 才报告 visual change；Windows paint 先在兼容 memory DC
-  组成完整 client frame，再以单次 `BitBlt` 提交，分配或提交失败时保留直接绘制
-  fallback，并对像素预算 fail closed。聚焦双缓冲边界测试与 UI-client tests 已通过。
+  组成完整 client frame，再以单次 `BitBlt` 提交；像素预算、back-buffer 分配或提交失败
+  都 typed fail 并关闭受影响的 replaceable window，不静默退回会重现半帧闪烁的 direct
+  paint 路径。聚焦双缓冲边界测试与 UI-client tests 已通过。
   集成态 `check.cmd --quick` 已通过 repository lint、fmt、alignment、warnings-denied
   all-target Clippy 与 396 项 library tests，七产物 dev build 通过；两次直接归属的
   `remote-ui-smoke` 均完成 resize/minimize/restore、Settings、PTY 和 renderer-owned
@@ -480,7 +481,12 @@ Release 全部是本轮明确非目标。
   回归、warnings-denied Clippy 与连续两次 `build.bat` 已通过；第二次复用相同 worker，bootstrap
   Cargo 为 0 ms，总时长从 31.3 秒降到 11.8 秒。首次构建另回收 69 个旧 session、约
   1.20 GB logical bytes；真实工作树上可删除的不同 root generation 数量与实际字节回收量
-  尚未出现，因此缓存膨胀叶仍为 partial，不以隔离 fixture 冒充生产回收证据。
+  尚未出现，因此缓存膨胀叶仍为 partial，不以隔离 fixture 冒充生产回收证据。后续 clean
+  `c65bf36` 原生 dev build 在 `target/debug/incremental` 为 2,281,521 KiB 时又真实删除
+  46 个 finalized sessions、590 个文件、402,592,437 logical bytes；本次没有 rustc invocation，
+  whole-root manifest 明确为 invalid、授权删除 0 个 root。该回执证明普通热构建会安全回收
+  session 垃圾，同时如实保留“整 root generation 尚无生产删除样本”的剩余证据缺口；不为
+  制造 `removed_roots > 0` 重跑构建或伪造 touch manifest。
 - [x] `agenterm-platform` workspace 抽取后的集成门禁已真实收口：供应链任务不再假设单
   workspace package，而是动态排除全部 workspace members、验证两个 crate 的外部直接依赖
   并集并生成 275-package SPDX；补齐 macOS `objc2-app-kit`/`objc2-foundation` MIT notices。

@@ -11,33 +11,31 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Product outcome
 
-- [~] the Platform Facade is being promoted from an internal module into the
-  independently consumable `crates/agenterm-platform` workspace package. The
-  first real dependency slices move process and PTY contracts, services,
-  private target selection and all three native adapters without retaining
-  duplicate source. Platform shell defaults also move under the process feature;
-  shared DPI/geometry conversion is exposed by the window feature. The remaining
-  capability families and product-code extraction are open. Generic host
-  filesystem conventions and cross-process path/slot locks are public while
+- [x] the Platform Facade is an independently consumable
+  `crates/agenterm-platform` workspace package. Process and PTY contracts,
+  services, private target selection and all three native adapters moved without
+  retaining duplicate source. Platform shell defaults live under the process
+  feature; shared DPI/geometry conversion is exposed by the window feature.
+  Generic host filesystem conventions and cross-process path/slot locks are public while
   AgenTerm directory names, audit filenames and Script concurrency policy remain
   root-package concerns. Typed IPC endpoints, optional serde support, Windows
   named pipes and Unix sockets are public together with typed transport failures,
   bounded I/O and endpoint ownership checks. Only AgenTerm endpoint/workspace
   naming remains in the root package, and IPC capability status is available.
-- [~] Clipboard, bounded XRGB screenshot encoding and font-file candidates are
+- [x] Clipboard, bounded XRGB screenshot encoding and font-file candidates are
   reusable crate capabilities. Terminal paste limits, HWND/GDI capture and font
   handles remain explicit root product extensions rather than leaking native
   types through the public crate API. Linux/macOS clipboard helpers now consume
   the caller deadline with a 1500 ms adapter ceiling (including one shared Linux
   fallback budget); zero deadlines and helper timeout/size/backend failures stay
   typed through the Unix frontend instead of collapsing to an availability string.
-- [~] Normalized modifier/key classification, committed Unicode precedence,
+- [x] Normalized modifier/key classification, committed Unicode precedence,
   UTF-16 decoding, and per-platform primary-shortcut policy are reusable through
   the `input` feature. Native frontend event translation remains a root product
   extension. The `ime` feature now owns public preedit/commit actions and
   display-aware status: Linux/macOS are available with a display, while Windows
   remains explicitly Unsupported until native preedit adaptation ships.
-- [~] Activation policy and typed native-window requests are public crate API.
+- [x] Activation policy and typed native-window requests are public crate API.
   Windows show/no-activate/restore operations and Linux/macOS winit activation
   intent live in target-isolated crate adapters; AgenTerm owns only its window
   lifetime and maps typed failures into the product protocol. Semantic Unix
@@ -49,7 +47,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   termination and re-check process start identity before killing any child
   that escaped into a nested process group; Linux `Z/X/x` proc states are Dead,
   not live service owners. The cross-group matching-host test is compiled for
-  Linux/macOS and still awaits its new ordinary-CI execution receipt.
+  Linux/macOS; exact-SHA `af5ac62` run `30717141687` closed the Linux process-tree
+  cleanup receipt and later six-cell runs retained the portable gate.
   AgenTerm-specific audit-path naming remains product policy.
 - [x] Product path composition consumes `filesystem::host_directories` and
   `executable_name`; the three root OS path adapters are deleted. AgenTerm
@@ -83,21 +82,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   public CoreGraphics window-under-pointer fields for the exact selected
   WindowServer ID, preventing process delivery from losing intra-application
   window routing while the Control Center remains non-frontmost.
-- [~] Passive system-WebView discovery is public and selected inside the crate,
+- [x] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
   opaque RAII font resource are public; the Windows renderer consumes its RAII
   resource and all three duplicate root native font implementations are deleted.
-- [ ] Windows, macOS, and Linux native frontends consume one declared platform
+- [x] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.
-- [ ] Product-visible UI state, actions, labels, layout geometry, and semantic
+- [x] Product-visible UI state, actions, labels, layout geometry, and semantic
   snapshots remain platform-neutral and are not reimplemented inside an OS
   adapter.
 - [x] Toolbar hit-to-action mapping is one platform-neutral product table; the
   former three OS-named copies are deleted rather than exported as platform API.
 - [x] Display backend facts and headless-aware window status are public crate
   API selected by Windows/Linux/macOS adapters.
-- [ ] Necessary native differences remain explicit capabilities or typed
+- [x] Necessary native differences remain explicit capabilities or typed
   unsupported results; parity never means hiding a missing behavior or forcing
   all systems through a lowest-common-denominator widget implementation.
 
@@ -155,13 +154,15 @@ enter the crate only as caller-supplied platform-neutral values.
 
 - [x] revision-4 Platform Facade is the sole production native boundary
 
-`platform` is not merely a collection of GUI helpers. It is the required
+`agenterm-platform` is not merely a collection of GUI helpers. It is the reusable
 middle layer between product code and an operating system. Product/domain
-modules call typed `platform::{ipc, process, paths, ui_host, webview, ...}`
-facade services; they do **not** branch on Windows, macOS, Linux, Unix, native
-handles, or OS path/identity conventions. `selected.rs` and
-`adapters/{windows,macos,linux}` are the only production implementation sites
-that may select an OS with `cfg`.
+modules consume its typed feature facades, while root `src/platform` contains
+only AgenTerm product extensions and neutral error/protocol projection. Product
+code does **not** branch on Windows, macOS, Linux, Unix, native handles, or OS
+path/identity conventions. The crate's private `selected.rs` and
+`adapters/{windows,macos,linux}` are the production implementation sites that
+may select an OS with `cfg`; unavoidable binary subsystem attributes and tests
+remain structurally explicit exceptions.
 
 This preserves necessary native implementations without allowing OS conditionals
 to spread through Fleet, IPC contracts, Script Runtime, Settings, Control
@@ -172,9 +173,11 @@ being forced through an OS widget API.
 
 The migration is complete only when all of the following are true:
 
-- [x] production `#[cfg(windows|unix|target_os|target_family)]` selection is
-  confined to `src/platform/**` and unavoidable binary-entry bootstrap code;
-  test-only fixtures are excluded from this count
+- [x] production `#[cfg(windows|unix|target_os|target_family)]` selection for
+  reusable mechanisms is confined to `crates/agenterm-platform` private
+  selection/adapters and unavoidable binary-entry bootstrap code; test-only
+  fixtures are excluded from this count. Root product extensions contain no
+  native API or platform-selection implementation.
 - [x] `ipc_endpoint`, `ipc_transport`, process identity/tree control, standard
   paths, native activation/clipboard/screenshot, Control Center shell hosting,
   and WebView runtime probing call facade services rather than OS APIs directly
@@ -187,18 +190,17 @@ The migration is complete only when all of the following are true:
   neutral; physical ownership is complete, while further state normalization
   remains open
 - [x] manual and repository-enforced source scanning finds no production
-  OS-selection cfg or native API import outside `src/platform/**`; only
-  necessary binary subsystem attrs and structurally excluded test fixtures
-  remain. The gate scans every Rust source, allows only three exact subsystem
-  attributes, and its fixture proves product markers are rejected while
-  comments and test items are ignored.
+  OS-selection cfg or native API import outside the reusable crate's private
+  adapters and necessary binary subsystem attrs. The gate scans every Rust
+  source, allows only exact structural exceptions, and its fixture proves
+  product markers are rejected while comments and test items are ignored.
 - [x] a repository boundary test fails when a new non-platform production
   source file imports OS-native crates or contains an OS-selection `cfg`
-- [x] `selected.rs` is the sole production adapter assembly point; the former
-  top-level Windows/Linux/macOS module trees are adapter-private `native/`
-  mechanisms, `platform/mod.rs` contains no production OS selection, and an
-  internal gate rejects selection cfg and native API markers elsewhere in
-  contracts or services
+- [x] the crate's `selected.rs` is the sole reusable adapter assembly point;
+  former root Windows/Linux/macOS native mechanism trees are deleted or moved
+  behind crate-private adapters, root product extensions contain no production
+  OS selection, and the internal gate rejects selection cfg and native API
+  markers elsewhere in contracts or facades
 - [x] all three platform adapters satisfy the same facade contract tests; a
   missing capability remains a typed unsupported result, never an implicit
   fallback. One host test loads all three OS-neutral adapter manifests and
@@ -207,7 +209,7 @@ The migration is complete only when all of the following are true:
 
 ## Shared contract
 
-- [ ] normalized input distinguishes physical key identity, logical key chord,
+- [x] normalized input distinguishes physical key identity, logical key chord,
   committed text, IME preedit/commit, pointer movement/buttons, wheel motion,
   resize, focus, and scale-factor changes
 - [x] text input is not reconstructed from physical key codes when the native

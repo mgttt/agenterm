@@ -453,12 +453,12 @@ track remains planned, but every declared dependency must still pass.
     boundaries in [Control Center](PRD_02_21_control_center.md),
     [Agent control plane](PRD_02_07_agent_control_plane.md), and
     [Decentralized network foundation](PRD_02_22_decentralized_network.md)
-- [ ] M11 / v0.1.12 Convergence and fast candidate promotion
-  - [ ] converge the v0.1.11 native IPC foundation across Windows named pipes
+- [~] M11 / v0.1.12 Convergence and fast candidate promotion
+  - [x] converge the v0.1.11 native IPC foundation across Windows named pipes
     and Linux/macOS Unix sockets: logical main/dev isolation, stale authority
     recovery, mixed-schema discovery and one shared resolver remain truthful
     under upgrade and rollback
-    - [~] native macOS 26.5 arm64 evidence (2026-07-31) passes the direct
+    - [x] native macOS 26.5 arm64 evidence (2026-07-31) passes the direct
       `native-ipc-smoke --ci-main-dev` public task in 1.60 seconds: logical
       main/dev and duplicate-authority isolation, owner/socket modes,
       `/tmp`/`/private/tmp` canonicalization, typed overlong-path and symlink
@@ -474,23 +474,24 @@ track remains planned, but every declared dependency must still pass.
       applicable published upgrade/rollback journeys in the six-cell matrix.
       This closes the matching-host compatibility receipt gap without erasing
       the separately listed destructive credential and legacy-client limits.
-  - [~] close the Linux/macOS main-workbench evidence gap with separate
+  - [x] close the Linux/macOS main-workbench evidence gap with separate
     matching-host receipts for no-activate launch, native activation truth,
     renderer-owned snapshot/PNG, asynchronous native clipboard paste and stale
     completion cancellation. The shared journey/task/CI ownership is integrated;
     Exact-SHA `b4f1622` run `30724960474` passed the complete journey on Linux
     x86_64 and both macOS architectures, closing this matching-host receipt leaf.
     Broader workspace follow-ups remain governed by the owning PRD.
-  - [ ] deepen the independent Control Center only through a useful read-only
-    Cockpit and complete platform evidence; Unix renderer-owned screenshots,
-    incompatible/renderer-failure cases and caller-instance selection close
-    before richer Workflow, Extensions or InfoHub content is promoted
-  - [ ] split fast feedback, exact-SHA candidate qualification and release
+  - [~] deepen the independent Control Center only through a useful read-only
+    Cockpit and complete platform evidence. Windows, Linux X11 and macOS native
+    lifecycle/renderer/caller-instance journeys are integrated and have matching-
+    host receipts; macOS physical pointer acceptance remains open, and richer
+    Workflow, Extensions or InfoHub content is not promoted by this slice
+  - [~] split fast feedback, exact-SHA candidate qualification and release
     promotion so a complete stress-inclusive qualification executes once per
     eligible candidate; tag publication verifies and promotes the previously
     qualified six-platform bytes without rebuilding or rerunning the complete
     desktop suite
-  - [ ] bind promotion to an exact commit, receipt, platform matrix, artifact
+  - [~] bind promotion to an exact commit, receipt, platform matrix, artifact
     hashes, SBOM and provenance; missing, stale or tampered candidate artifacts
     fail closed before a GitHub Release exists
   - [ ] measure queue, cache, compile, test, package, upload and promotion

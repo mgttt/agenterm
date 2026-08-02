@@ -198,8 +198,9 @@ Control Center is the product name; the executable family uses
   pointer automation as typed Unsupported instead of returning false success.
   The journey keeps TCC-authorized keyboard navigation positive and proves the
   pointer failure changes no CC/server/epoch/foreground state; it does not
-  claim physical-user pointer evidence. Final Linux positive and macOS physical
-  pointer acceptance remain open.
+  claim physical-user pointer evidence. Exact-SHA `9669326` run `30721636280`
+  closes the Linux positive receipt; macOS physical pointer acceptance remains
+  open.
   Exact-SHA run `30719411235` then passed that macOS input contract and exposed
   a later, independent reuse failure: the caller published the existing
   Control Center's focus-mailbox request successfully, then treated the
@@ -207,9 +208,8 @@ Control Center is the product name; the executable family uses
   Existing-window focus is now owned by the live window process on every
   platform; its bounded event-loop poll consumes the mailbox and invokes focus
   with the live winit window. Mailbox publication failures are returned as
-  `control_center_focus_request_failed` rather than silently ignored. A new
-  matching-host receipt is still required. Exact-SHA `ceb41a4` run
-  `30721132723` proved both macOS architectures compile and the x86_64 native
+  `control_center_focus_request_failed` rather than silently ignored. Exact-SHA
+  `ceb41a4` run `30721132723` proved both macOS architectures compile and the x86_64 native
   lifecycle, then exposed that the ARM64 incompatible-protocol fixture served
   only one connection: the renderer briefly observed `server_incompatible`
   before its next refresh truthfully became `server_unreachable`. The fixture
@@ -403,26 +403,27 @@ future promotion gates.
   dimensions, byte length and digest, and retains the successful image at
   `dist/evidence/control-center-live-cockpit.png`. Native macOS now retains
   equivalent renderer-owned structured evidence at the host's actual backing
-  scale; a separately recorded 2x sample proves Retina rendering. Linux remains
-  open.
+  scale; a separately recorded 2x sample proves Retina rendering. Exact-SHA
+  `9669326` run `30721636280` passed the Linux X11 renderer journey; broader
+  Wayland-native and packaged evidence remains separate follow-up work.
 - [ ] any distributed executable has its own size budget, hash, SBOM,
   provenance, startup measurement, capability catalog, and public black-box
   owner; it does not inflate `agenterm.exe`.
 
 ## v0.1.12 macOS convergence evidence
 
-- [~] native macOS 26.5 arm64 public task
+- [x] native macOS 26.5 arm64 public task
   `control-center-macos-smoke` passes in 5.01 seconds with isolated settings,
   workspace, instance registry, native runtime, logical `dev` authority, and
   typed cleanup. It proves the caller-selected Unix socket and exact server
   PID/epoch/context without starting a second server.
-- [~] one native Control Center PID survives repeated open, explicit focus,
+- [x] one native Control Center PID survives repeated open, explicit focus,
   no-activate, server kill, typed `server_unreachable`, malformed sibling
   `server_incompatible`, and same-scope replacement with a new PID/epoch.
   Typed close and forced renderer-process kill preserve the server and PTY;
   stale owner recovery creates one replacement projection and leaves no owned
   process, socket, registration, or request/result file.
-- [~] renderer-owned structured evidence and its retained PNG agree at the
+- [x] renderer-owned structured evidence and its retained PNG agree at the
   current display's actual backing scale. A recorded 2x sample is 1520x960
   physical pixels for the 760x480 logical Cockpit; the portable CI gate also
   accepts a truthful 1x virtual display instead of treating CPU architecture
@@ -432,7 +433,7 @@ future promotion gates.
   rather than collapsing them into an opaque composite assertion. The visible
   framebuffer displays the logical authority rather than an absolute socket
   path.
-- [~] native Linux now has a public X11/Wayland-aware lifecycle journey wired
+- [x] native Linux now has a public X11/Wayland-aware lifecycle journey wired
   to main CI: X11 requires caller-selected Unix IPC, compositor-observed
   no-activate/focus reuse, renderer-owned structured frame plus independently
   hashed PNG, server loss/new epoch, renderer kill/replacement, PTY isolation
@@ -453,11 +454,11 @@ future promotion gates.
   timeout and is the negative baseline; exact-SHA `9669326` run `30721636280`
   then passed the native Linux X11 journey and all six ordinary CI target jobs.
   Wayland native evidence and packaged evidence remain open.
-- [~] the Linux journey creates its isolated runtime as a direct `0700`
+- [x] the Linux journey creates its isolated runtime as a direct `0700`
   directory owned by the effective UID before binding the Unix endpoint; the
   smoke verifies both owner and mode instead of weakening the production IPC
-  `UnsafeEndpoint` boundary. This closes the hosted-runner umask failure once a
-  new matching-host CI receipt returns. The X11 focus witness is located by a
+  `UnsafeEndpoint` boundary. Exact-SHA `9669326` run `30721636280` closes the
+  hosted-runner umask failure. The X11 focus witness is located by a
   per-run unique visible title and then verified by exact window name; it no
   longer assumes the Xaw `xmessage` client publishes `_NET_WM_PID`, while the
   subsequent compositor activation and foreground assertions remain intact.
@@ -466,8 +467,8 @@ future promotion gates.
   so the newly mapped Control Center stole the independent witness focus. The
   Linux adapter now creates a no-activate window hidden, installs
   `_NET_WM_USER_TIME=0`, and only then maps it; inability to establish that
-  native invariant is a typed startup failure, not a best-effort fallback. A
-  matching-host receipt for this exact behavior remains required.
+  native invariant is a typed startup failure, not a best-effort fallback; the
+  same matching-host run passed this exact behavior.
 - [~] macOS now owns the matching Quartz exact-PID process-window adapter. It
   rejects zero/multiple layer-0 on-screen candidates, bounds Retina client
   coordinates, and uses `CGEventPostToPid` only after the non-interactive TCC
