@@ -140,6 +140,7 @@ agenterm-platform crate（复用层）
 - `src/platform/adapters/unix/frontend/input.rs`/`render.rs`/`new_terminal.rs` 已以 `platform` 能力 API 驱动快捷键与主终端 shell 命名，不再出现新的 OS/主机策略分支外泄。
   - `src/platform/adapters/windows/remote_frontend.rs` 继续承担 Win32 交互宿主职责，但未新增产品语义分支。
 - 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；本轮已完成 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs`、`script_process.rs` 的测试与兼容性路径适配收口，全部改为基于 `platform` 能力契约分支。
+- 本次同步进度（2026-08-02）：再向下沉 3 个测试分支（`script_process` 的 runtime 分支、`script_stdlib`/`working_context`/`workspace` 的 OS 条件），确保非平台层的运行时 `host` 判断继续收敛。
 - 下一步：
   - O1C 补强：
     - 将行为差异记录到 `plan/platform-ux-parity-evidence-matrix.md` 的 P0/P1/P2 回归条目，并补齐 GUI/CLI 双端最小冒烟证据脚本的证据汇聚策略。
