@@ -100,6 +100,20 @@ pub(crate) fn frontend_host() -> FrontendHost {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum WorkspaceLayoutKind {
+    WindowsFlat,
+    DirectoryByScope,
+}
+
+pub(crate) fn workspace_layout_kind() -> WorkspaceLayoutKind {
+    if is_windows_host() {
+        WorkspaceLayoutKind::WindowsFlat
+    } else {
+        WorkspaceLayoutKind::DirectoryByScope
+    }
+}
+
 /// Capability surface an adapter may expose (capability-oriented, not one
 /// global `OsLayer` object).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -266,7 +280,7 @@ pub(crate) fn shell_command_for_host<'a>(windows_command: &'a str, unix_command:
 }
 
 pub(crate) fn workspace_path_uses_windows_flat_layout() -> bool {
-    is_windows_host()
+    matches!(workspace_layout_kind(), WorkspaceLayoutKind::WindowsFlat)
 }
 
 pub(crate) fn is_macos_host() -> bool {

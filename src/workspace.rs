@@ -72,7 +72,10 @@ mod tests {
 
     #[test]
     fn unix_default_workspace_contains_workspaces_component() {
-        if crate::platform::workspace_path_uses_windows_flat_layout() {
+        if matches!(
+            crate::platform::workspace_layout_kind(),
+            crate::platform::WorkspaceLayoutKind::WindowsFlat
+        ) {
             return;
         }
         let default = default_workspace_path();
