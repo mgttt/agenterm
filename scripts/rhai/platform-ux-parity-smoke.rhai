@@ -126,14 +126,61 @@ let evidence_profiles = [
     }
 ];
 
-fn has_emitted_evidence(emitted, evidence_id) {
-    let hit = false;
-    for entry in emitted {
-        if entry == evidence_id {
-            hit = true;
-        }
+fn init_evidence_states(profiles) {
+    let states = #{
+        failed: false
+    };
+    for profile in profiles {
+        states[profile.id] = #{
+            executed: false,
+            failed: false,
+            root_cause: "",
+            observed: false
+        };
     }
-    hit
+    states
+}
+
+fn set_evidence_state(states, evidence_id, failure_message) {
+    let has = states.contains(evidence_id);
+    if !has {
+        return states;
+    }
+    if failure_message == () {
+        states[evidence_id].executed = true;
+        states[evidence_id].failed = false;
+        states[evidence_id].root_cause = "";
+        states[evidence_id].observed = true;
+    } else {
+        states[evidence_id].executed = true;
+        states[evidence_id].failed = true;
+        states[evidence_id].root_cause = classify_failure_root(failure_message);
+        states[evidence_id].observed = true;
+        states.failed = true;
+    }
+    states
+}
+
+fn mark_evidence_state(states, evidence_ids, failure_message) {
+    let updated = states;
+    for evidence_id in evidence_ids {
+        updated = set_evidence_state(updated, evidence_id, failure_message);
+    }
+    updated
+}
+
+fn aggregate_failure_message(failure_messages) {
+    if failure_messages.len == 0 {
+        return "";
+    }
+    let joined = "";
+    for message in failure_messages {
+        if joined != "" {
+            joined += "\n";
+        }
+        joined += message;
+    }
+    joined
 }
 
 fn classify_failure_root(failure) {
@@ -165,33 +212,39 @@ fn classify_failure_root(failure) {
     "bug/unknown"
 }
 
-fn platform_state_for(profile, run_platform, emitted, failure) {
+fn platform_state_for(profile, run_platform, emitted) {
     let pending = "not-executed-yet";
-    let emitted_for_profile = has_emitted_evidence(emitted, profile.id);
+    let emitted_for_profile = emitted.contains(profile.id) && emitted[profile.id].executed;
     let windows_state = if !profile.windows_supported {
         "Unsupported"
-    } else if run_platform == "windows" && failure == "" && emitted_for_profile {
+    } else if run_platform == "windows" && emitted_for_profile && !emitted[profile.id].failed {
         "Supported"
-    } else if run_platform == "windows" && failure != "" {
+    } else if run_platform == "windows" && emitted_for_profile && emitted[profile.id].failed {
         "Failed"
+    } else if run_platform == "windows" && !emitted_for_profile {
+        "not-executed-yet"
     } else {
         pending
     };
     let linux_state = if !profile.linux_supported {
         "Unsupported"
-    } else if run_platform == "linux" && failure == "" && emitted_for_profile {
+    } else if run_platform == "linux" && emitted_for_profile && !emitted[profile.id].failed {
         "Supported"
-    } else if run_platform == "linux" && failure != "" {
+    } else if run_platform == "linux" && emitted_for_profile && emitted[profile.id].failed {
         "Failed"
+    } else if run_platform == "linux" && !emitted_for_profile {
+        "not-executed-yet"
     } else {
         pending
     };
     let macos_state = if !profile.macos_supported {
         "Unsupported"
-    } else if run_platform == "macos" && failure == "" && emitted_for_profile {
+    } else if run_platform == "macos" && emitted_for_profile && !emitted[profile.id].failed {
         "Supported"
-    } else if run_platform == "macos" && failure != "" {
+    } else if run_platform == "macos" && emitted_for_profile && emitted[profile.id].failed {
         "Failed"
+    } else if run_platform == "macos" && !emitted_for_profile {
+        "not-executed-yet"
     } else {
         pending
     };
@@ -199,21 +252,21 @@ fn platform_state_for(profile, run_platform, emitted, failure) {
     let windows_root = if windows_state == "Unsupported" {
         profile.unsupported_root_cause
     } else if windows_state == "Failed" {
-        classify_failure_root(failure)
+        emitted[profile.id].root_cause
     } else {
         ""
     };
     let linux_root = if linux_state == "Unsupported" {
         profile.unsupported_root_cause
     } else if linux_state == "Failed" {
-        classify_failure_root(failure)
+        emitted[profile.id].root_cause
     } else {
         ""
     };
     let macos_root = if macos_state == "Unsupported" {
         profile.unsupported_root_cause
     } else if macos_state == "Failed" {
-        classify_failure_root(failure)
+        emitted[profile.id].root_cause
     } else {
         ""
     };
@@ -228,7 +281,7 @@ fn platform_state_for(profile, run_platform, emitted, failure) {
     }
 }
 
-fn write_matrix_reports(context, platform, emitted, failure, emit_matrix, profiles) {
+fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profiles) {
     if !emit_matrix {
         return;
     }
@@ -246,7 +299,7 @@ fn write_matrix_reports(context, platform, emitted, failure, emit_matrix, profil
 
     let matrix_result = [];
     for profile in profiles {
-        let per_platform = platform_state_for(profile, platform, emitted, failure);
+        let per_platform = platform_state_for(profile, platform, evidence_states);
         let row_state = if platform == "windows" {
             per_platform.windows
         } else if platform == "linux" {
@@ -296,7 +349,7 @@ fn write_matrix_reports(context, platform, emitted, failure, emit_matrix, profil
             "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
         ];
         for profile in profiles {
-            let per_platform = platform_state_for(profile, platform, emitted, failure);
+        let per_platform = platform_state_for(profile, platform, evidence_states);
             let row_state = if platform == "windows" {
                 per_platform.windows
             } else if platform == "linux" {
@@ -401,13 +454,6 @@ fn run_script_task(context, script_bin, repository, task_file, task_args, task_l
     return output;
 }
 
-fn emit(context, declared, id, observed_evidence) {
-    test_harness::emit_evidence(context, declared, id);
-    let observed = observed_evidence;
-    observed.push(id);
-    observed
-}
-
 fn parse_platform_args(positional_args) {
     let args_len = positional_args.len;
     require(args_len >= 4, "expected: REPO GUI_EXE [SCRIPT_EXE] CLI_EXE PLATFORM");
@@ -441,6 +487,40 @@ fn parse_platform_args(positional_args) {
     short
 }
 
+fn execute_phase(
+    context,
+    runtime_script,
+    repository,
+    task_file,
+    task_args,
+    task_label,
+    declared_evidence,
+    evidence_ids,
+    evidence_states
+) {
+    try {
+        run_script_task(
+            context,
+            runtime_script,
+            repository,
+            task_file,
+            task_args,
+            task_label
+        );
+        for evidence_id in evidence_ids {
+            if evidence_id != "" {
+                test_harness::emit_evidence(context, declared_evidence, evidence_id);
+                evidence_states = mark_evidence_state(evidence_states, [evidence_id], ());
+            }
+        }
+        return #{ success: true, error: (), evidence_states: evidence_states };
+    } catch (error) {
+        let failure = error.to_string();
+        let updated = mark_evidence_state(evidence_states, evidence_ids, failure);
+        return #{ success: false, error: failure, evidence_states: updated };
+    }
+}
+
 let parsed = parse_platform_args(positional_args);
 let repository = parsed.repository;
 let gui_exe = parsed.gui_exe;
@@ -458,82 +538,98 @@ require(std::fs::exists(runtime_script), "platform_script_missing");
 
 let context = test_harness::new_context(repository, "platform-ux-parity");
 let owned_children = [];
-let failure = "";
-let emitted = [];
+let evidence_states = init_evidence_states(evidence_profiles);
+let failure_messages = [];
+let succeeded = true;
 
-let succeeded = false;
+print("STEP startup contract and first-window behavior");
+let startup_evidence = ["ux-parity.startup", "ux-parity.startup-title"];
+let startup_result = execute_phase(
+    context,
+    runtime_script,
+    repository,
+    "startup-smoke",
+    [gui_exe, cli_exe, "1000"],
+    "startup",
+    declared_evidence,
+    startup_evidence,
+    evidence_states
+);
+if !startup_result.success {
+    succeeded = false;
+    failure_messages.push(startup_result.error);
+}
+evidence_states = startup_result.evidence_states;
 
-try {
-    print("STEP startup contract and first-window behavior");
-    run_script_task(
+print("STEP wake contract");
+let wake_result = execute_phase(
+    context,
+    runtime_script,
+    repository,
+    "wake-smoke",
+    [gui_exe, cli_exe],
+    "wake-contract",
+    declared_evidence,
+    ["ux-parity.wake-coalescing"],
+    evidence_states
+);
+if !wake_result.success {
+    succeeded = false;
+    failure_messages.push(wake_result.error);
+}
+evidence_states = wake_result.evidence_states;
+
+if platform == "windows" {
+    print("STEP windows remote-ui behavior (replaceable client + selection + clipboard)");
+    let remote_result = execute_phase(
         context,
         runtime_script,
         repository,
-        "startup-smoke",
-        [gui_exe, cli_exe, "1000"],
-        "startup"
-    );
-    emitted = emit(context, declared_evidence, "ux-parity.startup", emitted);
-    emitted = emit(context, declared_evidence, "ux-parity.startup-title", emitted);
-    run_script_task(
-        context,
-        runtime_script,
-        repository,
-        "wake-smoke",
+        "remote-ui-smoke",
         [gui_exe, cli_exe],
-        "wake-contract"
-    );
-    emitted = emit(context, declared_evidence, "ux-parity.wake-coalescing", emitted);
-
-    if platform == "windows" {
-        print("STEP windows remote-ui behavior (replaceable client + selection + clipboard)");
-        run_script_task(
-            context,
-            runtime_script,
-            repository,
-            "remote-ui-smoke",
-            [gui_exe, cli_exe],
-            "remote-ui"
-        );
-        emitted = emit(
-            context,
-            declared_evidence,
+        "remote-ui",
+        declared_evidence,
+        [
             "ux-parity.remote-ui.replaceable-client",
-            emitted
-        );
-        emitted = emit(
-            context,
-            declared_evidence,
             "ux-parity.remote-ui.selection",
-            emitted
-        );
-        emitted = emit(context, declared_evidence, "ux-parity.window-focus-contract", emitted);
-    } else {
-        let workbench_evidence = "ux-parity." + platform + ".unix-frontend.workbench";
-        let clipboard_evidence = "ux-parity." + platform + ".unix-frontend.clipboard";
-        print("STEP unix frontend behavior by platform (workbench + focus contract)");
-        run_script_task(
-            context,
-            runtime_script,
-            repository,
-            "unix-frontend-" + platform + "-smoke",
-            [gui_exe, cli_exe, "--platform", platform],
-            "unix-frontend"
-        );
-        emitted = emit(context, declared_evidence, workbench_evidence, emitted);
-        emitted = emit(context, declared_evidence, clipboard_evidence, emitted);
-        emitted = emit(context, declared_evidence, "ux-parity.window-focus-contract", emitted);
+            "ux-parity.window-focus-contract"
+        ],
+        evidence_states
+    );
+    if !remote_result.success {
+        succeeded = false;
+        failure_messages.push(remote_result.error);
     }
+    evidence_states = remote_result.evidence_states;
+} else {
+    let workbench_evidence = "ux-parity." + platform + ".unix-frontend.workbench";
+    let clipboard_evidence = "ux-parity." + platform + ".unix-frontend.clipboard";
+    print("STEP unix frontend behavior by platform (workbench + focus contract)");
+    let unix_result = execute_phase(
+        context,
+        runtime_script,
+        repository,
+        "unix-frontend-" + platform + "-smoke",
+        [gui_exe, cli_exe, "--platform", platform],
+        "unix-frontend",
+        declared_evidence,
+        [workbench_evidence, clipboard_evidence, "ux-parity.window-focus-contract"],
+        evidence_states
+    );
+    if !unix_result.success {
+        succeeded = false;
+        failure_messages.push(unix_result.error);
+    }
+    evidence_states = unix_result.evidence_states;
+}
 
-    succeeded = true;
-} catch (error) {
-    failure = error.to_string();
-};
+let failure = aggregate_failure_message(failure_messages);
+ 
+
 write_matrix_reports(
     context,
     platform,
-    emitted,
-    failure,
+    evidence_states,
     emit_matrix,
     evidence_profiles
 );
