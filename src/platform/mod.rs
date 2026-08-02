@@ -38,6 +38,10 @@ pub(crate) use policy::paths::{
 };
 pub(crate) use policy::runtime::hosted_script_worker_available;
 #[allow(unused_imports)]
+pub(crate) use policy::script_http::{
+    script_http_tls_config, script_http_tls_provider, script_http_tls_root_certs_are_expected,
+};
+#[allow(unused_imports)]
 pub(crate) use policy::workspace::{WorkspaceLayoutKind, workspace_layout_kind};
 
 pub(crate) use agenterm_platform::console_interrupt::{
@@ -186,41 +190,6 @@ pub(crate) fn project_capability_status(
             code: failed_code,
             message: "platform capability returned an unknown status".to_owned(),
         },
-    }
-}
-
-pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static str> {
-    let (provider, roots) = if is_windows_host() {
-        (
-            ureq::tls::TlsProvider::NativeTls,
-            ureq::tls::RootCerts::PlatformVerifier,
-        )
-    } else if is_unix_host() {
-        (ureq::tls::TlsProvider::Rustls, ureq::tls::RootCerts::WebPki)
-    } else {
-        return Err("http_tls_backend_unsupported");
-    };
-    Ok(ureq::tls::TlsConfig::builder()
-        .provider(provider)
-        .root_certs(roots)
-        .build())
-}
-
-#[allow(dead_code)]
-pub(crate) fn script_http_tls_provider() -> ureq::tls::TlsProvider {
-    if is_windows_host() {
-        ureq::tls::TlsProvider::NativeTls
-    } else {
-        ureq::tls::TlsProvider::Rustls
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn script_http_tls_root_certs_are_expected(root_certs: &ureq::tls::RootCerts) -> bool {
-    if is_windows_host() {
-        matches!(root_certs, ureq::tls::RootCerts::PlatformVerifier)
-    } else {
-        matches!(root_certs, ureq::tls::RootCerts::WebPki)
     }
 }
 
