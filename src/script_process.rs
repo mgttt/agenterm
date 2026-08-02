@@ -1632,68 +1632,37 @@ mod tests {
 
     #[test]
     fn child_id_remains_stable_after_wait() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let c = std::process::command("cmd.exe");
-                c.args(["/d", "/s", "/c", "exit /b 0"]);
-                let child = c.start();
-                let before = child.id;
-                child.wait_with_output();
-                let facts = child.platform_facts;
-                #{ before: before, after: child.id, state: child.state,
-                   window_supported: facts.top_level_window_supported,
-                   window_present: facts.top_level_window_present,
-                   window_id: facts.top_level_window_id }
-            "#
-        } else {
-            r#"
-                let c = std::process::command("/bin/sh");
-                c.args(["-c", "exit 0"]);
-                let child = c.start();
-                let before = child.id;
-                child.wait_with_output();
-                let facts = child.platform_facts;
-                #{ before: before, after: child.id, state: child.state,
-                   window_supported: facts.top_level_window_supported,
-                   window_present: facts.top_level_window_present,
-                   window_id: facts.top_level_window_id }
-            "#
-        };
-        let result = engine().eval::<rhai::Map>(source).unwrap();
-        assert!(result["before"].as_int().unwrap() > 0);
-        assert_eq!(
-            result["before"].as_int().unwrap(),
-            result["after"].as_int().unwrap()
-        );
-        assert_eq!(result["state"].clone().into_string().unwrap(), "exited");
-        assert_eq!(
-            result["window_supported"].as_bool().unwrap(),
-            crate::platform::is_windows_host()
-        );
-        assert!(!result["window_present"].as_bool().unwrap());
-        assert_eq!(result["window_id"].as_int().unwrap(), 0);
+        let mut command = shell_wrapped_process_command("exit", "exit", &[]);
+        command.arguments.extend(["/b".to_string(), "0".to_string()]);
+        let mut child = command_start(&mut command).unwrap();
+        let before = child_id(&mut child).unwrap();
+        child_wait_with_output(&mut child).unwrap();
+        let after = child_id(&mut child).unwrap();
+        let facts = child_platform_facts(&mut child).unwrap();
+        let state = child_state(&mut child).unwrap();
+        assert!(before > 0);
+        assert_eq!(before, after);
+        assert_eq!(state, "exited");
+        assert_eq!(facts.top_level_window_supported, crate::platform::is_windows_host());
+        assert!(!facts.top_level_window_present);
+        assert_eq!(facts.top_level_window_id, 0);
     }
 
     #[test]
     fn command_timeout_is_typed() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let c = std::process::command("cmd.exe");
-                c.args(["/d", "/s", "/c", "ping -n 6 127.0.0.1 >nul"]);
-                c.timeout(std::time::Duration::from_millis(10));
-                c.output()
-            "#
+        let mut command = shell_wrapped_process_command(
+            "ping",
+            "sleep",
+            &[],
+        );
+        if crate::platform::is_windows_host() {
+            command.arguments.extend(["-n".to_string(), "6".to_string(), "127.0.0.1".to_string()]);
         } else {
-            r#"
-                let c = std::process::command("/bin/sh");
-                c.args(["-c", "sleep 5"]);
-                c.timeout(std::time::Duration::from_millis(10));
-                c.output()
-            "#
-        };
+            command.arguments.push("5".to_string());
+        }
+        command.timeout = Duration::from_millis(10);
         assert!(
-            engine()
-                .eval::<ScriptOutput>(source)
+            command_output(&mut command)
                 .unwrap_err()
                 .to_string()
                 .contains("process_timeout")
@@ -1801,61 +1770,48 @@ mod tests {
 
     #[test]
     fn child_streams_are_live_bounded_and_preserve_final_capture() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let c = std::process::command("cmd.exe");
-                c.args(["/d", "/s", "/c", "<nul set /p =abcdef"]);
-                let child = c.start();
-                let stream = child.stdout;
-                let first = stream.read(2,
-                    std::time::Duration::from_secs(1)).to_text();
-                let rest = stream.collect(16,
-                    std::time::Duration::from_secs(1)).to_text();
-                let output = child.wait_with_output();
-                #{first: first, rest: rest, final: output.stdout_text(),
-                  stream_complete: stream.complete, output_complete: output.complete}
-            "#
-        } else {
-            r#"
-                let c = std::process::command("/bin/sh");
-                c.args(["-c", "printf abcdef"]);
-                let child = c.start();
-                let stream = child.stdout;
-                let first = stream.read(2,
-                    std::time::Duration::from_secs(1)).to_text();
-                let rest = stream.collect(16,
-                    std::time::Duration::from_secs(1)).to_text();
-                let output = child.wait_with_output();
-                #{first: first, rest: rest, final: output.stdout_text(),
-                  stream_complete: stream.complete, output_complete: output.complete}
-            "#
-        };
-        let result = engine().eval::<rhai::Map>(source).unwrap();
-        assert_eq!(result["first"].clone().into_string().unwrap(), "ab");
-        assert_eq!(result["rest"].clone().into_string().unwrap(), "cdef");
-        assert_eq!(result["final"].clone().into_string().unwrap(), "abcdef");
-        assert!(result["stream_complete"].as_bool().unwrap());
-        assert!(result["output_complete"].as_bool().unwrap());
+        let mut command = shell_wrapped_process_command(
+            "<nul set /p =abcdef",
+            "printf abcdef",
+            &[],
+        );
+        let mut child = command_start(&mut command).unwrap();
+        let mut stream = child_stdout(&mut child).unwrap();
+        let mut scope = rhai::Scope::new();
+        scope.push("stream", stream.clone());
+        let mut engine = engine();
+        let first = engine
+            .eval_with_scope::<String>(
+                &mut scope,
+                "stream.read(2, std::time::Duration::from_secs(1)).to_text()",
+            )
+            .unwrap();
+        let rest = engine
+            .eval_with_scope::<String>(
+                &mut scope,
+                "stream.collect(16, std::time::Duration::from_secs(1)).to_text()",
+            )
+            .unwrap();
+        let stream_complete = engine
+            .eval_with_scope::<bool>(&mut scope, "stream.complete")
+            .unwrap();
+        let output = child_wait_with_output(&mut child).unwrap();
+        assert_eq!(first, "ab");
+        assert_eq!(rest, "cdef");
+        assert_eq!(output.stdout.0, b"abcdef");
+        assert!(stream_complete);
+        assert!(output.complete);
     }
 
     #[test]
     fn truncated_process_capture_is_not_reported_as_complete() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let c = std::process::command("cmd.exe");
-                c.args(["/d", "/s", "/c", "<nul set /p =abcdefgh"]);
-                c.capture_limit(4);
-                c.output()
-            "#
-        } else {
-            r#"
-                let c = std::process::command("/bin/sh");
-                c.args(["-c", "printf abcdefgh"]);
-                c.capture_limit(4);
-                c.output()
-            "#
-        };
-        let output = engine().eval::<ScriptOutput>(source).unwrap();
+        let mut command = shell_wrapped_process_command(
+            "<nul set /p =abcdefgh",
+            "printf abcdefgh",
+            &[],
+        );
+        command_capture_limit(&mut command, 4).unwrap();
+        let output = command_output(&mut command).unwrap();
         assert_eq!(output.stdout.0, b"abcd");
         assert!(output.truncated);
         assert!(!output.complete);
