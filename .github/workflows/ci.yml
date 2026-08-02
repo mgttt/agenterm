@@ -84,6 +84,21 @@ jobs:
       - name: Run platform Unix tests
         run: cargo test --locked -p agenterm-platform --all-features --target ${{ matrix.target }}
 
+  platform-locking-minimal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Run native locking minimal-feature tests
+        run: >-
+          cargo test --locked -p agenterm-platform
+          --no-default-features --features locking
+
   windows:
     runs-on: windows-latest
     steps:
