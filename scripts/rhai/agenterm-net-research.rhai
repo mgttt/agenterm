@@ -61,7 +61,11 @@ require(
         && receipt.result.process.orphan_cleanup_armed
         && receipt.result.process.forced_cleanup_reaped
         && receipt.result.process.forced_cleanup_pid > 0
-        && receipt.result.process.listener_pid != receipt.result.process.connector_pid,
+        && receipt.result.process.listener_pid != receipt.result.process.connector_pid
+        && receipt.result.process.listener_peer_id != receipt.result.process.connector_peer_id
+        && receipt.result.process.handshake
+        && receipt.result.process.bounded_ping
+        && receipt.result.process.listener_lifecycle_observed,
     "agenterm_net_process_isolation"
 );
 require(

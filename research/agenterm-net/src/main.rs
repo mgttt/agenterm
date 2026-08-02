@@ -109,6 +109,15 @@ struct WorkerResult {
     resources: ProcessResourceSample,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+struct ListenerResult {
+    event: String,
+    peer_id: String,
+    remote_peer_id: String,
+    pid: u32,
+    resources: ProcessResourceSample,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ProcessResourceSample {
     peak_rss_bytes: Option<u64>,
@@ -137,6 +146,7 @@ struct ProcessEvidence {
     address: String,
     handshake: bool,
     bounded_ping: bool,
+    listener_lifecycle_observed: bool,
     child_exit_clean: bool,
     orphan_cleanup_armed: bool,
     forced_cleanup_pid: u32,
@@ -747,6 +757,7 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
     let deadline = tokio::time::sleep(phase_deadline);
     tokio::pin!(deadline);
     let mut announced = false;
+    let mut connected_peer = None;
     loop {
         tokio::select! {
             _ = &mut deadline => return Err("listener deadline exceeded".to_string()),
@@ -764,21 +775,30 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
                     println!("{}", serde_json::to_string(&ready).map_err(|e| e.to_string())?);
                     announced = true;
                 }
-                SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event.result {
-                    Ok(rtt) => {
-                        let result = WorkerResult {
-                            event: "ping".to_string(),
-                            peer_id: peer_id.to_string(),
-                            remote_peer_id: event.peer.to_string(),
-                            rtt_us: rtt.as_micros(),
-                            pid: std::process::id(),
-                            resources: sample_process_resources(),
-                        };
-                        println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
-                        return Ok(());
+                SwarmEvent::ConnectionEstablished { peer_id: remote_peer, .. } => {
+                    if connected_peer.is_some_and(|existing| existing != remote_peer) {
+                        return Err("listener accepted an unexpected second peer".to_string());
                     }
-                    Err(error) => return Err(format!("ping with {} failed: {error}", event.peer)),
-                },
+                    connected_peer = Some(remote_peer);
+                    deadline
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + phase_deadline);
+                }
+                SwarmEvent::ConnectionClosed { peer_id: remote_peer, num_established: 0, .. }
+                    if connected_peer == Some(remote_peer) =>
+                {
+                    let mut resources = sample_process_resources();
+                    resources.scope = "per listener after authenticated connection close; RSS is OS high-water mark, threads are observed".to_string();
+                    let result = ListenerResult {
+                        event: "connection-closed".to_string(),
+                        peer_id: peer_id.to_string(),
+                        remote_peer_id: remote_peer.to_string(),
+                        pid: std::process::id(),
+                        resources,
+                    };
+                    println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
+                    return Ok(());
+                }
                 _ => {}
             }
         }
@@ -877,13 +897,17 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
             .ok_or_else(|| "connector stdout unavailable".to_string())?,
     );
     let connector_result: WorkerResult = receive_json(&connector_rx, deadline, "connector ping")?;
-    let listener_result: WorkerResult = receive_json(&listener_rx, deadline, "listener ping")?;
+    let listener_result: ListenerResult =
+        receive_json(&listener_rx, deadline, "listener connection close")?;
     if connector_result.event != "ping"
-        || listener_result.event != "ping"
+        || listener_result.event != "connection-closed"
         || connector_result.remote_peer_id != ready.peer_id
+        || listener_result.peer_id != ready.peer_id
         || listener_result.remote_peer_id != connector_result.peer_id
+        || listener_result.pid != listener_pid
+        || connector_result.pid != connector_pid
     {
-        return Err("cross-process identity or ping receipt mismatch".to_string());
+        return Err("cross-process identity, connection, or ping receipt mismatch".to_string());
     }
     let process_samples = vec![
         listener_result.resources.clone(),
@@ -918,6 +942,7 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
             address: ready.address,
             handshake: true,
             bounded_ping: true,
+            listener_lifecycle_observed: true,
             child_exit_clean: listener_clean && connector_clean,
             orphan_cleanup_armed: true,
             forced_cleanup_pid,

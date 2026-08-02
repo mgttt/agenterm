@@ -71,8 +71,10 @@ fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
     assert_eq!(value["deadline_ms"], 30_000);
     let process = &value["result"]["process"];
     assert_ne!(process["listener_pid"], process["connector_pid"]);
+    assert_ne!(process["listener_peer_id"], process["connector_peer_id"]);
     assert_eq!(process["handshake"], true);
     assert_eq!(process["bounded_ping"], true);
+    assert_eq!(process["listener_lifecycle_observed"], true);
     assert_eq!(process["child_exit_clean"], true);
     assert_eq!(process["orphan_cleanup_armed"], true);
     assert_eq!(process["forced_cleanup_reaped"], true);
@@ -81,7 +83,20 @@ fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
     assert_eq!(resources["measurement_complete"], true);
     assert!(resources["peak_child_rss_bytes"].as_u64().unwrap() > 0);
     assert!(resources["max_observed_child_threads"].as_u64().unwrap() > 0);
-    assert_eq!(resources["process_samples"].as_array().unwrap().len(), 2);
+    let samples = resources["process_samples"].as_array().unwrap();
+    assert_eq!(samples.len(), 2);
+    assert!(
+        samples[0]["scope"]
+            .as_str()
+            .unwrap()
+            .contains("authenticated connection close")
+    );
+    assert!(
+        samples[1]["scope"]
+            .as_str()
+            .unwrap()
+            .contains("successful ping")
+    );
     assert_eq!(value["result"]["block"]["round_trip_verified"], true);
     assert_eq!(value["result"]["block"]["corruption_rejected"], true);
     assert_eq!(value["result"]["block"]["store_removed"], true);

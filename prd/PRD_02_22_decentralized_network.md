@@ -231,8 +231,9 @@ orphan-free cleanup. The measured Windows release executable is 1,406,976
 bytes; cold/hot release builds were 88.271/25.766 seconds. Peak RSS/thread
 evidence is now reported per communicating worker: Windows uses process-memory
 counters plus Toolhelp, Linux uses `/proc/self/status`, and macOS uses
-`getrusage` plus `ps thcount`. RSS is the OS high-water mark; threads are
-observed at successful ping. The self-test also starts a third live listener
+`getrusage` plus `ps thcount`. RSS is the OS high-water mark; the connector is
+sampled at successful ping and the listener after the authenticated connection
+closes. The self-test also starts a third live listener
 and intentionally cancels and reaps it, so forced cleanup is receipt-owned
 rather than inferred from a guard being armed. Six-target runtime evidence,
 accepted load ceilings, complete malformed-CID coverage, and a live
@@ -256,13 +257,19 @@ the executable's experimental or non-packaged status.
 Follow-up exact-SHA `cf420d0` run `30726126583` proved the phase reset and
 typed diagnostic were effective: the failure moved from an exhausted listener
 budget hidden as a missing field to the connector's explicit fresh
-`connector ping deadline exceeded`. That second matching-host result shows a
-10-second phase is itself below the default-parallel multi-process fixture's
-loaded scheduling budget. Only the public research self-test now declares a
-30-second per-phase deadline in its receipt; ordinary commands retain the
-10-second default, protocol timeout remains inside each owner phase, and Cargo/
-Rhai outer deadlines remain unchanged and bounded. The next Linux receipt must
-prove this measured budget under the same default-parallel topology.
+`connector ping deadline exceeded`. The provisional 30-second public phase
+budget made the next diagnosis observable, but exact-SHA `a56144b` run
+`30726492135` disproved scheduling budget as the root cause: the connector
+completed its outbound Ping before the parent received a typed listener
+deadline after 30.12 seconds. `libp2p-ping 0.47` answers inbound Ping without
+emitting a behaviour-success event for that answer; the old fixture therefore
+waited unnecessarily for the listener to initiate a second outbound Ping.
+The fixture now treats the connector's bounded round trip as the Ping proof,
+records the listener's authenticated connection lifecycle, cross-checks both
+PIDs and PeerIds, and samples both workers before clean exit. The exact public
+self-test completes locally in 343 ms with this evidence. Ordinary commands
+retain the 10-second default and the public receipt remains explicitly bounded
+at 30 seconds; a succeeding Linux matching-host receipt is still required.
 
 ## Gates before stable service integration
 

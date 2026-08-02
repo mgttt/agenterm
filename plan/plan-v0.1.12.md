@@ -1021,12 +1021,16 @@ typed fail；parent 先识别 `agenterm-net/error/v1`，不再把合法 child fa
 decoder、15 unit + 14 默认并行 CLI tests 与 owning Rhai task 均已通过；仍等待后继 Linux
 matching-host 回执，且不因此把 experimental binary 升为 stable/release asset。
 
-后继 exact-SHA `cf420d0` run `30726126583` 证明第一修复有效但 10 秒预算本身不足：
-listener 不再超时、child error 保留 typed code/message，失败精确移动为拥有完整新 phase 的
-`connector ping deadline exceeded`。因此仅 public research self-test 把每阶段显式预算校准为
-30 秒并写入 receipt；其他命令继续 10 秒，libp2p timeout 仍短于 owning phase，Cargo 300 秒/
-Rhai 120 秒 outer budget 不变。下一 Linux matching-host run 必须在相同默认并行拓扑下通过，
-不能用本地快速成功或串行测试代替。
+后继 exact-SHA `cf420d0` run `30726126583` 证明第一修复有效：listener 不再先耗尽预算、
+child error 保留 typed code/message，失败精确移动为 connector fresh phase。随后 `a56144b`
+run `30726492135` 在 30 秒预算下证明 connector 已成功 Ping、listener 却仍等待到 30.12 秒，
+从而否定“仅仅负载慢”的假设。白箱核对 `libp2p-ping 0.47` 后确认：入站 Ping 会被回答但
+不产生 behaviour success event；旧 fixture 错把 listener 再主动发一个 Ping 当作端到端成功的
+必要条件。新证据模型由 connector 的 bounded Ping 证明真实往返，同时由 listener 的同一
+PeerId connection lifecycle、双方 PID/PeerId 交叉匹配和 clean exit 证明监听侧归属；本地公开
+self-test 在 343ms 完成。30 秒仍作为 public receipt 的明确上限而非性能目标；其他命令继续
+10 秒，Cargo 300 秒/Rhai 120 秒 outer budget 不变。下一 Linux matching-host run 必须在相同
+默认并行拓扑下通过，不能用本地快速成功或串行测试代替。
 
 ## 九、系统 WebView / Tauri-compatible spike
 
