@@ -134,6 +134,57 @@ agenterm-platform crate（复用层）
 │  ├─ 对齐目标：同场景同字段差异最小化，差异只发生在能力缺口
 │  ├─ 当前状态：行为主逻辑趋同，残差收敛交由 O1B/O1C 场景脚本
 │  └─ 回退：以回归脚本证据为唯一判定，禁止“口头对齐”放行
+```
+
+## OS×Windows/macOS 统一分支树（当前可验证）
+
+```text
+src/frontend.rs
+├─ 统一入口：run_gui_entry / run_gui_entry_result
+│  ├─ Windows：platform/adapters/windows/frontend.rs
+│  ├─ Unix(macos/linux)：platform/adapters/unix/frontend/mod.rs
+│  └─ 归一：GUI 参数解析与启动失败语义已统一
+├─ 统一入口：request_gui_wake / request_gui_wake_best_effort
+│  ├─ Windows：窗口消息唤醒路径
+│  └─ Unix：wake proxy 路径
+└─ 约束：OS 分支只到 platform 层，UI 产品动作仅消费统一快照与事件
+
+src/ui_clipboard.rs + src/ui_client.rs + src/ui_interaction.rs + src/server_app.rs
+├─ 粘贴（paste）链路统一
+│  ├─ 文本规范化（normalize_terminal_paste）为共享
+│  ├─ 帧封装（terminal_paste_bytes）为共享
+│  ├─ 交互协议（ui-interact paste）为共享
+│  └─ 服务器动作（TerminalPasted 事件）为共享
+└─ 仅在 host 适配层保留：clipboard API 调度/线程模型/输入焦点约束
+
+src/platform/adapters/windows/remote_frontend.rs
+├─ 专属能力：
+│  ├─ Raw input、窗口消息、系统菜单、窗口命令映射
+│  ├─ Win32 控件焦点与拖拽语义
+│  └─ 仍可继续承载 host 特性，不承载产品策略分支
+├─ 与 paste 相关的 host 逻辑：
+│  ├─ clipboard::get_text + async worker + pasted target 状态校验
+│  └─ 发送后仍走 server/app 统一语义
+
+src/platform/adapters/unix/frontend/mod.rs
+├─ 专属能力：
+│  ├─ winit/窗口生命周期、渲染、输入归一化、screenshot 约束
+│  └─ 平台字体/渲染特性作为测试和能力契约输入
+└─ 与 paste 相关的 host 逻辑：
+   ├─ clipboard::get_clipboard_text_bounded + async worker + target 活跃性校验
+   └─ 发送后仍走 server/app 统一语义
+
+src/platform/目录其余适配层
+├─ IPC/路径/进程/字体/截图/clipboard 工具定义与能力探测
+└─ 约束：禁止注入 input/selection/paste/snapshot 的产品语义分支
+```
+
+### 结论（本轮）
+- osx 与 windows 的体验偏差应优先映射到“能力缺口”（截图、raw 鼠标、窗口消息模型）而非 paste/selection 的共享语义。
+- 目前已知非共享语义入口集中在：
+  - `src/platform/adapters/windows/remote_frontend.rs`（Win32 宿主行为）
+  - `src/platform/adapters/unix/frontend/mod.rs`（winit/x11/wayland 宿主行为）
+- 下一步：围绕此树把 `scripts/rhai/platform-ux-parity-*.rhai` 里失败项改为“Unsupported/Failed/Supported”归档，不再在一条失败里吞掉已通过路径。
 
 ## 本轮平台边界巡检（2026-08-02）
 
