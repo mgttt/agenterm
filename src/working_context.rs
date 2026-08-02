@@ -714,6 +714,67 @@ pub(crate) fn cwd_command(shell: ShellKind, path: &str) -> Result<String> {
     }
 }
 
+pub(crate) fn shell_command_for_child(
+    shell_program: &str,
+    command: &str,
+    arguments: &[String],
+) -> Result<Vec<String>> {
+    let shell = ShellKind::from_program(shell_program);
+    if command.is_empty() {
+        bail!("shell command cannot be empty");
+    }
+    match shell {
+        ShellKind::Cmd => {
+            for value in arguments.iter().chain(std::iter::once(&command.to_owned())) {
+                if value.contains(['"', '%', '!']) {
+                    bail!(
+                        "cmd shell argument contains a character that cannot be quoted safely"
+                    );
+                }
+            }
+            let mut launched = vec![
+                shell_program.to_owned(),
+                "/d".to_owned(),
+                "/s".to_owned(),
+                "/c".to_owned(),
+                command.to_owned(),
+            ];
+            launched.extend(arguments.iter().cloned());
+            Ok(launched)
+        }
+        ShellKind::PowerShell => {
+            let mut segments = Vec::with_capacity(2 + arguments.len());
+            segments.push(command.to_owned());
+            segments.extend(arguments.iter().map(|value| quote_for_powershell(value)));
+            Ok(vec![
+                shell_program.to_owned(),
+                "-NoLogo".to_owned(),
+                "-NoProfile".to_owned(),
+                "-Command".to_owned(),
+                segments.join(" "),
+            ])
+        }
+        ShellKind::Bash | ShellKind::Unknown => {
+            let mut segments = Vec::with_capacity(1 + arguments.len());
+            segments.push(quote_for_bash(command));
+            segments.extend(arguments.iter().map(quote_for_bash));
+            Ok(vec![
+                shell_program.to_owned(),
+                "-lc".to_owned(),
+                segments.join(" "),
+            ])
+        }
+    }
+}
+
+fn quote_for_bash(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn quote_for_powershell(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 pub(crate) fn parse_osc7(params: &[&[u8]], local_hostname: Option<&str>) -> Option<String> {
     if params.len() != 2 || params[0] != b"7" || params[1].len() > OSC7_MAX_BYTES {
         return None;

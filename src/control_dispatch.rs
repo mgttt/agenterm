@@ -1387,20 +1387,27 @@ pub(crate) fn dispatch_shared_command(
                 None => None,
             };
             let mut child_command = if let Some(program) = option_value(args, "--program") {
-                vec![program.to_owned()]
+                let mut command = vec![program.to_owned()];
+                if has_option(args, "--yolo") {
+                    command.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+                }
+                command.extend(agent_arguments);
+                command
             } else {
-                vec![
-                    std::env::var("COMSPEC")
-                        .unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned()),
-                    "/d".to_owned(),
-                    "/c".to_owned(),
-                    "codex".to_owned(),
-                ]
+                let mut command_arguments = agent_arguments;
+                if has_option(args, "--yolo") {
+                    command_arguments
+                        .push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+                }
+                match crate::working_context::shell_command_for_child(
+                    &crate::platform::runtime::default_terminal_shell(),
+                    "codex",
+                    &command_arguments,
+                ) {
+                    Ok(command) => command,
+                    Err(error) => return Some(IpcResponse::failure(error.to_string())),
+                }
             };
-            if has_option(args, "--yolo") {
-                child_command.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
-            }
-            child_command.extend(agent_arguments);
             match host.create_tab(
                 title.or_else(|| Some("Codex".to_owned())),
                 child_command,
