@@ -177,11 +177,18 @@ fn normalized_path(path: &Path) -> Result<String, LockError> {
 
 fn lexical_normalize(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
+    let mut root_components = 0;
     for component in path.components() {
         match component {
+            Component::Prefix(_) | Component::RootDir => {
+                result.push(component.as_os_str());
+                root_components += 1;
+            }
             Component::CurDir => {}
             Component::ParentDir => {
-                result.pop();
+                if result.components().count() > root_components {
+                    result.pop();
+                }
             }
             _ => result.push(component.as_os_str()),
         }
@@ -265,5 +272,19 @@ mod tests {
         drop(first);
         PathLock::try_acquire(&alias).expect("Unicode case alias is released");
         std::fs::remove_dir_all(directory).expect("remove Unicode path alias fixture");
+    }
+
+    #[test]
+    fn lexical_normalize_does_not_pop_past_the_host_root() {
+        let current = std::env::current_dir().expect("read current directory");
+        let mut anchor = PathBuf::new();
+        for component in current.components() {
+            match component {
+                Component::Prefix(_) | Component::RootDir => anchor.push(component.as_os_str()),
+                _ => break,
+            }
+        }
+        let escaped = anchor.join("..").join("path-lock-root");
+        assert_eq!(lexical_normalize(&escaped), anchor.join("path-lock-root"));
     }
 }
