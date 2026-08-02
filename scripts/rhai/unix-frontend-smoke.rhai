@@ -282,12 +282,44 @@ fn wait_native_focus(context, cli, gui, platform, native_window_id) {
 
 fn set_native_clipboard(context, platform, helper, text) {
     if platform == "linux" {
-        invoke_tool(
-            context, helper, ["-selection", "clipboard"], text
-        );
+        let command = std::process::command(helper);
+        command.args([
+            "-selection", "clipboard", "-loops", "2", "-silent"
+        ]);
+        command.stdin_text(text);
+        command.timeout(std::time::Duration::from_secs(30));
+        return command.start();
     } else {
         invoke_tool(context, helper, [], text);
     }
+}
+
+fn wait_linux_clipboard_owner(context, helper, expected, owner) {
+    for attempt in 0..100 {
+        if owner.state == "exited" {
+            let output = owner.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw "unix_frontend_xclip_owner_exited:" +
+                output.stderr_text();
+        }
+        let command = std::process::command(helper);
+        command.args(["-selection", "clipboard", "-o"]);
+        command.timeout(std::time::Duration::from_secs(2));
+        let output = command.output();
+        test_harness::append_command_record(
+            context,
+            ["xclip", "-selection", "clipboard", "-o"],
+            output,
+            !output.success,
+            []
+        );
+        if output.success && output.stdout_text() == expected {
+            return;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(20));
+    }
+    throw "unix_frontend_xclip_owner_readiness_timeout";
 }
 
 fn wait_file(path, gui, code) {
@@ -598,9 +630,16 @@ try {
     print("STEP real native clipboard text is asynchronously pasted into the PTY");
     let active_tab = focused.active_window_id;
     let paste_marker = "AGENTERM_NATIVE_PASTE_" + context.run_id;
-    set_native_clipboard(
-        context, platform, clipboard_writer, "echo " + paste_marker
+    let clipboard_text = "echo " + paste_marker;
+    let clipboard_owner = set_native_clipboard(
+        context, platform, clipboard_writer, clipboard_text
     );
+    if platform == "linux" {
+        owned_children.push(clipboard_owner);
+        wait_linux_clipboard_owner(
+            context, clipboard_reader, clipboard_text, clipboard_owner
+        );
+    }
     let paste_baseline = json_cli(context, cli_exe, ["ui-snapshot"]);
     json_cli(context, cli_exe, ["ui-action", "terminal-paste"]);
     let paste_complete = wait_terminal_paste_success(context, cli_exe);

@@ -19,7 +19,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   asynchronous snapshot had converged. The shared journey now first waits for
   typed paste success through public state, then verifies the already-committed
   event, preserving a precise clipboard failure if convergence does not occur.
-  A succeeding Linux matching-host receipt remains open. Win alignment execution map:
+  Follow-up SHA `d7facf6` run `30724482279` then exposed that precise failure:
+  the Script-owned one-shot `xclip` writer had already lost its X11 selection
+  owner, so the product adapter truthfully returned `clipboard_backend_error`.
+  The Linux fixture now retains a foreground `xclip -silent -loops 2` child:
+  one native read proves readiness, AgenTerm consumes the second, and the
+  process then exits under the shared orphan-free cleanup contract. A succeeding
+  Linux matching-host receipt remains open. Win alignment execution map:
   [`plan/plan-unix-gui-win-parity.md`](plan/plan-unix-gui-win-parity.md)
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane

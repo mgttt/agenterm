@@ -938,6 +938,12 @@ Cockpit
   quality 同时暴露 LF 下略小于 256KiB 的源文件在 CRLF checkout 后越过默认 Rhai string
   budget；lint task 现显式拥有 bounded 1MiB budget。本轮修复仍等待后继 exact-SHA Linux/
   Windows 回执，因此 capability 与 M11 保持 partial；
+- 后继 `d7facf6` run `30724482279` 让 macOS 两格、Windows/Linux ARM64 继续绿，
+  Linux x64 也越过 async post-state 并给出精确 `clipboard_backend_error`：Script Runtime
+  的 owned process-tree 在 one-shot writer 返回后回收了 xclip background selection owner，
+  因而产品 adapter 的真实读取 exit 1。fixture 现以前台 `xclip -silent -loops 2` 作为
+  owned child，一次 native read 证明 readiness，第二次由 AgenTerm 消费，随后自然退出并
+  进入同一 orphan-free cleanup。该根因修复仍等待下一 exact-SHA Linux 回执；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 
