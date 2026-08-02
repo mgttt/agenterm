@@ -266,9 +266,10 @@ mod server {
     use anyhow::{Context as _, Result};
 
     use crate::{
-        IPC_TIMEOUT, client,
+        IPC_TIMEOUT,
+        client,
+        platform::services::frontend::request_gui_wake_best_effort,
         protocol::{IpcRequest, IpcResponse},
-        request_gui_wake_best_effort,
         wake_signal::WakeSignal,
     };
 

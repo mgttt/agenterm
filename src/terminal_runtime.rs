@@ -20,7 +20,8 @@ use crate::{
     terminal_cursor::{DecscusrTracker, TerminalCursorAppearance},
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
-    request_gui_wake_best_effort, wake_signal::WakeSignal,
+    platform::services::frontend::request_gui_wake_best_effort,
+    wake_signal::WakeSignal,
     working_context::{
         CwdTracker, ProxyConfirmationMarker, ProxyState, SecretValue, ShellKind, parse_osc7,
     },
