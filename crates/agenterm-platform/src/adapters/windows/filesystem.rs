@@ -422,4 +422,84 @@ mod tests {
 
         std::fs::remove_dir_all(directory).expect("remove ACL child fixture");
     }
+
+    #[test]
+    fn private_directory_acl_rejects_junction_without_touching_target() {
+        use std::os::windows::ffi::OsStrExt as _;
+        use std::ptr::null_mut;
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::{
+                Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
+                DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, SE_DACL_PROTECTED,
+            },
+        };
+
+        fn dacl_is_protected(path: &std::path::Path) -> bool {
+            let wide = std::fs::canonicalize(path)
+                .expect("canonical ACL target")
+                .as_os_str()
+                .encode_wide()
+                .chain(Some(0))
+                .collect::<Vec<_>>();
+            let mut dacl = null_mut();
+            let mut descriptor = null_mut();
+            let result = unsafe {
+                GetNamedSecurityInfoW(
+                    wide.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    &mut dacl,
+                    null_mut(),
+                    &mut descriptor,
+                )
+            };
+            assert_eq!(result, 0, "read target ACL: {}", win32_error(result));
+            let mut control = 0;
+            let mut revision = 0;
+            let ok =
+                unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) };
+            assert_ne!(ok, 0, "read target security descriptor control");
+            unsafe {
+                LocalFree(descriptor);
+            }
+            control & SE_DACL_PROTECTED != 0
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-junction-{}",
+            std::process::id()
+        ));
+        let target = root.join("target");
+        let junction = root.join("junction");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&target).expect("create junction target");
+        let status = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("run mklink junction fixture");
+        assert!(status.success(), "mklink /J fixture failed: {status}");
+
+        let target_protected_before = dacl_is_protected(&target);
+        assert_eq!(
+            protect_private_directory(&junction)
+                .expect_err("private directory protection must reject a junction")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            dacl_is_protected(&target),
+            target_protected_before,
+            "junction rejection changed the target ACL"
+        );
+
+        std::fs::remove_dir(&junction).expect("remove junction fixture");
+        std::fs::remove_dir_all(root).expect("remove junction ACL fixture");
+    }
 }
