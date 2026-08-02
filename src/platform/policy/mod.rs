@@ -5,6 +5,7 @@
 //! `crate::platform` re-exports.
 
 pub(crate) mod control_center;
+pub(crate) mod host;
 pub(crate) mod input;
 pub(crate) mod paths;
 pub(crate) mod runtime;

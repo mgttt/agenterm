@@ -26,6 +26,10 @@ pub(crate) use policy::input::{
     terminal_shortcut_empty_copy_action_is_suppressed,
 };
 
+#[allow(unused_imports)]
+pub(crate) use policy::host::{
+    is_macos_host, is_unix_host, is_windows_host, shell_command_for_host,
+};
 pub(crate) use policy::paths::{
     default_audit_path, default_workspace_path, instance_registry_directory_root,
     ipc_default_workspace_path, ipc_default_workspace_path_for,
@@ -183,39 +187,6 @@ pub(crate) fn project_capability_status(
             message: "platform capability returned an unknown status".to_owned(),
         },
     }
-}
-
-pub(crate) fn is_windows_host() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Windows
-    )
-}
-
-#[allow(dead_code)]
-pub(crate) fn shell_command_for_host<'a>(
-    windows_command: &'a str,
-    unix_command: &'a str,
-) -> &'a str {
-    if is_windows_host() {
-        windows_command
-    } else {
-        unix_command
-    }
-}
-
-pub(crate) fn is_macos_host() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Macos
-    )
-}
-
-pub(crate) fn is_unix_host() -> bool {
-    matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
-    )
 }
 
 pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static str> {
