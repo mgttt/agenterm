@@ -1289,6 +1289,23 @@ mod tests {
     }
 
     #[cfg(any(windows, unix))]
+    fn shell_wrapped_process_command(
+        windows_command: &str,
+        unix_command: &str,
+        arguments: &[&str],
+    ) -> ScriptCommand {
+        let command = if crate::platform::is_windows_host() {
+            windows_command
+        } else {
+            unix_command
+        };
+        let (program, command_arguments) = wrapped_shell_command(command, arguments);
+        let mut process = process_command(&program).expect("shell command should be runnable");
+        process.arguments = command_arguments;
+        process
+    }
+
+    #[cfg(any(windows, unix))]
     fn spawn_owned_tree_fixture() -> ScriptChild {
         let (program, arguments) = wrapped_shell_command(
             long_running_shell_command().0,
@@ -1506,34 +1523,17 @@ mod tests {
 
     #[test]
     fn command_preserves_environment_output_and_exit_code() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let c = std::process::command("cmd.exe");
-                c.args(["/d", "/s", "/c", "echo %AGENTERM_PROCESS_TEST%&echo error 1>&2&exit /b 7"]);
-                c.env("AGENTERM_PROCESS_TEST", "argv-safe");
-                let o = c.output();
-                let stdout = o.stdout_text();
-                let stderr = o.stderr_text();
-                stdout.trim();
-                stderr.trim();
-                #{ success: o.success, code: o.exit_code,
-                   stdout: stdout, stderr: stderr }
-            "#
-        } else {
-            r#"
-                let c = std::process::command("/bin/sh");
-                c.args(["-c", "printf '%s' \"$AGENTERM_PROCESS_TEST\"; printf error >&2; exit 7"]);
-                c.env("AGENTERM_PROCESS_TEST", "argv-safe");
-                let o = c.output();
-                #{ success: o.success, code: o.exit_code,
-                   stdout: o.stdout_text(), stderr: o.stderr_text() }
-            "#
-        };
-        let result = engine().eval::<rhai::Map>(source).unwrap();
-        assert!(!result["success"].as_bool().unwrap());
-        assert_eq!(result["code"].as_int().unwrap(), 7);
-        assert_eq!(result["stdout"].clone().into_string().unwrap(), "argv-safe");
-        assert_eq!(result["stderr"].clone().into_string().unwrap(), "error");
+        let mut command = shell_wrapped_process_command(
+            "echo %AGENTERM_PROCESS_TEST%&echo error 1>&2&exit /b 7",
+            "printf '%s' \"$AGENTERM_PROCESS_TEST\"; printf error >&2; exit 7",
+            &[],
+        );
+        command.env("AGENTERM_PROCESS_TEST", "argv-safe");
+        let output = command_output(&mut command).unwrap();
+        assert!(!output.success);
+        assert_eq!(output.exit_code, 7);
+        assert_eq!(output.stdout_text().unwrap(), "argv-safe");
+        assert_eq!(output.stderr_text().unwrap(), "error");
     }
 
     #[test]
@@ -1557,31 +1557,15 @@ mod tests {
             std::process::id()
         ));
         let script_path = path.to_string_lossy().replace('\\', "\\\\");
-        let source = if crate::platform::is_windows_host() {
-            format!(
-                r#"
-                    let c = std::process::command("cmd.exe");
-                    c.args(["/d", "/s", "/c",
-                        "<nul set /p =redirected&exit /b 0"]);
-                    c.stdout_file("{script_path}");
-                    let output = c.output();
-                    #{{ success: output.success, stdout: output.stdout_text() }}
-                "#
-            )
-        } else {
-            format!(
-                r#"
-                    let c = std::process::command("/bin/sh");
-                    c.args(["-c", "printf redirected"]);
-                    c.stdout_file("{script_path}");
-                    let output = c.output();
-                    #{{ success: output.success, stdout: output.stdout_text() }}
-                "#
-            )
-        };
-        let result = engine().eval::<rhai::Map>(&source).unwrap();
-        assert!(result["success"].as_bool().unwrap());
-        assert_eq!(result["stdout"].clone().into_string().unwrap(), "");
+        let mut command = shell_wrapped_process_command(
+            "<nul set /p =redirected&exit /b 0",
+            "printf redirected",
+            &[],
+        );
+        command.stdout_file = Some(PathBuf::from(script_path));
+        let output = command_output(&mut command).unwrap();
+        assert!(output.success);
+        assert_eq!(output.stdout, ScriptBytes::default());
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
     }
@@ -1593,53 +1577,26 @@ mod tests {
             std::process::id()
         ));
         let script_path = path.to_string_lossy().replace('\\', "\\\\");
-        let source = if crate::platform::is_windows_host() {
-            format!(
-                r#"
-                    let c = std::process::command("cmd.exe");
-                    c.args(["/d", "/s", "/c",
-                        "<nul set /p =redirected 1>&2&exit /b 0"]);
-                    c.stderr_file("{script_path}");
-                    let output = c.output();
-                    #{{ success: output.success, stderr: output.stderr_text() }}
-                "#
-            )
-        } else {
-            format!(
-                r#"
-                    let c = std::process::command("/bin/sh");
-                    c.args(["-c", "printf redirected >&2"]);
-                    c.stderr_file("{script_path}");
-                    let output = c.output();
-                    #{{ success: output.success, stderr: output.stderr_text() }}
-                "#
-            )
-        };
-        let result = engine().eval::<rhai::Map>(&source).unwrap();
-        assert!(result["success"].as_bool().unwrap());
-        assert_eq!(result["stderr"].clone().into_string().unwrap(), "");
+        let mut command = shell_wrapped_process_command(
+            "<nul set /p =redirected 1>&2&exit /b 0",
+            "printf redirected >&2",
+            &[],
+        );
+        command.stderr_file = Some(PathBuf::from(script_path));
+        let output = command_output(&mut command).unwrap();
+        assert!(output.success);
+        assert_eq!(output.stderr, ScriptBytes::default());
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn output_can_require_a_successful_child_exit() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let c = std::process::command("cmd.exe");
-                c.args(["/d", "/s", "/c", "exit /b 7"]);
-                let output = c.output();
-                output.require_success("test-child");
-            "#
-        } else {
-            r#"
-                let c = std::process::command("/bin/sh");
-                c.args(["-c", "exit 7"]);
-                let output = c.output();
-                output.require_success("test-child");
-            "#
-        };
-        let error = engine().eval::<()>(source).unwrap_err().to_string();
+        let mut command = shell_wrapped_process_command("exit /b 7", "exit 7", &[]);
+        let mut output = command_output(&mut command).unwrap();
+        let error = output_require_success(&mut output, "test-child")
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("child_nonzero"));
         assert!(error.contains("test-child"));
         assert!(error.contains("code 7"));
@@ -1647,34 +1604,11 @@ mod tests {
 
     #[test]
     fn required_child_failure_is_a_catchable_typed_error() {
-        let source = if crate::platform::is_windows_host() {
-            r#"
-                let caught = ();
-                try {
-                    let c = std::process::command("cmd.exe");
-                    c.args(["/d", "/s", "/c", "exit /b 7"]);
-                    let output = c.output();
-                    output.require_success("test-child");
-                } catch (error) {
-                    caught = error;
-                }
-                caught
-            "#
-        } else {
-            r#"
-                let caught = ();
-                try {
-                    let c = std::process::command("/bin/sh");
-                    c.args(["-c", "exit 7"]);
-                    let output = c.output();
-                    output.require_success("test-child");
-                } catch (error) {
-                    caught = error;
-                }
-                caught
-            "#
-        };
-        let error = engine().eval::<rhai::Map>(source).unwrap();
+        let mut command = shell_wrapped_process_command("exit /b 7", "exit 7", &[]);
+        let mut output = command_output(&mut command).unwrap();
+        let error = output_require_success(&mut output, "test-child")
+            .unwrap_err()
+            .to_string();
         assert_eq!(error["class"].clone().into_string().unwrap(), "child");
         assert_eq!(
             error["code"].clone().into_string().unwrap(),
