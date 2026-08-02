@@ -24,6 +24,18 @@ pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
 };
 
+pub fn install_console_interrupt_ignore_guard()
+-> anyhow::Result<ConsoleInterruptIgnoreGuard>
+{
+    ConsoleInterruptIgnoreGuard::install().map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+pub fn install_console_interrupt_observer()
+-> anyhow::Result<ConsoleInterruptObserver>
+{
+    ConsoleInterruptObserver::install().map_err(|error| anyhow::anyhow!("{error}"))
+}
+
 // Platform Facade services. Product modules consume these typed services;
 // their selected OS implementations stay private to this boundary.
 // Several services are staged ahead of their final product-caller migration;

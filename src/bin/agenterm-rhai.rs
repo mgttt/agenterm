@@ -1090,8 +1090,7 @@ fn run_worker() -> anyhow::Result<u8> {
 }
 
 fn run_framed_worker() -> anyhow::Result<u8> {
-    let _interrupt_guard =
-        agenterm_platform::console_interrupt::ConsoleInterruptIgnoreGuard::install()?;
+    let _interrupt_guard = agenterm::install_console_interrupt_ignore_guard()?;
     process_concurrent_framed_worker(std::io::stdin().lock(), std::io::stdout())?;
     Ok(0)
 }

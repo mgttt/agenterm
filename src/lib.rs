@@ -72,6 +72,10 @@ mod frontend;
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;
 pub use mcp_catalog::run_mcp_entry_with_args;
+pub use platform::{
+    install_console_interrupt_ignore_guard,
+    install_console_interrupt_observer,
+};
 
 pub use frontend::run_gui_entry;
 

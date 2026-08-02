@@ -329,7 +329,7 @@ impl ReplInterruptWatcher {
         let (event_tx, events) = mpsc::channel();
         let (shutdown, shutdown_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
-            let observer = match crate::platform::ConsoleInterruptObserver::install() {
+            let observer = match crate::platform::install_console_interrupt_observer() {
                     Ok(observer) => {
                         let _ = ready_tx.send(Ok(()));
                         observer
@@ -2233,7 +2233,7 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
         }
     };
     let _interrupt_guard = if arguments.get(1).is_some_and(|value| value == "repl") {
-        match crate::platform::ConsoleInterruptIgnoreGuard::install() {
+        match crate::platform::install_console_interrupt_ignore_guard() {
             Ok(guard) => Some(guard),
             Err(error) => {
                 eprintln!("host_console_interrupt: {error}");
