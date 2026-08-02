@@ -129,6 +129,18 @@ mod tests {
         assert_eq!(error.kind(), LockErrorKind::Contended);
         drop(first);
         PathLock::try_acquire(&alias).expect("alias is released with the canonical guard");
+
+        let missing = directory.join("missing").join("state.lock");
+        let missing_alias = child.join("..").join("missing").join("STATE.LOCK");
+        let first_missing =
+            PathLock::acquire(&missing).expect("acquire missing-tail canonical path");
+        let error = match PathLock::try_acquire(&missing_alias) {
+            Ok(_) => panic!("missing-tail path alias bypassed the existing lock"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), LockErrorKind::Contended);
+        drop(first_missing);
+        PathLock::try_acquire(&missing_alias).expect("missing-tail alias is released");
         std::fs::remove_dir_all(directory).expect("remove alias fixture");
     }
 
