@@ -904,7 +904,14 @@ Cockpit
   SID 常量或依赖未对齐裸指针。API 保留 exact kind/string、显式 profile create/delete 与
   typed HRESULT/Win32 failure；它只是平台 lifecycle primitive，不给 Script Runtime 加权限、
   endpoint allowlist 或自动 sandbox policy。Windows-hosted 5/5 定向测试已通过，exact-SHA
-  `c12b3a0` 的六格 ordinary CI 回执仍在运行；
+  `c12b3a0` 的后继 ordinary CI 被更新提交正确 supersede，不将取消冒充失败或成功；
+- 新增 dependency-free `process-conventions` feature，外部仓库可在任意 host 生成 Windows
+  CRT command line 与 `CreateProcessW` Unicode environment block，而不复制 quoting 规则或
+  打开进程。审查发现初稿错误保留输入顺序；Microsoft ABI 要求按 name 做 locale-independent
+  case-insensitive Unicode sort，现改为 stable folded-key 排序，同 folded name 保持调用方顺序，
+  malformed entry 仍显式 Reject/Skip。Windows minimal-feature 5/5 覆盖 typed NUL/index、
+  terminator、排序/duplicate/Unicode 和原生 `CommandLineToArgvW` round-trip；该 feature 不拥有
+  spawn、duplicate-value policy 或任何 Agent/Script 权限；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

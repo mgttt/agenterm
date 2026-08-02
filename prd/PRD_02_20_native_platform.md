@@ -543,6 +543,17 @@ integrated validation recorded below):
   automatically applied sandbox policy. Windows-hosted tests own exact SID
   identity, unaligned borrowed input, deterministic profile derivation, and
   explicit create/existing/delete behavior.
+- [x] The dependency-free `process-conventions` feature lets external callers
+  prepare Windows process parameters without copying quoting logic or opening a
+  process. It rejects empty argv and embedded NULs with indexed typed errors,
+  round-trips CRT/`CommandLineToArgvW` quoting on a Windows host, and emits a
+  double-NUL UTF-16 environment block after stable locale-independent Unicode
+  case folding and name sort as required by `CreateProcessW`. Malformed
+  environment entries are explicitly rejected or skipped; equal folded names
+  retain caller order. The helper does not spawn, select an executable, decide
+  duplicate-variable policy, mutate the caller environment, or impose Agent or
+  Script Runtime permissions. Minimal-feature Windows tests prove all five
+  contracts without enabling `process-spawn`.
 - [x] Window minimized/maximized/restored semantic state and native-flag
   precedence are public platform-neutral window contracts. AgenTerm's 320x240
   CLI resize minimum and error wording remain product policy in the main crate.

@@ -31,29 +31,38 @@ pub fn windows_command_line(args: &[String]) -> Result<String, WindowsCommandLin
 /// Encode UTF-8 environment entries as the UTF-16 block accepted by
 /// `CreateProcessW`.
 ///
-/// The result always ends with two NUL code units. Entry ordering and valid
-/// duplicate handling are preserved; callers continue to own those policies.
+/// The result always ends with two NUL code units. Valid entries are stably
+/// sorted by a locale-independent Unicode uppercase key as required by the
+/// Windows environment-block contract; equal folded names retain caller order,
+/// so duplicate-name policy remains with the caller.
 pub fn windows_environment_block(
     entries: &[(String, String)],
     invalid: InvalidEnvironmentEntryPolicy,
 ) -> Result<Vec<u16>, WindowsEnvironmentBlockError> {
-    let mut encoded = String::new();
-    let mut has_entry = false;
+    let mut valid = Vec::with_capacity(entries.len());
     for (index, (key, value)) in entries.iter().enumerate() {
-        let error = validate_environment_entry(index, key, value);
-        if let Some(error) = error {
+        if let Some(error) = validate_environment_entry(index, key, value) {
             match invalid {
                 InvalidEnvironmentEntryPolicy::Reject => return Err(error),
                 InvalidEnvironmentEntryPolicy::Skip => continue,
             }
         }
-        has_entry = true;
+        valid.push((
+            key.to_uppercase().encode_utf16().collect::<Vec<_>>(),
+            key,
+            value,
+        ));
+    }
+    valid.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut encoded = String::new();
+    for (_, key, value) in &valid {
         encoded.push_str(key);
         encoded.push('=');
         encoded.push_str(value);
         encoded.push('\0');
     }
-    if !has_entry {
+    if valid.is_empty() {
         encoded.push('\0');
     }
     encoded.push('\0');
@@ -173,7 +182,7 @@ mod tests {
         ];
         assert_eq!(
             environment_text(&entries),
-            "GOOD=keep<NUL>ALSO_GOOD=v=1<NUL><NUL>"
+            "ALSO_GOOD=v=1<NUL>GOOD=keep<NUL><NUL>"
         );
         assert_eq!(environment_text(&[]), "<NUL><NUL>");
         for (entry, expected) in [
@@ -203,6 +212,16 @@ mod tests {
         assert_eq!(
             environment_text(&[("NAME".to_owned(), "中文=ok".to_owned())]),
             "NAME=中文=ok<NUL><NUL>"
+        );
+        assert_eq!(
+            environment_text(&[
+                ("zeta".to_owned(), "last".to_owned()),
+                ("Path".to_owned(), "first-duplicate".to_owned()),
+                ("alpha".to_owned(), "first".to_owned()),
+                ("PATH".to_owned(), "second-duplicate".to_owned()),
+                ("中文".to_owned(), "unicode".to_owned()),
+            ]),
+            "alpha=first<NUL>Path=first-duplicate<NUL>PATH=second-duplicate<NUL>zeta=last<NUL>中文=unicode<NUL><NUL>"
         );
     }
 

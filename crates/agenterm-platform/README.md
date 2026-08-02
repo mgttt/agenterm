@@ -46,6 +46,7 @@ clipboard, IPC, or screenshot modules.
 | `console-interrupt` | RAII Ctrl-C/SIGINT observation or temporary ignore with typed failures | target `libc` / minimal `windows-sys` |
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
 | `app-container-profile` | target-specific Windows AppContainer profile and owned SID primitives; lifecycle policy stays with the caller | minimal `windows-sys` |
+| `process-conventions` | pure Windows CRT command-line and sorted Unicode environment-block encoding with typed malformed-input policy; does not spawn a process | none |
 | `process-control` | typed single-process termination, exact Windows HANDLE termination, and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-observation` | fail-closed single-process liveness and stable start identity | target `libc` / minimal `windows-sys` |
 | `process-reference` | owned stable process reference plus bounded or indefinite exact-object exit waits via HANDLE, pidfd, or kqueue; Windows raw exit-code, target-process HANDLE delivery and exact Job membership | target `libc` / minimal `windows-sys` |
@@ -89,6 +90,7 @@ clipboard, IPC, or screenshot modules.
 | storage | volume capacity + cluster geometry | `statvfs` | `statvfs` |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
 | console interrupt | Ctrl-C-only console handler + atomic notification | SIGINT `sigaction` + self-pipe | SIGINT `sigaction` + self-pipe |
+| process conventions | encode Windows argv/environment inputs without native access | same portable encoder | same portable encoder |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process image | queried full image path | `/proc/<pid>/exe` | `proc_pidpath` |
 | process metrics | process times + working set + total faults | `/proc` stat/statm + minor/major faults | `PROC_PIDTASKINFO` total faults + page-ins |
