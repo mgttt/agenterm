@@ -300,14 +300,12 @@ mod tests {
         use windows_sys::Win32::{
             Foundation::{GENERIC_ALL, LocalFree},
             Security::{
-                ACCESS_ALLOWED_ACE, ACCESS_ALLOWED_ACE_TYPE, ACL_SIZE_INFORMATION,
-                AclSizeInformation,
-                Authorization::{
-                    GetAce, GetAclInformation, GetNamedSecurityInfoW, GetSecurityDescriptorDacl,
-                    SE_FILE_OBJECT,
-                },
-                DACL_SECURITY_INFORMATION, EqualSid, INHERITED_ACE,
+                ACCESS_ALLOWED_ACE, ACL_SIZE_INFORMATION, AclSizeInformation,
+                Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
+                DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
+                GetSecurityDescriptorDacl, INHERITED_ACE,
             },
+            System::SystemServices::ACCESS_ALLOWED_ACE_TYPE,
         };
 
         let directory = std::env::temp_dir().join(format!(
@@ -394,7 +392,8 @@ mod tests {
                 let mut ace = null_mut();
                 assert_ne!(unsafe { GetAce(child_dacl, index, &mut ace) }, 0);
                 let header = unsafe { &*(ace.cast::<windows_sys::Win32::Security::ACE_HEADER>()) };
-                if header.AceType == ACCESS_ALLOWED_ACE_TYPE && header.AceFlags & INHERITED_ACE != 0
+                if u32::from(header.AceType) == ACCESS_ALLOWED_ACE_TYPE
+                    && header.AceFlags & INHERITED_ACE as u8 != 0
                 {
                     let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
                     assert_eq!(allowed.Mask, GENERIC_ALL);
