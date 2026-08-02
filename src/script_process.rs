@@ -1243,6 +1243,7 @@ fn bounded(value: rhai::INT, code: &str, maximum: u64) -> Result<u64, Box<EvalAl
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::working_context::shell_command_for_child;
 
     struct KillOnDrop(Child);
 
@@ -1260,38 +1261,53 @@ mod tests {
     }
 
     #[cfg(any(windows, unix))]
+    fn wrapped_shell_command(
+        shell_command: &str,
+        arguments: &[&str],
+    ) -> (String, Vec<String>) {
+        let shell = crate::platform::runtime::default_terminal_shell();
+        let arguments = arguments
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>();
+        let mut wrapped = shell_command_for_child(&shell, shell_command, &arguments)
+            .expect("shell command should be valid");
+        let program = wrapped
+            .drain(0..1)
+            .next()
+            .expect("wrapped shell command must include a program");
+        (program, wrapped)
+    }
+
+    #[cfg(any(windows, unix))]
+    fn long_running_shell_command() -> (&'static str, &'static [&'static str]) {
+        if crate::platform::is_windows_host() {
+            ("ping.exe", &["-n", "30", "127.0.0.1", ">nul"])
+        } else {
+            ("sleep", &["30"])
+        }
+    }
+
+    #[cfg(any(windows, unix))]
     fn spawn_owned_tree_fixture() -> ScriptChild {
-        let mut command = process_command(if crate::platform::is_windows_host() {
-            "cmd.exe"
-        } else {
-            "/bin/sh"
-        })
-            .expect("fixture command");
-        command.arguments = if crate::platform::is_windows_host() {
-            vec![
-                "/d".to_owned(),
-                "/s".to_owned(),
-                "/c".to_owned(),
-                "ping.exe -n 30 127.0.0.1 >nul".to_owned(),
-            ]
-        } else {
-            vec!["-c".to_owned(), "sleep 30 & wait".to_owned()]
-        };
+        let (program, arguments) = wrapped_shell_command(
+            long_running_shell_command().0,
+            long_running_shell_command().1,
+        );
+        let mut command = process_command(&program).expect("fixture command");
+        command.arguments = arguments;
         command.timeout = Duration::from_secs(30);
         spawn_owned(&command).expect("spawn owned process tree")
     }
 
     #[cfg(any(windows, unix))]
     fn spawn_unrelated_fixture() -> KillOnDrop {
-        let mut command = if crate::platform::is_windows_host() {
-            let mut command = Command::new("cmd.exe");
-            command.args(["/d", "/s", "/c", "ping.exe -n 30 127.0.0.1 >nul"]);
-            command
-        } else {
-            let mut command = Command::new("/bin/sh");
-            command.args(["-c", "sleep 30 & wait"]);
-            command
-        };
+        let (program, arguments) = wrapped_shell_command(
+            long_running_shell_command().0,
+            long_running_shell_command().1,
+        );
+        let mut command = Command::new(program);
+        command.args(arguments);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -1457,20 +1473,18 @@ mod tests {
     #[test]
     #[cfg(any(windows, unix))]
     fn process_kill_terminates_an_arbitrary_operating_system_process() {
-        let mut child = if crate::platform::is_windows_host() {
-            let mut command = Command::new("cmd.exe");
-            command.args(["/d", "/s", "/c", "ping -n 30 127.0.0.1 >nul"]);
-            command
-        } else {
-            let mut command = Command::new("/bin/sh");
-            command.args(["-c", "sleep 30"]);
-            command
-        }
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+        let (program, arguments) = wrapped_shell_command(
+            long_running_shell_command().0,
+            long_running_shell_command().1,
+        );
+        let mut child = Command::new(program);
+        child.args(arguments);
+        let mut child = child
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
 
         engine()
             .eval::<()>(&format!("std::process::kill({})", child.id()))
