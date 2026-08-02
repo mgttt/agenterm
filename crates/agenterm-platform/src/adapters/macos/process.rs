@@ -149,7 +149,10 @@ impl ProcessTreeGuard {
             ) => *current == *expected,
             _ => false,
         };
-        if !root_is_owned && !matches!(root_observation, ProcessObservation::Dead { .. }) {
+        if !root_is_owned {
+            // Once the original root is reaped, its PID and process-group ID
+            // can be reused by unrelated processes. Only terminate a tree while
+            // the exact observed root is still live.
             self.active = false;
             return Ok(());
         }
