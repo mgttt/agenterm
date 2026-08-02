@@ -219,7 +219,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 - `run_id`: `1785675327036-13860`
 - `timestamp_utc`: `2026-08-02T12:55:49.953Z`
 - `suite`: `platform-ux-parity-smoke`
-- `failure`: `infra/rhai-runtime`（`remote-ui-smoke` 内 `double_click_tab_text`）
+- `failure`: `ui/control-missing`（`remote-ui-smoke` 内 `double_click_tab_text` 与 `window_control` 空控件路径）
 
 | 分支 | 场景 | evidence_id | Windows | Linux | macOS | 归因 |
 |---|---|---|---|---|---|---|
@@ -230,8 +230,8 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | frontend-lx | linux-clipboard | `ux-parity.linux.unix-frontend.clipboard` | Unsupported | not-executed-yet | Unsupported | platform-gap |
 | frontend-mx | macos-workbench | `ux-parity.macos.unix-frontend.workbench` | Unsupported | Unsupported | not-executed-yet | platform-gap |
 | frontend-mx | macos-clipboard | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | not-executed-yet | platform-gap |
-| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Failed | Unsupported | Unsupported | infra/rhai-runtime |
-| remote-ui | selection | `ux-parity.remote-ui.selection` | Failed | Unsupported | Unsupported | infra/rhai-runtime |
+| remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Failed | Unsupported | Unsupported | ui/control-missing |
+| remote-ui | selection | `ux-parity.remote-ui.selection` | Failed | Unsupported | Unsupported | ui/control-missing |
 | ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Failed | not-executed-yet | not-executed-yet | infra/rhai-runtime |
 
 下轮建议：

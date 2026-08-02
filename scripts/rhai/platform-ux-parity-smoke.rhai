@@ -209,6 +209,9 @@ fn classify_failure_root(failure) {
     if failure.contains("unsupported platform") {
         return "infra/unsupported-platform";
     }
+    if failure.contains("remote_ui_control_missing") {
+        return "ui/control-missing";
+    }
     if failure.contains("platform_gui_missing") ||
             failure.contains("platform_cli_missing") ||
             failure.contains("platform_script_missing") {
