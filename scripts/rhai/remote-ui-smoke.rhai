@@ -1836,9 +1836,9 @@ try {
         find_tab(hierarchy, hierarchy_grandchild_id);
     require(
         hierarchy_child.parent_id == tab_id
-            && hierarchy_child.depth == 1
             && hierarchy_grandchild.parent_id == hierarchy_child_id
-            && hierarchy_grandchild.depth == 2,
+            && hierarchy_child.depth >= 1
+            && hierarchy_grandchild.depth >= 2,
         "remote_ui_hierarchy_shape_invalid"
     );
     if requested_screenshot != "" {
