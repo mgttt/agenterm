@@ -94,6 +94,45 @@ pub(crate) enum WheelTarget {
     Ignored,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApplicationMouseMode {
+    None,
+    Press,
+    PressRelease,
+    ButtonMotion,
+    AnyMotion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MouseDelivery {
+    LocalSelection,
+    Application,
+}
+
+pub(crate) fn mouse_delivery(
+    mode: ApplicationMouseMode,
+    shift_override: bool,
+    scrolled_back: bool,
+    motion: bool,
+    dragging: bool,
+    pressed: bool,
+) -> MouseDelivery {
+    if shift_override || scrolled_back || mode == ApplicationMouseMode::None {
+        return MouseDelivery::LocalSelection;
+    }
+    let reportable = match mode {
+        ApplicationMouseMode::None => false,
+        ApplicationMouseMode::Press => pressed && !motion,
+        ApplicationMouseMode::PressRelease => !motion,
+        ApplicationMouseMode::ButtonMotion => !motion || dragging,
+        ApplicationMouseMode::AnyMotion => true,
+    };
+    if reportable {
+        MouseDelivery::Application
+    } else {
+        MouseDelivery::LocalSelection
+    }
+}
 pub(crate) fn route_wheel(sidebar_hit: bool, terminal_hit: bool) -> WheelTarget {
     if sidebar_hit {
         WheelTarget::Sidebar
@@ -140,8 +179,9 @@ pub(crate) fn sidebar_scroll_offset_for_thumb_top(
 #[cfg(test)]
 mod tests {
     use super::{
-        FocusDirection, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag, WheelAccumulator,
-        WheelTarget, focus_surface_navigation, route_wheel, sidebar_scroll_offset_for_thumb_top,
+        ApplicationMouseMode, FocusDirection, FocusSurface, FocusTransitionGate, MouseDelivery,
+        ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
+        mouse_delivery, route_wheel, sidebar_scroll_offset_for_thumb_top,
     };
 
     #[test]
@@ -309,6 +349,43 @@ mod tests {
         assert_eq!(accumulator.push(-40), 0);
         assert_eq!(accumulator.push(-40), 0);
         assert_eq!(accumulator.push(-40), -1);
+    }
+
+    #[test]
+    fn mouse_delivery_follows_xterm_protocol_phases() {
+        use ApplicationMouseMode as Mode;
+        assert_eq!(
+            mouse_delivery(Mode::None, false, false, false, false, true),
+            MouseDelivery::LocalSelection
+        );
+        assert_eq!(
+            mouse_delivery(Mode::Press, false, false, false, false, true),
+            MouseDelivery::Application
+        );
+        assert_eq!(
+            mouse_delivery(Mode::Press, false, false, true, false, true),
+            MouseDelivery::LocalSelection
+        );
+        assert_eq!(
+            mouse_delivery(Mode::PressRelease, false, false, true, true, true),
+            MouseDelivery::LocalSelection
+        );
+        assert_eq!(
+            mouse_delivery(Mode::ButtonMotion, false, false, true, true, true),
+            MouseDelivery::Application
+        );
+        assert_eq!(
+            mouse_delivery(Mode::AnyMotion, false, false, true, false, false),
+            MouseDelivery::Application
+        );
+        assert_eq!(
+            mouse_delivery(Mode::Press, true, false, false, false, true),
+            MouseDelivery::LocalSelection
+        );
+        assert_eq!(
+            mouse_delivery(Mode::Press, false, true, false, false, true),
+            MouseDelivery::LocalSelection
+        );
     }
 
     #[test]

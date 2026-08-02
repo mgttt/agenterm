@@ -222,6 +222,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | modal focus gate | `src/frontend/interaction.rs` | `FocusTransitionGate`，modal 打开时禁止 focus transition | Supported | not-executed-yet | not-executed-yet |
 | wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | not-executed-yet | not-executed-yet |
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | not-executed-yet | not-executed-yet |
+| raw-mouse arbitration | `src/frontend/interaction.rs` | `mouse_delivery`，xterm mouse 阶段/shift/scrollback 仲裁统一 | Supported | not-executed-yet | not-executed-yet |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 的真机交互 smoke 仍受 `infra/platform-binary-missing` 限制，列状态保留为 `not-executed-yet`，不把结构单测冒充真机 UX 证据。
 

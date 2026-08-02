@@ -72,8 +72,9 @@ use crate::{
 
 use self::wake::install_unix_wake;
 use crate::frontend::interaction::{
-    FocusDirection, FocusSurface, FocusTransitionGate, ScrollbarThumbDrag, WheelAccumulator,
-    WheelTarget, focus_surface_navigation, route_wheel, sidebar_scroll_offset_for_thumb_top,
+    ApplicationMouseMode, FocusDirection, FocusSurface, FocusTransitionGate, MouseDelivery,
+    ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation, mouse_delivery,
+    route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -3155,8 +3156,7 @@ impl UnixApp {
         pressed: bool,
         motion: bool,
     ) -> bool {
-        if self.pointer_modifiers.shift
-            || self.settings_open
+        if self.settings_open
             || self.window_close_pending
             || self.pending_close.is_some()
             || self.new_terminal_dialog.is_open()
@@ -3174,15 +3174,23 @@ impl UnixApp {
                 screen.scrollback(),
             )
         };
-        let dragging = self.mouse_report_button.is_some();
-        let reportable = match mode {
-            vt100::MouseProtocolMode::None => false,
-            vt100::MouseProtocolMode::Press => pressed && !motion,
-            vt100::MouseProtocolMode::PressRelease => !motion,
-            vt100::MouseProtocolMode::ButtonMotion => !motion || dragging,
-            vt100::MouseProtocolMode::AnyMotion => true,
+        let product_mode = match mode {
+            vt100::MouseProtocolMode::None => ApplicationMouseMode::None,
+            vt100::MouseProtocolMode::Press => ApplicationMouseMode::Press,
+            vt100::MouseProtocolMode::PressRelease => ApplicationMouseMode::PressRelease,
+            vt100::MouseProtocolMode::ButtonMotion => ApplicationMouseMode::ButtonMotion,
+            vt100::MouseProtocolMode::AnyMotion => ApplicationMouseMode::AnyMotion,
         };
-        if !reportable || scrollback != 0 {
+        let dragging = self.mouse_report_button.is_some();
+        if mouse_delivery(
+            product_mode,
+            self.pointer_modifiers.shift,
+            scrollback != 0,
+            motion,
+            dragging,
+            pressed,
+        ) != MouseDelivery::Application
+        {
             return false;
         }
         let Some((column, row)) = self.cell_at_client(x, y) else {
