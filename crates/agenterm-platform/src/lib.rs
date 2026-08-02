@@ -46,6 +46,7 @@ pub enum Capability {
     Process,
     FilesystemConventions,
     FilesystemEntry,
+    DirectoryAccess,
     FilesystemOpen,
     FilesystemCleanup,
     FilesystemPublish,
@@ -102,6 +103,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Process => (cfg!(feature = "process"), true),
         Capability::FilesystemConventions => (cfg!(feature = "filesystem-conventions"), true),
         Capability::FilesystemEntry => (cfg!(feature = "filesystem-entry"), true),
+        Capability::DirectoryAccess => (cfg!(feature = "directory-access"), true),
         Capability::FilesystemOpen => (cfg!(feature = "filesystem-open"), true),
         Capability::FilesystemCleanup => (cfg!(feature = "filesystem-cleanup"), true),
         Capability::FilesystemPublish => (cfg!(feature = "filesystem-publish"), true),
@@ -182,6 +184,9 @@ pub mod filesystem;
 
 #[cfg(feature = "filesystem-entry")]
 pub mod filesystem_entry;
+
+#[cfg(feature = "directory-access")]
+pub mod directory_access;
 
 #[cfg(feature = "filesystem-open")]
 pub mod filesystem_open;

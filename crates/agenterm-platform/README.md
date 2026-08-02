@@ -58,6 +58,7 @@ clipboard, IPC, or screenshot modules.
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
 | `filesystem-entry` | classify path metadata or already-open objects, treating Unix symbolic links and every Windows reparse point as link-like | none |
+| `directory-access` | merge bounded read/execute or content-modify access for a native principal across a quiescent directory tree without following links | `filesystem-entry` + minimal Windows security APIs |
 | `filesystem-open` | open an existing path or one child component without following the final link, then verify the opened object type | target `libc` / minimal `windows-sys` |
 | `filesystem-cleanup` | remove caller-owned quiescent trees after restoring deletable permissions without following links | none |
 | `filesystem-publish` | recoverable same-parent directory publication with typed rollback outcomes | `filesystem-cleanup` |
@@ -166,6 +167,15 @@ without reopening its path. Callers doing component-wise traversal must use a
 native no-follow open first; the returned directory/link-like facts then avoid
 a second name-resolution race. The feature remains free of native crate
 dependencies and does not choose traversal roots or authorization policy.
+
+`directory_access::grant_directory_tree_access` keeps the principal and access
+class explicit. On Windows it validates or creates the SID, merges an allow ACE
+into the existing DACL, rejects a link-like root, and counts skipped link-like
+descendants. `ModifyContents` permits content creation, rewrite, rename, and
+deletion but excludes ownership and DACL mutation. Linux and macOS expose the
+same typed API and return `Unsupported` for Windows SID principals rather than
+pretending Unix mode bits are equivalent. The caller owns principal selection,
+tree quiescence, and product authorization policy.
 
 `filesystem_open::open_existing_child` accepts exactly one ordinary component
 and resolves it relative to a retained directory object. Windows opens the

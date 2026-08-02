@@ -143,6 +143,13 @@ process = [
 ]
 filesystem-conventions = []
 filesystem-entry = []
+directory-access = [
+    "filesystem-entry",
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_Security",
+    "windows-sys/Win32_Security_Authorization",
+]
 filesystem-open = [
     "filesystem-entry",
     "dep:libc",
@@ -161,6 +168,7 @@ file-identity = [
 filesystem = [
     "filesystem-conventions",
     "filesystem-entry",
+    "directory-access",
     "filesystem-open",
     "file-identity",
     "user-identity",
