@@ -90,24 +90,6 @@ pub enum PlatformKind {
     Linux,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
-pub(crate) enum FrontendHost {
-    Windows,
-    Unix,
-    Unsupported,
-}
-
-pub(crate) fn frontend_host() -> FrontendHost {
-    match agenterm_platform::platform_kind() {
-        agenterm_platform::PlatformKind::Windows => FrontendHost::Windows,
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-            FrontendHost::Unix
-        }
-        _ => FrontendHost::Unsupported,
-    }
-}
-
 pub use agenterm_platform::input::{KeyClassification, ModifierState};
 #[allow(unused_imports)]
 pub(crate) use policy::capability::{CapabilityKind, CapabilityStatus, platform_info_json};

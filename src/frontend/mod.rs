@@ -5,15 +5,16 @@
 //! startup and wake delivery.
 
 use crate::client::{parse_loopback_ipc_address, set_ipc_selectors};
+use crate::frontend::host::{FrontendHost, frontend_host};
 use crate::ipc_endpoint::EndpointSelectorArgs;
 use crate::platform::adapters::unix::frontend as unix_frontend;
 use crate::platform::adapters::windows::frontend as windows_frontend;
-use crate::platform::{FrontendHost, frontend_host};
 use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE};
 use crate::wake_signal::WakeSignal;
 
 pub(crate) mod action;
 pub(crate) mod control_center;
+pub(crate) mod host;
 pub(crate) mod interaction;
 pub(crate) mod toolbar;
 pub(crate) mod window;
