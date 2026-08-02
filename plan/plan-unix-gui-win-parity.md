@@ -93,8 +93,8 @@ O1 并发树（并行）
 
 ### O2 汇聚后验收
 
-- [~] 所有交互分支都以 `agenterm-platform` 能力结果驱动，不再通过OS cfg做策略选择（进行中：platform facade 已统一，下一步收口交互决策）
-- [ ] `ui-snapshot`、`terminal_state`、`selection` 与可见行为在同场景可回放比对
+- [x] 所有交互分支都以 `agenterm-platform` 能力结果驱动，不再通过 OS cfg 做策略选择。2026-08-02 复核：`src` 非平台目录使用 `rg` 全量扫描后未发现 `is_windows_host`、`is_unix_host`、`platform_kind`、`#\[cfg(windows)]`、`#\[cfg(unix)]`，交互分支差异统一在能力证据和宿主差异记录，不直接进入非平台产品代码分支。
+- [x] `ui-snapshot`、`terminal_state`、`selection` 与可见行为在同场景可回放比对
 - [x] 文档同步：跨平台UX能力缺口矩阵同步到 PRD_02_20 与 plan
 
 ### O3 验证循环（Rhai 首选）
