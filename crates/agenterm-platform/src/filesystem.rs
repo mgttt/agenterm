@@ -281,7 +281,7 @@ mod tests {
     #[cfg(feature = "filesystem")]
     #[test]
     fn private_create_is_exclusive() {
-        let path = std::env::temp_dir().join(format!(
+        let path = temp_root().join(format!(
             "agenterm-platform-private-create-{}",
             std::process::id()
         ));
@@ -302,7 +302,7 @@ mod tests {
     #[cfg(feature = "filesystem")]
     #[test]
     fn private_directory_protection_rejects_a_file() {
-        let path = std::env::temp_dir().join(format!(
+        let path = temp_root().join(format!(
             "agenterm-platform-private-not-directory-{}",
             std::process::id()
         ));
@@ -317,13 +317,23 @@ mod tests {
         std::fs::remove_file(path).expect("remove non-directory fixture");
     }
 
+    /// Temporary root with symlinked prefixes resolved.
+    ///
+    /// macOS points TMPDIR at /var/... where /var is a symlink, and private
+    /// directory protection refuses symlinked ancestry, so fixtures must start
+    /// from the resolved path to test their own behaviour.
+    fn temp_root() -> std::path::PathBuf {
+        let base = std::env::temp_dir();
+        std::fs::canonicalize(&base).unwrap_or(base)
+    }
+
     #[cfg(all(unix, feature = "filesystem"))]
     #[test]
     fn private_directory_protection_rejects_a_symbolic_link() {
         use std::os::unix::fs::PermissionsExt as _;
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
+        let root = temp_root().join(format!(
             "agenterm-platform-private-link-{}",
             std::process::id()
         ));
@@ -360,7 +370,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
+        let root = temp_root().join(format!(
             "agenterm-platform-private-link-ancestry-{}",
             std::process::id()
         ));
@@ -396,7 +406,7 @@ mod tests {
     #[cfg(feature = "filesystem")]
     #[test]
     fn private_atomic_write_replaces_and_leaves_no_temporary() {
-        let root = std::env::temp_dir().join(format!(
+        let root = temp_root().join(format!(
             "agenterm-platform-private-atomic-{}",
             std::process::id()
         ));
@@ -434,7 +444,7 @@ mod tests {
     #[cfg(all(windows, feature = "filesystem"))]
     #[test]
     fn private_atomic_write_tolerates_concurrent_readers() {
-        let root = std::env::temp_dir().join(format!(
+        let root = temp_root().join(format!(
             "agenterm-platform-private-atomic-reader-{}",
             std::process::id()
         ));
@@ -471,7 +481,7 @@ mod tests {
     fn private_file_and_directory_use_owner_only_modes() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let root = std::env::temp_dir().join(format!(
+        let root = temp_root().join(format!(
             "agenterm-platform-private-mode-{}",
             std::process::id()
         ));

@@ -193,7 +193,13 @@ mod tests {
     use std::{fs, io::Read as _, path::PathBuf};
 
     fn fixture(label: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
+        // Componentwise opening refuses symlinked ancestors, and macOS points
+        // TMPDIR at /var/... where /var is a symlink to private/var. Resolve
+        // the temporary root first so fixtures exercise the walk itself rather
+        // than the platform's own symlinked prefix.
+        let base = std::env::temp_dir();
+        let base = std::fs::canonicalize(&base).unwrap_or(base);
+        base.join(format!(
             "agenterm-platform-open-{label}-{}",
             std::process::id()
         ))
