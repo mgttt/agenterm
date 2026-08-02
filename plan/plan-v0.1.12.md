@@ -1029,8 +1029,9 @@ run `30726492135` 在 30 秒预算下证明 connector 已成功 Ping、listener 
 必要条件。新证据模型由 connector 的 bounded Ping 证明真实往返，同时由 listener 的同一
 PeerId connection lifecycle、双方 PID/PeerId 交叉匹配和 clean exit 证明监听侧归属；本地公开
 self-test 在 343ms 完成。30 秒仍作为 public receipt 的明确上限而非性能目标；其他命令继续
-10 秒，Cargo 300 秒/Rhai 120 秒 outer budget 不变。下一 Linux matching-host run 必须在相同
-默认并行拓扑下通过，不能用本地快速成功或串行测试代替。
+10 秒，Cargo 300 秒/Rhai 120 秒 outer budget 不变。exact-SHA `1ef8e92` CI run
+`30726883698` 随后在同一默认并行拓扑下通过 Linux x86_64 owning research gate，且六个平台
+job 全绿；该 matching-host 回执已关闭，不依赖本地快速成功、串行替代或 failed-job retry。
 
 ## 九、系统 WebView / Tauri-compatible spike
 

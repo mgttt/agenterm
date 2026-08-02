@@ -269,7 +269,9 @@ records the listener's authenticated connection lifecycle, cross-checks both
 PIDs and PeerIds, and samples both workers before clean exit. The exact public
 self-test completes locally in 343 ms with this evidence. Ordinary commands
 retain the 10-second default and the public receipt remains explicitly bounded
-at 30 seconds; a succeeding Linux matching-host receipt is still required.
+at 30 seconds. Exact-SHA `1ef8e92` CI run `30726883698` then passed the owning
+Linux x86_64 research gate and all six platform jobs, closing the matching-host
+regression evidence without retrying or widening a deadline.
 
 ## Gates before stable service integration
 
