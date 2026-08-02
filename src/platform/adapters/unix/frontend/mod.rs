@@ -5003,7 +5003,11 @@ impl UnixApp {
                     self.queue_pty_input(bytes);
                 }
             }
-            PixelWindowEvent::PointerMoved(position) => {
+            PixelWindowEvent::PointerMoved {
+                position,
+                modifiers,
+            } => {
+                self.pointer_modifiers = modifiers;
                 let (x, y) = (position.x, position.y);
                 self.last_cursor = (x, y);
                 if self.tabs_resize_drag.is_some() {
@@ -5021,7 +5025,12 @@ impl UnixApp {
                     let _ = self.forward_terminal_mouse(x, y, None, true, true);
                 }
             }
-            PixelWindowEvent::MouseWheel { delta, position } => {
+            PixelWindowEvent::MouseWheel {
+                delta,
+                position,
+                modifiers,
+            } => {
+                self.pointer_modifiers = modifiers;
                 let (x, y) = position
                     .map(|position| (position.x, position.y))
                     .unwrap_or(self.last_cursor);
@@ -5039,7 +5048,9 @@ impl UnixApp {
                 state: PointerButtonState::Pressed,
                 button: PointerButton::Left,
                 position,
+                modifiers,
             } => {
+                self.pointer_modifiers = modifiers;
                 self.cursor_blink.reset(Instant::now());
                 let (x, y) = position
                     .map(|position| (position.x, position.y))
@@ -5054,8 +5065,10 @@ impl UnixApp {
             PixelWindowEvent::PointerButton {
                 state: PointerButtonState::Released,
                 button: PointerButton::Left,
+                modifiers,
                 ..
             } => {
+                self.pointer_modifiers = modifiers;
                 if let Some(code) = self.mouse_report_button.take() {
                     let (x, y) = self.last_cursor;
                     let _ = self.forward_terminal_mouse(x, y, Some(code), false, false);
@@ -5074,7 +5087,9 @@ impl UnixApp {
                 state,
                 button: button @ (PointerButton::Right | PointerButton::Middle),
                 position,
+                modifiers,
             } => {
+                self.pointer_modifiers = modifiers;
                 let code = if button == PointerButton::Right { 2 } else { 1 };
                 let (x, y) = position
                     .map(|position| (position.x, position.y))

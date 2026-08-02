@@ -434,7 +434,13 @@ impl ApplicationHandler<()> for PixelWindowRunner {
                 let logical = position.to_logical::<f64>(scale);
                 let point = LogicalPoint::new(logical.x, logical.y);
                 self.last_pointer = Some(point);
-                self.dispatch_event(event_loop, PixelWindowEvent::PointerMoved(point));
+                self.dispatch_event(
+                    event_loop,
+                    PixelWindowEvent::PointerMoved {
+                        position: point,
+                        modifiers: self.modifiers,
+                    },
+                );
             }
             WindowEvent::CursorLeft { .. } => {
                 self.last_pointer = None;
@@ -461,6 +467,7 @@ impl ApplicationHandler<()> for PixelWindowRunner {
                     PixelWindowEvent::MouseWheel {
                         delta,
                         position: self.last_pointer,
+                        modifiers: self.modifiers,
                     },
                 );
             }
@@ -475,6 +482,7 @@ impl ApplicationHandler<()> for PixelWindowRunner {
                         button: pointer_button(button),
                         state,
                         position: self.last_pointer,
+                        modifiers: self.modifiers,
                     },
                 );
             }

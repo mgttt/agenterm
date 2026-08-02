@@ -151,16 +151,21 @@ pub enum PixelWindowEvent {
     FocusChanged(bool),
     Keyboard(NormalizedKeyEvent),
     Ime(ImeEvent),
-    PointerMoved(LogicalPoint),
+    PointerMoved {
+        position: LogicalPoint,
+        modifiers: crate::contract::input::ModifierState,
+    },
     PointerLeft,
     PointerButton {
         button: PointerButton,
         state: PointerButtonState,
         position: Option<LogicalPoint>,
+        modifiers: crate::contract::input::ModifierState,
     },
     MouseWheel {
         delta: WheelDelta,
         position: Option<LogicalPoint>,
+        modifiers: crate::contract::input::ModifierState,
     },
 }
 
