@@ -9,7 +9,11 @@ fn require(condition, message) {
 fn new_context(repo_value, suite) {
     require(suite != "", "test_harness_suite_empty");
     let repo = std::path::absolute(repo_value).display;
-    let shared_evidence = std::env::get("AGENTERM_TEST_EVIDENCE_PATH");
+    let shared_evidence = if std::env::has("AGENTERM_TEST_EVIDENCE_PATH") {
+        std::env::get("AGENTERM_TEST_EVIDENCE_PATH")
+    } else {
+        ""
+    };
     let evidence_file = if shared_evidence != () && shared_evidence != "" {
         std::path::absolute(shared_evidence).display
     } else {
