@@ -1,0 +1,58 @@
+name: Release Candidate Auto-Dispatch
+
+# Qualifying a candidate is the one release step that needs no human judgement:
+# it only proves that an exact green main commit can produce six sealed
+# platform archives. Waiting for a person (or an agent) to notice CI turned
+# green and then dispatch by hand costs more time than the qualification
+# itself. Public promotion stays manual and keeps its confirmation string.
+#
+# Enable by setting the repository variable RELEASE_INTENT to the version being
+# prepared (for example `v0.1.12`). Clear it to stop auto-dispatch.
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: release-candidate-auto
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Dispatch a candidate for the green commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_INTENT: ${{ vars.RELEASE_INTENT }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_INTENT:-}" ]]; then
+            echo "RELEASE_INTENT is unset; no candidate is being prepared." >&2
+            exit 0
+          fi
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          existing="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/candidate.yml/runs?head_sha=$SOURCE_SHA&per_page=20" \
+              --jq '[.workflow_runs[] | select(.conclusion != "failure")] | length'
+          )"
+          if [[ "$existing" -gt 0 ]]; then
+            echo "A candidate already exists for $SOURCE_SHA." >&2
+            exit 0
+          fi
+          echo "Dispatching Release Candidate for $SOURCE_SHA ($RELEASE_INTENT)."
+          gh workflow run candidate.yml -f "source_sha=$SOURCE_SHA"
