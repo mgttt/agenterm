@@ -79,6 +79,7 @@ agenterm-platform crate（复用层）
   - 已完成: 启动/恢复 server 的决策逻辑从 `src/platform/adapters/windows/remote_frontend.rs` 提取为独立产品域 `src/frontend_server.rs`，并由 `src/platform/adapters/windows/remote_frontend.rs` 仅消费该域接口（`connect_or_start_frontend_gui_client` / `FrontendServerRecovery*`），减少平台适配器中的生命周期分支。
   - 本轮补充: 控制平面 CLI 的 `start_server_process` 也已委托给 `frontend_server::start_frontend_server_process`，避免服务端启动策略在 `src/client/mod.rs` 和 `remote_frontend` 中重复定义。
   - 本轮收口: 新增 `FrontendContractState`，并由 `GuiLaunchResult` / `GuiWakeResult` / `FrontendServerRecovery` 映射统一状态（Supported/Unsupported/Failed）；便于 evidence 统一归档与分支阻断。
+  - 本轮补充: 把 `autostart_server` 的平台分支下沉到 `src/platform/process.rs` 的编译期分支（Windows 真正执行、非 Windows 返回 `Ok(false)`），去掉运行时 `platform_kind` 条件，提高平台能力边界清晰度。
 
 - O1B（UI）：统一输入-选择-滚轮场景模板（进行中）
   - owner: Human Workspace + ui_bridge
