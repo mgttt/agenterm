@@ -87,6 +87,28 @@ fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
 }
 
 #[test]
+fn hidden_listener_reports_typed_ping_deadline_after_ready() {
+    let output = Command::new(binary())
+        .args(["__listen", "100"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .expect("run hidden listener");
+    assert!(!output.status.success());
+    let receipts = String::from_utf8(output.stdout)
+        .expect("listener stdout is UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("typed listener JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(receipts.len(), 2, "{receipts:?}");
+    assert_eq!(receipts[0]["event"], "ready");
+    assert_eq!(receipts[1]["schema"], "agenterm-net/error/v1");
+    assert_eq!(receipts[1]["state"], "failed");
+    assert_eq!(receipts[1]["code"], "listener_failed");
+    assert_eq!(receipts[1]["message"], "listener deadline exceeded");
+}
+
+#[test]
 fn private_mesh_proves_dht_pubsub_and_relay_without_public_authority() {
     let (capability_status, capabilities) = json_output(&["capabilities", "--json"]);
     assert!(capability_status.success(), "{capabilities}");

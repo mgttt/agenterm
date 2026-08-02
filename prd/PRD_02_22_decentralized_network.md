@@ -239,6 +239,20 @@ accepted load ceilings, complete malformed-CID coverage, and a live
 stable-server/PTY isolation journey remain open, so this evidence does not
 promote the research executable into the stable artifact manifest.
 
+The Linux x86_64 ordinary-CI run `30725392424` exposed a real phase-budget
+defect rather than a libp2p transport failure: the listener spent one 10-second
+deadline across both listen readiness and the later ping while the connector
+received a fresh ping budget, and libp2p's default protocol timeout exceeded
+the outer worker deadline. The listener now owns separate bounded ready and
+ping phases, both peers configure protocol timeout within the owning phase,
+and an explicit ping failure exits immediately. Parent receipt decoding also
+preserves a child `agenterm-net/error/v1` code/message instead of relabeling it
+as a missing success field. Exact public self-test, a 100 ms typed listener
+deadline, typed parent decoding, all **15 unit + 14 default-parallel CLI tests**,
+and the owning `agenterm-net-research` task pass locally. A succeeding Linux
+matching-host receipt remains required; this robustness repair does not change
+the executable's experimental or non-packaged status.
+
 ## Gates before stable service integration
 
 - [~] durable identity and local key lifecycle are specified and migration-tested;

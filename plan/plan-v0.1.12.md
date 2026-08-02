@@ -1005,6 +1005,15 @@ Local sidecar crash recovery 也现有显式 `node recover` 纵切：活 control
 证明 durable PeerId/store 连续与新 PID，但 remote libp2p peer/session reconnect、自动恢复
 policy、rate exhaustion 和三平台负载仍未完成。
 
+ordinary CI run `30725392424` 在 Linux 并行负载下暴露 N1 self-test 的真实阶段预算
+不对称：listener 从 listen 前开始消耗同一 10 秒直到 ping，connector 却在 ready 后拿到
+完整新预算；libp2p ping 默认 20 秒也越过外层 worker deadline。修复把 ready/ping 分成
+各自 bounded phase，使 protocol timeout 严格短于 owner phase，并在 ping failure 时立即
+typed fail；parent 先识别 `agenterm-net/error/v1`，不再把合法 child failure 降格成
+`missing field event`。跨进程 public self-test、100ms hidden-listener typed deadline、parent
+decoder、15 unit + 14 默认并行 CLI tests 与 owning Rhai task 均已通过；仍等待后继 Linux
+matching-host 回执，且不因此把 experimental binary 升为 stable/release asset。
+
 ## 九、系统 WebView / Tauri-compatible spike
 
 先以一个独立的 `agenterm-cc-web` 实验宿主验证系统 WebView，而不是把 Tauri

@@ -60,6 +60,14 @@ struct ErrorEnvelope {
     message: String,
 }
 
+#[derive(Deserialize)]
+struct ChildErrorEnvelope {
+    schema: String,
+    state: String,
+    code: String,
+    message: String,
+}
+
 #[derive(Serialize)]
 struct Capability {
     name: &'static str,
@@ -704,7 +712,11 @@ fn hex_digest(input: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn make_swarm() -> Result<libp2p::Swarm<Behaviour>, String> {
+fn make_swarm(phase_deadline: Duration) -> Result<libp2p::Swarm<Behaviour>, String> {
+    let protocol_timeout = std::cmp::max(
+        phase_deadline.saturating_sub(Duration::from_millis(50)),
+        Duration::from_millis(1),
+    );
     let builder = SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
@@ -714,14 +726,15 @@ fn make_swarm() -> Result<libp2p::Swarm<Behaviour>, String> {
         )
         .map_err(|error| error.to_string())?
         .with_behaviour(|_| Behaviour {
-            ping: ping::Behaviour::new(ping::Config::new()),
+            ping: ping::Behaviour::new(ping::Config::new().with_timeout(protocol_timeout)),
         })
         .map_err(|error| error.to_string())?;
     Ok(builder.build())
 }
 
 async fn run_listener(deadline_ms: u64) -> Result<(), String> {
-    let mut swarm = make_swarm()?;
+    let phase_deadline = Duration::from_millis(deadline_ms);
+    let mut swarm = make_swarm(phase_deadline)?;
     let peer_id = *swarm.local_peer_id();
     swarm
         .listen_on(
@@ -730,7 +743,7 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
                 .map_err(|error: libp2p::multiaddr::Error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
-    let deadline = tokio::time::sleep(Duration::from_millis(deadline_ms));
+    let deadline = tokio::time::sleep(phase_deadline);
     tokio::pin!(deadline);
     let mut announced = false;
     loop {
@@ -738,6 +751,9 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
             _ = &mut deadline => return Err("listener deadline exceeded".to_string()),
             event = swarm.select_next_some() => match event {
                 SwarmEvent::NewListenAddr { address, .. } if !announced => {
+                    deadline
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + phase_deadline);
                     let ready = Ready {
                         event: "ready".to_string(),
                         peer_id: peer_id.to_string(),
@@ -747,18 +763,21 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
                     println!("{}", serde_json::to_string(&ready).map_err(|e| e.to_string())?);
                     announced = true;
                 }
-                SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) if event.result.is_ok() => {
-                    let result = WorkerResult {
-                        event: "ping".to_string(),
-                        peer_id: peer_id.to_string(),
-                        remote_peer_id: event.peer.to_string(),
-                        rtt_us: event.result.unwrap_or_default().as_micros(),
-                        pid: std::process::id(),
-                        resources: sample_process_resources(),
-                    };
-                    println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
-                    return Ok(());
-                }
+                SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event.result {
+                    Ok(rtt) => {
+                        let result = WorkerResult {
+                            event: "ping".to_string(),
+                            peer_id: peer_id.to_string(),
+                            remote_peer_id: event.peer.to_string(),
+                            rtt_us: rtt.as_micros(),
+                            pid: std::process::id(),
+                            resources: sample_process_resources(),
+                        };
+                        println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
+                        return Ok(());
+                    }
+                    Err(error) => return Err(format!("ping with {} failed: {error}", event.peer)),
+                },
                 _ => {}
             }
         }
@@ -766,7 +785,8 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
 }
 
 async fn run_connector(address: &str, expected_peer: &str, deadline_ms: u64) -> Result<(), String> {
-    let mut swarm = make_swarm()?;
+    let phase_deadline = Duration::from_millis(deadline_ms);
+    let mut swarm = make_swarm(phase_deadline)?;
     let peer_id = *swarm.local_peer_id();
     let expected: PeerId = expected_peer
         .parse()
@@ -776,24 +796,30 @@ async fn run_connector(address: &str, expected_peer: &str, deadline_ms: u64) -> 
         .map_err(|error| format!("invalid address: {error}"))?;
     address.push(libp2p::multiaddr::Protocol::P2p(expected));
     swarm.dial(address).map_err(|error| error.to_string())?;
-    let deadline = tokio::time::sleep(Duration::from_millis(deadline_ms));
+    let deadline = tokio::time::sleep(phase_deadline);
     tokio::pin!(deadline);
     loop {
         tokio::select! {
             _ = &mut deadline => return Err("connector deadline exceeded".to_string()),
             event = swarm.select_next_some() => match event {
-                SwarmEvent::Behaviour(BehaviourEvent::Ping(event))
-                    if event.peer == expected && event.result.is_ok() => {
-                    let result = WorkerResult {
-                        event: "ping".to_string(),
-                        peer_id: peer_id.to_string(),
-                        remote_peer_id: event.peer.to_string(),
-                        rtt_us: event.result.unwrap_or_default().as_micros(),
-                        pid: std::process::id(),
-                        resources: sample_process_resources(),
-                    };
-                    println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
-                    return Ok(());
+                SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) if event.peer == expected => {
+                    match event.result {
+                        Ok(rtt) => {
+                            let result = WorkerResult {
+                                event: "ping".to_string(),
+                                peer_id: peer_id.to_string(),
+                                remote_peer_id: event.peer.to_string(),
+                                rtt_us: rtt.as_micros(),
+                                pid: std::process::id(),
+                                resources: sample_process_resources(),
+                            };
+                            println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            return Err(format!("ping with {} failed: {error}", event.peer));
+                        }
+                    }
                 }
                 SwarmEvent::OutgoingConnectionError { error, .. } => {
                     return Err(format!("peer connection failed: {error}"));
@@ -1122,8 +1148,21 @@ fn receive_json<T: serde::de::DeserializeOwned>(
     phase: &str,
 ) -> Result<T, String> {
     match receiver.recv_timeout(deadline) {
-        Ok(ChildMessage::Line(line)) => serde_json::from_str(&line)
-            .map_err(|error| format!("{phase} emitted invalid JSON: {error}: {line}")),
+        Ok(ChildMessage::Line(line)) => {
+            let value: serde_json::Value = serde_json::from_str(&line)
+                .map_err(|error| format!("{phase} emitted invalid JSON: {error}: {line}"))?;
+            if let Ok(error) = serde_json::from_value::<ChildErrorEnvelope>(value.clone())
+                && error.schema == "agenterm-net/error/v1"
+                && error.state == "failed"
+            {
+                return Err(format!(
+                    "{phase} failed with {}: {}",
+                    error.code, error.message
+                ));
+            }
+            serde_json::from_value(value)
+                .map_err(|error| format!("{phase} emitted an invalid receipt: {error}: {line}"))
+        }
         Ok(ChildMessage::IoError(error)) => Err(format!("{phase} read failed: {error}")),
         Ok(ChildMessage::Eof) => Err(format!("{phase} ended before emitting evidence")),
         Err(mpsc::RecvTimeoutError::Timeout) => Err(format!("{phase} deadline exceeded")),
@@ -1233,5 +1272,28 @@ mod tests {
             Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap()
         };
         assert!(ChildGuard::new(child).finish().unwrap());
+    }
+
+    #[test]
+    fn child_error_envelope_preserves_typed_failure() {
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(ChildMessage::Line(
+                r#"{"schema":"agenterm-net/error/v1","request_id":"net-test","state":"failed","code":"listener_failed","message":"listener deadline exceeded"}"#.to_string(),
+            ))
+            .unwrap();
+
+        let error = match receive_json::<WorkerResult>(
+            &receiver,
+            Duration::from_millis(10),
+            "listener ping",
+        ) {
+            Ok(_) => panic!("typed child failure was accepted as a worker receipt"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error,
+            "listener ping failed with listener_failed: listener deadline exceeded"
+        );
     }
 }
