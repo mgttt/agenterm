@@ -1260,11 +1260,17 @@ mod tests {
         engine
     }
 
-    #[cfg(any(windows, unix))]
+    fn process_shell_test_host_supported() -> bool {
+        crate::platform::is_windows_host() || crate::platform::is_unix_host()
+    }
+
     fn wrapped_shell_command(
         shell_command: &str,
         arguments: &[&str],
     ) -> (String, Vec<String>) {
+        if !process_shell_test_host_supported() {
+            panic!("process-shell tests unsupported on this platform");
+        }
         let shell = crate::platform::runtime::default_terminal_shell();
         let arguments = arguments
             .iter()
@@ -1279,17 +1285,14 @@ mod tests {
         (program, wrapped)
     }
 
-    #[cfg(any(windows, unix))]
     fn long_running_shell_command() -> (&'static str, &'static [&'static str]) {
         crate::platform::long_running_process_command_fixture()
     }
 
-    #[cfg(any(windows, unix))]
     fn long_running_process_command_timeout() -> (&'static str, &'static [&'static str]) {
         crate::platform::long_running_process_command_timeout()
     }
 
-    #[cfg(any(windows, unix))]
     fn shell_wrapped_process_command(
         windows_command: &str,
         unix_command: &str,
@@ -1302,7 +1305,6 @@ mod tests {
         process
     }
 
-    #[cfg(any(windows, unix))]
     fn spawn_owned_tree_fixture() -> ScriptChild {
         let (program, arguments) = wrapped_shell_command(
             long_running_shell_command().0,
@@ -1314,7 +1316,6 @@ mod tests {
         spawn_owned(&command).expect("spawn owned process tree")
     }
 
-    #[cfg(any(windows, unix))]
     fn spawn_unrelated_fixture() -> KillOnDrop {
         let (program, arguments) = wrapped_shell_command(
             long_running_shell_command().0,
@@ -1329,7 +1330,6 @@ mod tests {
         KillOnDrop(command.spawn().expect("spawn unrelated process"))
     }
 
-    #[cfg(any(windows, unix))]
     fn descendant_ids(root_id: u32) -> Vec<u32> {
         let processes = platform_process_list().expect("process inventory");
         let parents = processes
@@ -1356,14 +1356,12 @@ mod tests {
             .collect()
     }
 
-    #[cfg(any(windows, unix))]
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct ObservedProcess {
         id: u32,
         start_identity: String,
     }
 
-    #[cfg(any(windows, unix))]
     fn wait_for_descendants(root_id: u32) -> Vec<ObservedProcess> {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -1388,7 +1386,6 @@ mod tests {
         }
     }
 
-    #[cfg(any(windows, unix))]
     fn observed_process_is_live(
         process: &ObservedProcess,
         observation: child_process_tree::ProcessObservation,
@@ -1406,7 +1403,6 @@ mod tests {
         }
     }
 
-    #[cfg(any(windows, unix))]
     fn wait_for_processes_to_disappear(processes: &[ObservedProcess]) {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -1485,8 +1481,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(windows, unix))]
     fn process_kill_terminates_an_arbitrary_operating_system_process() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let (program, arguments) = wrapped_shell_command(
             long_running_shell_command().0,
             long_running_shell_command().1,
@@ -1520,6 +1518,9 @@ mod tests {
 
     #[test]
     fn command_preserves_environment_output_and_exit_code() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let mut command = shell_wrapped_process_command(
             "set",
             "printenv",
@@ -1554,6 +1555,9 @@ mod tests {
 
     #[test]
     fn command_can_redirect_stdout_to_one_explicit_file() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let path = std::env::temp_dir().join(format!(
             "agenterm-process-stdout-{}.txt",
             std::process::id()
@@ -1574,6 +1578,9 @@ mod tests {
 
     #[test]
     fn command_can_redirect_stderr_to_one_explicit_file() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let path = std::env::temp_dir().join(format!(
             "agenterm-process-stderr-{}.txt",
             std::process::id()
@@ -1594,6 +1601,9 @@ mod tests {
 
     #[test]
     fn output_can_require_a_successful_child_exit() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let mut command = shell_wrapped_process_command("exit /b 7", "exit 7", &[]);
         let mut output = command_output(&mut command).unwrap();
         let error = output_require_success(&mut output, "test-child")
@@ -1606,6 +1616,9 @@ mod tests {
 
     #[test]
     fn required_child_failure_is_a_catchable_typed_error() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let mut command = shell_wrapped_process_command("exit /b 7", "exit 7", &[]);
         let mut output = command_output(&mut command).unwrap();
         let error = output_require_success(&mut output, "test-child").unwrap_err();
@@ -1630,6 +1643,9 @@ mod tests {
 
     #[test]
     fn child_id_remains_stable_after_wait() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let mut command = shell_wrapped_process_command("exit", "exit", &[]);
         command.arguments.push("0".to_string());
         let mut child = command_start(&mut command).unwrap();
@@ -1651,6 +1667,9 @@ mod tests {
 
     #[test]
     fn command_timeout_is_typed() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let (timeout_command, timeout_arguments) = long_running_process_command_timeout();
         let mut command = shell_wrapped_process_command(
             timeout_command,
@@ -1667,8 +1686,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(windows, unix))]
     fn child_kill_tree_reaps_descendants_without_touching_unrelated_processes() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let mut owned = spawn_owned_tree_fixture();
         let owned_id = u32::try_from(child_id(&mut owned).unwrap()).unwrap();
         let descendants = wait_for_descendants(owned_id);
@@ -1690,8 +1711,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(windows, unix))]
     fn cleanup_observation_tracks_process_identity_instead_of_pid_presence() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let process = ObservedProcess {
             id: 42,
             start_identity: "original".to_owned(),
@@ -1735,8 +1758,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(windows, unix))]
     fn child_wait_timeout_reaps_descendants_without_touching_unrelated_processes() {
+        if !process_shell_test_host_supported() {
+            return;
+        }
         let mut owned = spawn_owned_tree_fixture();
         let owned_id = u32::try_from(child_id(&mut owned).unwrap()).unwrap();
         let descendants = wait_for_descendants(owned_id);
