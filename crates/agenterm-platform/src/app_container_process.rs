@@ -18,6 +18,12 @@ pub struct AppContainerProcessCapability<'a> {
 
 impl<'a> AppContainerProcessCapability<'a> {
     #[must_use]
+    pub const fn enabled(sid: &'a [u8]) -> Self {
+        const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+        Self::new(sid, SE_GROUP_ENABLED)
+    }
+
+    #[must_use]
     pub const fn new(sid: &'a [u8], attributes: u32) -> Self {
         Self { sid, attributes }
     }
@@ -272,6 +278,7 @@ mod tests {
 
     #[test]
     fn invalid_inputs_fail_before_native_process_creation() {
+        assert_eq!(AppContainerProcessCapability::enabled(&[1]).attributes(), 4);
         assert_eq!(
             spawn_suspended(options(&[], "cmd.exe"))
                 .err()
@@ -343,6 +350,11 @@ mod real_windows_tests {
         (name, sid)
     }
 
+    fn profile_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn command_fixture() -> (String, std::path::PathBuf, Vec<(String, String)>) {
         let system_root = std::env::var("SystemRoot").expect("SystemRoot");
         let executable = std::path::Path::new(&system_root)
@@ -373,6 +385,7 @@ mod real_windows_tests {
 
     #[test]
     fn suspended_process_resumes_and_preserves_exact_exit_code() {
+        let _serial = profile_test_guard();
         let (name, sid) = fixture();
         let _cleanup = ProfileCleanup(name);
         let (command, directory, environment) = command_fixture();
@@ -401,6 +414,7 @@ mod real_windows_tests {
 
     #[test]
     fn dropping_unresumed_process_terminates_and_waits_for_the_exact_object() {
+        let _serial = profile_test_guard();
         let (name, sid) = fixture();
         let _cleanup = ProfileCleanup(name);
         let (command, directory, environment) = command_fixture();
@@ -433,6 +447,7 @@ mod real_windows_tests {
             System::Threading::CreateEventW,
         };
 
+        let _serial = profile_test_guard();
         let (name, sid) = fixture();
         let _cleanup = ProfileCleanup(name);
         let (command, directory, environment) = command_fixture();

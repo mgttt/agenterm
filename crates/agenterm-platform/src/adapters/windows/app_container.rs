@@ -206,6 +206,11 @@ impl AppContainerCapabilitySid {
 }
 
 impl<'a> AppContainerCapability<'a> {
+    pub fn enabled(sid: &'a [u8]) -> Result<Self, AppContainerProfileError> {
+        const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+        Self::new(sid, SE_GROUP_ENABLED)
+    }
+
     pub fn new(sid: &'a [u8], attributes: u32) -> Result<Self, AppContainerProfileError> {
         validate_sid_bytes("AppContainerCapability", sid)?;
         Ok(Self { sid, attributes })
@@ -530,6 +535,12 @@ mod tests {
 
         assert_eq!(sid_string(&unaligned[1..]).unwrap(), "S-1-15-3-1");
         AppContainerCapability::new(&unaligned[1..], 4).expect("borrow unaligned SID");
+        assert_eq!(
+            AppContainerCapability::enabled(&unaligned[1..])
+                .expect("enable unaligned SID")
+                .attributes,
+            4
+        );
 
         let aligned = aligned_sid_copy("test", &unaligned[1..]).expect("align SID bytes");
         assert_eq!(aligned.as_ptr() as usize % std::mem::align_of::<usize>(), 0);
