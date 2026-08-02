@@ -138,6 +138,7 @@ O1 并发树（并行）
 ```text
 目标：UI/UX 语义住在 src/frontend/，platform 只保留能力契约与主机 adapter
 ├─ D1 [x] src/platform/toolbar.rs → src/frontend/toolbar.rs
+├─ D1 [x] src/platform/mod.rs `action` → src/frontend/action.rs
 ├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
 ├─ D1 [ ] src/platform/control_center.rs → src/frontend/control_center.rs
 ├─ D2 [ ] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures}

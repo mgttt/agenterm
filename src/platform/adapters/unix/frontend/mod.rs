@@ -2558,7 +2558,7 @@ impl UnixApp {
     /// Platform hot-path: toolbar hits resolve through stable adapter action ids
     /// before shared product handlers run.
     fn dispatch_toolbar_action(&mut self, action_id: &str) {
-        use crate::platform::action;
+        use crate::frontend::action;
         if !action::is_toolbar_action_id(action_id) {
             return;
         }
@@ -4410,13 +4410,13 @@ impl UnixApp {
 
 fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
     match hit {
-        ToolbarHit::NewTab => crate::platform::action::NEW_TAB,
-        ToolbarHit::ToggleTabs => crate::platform::action::TOGGLE_TABS,
-        ToolbarHit::ControlCenter => crate::platform::action::OPEN_CONTROL_CENTER,
-        ToolbarHit::Settings => crate::platform::action::OPEN_SETTINGS,
-        ToolbarHit::ToggleLocale => crate::platform::action::TOGGLE_LOCALE,
-        ToolbarHit::FontDecrease => crate::platform::action::FONT_DECREASE,
-        ToolbarHit::FontIncrease => crate::platform::action::FONT_INCREASE,
+        ToolbarHit::NewTab => crate::frontend::action::NEW_TAB,
+        ToolbarHit::ToggleTabs => crate::frontend::action::TOGGLE_TABS,
+        ToolbarHit::ControlCenter => crate::frontend::action::OPEN_CONTROL_CENTER,
+        ToolbarHit::Settings => crate::frontend::action::OPEN_SETTINGS,
+        ToolbarHit::ToggleLocale => crate::frontend::action::TOGGLE_LOCALE,
+        ToolbarHit::FontDecrease => crate::frontend::action::FONT_DECREASE,
+        ToolbarHit::FontIncrease => crate::frontend::action::FONT_INCREASE,
     }
 }
 
@@ -5614,7 +5614,7 @@ mod system_menu_tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn toolbar_hits_resolve_through_platform_action_ids() {
-        use crate::platform::action;
+        use crate::frontend::action;
         assert_eq!(
             platform_toolbar_action_id(ToolbarHit::NewTab),
             action::NEW_TAB

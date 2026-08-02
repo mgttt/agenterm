@@ -59,35 +59,6 @@ pub(crate) mod services;
 #[allow(dead_code)]
 pub(crate) mod webview;
 
-/// Stable product action identities consumed by toolbar / shortcut surfaces.
-///
-/// Win32 control IDs, winit events, and HTML elements remain adapter details.
-pub mod action {
-    pub const NEW_TAB: &str = "new-tab";
-    pub const TOGGLE_TABS: &str = "toggle-tabs";
-    pub const OPEN_CONTROL_CENTER: &str = "open-control-center";
-    pub const OPEN_SETTINGS: &str = "open-settings";
-    pub const TOGGLE_LOCALE: &str = "toggle-locale";
-    pub const FONT_DECREASE: &str = "font-decrease";
-    pub const FONT_INCREASE: &str = "font-increase";
-
-    /// Canonical left-to-right toolbar order. Every adapter `ORDER` must match.
-    pub const TOOLBAR_ACTION_ORDER: [&str; 7] = [
-        TOGGLE_TABS,
-        NEW_TAB,
-        OPEN_CONTROL_CENTER,
-        OPEN_SETTINGS,
-        TOGGLE_LOCALE,
-        FONT_DECREASE,
-        FONT_INCREASE,
-    ];
-
-    /// Reject adapter-local or stale identities before product dispatch.
-    pub fn is_toolbar_action_id(action_id: &str) -> bool {
-        TOOLBAR_ACTION_ORDER.contains(&action_id)
-    }
-}
-
 /// Which operating-system adapter identity is speaking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
@@ -643,13 +614,16 @@ mod tests {
     #[test]
     fn product_action_identities_match_prd_examples() {
         let expected = [
-            ("new-tab", action::NEW_TAB),
-            ("toggle-tabs", action::TOGGLE_TABS),
-            ("open-control-center", action::OPEN_CONTROL_CENTER),
-            ("open-settings", action::OPEN_SETTINGS),
-            ("toggle-locale", action::TOGGLE_LOCALE),
-            ("font-decrease", action::FONT_DECREASE),
-            ("font-increase", action::FONT_INCREASE),
+            ("new-tab", crate::frontend::action::NEW_TAB),
+            ("toggle-tabs", crate::frontend::action::TOGGLE_TABS),
+            (
+                "open-control-center",
+                crate::frontend::action::OPEN_CONTROL_CENTER,
+            ),
+            ("open-settings", crate::frontend::action::OPEN_SETTINGS),
+            ("toggle-locale", crate::frontend::action::TOGGLE_LOCALE),
+            ("font-decrease", crate::frontend::action::FONT_DECREASE),
+            ("font-increase", crate::frontend::action::FONT_INCREASE),
         ];
         for (want, got) in expected {
             assert_eq!(got, want);
@@ -659,7 +633,7 @@ mod tests {
     #[test]
     fn toolbar_action_order_matches_prd_geometry() {
         assert_eq!(
-            action::TOOLBAR_ACTION_ORDER,
+            crate::frontend::action::TOOLBAR_ACTION_ORDER,
             [
                 "toggle-tabs",
                 "new-tab",
@@ -670,10 +644,12 @@ mod tests {
                 "font-increase",
             ]
         );
-        for action_id in action::TOOLBAR_ACTION_ORDER {
-            assert!(action::is_toolbar_action_id(action_id));
+        for action_id in crate::frontend::action::TOOLBAR_ACTION_ORDER {
+            assert!(crate::frontend::action::is_toolbar_action_id(action_id));
         }
-        assert!(!action::is_toolbar_action_id("adapter-local-action"));
+        assert!(!crate::frontend::action::is_toolbar_action_id(
+            "adapter-local-action"
+        ));
     }
 
     #[test]
@@ -681,7 +657,7 @@ mod tests {
         use crate::frontend::toolbar::NativeToolbarHit;
         assert_eq!(
             NativeToolbarHit::ORDER.map(NativeToolbarHit::action_id),
-            action::TOOLBAR_ACTION_ORDER
+            crate::frontend::action::TOOLBAR_ACTION_ORDER
         );
     }
 

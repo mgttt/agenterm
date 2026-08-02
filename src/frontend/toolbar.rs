@@ -1,6 +1,6 @@
 //! Product toolbar action mapping, independent of the native window toolkit.
 
-use crate::platform::action;
+use crate::frontend::action;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NativeToolbarHit {

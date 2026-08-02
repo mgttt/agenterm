@@ -21,6 +21,7 @@ src/platform/                产品平台 glue：FrontendHost、目录名、快�
 
 src/frontend/                产品 GUI 入口 + UI/UX 语义
   mod.rs                     parse / handoff / 统一结果码 / dispatch
+  action.rs                  canonical action identities（toolbar/shortcut 共用）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
 
