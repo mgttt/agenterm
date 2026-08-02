@@ -298,8 +298,11 @@ pub(super) fn grid_dimensions_for_terminal(
     cell_height: u32,
 ) -> (u16, u16) {
     let terminal_width = terminal_width.saturating_sub(SCROLLBAR_WIDTH);
-    let cols = (terminal_width / cell_width.max(1)).max(1) as u16;
-    let rows = (terminal_height / cell_height.max(1)).max(1) as u16;
+    let cols = (terminal_width / cell_width.max(1)).max(2) as u16;
+    // A one-row grid underflows vt100's wrap bookkeeping (grid.rs
+    // `prev_pos.row -= scrolled`) and aborts the process, so the grid never
+    // shrinks below two rows even when the viewport is dragged that small.
+    let rows = (terminal_height / cell_height.max(1)).max(2) as u16;
     (cols, rows)
 }
 
