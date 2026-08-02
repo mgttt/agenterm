@@ -26,6 +26,17 @@ pub(crate) const fn app_container_process_supported() -> bool {
     }
 }
 
+pub(crate) const fn app_container_profile_supported() -> bool {
+    #[cfg(windows)]
+    {
+        true
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 #[cfg(all(feature = "console-interrupt", windows))]
 #[path = "adapters/windows/console_interrupt.rs"]
 pub(crate) mod console_interrupt;

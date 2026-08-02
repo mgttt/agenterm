@@ -98,7 +98,10 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
         Capability::ProcessReference => (cfg!(feature = "process-reference"), true),
         Capability::ProcessContainment => (cfg!(feature = "process-containment"), true),
-        Capability::AppContainerProfile => (cfg!(feature = "app-container-profile"), cfg!(windows)),
+        Capability::AppContainerProfile => (
+            cfg!(feature = "app-container-profile"),
+            crate::selected::app_container_profile_supported(),
+        ),
         Capability::AppContainerProcess => (
             cfg!(feature = "app-container-process"),
             crate::selected::app_container_process_supported(),
