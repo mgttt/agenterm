@@ -82,6 +82,24 @@ pub enum PlatformKind {
     Linux,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
+pub(crate) enum FrontendHost {
+    Windows,
+    Unix,
+    Unsupported,
+}
+
+pub(crate) fn frontend_host() -> FrontendHost {
+    match agenterm_platform::platform_kind() {
+        agenterm_platform::PlatformKind::Windows => FrontendHost::Windows,
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
+            FrontendHost::Unix
+        }
+        _ => FrontendHost::Unsupported,
+    }
+}
+
 /// Capability surface an adapter may expose (capability-oriented, not one
 /// global `OsLayer` object).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

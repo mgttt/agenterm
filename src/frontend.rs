@@ -11,6 +11,7 @@ use crate::frontend_server::{
 };
 use crate::wake_signal::WakeSignal;
 use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE};
+use crate::platform::{frontend_host, FrontendHost};
 
 #[path = "platform/adapters/windows/remote_frontend.rs"]
 mod remote_frontend;
@@ -18,23 +19,6 @@ mod remote_frontend;
 mod unix_frontend;
 #[path = "platform/adapters/windows/frontend.rs"]
 mod windows_frontend;
-
-#[derive(Clone, Copy)]
-enum FrontendHost {
-    Windows,
-    Unix,
-    Unsupported,
-}
-
-fn frontend_host() -> FrontendHost {
-    match agenterm_platform::platform_kind() {
-        agenterm_platform::PlatformKind::Windows => FrontendHost::Windows,
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
-            FrontendHost::Unix
-        }
-        _ => FrontendHost::Unsupported,
-    }
-}
 
 // Shared GUI launch usage for both platform frontends.
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\
