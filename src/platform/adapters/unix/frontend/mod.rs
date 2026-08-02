@@ -11,6 +11,7 @@ mod terminal_selection;
 #[path = "../../../../ui_snapshot.rs"]
 mod ui_snapshot;
 mod wake;
+pub(crate) use wake::request_gui_wake;
 mod window_state;
 
 use std::{

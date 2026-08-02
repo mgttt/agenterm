@@ -59,7 +59,7 @@ pub(crate) enum FrontendServerRecovery {
 }
 
 impl FrontendServerRecovery {
-    pub(crate) const fn contract_state(self) -> crate::frontend::FrontendContractState {
+    pub(crate) fn contract_state(self) -> crate::frontend::FrontendContractState {
         match self {
             Self::NoAction | Self::Started => crate::frontend::FrontendContractState::Supported,
             Self::Failed(_) => crate::frontend::FrontendContractState::Failed,
@@ -138,7 +138,7 @@ pub(crate) fn start_frontend_server_process() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{next_frontend_server_restart_after, FrontendServerRecovery, GUI_FRONTEND_SERVER_RESTART_INTERVAL};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn recovery_delay_is_computable() {
@@ -146,8 +146,8 @@ mod tests {
         let later = next_frontend_server_restart_after(now);
         assert_eq!(
             later
-                .duration_since(now)
-                .unwrap_or_default(),
+                .checked_duration_since(now)
+                .unwrap_or_else(|| Duration::from_millis(0)),
             GUI_FRONTEND_SERVER_RESTART_INTERVAL
         );
     }

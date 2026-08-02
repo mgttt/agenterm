@@ -253,7 +253,7 @@ pub(crate) fn parse_gui_launch_target(
         ui_client,
         selectors,
     } = parse_gui_launch_arguments(arguments, policy).map_err(|error| error.to_string())?;
-    set_ipc_selectors(selectors).map_err(|error| error.to_string())?;
+    set_ipc_selectors(selectors.clone()).map_err(|error| error.to_string())?;
     Ok(GuiLaunchOptions {
         no_activate,
         ui_client,
@@ -328,7 +328,10 @@ pub fn run_gui_entry() -> i32 {
             eprintln!("AgenTerm GUI is unsupported on this platform");
             1
         }
-        GuiLaunchResult::BlockedByServer(_error) | GuiLaunchResult::StartupFailed(_) => 1,
+    GuiLaunchResult::BlockedByServer(error) | GuiLaunchResult::StartupFailed(error) => {
+        eprintln!("AgenTerm GUI launch failed: {error}");
+        1
+    }
     }
 }
 

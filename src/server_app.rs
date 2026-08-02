@@ -1951,7 +1951,9 @@ fn default_workspace() -> SavedWorkspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{configure_server_launch, validate_ui_client_snapshot};
+    use super::{
+        configure_server_launch, validate_ui_client_snapshot, PROJECTION_REPLACEABLE_UI_CLIENT,
+    };
 
     #[test]
     fn server_arguments_are_internal_bounded_and_loopback_only() {

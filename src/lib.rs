@@ -80,7 +80,7 @@ pub use server_app::run_server_entry;
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
-pub(crate) use frontend::request_gui_wake;
+pub(crate) use frontend::{request_gui_wake, request_gui_wake_best_effort};
 
 pub(crate) fn ipc_address() -> String {
     client::ipc_address()
