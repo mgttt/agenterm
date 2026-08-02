@@ -27,7 +27,7 @@ use crate::{
     },
     frontend::{
         action,
-        selection::SelectionGesturePhase,
+        selection::{RemotePoint, RemoteSelectionGesture, SelectionGesturePhase},
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
@@ -487,20 +487,12 @@ struct RemoteTreeRow {
     collapsed: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct RemoteTerminalPoint {
-    row: u32,
-    column: u32,
-}
-
 #[derive(Clone, Debug)]
 struct RemoteTerminalSelection {
     tab_id: String,
     rows: u32,
     columns: u32,
-    anchor: RemoteTerminalPoint,
-    active: RemoteTerminalPoint,
-    phase: SelectionGesturePhase,
+    gesture: RemoteSelectionGesture,
     cached_text: Option<String>,
 }
 
@@ -517,48 +509,32 @@ impl RemoteSidebarTextClick {
 }
 
 impl RemoteTerminalSelection {
-    fn bounds(&self) -> (RemoteTerminalPoint, RemoteTerminalPoint) {
-        if self.anchor <= self.active {
-            (self.anchor, self.active)
-        } else {
-            (self.active, self.anchor)
-        }
+    fn bounds(&self) -> (RemotePoint, RemotePoint) {
+        self.gesture.bounds()
     }
 
     fn is_empty(&self) -> bool {
-        self.anchor == self.active
+        self.gesture.is_empty()
     }
 
     fn active_gesture(&self) -> bool {
-        matches!(
-            self.phase,
-            SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
-        )
+        self.gesture.active()
     }
 
-    fn drag_to(&mut self, point: RemoteTerminalPoint) {
-        if !self.active_gesture() {
-            return;
-        }
-        self.active = point;
-        self.phase = if self.is_empty() {
-            SelectionGesturePhase::Prepared
-        } else {
-            SelectionGesturePhase::Dragging
-        };
+    fn phase(&self) -> SelectionGesturePhase {
+        self.gesture.phase()
+    }
+
+    fn drag_to(&mut self, point: RemotePoint) {
+        self.gesture.drag_to(point);
     }
 
     fn complete(&mut self) -> bool {
-        if self.phase != SelectionGesturePhase::Dragging || self.is_empty() {
-            self.phase = SelectionGesturePhase::Cancelled;
-            return false;
-        }
-        self.phase = SelectionGesturePhase::Completed;
-        true
+        self.gesture.complete()
     }
 
     fn can_copy(&self) -> bool {
-        self.phase == SelectionGesturePhase::Completed
+        self.phase() == SelectionGesturePhase::Completed
             && !self.is_empty()
             && self
                 .cached_text
@@ -570,7 +546,6 @@ impl RemoteTerminalSelection {
         self.tab_id == screen.tab_id && self.rows == screen.rows && self.columns == screen.columns
     }
 }
-
 fn selection_claims_copy_shortcut(selection: Option<&RemoteTerminalSelection>) -> bool {
     selection.is_some_and(RemoteTerminalSelection::can_copy)
 }
@@ -2205,7 +2180,7 @@ impl RemoteWindowState {
                         ))
                         .unwrap_or_default();
                     serde_json::json!({
-                        "phase": selection.phase.as_str(),
+                        "phase": selection.phase().as_str(),
                         "tab_id": selection.tab_id,
                         "copyable": selection.can_copy(),
                         "capture_owned": selection.active_gesture() && pointer_capture_owned,
@@ -4147,7 +4122,7 @@ impl RemoteWindowState {
         }
     }
 
-    fn terminal_point(&self, x: i32, y: i32, clamp: bool) -> Option<RemoteTerminalPoint> {
+    fn terminal_point(&self, x: i32, y: i32, clamp: bool) -> Option<RemotePoint> {
         let (_, terminal, _, _) = self.layout_rects();
         let tab = self.active_tab()?;
         if !clamp
@@ -4163,7 +4138,7 @@ impl RemoteWindowState {
             (terminal.right - terminal.left - TERMINAL_SCROLLBAR_WIDTH - 1).max(0),
         );
         let local_y = (y - terminal.top).clamp(0, (terminal.bottom - terminal.top - 1).max(0));
-        Some(RemoteTerminalPoint {
+        Some(RemotePoint {
             row: u32::try_from(local_y / self.cell_height)
                 .unwrap_or_default()
                 .min(tab.screen.rows.saturating_sub(1)),
@@ -4191,12 +4166,10 @@ impl RemoteWindowState {
             return true;
         }
         self.terminal_selection = Some(RemoteTerminalSelection {
-            tab_id,
+            tab_id: tab_id.clone(),
             rows,
             columns,
-            anchor: point,
-            active: point,
-            phase: SelectionGesturePhase::Prepared,
+            gesture: RemoteSelectionGesture::begin(tab_id, point),
             cached_text: None,
         });
         self.last_error = None;
@@ -4259,7 +4232,7 @@ impl RemoteWindowState {
             .is_some_and(RemoteTerminalSelection::active_gesture)
         {
             if let Some(selection) = self.terminal_selection.as_mut() {
-                selection.phase = SelectionGesturePhase::Cancelled;
+                selection.gesture.cancel();
             }
             self.terminal_selection = None;
         }
@@ -4271,7 +4244,7 @@ impl RemoteWindowState {
             .as_ref()
             .is_some_and(RemoteTerminalSelection::active_gesture);
         if let Some(selection) = self.terminal_selection.as_mut() {
-            selection.phase = SelectionGesturePhase::Cancelled;
+            selection.gesture.cancel();
         }
         self.terminal_selection = None;
         if captured && let Err(error) = self.window.set_pointer_capture(false) {
@@ -6619,15 +6592,18 @@ mod tests {
             complete: true,
             truncated: false,
         };
-        let selection = RemoteTerminalSelection {
+        let mut selection = RemoteTerminalSelection {
             tab_id: "@1".to_owned(),
             rows: 2,
             columns: 8,
-            anchor: RemoteTerminalPoint { row: 0, column: 1 },
-            active: RemoteTerminalPoint { row: 1, column: 1 },
-            phase: SelectionGesturePhase::Completed,
+            gesture: RemoteSelectionGesture::begin(
+                "@1".to_owned(),
+                RemotePoint { row: 0, column: 1 },
+            ),
             cached_text: Some("cached".to_owned()),
         };
+        selection.drag_to(RemotePoint { row: 1, column: 1 });
+        assert!(selection.complete());
         assert_eq!(screen_selection_text(&screen, &selection), "界B\r\nta");
     }
 
@@ -6656,15 +6632,18 @@ mod tests {
             complete: true,
             truncated: false,
         };
-        let selection = RemoteTerminalSelection {
+        let mut selection = RemoteTerminalSelection {
             tab_id: "@1".to_owned(),
             rows: 3,
             columns: 8,
-            anchor: RemoteTerminalPoint { row: 0, column: 2 },
-            active: RemoteTerminalPoint { row: 2, column: 3 },
-            phase: SelectionGesturePhase::Dragging,
+            gesture: RemoteSelectionGesture::begin(
+                "@1".to_owned(),
+                RemotePoint { row: 0, column: 2 },
+            ),
             cached_text: None,
         };
+        selection.drag_to(RemotePoint { row: 2, column: 3 });
+        assert!(selection.complete());
         assert_eq!(
             terminal_selection_highlight_rects(
                 &selection,
@@ -6707,13 +6686,14 @@ mod tests {
             tab_id: "@1".to_owned(),
             rows: 2,
             columns: 8,
-            anchor: RemoteTerminalPoint { row: 0, column: 1 },
-            active: RemoteTerminalPoint { row: 0, column: 1 },
-            phase: SelectionGesturePhase::Prepared,
+            gesture: RemoteSelectionGesture::begin(
+                "@1".to_owned(),
+                RemotePoint { row: 0, column: 1 },
+            ),
             cached_text: None,
         };
-        selection.drag_to(RemoteTerminalPoint { row: 1, column: 1 });
-        assert_eq!(selection.phase, SelectionGesturePhase::Dragging);
+        selection.drag_to(RemotePoint { row: 1, column: 1 });
+        assert_eq!(selection.phase(), SelectionGesturePhase::Dragging);
         assert!(selection.complete());
         selection.cached_text = Some("selected".to_owned());
         assert!(selection.can_copy());
@@ -6754,13 +6734,14 @@ mod tests {
             tab_id: "@1".to_owned(),
             rows: 24,
             columns: 80,
-            anchor: RemoteTerminalPoint { row: 2, column: 3 },
-            active: RemoteTerminalPoint { row: 2, column: 3 },
-            phase: SelectionGesturePhase::Prepared,
+            gesture: RemoteSelectionGesture::begin(
+                "@1".to_owned(),
+                RemotePoint { row: 2, column: 3 },
+            ),
             cached_text: None,
         };
         assert!(!selection.complete());
-        assert_eq!(selection.phase, SelectionGesturePhase::Cancelled);
+        assert_eq!(selection.phase(), SelectionGesturePhase::Cancelled);
         assert!(!selection.can_copy());
     }
 
@@ -6770,15 +6751,17 @@ mod tests {
             tab_id: "@1".to_owned(),
             rows: 24,
             columns: 80,
-            anchor: RemoteTerminalPoint { row: 2, column: 3 },
-            active: RemoteTerminalPoint { row: 2, column: 8 },
-            phase: SelectionGesturePhase::Prepared,
+            gesture: RemoteSelectionGesture::begin(
+                "@1".to_owned(),
+                RemotePoint { row: 2, column: 3 },
+            ),
             cached_text: None,
         };
         assert!(!selection_claims_copy_shortcut(None));
         assert!(!selection_claims_copy_shortcut(Some(&selection)));
 
-        selection.phase = SelectionGesturePhase::Completed;
+        selection.drag_to(RemotePoint { row: 2, column: 8 });
+        assert!(selection.complete());
         assert!(!selection_claims_copy_shortcut(Some(&selection)));
         selection.cached_text = Some("selected".to_owned());
         assert!(selection_claims_copy_shortcut(Some(&selection)));

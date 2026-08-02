@@ -1,4 +1,4 @@
-// This module owns linear local-selection semantics only. Application raw-mouse
+// This module owns linear local-selection and shared remote selection gesture
 // arbitration and rectangular selection are intentionally outside this slice.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -156,6 +156,81 @@ impl SelectionGesture {
             focus: clamp_point(focus, rows, cols)?,
             phase: SelectionGesturePhase::Completed,
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct RemotePoint {
+    pub(crate) row: u32,
+    pub(crate) column: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RemoteSelectionGesture {
+    tab_id: String,
+    anchor: RemotePoint,
+    focus: RemotePoint,
+    phase: SelectionGesturePhase,
+}
+
+impl RemoteSelectionGesture {
+    pub(crate) fn begin(tab_id: String, anchor: RemotePoint) -> Self {
+        Self {
+            tab_id,
+            anchor,
+            focus: anchor,
+            phase: SelectionGesturePhase::Prepared,
+        }
+    }
+
+    pub(crate) const fn phase(&self) -> SelectionGesturePhase {
+        self.phase
+    }
+
+    pub(crate) const fn active(&self) -> bool {
+        matches!(
+            self.phase,
+            SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
+        )
+    }
+
+    pub(crate) fn bounds(&self) -> (RemotePoint, RemotePoint) {
+        if self.anchor <= self.focus {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.anchor == self.focus
+    }
+
+    pub(crate) fn drag_to(&mut self, focus: RemotePoint) -> &mut Self {
+        if !self.active() {
+            return self;
+        }
+        self.focus = focus;
+        self.phase = if self.is_empty() {
+            SelectionGesturePhase::Prepared
+        } else {
+            SelectionGesturePhase::Dragging
+        };
+        self
+    }
+
+    pub(crate) fn complete(&mut self) -> bool {
+        if self.phase != SelectionGesturePhase::Dragging || self.is_empty() {
+            self.phase = SelectionGesturePhase::Cancelled;
+            return false;
+        }
+        self.phase = SelectionGesturePhase::Completed;
+        true
+    }
+
+    pub(crate) fn cancel(&mut self) -> &mut Self {
+        self.phase = SelectionGesturePhase::Cancelled;
+        self
     }
 }
 
