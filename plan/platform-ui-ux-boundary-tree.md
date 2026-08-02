@@ -141,7 +141,10 @@ agenterm-platform crate（复用层）
   - `src/platform/adapters/windows/remote_frontend.rs` 继续承担 Win32 交互宿主职责，但未新增产品语义分支。
 - 全仓库 `src`（排除平台crate）里，非测试的 `#[cfg(windows)]`/`#[cfg(unix)]` 直接分支已降到可接受边界；本轮已完成 `instances.rs`、`workspace.rs`、`working_context.rs`、`script_stdlib.rs`、`script_process.rs` 的测试与兼容性路径适配收口，全部改为基于 `platform` 能力契约分支。
 - 下一步：
-- O1C 补强：
-  - 将行为差异记录到 `plan/platform-ux-parity-evidence-matrix.md` 的 P0/P1/P2 回归条目，并补齐 GUI/CLI 双端最小冒烟证据脚本的证据汇聚策略。
-  - 对 `script_process` 中的运行时主机判定场景，优先统一为能力入口返回值语义（supported/unsupported/failed）而非直接 `cfg!(windows)` 语义分支。
+  - O1C 补强：
+    - 将行为差异记录到 `plan/platform-ux-parity-evidence-matrix.md` 的 P0/P1/P2 回归条目，并补齐 GUI/CLI 双端最小冒烟证据脚本的证据汇聚策略。
+    - 对 `script_process` 中的运行时主机判定场景，优先统一为能力入口返回值语义（supported/unsupported/failed）而非直接 `cfg!(windows)` 语义分支。
+
+- 实测验收（src 非平台层）：
+  - 截止 `2026-08-02`，`src` 非平台目录未发现剩余 `#[cfg(windows)]`/`#[cfg(unix)]` 或 `cfg!(windows)`/`cfg!(unix)` 直接分支；仅保留与行为可见性相关的测试辅助路径分支（如 `script_process` 的兼容性路径）并通过 `platform` 能力入口落地。
 ```
