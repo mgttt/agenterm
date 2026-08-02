@@ -2,14 +2,32 @@ name: CI
 
 on:
   push:
+    # Documentation-only commits cannot change build or test outcomes, and
+    # every extra full-matrix run competes for the runners that release CI
+    # needs. Code paths still trigger the complete matrix.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'plan/**'
+      - 'prd/**'
+      - 'assets/**'
+      - 'LICENSE*'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'plan/**'
+      - 'prd/**'
+      - 'assets/**'
+      - 'LICENSE*'
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  # Cancelling superseded runs is right for branches, but main hosts several
-  # agents pushing concurrently; cancelling there starves the release
-  # preflight, which requires a completed successful CI run for an exact SHA.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Per-SHA groups: concurrent agents pushing different commits to main no
+  # longer displace each other, so every commit can reach the completed
+  # successful run the release preflight requires. Re-running the same SHA
+  # still supersedes its own earlier run.
+  group: ci-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
