@@ -142,7 +142,7 @@ O1 并发树（并行）
 ├─ D1 [x] src/platform/window.rs → src/frontend/window.rs
 ├─ D1 [x] src/platform/control_center.rs → src/frontend/control_center.rs
 ├─ D2 [x] src/platform/mod.rs 产品策略拆 policy/{input,paths,control_center,runtime,test_fixtures}
-├─ D3 [~] Win remote vs Unix embedded 共享交互管线（selection phase 与语义已收为 crate 共享；wheel/focus 仍待收敛）
+├─ D3 [~] Win remote vs Unix embedded 共享交互管线（selection phase、focus 导航与 wheel 累积已收为 crate 共享；modal/focus 规则仍待收敛）
 └─ D4 [ ] 每条可见差进入 evidence matrix；无 adapter 内产品 if
 ```
 

@@ -14,6 +14,7 @@ use crate::wake_signal::WakeSignal;
 
 pub(crate) mod action;
 pub(crate) mod control_center;
+pub(crate) mod interaction;
 pub(crate) mod toolbar;
 pub(crate) mod window;
 

@@ -9,6 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::frontend::interaction::{
+    FocusDirection, FocusSurface, WheelAccumulator, focus_surface_navigation,
+};
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
     SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
@@ -44,10 +47,10 @@ use crate::{
     ui_geometry::{
         PixelRect as ProductPixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH,
         TerminalScrollbarGeometry, TreeRowActionDensity, TreeRowGeometry, TreeRowMode,
-        WorkspaceLayout, WorkspaceLayoutInput, pixel_rect_json, reset_tabs_width,
-        scrollback_for_thumb_top, sidebar_scrollbar_track, sidebar_tree_row_geometry,
-        tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y,
-        workspace_layout,
+        WHEEL_ROWS_PER_NOTCH, WorkspaceLayout, WorkspaceLayoutInput, pixel_rect_json,
+        reset_tabs_width, scrollback_for_thumb_top, sidebar_scrollbar_track,
+        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_scrollbar_geometry,
+        tree_connector_segments, tree_row_at_y, wheel_delta_units, workspace_layout,
     },
     working_context::parse_proxy_url,
 };
@@ -600,24 +603,23 @@ fn remote_surface_navigation(
     alt: bool,
     key: u32,
 ) -> Option<RemoteFocusSurface> {
-    if !control || shift || alt {
-        return None;
-    }
-    match (source, key) {
-        (RemoteFocusSurface::Terminal, key) if key == u32::from(KEY_DOWN) => {
-            Some(RemoteFocusSurface::Composer)
-        }
-        (RemoteFocusSurface::Composer, key) if key == u32::from(KEY_UP) => {
-            Some(RemoteFocusSurface::Terminal)
-        }
-        (RemoteFocusSurface::Terminal, key) if key == u32::from(KEY_LEFT) => {
-            Some(RemoteFocusSurface::Tabs)
-        }
-        (RemoteFocusSurface::Tabs, key) if key == u32::from(KEY_RIGHT) => {
-            Some(RemoteFocusSurface::Terminal)
-        }
-        _ => None,
-    }
+    let source = match source {
+        RemoteFocusSurface::Terminal => FocusSurface::Terminal,
+        RemoteFocusSurface::Composer => FocusSurface::Composer,
+        RemoteFocusSurface::Tabs => FocusSurface::Sidebar,
+    };
+    let target = focus_surface_navigation(
+        source,
+        FocusDirection::from_virtual_key_code(key)?,
+        control,
+        shift,
+        alt,
+    )?;
+    Some(match target {
+        FocusSurface::Terminal => RemoteFocusSurface::Terminal,
+        FocusSurface::Composer => RemoteFocusSurface::Composer,
+        FocusSurface::Sidebar => RemoteFocusSurface::Tabs,
+    })
 }
 
 fn remote_composer_identity(
@@ -703,6 +705,7 @@ struct RemoteWindowState {
     settings_override_draft: TerminalAppearanceOverride,
     settings_target_tab_id: Option<String>,
     terminal_selection: Option<RemoteTerminalSelection>,
+    wheel_accumulator: WheelAccumulator,
     scroll_drag: Option<RemoteScrollDrag>,
     sidebar_scroll_offset: usize,
     sidebar_scroll_drag: Option<RemoteSidebarScrollDrag>,
@@ -889,6 +892,7 @@ impl RemoteWindowState {
             settings_override_draft: TerminalAppearanceOverride::default(),
             settings_target_tab_id: None,
             terminal_selection: None,
+            wheel_accumulator: WheelAccumulator::default(),
             scroll_drag: None,
             sidebar_scroll_offset: 0,
             sidebar_scroll_drag: None,
@@ -4525,20 +4529,16 @@ impl RemoteWindowState {
         }
     }
 
-    fn scroll_terminal(&mut self, delta: i32) {
+    fn scroll_terminal(&mut self, wheel_notches: i32) {
         self.cancel_terminal_selection();
         let Some(tab) = self.active_tab() else {
             return;
         };
         let tab_id = tab.id.clone();
         let max_scrollback = tab.screen.max_scrollback;
-        let count = usize::try_from(delta.unsigned_abs())
-            .unwrap_or(120)
-            .div_ceil(120)
-            .saturating_mul(3)
-            .max(1);
+        let count = wheel_notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
         if max_scrollback == 0 {
-            let key = if delta > 0 { "Up" } else { "Down" };
+            let key = if wheel_notches > 0 { "Up" } else { "Down" };
             let mut arguments = vec![
                 "send-keys".to_owned(),
                 "-t".to_owned(),
@@ -4560,7 +4560,7 @@ impl RemoteWindowState {
             }
             return;
         }
-        let action = if delta > 0 { "up" } else { "down" };
+        let action = if wheel_notches > 0 { "up" } else { "down" };
         let result = self
             .client
             .as_mut()
@@ -4683,11 +4683,11 @@ impl RemoteWindowState {
         self.scroll_drag = None;
     }
 
-    fn scroll_sidebar(&mut self, wheel_delta: i32) {
+    fn scroll_sidebar(&mut self, wheel_notches: i32) {
         self.invalidate_sidebar_text_click();
-        let steps = (wheel_delta.unsigned_abs() as usize / 120).max(1) * 3;
+        let steps = wheel_notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
         let maximum = self.sidebar_max_offset();
-        self.sidebar_scroll_offset = if wheel_delta > 0 {
+        self.sidebar_scroll_offset = if wheel_notches > 0 {
             self.sidebar_offset().saturating_sub(steps)
         } else {
             self.sidebar_offset().saturating_add(steps).min(maximum)
@@ -4936,10 +4936,14 @@ impl RemoteWindowState {
         {
             return;
         }
+        let notches = self.wheel_accumulator.push(delta);
+        if notches == 0 {
+            return;
+        }
         if self.workspace_geometry().sidebar_tree.contains(x, y) {
-            self.scroll_sidebar(delta);
+            self.scroll_sidebar(notches);
         } else {
-            self.scroll_terminal(delta);
+            self.scroll_terminal(notches);
         }
     }
 
@@ -6055,7 +6059,11 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 delta: ControlWheelDelta::Lines(lines),
                 position,
             } => {
-                state.handle_wheel(position.x, position.y, (lines * 120.0).round() as i32);
+                state.handle_wheel(
+                    position.x,
+                    position.y,
+                    wheel_delta_units(f64::from(lines), true),
+                );
                 redraw = true;
                 consumed = true;
             }

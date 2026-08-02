@@ -59,7 +59,7 @@ use crate::{
         terminal_paste_bytes,
     },
     ui_geometry::{
-        ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA,
+        ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode,
         WHEEL_ROWS_PER_NOTCH, WorkspaceToolbarLayout, pixel_rect_json, scrollback_for_thumb_top,
         scrollbar_hit_test, sidebar_row_capacity, sidebar_scrollbar_geometry,
         sidebar_scrollbar_track, sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
@@ -71,6 +71,9 @@ use crate::{
 };
 
 use self::wake::install_unix_wake;
+use crate::frontend::interaction::{
+    FocusDirection, FocusSurface, WheelAccumulator, focus_surface_navigation,
+};
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
@@ -627,7 +630,7 @@ struct UnixApp {
     tab_name_draft: String,
     tab_note_draft: String,
     tab_editor_focus: TabEditorFocus,
-    wheel_remainder: i32,
+    wheel_accumulator: WheelAccumulator,
     scroll_drag: Option<ScrollDrag>,
     sidebar_scroll_offset: usize,
     sidebar_scroll_drag: Option<SidebarScrollDrag>,
@@ -731,7 +734,7 @@ impl UnixApp {
             tab_name_draft: String::new(),
             tab_note_draft: String::new(),
             tab_editor_focus: TabEditorFocus::Name,
-            wheel_remainder: 0,
+            wheel_accumulator: WheelAccumulator::default(),
             scroll_drag: None,
             sidebar_scroll_offset: 0,
             sidebar_scroll_drag: None,
@@ -3240,9 +3243,7 @@ impl UnixApp {
         let layout = self.layout();
         let units = wheel_delta_units(vertical_delta, line_based);
         if self.config.tabs_visible && layout.sidebar_tree.contains(x as i32, y as i32) {
-            self.wheel_remainder += units;
-            let notches = self.wheel_remainder / WHEEL_DELTA;
-            self.wheel_remainder %= WHEEL_DELTA;
+            let notches = self.wheel_accumulator.push(units);
             if notches != 0 {
                 self.scroll_sidebar(notches);
                 self.request_redraw();
@@ -3253,9 +3254,7 @@ impl UnixApp {
         if !terminal.contains(x as i32, y as i32) {
             return;
         }
-        self.wheel_remainder += units;
-        let notches = self.wheel_remainder / WHEEL_DELTA;
-        self.wheel_remainder %= WHEEL_DELTA;
+        let notches = self.wheel_accumulator.push(units);
         if notches == 0 {
             return;
         }
@@ -4860,6 +4859,37 @@ impl ControlHost for UnixApp {
 }
 
 impl UnixApp {
+    fn handle_surface_navigation(&mut self, event: &NormalizedKeyEvent) -> bool {
+        let direction = match &event.logical {
+            Key::Named(NamedKey::ArrowUp) => FocusDirection::Up,
+            Key::Named(NamedKey::ArrowDown) => FocusDirection::Down,
+            Key::Named(NamedKey::ArrowLeft) => FocusDirection::Left,
+            Key::Named(NamedKey::ArrowRight) => FocusDirection::Right,
+            _ => return false,
+        };
+        let source = match self.focus_surface {
+            UnixFocusSurface::Terminal => FocusSurface::Terminal,
+            UnixFocusSurface::Composer => FocusSurface::Composer,
+            UnixFocusSurface::Sidebar => FocusSurface::Sidebar,
+            UnixFocusSurface::Settings => return false,
+        };
+        let Some(target) = focus_surface_navigation(
+            source,
+            direction,
+            event.modifiers.control,
+            event.modifiers.shift,
+            event.modifiers.alt,
+        ) else {
+            return false;
+        };
+        let target = match target {
+            FocusSurface::Terminal => UnixFocusSurface::Terminal,
+            FocusSurface::Composer => UnixFocusSurface::Composer,
+            FocusSurface::Sidebar => UnixFocusSurface::Sidebar,
+        };
+        self.set_focus_surface_internal(target, "keyboard-navigation");
+        true
+    }
     fn handle_pixel_event(&mut self, event: PixelWindowEvent) {
         match event {
             PixelWindowEvent::Wake => {
@@ -4929,6 +4959,9 @@ impl UnixApp {
                 }
                 if self.note_edit_target.is_some() {
                     self.handle_tab_editor_key(&event);
+                    return;
+                }
+                if self.handle_surface_navigation(&event) {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Sidebar
