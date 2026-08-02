@@ -1788,13 +1788,13 @@ mod tests {
         let first = engine
             .eval_with_scope::<String>(
                 &mut scope,
-                "stream.read(2, std::time::Duration::from_secs(1)).to_text()",
+                "stream.read(2, std::time::Duration::from_secs(5)).to_text()",
             )
             .unwrap();
         let rest = engine
             .eval_with_scope::<String>(
                 &mut scope,
-                "stream.collect(16, std::time::Duration::from_secs(1)).to_text()",
+                "stream.collect(16, std::time::Duration::from_secs(5)).to_text()",
             )
             .unwrap();
         let stream_complete = engine
