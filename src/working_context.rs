@@ -757,7 +757,9 @@ pub(crate) fn shell_command_for_child(
         }
         ShellKind::Bash | ShellKind::Unknown => {
             let mut segments = Vec::with_capacity(1 + arguments.len());
-            segments.push(quote_for_bash(command));
+            // The command is a shell script, not one argv word: keep its spaces
+            // and operators intact for `-lc`, and quote only appended arguments.
+            segments.push(command.to_owned());
             segments.extend(arguments.iter().map(|argument| quote_for_bash(argument)));
             Ok(vec![
                 shell_program.to_owned(),
@@ -1217,7 +1219,7 @@ mod tests {
             vec![
                 "bash".to_owned(),
                 "-lc".to_owned(),
-                "'codex' 'hello' 'O'\\''Neil'".to_owned(),
+                "codex 'hello' 'O'\\''Neil'".to_owned(),
             ]
         );
     }

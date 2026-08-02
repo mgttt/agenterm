@@ -1569,7 +1569,7 @@ mod tests {
         );
         command.stdout_file = Some(PathBuf::from(script_path));
         let output = command_output(&mut command).unwrap();
-        assert!(output.success, "diagnostic output={output:?}");
+        assert!(output.success);
         assert!(output.stdout.0.is_empty());
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
@@ -1592,7 +1592,7 @@ mod tests {
         );
         command.stderr_file = Some(PathBuf::from(script_path));
         let output = command_output(&mut command).unwrap();
-        assert!(output.success, "diagnostic output={output:?}");
+        assert!(output.success);
         assert!(output.stderr.0.is_empty());
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
@@ -1610,7 +1610,7 @@ mod tests {
             .to_string();
         assert!(error.contains("child_nonzero"));
         assert!(error.contains("test-child"));
-        assert!(error.contains("code 7"), "diagnostic error={error}");
+        assert!(error.contains("code 7"));
     }
 
     #[test]
@@ -1801,10 +1801,7 @@ mod tests {
             .eval_with_scope::<bool>(&mut scope, "stream.complete")
             .unwrap();
         let output = child_wait_with_output(&mut child).unwrap();
-        assert_eq!(
-            first, "ab",
-            "diagnostic first={first:?} rest={rest:?} stream_complete={stream_complete} output={output:?}"
-        );
+        assert_eq!(first, "ab");
         assert!(rest.starts_with("cdef"));
         assert!(
             output_text(&output.stdout, "process_stdout_not_utf8")
@@ -1820,7 +1817,7 @@ mod tests {
         let mut command = shell_wrapped_process_command("echo abcdefgh", "printf abcdefgh", &[]);
         command_capture_limit(&mut command, 4).unwrap();
         let output = command_output(&mut command).unwrap();
-        assert_eq!(output.stdout.0, b"abcd", "diagnostic output={output:?}");
+        assert_eq!(output.stdout.0, b"abcd");
         assert!(output.truncated);
         assert!(!output.complete);
     }
