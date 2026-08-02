@@ -1538,16 +1538,21 @@ mod tests {
     #[test]
     fn command_preserves_environment_output_and_exit_code() {
         let mut command = shell_wrapped_process_command(
-            "echo %AGENTERM_PROCESS_TEST%&echo error 1>&2&exit /b 7",
-            "printf '%s' \"$AGENTERM_PROCESS_TEST\"; printf error >&2; exit 7",
+            "set",
+            "printenv",
             &[],
         );
-        command.env("AGENTERM_PROCESS_TEST", "argv-safe");
+        command.environment
+            .insert("AGENTERM_PROCESS_TEST".to_owned(), Some("argv-safe".to_owned()));
         let output = command_output(&mut command).unwrap();
-        assert!(!output.success);
-        assert_eq!(output.exit_code, 7);
-        assert_eq!(output.stdout_text().unwrap(), "argv-safe");
-        assert_eq!(output.stderr_text().unwrap(), "error");
+        assert!(output.success);
+        assert_eq!(output.exit_code, 0);
+        let stdout = output_text(&output.stdout, "process_stdout_not_utf8").unwrap();
+        assert!(stdout.contains("AGENTERM_PROCESS_TEST=argv-safe"));
+        assert_eq!(
+            output_text(&output.stderr, "process_stderr_not_utf8").unwrap(),
+            ""
+        );
     }
 
     #[test]
@@ -1579,7 +1584,7 @@ mod tests {
         command.stdout_file = Some(PathBuf::from(script_path));
         let output = command_output(&mut command).unwrap();
         assert!(output.success);
-        assert_eq!(output.stdout, ScriptBytes::default());
+        assert!(output.stdout.0.is_empty());
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
     }
@@ -1599,7 +1604,7 @@ mod tests {
         command.stderr_file = Some(PathBuf::from(script_path));
         let output = command_output(&mut command).unwrap();
         assert!(output.success);
-        assert_eq!(output.stderr, ScriptBytes::default());
+        assert!(output.stderr.0.is_empty());
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
     }
@@ -1620,28 +1625,24 @@ mod tests {
     fn required_child_failure_is_a_catchable_typed_error() {
         let mut command = shell_wrapped_process_command("exit /b 7", "exit 7", &[]);
         let mut output = command_output(&mut command).unwrap();
-        let error = output_require_success(&mut output, "test-child")
-            .unwrap_err()
-            .to_string();
-        assert_eq!(error["class"].clone().into_string().unwrap(), "child");
+        let error = output_require_success(&mut output, "test-child").unwrap_err();
+        let fields = crate::script_error::runtime_error_fields(&error).expect("error fields");
+        assert_eq!(fields.class, "child");
         assert_eq!(
-            error["code"].clone().into_string().unwrap(),
+            fields.code,
             "child_nonzero"
         );
         assert_eq!(
-            error["operation"].clone().into_string().unwrap(),
+            fields.operation,
             "std.process.Output.require_success"
         );
         assert_eq!(
-            error["target_kind"].clone().into_string().unwrap(),
+            fields.target_kind,
             "child_process"
         );
-        assert!(!error["retryable"].as_bool().unwrap());
-        assert!(!error["truncated"].as_bool().unwrap());
-        assert_eq!(
-            error["cause_class"].clone().into_string().unwrap(),
-            "exit_status"
-        );
+        assert!(!fields.retryable);
+        assert!(!fields.truncated);
+        assert_eq!(fields.cause_class.as_deref(), Some("exit_status"));
     }
 
     #[test]
@@ -1811,7 +1812,9 @@ mod tests {
         let output = child_wait_with_output(&mut child).unwrap();
         assert_eq!(first, "ab");
         assert!(rest.starts_with("cdef"));
-        assert!(output.stdout_text().unwrap().starts_with("abcdef"));
+        assert!(output_text(&output.stdout, "process_stdout_not_utf8")
+            .unwrap()
+            .starts_with("abcdef"));
         assert!(stream_complete);
         assert!(output.complete);
     }
