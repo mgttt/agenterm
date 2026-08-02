@@ -92,8 +92,12 @@ fn test_command(mode: &str, marker: Option<&std::ffi::OsStr>) -> Command {
 fn wait_for_marker(marker: &Path, child: &mut Child) -> u32 {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(value) = std::fs::read_to_string(marker) {
-            return value.trim().parse().expect("grandchild PID marker");
+        // The helper creates the marker before writing it, so an empty read is
+        // an expected intermediate state rather than a malformed PID.
+        if let Ok(value) = std::fs::read_to_string(marker)
+            && let Ok(pid) = value.trim().parse()
+        {
+            return pid;
         }
         if let Some(status) = child.try_wait().expect("observe child helper") {
             panic!("child helper exited before publishing grandchild: {status}");
