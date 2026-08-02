@@ -1261,9 +1261,13 @@ mod tests {
 
     #[cfg(any(windows, unix))]
     fn spawn_owned_tree_fixture() -> ScriptChild {
-        let mut command = process_command(if cfg!(windows) { "cmd.exe" } else { "/bin/sh" })
+        let mut command = process_command(if crate::platform::is_windows_host() {
+            "cmd.exe"
+        } else {
+            "/bin/sh"
+        })
             .expect("fixture command");
-        command.arguments = if cfg!(windows) {
+        command.arguments = if crate::platform::is_windows_host() {
             vec![
                 "/d".to_owned(),
                 "/s".to_owned(),
@@ -1279,7 +1283,7 @@ mod tests {
 
     #[cfg(any(windows, unix))]
     fn spawn_unrelated_fixture() -> KillOnDrop {
-        let mut command = if cfg!(windows) {
+        let mut command = if crate::platform::is_windows_host() {
             let mut command = Command::new("cmd.exe");
             command.args(["/d", "/s", "/c", "ping.exe -n 30 127.0.0.1 >nul"]);
             command
@@ -1453,7 +1457,7 @@ mod tests {
     #[test]
     #[cfg(any(windows, unix))]
     fn process_kill_terminates_an_arbitrary_operating_system_process() {
-        let mut child = if cfg!(windows) {
+        let mut child = if crate::platform::is_windows_host() {
             let mut command = Command::new("cmd.exe");
             command.args(["/d", "/s", "/c", "ping -n 30 127.0.0.1 >nul"]);
             command
@@ -1488,7 +1492,7 @@ mod tests {
 
     #[test]
     fn command_preserves_environment_output_and_exit_code() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let c = std::process::command("cmd.exe");
                 c.args(["/d", "/s", "/c", "echo %AGENTERM_PROCESS_TEST%&echo error 1>&2&exit /b 7"]);
@@ -1539,7 +1543,7 @@ mod tests {
             std::process::id()
         ));
         let script_path = path.to_string_lossy().replace('\\', "\\\\");
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             format!(
                 r#"
                     let c = std::process::command("cmd.exe");
@@ -1575,7 +1579,7 @@ mod tests {
             std::process::id()
         ));
         let script_path = path.to_string_lossy().replace('\\', "\\\\");
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             format!(
                 r#"
                     let c = std::process::command("cmd.exe");
@@ -1606,7 +1610,7 @@ mod tests {
 
     #[test]
     fn output_can_require_a_successful_child_exit() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let c = std::process::command("cmd.exe");
                 c.args(["/d", "/s", "/c", "exit /b 7"]);
@@ -1629,7 +1633,7 @@ mod tests {
 
     #[test]
     fn required_child_failure_is_a_catchable_typed_error() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let caught = ();
                 try {
@@ -1680,7 +1684,7 @@ mod tests {
 
     #[test]
     fn child_id_remains_stable_after_wait() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let c = std::process::command("cmd.exe");
                 c.args(["/d", "/s", "/c", "exit /b 0"]);
@@ -1714,14 +1718,17 @@ mod tests {
             result["after"].as_int().unwrap()
         );
         assert_eq!(result["state"].clone().into_string().unwrap(), "exited");
-        assert_eq!(result["window_supported"].as_bool().unwrap(), cfg!(windows));
+        assert_eq!(
+            result["window_supported"].as_bool().unwrap(),
+            crate::platform::is_windows_host()
+        );
         assert!(!result["window_present"].as_bool().unwrap());
         assert_eq!(result["window_id"].as_int().unwrap(), 0);
     }
 
     #[test]
     fn command_timeout_is_typed() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let c = std::process::command("cmd.exe");
                 c.args(["/d", "/s", "/c", "ping -n 6 127.0.0.1 >nul"]);
@@ -1846,7 +1853,7 @@ mod tests {
 
     #[test]
     fn child_streams_are_live_bounded_and_preserve_final_capture() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let c = std::process::command("cmd.exe");
                 c.args(["/d", "/s", "/c", "<nul set /p =abcdef"]);
@@ -1885,7 +1892,7 @@ mod tests {
 
     #[test]
     fn truncated_process_capture_is_not_reported_as_complete() {
-        let source = if cfg!(windows) {
+        let source = if crate::platform::is_windows_host() {
             r#"
                 let c = std::process::command("cmd.exe");
                 c.args(["/d", "/s", "/c", "<nul set /p =abcdefgh"]);
@@ -1906,3 +1913,4 @@ mod tests {
         assert!(!output.complete);
     }
 }
+
