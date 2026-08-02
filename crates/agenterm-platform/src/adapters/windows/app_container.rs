@@ -143,25 +143,32 @@ impl OwnedAppContainerSid {
     }
 
     pub fn string(&self) -> Result<String, AppContainerProfileError> {
-        let mut text = std::ptr::null_mut();
-        if unsafe { ConvertSidToStringSidW(self.sid.as_ptr(), &raw mut text) } == 0 {
-            let code = unsafe { GetLastError() };
-            return Err(AppContainerProfileError::invalid(
-                "ConvertSidToStringSidW",
-                format!("GetLastError={code}"),
-            ));
-        }
-        let value = unsafe {
-            let mut len = 0;
-            while *text.add(len) != 0 {
-                len += 1;
-            }
-            let value = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
-            LocalFree(text.cast());
-            value
-        };
-        Ok(value)
+        sid_string(self.as_bytes())
     }
+}
+
+/// Formats one exact, validated SID byte sequence using Windows canonical form.
+pub fn sid_string(sid: &[u8]) -> Result<String, AppContainerProfileError> {
+    const OPERATION: &str = "ConvertSidToStringSidW";
+    validate_sid_bytes(OPERATION, sid)?;
+    let mut text = std::ptr::null_mut();
+    if unsafe { ConvertSidToStringSidW(sid.as_ptr().cast_mut().cast(), &raw mut text) } == 0 {
+        let code = unsafe { GetLastError() };
+        return Err(AppContainerProfileError::invalid(
+            OPERATION,
+            format!("GetLastError={code}"),
+        ));
+    }
+    let value = unsafe {
+        let mut len = 0;
+        while *text.add(len) != 0 {
+            len += 1;
+        }
+        let value = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+        LocalFree(text.cast());
+        value
+    };
+    Ok(value)
 }
 
 impl Drop for OwnedAppContainerSid {
@@ -325,6 +332,10 @@ mod tests {
         let second = derive_profile_sid(&name).expect("derive second SID");
         assert_eq!(first.as_bytes(), second.as_bytes());
         assert!(first.string().expect("format SID").starts_with("S-1-15-2-"));
+        assert_eq!(
+            first.string().unwrap(),
+            sid_string(first.as_bytes()).unwrap()
+        );
     }
 
     #[test]
@@ -349,5 +360,9 @@ mod tests {
         let error = AppContainerCapability::new(&[1, 2, 3], 0)
             .expect_err("invalid SID bytes must be rejected");
         assert_eq!(error.kind(), AppContainerProfileErrorKind::InvalidInput);
+        assert_eq!(
+            sid_string(&[1, 2, 3]).unwrap_err().kind(),
+            AppContainerProfileErrorKind::InvalidInput
+        );
     }
 }
