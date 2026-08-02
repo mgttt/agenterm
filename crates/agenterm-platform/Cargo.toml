@@ -1,6 +1,6 @@
 [package]
 name = "agenterm-platform"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 rust-version = "1.97"
 description = "Typed operating-system contracts and adapters used by AgenTerm"

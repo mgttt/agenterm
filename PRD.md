@@ -116,7 +116,7 @@ artifact generation, CLI smoke, and semantic UX smoke all pass. Rendering
 changes additionally require
 `screenshot` or `screenshot-pane` inspection.
 
-An unpublished v0.1.11 release candidate uses
+An unpublished v0.1.12 release candidate uses
 `.\check.cmd --release --include-stress` on a clean commit and must emit one
 complete qualification receipt bound to the exact candidate bytes. The
 independent `agenterm-script task run package-qualified` step may only copy

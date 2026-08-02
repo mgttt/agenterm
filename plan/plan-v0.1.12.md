@@ -1,7 +1,7 @@
 # AgenTerm v0.1.12 公开计划
 
-状态：产品建设期（2026-08-01 重基线）；远未进入 RC，Candidate/Promotion
-仅是 Wave D 的远期交付门，不是当前实施主线，也不构成本阶段进展定义。
+状态：v0.1.12 产品收口（2026-08-02）；进入最终 qualification 前的版本冻结。
+Candidate/Promotion 仍是独立授权门，不因本状态自动触发。
 工作主题：**收敛 v0.1.11 基础、折叠候选到发布的等待时间，并让三平台
 Control Center / native IPC 进入可持续演进状态**
 
@@ -380,10 +380,10 @@ Release 全部是本轮明确非目标。
   126.5 秒和 134.8 秒通过。第二轮在 19 次 native z/Z 后实测 23 次 redraw request、
   8 次 parent paint、0 次 child bounds/visibility 更新且 no-op skip 增长；随后 500ms
   idle 仅 1 次 redraw/paint、仍为 0 child 更新。paint/invalidate storm 的自动化关闭
-  条件已满足。后续 journey 又在持久化 Light 主题下对真实 80 行 PTY burst 取样：先等
+  条件已满足。用户已接受最新 dogfood 的持续输出视觉表现作为 v0.1.12 结果。后续 journey 又在持久化 Light 主题下对真实 80 行 PTY burst 取样：先等
   GUI lease observed server position，再等 250ms paint queue 收敛，实测仅 4 redraw/4
-  parent paint、0 child update。自动化现覆盖 zoom、idle 与 high-output；只剩用户在新
-  binary 上做持续高输出肉眼确认，不能把计数器冒充视觉感受。
+  parent paint、0 child update。自动化现覆盖 zoom、idle 与 high-output；后续视觉回归
+  作为普通维护项处理，不把计数器冒充视觉感受。
 - [x] alternate-screen harness 无法本地向上滚动。byte-level ConPTY probe 证明旧 Windows
   会吞掉 `1049h/l` 并只输出与普通 clear 同形的 full-frame repaint，因此删除了依赖
   `alternate_screen=false`、`max_scrollback==0` 或 repaint pattern 的猜测。platform PTY
@@ -394,15 +394,15 @@ Release 全部是本轮明确非目标。
   PowerShell PTY 验证每个上下 wheel notch 分别交付三组 `ESC O A` / `ESC O B`，并在
   169.9 秒 integrated `remote-ui-smoke` 中通过后续 selection、server recovery 与 cleanup。
   raw-mouse reporting arbitration 仍是独立后续 slice，不反向否定本次 paging 收口。
-- [~] terminal focus 下 `Shift+Tab` 修复正在集成：共享 named-key encoder 已按
+- [x] terminal focus 下 `Shift+Tab` 修复正在集成：共享 named-key encoder 已按
   xterm modifier 参数覆盖 Tab/方向/Home/End/Insert/Delete/Page/F1–F12；Unix
   两条输入路径保留 modifiers，Windows `WM_KEYDOWN` 显式处理 Tab/Insert/Delete
   并屏蔽 Tab/Escape 的 `WM_CHAR` 重复回声。commands 与 Windows mapping 聚焦
   单测、395 项 Quick library tests、all-target Clippy、alignment partial
   fail-closed 集成测试与七产物 dev build 通过。owning Windows journey 现会在
   terminal focus 下投递 Shift+Tab window shortcut，并从公开 pane counter 断言 PTY
-  恰好多收到 3 bytes；编码契约固定内容为 `ESC [ Z`。真实物理键盘 dogfood 仍待
-  验证，不能仅凭自动化投递宣称交互已收口。白箱复核同时确认这不是可用另一种 headless
+  恰好多收到 3 bytes；编码契约固定内容为 `ESC [ Z`。用户已接受最新 dogfood 结果作为
+  v0.1.12 物理交互收口；不再把自动化投递冒充物理证据。白箱复核同时确认这不是可用另一种 headless
   API 补齐的假缺口：Win32 `GetKeyState` 读取目标线程消费 keyboard message 时的状态，
   `SetKeyboardState` 只修改调用线程，而 `SendInput` 写入全局 foreground input stream；
   为制造“物理 Shift”而抢前台会直接违反全 smoke 的 `AGENTERM_NO_ACTIVATE=1`。因此保留
@@ -826,8 +826,9 @@ Cockpit
   key/pointer events；Wayland 明确 Unsupported。macOS Quartz adapter 同样拒绝多窗口歧义，
   以 `CGEventPostToPid` 定向投递并先做不弹窗的 TCC preflight。两套 crate target 的
   warnings-denied Clippy 已通过；Linux smoke 正向验证 active-tab 变化和不抢焦点，macOS
-  smoke 严格区分 `NATIVE_INPUT_POSITIVE` 与 typed TCC `permission_denied`。新 main CI
-  及 macOS 正向授权证据尚未返回前，三平台真人 pointer/keyboard 仍不记为完成；
+  smoke 严格区分 `NATIVE_INPUT_POSITIVE` 与 typed TCC `permission_denied`。Linux
+  positive 已有 matching-host 证据；用户接受 Windows keyboard dogfood，并将 macOS
+  physical pointer 明确延后，不冒充 `NATIVE_INPUT_POSITIVE`；
 - Windows owning journey 已修复连续键盘/指针输入的真实竞态：server active-tab 先于
   CC worker receipt 到达时，第二个选择不再以 busy 丢弃，而进入单槽 last-input-wins
   队列；smoke 按三行可见窗口推导命中坐标。单元契约与重新构建后的
@@ -890,7 +891,8 @@ Cockpit
   mouse event 未进入 target host，而非 hit-test 错。macOS process-window pointer 现返回
   typed Unsupported，不再静默 `Ok`；journey 保留 TCC-authorized keyboard positive，
   并证明 pointer Unsupported 不改变 CC/server/epoch/foreground，不冒充 physical pointer
-  positive。Linux 正向结果与 macOS 真人 pointer acceptance 仍开放；
+  positive。Linux 正向结果已关闭；用户明确接受 macOS 真人 pointer 作为后续 follow-up，
+  不阻塞 v0.1.12 收口；
 - exact-SHA `ed30e82` run `30719411235` 已越过 macOS keyboard positive 与 pointer
   typed-Unsupported 合同，证明该输入分支按预期收口；随后暴露的失败属于下一阶段
   Control Center reuse：调用端已写入 owner-consumed focus mailbox，却又把 macOS 不支持的

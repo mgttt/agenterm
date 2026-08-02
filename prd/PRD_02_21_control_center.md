@@ -199,8 +199,10 @@ Control Center is the product name; the executable family uses
   The journey keeps TCC-authorized keyboard navigation positive and proves the
   pointer failure changes no CC/server/epoch/foreground state; it does not
   claim physical-user pointer evidence. Exact-SHA `9669326` run `30721636280`
-  closes the Linux positive receipt; macOS physical pointer acceptance remains
-  open.
+  closes the Linux positive receipt. The user has accepted the typed
+  `Unsupported` macOS physical-pointer boundary for v0.1.12; real pointer
+  acceptance remains an explicitly deferred follow-up and is not reported as
+  positive support.
   Exact-SHA run `30719411235` then passed that macOS input contract and exposed
   a later, independent reuse failure: the caller published the existing
   Control Center's focus-mailbox request successfully, then treated the

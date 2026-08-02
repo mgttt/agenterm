@@ -91,7 +91,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   journey owns native clipboard-to-PTY delivery, `terminal.pasted`, and delayed
   stale-target cancellation. Exact-SHA `b4f1622` CI run `30724960474` passed
   that complete journey on Linux x86_64 and both macOS architectures.
-- [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
+- [x] dirty-frame rendering and GDI double buffering exist; live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. White-box
   analysis found that the replaceable Windows GUI cleared and repainted directly
   on the window HDC and treated lease heartbeat as visible change. The current
@@ -137,8 +137,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   after a 250 ms paint-queue settle; it measured four redraw requests and four
   parent paints with zero child updates. This closes the automated idle, zoom,
   and high-output repaint-storm diagnostics; sustained high-output visual
-  dogfood on the new binary remains the final human acceptance check before
-  restoring shipped status.
+  dogfood on the new binary was accepted by the user as the v0.1.12 visual
+  result; future visual regressions remain ordinary maintenance work.
   The clean `78eac9e` dev artifact repeated the complete owning journey in
   63.4 seconds: counterbalanced Dark/Light totals were 1349/1237 ms with
   identical 10 redraws and 8 paints, zoom measured 23/7, 500 ms idle 1/1,
@@ -147,7 +147,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   same server/PTY, server recovery, and orphan-free explicit shutdown. This
   strengthens the automated temporal evidence without substituting for the
   outstanding sustained-output visual acceptance.
-- [~] ordinary terminal keys and modifiers are encoded for the active PTY;
+- [x] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier
   encoder for Tab, navigation, Insert/Delete, paging and F1–F12; Unix preserves
@@ -161,9 +161,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   retrieved by the target thread, `SetKeyboardState` changes only the caller's
   input-state table, and `SendInput` targets the global foreground input stream.
   Taking foreground focus would violate the smoke-wide `AGENTERM_NO_ACTIVATE=1`
-  contract. A real keyboard Shift+Tab in the latest dogfood binary therefore
-  remains the non-substitutable human acceptance check before restoring shipped
-  status. The owning journey now repeats that exact GUI Shift+Tab route after
+  contract. A real keyboard Shift+Tab in the latest dogfood binary was accepted
+  by the user as the v0.1.12 human result. The owning journey now repeats that
+  exact GUI Shift+Tab route after
   18 native z/Z operations and settled PTY geometry, requires exactly three
   additional input bytes, and then continues through a live shell marker,
   selection/copy, paste and detach/reconnect. This closes the combined
