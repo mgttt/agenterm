@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusSurface, WheelAccumulator, focus_surface_navigation,
+    FocusDirection, FocusSurface, FocusTransitionGate, WheelAccumulator, focus_surface_navigation,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -4397,12 +4397,15 @@ impl RemoteWindowState {
     }
 
     fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
-        if self.window_close_pending
-            || self.settings_open
-            || self.new_terminal_open
-            || self.editing_tab_id.is_some()
-            || self.pending_close_tab_id.is_some()
-            || self.cwd_edit_tab_id.is_some()
+        if (FocusTransitionGate {
+            window_close_pending: self.window_close_pending,
+            settings_open: self.settings_open,
+            new_terminal_open: self.new_terminal_open,
+            tab_editor_open: self.editing_tab_id.is_some(),
+            close_confirmation_open: self.pending_close_tab_id.is_some(),
+            cwd_editor_open: self.cwd_edit_tab_id.is_some(),
+        })
+        .blocked()
         {
             return false;
         }

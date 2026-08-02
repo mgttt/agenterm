@@ -72,7 +72,7 @@ use crate::{
 
 use self::wake::install_unix_wake;
 use crate::frontend::interaction::{
-    FocusDirection, FocusSurface, WheelAccumulator, focus_surface_navigation,
+    FocusDirection, FocusSurface, FocusTransitionGate, WheelAccumulator, focus_surface_navigation,
 };
 use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -4860,6 +4860,18 @@ impl ControlHost for UnixApp {
 
 impl UnixApp {
     fn handle_surface_navigation(&mut self, event: &NormalizedKeyEvent) -> bool {
+        if (FocusTransitionGate {
+            window_close_pending: self.window_close_pending,
+            settings_open: self.settings_open,
+            new_terminal_open: self.new_terminal_dialog.is_open(),
+            tab_editor_open: self.note_edit_target.is_some(),
+            close_confirmation_open: self.pending_close.is_some(),
+            cwd_editor_open: self.cwd_edit_target.is_some(),
+        })
+        .blocked()
+        {
+            return false;
+        }
         let direction = match &event.logical {
             Key::Named(NamedKey::ArrowUp) => FocusDirection::Up,
             Key::Named(NamedKey::ArrowDown) => FocusDirection::Down,

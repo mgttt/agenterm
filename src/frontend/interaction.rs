@@ -66,10 +66,80 @@ impl WheelAccumulator {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FocusTransitionGate {
+    pub(crate) window_close_pending: bool,
+    pub(crate) settings_open: bool,
+    pub(crate) new_terminal_open: bool,
+    pub(crate) tab_editor_open: bool,
+    pub(crate) close_confirmation_open: bool,
+    pub(crate) cwd_editor_open: bool,
+}
+
+impl FocusTransitionGate {
+    pub(crate) const fn blocked(self) -> bool {
+        self.window_close_pending
+            || self.settings_open
+            || self.new_terminal_open
+            || self.tab_editor_open
+            || self.close_confirmation_open
+            || self.cwd_editor_open
+    }
+}
 #[cfg(test)]
 mod tests {
-    use super::{FocusDirection, FocusSurface, WheelAccumulator, focus_surface_navigation};
+    use super::{
+        FocusDirection, FocusSurface, FocusTransitionGate, WheelAccumulator,
+        focus_surface_navigation,
+    };
 
+    #[test]
+    fn focus_transition_gate_blocks_each_modal_state() {
+        let idle = FocusTransitionGate::default();
+        assert!(!idle.blocked());
+        assert!(
+            FocusTransitionGate {
+                window_close_pending: true,
+                ..idle
+            }
+            .blocked()
+        );
+        assert!(
+            FocusTransitionGate {
+                settings_open: true,
+                ..idle
+            }
+            .blocked()
+        );
+        assert!(
+            FocusTransitionGate {
+                new_terminal_open: true,
+                ..idle
+            }
+            .blocked()
+        );
+        assert!(
+            FocusTransitionGate {
+                tab_editor_open: true,
+                ..idle
+            }
+            .blocked()
+        );
+        assert!(
+            FocusTransitionGate {
+                close_confirmation_open: true,
+                ..idle
+            }
+            .blocked()
+        );
+        assert!(
+            FocusTransitionGate {
+                cwd_editor_open: true,
+                ..idle
+            }
+            .blocked()
+        );
+    }
     #[test]
     fn focus_navigation_requires_control_without_shift_or_alt() {
         assert_eq!(

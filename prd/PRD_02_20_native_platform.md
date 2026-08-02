@@ -639,6 +639,11 @@ integrated validation recorded below):
   settings/CWD, resize/tree/scroll, terminal selection copy/paste and server
   recovery. Evidence: `a9f1c90`, `d056888`, `ux.system-menu-clipboard`,
   `ux.terminal-selection-copy`, `ui.replaceable-client`.
+- [x] Cross-platform product interaction policy now lives in
+  `src/frontend/interaction.rs`: focus navigation, wheel accumulation and
+  modal focus gating are shared by Windows remote and Unix embedded
+  frontends; both adapters only map native events/states into shared types.
+  Evidence: `src/frontend/interaction.rs` unit tests and Quick Gate.
 - [x] Root IPC, Script-host availability, supervisor-audit path policy and XRGB
   screenshot encoding no longer require selected adapter modules. They compose
   product paths/capability facts from the crate `PlatformKind` or call the crate
