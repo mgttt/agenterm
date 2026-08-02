@@ -50,6 +50,10 @@ dependencies, risks, decisions, and delivery history, but remain execution
 projections rather than canonical product truth. Every accepted product scope
 or capability-status change also belongs in its owning PRD module.
 
+Current source layout (layers, bins, hot files, structural bans) lives in
+[`plan/ARCHITECTURE.md`](plan/ARCHITECTURE.md). Version plans link to it; they
+do not redraw a second living tree.
+
 Stable public technical contracts that are too detailed for an owning PRD
 module may live under [`docs/`](docs/). Every such specification links back to
 exactly one owning PRD module; it defines interface semantics and conformance,

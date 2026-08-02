@@ -1,4 +1,9 @@
-# 跨平台 UI/UX 边界树（执行版）
+# 跨平台 UI/UX 边界树（历史过程文 · superseded）
+
+> **现行结构 SSOT**：[`plan/ARCHITECTURE.md`](ARCHITECTURE.md)  
+> 本文保留 0.1.12 前后执行叙事，**不再**作为「代码现在怎么分层」的权威。  
+> 与 ARCHITECTURE / `boundary_tests` / 真实模块树冲突时，以三者为准。  
+> GUI 入口是 `src/frontend.rs`，**不是**已删除的 `platform/services/frontend.rs`。
 
 - [x] 目标：让 `agenterm-platform` 只承载「能力」与「机制」；主进程 `src/` 承载「产品语义」。
 - [x] [已完成] 启动参数解析已抽离到 `src/frontend.rs` 的共享策略器，Windows/Unix 前端入口复用同一 `parse_gui_launch_arguments` 规则，仅保留平台能力差异（地址校验/ui-client 开关）。启动/唤醒分发已收敛到统一能力入口。

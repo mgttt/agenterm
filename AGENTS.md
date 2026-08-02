@@ -4,8 +4,8 @@ This is the operational source of truth for coding agents. Start product and
 repository orientation at `PRD.md`, then follow its links to the owning
 `prd/PRD_*.md` module. Machine alignment lives in
 `prd/alignment-contract.json`, and public version execution plans live in
-`plan/`. Discover current source layout from the checkout instead of maintaining
-a duplicate file map here.
+`plan/`. Current source layout SSOT is [`plan/ARCHITECTURE.md`](plan/ARCHITECTURE.md);
+do not invent a second living file map in prompts or version plans.
 
 ## Planning and decomposition method
 

@@ -98,6 +98,7 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
 
 pub struct ProcessTreeGuard {
     process_group: libc::pid_t,
+    root_start_identity: Option<String>,
     active: bool,
 }
 
@@ -119,8 +120,15 @@ impl ProcessTreeGuard {
     pub fn attach(child: &Child) -> Result<Self, String> {
         let process_group = libc::pid_t::try_from(child.id())
             .map_err(|_| "child process ID exceeds pid_t".to_owned())?;
+        let root_start_identity = match observe(child.id()) {
+            ProcessObservation::Live {
+                start_identity: Some(identity),
+            } => Some(identity),
+            _ => None,
+        };
         Ok(Self {
             process_group,
+            root_start_identity,
             active: true,
         })
     }
@@ -144,16 +152,26 @@ impl ProcessTreeGuard {
                     .collect::<Vec<_>>()
             })
             .map_err(|error| format!("owned process inventory failed: {error}"));
-        let group_result = if unsafe { libc::killpg(self.process_group, libc::SIGKILL) } == 0 {
-            Ok(())
-        } else {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
+        let root_is_owned = match (&self.root_start_identity, observe(root_id)) {
+            (
+                Some(expected),
+                ProcessObservation::Live {
+                    start_identity: Some(current),
+                },
+            ) => current == *expected,
+            _ => false,
+        };
+        let group_result =
+            if root_is_owned && unsafe { libc::killpg(self.process_group, libc::SIGKILL) } == 0 {
                 Ok(())
             } else {
-                Err(format!("killpg failed: {error}"))
-            }
-        };
+                let error = std::io::Error::last_os_error();
+                if !root_is_owned || error.raw_os_error() == Some(libc::ESRCH) {
+                    Ok(())
+                } else {
+                    Err(format!("killpg failed: {error}"))
+                }
+            };
         let mut failures = Vec::new();
         if let Err(error) = group_result {
             failures.push(error);

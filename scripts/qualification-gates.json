@@ -162,7 +162,10 @@
         "ux.system-menu-clipboard",
         "ux.theme-render-parity",
         "ux.terminal-selection-copy",
-        "ux.working-context-cwd"
+        "ux.working-context-cwd",
+        "ux-parity.remote-ui.replaceable-client",
+        "ux-parity.remote-ui.selection",
+        "ux-parity.window-focus-contract"
       ]
     },
     {

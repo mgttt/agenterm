@@ -512,3 +512,52 @@ fn all_three_adapters_satisfy_the_same_contract() {
             .unwrap_or_else(|error| panic!("adapter contract mismatch: {error}"));
     }
 }
+
+/// Every `src/platform/services/*.rs` (except `mod.rs`) must be declared in
+/// `services/mod.rs`. Prevents orphan shims like the deleted `frontend.rs`.
+#[test]
+fn platform_services_have_no_orphan_source_files() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let services_dir = root.join("src/platform/services");
+    let mod_src = fs::read_to_string(services_dir.join("mod.rs")).expect("read services/mod.rs");
+    let mut orphans = Vec::new();
+    for entry in fs::read_dir(&services_dir).expect("read services/") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .expect("utf-8 stem");
+        if name == "mod" {
+            continue;
+        }
+        let declare = format!("mod {name}");
+        if !mod_src.contains(&declare) {
+            orphans.push(format!("src/platform/services/{name}.rs"));
+        }
+    }
+    assert!(
+        orphans.is_empty(),
+        "orphan service sources (not declared in services/mod.rs):\n{}\nSee plan/ARCHITECTURE.md",
+        orphans.join("\n")
+    );
+}
+
+/// Tracked L1 debt: `src/frontend.rs` must not compile adapters via `#[path]`.
+/// Budget 0 after L1 ownership fix.
+const FRONTEND_PATH_ATTR_BUDGET: usize = 0;
+
+#[test]
+fn frontend_path_attr_debt_does_not_grow() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(root.join("src/frontend.rs")).expect("read frontend.rs");
+    let count = source.matches("#[path").count();
+    assert_eq!(
+        count, FRONTEND_PATH_ATTR_BUDGET,
+        "src/frontend.rs has {count} #[path] attrs (budget {FRONTEND_PATH_ATTR_BUDGET}). \
+         Do not add more; L1 removes them — see plan/ARCHITECTURE.md §4"
+    );
+}

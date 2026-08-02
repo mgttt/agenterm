@@ -6,19 +6,11 @@
 
 use crate::client::{parse_loopback_ipc_address, set_ipc_selectors};
 use crate::ipc_endpoint::EndpointSelectorArgs;
+use crate::platform::adapters::unix::frontend as unix_frontend;
+use crate::platform::adapters::windows::frontend as windows_frontend;
 use crate::platform::{FrontendHost, frontend_host};
 use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE};
 use crate::wake_signal::WakeSignal;
-
-#[allow(dead_code)]
-#[path = "platform/adapters/windows/remote_frontend.rs"]
-mod remote_frontend;
-#[allow(dead_code)]
-#[path = "platform/adapters/unix/frontend/mod.rs"]
-mod unix_frontend;
-#[allow(dead_code)]
-#[path = "platform/adapters/windows/frontend.rs"]
-mod windows_frontend;
 
 // Shared GUI launch usage for both platform frontends.
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\

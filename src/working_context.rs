@@ -1,4 +1,4 @@
-use std::{env, path::Path};
+use std::env;
 
 use anyhow::{Result, bail};
 
@@ -590,9 +590,9 @@ pub(crate) enum ShellKind {
 
 impl ShellKind {
     pub(crate) fn from_program(program: &str) -> Self {
-        let name = Path::new(program)
-            .file_name()
-            .and_then(|name| name.to_str())
+        let name = program
+            .rsplit(['/', '\\'])
+            .next()
             .unwrap_or(program)
             .to_ascii_lowercase();
         match name.as_str() {

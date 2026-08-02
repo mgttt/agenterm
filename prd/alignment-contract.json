@@ -373,6 +373,18 @@
       "evidence_ids": ["fleet.wake-coalescing", "ux-parity.wake-coalescing"]
     },
     {
+      "id": "platform.ux-parity-remote-ui",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`remote-ui-smoke` native public-interface journey: 19 evidence IDs,",
+      "evidence_ids": [
+        "ux-parity.remote-ui.replaceable-client",
+        "ux-parity.remote-ui.selection",
+        "ux-parity.window-focus-contract"
+      ]
+    },
+    {
       "id": "control.event-transition-catalog",
       "protocol_feature": "typed_events",
       "kind": "architecture",

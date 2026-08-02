@@ -259,9 +259,9 @@ Available, Unsupported, and Failed without reading source or assuming parity.
     state and bounded client resize consume the shared window lifecycle
     contract; Win32 retains HWND sizing and non-client-frame arithmetic
   - [x] the Windows-subsystem launcher and replaceable Win32 GUI projection now
-    physically reside in the Windows adapter; `lib.rs` reaches them only through
-    `services::frontend → selected`, and no longer selects or declares Windows
-    application modules itself
+    physically reside in the Windows adapter; product ingress is
+    `src/frontend.rs` (see `plan/ARCHITECTURE.md`), not a
+    `services::frontend` shim
   - [~] existing HWND controls, GDI rendering, system menu, and remaining input
     behavior are shipped inside the adapter but still need narrower normalized
     contracts around product-neutral state
@@ -745,7 +745,7 @@ Windows slice-1 evidence (2026-07-30):
 - [x] 286 library tests, including native toolbar-ID mapping, toolbar ordering, Ctrl shortcut, AltGr
   committed text, BMP Unicode, surrogate pairs, and orphan-surrogate handling
 - [x] incremental Windows artifact build
-- [x] `remote-ui-smoke` native public-interface journey: 15 evidence IDs,
+- [x] `remote-ui-smoke` native public-interface journey: 19 evidence IDs,
   including toolbar/tabs, keyboard navigation, locale, Settings, clipboard,
   scrollback, close/detach, server restart, and replaceable-GUI recovery
 
@@ -767,7 +767,7 @@ Windows slice-3 evidence (2026-07-30):
   in-place BGRA conversion, and typed screenshot failures
 - [x] incremental Windows artifact build
 - [x] `remote-ui-smoke` captures and validates both full-window and
-  terminal-region PNG files through public CLI commands, then completes all 15
+  terminal-region PNG files through public CLI commands, then completes all 19
   replaceable-GUI evidence journeys
 - [x] exact-head native rerun after shared-contract adoption: warnings-denied
   all-target/all-feature Clippy, 296 library tests, a 537 ms no-activate first

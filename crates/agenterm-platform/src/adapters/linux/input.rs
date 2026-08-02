@@ -4,5 +4,5 @@ use crate::contract::input::ModifierState;
 mod unix;
 
 pub(crate) const fn is_primary_shortcut(modifiers: ModifierState) -> bool {
-    modifiers.control_or_meta()
+    modifiers.control && !modifiers.alt
 }

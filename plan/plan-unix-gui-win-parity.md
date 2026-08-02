@@ -75,7 +75,8 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 O1 并发树（并行）
 ├─ O1A 能力注入层（Owner: Platform）[x]
 │  ├─ 目标：保持入口分发在平台能力上，不在入口层承载UI策略
-│  ├─ 交付：`src/platform/services/frontend.rs` 只保留 run/request 能力路由
+│  ├─ 交付：能力路由在 `src/frontend.rs` + `platform::frontend_host`（曾写
+│  │     `services/frontend.rs`；该路径已删除，见 `plan/ARCHITECTURE.md`）
 │  ├─ 交付：`agenterm` 启动参数解析进入 `src/frontend.rs` 共享策略器（Windows/Unix 同步）
 │  ├─ 约束：`run_gui_entry` 与 `request_gui_wake` 返回码一致，启动失败原因可归并为统一证据
 │  └─ 风险：handoff 与服务端接管回退回归
@@ -132,7 +133,8 @@ O1 并发树（并行）
 4) 复测：`ui-snapshot` 与 PNG 证据差异归一化
 ```
 
-> 详细分支树与边界归集说明请参见：`plan/platform-ui-ux-boundary-tree.md`
+> 现行结构 SSOT：`plan/ARCHITECTURE.md`。  
+> 历史边界叙事（非权威）：`plan/platform-ui-ux-boundary-tree.md`。
 
 ## 验收证据
 

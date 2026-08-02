@@ -147,7 +147,10 @@ mod tests {
     fn opening_beyond_the_created_size_fails_before_pointer_access() {
         let name = unique_name("oversized-open");
         let _creator = SharedMemory::create(&name, 4096).expect("create mapping");
-        let error = SharedMemory::open(&name, 8192).expect_err("reject oversized view");
+        // Apple Silicon rounds the backing object up to the 16 KiB native
+        // page, so 8 KiB is not oversized there. 64 KiB remains larger than
+        // the 4 KiB created object on every current CI page size.
+        let error = SharedMemory::open(&name, 64 * 1024).expect_err("reject oversized view");
         #[cfg(unix)]
         assert_eq!(error.kind(), SharedMemoryErrorKind::SizeMismatch);
         #[cfg(windows)]

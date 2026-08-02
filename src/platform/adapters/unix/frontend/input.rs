@@ -380,14 +380,14 @@ pub(super) fn terminal_shortcut_action(
     if text.eq_ignore_ascii_case("c") {
         if has_selection {
             TerminalShortcutAction::Copy
-        } else if modifiers.meta {
+        } else if crate::platform::terminal_shortcut_empty_copy_action_is_suppressed() {
             TerminalShortcutAction::Suppress
         } else {
             TerminalShortcutAction::Forward
         }
     } else if text.eq_ignore_ascii_case("v") {
         TerminalShortcutAction::Paste
-    } else if modifiers.meta {
+    } else if crate::platform::terminal_shortcut_empty_copy_action_is_suppressed() {
         TerminalShortcutAction::Suppress
     } else {
         TerminalShortcutAction::Forward
