@@ -49,7 +49,8 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
     let directory = crate::filesystem_open::open_existing_path(
         path,
         crate::filesystem_open::ExistingEntryType::Directory,
-    )?;
+    )
+    .map_err(map_link_like_error)?;
     let facts = crate::filesystem_entry::opened_file_entry_facts(&directory)?;
     if !facts.is_real_directory() {
         return Err(std::io::Error::new(
@@ -62,6 +63,18 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
         Err(std::io::Error::last_os_error())
     } else {
         Ok(())
+    }
+}
+
+#[cfg(feature = "filesystem")]
+fn map_link_like_error(error: std::io::Error) -> std::io::Error {
+    if error.raw_os_error() == Some(libc::ELOOP) {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "private directory path contains a symbolic link",
+        )
+    } else {
+        error
     }
 }
 
