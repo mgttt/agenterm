@@ -1,6 +1,8 @@
 //! Host filesystem conventions without product-specific directory names.
 
 use std::path::{Path, PathBuf};
+#[cfg(all(test, feature = "file-identity", not(feature = "filesystem")))]
+use std::io;
 #[cfg(feature = "filesystem")]
 use std::{
     ffi::OsString,
