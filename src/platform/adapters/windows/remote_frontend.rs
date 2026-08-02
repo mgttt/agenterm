@@ -4382,6 +4382,17 @@ impl RemoteWindowState {
         }
     }
 
+    fn focus_gate(&self) -> FocusTransitionGate {
+        FocusTransitionGate {
+            window_close_pending: self.window_close_pending,
+            settings_open: self.settings_open,
+            new_terminal_open: self.new_terminal_open,
+            tab_editor_open: self.editing_tab_id.is_some(),
+            close_confirmation_open: self.pending_close_tab_id.is_some(),
+            cwd_editor_open: self.cwd_edit_tab_id.is_some(),
+        }
+    }
+
     fn native_focus_surface_code(&self) -> isize {
         let focused = self.window.focused_target();
         if focused == FocusTarget::Control(self.edit) {
@@ -4398,17 +4409,8 @@ impl RemoteWindowState {
     }
 
     fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
-        let mut state = FocusState::new(
-            self.current_focus_surface().to_shared(),
-            FocusTransitionGate {
-                window_close_pending: self.window_close_pending,
-                settings_open: self.settings_open,
-                new_terminal_open: self.new_terminal_open,
-                tab_editor_open: self.editing_tab_id.is_some(),
-                close_confirmation_open: self.pending_close_tab_id.is_some(),
-                cwd_editor_open: self.cwd_edit_tab_id.is_some(),
-            },
-        );
+        let mut state =
+            FocusState::new(self.current_focus_surface().to_shared(), self.focus_gate());
         if !state.transition(target.to_shared()) {
             return false;
         }

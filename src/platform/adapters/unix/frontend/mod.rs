@@ -1074,13 +1074,19 @@ impl UnixApp {
         self.layout().composer.contains(x as i32, y as i32)
     }
 
+    fn focus_gate(&self) -> FocusTransitionGate {
+        FocusTransitionGate {
+            window_close_pending: self.window_close_pending,
+            settings_open: self.settings_open,
+            new_terminal_open: self.new_terminal_dialog.is_open(),
+            tab_editor_open: self.note_edit_target.is_some(),
+            close_confirmation_open: self.pending_close.is_some(),
+            cwd_editor_open: self.cwd_edit_target.is_some(),
+        }
+    }
+
     fn modal_surface_active(&self) -> bool {
-        self.window_close_pending
-            || self.pending_close.is_some()
-            || self.settings_open
-            || self.new_terminal_dialog.is_open()
-            || self.cwd_edit_target.is_some()
-            || self.note_edit_target.is_some()
+        self.focus_gate().blocked()
     }
 
     fn render_shell_choice(&self) -> RenderShellChoice {
@@ -4859,17 +4865,7 @@ impl UnixApp {
             UnixFocusSurface::Sidebar => FocusSurface::Sidebar,
             UnixFocusSurface::Settings => return false,
         };
-        let state = FocusState::new(
-            source,
-            FocusTransitionGate {
-                window_close_pending: self.window_close_pending,
-                settings_open: self.settings_open,
-                new_terminal_open: self.new_terminal_dialog.is_open(),
-                tab_editor_open: self.note_edit_target.is_some(),
-                close_confirmation_open: self.pending_close.is_some(),
-                cwd_editor_open: self.cwd_edit_target.is_some(),
-            },
-        );
+        let state = FocusState::new(source, self.focus_gate());
         let Some(target) = state.navigate(
             direction,
             event.modifiers.control,
