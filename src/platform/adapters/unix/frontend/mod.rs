@@ -5444,6 +5444,7 @@ mod system_menu_tests {
         RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure, UnixFocusSurface,
         compact_cwd_for_status, gui_help_result, parse_gui_launch_target, scale_frame_nearest,
         scale_rect_to_frame,
+        UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, GuiLaunchResult,
         system_menu_clipboard_state_pure, terminal_paste_bytes, terminal_paste_target_is_current,
         workspace_toolbar_snapshot_json,
     };
@@ -5457,8 +5458,8 @@ mod system_menu_tests {
     #[test]
     fn gui_launch_help_is_supported_by_frontend_contract() {
         assert!(matches!(
-            gui_help_result(&["--help".to_owned()], crate::platform::services::frontend::UNIX_GUI_USAGE),
-            Some(crate::platform::services::frontend::GuiLaunchResult::UsageHelpPrinted)
+            gui_help_result(&["--help".to_owned()], UNIX_GUI_USAGE),
+            Some(GuiLaunchResult::UsageHelpPrinted)
         ));
     }
 
@@ -5477,7 +5478,7 @@ mod system_menu_tests {
                     option.to_owned(),
                     value.to_owned(),
                 ],
-                crate::platform::services::frontend::UNIX_GUI_LAUNCH_POLICY,
+                UNIX_GUI_LAUNCH_POLICY,
             )
             .unwrap();
             assert!(options.no_activate);
@@ -5516,7 +5517,7 @@ mod system_menu_tests {
         ];
         for arguments in invalid {
             assert!(
-                parse_gui_launch_target(&arguments, crate::platform::services::frontend::UNIX_GUI_LAUNCH_POLICY).is_err(),
+                parse_gui_launch_target(&arguments, UNIX_GUI_LAUNCH_POLICY).is_err(),
                 "{arguments:?}"
             );
         }
