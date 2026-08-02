@@ -11,9 +11,13 @@ mod tests {
     #[test]
     fn tls_provider_matches_the_selected_platform() {
         let config = tls_config().expect("supported platform TLS config");
-        let (expected_provider, expected_roots) = crate::platform::script_http_tls_expectation();
-        assert_eq!(config.provider(), expected_provider);
-        assert_eq!(config.root_certs(), expected_roots);
+        assert_eq!(
+            config.provider(),
+            crate::platform::script_http_tls_provider()
+        );
+        assert!(crate::platform::script_http_tls_root_certs_are_expected(
+            config.root_certs()
+        ));
     }
 }
 

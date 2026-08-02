@@ -359,15 +359,21 @@ pub(crate) fn script_http_tls_config() -> Result<ureq::tls::TlsConfig, &'static 
         .build())
 }
 
-pub(crate) fn script_http_tls_expectation()
--> (ureq::tls::TlsProvider, ureq::tls::RootCerts) {
+pub(crate) fn script_http_tls_provider() -> ureq::tls::TlsProvider {
     if is_windows_host() {
-        (
-            ureq::tls::TlsProvider::NativeTls,
-            ureq::tls::RootCerts::PlatformVerifier,
-        )
+        ureq::tls::TlsProvider::NativeTls
     } else {
-        (ureq::tls::TlsProvider::Rustls, ureq::tls::RootCerts::WebPki)
+        ureq::tls::TlsProvider::Rustls
+    }
+}
+
+pub(crate) fn script_http_tls_root_certs_are_expected(
+    root_certs: &ureq::tls::RootCerts,
+) -> bool {
+    if is_windows_host() {
+        matches!(root_certs, ureq::tls::RootCerts::PlatformVerifier)
+    } else {
+        matches!(root_certs, ureq::tls::RootCerts::WebPki)
     }
 }
 
