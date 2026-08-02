@@ -39,10 +39,11 @@ pub fn executable_name(base: &str) -> String {
 
 #[cfg(feature = "filesystem")]
 pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> {
-    if !path.is_dir() {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !crate::filesystem_entry::metadata_is_real_directory(&metadata) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "private directory must already exist",
+            "private directory must be an existing real directory",
         ));
     }
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
