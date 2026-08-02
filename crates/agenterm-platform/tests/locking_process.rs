@@ -23,9 +23,12 @@ fn path_lock_is_cross_process_and_released() {
         std::process::id()
     ));
     std::fs::create_dir_all(&directory).expect("create process-lock fixture");
+    let child_directory = directory.join("child");
+    std::fs::create_dir(&child_directory).expect("create process-lock alias fixture");
     let path = directory.join("state.lock");
+    let alias = child_directory.join("..").join("STATE.LOCK");
     let guard = PathLock::acquire(&path).expect("parent lock");
-    run_test_child(&path, "contended");
+    run_test_child(&alias, "contended");
     drop(guard);
     run_test_child(&path, "available");
     run_test_child(&path, "exit-without-drop");
