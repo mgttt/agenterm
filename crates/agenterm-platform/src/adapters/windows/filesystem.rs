@@ -300,11 +300,13 @@ mod tests {
         use windows_sys::Win32::{
             Foundation::{GENERIC_ALL, LocalFree},
             Security::{
+                ACCESS_ALLOWED_ACE, ACCESS_ALLOWED_ACE_TYPE, ACL_SIZE_INFORMATION,
+                AclSizeInformation,
                 Authorization::{
-                    GetExplicitEntriesFromAclW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
-                    TRUSTEE_IS_SID,
+                    GetAce, GetAclInformation, GetNamedSecurityInfoW, GetSecurityDescriptorDacl,
+                    SE_FILE_OBJECT,
                 },
-                DACL_SECURITY_INFORMATION, EqualSid, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+                DACL_SECURITY_INFORMATION, EqualSid, INHERITED_ACE,
             },
         };
 
@@ -353,32 +355,67 @@ mod tests {
                 )
             };
             assert_eq!(result, 0, "read child ACL: {}", win32_error(result));
-            let mut count = 0;
-            let mut entries_ptr = null_mut();
-            let result = unsafe { GetExplicitEntriesFromAclW(dacl, &mut count, &mut entries_ptr) };
-            assert_eq!(result, 0, "expand child ACL: {}", win32_error(result));
-            assert!(count > 0, "protected child ACL has no inherited ACE");
-            let entries = unsafe { std::slice::from_raw_parts(entries_ptr, count as usize) };
-            for entry in entries {
-                assert_eq!(entry.Trustee.TrusteeForm, TRUSTEE_IS_SID);
-                assert_ne!(
-                    unsafe {
-                        EqualSid(
-                            entry.Trustee.ptstrName.cast(),
-                            aligned_sid.as_mut_ptr().cast(),
-                        )
-                    },
-                    0,
-                    "protected child ACL contains a non-user trustee"
-                );
-                assert_eq!(entry.grfAccessPermissions, GENERIC_ALL);
-                assert_eq!(
-                    entry.grfInheritance & SUB_CONTAINERS_AND_OBJECTS_INHERIT,
-                    SUB_CONTAINERS_AND_OBJECTS_INHERIT
-                );
+            let mut present = 0;
+            let mut defaulted = 0;
+            let mut child_dacl = null_mut();
+            assert_ne!(
+                unsafe {
+                    GetSecurityDescriptorDacl(
+                        descriptor,
+                        &mut present,
+                        &mut child_dacl,
+                        &mut defaulted,
+                    )
+                },
+                0,
+                "read child security descriptor DACL"
+            );
+            assert_ne!(present, 0, "protected child has no DACL");
+            let mut size = ACL_SIZE_INFORMATION {
+                AceCount: 0,
+                AclBytesInUse: 0,
+                AclBytesFree: 0,
+            };
+            assert_ne!(
+                unsafe {
+                    GetAclInformation(
+                        child_dacl,
+                        (&mut size as *mut ACL_SIZE_INFORMATION).cast(),
+                        std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                        AclSizeInformation,
+                    )
+                },
+                0,
+                "read child ACL information"
+            );
+            assert!(size.AceCount > 0, "protected child ACL has no ACE");
+            let mut inherited_user_ace = false;
+            for index in 0..size.AceCount {
+                let mut ace = null_mut();
+                assert_ne!(unsafe { GetAce(child_dacl, index, &mut ace) }, 0);
+                let header = unsafe { &*(ace.cast::<windows_sys::Win32::Security::ACE_HEADER>()) };
+                if header.AceType == ACCESS_ALLOWED_ACE_TYPE && header.AceFlags & INHERITED_ACE != 0
+                {
+                    let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+                    assert_eq!(allowed.Mask, GENERIC_ALL);
+                    assert_ne!(
+                        unsafe {
+                            EqualSid(
+                                (&allowed.SidStart as *const u32).cast_mut().cast(),
+                                aligned_sid.as_mut_ptr().cast(),
+                            )
+                        },
+                        0,
+                        "protected child inherited ACE belongs to another trustee"
+                    );
+                    inherited_user_ace = true;
+                }
             }
+            assert!(
+                inherited_user_ace,
+                "protected child has no inherited user ACE"
+            );
             unsafe {
-                LocalFree(entries_ptr.cast());
                 LocalFree(descriptor);
             }
         }
