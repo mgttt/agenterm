@@ -7,7 +7,7 @@ pub(crate) fn terminal_default_font_size() -> u16 {
 }
 
 pub(crate) fn script_worker_executable_names() -> Vec<String> {
-    let native = agenterm_platform::filesystem::executable_name(
+    let native = crate::platform::filesystem::executable_name(
         crate::platform::script_worker_default_executable_name(),
     );
     if native.ends_with(".exe") {
@@ -18,7 +18,7 @@ pub(crate) fn script_worker_executable_names() -> Vec<String> {
 }
 
 pub(crate) fn control_center_executable_name() -> String {
-    agenterm_platform::filesystem::executable_name("agenterm-cc")
+    crate::platform::filesystem::executable_name("agenterm-cc")
 }
 
 pub(crate) fn default_workspace_path() -> PathBuf {
