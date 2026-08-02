@@ -9,3 +9,7 @@ pub fn default_terminal_shell() -> String {
 pub fn primary_terminal_shell() -> TerminalShellDescriptor {
     selected::runtime::primary_terminal_shell()
 }
+
+pub fn preferred_terminal_lang() -> Option<String> {
+    selected::runtime::preferred_terminal_lang()
+}

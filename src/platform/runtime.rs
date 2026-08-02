@@ -12,6 +12,12 @@ pub(crate) fn primary_terminal_shell() -> crate::platform::contract::runtime::Te
     crate::platform::services::runtime::primary_terminal_shell()
 }
 
+/// Returns the `LANG` value to inject into terminal children when the GUI
+/// process environment has no locale, or `None` to leave it untouched.
+pub(crate) fn preferred_terminal_lang() -> Option<String> {
+    crate::platform::services::runtime::preferred_terminal_lang()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

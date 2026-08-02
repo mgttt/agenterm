@@ -13,3 +13,9 @@ pub const fn primary_terminal_shell() -> TerminalShellDescriptor {
         program: "/bin/sh",
     }
 }
+
+/// Linux desktop sessions already export locale variables; AgenTerm does not
+/// synthesize one here.
+pub fn preferred_terminal_lang() -> Option<String> {
+    None
+}

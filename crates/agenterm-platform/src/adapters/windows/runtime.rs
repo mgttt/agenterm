@@ -13,3 +13,8 @@ pub const fn primary_terminal_shell() -> TerminalShellDescriptor {
         program: r"C:\Windows\System32\cmd.exe",
     }
 }
+
+/// Windows terminals do not use POSIX locale variables.
+pub fn preferred_terminal_lang() -> Option<String> {
+    None
+}

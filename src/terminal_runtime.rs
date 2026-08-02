@@ -269,6 +269,9 @@ impl TerminalTab {
             .env("AGENTERM_TAB_ID", format!("@{id}"))
             .env("AGENTERM_SESSION", session_name)
             .env("AGENTERM_WORKSPACE_PATH", workspace_path());
+        if let Some(lang) = crate::platform::runtime::preferred_terminal_lang() {
+            command = command.env("LANG", lang);
+        }
         if let Some(address) = endpoint.legacy_address() {
             command = command.env("AGENTERM_IPC_ADDRESS", address);
         }
