@@ -6,8 +6,6 @@ mod layout;
 mod new_terminal;
 mod render;
 mod screenshot;
-#[path = "../../../../terminal_selection.rs"]
-mod terminal_selection;
 mod wake;
 pub(crate) use wake::request_gui_wake;
 mod window_state;
@@ -72,7 +70,7 @@ use crate::{
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
-use self::terminal_selection::{
+use crate::terminal_selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
 };

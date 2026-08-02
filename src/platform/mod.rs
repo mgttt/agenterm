@@ -57,7 +57,6 @@ pub fn install_console_interrupt_observer() -> anyhow::Result<ConsoleInterruptOb
 mod boundary_tests;
 pub(crate) mod contract;
 #[allow(dead_code)]
-#[allow(dead_code)]
 pub(crate) mod ipc;
 #[allow(dead_code)]
 pub(crate) mod paths;

@@ -2,31 +2,31 @@
 // arbitration and rectangular selection are intentionally outside this slice.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct TerminalPoint {
-    pub(super) row: u16,
-    pub(super) col: u16,
+pub(crate) struct TerminalPoint {
+    pub(crate) row: u16,
+    pub(crate) col: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TerminalSelection {
-    pub(super) tab_id: u64,
-    pub(super) anchor: TerminalPoint,
-    pub(super) focus: TerminalPoint,
-    pub(super) dragging: bool,
-    pub(super) moved: bool,
+pub(crate) struct TerminalSelection {
+    pub(crate) tab_id: u64,
+    pub(crate) anchor: TerminalPoint,
+    pub(crate) focus: TerminalPoint,
+    pub(crate) dragging: bool,
+    pub(crate) moved: bool,
 }
 
 impl TerminalSelection {
-    pub(super) fn bounds(self) -> (TerminalPoint, TerminalPoint) {
+    pub(crate) fn bounds(self) -> (TerminalPoint, TerminalPoint) {
         normalize_endpoints(self.anchor, self.focus)
     }
 
-    pub(super) fn contains(self, row: u16, col: u16) -> bool {
+    pub(crate) fn contains(self, row: u16, col: u16) -> bool {
         let (start, end) = self.bounds();
         TerminalPoint { row, col } >= start && TerminalPoint { row, col } <= end
     }
 
-    pub(super) fn is_empty(self) -> bool {
+    pub(crate) fn is_empty(self) -> bool {
         self.anchor == self.focus
     }
 }
@@ -40,6 +40,7 @@ pub(crate) enum SelectionGesturePhase {
 }
 
 impl SelectionGesturePhase {
+    #[allow(dead_code)]
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Prepared => "prepared",
@@ -73,6 +74,7 @@ impl SelectionGesture {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) const fn phase(self) -> SelectionGesturePhase {
         self.phase
     }
@@ -337,7 +339,7 @@ fn cell_end(screen: &vt100::Screen, row: u16, col: u16, cols: u16) -> u16 {
     }
 }
 
-pub(super) fn terminal_selection_text(
+pub(crate) fn terminal_selection_text(
     screen: &vt100::Screen,
     selection: TerminalSelection,
 ) -> String {

@@ -35,7 +35,7 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
 src/frontend_server.rs       server 拉起 / 恢复（非 IPC 代理）
 
 src/ui_*.rs + control_*      共享产品语义：geometry / snapshot / bridge /
-                             clipboard / dispatch（Win/Unix 应对齐字段）
+                             clipboard / dispatch / terminal_selection（Win/Unix 应对齐字段）
 
 src/platform/adapters/       主机实现（物理目录）
   windows/                   replaceable remote UI ↔ agenterm-server
