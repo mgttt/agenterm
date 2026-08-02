@@ -1326,10 +1326,7 @@ mod tests {
     #[test]
     fn rollback_fixture_reports_native_server_as_unsupported_to_v1_tcp_clients() {
         let scope = ServerScopeId::current(&LogicalInstance::Main).unwrap();
-        #[cfg(windows)]
-        let endpoint = IpcEndpoint::NamedPipe(r"\\.\pipe\agenterm-migration-fixture".to_owned());
-        #[cfg(unix)]
-        let endpoint = IpcEndpoint::UnixSocket("/tmp/agenterm-migration-fixture.sock".to_owned());
+        let endpoint = crate::platform::ipc_default_native_endpoint(&scope);
         let record = InstanceRecord {
             schema_version: INSTANCE_SCHEMA_VERSION,
             pid: std::process::id(),
