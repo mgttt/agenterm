@@ -247,8 +247,18 @@ pub(crate) fn hosted_script_worker_available() -> bool {
     )
 }
 
-pub(crate) fn supports_verbatim_atomic_path_windows_semantics() -> bool {
-    is_windows_host()
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AtomicPathSemantics {
+    VerbatimLongPath,
+    CanonicalSafe,
+}
+
+pub(crate) fn atomic_path_semantics() -> AtomicPathSemantics {
+    if is_windows_host() {
+        AtomicPathSemantics::VerbatimLongPath
+    } else {
+        AtomicPathSemantics::CanonicalSafe
+    }
 }
 
 pub(crate) fn long_running_process_command_fixture() -> (&'static str, &'static [&'static str]) {
@@ -277,10 +287,6 @@ pub(crate) fn shell_command_for_host<'a>(windows_command: &'a str, unix_command:
     } else {
         unix_command
     }
-}
-
-pub(crate) fn workspace_path_uses_windows_flat_layout() -> bool {
-    matches!(workspace_layout_kind(), WorkspaceLayoutKind::WindowsFlat)
 }
 
 pub(crate) fn is_macos_host() -> bool {
