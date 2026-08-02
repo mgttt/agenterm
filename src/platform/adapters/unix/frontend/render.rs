@@ -1266,6 +1266,7 @@ fn render_composer(
     } else {
         1
     };
+    let mut caret = None;
     for (row, line) in visible_lines[..visible_line_count].iter().enumerate() {
         let row_prefix = if row == 0 {
             if earlier_lines_hidden { "… " } else { prefix }
@@ -1312,6 +1313,23 @@ fn render_composer(
             } else {
                 palette.text
             },
+        );
+        caret = Some((text_x + ui_text_width(&visible_text), row_y));
+    }
+    // The composer edits at the end of the draft, so the caret marks exactly
+    // that insertion point; without it the strip gives no editing feedback.
+    if composer.focused
+        && !composer.selected_all
+        && let Some((caret_x, caret_y)) = caret
+    {
+        fill_rect(
+            buffer,
+            stride,
+            caret_x.min(text_right.saturating_sub(2)),
+            caret_y.saturating_sub(2),
+            2,
+            COMPOSER_LINE_HEIGHT,
+            rgb_to_pixel(palette.focus_ring),
         );
     }
 }
@@ -2589,6 +2607,19 @@ fn draw_cell(
             }
         }
     }
+}
+
+/// Pixel width `draw_text` will advance for `text`, glyph-accurate so carets
+/// can sit flush against rendered text.
+fn ui_text_width(text: &str) -> u32 {
+    const UI_FONT_SIZE: u16 = 12;
+    let mut x = 0f32;
+    for ch in text.chars() {
+        x += raster_glyph(ch, UI_FONT_SIZE).map_or((GLYPH_WIDTH + 1) as f32, |glyph| {
+            glyph.advance.ceil().max(1.0)
+        });
+    }
+    x as u32
 }
 
 #[allow(clippy::too_many_arguments)]

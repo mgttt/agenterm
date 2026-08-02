@@ -51,8 +51,63 @@ pub(super) fn composer_key_action(
     if event.state != KeyPressState::Pressed || event.repeat {
         return ComposerKeyAction::Ignored;
     }
+    if let Some(action) = composer_control_chord_action(event, buffer, select_all) {
+        return action;
+    }
 
     platform_composer_key_action(event, buffer, select_all)
+}
+
+/// Readline-style Ctrl chords for the composer: H backspace, U kill to line
+/// start, A select all, C copy, V paste, O send.
+fn composer_control_chord_action(
+    event: &KeyEvent,
+    buffer: &mut String,
+    select_all: &mut bool,
+) -> Option<ComposerKeyAction> {
+    let modifiers = event.modifiers;
+    if !modifiers.control || modifiers.alt || modifiers.meta || modifiers.shift {
+        return None;
+    }
+    let character = match &event.logical {
+        Key::Character(text) => {
+            let mut characters = text.chars();
+            let first = characters.next()?;
+            (characters.next().is_none() && !first.is_control()).then_some(first)
+        }
+        _ => None,
+    }
+    .or_else(|| match event.physical {
+        PhysicalKeyCode::Letter(letter) if letter.is_ascii_alphabetic() => Some(letter),
+        _ => None,
+    })?;
+    Some(match character.to_ascii_lowercase() {
+        'h' => {
+            if prepare_composer_edit(buffer, select_all) || buffer.pop().is_some() {
+                ComposerKeyAction::Edited
+            } else {
+                ComposerKeyAction::Ignored
+            }
+        }
+        'u' => {
+            if prepare_composer_edit(buffer, select_all) {
+                ComposerKeyAction::Edited
+            } else {
+                let line_start = buffer.rfind('\n').map_or(0, |index| index + 1);
+                if line_start < buffer.len() {
+                    buffer.truncate(line_start);
+                    ComposerKeyAction::Edited
+                } else {
+                    ComposerKeyAction::Ignored
+                }
+            }
+        }
+        'a' => ComposerKeyAction::SelectAll,
+        'c' => ComposerKeyAction::Copy,
+        'v' => ComposerKeyAction::Paste,
+        'o' => ComposerKeyAction::Submit,
+        _ => return None,
+    })
 }
 
 fn composer_logical_key_action(
@@ -274,10 +329,10 @@ pub(super) fn mouse_report_bytes(
     }
 }
 
-/// Interrupt/EOF chords that pass through to the active PTY even while the
-/// composer strip owns focus. Primary-shortcut copy (Ctrl+C on Linux/Windows)
-/// keeps priority only over a non-empty draft.
-pub(super) fn composer_passthrough_bytes(event: &KeyEvent, draft_empty: bool) -> Option<Vec<u8>> {
+/// EOF chord that passes through to the active PTY even while the composer
+/// strip owns focus. Ctrl+C stays in the composer as copy; the terminal
+/// surface owns interrupt semantics.
+pub(super) fn composer_passthrough_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
     if event.state != KeyPressState::Pressed {
         return None;
     }
@@ -298,7 +353,6 @@ pub(super) fn composer_passthrough_bytes(event: &KeyEvent, draft_empty: bool) ->
         _ => None,
     })?;
     match character.to_ascii_lowercase() {
-        'c' if draft_empty || !primary_shortcut(modifiers) => tmux_key_bytes("C-c"),
         'd' => tmux_key_bytes("C-d"),
         _ => None,
     }
@@ -1025,36 +1079,56 @@ mod ctrl_passthrough_tests {
     }
 
     #[test]
-    fn composer_focus_passes_interrupt_and_eof_to_pty() {
+    fn composer_focus_passes_eof_to_pty_and_keeps_copy_local() {
         assert_eq!(
-            composer_passthrough_bytes(&ctrl_event('d', 'D', None), false),
+            composer_passthrough_bytes(&ctrl_event('d', 'D', None)),
             Some(vec![4])
         );
         assert_eq!(
-            composer_passthrough_bytes(&ctrl_event('c', 'C', None), true),
-            Some(vec![3])
-        );
-        let over_draft = composer_passthrough_bytes(&ctrl_event('c', 'C', None), false);
-        if super::primary_shortcut(ModifierState {
-            control: true,
-            shift: false,
-            alt: false,
-            meta: false,
-        }) {
-            assert_eq!(
-                over_draft, None,
-                "primary-shortcut copy keeps a non-empty draft"
-            );
-        } else {
-            assert_eq!(over_draft, Some(vec![3]));
-        }
-        assert_eq!(
-            composer_passthrough_bytes(&ctrl_event('x', 'X', None), true),
+            composer_passthrough_bytes(&ctrl_event('c', 'C', None)),
             None
         );
-        let mut meta = ctrl_event('c', 'C', None);
+        assert_eq!(
+            composer_passthrough_bytes(&ctrl_event('x', 'X', None)),
+            None
+        );
+        let mut meta = ctrl_event('d', 'D', None);
         meta.modifiers.meta = true;
-        assert_eq!(composer_passthrough_bytes(&meta, true), None);
+        assert_eq!(composer_passthrough_bytes(&meta), None);
+    }
+
+    #[test]
+    fn composer_control_chords_edit_copy_and_send() {
+        use super::{ComposerKeyAction, composer_key_action};
+        let mut buffer = String::from("line one\ndraft tail");
+        let mut select_all = false;
+
+        assert!(matches!(
+            composer_key_action(&ctrl_event('h', 'H', None), &mut buffer, &mut select_all),
+            ComposerKeyAction::Edited
+        ));
+        assert_eq!(buffer, "line one\ndraft tai");
+        assert!(matches!(
+            composer_key_action(&ctrl_event('u', 'U', None), &mut buffer, &mut select_all),
+            ComposerKeyAction::Edited
+        ));
+        assert_eq!(buffer, "line one\n");
+        assert!(matches!(
+            composer_key_action(&ctrl_event('a', 'A', None), &mut buffer, &mut select_all),
+            ComposerKeyAction::SelectAll
+        ));
+        assert!(matches!(
+            composer_key_action(&ctrl_event('c', 'C', None), &mut buffer, &mut select_all),
+            ComposerKeyAction::Copy
+        ));
+        assert!(matches!(
+            composer_key_action(&ctrl_event('v', 'V', None), &mut buffer, &mut select_all),
+            ComposerKeyAction::Paste
+        ));
+        assert!(matches!(
+            composer_key_action(&ctrl_event('o', 'O', None), &mut buffer, &mut select_all),
+            ComposerKeyAction::Submit
+        ));
     }
 }
 

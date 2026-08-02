@@ -4797,10 +4797,7 @@ impl UnixApp {
                         }
                     }
                     if self.cwd_edit_target.is_none()
-                        && let Some(bytes) = input::composer_passthrough_bytes(
-                            &event,
-                            self.composer_buffer.is_empty(),
-                        )
+                        && let Some(bytes) = input::composer_passthrough_bytes(&event)
                     {
                         self.queue_pty_input(bytes);
                         return;

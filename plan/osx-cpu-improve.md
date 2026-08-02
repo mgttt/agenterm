@@ -1,6 +1,6 @@
 # macOS CPU usage investigation and improvement plan
 
-Status: P0 (dirty-row repaint) and P2 (present pacing) shipped; P1/P3 open
+Status: P0, P2, P3 shipped; P1 open
 Date: 2026-08-02
 Owner module: [`prd/PRD_02_01_terminal_runtime.md`](../prd/PRD_02_01_terminal_runtime.md)
 (rendering performance) — this file is an execution projection, not product truth.
@@ -85,7 +85,10 @@ passes over ~26 M pixels at 4K:
   (schedule via `WaitUntil` instead of immediate `request_redraw` when the
   last present is recent). Bounded win today because frames are currently
   CPU-bound below that rate, but it protects the win from P0/P1.
-- **P3 — Present-path conversion.** Investigate a CALayer-compatible pixel
+- **P3 — Present-path conversion. [DONE]** Shipped: vendored softbuffer
+  (`third_party/softbuffer`, one-line change) tags frames with the display's
+  color space, so Core Animation blits without the per-frame vImage pass.
+  date-loop load at 960×600: 33% → 16%. Original scope: Investigate a CALayer-compatible pixel
   format/colorspace for the softbuffer surface so `CA::Transaction::commit`
   stops running vImage `AnyToAny` over the full buffer each present.
 
