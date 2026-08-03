@@ -124,6 +124,9 @@ O1 并发树（并行）
     - 结果：`platform_gui_missing`，`infra/platform-binary-missing`
     - 处置：补齐 macOS GUI 二进制可执行链路后补跑
 - Owner: UX（P1）
+- 2026-08-03 本地 `platform-ux-parity-smoke -- --emit-matrix`
+  - run_id: 1785722327057-244172
+  - 结果：Windows `ux-parity.startup` / `ux-parity.startup-title` / `ux-parity.wake-coalescing` / `ux-parity.window-focus-contract` / `ux-parity.remote-ui.replaceable-client` / `ux-parity.remote-ui.selection` 全 Supported；`ux.mouse-scrollback` / `ux.terminal-selection-copy` / `ux.working-context-cwd` 一并 PASS
   - `platform-ux-parity-smoke -- --emit-matrix`  
     - `run_id: 1785678683554-260172`
     - 结果：Windows 侧 `ux-parity.remote-ui.replaceable-client`、`ux-parity.remote-ui.selection`、`ux-parity.window-focus-contract` 为 `Supported`

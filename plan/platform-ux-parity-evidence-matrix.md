@@ -227,8 +227,8 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | mouse report encoding | `src/frontend/interaction.rs` | `MouseReportEncoding` + `mouse_report_bytes`；Windows remote 与 Unix embedded 共用同一编码器 | Supported | Supported | Supported |
 | raw-mouse arbitration | src/frontend/interaction.rs | mouse_report_outcome 统一裁决/编码，组合 mouse_delivery 与 mouse_report_bytes；两端 adapter 只映射原生事件 | Supported | Supported | Supported |
 | selection autoscroll | src/frontend/selection.rs | utoscroll_step 单份计算；Unix embedded 与 Windows remote poll tick 共用同一拖出视口滚动语义 | Supported | Supported | Supported |
-| word/line selection | `src/frontend/selection.rs` |
-| CWD editor write modes | `src/frontend/composer.rs` | `ComposerWriteMode` 单点定义并供 Unix embedded、Windows remote、server dispatch 共用；Windows Ctrl+Enter=empty-only、Shift+Ctrl+Enter=append、Alt+Ctrl+Enter=replace 与 Unix 对齐 | Supported | Supported | Supported | `TerminalCellSource` + `word_selection_bounds` 统一 vt100 与 snapshot cell grid 的单词边界；Windows remote 双击/三击接线已补，raw-mouse 优先时仍走应用上报 | Supported | Supported | Supported |
+| word/line selection | `src/frontend/selection.rs` | `TerminalCellSource` + `word_selection_bounds` 统一 vt100 与 snapshot cell grid 的单词边界；Windows remote 双击/三击接线已补，raw-mouse 优先时仍走应用上报 | Supported | Supported | Supported |
+| CWD editor write modes | `src/frontend/composer.rs` | `ComposerWriteMode` 单点定义并供 Unix embedded、Windows remote、server dispatch 共用；Windows Ctrl+Enter=empty-only、Shift+Ctrl+Enter=append、Alt+Ctrl+Enter=replace 与 Unix 对齐 | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 
@@ -243,8 +243,8 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 
 ### 最近一次 Windows 回归（`platform-ux-parity-smoke -- --emit-matrix`）
 
-- `run_id`: `1785678683554-260172`
-- `timestamp_utc`: `2026-08-02T13:52:00.636Z`
+- `run_id`: `1785722327057-244172`
+- `timestamp_utc`: `2026-08-03T01:59:23.373Z`
 - `suite`: `platform-ux-parity-smoke`
 - `failure`: 无（`result_class: success`）
 
@@ -259,6 +259,9 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | frontend-mx | macos-clipboard | `ux-parity.macos.unix-frontend.clipboard` | Unsupported | Unsupported | not-executed-yet | platform-gap |
 | remote-ui | replaceable-client | `ux-parity.remote-ui.replaceable-client` | Supported | Unsupported | Unsupported | windows-only-contract |
 | remote-ui | selection | `ux-parity.remote-ui.selection` | Supported | Unsupported | Unsupported | windows-only-contract |
+| remote-ui | wheel/scrollback | `ux.mouse-scrollback` | Supported | Unsupported | Unsupported | windows-only-contract |
+| remote-ui | selection copy | `ux.terminal-selection-copy` | Supported | Unsupported | Unsupported | windows-only-contract |
+| remote-ui | CWD editor | `ux.working-context-cwd` | Supported | Unsupported | Unsupported | windows-only-contract |
 | ux-startup | window-focus-contract | `ux-parity.window-focus-contract` | Supported | not-executed-yet | not-executed-yet |  |
 
 ### 上次 Windows 通过回归（`platform-ux-parity-smoke -- --emit-matrix`）
