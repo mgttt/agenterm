@@ -221,6 +221,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | wheel accumulation | `src/frontend/interaction.rs` | `WheelAccumulator`，高分辨率增量按 `WHEEL_DELTA` 统一累积 | Supported | Supported | Supported |
 | modal focus state | `src/frontend/interaction.rs` | `FocusState`（surface+gate），语义 surface 由两端存储，modal 打开时禁止 focus transition/navigation；两端 adapter 以 `focus_gate()` 单点映射原生 modal flags | Supported | Supported | Supported |
 | wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | Supported | Supported |
+| alternate-screen wheel fallback | `src/commands.rs` + Windows remote | `alternate_screen_wheel_bytes` 单份编码；Windows remote 在无可滚动 viewport 时按 Unix 语义只对 alternate screen 回退发送箭头序列 | Supported | Supported | Supported |
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
 | pointer modifiers | `agenterm-platform::contract::input::ModifierState` | Windows `ControlWindowEvent` 与 Unix `PixelWindowEvent` 都携带 modifiers；Win32 鼠标消息从同一 `current_modifiers()` 读取 | Supported | Supported | Supported |
 | mouse report encoding | `src/frontend/interaction.rs` | `MouseReportEncoding` + `mouse_report_bytes`；Windows remote 与 Unix embedded 共用同一编码器 | Supported | Supported | Supported |

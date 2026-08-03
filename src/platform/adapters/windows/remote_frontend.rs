@@ -23,7 +23,8 @@ use crate::ui_snapshot::{
 use crate::{
     client::{ipc_address, resolved_ipc_endpoint},
     commands::{
-        option_value, positional_values, screenshot_output_path, tmux_key_bytes_with_modifiers,
+        alternate_screen_wheel_bytes, option_value, positional_values, screenshot_output_path,
+        tmux_key_bytes_with_modifiers,
     },
     frontend::{
         action,
@@ -4700,28 +4701,17 @@ impl RemoteWindowState {
             return;
         };
         let tab_id = tab.id.clone();
-        let max_scrollback = tab.screen.max_scrollback;
         let count = wheel_notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
-        if max_scrollback == 0 {
-            let key = if wheel_notches > 0 { "Up" } else { "Down" };
-            let mut arguments = vec![
-                "send-keys".to_owned(),
-                "-t".to_owned(),
-                tab_id,
-                "--native".to_owned(),
-            ];
-            arguments.extend(std::iter::repeat_n(key.to_owned(), count));
-            let result = self
-                .client
-                .as_mut()
-                .context("UI is disconnected")
-                .and_then(|client| {
-                    client.run_control(arguments)?;
-                    client.poll_deltas()?;
-                    Ok(())
-                });
-            if let Err(error) = result {
-                self.last_error = Some(format!("Terminal wheel input failed: {error:#}"));
+        let before = tab.screen.scrollback_offset;
+        let alternate_screen = tab.screen.alternate_screen;
+        let application_cursor = tab.screen.application_cursor;
+        if tab.screen.max_scrollback == 0 {
+            if alternate_screen {
+                self.terminal_input(&alternate_screen_wheel_bytes(
+                    wheel_notches > 0,
+                    count,
+                    application_cursor,
+                ));
             }
             return;
         }
@@ -4741,8 +4731,22 @@ impl RemoteWindowState {
                 client.poll_deltas()?;
                 Ok(())
             });
-        if let Err(error) = result {
-            self.last_error = Some(format!("Terminal scroll failed: {error:#}"));
+        match result {
+            Ok(()) => {
+                let scrolled = self
+                    .active_tab()
+                    .is_some_and(|tab| tab.screen.scrollback_offset != before);
+                if !scrolled && alternate_screen {
+                    self.terminal_input(&alternate_screen_wheel_bytes(
+                        wheel_notches > 0,
+                        count,
+                        application_cursor,
+                    ));
+                }
+            }
+            Err(error) => {
+                self.last_error = Some(format!("Terminal scroll failed: {error:#}"));
+            }
         }
     }
 
