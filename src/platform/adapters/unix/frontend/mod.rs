@@ -1616,6 +1616,7 @@ impl UnixApp {
         if apply {
             self.settings_dialog.capture()?;
             let changes = self.settings_dialog.changes();
+            self.config.terminal_font_family = changes.default_appearance.terminal_font_family;
             self.config.terminal_font_size = changes.default_appearance.terminal_font_size;
             self.config.color_theme = changes.default_appearance.color_theme;
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
