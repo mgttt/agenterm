@@ -317,6 +317,189 @@ enum ReplInterruptEvent {
     Failed(String),
 }
 
+/// Commands the REPL main loop sends to the interactive input thread.
+enum ReplEditorCommand {
+    /// Discard the in-progress line (after ^C cancels a cell).
+    Clear,
+    /// Render the prompt; `None` suppresses rendering (JSON output mode).
+    SetPrompt(Option<String>),
+}
+
+/// Render `prompt + text` on one terminal line with the cursor restored to
+/// `cursor`. Uses ANSI sequences; the platform line editor enables VT
+/// processing on the output handle where required.
+fn render_edit_line(
+    out: &mut impl Write,
+    prompt: &str,
+    text: &str,
+    cursor: usize,
+) -> std::io::Result<()> {
+    write!(out, "\r\x1b[2K{prompt}{text}")?;
+    let suffix = &text[cursor.min(text.len())..];
+    let suffix_columns: usize = suffix
+        .chars()
+        .filter_map(unicode_width::UnicodeWidthChar::width)
+        .sum();
+    if suffix_columns > 0 {
+        write!(out, "\x1b[{suffix_columns}D")?;
+    }
+    out.flush()
+}
+
+/// Interactive per-key input thread: line editing with local history plus the
+/// shared Ctrl-C observer. Falls back to plain line reads when the platform
+/// line editor is unavailable (e.g. mintty without a Win32 console).
+fn run_repl_line_editor(
+    input_tx: mpsc::Sender<ReplInputEvent>,
+    command_rx: mpsc::Receiver<ReplEditorCommand>,
+) {
+    let mut editor = match crate::platform::enter_console_line_editor() {
+        Ok(editor) => editor,
+        Err(_) => {
+            run_repl_plain_reader(input_tx, command_rx);
+            return;
+        }
+    };
+    let mut buffer = crate::platform::LineBuffer::new();
+    let mut history = crate::platform::LineHistory::new();
+    let mut prompt: Option<String> = None;
+    let mut dirty = false;
+    loop {
+        loop {
+            match command_rx.try_recv() {
+                Ok(ReplEditorCommand::Clear) => {
+                    buffer.clear();
+                    history.reset();
+                    dirty = true;
+                }
+                Ok(ReplEditorCommand::SetPrompt(next)) => {
+                    prompt = next;
+                    dirty = true;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+        match editor.read_key() {
+            Ok(Some(key)) => {
+                let mut submitted = None;
+                match key {
+                    crate::platform::ConsoleKey::Char(ch) => buffer.insert_char(ch),
+                    crate::platform::ConsoleKey::Enter => submitted = Some(buffer.take()),
+                    crate::platform::ConsoleKey::Backspace => {
+                        buffer.backspace();
+                    }
+                    crate::platform::ConsoleKey::Delete => {
+                        buffer.delete();
+                    }
+                    crate::platform::ConsoleKey::Left => buffer.move_left(),
+                    crate::platform::ConsoleKey::Right => buffer.move_right(),
+                    crate::platform::ConsoleKey::Home => buffer.move_home(),
+                    crate::platform::ConsoleKey::End => buffer.move_end(),
+                    crate::platform::ConsoleKey::Up => {
+                        if let Some(text) = history.previous(&buffer) {
+                            buffer.set_text(text);
+                        }
+                    }
+                    crate::platform::ConsoleKey::Down => {
+                        if let Some(text) = history.next(&buffer) {
+                            buffer.set_text(text);
+                        }
+                    }
+                    crate::platform::ConsoleKey::Eof => {
+                        if buffer.is_empty() {
+                            let _ = std::io::stderr().write_all(b"\n");
+                            let _ = input_tx.send(ReplInputEvent::Eof);
+                            return;
+                        }
+                        buffer.delete();
+                    }
+                    _ => {}
+                }
+                if let Some(line) = submitted {
+                    history.push(&line);
+                    // The main loop accumulates multi-line cells with
+                    // `buffer.push_str(&line)`; carry the line terminator so
+                    // an incomplete Rhai cell keeps its line boundaries.
+                    let mut line_with_eol = line;
+                    line_with_eol.push('\n');
+                    if input_tx.send(ReplInputEvent::Line(line_with_eol)).is_err() {
+                        return;
+                    }
+                    // Commit the submitted line to the terminal scrollback so
+                    // multi-line cells stay visible (standard REPL behavior);
+                    // continuation prompts then start on a fresh line.
+                    let _ = std::io::stderr().write_all(b"\n");
+                }
+                dirty = true;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let _ = input_tx.send(ReplInputEvent::Failed(format!(
+                    "host_line_editor: {error}"
+                )));
+                return;
+            }
+        }
+        if dirty && let Some(prompt) = &prompt {
+            if let Err(error) = render_edit_line(
+                &mut std::io::stderr(),
+                prompt,
+                buffer.text(),
+                buffer.cursor(),
+            ) {
+                let _ = input_tx.send(ReplInputEvent::Failed(format!(
+                    "host_line_editor_render: {error}"
+                )));
+                return;
+            }
+            dirty = false;
+        }
+    }
+}
+
+/// Plain line-read input thread, used for non-tty, JSON, or fallback input.
+/// Renders the prompt from the same command channel so both input paths share
+/// one main-loop contract.
+fn run_repl_plain_reader(
+    input_tx: mpsc::Sender<ReplInputEvent>,
+    command_rx: mpsc::Receiver<ReplEditorCommand>,
+) {
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    loop {
+        loop {
+            match command_rx.try_recv() {
+                Ok(ReplEditorCommand::Clear) => {}
+                Ok(ReplEditorCommand::SetPrompt(Some(prompt))) => {
+                    eprint!("{prompt}");
+                    let _ = std::io::stderr().flush();
+                }
+                Ok(ReplEditorCommand::SetPrompt(None)) => {}
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+        let mut line = String::new();
+        match input.read_line(&mut line) {
+            Ok(0) => {
+                let _ = input_tx.send(ReplInputEvent::Eof);
+                return;
+            }
+            Ok(_) => {
+                if input_tx.send(ReplInputEvent::Line(line)).is_err() {
+                    return;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                let _ = input_tx.send(ReplInputEvent::Failed(error.to_string()));
+                return;
+            }
+        }
+    }
+}
+
 struct ReplInterruptWatcher {
     events: mpsc::Receiver<ReplInterruptEvent>,
     shutdown: mpsc::Sender<()>,
@@ -459,27 +642,14 @@ fn run_script_repl(arguments: &[String]) -> i32 {
     };
     let tty = std::io::stdin().is_terminal();
     let (input_tx, input_rx) = mpsc::channel();
-    thread::spawn(move || {
-        let stdin = std::io::stdin();
-        let mut input = stdin.lock();
-        loop {
-            let mut line = String::new();
-            match input.read_line(&mut line) {
-                Ok(0) => {
-                    let _ = input_tx.send(ReplInputEvent::Eof);
-                    break;
-                }
-                Ok(_) => {
-                    if input_tx.send(ReplInputEvent::Line(line)).is_err() {
-                        break;
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => {
-                    let _ = input_tx.send(ReplInputEvent::Failed(error.to_string()));
-                    break;
-                }
-            }
+    let (command_tx, command_rx) = mpsc::channel();
+    let editor_active = tty && !json;
+    let join_editor = editor_active;
+    let input_thread = thread::spawn(move || {
+        if editor_active {
+            run_repl_line_editor(input_tx, command_rx);
+        } else {
+            run_repl_plain_reader(input_tx, command_rx);
         }
     });
     let fail_fast = has_option(arguments, "--fail-fast");
@@ -495,16 +665,15 @@ fn run_script_repl(arguments: &[String]) -> i32 {
     let mut cell_sequence = 0_u64;
 
     'repl: loop {
-        if tty && !json {
-            eprint!(
-                "{}",
-                if buffer.is_empty() {
-                    "rhai> "
-                } else {
-                    "....> "
-                }
-            );
-            let _ = std::io::stderr().flush();
+        if tty {
+            let prompt = if json {
+                None
+            } else if buffer.is_empty() {
+                Some("rhai> ".to_owned())
+            } else {
+                Some("....> ".to_owned())
+            };
+            let _ = command_tx.send(ReplEditorCommand::SetPrompt(prompt));
         }
         let event = loop {
             match watcher.events.try_recv() {
@@ -525,6 +694,7 @@ fn run_script_repl(arguments: &[String]) -> i32 {
         let line = match event {
             Err(ReplInterruptEvent::Idle | ReplInterruptEvent::Active) if tty => {
                 buffer.clear();
+                let _ = command_tx.send(ReplEditorCommand::Clear);
                 if !json {
                     eprintln!("^C");
                 }
@@ -656,12 +826,17 @@ fn run_script_repl(arguments: &[String]) -> i32 {
         }
         if interrupted {
             buffer.clear();
+            let _ = command_tx.send(ReplEditorCommand::Clear);
             if !json {
                 eprintln!("^C");
             }
         }
     }
 
+    drop(command_tx);
+    if join_editor {
+        let _ = input_thread.join();
+    }
     watcher.stop();
     if let Err(error) = session.close() {
         render_repl_error(&error, json);

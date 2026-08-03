@@ -33,6 +33,7 @@ pub enum Capability {
     Storage,
     Entropy,
     ConsoleInterrupt,
+    ConsoleLineEditor,
     UserIdentity,
     ProcessControl,
     ProcessObservation,
@@ -93,6 +94,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Storage => (cfg!(feature = "storage"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ConsoleInterrupt => (cfg!(feature = "console-interrupt"), true),
+        Capability::ConsoleLineEditor => (cfg!(feature = "console-line-editor"), true),
         Capability::UserIdentity => (cfg!(feature = "user-identity"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
@@ -157,6 +159,9 @@ pub mod clipboard;
 
 #[cfg(feature = "console-interrupt")]
 pub mod console_interrupt;
+
+#[cfg(feature = "console-line-editor")]
+pub mod console_line_editor;
 
 #[cfg(all(feature = "window", feature = "input"))]
 pub mod control_window;

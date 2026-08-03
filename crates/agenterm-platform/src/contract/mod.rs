@@ -5,6 +5,8 @@ pub mod cache_hierarchy;
 pub mod clipboard;
 #[cfg(feature = "console-interrupt")]
 pub mod console_interrupt;
+#[cfg(feature = "console-line-editor")]
+pub mod console_line_editor;
 #[cfg(all(feature = "window", feature = "input"))]
 pub mod control_window;
 #[cfg(feature = "entropy")]

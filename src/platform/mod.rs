@@ -47,6 +47,9 @@ pub(crate) use policy::workspace::{WorkspaceLayoutKind, workspace_layout_kind};
 pub(crate) use agenterm_platform::console_interrupt::{
     ConsoleInterruptIgnoreGuard, ConsoleInterruptObserver,
 };
+pub(crate) use agenterm_platform::console_line_editor::{
+    ConsoleKey, ConsoleLineEditor, LineBuffer, LineHistory,
+};
 pub use filesystem::{
     is_direct_directory, is_direct_file, metadata_is_link_like, replace_file, sync_parent,
 };
@@ -57,6 +60,10 @@ pub fn install_console_interrupt_ignore_guard() -> anyhow::Result<ConsoleInterru
 
 pub fn install_console_interrupt_observer() -> anyhow::Result<ConsoleInterruptObserver> {
     ConsoleInterruptObserver::install().map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+pub fn enter_console_line_editor() -> anyhow::Result<ConsoleLineEditor> {
+    ConsoleLineEditor::enter().map_err(|error| anyhow::anyhow!("{error}"))
 }
 
 // Platform Facade services. Product modules consume these typed services;

@@ -49,6 +49,18 @@ pub(crate) mod console_interrupt;
 #[path = "adapters/macos/console_interrupt.rs"]
 pub(crate) mod console_interrupt;
 
+#[cfg(all(feature = "console-line-editor", windows))]
+#[path = "adapters/windows/console_line_editor.rs"]
+pub(crate) mod console_line_editor;
+
+#[cfg(all(feature = "console-line-editor", target_os = "linux"))]
+#[path = "adapters/linux/console_line_editor.rs"]
+pub(crate) mod console_line_editor;
+
+#[cfg(all(feature = "console-line-editor", target_os = "macos"))]
+#[path = "adapters/macos/console_line_editor.rs"]
+pub(crate) mod console_line_editor;
+
 #[cfg(all(feature = "filesystem-cleanup", windows))]
 #[path = "adapters/windows/filesystem_cleanup.rs"]
 pub(crate) mod filesystem_cleanup;

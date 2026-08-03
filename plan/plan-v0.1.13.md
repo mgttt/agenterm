@@ -158,8 +158,14 @@ v0.1.13  Trust & platform narrowness
 │  └─ [x] quick 绿 ≠ 六平台 CI / smoke / Candidate；宿主矩阵门禁已记录（本机 601 tests + clippy 全绿 = Windows 单平台；六平台 CI 归 v0.1.12 授权链）
 │
 └─ E. v0.1.13 功能叶（守住边界 + 补齐功能；不做大 CC、不进 Workflows 内容）
-   ├─ [ ] REPL 行编辑/history：`agenterm-rhai` REPL 支持方向键编辑 +
+   ├─ [x] REPL 行编辑/history：`agenterm-rhai` REPL 支持方向键编辑 +
    │     上下历史（supervision/Ctrl+C 已有；交互编辑开放）
+   │     证据：agenterm-platform 新增 `console-line-editor` feature（Win32
+   │     INPUT_RECORD / Unix termios raw + ESC 解析，零新依赖）；LineBuffer/
+   │     LineHistory/EscapeParser 纯函数单测 22 项 + 237 all-features 全绿；
+   │     agenterm lib 602 绿、clippy -D warnings 零告警；非 tty 冒烟
+   │     `agenterm-cli script repl` 多行 cell + print 出 5（行为不变）。
+   │     Ctrl+C 仍走 ConsoleInterruptObserver（编辑器保留 ENABLE_PROCESSED_INPUT/ISIG）
    ├─ [ ] macOS pointer 诊断：Unsupported 时错误信息给清「缺哪项能力」
    │     （不冒充 shipped；真机正向证据若不可得则保留 typed 边界）
    ├─ [ ] Cockpit 只读事实/导航小步：加深诊断面板（事件/PTY/租约读数），
@@ -564,7 +570,8 @@ v0.1.13 发文方向从「更多抽象」调整为：**守住边界 + 补齐功�
 
 ```text
 v0.1.13 Wave A（功能补齐 — 用户体感优先）
-├─ [ ] REPL 行编辑/history（E 组叶，Script 体验）
+├─ [x] REPL 行编辑/history（E 组叶，Script 体验；console-line-editor feature，
+│      2026-08-04 亲测：clippy 零告警 + lib 602 + platform 237 + 非 tty 冒烟绿）
 ├─ [ ] Cockpit 诊断小步（E 组叶，只读事实加深）
 └─ [x] precision-audit #13 Rhai catalog 自动化（E 组叶，信任面；rhai metadata 仅 dev-dependency 启用，release 预算不受影响）
 

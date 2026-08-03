@@ -58,6 +58,13 @@ console-interrupt = [
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_System_Console",
 ]
+console-line-editor = [
+    "dep:libc",
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_System_Console",
+    "windows-sys/Win32_UI_Input_KeyboardAndMouse",
+]
 user-identity = [
     "dep:libc",
     "dep:windows-sys",
