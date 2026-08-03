@@ -3,7 +3,9 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    io, mem, ptr, rc::Rc, time::Instant,
+    io, mem, ptr,
+    rc::Rc,
+    time::Instant,
 };
 
 use windows_sys::Win32::{
@@ -763,20 +765,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     DISPATCHING.with(|flag| flag.set(true));
     let result = dispatch_window_message(hwnd, msg, wp, lp, unsafe { &mut *state_ptr });
     loop {
-        let pending = PENDING_MESSAGES.with(|messages| {
-            std::mem::take(&mut *messages.borrow_mut())
-        });
+        let pending = PENDING_MESSAGES.with(|messages| std::mem::take(&mut *messages.borrow_mut()));
         if pending.is_empty() {
             break;
         }
         for (pending_msg, pending_wp, pending_lp) in pending {
-            let _ = dispatch_window_message(
-                hwnd,
-                pending_msg,
-                pending_wp,
-                pending_lp,
-                unsafe { &mut *state_ptr },
-            );
+            let _ = dispatch_window_message(hwnd, pending_msg, pending_wp, pending_lp, unsafe {
+                &mut *state_ptr
+            });
         }
     }
     DISPATCHING.with(|flag| flag.set(false));
