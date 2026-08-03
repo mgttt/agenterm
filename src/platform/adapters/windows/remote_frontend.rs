@@ -2921,12 +2921,7 @@ impl RemoteWindowState {
                     })
             }) && self.window.focused_target() == FocusTarget::Window
                 && self.current_focus_surface() == RemoteFocusSurface::Terminal
-                && !self.window_close_dialog.is_open()
-                && !self.settings_dialog.is_open()
-                && !self.new_terminal_dialog.is_open()
-                && !self.tab_editor_dialog.is_open()
-                && !self.close_confirmation.is_open()
-                && !self.cwd_editor_dialog.is_open();
+                && !self.focus_gate().blocked();
             if !current {
                 self.last_error = Some(
                     "Paste cancelled because the active terminal or paste mode changed".to_owned(),
@@ -3042,13 +3037,7 @@ impl RemoteWindowState {
     }
 
     fn open_cwd_editor(&mut self) {
-        if self.cwd_editor_dialog.is_open()
-            || self.window_close_dialog.is_open()
-            || self.settings_dialog.is_open()
-            || self.new_terminal_dialog.is_open()
-            || self.close_confirmation.is_open()
-            || self.tab_editor_dialog.is_open()
-        {
+        if self.focus_gate().blocked() {
             return;
         }
         let Some(tab) = self.active_tab().cloned() else {
@@ -3150,11 +3139,7 @@ impl RemoteWindowState {
     }
 
     fn open_new_terminal(&mut self) {
-        if self.new_terminal_dialog.is_open()
-            || self.settings_dialog.is_open()
-            || self.window_close_dialog.is_open()
-            || self.close_confirmation.is_open()
-        {
+        if self.focus_gate().full_modal_blocked() {
             return;
         }
         self.cancel_terminal_selection();
@@ -4323,9 +4308,7 @@ impl RemoteWindowState {
             _ => false,
         };
         let terminal_ready = focused == FocusTarget::Window
-            && !self.window_close_dialog.is_open()
-            && !self.settings_dialog.is_open()
-            && !self.new_terminal_dialog.is_open()
+            && !self.focus_gate().full_modal_blocked()
             && self.active_tab().is_some_and(|tab| !tab.dead);
         system_menu_clipboard_state(
             edit_focus,
@@ -4420,11 +4403,7 @@ impl RemoteWindowState {
         pressed: bool,
         motion: bool,
     ) -> bool {
-        if self.settings_dialog.is_open()
-            || self.window_close_dialog.is_open()
-            || self.new_terminal_dialog.is_open()
-            || self.close_confirmation.is_open()
-        {
+        if self.focus_gate().full_modal_blocked() {
             return false;
         }
         let Some(tab) = self.active_tab() else {
@@ -4742,11 +4721,7 @@ impl RemoteWindowState {
     }
 
     fn handle_left_double_click(&mut self, x: i32, y: i32, clicks: u8) -> bool {
-        if self.window_close_dialog.is_open()
-            || self.settings_dialog.is_open()
-            || self.new_terminal_dialog.is_open()
-            || self.close_confirmation.is_open()
-        {
+        if self.focus_gate().full_modal_blocked() {
             return false;
         }
         let text_tab = self.take_matching_sidebar_text_click(x, y);
@@ -4769,11 +4744,7 @@ impl RemoteWindowState {
 
     fn handle_left_button_down(&mut self, x: i32, y: i32) -> bool {
         self.recent_sidebar_text_click = None;
-        if self.window_close_dialog.is_open()
-            || self.settings_dialog.is_open()
-            || self.new_terminal_dialog.is_open()
-            || self.close_confirmation.is_open()
-        {
+        if self.focus_gate().full_modal_blocked() {
             return false;
         }
         let clicked_text_tab = self.tab_text_id_at(x, y);
@@ -4973,11 +4944,7 @@ impl RemoteWindowState {
     }
 
     fn handle_wheel(&mut self, x: i32, y: i32, delta: i32) {
-        if self.window_close_dialog.is_open()
-            || self.settings_dialog.is_open()
-            || self.new_terminal_dialog.is_open()
-            || self.close_confirmation.is_open()
-        {
+        if self.focus_gate().full_modal_blocked() {
             return;
         }
         let target = route_wheel(
@@ -5250,11 +5217,7 @@ impl RemoteWindowState {
             &format!("CWD: {cwd}"),
             palette.muted_text.canvas_rgb(),
         );
-        if !self.window_close_dialog.is_open()
-            && !self.settings_dialog.is_open()
-            && !self.new_terminal_dialog.is_open()
-            && !self.close_confirmation.is_open()
-        {
+        if !self.focus_gate().full_modal_blocked() {
             let focus = match self.current_focus_surface() {
                 RemoteFocusSurface::Terminal => terminal,
                 RemoteFocusSurface::Composer => composer,

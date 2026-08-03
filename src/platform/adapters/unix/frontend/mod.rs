@@ -1279,11 +1279,7 @@ impl UnixApp {
     }
 
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
-        if self.settings_dialog.is_open()
-            || self.close_confirmation.is_open()
-            || self.window_close_dialog.is_open()
-            || self.tab_editor_dialog.is_open()
-        {
+        if self.focus_gate().blocked() {
             return Err("another modal surface is active".to_owned());
         }
         let _ = self.cancel_terminal_selection(true);
@@ -1948,9 +1944,7 @@ impl UnixApp {
 
     fn terminal_ready_for_system_menu(&self) -> bool {
         self.focus_surface == UnixFocusSurface::Terminal
-            && !self.window_close_dialog.is_open()
-            && !self.settings_dialog.is_open()
-            && !self.new_terminal_dialog.is_open()
+            && !self.focus_gate().full_modal_blocked()
             && self
                 .active_position()
                 .is_some_and(|position| self.tabs[position].exited.is_none())
@@ -3126,11 +3120,7 @@ impl UnixApp {
         pressed: bool,
         motion: bool,
     ) -> bool {
-        if self.settings_dialog.is_open()
-            || self.window_close_dialog.is_open()
-            || self.close_confirmation.is_open()
-            || self.new_terminal_dialog.is_open()
-        {
+        if self.focus_gate().full_modal_blocked() {
             return false;
         }
         let Some(position) = self.active_position() else {
@@ -3188,7 +3178,7 @@ impl UnixApp {
     }
 
     fn mouse_wheel(&mut self, x: f64, y: f64, vertical_delta: f64, line_based: bool) {
-        if self.settings_dialog.is_open() || self.window_close_dialog.is_open() {
+        if self.focus_gate().full_modal_blocked() {
             return;
         }
         let layout = self.layout();

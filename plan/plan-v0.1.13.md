@@ -122,6 +122,7 @@ v0.1.13  Trust & platform narrowness
 │  ├─ [x] sidebar scrollbar geometry 单点：sidebar_row_capacity/sidebar_scrollbar_geometry（ui_geometry.rs；Win/Unix 共用）
 │  ├─ [x] composer send/input geometry 单点：composer_geometry（ui_geometry.rs；Win/Unix 共用）
 │  ├─ [x] system menu clipboard state 单点：system_menu_clipboard_state（interaction.rs；Win/Unix 共用）
+│  ├─ [x] full-modal 输入拦截单点：FocusTransitionGate::full_modal_blocked()（interaction.rs；Win/Unix 共用，含 mouse/wheel/CWD 入口）
 │  ├─ [x] composer/workspace 可见性策略单点：FocusTransitionGate::workspace_controls_visible()（interaction.rs；Win/Unix 共用）
 │  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略

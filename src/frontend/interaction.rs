@@ -97,12 +97,18 @@ pub(crate) struct FocusTransitionGate {
 
 impl FocusTransitionGate {
     pub(crate) const fn blocked(self) -> bool {
+        self.full_modal_blocked() || self.tab_editor_open || self.cwd_editor_open
+    }
+
+    /// Full-screen modal surfaces that intercept terminal and workspace input.
+    ///
+    /// Inline tab/CWD editors remain reachable while they are open, so they
+    /// deliberately do not count as full modal blocking.
+    pub(crate) const fn full_modal_blocked(self) -> bool {
         self.window_close_pending
             || self.settings_open
             || self.new_terminal_open
-            || self.tab_editor_open
             || self.close_confirmation_open
-            || self.cwd_editor_open
     }
 
     pub(crate) const fn workspace_controls_visible(self) -> bool {
@@ -504,6 +510,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn full_modal_blocked_excludes_inline_editors() {
+        let idle = FocusTransitionGate::default();
+        assert!(!idle.full_modal_blocked());
+        for gate in [
+            FocusTransitionGate {
+                window_close_pending: true,
+                ..idle
+            },
+            FocusTransitionGate {
+                settings_open: true,
+                ..idle
+            },
+            FocusTransitionGate {
+                new_terminal_open: true,
+                ..idle
+            },
+            FocusTransitionGate {
+                close_confirmation_open: true,
+                ..idle
+            },
+        ] {
+            assert!(gate.full_modal_blocked());
+        }
+        assert!(
+            !FocusTransitionGate {
+                tab_editor_open: true,
+                ..idle
+            }
+            .full_modal_blocked()
+        );
+        assert!(
+            !FocusTransitionGate {
+                cwd_editor_open: true,
+                ..idle
+            }
+            .full_modal_blocked()
+        );
+        assert!(
+            FocusTransitionGate {
+                tab_editor_open: true,
+                cwd_editor_open: true,
+                ..idle
+            }
+            .blocked()
+        );
+    }
     #[test]
     fn modal_surface_uses_single_priority_and_excludes_tab_editor() {
         let idle = FocusTransitionGate::default();
