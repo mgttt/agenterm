@@ -324,6 +324,19 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 
 说明：这是当前 Windows 开发机的执行边界，不是回归逻辑失败；脚本已改为在该场景输出 `matrix` 与失败根因，便于三平台聚合不阻塞。
 
+## 宿主矩阵门禁记录（v0.1.13 Wave B，2026-08-04）
+
+| 宿主 | parity-smoke 任务 | 负责列 | 状态 | 证据 |
+|---|---|---|---|---|
+| Windows 开发机 | `platform-ux-parity-smoke` | windows | ✅ 绿 | `run_id 1785778126142-6792`（2026-08-04 01:29 +0800，`result_class: success`）：startup×2 / wake-coalescing / window-focus-contract / remote-ui×2 全 `Supported`；frontend-lx/mx 为平台能力缺口 `Unsupported`（platform-gap），Windows 主机上属预期 |
+| Linux matching-host CI | `platform-ux-parity-smoke-linux` | linux | 归 CI | ubuntu runner `check.sh --quick --target x86_64-unknown-linux-gnu` + 真机 `unix-frontend` smoke；Windows 主机预检仅 `platform_gui_missing`（`infra/platform-binary-missing`，非回归） |
+| macOS matching-host CI | `platform-ux-parity-smoke-macos` | macos | 归 CI | macos-15-intel / macos-14 runner；Windows 主机预检同上 `platform_gui_missing` |
+
+门禁规则：
+- Windows 列由本机 `platform-ux-parity-smoke -- --emit-matrix` 提供；绿 = `result_class: success` 且 startup / wake / focus / remote-ui 无 `Failed`。
+- Linux/macOS 列只认 matching-host CI 回执；Windows 主机上 linux/macos 任务输出 `platform_gui_missing` 属基础设施边界，不算回归失败，也不冒充三平台绿。
+- 任何 `Failed` 阻断对应分支；`Unsupported` 仅记录能力缺口（`platform-gap` / `windows-only-contract`）。
+
 ## 本轮 D4 真机 UX 证据（2026-08-02 CI run 30767566925）
 
 | 场景 | evidence_id | Linux | macOS | 证据来源 |

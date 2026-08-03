@@ -595,7 +595,12 @@ v0.1.13 Wave A（功能补齐 — 用户体感优先）
 v0.1.13 Wave B（信任面收口）
 ├─ [x] macOS pointer Unsupported 诊断清晰化（E 组叶）
 ├─ [x] B 组 [~] facade 纯转发删除（跨 target 编译亲测绿）
-└─ [ ] 六平台 parity-smoke 宿主矩阵门禁记录（Windows 已绿；Linux/macOS 归 CI）
+└─ [x] 六平台 parity-smoke 宿主矩阵门禁记录（Windows 已绿；Linux/macOS 归 CI）
+     证据：Windows 本机 `platform-ux-parity-smoke -- --emit-matrix` 亲测绿
+     （run_id 1785778126142-6792，2026-08-04 01:29 +0800，result_class success，
+     startup/wake/focus/remote-ui 全 Supported）；矩阵文件新增「宿主矩阵门禁
+     记录」节：Linux/macOS 列归 matching-host CI，Windows 主机预检
+     platform_gui_missing 为基础设施边界不算回归
 
 v0.1.13 完成定义（在 §六基础上）
 - Wave A/B 全勾选；每叶独立提交 + cargo check/clippy -D warnings 亲测绿
