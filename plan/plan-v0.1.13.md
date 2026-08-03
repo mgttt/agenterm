@@ -116,6 +116,8 @@ v0.1.13  Trust & platform narrowness
 │
 ├─ F. 跨平台分层（重点，见 §八）
 │  ├─ [x] 取消 `frontend.rs` 对 adapter 的 `#[path]` 虚树；adapter 归属 `platform::adapters`
+│  ├─ [x] new-terminal / settings modal 语义已进 `src/frontend/{new_terminal,settings}.rs`
+│  │     （Win/Unix 共用状态/校验/action，adapter 只保留原生呈现与事件映射）
 │  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略
 │  ├─ [ ] `platform/mod.rs` 产品策略表 vs `agenterm-platform` 机制 再切割

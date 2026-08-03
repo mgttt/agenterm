@@ -47,8 +47,8 @@ use crate::{
     protocol::IpcResponse,
     pty::TerminalSize,
     settings::{
-        AppConfig, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, config_path, load_config,
-        save_config,
+        AppConfig, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, TerminalAppearanceOverride,
+        config_path, load_config, save_config,
     },
     terminal_runtime::{TerminalLaunch, TerminalTab},
     theme::ThemeId,
@@ -82,6 +82,7 @@ use crate::frontend::selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
 };
+use crate::frontend::settings::{self, SettingsDialog};
 use crate::ui_snapshot::{
     PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
     embedded_window_json, event_position_json, locale_json, schema_version_json,
@@ -588,9 +589,8 @@ struct UnixApp {
     composer_select_all: bool,
     text_field_select_all: bool,
     config: AppConfig,
-    settings_open: bool,
-    settings_theme_draft: ThemeId,
-    settings_size_draft: u16,
+    settings_dialog: SettingsDialog,
+
     new_terminal_dialog: NewTerminalDialog,
     new_terminal_focus: NewTerminalFocusView,
     window_state_tracker: WindowStateTracker,
@@ -693,9 +693,10 @@ impl UnixApp {
             composer_buffer: String::new(),
             composer_select_all: false,
             text_field_select_all: false,
-            settings_open: false,
-            settings_theme_draft: config.color_theme,
-            settings_size_draft: config.terminal_font_size,
+            settings_dialog: SettingsDialog::new(
+                config.effective_terminal_appearance(&crate::client::ipc_address(), None),
+            ),
+
             new_terminal_dialog: NewTerminalDialog::new(),
             new_terminal_focus: NewTerminalFocusView::InitialCommand,
             window_state_tracker: WindowStateTracker::new(),
@@ -744,7 +745,11 @@ impl UnixApp {
 
     fn palette(&self) -> &'static crate::theme::ThemePalette {
         let configured = self.active_terminal_appearance().color_theme;
-        effective_palette(configured, self.settings_theme_draft, self.settings_open)
+        effective_palette(
+            configured,
+            self.settings_dialog.theme_draft(),
+            self.settings_dialog.is_open(),
+        )
     }
 
     fn active_terminal_appearance(&self) -> crate::settings::EffectiveTerminalAppearance {
@@ -895,7 +900,10 @@ impl UnixApp {
     }
 
     fn commit_ime_text(&mut self, raw: &str) {
-        if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
+        if self.window_close_pending
+            || self.pending_close.is_some()
+            || self.settings_dialog.is_open()
+        {
             return;
         }
         let raw = {
@@ -1064,7 +1072,7 @@ impl UnixApp {
     fn focus_gate(&self) -> FocusTransitionGate {
         FocusTransitionGate {
             window_close_pending: self.window_close_pending,
-            settings_open: self.settings_open,
+            settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.note_edit_target.is_some(),
             close_confirmation_open: self.pending_close.is_some(),
@@ -1085,7 +1093,7 @@ impl UnixApp {
     }
 
     fn open_new_terminal_dialog(&mut self) {
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
         }
         if self.note_edit_target.is_some() {
@@ -1252,7 +1260,7 @@ impl UnixApp {
     }
 
     fn handle_settings_key(&mut self, event: &NormalizedKeyEvent) {
-        if !self.settings_open {
+        if !self.settings_dialog.is_open() {
             return;
         }
         match event.logical {
@@ -1287,7 +1295,7 @@ impl UnixApp {
     }
 
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
-        if self.settings_open
+        if self.settings_dialog.is_open()
             || self.pending_close.is_some()
             || self.window_close_pending
             || self.note_edit_target.is_some()
@@ -1435,7 +1443,7 @@ impl UnixApp {
         if self.note_edit_target.is_some() {
             let _ = self.complete_tab_editor(false);
         }
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
         }
         if self.pending_close.is_some() {
@@ -1582,34 +1590,42 @@ impl UnixApp {
             let _ = self.complete_tab_editor(false);
         }
         self.sync_composer_buffer_to_tab();
-        self.settings_open = true;
-        self.settings_theme_draft = self.config.color_theme;
-        self.settings_size_draft = self.config.terminal_font_size;
+        settings::ui_action_open(
+            &mut self.settings_dialog,
+            self.config
+                .effective_terminal_appearance(&crate::client::ipc_address(), None),
+            None,
+            TerminalAppearanceOverride::default(),
+        );
         self.set_focus_surface_internal(UnixFocusSurface::Settings, "semantic");
     }
 
     fn close_settings(&mut self, apply: bool) -> Result<(), String> {
-        if !self.settings_open {
+        if !self.settings_dialog.is_open() {
             return Err("settings are not open".to_owned());
         }
         if apply {
-            if !(8..=36).contains(&self.settings_size_draft) {
-                return Err("font size must be from 8 to 36".to_owned());
-            }
-            self.config.terminal_font_size = self.settings_size_draft;
-            self.config.color_theme = self.settings_theme_draft;
+            self.settings_dialog.capture()?;
+            let changes = self.settings_dialog.changes();
+            self.config.terminal_font_size = changes.default_appearance.terminal_font_size;
+            self.config.color_theme = changes.default_appearance.color_theme;
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
-        } else {
-            self.settings_theme_draft = self.config.color_theme;
-            self.settings_size_draft = self.config.terminal_font_size;
         }
-        self.settings_open = false;
+        self.settings_dialog.close_without_apply();
         self.set_focus_surface_internal(UnixFocusSurface::Terminal, "settings-close");
         Ok(())
     }
 
+    fn settings_size_draft(&self) -> u16 {
+        self.settings_dialog
+            .font_size_draft()
+            .trim()
+            .parse::<u16>()
+            .unwrap_or(self.config.terminal_font_size)
+    }
+
     fn open_tab_editor_for(&mut self, tab_id: u64) -> Result<(), String> {
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
         }
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id) else {
@@ -1799,19 +1815,35 @@ impl UnixApp {
     fn handle_settings_click(&mut self, hit: SettingsHit) {
         match hit {
             SettingsHit::Dark => {
-                self.settings_theme_draft = ThemeId::Dark;
+                self.settings_dialog.preview_theme(ThemeId::Dark);
                 self.request_redraw();
             }
             SettingsHit::Light => {
-                self.settings_theme_draft = ThemeId::Light;
+                self.settings_dialog.preview_theme(ThemeId::Light);
                 self.request_redraw();
             }
             SettingsHit::SizeDecrease => {
-                self.settings_size_draft = self.settings_size_draft.saturating_sub(1).max(8);
+                let size = self
+                    .settings_dialog
+                    .font_size_draft()
+                    .trim()
+                    .parse::<u16>()
+                    .unwrap_or(MIN_TERMINAL_FONT_SIZE)
+                    .saturating_sub(1)
+                    .max(MIN_TERMINAL_FONT_SIZE);
+                self.settings_dialog.set_font_size_draft(size.to_string());
                 self.request_redraw();
             }
             SettingsHit::SizeIncrease => {
-                self.settings_size_draft = (self.settings_size_draft + 1).min(36);
+                let size = self
+                    .settings_dialog
+                    .font_size_draft()
+                    .trim()
+                    .parse::<u16>()
+                    .unwrap_or(MAX_TERMINAL_FONT_SIZE)
+                    .saturating_add(1)
+                    .min(MAX_TERMINAL_FONT_SIZE);
+                self.settings_dialog.set_font_size_draft(size.to_string());
                 self.request_redraw();
             }
             SettingsHit::Cancel => {
@@ -1941,7 +1973,7 @@ impl UnixApp {
     fn terminal_ready_for_system_menu(&self) -> bool {
         self.focus_surface == UnixFocusSurface::Terminal
             && !self.window_close_pending
-            && !self.settings_open
+            && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self
                 .active_position()
@@ -2254,8 +2286,8 @@ impl UnixApp {
                         "cancel"
                     ],
                 }))
-            } else if self.settings_open {
-                Some(serde_json::json!({"kind": "settings"}))
+            } else if self.settings_dialog.is_open() {
+                Some(self.settings_dialog.snapshot_modal())
             } else if let Some(id) = self.cwd_edit_target {
                 Some(serde_json::json!({
                     "kind": "cwd-editor",
@@ -2295,8 +2327,8 @@ impl UnixApp {
             ),
             "settings": settings_json(
                 &self.config,
-                self.settings_open,
-                Some(self.settings_theme_draft.as_str()),
+                self.settings_dialog.is_open(),
+                Some(self.settings_dialog.theme_draft().as_str()),
                 &crate::ipc_address(),
                 self.active_position()
                     .map(|position| format!("@{}", self.tabs[position].id))
@@ -2598,13 +2630,13 @@ impl UnixApp {
             }
             return;
         }
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             let (width, height) = self.client_size();
             let modal = SettingsModalView::for_client(
                 width,
                 height,
-                self.settings_size_draft,
-                self.settings_theme_draft,
+                self.settings_size_draft(),
+                self.settings_dialog.theme_draft(),
             );
             if let Some(hit) = modal.hit_test(x, y) {
                 self.handle_settings_click(hit);
@@ -3149,7 +3181,7 @@ impl UnixApp {
         pressed: bool,
         motion: bool,
     ) -> bool {
-        if self.settings_open
+        if self.settings_dialog.is_open()
             || self.window_close_pending
             || self.pending_close.is_some()
             || self.new_terminal_dialog.is_open()
@@ -3211,7 +3243,7 @@ impl UnixApp {
     }
 
     fn mouse_wheel(&mut self, x: f64, y: f64, vertical_delta: f64, line_based: bool) {
-        if self.settings_open || self.window_close_pending {
+        if self.settings_dialog.is_open() || self.window_close_pending {
             return;
         }
         let layout = self.layout();
@@ -3296,7 +3328,10 @@ impl UnixApp {
     }
 
     fn ime_anchor(&self) -> Option<(u32, u32, u32, u32)> {
-        if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
+        if self.window_close_pending
+            || self.pending_close.is_some()
+            || self.settings_dialog.is_open()
+        {
             return None;
         }
         let (client_width, client_height) = self.client_size();
@@ -3950,12 +3985,12 @@ impl UnixApp {
         let sidebar_scrollbar = self
             .sidebar_scrollbar_state()
             .map(|geometry| scrollbar_view_from_geometry(geometry.0));
-        let settings = self.settings_open.then(|| {
+        let settings = self.settings_dialog.is_open().then(|| {
             SettingsModalView::for_client(
                 logical_width,
                 logical_height,
-                self.settings_size_draft,
-                self.settings_theme_draft,
+                self.settings_size_draft(),
+                self.settings_dialog.theme_draft(),
             )
         });
         let new_terminal = if self.new_terminal_dialog.is_open() {
@@ -4449,7 +4484,7 @@ impl ControlHost for UnixApp {
             ));
         }
         if surface == UnixFocusSurface::Settings
-            && !self.settings_open
+            && !self.settings_dialog.is_open()
             && self.note_edit_target.is_none()
         {
             return Err(format!(
@@ -4598,8 +4633,7 @@ impl ControlHost for UnixApp {
     }
 
     fn preview_settings_theme(&mut self, theme: ThemeId) {
-        if self.settings_open {
-            self.settings_theme_draft = theme;
+        if self.settings_dialog.preview_theme(theme) {
             self.request_redraw();
         }
     }
@@ -4621,7 +4655,7 @@ impl ControlHost for UnixApp {
             self.finish_close_confirmation(false);
             return Ok(true);
         }
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             self.close_settings(false)?;
             return Ok(true);
         }
@@ -4913,7 +4947,7 @@ impl UnixApp {
                     }
                     return;
                 }
-                if self.settings_open {
+                if self.settings_dialog.is_open() {
                     self.handle_settings_key(&event);
                     return;
                 }

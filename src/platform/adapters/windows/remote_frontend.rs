@@ -35,6 +35,7 @@ use crate::{
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
             remote_word_selection,
         },
+        settings::{self, AppearanceField, SettingsDialog, SettingsScope},
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
@@ -43,7 +44,7 @@ use crate::{
     protocol::IpcResponse,
     settings::{
         AppConfig, EffectiveTerminalAppearance, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,
-        TerminalAppearanceOverride, clamp_tabs_width, config_path, load_config, save_config,
+        clamp_tabs_width, config_path, load_config, save_config,
     },
     tab_tree::{TabTreeNode, tree_rows},
     theme::{Rgb, ThemeId, ThemePalette},
@@ -455,19 +456,6 @@ enum RemoteTabAction {
     Close,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SettingsScope {
-    Defaults,
-    CurrentTerminal,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AppearanceField {
-    FontFamily,
-    FontSize,
-    Theme,
-}
-
 #[derive(Clone)]
 struct RemoteTreeRow {
     tab_index: usize,
@@ -669,14 +657,8 @@ struct RemoteWindowState {
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
     window_close_pending: bool,
-    settings_open: bool,
     new_terminal_dialog: NewTerminalDialog,
-
-    settings_theme_draft: ThemeId,
-    settings_scope: SettingsScope,
-    settings_default_draft: EffectiveTerminalAppearance,
-    settings_override_draft: TerminalAppearanceOverride,
-    settings_target_tab_id: Option<String>,
+    settings_dialog: SettingsDialog,
     terminal_selection: Option<RemoteTerminalSelection>,
     terminal_selection_pointer: Option<(i32, i32)>,
     terminal_selection_autoscroll: Option<AutoScrollStep>,
@@ -788,8 +770,8 @@ impl RemoteWindowState {
             new_cancel,
         } = controls;
         let config = load_config();
-        let settings_theme_draft = config.color_theme;
         let settings_default_draft = config.effective_terminal_appearance(&ipc_address(), None);
+
         let last_active_id = client.snapshot().active_tab_id.clone();
         let appearance =
             config.effective_terminal_appearance(&ipc_address(), last_active_id.as_deref());
@@ -864,14 +846,8 @@ impl RemoteWindowState {
             tabs_resize_dragging: false,
             editing_tab_id: None,
             window_close_pending: false,
-            settings_open: false,
             new_terminal_dialog: NewTerminalDialog::new(),
-
-            settings_theme_draft,
-            settings_scope: SettingsScope::Defaults,
-            settings_default_draft,
-            settings_override_draft: TerminalAppearanceOverride::default(),
-            settings_target_tab_id: None,
+            settings_dialog: SettingsDialog::new(settings_default_draft),
             terminal_selection: None,
             terminal_selection_pointer: None,
             terminal_selection_autoscroll: None,
@@ -1195,7 +1171,7 @@ impl RemoteWindowState {
             }
             "open-settings" => {
                 self.open_settings();
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings could not be opened");
                 }
             }
@@ -1203,59 +1179,59 @@ impl RemoteWindowState {
             "font-decrease" => self.adjust_active_terminal_font(-1),
             "font-increase" => self.adjust_active_terminal_font(1),
             "settings-defaults" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.switch_settings_scope(SettingsScope::Defaults);
             }
             "settings-current" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.switch_settings_scope(SettingsScope::CurrentTerminal);
             }
             "settings-font-toggle" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.toggle_settings_inheritance(AppearanceField::FontFamily);
             }
             "settings-size-toggle" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.toggle_settings_inheritance(AppearanceField::FontSize);
             }
             "settings-theme-toggle" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.toggle_settings_inheritance(AppearanceField::Theme);
             }
             "settings-reset-overrides" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.reset_settings_overrides();
             }
             "settings-theme-dark" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.preview_settings_theme(ThemeId::Dark);
             }
             "settings-theme-light" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.preview_settings_theme(ThemeId::Light);
             }
             "settings-apply" => {
-                if !self.settings_open {
+                if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
                 self.finish_settings(true);
-                if self.settings_open {
+                if self.settings_dialog.is_open() {
                     anyhow::bail!(
                         "{}",
                         self.last_error
@@ -1329,7 +1305,7 @@ impl RemoteWindowState {
                     self.finish_window_close(RemoteCloseChoice::Cancel);
                 } else if self.new_terminal_dialog.is_open() {
                     self.finish_new_terminal(false);
-                } else if self.settings_open {
+                } else if self.settings_dialog.is_open() {
                     self.finish_settings(false);
                 } else if self.cwd_edit_tab_id.is_some() {
                     self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
@@ -1770,6 +1746,7 @@ impl RemoteWindowState {
 
     fn ui_snapshot_json(&mut self) -> Result<String> {
         self.sync_new_terminal_drafts();
+        self.sync_settings_drafts();
         let client = self
             .client
             .as_ref()
@@ -1986,8 +1963,8 @@ impl RemoteWindowState {
             }))
         } else if self.new_terminal_dialog.is_open() {
             Some(self.new_terminal_dialog.snapshot_modal())
-        } else if self.settings_open {
-            Some(serde_json::json!({"kind": "settings"}))
+        } else if self.settings_dialog.is_open() {
+            Some(self.settings_dialog.snapshot_modal())
         } else if let Some(id) = &self.cwd_edit_tab_id {
             Some(serde_json::json!({
                 "kind": "cwd-editor",
@@ -2021,7 +1998,7 @@ impl RemoteWindowState {
             "window-close"
         } else if self.new_terminal_dialog.is_open() {
             "new-terminal"
-        } else if self.settings_open {
+        } else if self.settings_dialog.is_open() {
             "settings"
         } else if self.cwd_edit_tab_id.is_some() {
             "cwd-editor"
@@ -2042,7 +2019,7 @@ impl RemoteWindowState {
             native_window_state.maximized,
         );
         let workspace_controls_visible = !self.window_close_pending
-            && !self.settings_open
+            && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self.pending_close_tab_id.is_none();
         serde_json::to_string_pretty(&serde_json::json!({
@@ -2220,19 +2197,16 @@ impl RemoteWindowState {
                 "terminal_font_family": self.config.terminal_font_family,
                 "terminal_font_size": self.config.terminal_font_size,
                 "color_theme": self.config.color_theme.as_str(),
-                "scope": match self.settings_scope {
-                    SettingsScope::Defaults => "defaults",
-                    SettingsScope::CurrentTerminal => "current-terminal",
-                },
-                "target_tab_id": self.settings_target_tab_id,
+                "scope": self.settings_dialog.scope().as_str(),
+                "target_tab_id": self.settings_dialog.target_tab_id(),
                 "current_terminal_override": active_override,
                 "effective": {
                     "terminal_font_family": effective.terminal_font_family,
                     "terminal_font_size": effective.terminal_font_size,
                     "color_theme": effective.color_theme.as_str(),
                 },
-                "theme_draft": self.settings_open.then(
-                    || self.settings_theme_draft.as_str()
+                "theme_draft": self.settings_dialog.is_open().then(
+                    || self.settings_dialog.theme_draft().as_str()
                 ),
                 "theme_options": ThemeId::ALL.map(|theme| serde_json::json!({
                     "id": theme.as_str(),
@@ -2473,7 +2447,7 @@ impl RemoteWindowState {
         );
         let toolbar_visible = geometry.workspace_toolbar.is_some()
             && !self.window_close_pending
-            && !self.settings_open
+            && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open();
         self.set_control_visible(
             self.new_tab,
@@ -2748,7 +2722,7 @@ impl RemoteWindowState {
         ] {
             self.set_control_bounds(control, rect);
         }
-        self.show_settings_controls(self.settings_open);
+        self.show_settings_controls(self.settings_dialog.is_open());
     }
 
     fn show_settings_controls(&self, visible: bool) {
@@ -2764,7 +2738,8 @@ impl RemoteWindowState {
         ] {
             self.set_control_visible(control, visible);
         }
-        let override_visible = visible && self.settings_scope == SettingsScope::CurrentTerminal;
+        let override_visible =
+            visible && self.settings_dialog.scope() == SettingsScope::CurrentTerminal;
         for control in [
             self.settings_font_inherit,
             self.settings_size_inherit,
@@ -3048,7 +3023,7 @@ impl RemoteWindowState {
             }) && self.window.focused_target() == FocusTarget::Window
                 && self.current_focus_surface() == RemoteFocusSurface::Terminal
                 && !self.window_close_pending
-                && !self.settings_open
+                && !self.settings_dialog.is_open()
                 && !self.new_terminal_dialog.is_open()
                 && self.editing_tab_id.is_none()
                 && self.pending_close_tab_id.is_none()
@@ -3170,7 +3145,7 @@ impl RemoteWindowState {
     fn open_cwd_editor(&mut self) {
         if self.cwd_edit_tab_id.is_some()
             || self.window_close_pending
-            || self.settings_open
+            || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
             || self.editing_tab_id.is_some()
@@ -3286,7 +3261,7 @@ impl RemoteWindowState {
 
     fn open_new_terminal(&mut self) {
         if self.new_terminal_dialog.is_open()
-            || self.settings_open
+            || self.settings_dialog.is_open()
             || self.window_close_pending
             || self.pending_close_tab_id.is_some()
         {
@@ -3749,7 +3724,10 @@ impl RemoteWindowState {
     }
 
     fn open_settings(&mut self) {
-        if self.settings_open || self.new_terminal_dialog.is_open() || self.window_close_pending {
+        if self.settings_dialog.is_open()
+            || self.new_terminal_dialog.is_open()
+            || self.window_close_pending
+        {
             return;
         }
         self.cancel_terminal_selection();
@@ -3758,128 +3736,96 @@ impl RemoteWindowState {
             return;
         }
         self.finish_tab_edit(false);
-        self.settings_open = true;
-        self.settings_scope = SettingsScope::Defaults;
-        self.settings_default_draft = self
-            .config
-            .effective_terminal_appearance(&ipc_address(), None);
-        self.settings_target_tab_id = self
+        let target_tab_id = self
             .client
             .as_ref()
             .and_then(|client| client.snapshot().active_tab_id.clone());
-        self.settings_override_draft = self
-            .settings_target_tab_id
+        let override_draft = target_tab_id
             .as_deref()
             .map(|tab_id| self.config.terminal_override(&ipc_address(), tab_id))
             .unwrap_or_default();
+        settings::ui_action_open(
+            &mut self.settings_dialog,
+            self.config
+                .effective_terminal_appearance(&ipc_address(), None),
+            target_tab_id,
+            override_draft,
+        );
+        self.last_error = None;
         self.load_settings_scope_controls();
         self.show_workspace_controls(false);
         self.layout_settings_controls();
         self.focus_control(self.settings_font);
     }
 
+    fn sync_settings_drafts(&mut self) {
+        if !self.settings_dialog.is_open() {
+            return;
+        }
+        self.settings_dialog
+            .set_font_family_draft(self.control_text(self.settings_font));
+        self.settings_dialog
+            .set_font_size_draft(self.control_text(self.settings_size));
+    }
+
     fn capture_settings_scope(&mut self) -> Result<()> {
-        let family = self.control_text(self.settings_font).trim().to_owned();
-        let size = self
-            .control_text(self.settings_size)
-            .trim()
-            .parse::<u16>()
-            .context("font size must be a number from 8 to 36")?;
-        if family.is_empty()
-            || family.len() > 256
-            || !(MIN_TERMINAL_FONT_SIZE..=MAX_TERMINAL_FONT_SIZE).contains(&size)
-        {
-            anyhow::bail!("font family is required (maximum 256 bytes) and size must be 8 to 36");
-        }
-        match self.settings_scope {
-            SettingsScope::Defaults => {
-                self.settings_default_draft.terminal_font_family = family;
-                self.settings_default_draft.terminal_font_size = size;
-                self.settings_default_draft.color_theme = self.settings_theme_draft;
-            }
-            SettingsScope::CurrentTerminal => {
-                if self.settings_override_draft.terminal_font_family.is_some() {
-                    self.settings_override_draft.terminal_font_family = Some(family);
-                }
-                if self.settings_override_draft.terminal_font_size.is_some() {
-                    self.settings_override_draft.terminal_font_size = Some(size);
-                }
-                if self.settings_override_draft.color_theme.is_some() {
-                    self.settings_override_draft.color_theme = Some(self.settings_theme_draft);
-                }
-            }
-        }
-        Ok(())
+        self.sync_settings_drafts();
+        self.settings_dialog.capture().map_err(|error| {
+            self.last_error = Some(error.clone());
+            anyhow::Error::msg(error)
+        })
     }
 
     fn switch_settings_scope(&mut self, scope: SettingsScope) {
-        if !self.settings_open
-            || scope == self.settings_scope
-            || (scope == SettingsScope::CurrentTerminal && self.settings_target_tab_id.is_none())
-        {
-            return;
+        self.sync_settings_drafts();
+        match self.settings_dialog.switch_scope(scope) {
+            Ok(true) => {
+                self.load_settings_scope_controls();
+                self.layout_settings_controls();
+            }
+            Ok(false) => {}
+            Err(error) => {
+                self.last_error = Some(format!("Settings draft invalid: {error:#}"));
+            }
         }
-        if let Err(error) = self.capture_settings_scope() {
-            self.last_error = Some(format!("Settings draft invalid: {error:#}"));
-            return;
-        }
-        self.settings_scope = scope;
-        self.load_settings_scope_controls();
-        self.layout_settings_controls();
     }
 
     fn load_settings_scope_controls(&mut self) {
         let locale = self.config.locale;
-        let (family, size, theme) = match self.settings_scope {
-            SettingsScope::Defaults => (
-                self.settings_default_draft.terminal_font_family.clone(),
-                self.settings_default_draft.terminal_font_size,
-                self.settings_default_draft.color_theme,
-            ),
-            SettingsScope::CurrentTerminal => (
-                self.settings_override_draft
-                    .terminal_font_family
-                    .clone()
-                    .unwrap_or_else(|| self.settings_default_draft.terminal_font_family.clone()),
-                self.settings_override_draft
-                    .terminal_font_size
-                    .unwrap_or(self.settings_default_draft.terminal_font_size),
-                self.settings_override_draft
-                    .color_theme
-                    .unwrap_or(self.settings_default_draft.color_theme),
-            ),
-        };
-        self.settings_theme_draft = theme;
+        self.settings_dialog.load_effective_drafts();
+        let family = self.settings_dialog.font_family_draft().to_owned();
+        let size = self.settings_dialog.font_size_draft().to_owned();
         self.set_control_text(self.settings_font, &family);
-        self.set_control_text(self.settings_size, &size.to_string());
+        self.set_control_text(self.settings_size, &size);
         self.set_control_enabled(
             self.settings_current_scope,
-            self.settings_target_tab_id.is_some(),
+            self.settings_dialog.target_tab_id().is_some(),
         );
-        let current = self.settings_scope == SettingsScope::CurrentTerminal;
+        let current = self.settings_dialog.scope() == SettingsScope::CurrentTerminal;
+        let override_draft = self.settings_dialog.override_draft();
         self.set_control_enabled(
             self.settings_font,
-            !current || self.settings_override_draft.terminal_font_family.is_some(),
+            !current || override_draft.terminal_font_family.is_some(),
         );
         self.set_control_enabled(
             self.settings_size,
-            !current || self.settings_override_draft.terminal_font_size.is_some(),
+            !current || override_draft.terminal_font_size.is_some(),
         );
-        let theme_enabled = !current || self.settings_override_draft.color_theme.is_some();
+        let theme_enabled = !current || override_draft.color_theme.is_some();
         self.set_control_enabled(self.settings_dark, theme_enabled);
         self.set_control_enabled(self.settings_light, theme_enabled);
         for (control, overridden) in [
             (
                 self.settings_font_inherit,
-                self.settings_override_draft.terminal_font_family.is_some(),
+                override_draft.terminal_font_family.is_some(),
             ),
             (
                 self.settings_size_inherit,
-                self.settings_override_draft.terminal_font_size.is_some(),
+                override_draft.terminal_font_size.is_some(),
             ),
             (
                 self.settings_theme_inherit,
-                self.settings_override_draft.color_theme.is_some(),
+                override_draft.color_theme.is_some(),
             ),
         ] {
             self.set_control_text(
@@ -3896,7 +3842,7 @@ impl RemoteWindowState {
             &format!(
                 "{}{}",
                 locale.text(UiText::DefaultValues),
-                if self.settings_scope == SettingsScope::Defaults {
+                if self.settings_dialog.scope() == SettingsScope::Defaults {
                     " · ✓"
                 } else {
                     ""
@@ -3908,7 +3854,7 @@ impl RemoteWindowState {
             &format!(
                 "{}{}",
                 locale.text(UiText::CurrentTerminal),
-                if self.settings_scope == SettingsScope::CurrentTerminal {
+                if self.settings_dialog.scope() == SettingsScope::CurrentTerminal {
                     " · ✓"
                 } else {
                     ""
@@ -3919,69 +3865,36 @@ impl RemoteWindowState {
     }
 
     fn toggle_settings_inheritance(&mut self, field: AppearanceField) {
-        if self.settings_scope != SettingsScope::CurrentTerminal {
-            return;
-        }
-        if let Err(error) = self.capture_settings_scope() {
-            self.last_error = Some(format!("Settings draft invalid: {error:#}"));
-            return;
-        }
-        match field {
-            AppearanceField::FontFamily => {
-                self.settings_override_draft.terminal_font_family = self
-                    .settings_override_draft
-                    .terminal_font_family
-                    .take()
-                    .is_none()
-                    .then(|| self.settings_default_draft.terminal_font_family.clone());
-            }
-            AppearanceField::FontSize => {
-                self.settings_override_draft.terminal_font_size = self
-                    .settings_override_draft
-                    .terminal_font_size
-                    .take()
-                    .is_none()
-                    .then_some(self.settings_default_draft.terminal_font_size);
-            }
-            AppearanceField::Theme => {
-                self.settings_override_draft.color_theme = self
-                    .settings_override_draft
-                    .color_theme
-                    .take()
-                    .is_none()
-                    .then_some(self.settings_default_draft.color_theme);
+        self.sync_settings_drafts();
+        match self.settings_dialog.toggle_inheritance(field) {
+            Ok(true) => self.load_settings_scope_controls(),
+            Ok(false) => {}
+            Err(error) => {
+                self.last_error = Some(format!("Settings draft invalid: {error:#}"));
             }
         }
-        self.load_settings_scope_controls();
     }
 
     fn reset_settings_overrides(&mut self) {
-        if self.settings_scope != SettingsScope::CurrentTerminal {
-            return;
+        self.sync_settings_drafts();
+        if self.settings_dialog.reset_overrides() {
+            self.load_settings_scope_controls();
         }
-        self.settings_override_draft = TerminalAppearanceOverride::default();
-        self.load_settings_scope_controls();
     }
 
     fn preview_settings_theme(&mut self, theme: ThemeId) {
-        if !self.settings_open {
-            return;
+        if self.settings_dialog.preview_theme(theme) {
+            self.refresh_settings_theme_controls();
         }
-        if self.settings_scope == SettingsScope::CurrentTerminal
-            && self.settings_override_draft.color_theme.is_none()
-        {
-            return;
-        }
-        self.settings_theme_draft = theme;
-        self.refresh_settings_theme_controls();
     }
 
     fn refresh_settings_theme_controls(&self) {
+        let theme_draft = self.settings_dialog.theme_draft();
         for (theme, control) in [
             (ThemeId::Dark, self.settings_dark),
             (ThemeId::Light, self.settings_light),
         ] {
-            let state = if theme == self.settings_theme_draft {
+            let state = if theme == theme_draft {
                 self.config.locale.text(UiText::Selected)
             } else {
                 self.config.locale.text(UiText::Preview)
@@ -4001,16 +3914,13 @@ impl RemoteWindowState {
 
     fn apply_settings(&mut self) -> Result<()> {
         self.capture_settings_scope()?;
+        let changes = self.settings_dialog.changes();
         let mut next = self.config.clone();
-        next.terminal_font_family = self.settings_default_draft.terminal_font_family.clone();
-        next.terminal_font_size = self.settings_default_draft.terminal_font_size;
-        next.color_theme = self.settings_default_draft.color_theme;
-        if let Some(tab_id) = self.settings_target_tab_id.as_deref() {
-            next.set_terminal_override(
-                &ipc_address(),
-                tab_id,
-                self.settings_override_draft.clone(),
-            );
+        next.terminal_font_family = changes.default_appearance.terminal_font_family.clone();
+        next.terminal_font_size = changes.default_appearance.terminal_font_size;
+        next.color_theme = changes.default_appearance.color_theme;
+        if let Some(tab_id) = changes.target_tab_id.as_deref() {
+            next.set_terminal_override(&ipc_address(), tab_id, changes.override_draft.clone());
         }
         let active = self
             .client
@@ -4032,16 +3942,14 @@ impl RemoteWindowState {
     }
 
     fn finish_settings(&mut self, apply: bool) {
-        if !self.settings_open {
+        if !self.settings_dialog.is_open() {
             return;
         }
         if apply && let Err(error) = self.apply_settings() {
             self.last_error = Some(format!("Settings apply failed: {error:#}"));
             return;
         }
-        self.settings_open = false;
-        self.settings_theme_draft = self.active_terminal_appearance().color_theme;
-        self.settings_target_tab_id = None;
+        self.settings_dialog.close_without_apply();
         self.show_settings_controls(false);
         self.show_workspace_controls(true);
         self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
@@ -4063,7 +3971,7 @@ impl RemoteWindowState {
             return;
         }
         self.cancel_terminal_selection();
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             self.finish_settings(false);
         }
         if self.new_terminal_dialog.is_open() {
@@ -4427,7 +4335,7 @@ impl RemoteWindowState {
     fn focus_gate(&self) -> FocusTransitionGate {
         FocusTransitionGate {
             window_close_pending: self.window_close_pending,
-            settings_open: self.settings_open,
+            settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.editing_tab_id.is_some(),
             close_confirmation_open: self.pending_close_tab_id.is_some(),
@@ -4519,7 +4427,7 @@ impl RemoteWindowState {
         }
         let terminal_ready = focused == FocusTarget::Window
             && !self.window_close_pending
-            && !self.settings_open
+            && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self.active_tab().is_some_and(|tab| !tab.dead);
         (
@@ -4615,7 +4523,7 @@ impl RemoteWindowState {
         pressed: bool,
         motion: bool,
     ) -> bool {
-        if self.settings_open
+        if self.settings_dialog.is_open()
             || self.window_close_pending
             || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
@@ -4938,7 +4846,7 @@ impl RemoteWindowState {
 
     fn handle_left_double_click(&mut self, x: i32, y: i32, clicks: u8) -> bool {
         if self.window_close_pending
-            || self.settings_open
+            || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
@@ -4965,7 +4873,7 @@ impl RemoteWindowState {
     fn handle_left_button_down(&mut self, x: i32, y: i32) -> bool {
         self.recent_sidebar_text_click = None;
         if self.window_close_pending
-            || self.settings_open
+            || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
@@ -5169,7 +5077,7 @@ impl RemoteWindowState {
 
     fn handle_wheel(&mut self, x: i32, y: i32, delta: i32) {
         if self.window_close_pending
-            || self.settings_open
+            || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
@@ -5224,7 +5132,7 @@ impl RemoteWindowState {
             }
             return true;
         }
-        if self.settings_open {
+        if self.settings_dialog.is_open() {
             if key == 0x1b {
                 self.finish_settings(false);
             }
@@ -5340,8 +5248,8 @@ impl RemoteWindowState {
     }
 
     fn paint_frame(&self, device: &mut dyn ControlCanvas) {
-        let palette = if self.settings_open {
-            self.settings_theme_draft.palette()
+        let palette = if self.settings_dialog.is_open() {
+            self.settings_dialog.theme_draft().palette()
         } else {
             self.active_terminal_appearance().color_theme.palette()
         };
@@ -5446,7 +5354,7 @@ impl RemoteWindowState {
             palette.muted_text.canvas_rgb(),
         );
         if !self.window_close_pending
-            && !self.settings_open
+            && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self.pending_close_tab_id.is_none()
         {
@@ -5459,7 +5367,7 @@ impl RemoteWindowState {
         }
         if self.window_close_pending {
             self.paint_window_close(device, palette);
-        } else if self.settings_open {
+        } else if self.settings_dialog.is_open() {
             self.paint_settings(device, palette);
         } else if self.new_terminal_dialog.is_open() {
             self.paint_new_terminal(device, palette);
@@ -5643,8 +5551,8 @@ impl RemoteWindowState {
             locale.text(UiText::ColorTheme),
             palette.muted_text.canvas_rgb(),
         );
-        if self.settings_scope == SettingsScope::CurrentTerminal {
-            let target = self.settings_target_tab_id.as_deref().unwrap_or("-");
+        if self.settings_dialog.scope() == SettingsScope::CurrentTerminal {
+            let target = self.settings_dialog.target_tab_id().unwrap_or("-");
             draw_text(
                 device,
                 ProductPixelRect {
@@ -6185,6 +6093,9 @@ impl RemoteWindowApplication {
             || control_id == state.new_https_proxy
         {
             state.sync_new_terminal_drafts();
+        }
+        if control_id == state.settings_font || control_id == state.settings_size {
+            state.sync_settings_drafts();
         }
         if let Some(hit) = windows_toolbar_hit(control_id) {
             state.dispatch_windows_toolbar_action(hit.action_id());

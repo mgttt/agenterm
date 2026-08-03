@@ -19,6 +19,7 @@ pub(crate) mod input;
 pub(crate) mod interaction;
 pub(crate) mod new_terminal;
 pub(crate) mod selection;
+pub(crate) mod settings;
 pub(crate) mod toolbar;
 pub(crate) mod window;
 
