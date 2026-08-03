@@ -29,7 +29,7 @@ use crate::{
     frontend::{
         action,
         composer::ComposerWriteMode,
-        new_terminal::NewShellChoice,
+        new_terminal::{self, NewShellChoice, NewTerminalDialog},
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
@@ -63,7 +63,6 @@ use crate::{
         terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y, wheel_delta_units,
         workspace_layout,
     },
-    working_context::parse_proxy_url,
 };
 use agenterm_platform::{
     clipboard,
@@ -671,8 +670,8 @@ struct RemoteWindowState {
     editing_tab_id: Option<String>,
     window_close_pending: bool,
     settings_open: bool,
-    new_terminal_open: bool,
-    new_shell_choice: NewShellChoice,
+    new_terminal_dialog: NewTerminalDialog,
+
     settings_theme_draft: ThemeId,
     settings_scope: SettingsScope,
     settings_default_draft: EffectiveTerminalAppearance,
@@ -866,8 +865,8 @@ impl RemoteWindowState {
             editing_tab_id: None,
             window_close_pending: false,
             settings_open: false,
-            new_terminal_open: false,
-            new_shell_choice: NewShellChoice::Default,
+            new_terminal_dialog: NewTerminalDialog::new(),
+
             settings_theme_draft,
             settings_scope: SettingsScope::Defaults,
             settings_default_draft,
@@ -1328,7 +1327,7 @@ impl RemoteWindowState {
             "cancel" => {
                 if self.window_close_pending {
                     self.finish_window_close(RemoteCloseChoice::Cancel);
-                } else if self.new_terminal_open {
+                } else if self.new_terminal_dialog.is_open() {
                     self.finish_new_terminal(false);
                 } else if self.settings_open {
                     self.finish_settings(false);
@@ -1592,7 +1591,7 @@ impl RemoteWindowState {
         Ok(())
     }
 
-    fn detached_ui_snapshot_json(&self) -> Result<String> {
+    fn detached_ui_snapshot_json(&mut self) -> Result<String> {
         let mut value: serde_json::Value = serde_json::from_str(&self.ui_snapshot_json()?)
             .context("could not decode replaceable UI snapshot")?;
         value["window"]["visible"] = serde_json::Value::Bool(false);
@@ -1769,7 +1768,8 @@ impl RemoteWindowState {
         tree_row_at_y(y).map(|position| self.sidebar_offset().saturating_add(position))
     }
 
-    fn ui_snapshot_json(&self) -> Result<String> {
+    fn ui_snapshot_json(&mut self) -> Result<String> {
+        self.sync_new_terminal_drafts();
         let client = self
             .client
             .as_ref()
@@ -1984,20 +1984,8 @@ impl RemoteWindowState {
                     close_button_snapshot("cancel", "Cancel"),
                 ],
             }))
-        } else if self.new_terminal_open {
-            Some(serde_json::json!({
-                "kind": "new-terminal",
-                "shell": self.new_shell_choice.id(),
-                "initial_command_configured":
-                    !self.control_text(self.new_initial_command).trim().is_empty(),
-                "http_proxy_configured":
-                    !self.control_text(self.new_http_proxy).trim().is_empty(),
-                "https_proxy_configured":
-                    !self.control_text(self.new_https_proxy).trim().is_empty(),
-                "proxy_values_exposed": false,
-                "default_action": "create",
-                "actions": ["create", "cancel"],
-            }))
+        } else if self.new_terminal_dialog.is_open() {
+            Some(self.new_terminal_dialog.snapshot_modal())
         } else if self.settings_open {
             Some(serde_json::json!({"kind": "settings"}))
         } else if let Some(id) = &self.cwd_edit_tab_id {
@@ -2031,7 +2019,7 @@ impl RemoteWindowState {
         };
         let focus = if self.window_close_pending {
             "window-close"
-        } else if self.new_terminal_open {
+        } else if self.new_terminal_dialog.is_open() {
             "new-terminal"
         } else if self.settings_open {
             "settings"
@@ -2055,7 +2043,7 @@ impl RemoteWindowState {
         );
         let workspace_controls_visible = !self.window_close_pending
             && !self.settings_open
-            && !self.new_terminal_open
+            && !self.new_terminal_dialog.is_open()
             && self.pending_close_tab_id.is_none();
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
@@ -2486,7 +2474,7 @@ impl RemoteWindowState {
         let toolbar_visible = geometry.workspace_toolbar.is_some()
             && !self.window_close_pending
             && !self.settings_open
-            && !self.new_terminal_open;
+            && !self.new_terminal_dialog.is_open();
         self.set_control_visible(
             self.new_tab,
             toolbar_visible && self.pending_close_tab_id.is_none(),
@@ -2859,7 +2847,7 @@ impl RemoteWindowState {
         ] {
             self.set_control_bounds(control, rect);
         }
-        self.show_new_terminal_controls(self.new_terminal_open);
+        self.show_new_terminal_controls(self.new_terminal_dialog.is_open());
     }
 
     fn show_new_terminal_controls(&self, visible: bool) {
@@ -3061,7 +3049,7 @@ impl RemoteWindowState {
                 && self.current_focus_surface() == RemoteFocusSurface::Terminal
                 && !self.window_close_pending
                 && !self.settings_open
-                && !self.new_terminal_open
+                && !self.new_terminal_dialog.is_open()
                 && self.editing_tab_id.is_none()
                 && self.pending_close_tab_id.is_none()
                 && self.cwd_edit_tab_id.is_none();
@@ -3183,7 +3171,7 @@ impl RemoteWindowState {
         if self.cwd_edit_tab_id.is_some()
             || self.window_close_pending
             || self.settings_open
-            || self.new_terminal_open
+            || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
             || self.editing_tab_id.is_some()
         {
@@ -3297,7 +3285,7 @@ impl RemoteWindowState {
     }
 
     fn open_new_terminal(&mut self) {
-        if self.new_terminal_open
+        if self.new_terminal_dialog.is_open()
             || self.settings_open
             || self.window_close_pending
             || self.pending_close_tab_id.is_some()
@@ -3311,12 +3299,12 @@ impl RemoteWindowState {
         }
         self.finish_tab_edit(false);
         self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
-        self.new_terminal_open = true;
-        self.new_shell_choice = NewShellChoice::Default;
+        new_terminal::ui_action_open(&mut self.new_terminal_dialog);
         self.last_error = None;
         self.set_control_text(self.new_initial_command, "");
         self.set_control_text(self.new_http_proxy, "");
         self.set_control_text(self.new_https_proxy, "");
+        self.sync_new_terminal_drafts();
         self.refresh_new_shell_controls();
         self.show_workspace_controls(false);
         self.layout_new_terminal_controls();
@@ -3324,10 +3312,10 @@ impl RemoteWindowState {
     }
 
     fn choose_new_shell(&mut self, choice: NewShellChoice) {
-        if !self.new_terminal_open {
+        if !self.new_terminal_dialog.is_open() {
             return;
         }
-        self.new_shell_choice = choice;
+        new_terminal::ui_action_choose_shell(&mut self.new_terminal_dialog, choice);
         self.refresh_new_shell_controls();
     }
 
@@ -3341,7 +3329,7 @@ impl RemoteWindowState {
             ),
             (self.new_powershell, NewShellChoice::Alternate, "PowerShell"),
         ] {
-            let selected = self.new_shell_choice == choice;
+            let selected = self.new_terminal_dialog.shell_choice() == choice;
             self.set_control_text(
                 control,
                 &format!("{} {label}", if selected { "●" } else { "○" }),
@@ -3349,53 +3337,50 @@ impl RemoteWindowState {
         }
     }
 
-    fn finish_new_terminal(&mut self, create: bool) {
-        if !self.new_terminal_open {
+    fn sync_new_terminal_drafts(&mut self) {
+        if !self.new_terminal_dialog.is_open() {
             return;
         }
-        if create {
-            let initial = self
-                .control_text(self.new_initial_command)
-                .trim()
-                .to_owned();
-            let http_proxy = self.control_text(self.new_http_proxy).trim().to_owned();
-            let https_proxy = self.control_text(self.new_https_proxy).trim().to_owned();
-            for (label, value) in [
-                ("HTTP proxy", http_proxy.as_str()),
-                ("HTTPS proxy", https_proxy.as_str()),
-            ] {
-                if !value.is_empty() && parse_proxy_url(value).is_none() {
-                    self.last_error =
-                        Some(format!("{label} must be a valid http:// or https:// URL"));
+        self.new_terminal_dialog
+            .set_initial_command_draft(self.control_text(self.new_initial_command));
+        self.new_terminal_dialog
+            .set_http_proxy_draft(self.control_text(self.new_http_proxy));
+        self.new_terminal_dialog
+            .set_https_proxy_draft(self.control_text(self.new_https_proxy));
+    }
+
+    fn finish_new_terminal(&mut self, create: bool) {
+        if !self.new_terminal_dialog.is_open() {
+            return;
+        }
+        self.sync_new_terminal_drafts();
+        let create_params = if create {
+            match new_terminal::ui_action_create(&mut self.new_terminal_dialog) {
+                Ok(Some(params)) => Some(params),
+                Ok(None) => None,
+                Err(error) => {
+                    self.last_error = Some(error);
                     return;
                 }
             }
-
+        } else {
+            new_terminal::ui_action_cancel(&mut self.new_terminal_dialog);
+            None
+        };
+        if let Some(params) = create_params {
             let mut args = vec![
                 "new-window".to_owned(),
                 "-P".to_owned(),
                 "-F".to_owned(),
                 "#{window_id}".to_owned(),
             ];
-            // Temporarily leave inherited HTTP(S) proxy variables untouched.
-            // Keep the drafts for a future design, but do not forward them as
-            // child environment overrides until that contract is accepted.
-            // for (name, value) in [
-            //     ("HTTP_PROXY", http_proxy.as_str()),
-            //     ("HTTPS_PROXY", https_proxy.as_str()),
-            // ] {
-            //     if !value.is_empty() {
-            //         args.push("-e".to_owned());
-            //         args.push(format!("{name}={value}"));
-            //     }
-            // }
-            let mut child = crate::platform::runtime::new_terminal_command_line(
-                self.new_shell_choice.id(),
-                &initial,
-            );
-            if !child.is_empty() {
+            for (name, value) in &params.tab_environment {
+                args.push("-e".to_owned());
+                args.push(format!("{name}={value}"));
+            }
+            if !params.command_line.is_empty() {
                 args.push("--".to_owned());
-                args.append(&mut child);
+                args.extend(params.command_line);
             }
             let result = self.client.as_mut().context("UI is disconnected").and_then(
                 |client| -> Result<()> {
@@ -3407,10 +3392,8 @@ impl RemoteWindowState {
             if result.is_err() {
                 self.last_error =
                     Some("New terminal could not be created; check its configuration".to_owned());
-                return;
             }
         }
-        self.new_terminal_open = false;
         self.show_new_terminal_controls(false);
         self.show_workspace_controls(true);
         self.layout();
@@ -3766,7 +3749,7 @@ impl RemoteWindowState {
     }
 
     fn open_settings(&mut self) {
-        if self.settings_open || self.new_terminal_open || self.window_close_pending {
+        if self.settings_open || self.new_terminal_dialog.is_open() || self.window_close_pending {
             return;
         }
         self.cancel_terminal_selection();
@@ -4083,7 +4066,7 @@ impl RemoteWindowState {
         if self.settings_open {
             self.finish_settings(false);
         }
-        if self.new_terminal_open {
+        if self.new_terminal_dialog.is_open() {
             self.finish_new_terminal(false);
         }
         if self.client.is_some()
@@ -4445,7 +4428,7 @@ impl RemoteWindowState {
         FocusTransitionGate {
             window_close_pending: self.window_close_pending,
             settings_open: self.settings_open,
-            new_terminal_open: self.new_terminal_open,
+            new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.editing_tab_id.is_some(),
             close_confirmation_open: self.pending_close_tab_id.is_some(),
             cwd_editor_open: self.cwd_edit_tab_id.is_some(),
@@ -4537,7 +4520,7 @@ impl RemoteWindowState {
         let terminal_ready = focused == FocusTarget::Window
             && !self.window_close_pending
             && !self.settings_open
-            && !self.new_terminal_open
+            && !self.new_terminal_dialog.is_open()
             && self.active_tab().is_some_and(|tab| !tab.dead);
         (
             terminal_ready
@@ -4634,7 +4617,7 @@ impl RemoteWindowState {
     ) -> bool {
         if self.settings_open
             || self.window_close_pending
-            || self.new_terminal_open
+            || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
             return false;
@@ -4956,7 +4939,7 @@ impl RemoteWindowState {
     fn handle_left_double_click(&mut self, x: i32, y: i32, clicks: u8) -> bool {
         if self.window_close_pending
             || self.settings_open
-            || self.new_terminal_open
+            || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
             return false;
@@ -4983,7 +4966,7 @@ impl RemoteWindowState {
         self.recent_sidebar_text_click = None;
         if self.window_close_pending
             || self.settings_open
-            || self.new_terminal_open
+            || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
             return false;
@@ -5187,7 +5170,7 @@ impl RemoteWindowState {
     fn handle_wheel(&mut self, x: i32, y: i32, delta: i32) {
         if self.window_close_pending
             || self.settings_open
-            || self.new_terminal_open
+            || self.new_terminal_dialog.is_open()
             || self.pending_close_tab_id.is_some()
         {
             return;
@@ -5247,7 +5230,7 @@ impl RemoteWindowState {
             }
             return true;
         }
-        if self.new_terminal_open {
+        if self.new_terminal_dialog.is_open() {
             if key == 0x1b {
                 self.finish_new_terminal(false);
             } else if key == 0x0d {
@@ -5464,7 +5447,7 @@ impl RemoteWindowState {
         );
         if !self.window_close_pending
             && !self.settings_open
-            && !self.new_terminal_open
+            && !self.new_terminal_dialog.is_open()
             && self.pending_close_tab_id.is_none()
         {
             let focus = match self.current_focus_surface() {
@@ -5478,7 +5461,7 @@ impl RemoteWindowState {
             self.paint_window_close(device, palette);
         } else if self.settings_open {
             self.paint_settings(device, palette);
-        } else if self.new_terminal_open {
+        } else if self.new_terminal_dialog.is_open() {
             self.paint_new_terminal(device, palette);
         } else if self.pending_close_tab_id.is_some() {
             self.paint_tab_close(device, palette);
@@ -6197,6 +6180,12 @@ impl RemoteWindowApplication {
     }
 
     fn command(state: &mut RemoteWindowState, control_id: ControlId) {
+        if control_id == state.new_initial_command
+            || control_id == state.new_http_proxy
+            || control_id == state.new_https_proxy
+        {
+            state.sync_new_terminal_drafts();
+        }
         if let Some(hit) = windows_toolbar_hit(control_id) {
             state.dispatch_windows_toolbar_action(hit.action_id());
             return;
