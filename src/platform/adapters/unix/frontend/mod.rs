@@ -4808,7 +4808,15 @@ impl ControlHost for UnixApp {
         self.tabs.remove(position);
 
         if self.active == Some(id) {
-            self.active = self.tabs.first().map(|tab| tab.id);
+            self.active = self
+                .tabs
+                .get(position)
+                .or_else(|| {
+                    position
+                        .checked_sub(1)
+                        .and_then(|index| self.tabs.get(index))
+                })
+                .map(|tab| tab.id);
             self.resize_active_tab_to_layout();
             self.sync_grid_from_tab();
             self.request_ui_redraw();
