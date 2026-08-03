@@ -526,11 +526,18 @@ impl RemoteTerminalSelection {
     }
 
     fn drag_to(&mut self, point: RemotePoint) {
-        self.gesture.drag_to(point);
+        self.gesture = self.gesture.clone().drag_to(point);
     }
 
     fn complete(&mut self) -> bool {
-        self.gesture.complete()
+        let updated = self.gesture.clone().complete();
+        let completed = updated.phase() == SelectionGesturePhase::Completed;
+        self.gesture = updated;
+        completed
+    }
+
+    fn cancel(&mut self) {
+        self.gesture = self.gesture.clone().cancel();
     }
 
     fn can_copy(&self) -> bool {
@@ -4232,7 +4239,7 @@ impl RemoteWindowState {
             .is_some_and(RemoteTerminalSelection::active_gesture)
         {
             if let Some(selection) = self.terminal_selection.as_mut() {
-                selection.gesture.cancel();
+                selection.cancel();
             }
             self.terminal_selection = None;
         }
@@ -4244,7 +4251,7 @@ impl RemoteWindowState {
             .as_ref()
             .is_some_and(RemoteTerminalSelection::active_gesture);
         if let Some(selection) = self.terminal_selection.as_mut() {
-            selection.gesture.cancel();
+            selection.cancel();
         }
         self.terminal_selection = None;
         if captured && let Err(error) = self.window.set_pointer_capture(false) {

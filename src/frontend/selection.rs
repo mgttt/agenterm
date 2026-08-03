@@ -51,57 +51,53 @@ impl SelectionGesturePhase {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SelectionGesture {
-    tab_id: u64,
-    anchor: TerminalPoint,
-    focus: TerminalPoint,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SelectionGestureState<TabId, Point> {
+    tab_id: TabId,
+    anchor: Point,
+    focus: Point,
     phase: SelectionGesturePhase,
 }
 
-impl SelectionGesture {
-    pub(crate) fn prepare(
-        tab_id: u64,
-        anchor: TerminalPoint,
-        rows: u16,
-        cols: u16,
-    ) -> Option<Self> {
-        Some(Self {
+impl<TabId: Clone, Point: Copy + Eq + Ord> SelectionGestureState<TabId, Point> {
+    pub(crate) fn begin(tab_id: TabId, anchor: Point) -> Self {
+        Self {
             tab_id,
-            anchor: clamp_point(anchor, rows, cols)?,
-            focus: clamp_point(anchor, rows, cols)?,
+            anchor,
+            focus: anchor,
             phase: SelectionGesturePhase::Prepared,
-        })
+        }
     }
 
-    #[allow(dead_code)]
-    pub(crate) const fn phase(self) -> SelectionGesturePhase {
+    pub(crate) const fn phase(&self) -> SelectionGesturePhase {
         self.phase
     }
 
-    pub(crate) const fn tab_id(self) -> u64 {
-        self.tab_id
-    }
-
-    pub(crate) const fn active(self) -> bool {
+    pub(crate) const fn active(&self) -> bool {
         matches!(
             self.phase,
             SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
         )
     }
 
-    pub(crate) fn drag_to(mut self, focus: TerminalPoint, rows: u16, cols: u16) -> Self {
-        if !matches!(
-            self.phase,
-            SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
-        ) {
+    pub(crate) fn bounds(&self) -> (Point, Point) {
+        if self.anchor <= self.focus {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.anchor == self.focus
+    }
+
+    pub(crate) fn drag_to(mut self, focus: Point) -> Self {
+        if !self.active() {
             return self;
         }
-        let Some(focus) = clamp_point(focus, rows, cols) else {
-            return self.cancel();
-        };
         self.focus = focus;
-        self.phase = if self.focus == self.anchor {
+        self.phase = if self.is_empty() {
             SelectionGesturePhase::Prepared
         } else {
             SelectionGesturePhase::Dragging
@@ -122,25 +118,31 @@ impl SelectionGesture {
         self.phase = SelectionGesturePhase::Cancelled;
         self
     }
+}
 
-    pub(crate) fn completed_selection(self) -> Option<TerminalSelection> {
-        (self.phase == SelectionGesturePhase::Completed).then_some(TerminalSelection {
-            tab_id: self.tab_id,
-            anchor: self.anchor,
-            focus: self.focus,
-            dragging: false,
-            moved: true,
+impl SelectionGestureState<u64, TerminalPoint> {
+    pub(crate) fn prepare(
+        tab_id: u64,
+        anchor: TerminalPoint,
+        rows: u16,
+        cols: u16,
+    ) -> Option<Self> {
+        Some(Self {
+            tab_id,
+            anchor: clamp_point(anchor, rows, cols)?,
+            focus: clamp_point(anchor, rows, cols)?,
+            phase: SelectionGesturePhase::Prepared,
         })
     }
 
-    pub(crate) fn selection(self) -> Option<TerminalSelection> {
-        (self.phase != SelectionGesturePhase::Cancelled).then_some(TerminalSelection {
-            tab_id: self.tab_id,
-            anchor: self.anchor,
-            focus: self.focus,
-            dragging: self.active(),
-            moved: self.anchor != self.focus,
-        })
+    pub(crate) fn drag_to_clamped(self, focus: TerminalPoint, rows: u16, cols: u16) -> Self {
+        if !self.active() {
+            return self;
+        }
+        let Some(focus) = clamp_point(focus, rows, cols) else {
+            return self.cancel();
+        };
+        self.drag_to(focus)
     }
 
     pub(crate) fn completed(
@@ -157,7 +159,33 @@ impl SelectionGesture {
             phase: SelectionGesturePhase::Completed,
         })
     }
+
+    pub(crate) fn completed_selection(&self) -> Option<TerminalSelection> {
+        (self.phase == SelectionGesturePhase::Completed).then_some(TerminalSelection {
+            tab_id: self.tab_id,
+            anchor: self.anchor,
+            focus: self.focus,
+            dragging: false,
+            moved: true,
+        })
+    }
+
+    pub(crate) fn selection(&self) -> Option<TerminalSelection> {
+        (self.phase != SelectionGesturePhase::Cancelled).then_some(TerminalSelection {
+            tab_id: self.tab_id,
+            anchor: self.anchor,
+            focus: self.focus,
+            dragging: self.active(),
+            moved: self.anchor != self.focus,
+        })
+    }
+
+    pub(crate) const fn tab_id(&self) -> u64 {
+        self.tab_id
+    }
 }
+
+pub(crate) type SelectionGesture = SelectionGestureState<u64, TerminalPoint>;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct RemotePoint {
@@ -165,75 +193,7 @@ pub(crate) struct RemotePoint {
     pub(crate) column: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RemoteSelectionGesture {
-    tab_id: String,
-    anchor: RemotePoint,
-    focus: RemotePoint,
-    phase: SelectionGesturePhase,
-}
-
-impl RemoteSelectionGesture {
-    pub(crate) fn begin(tab_id: String, anchor: RemotePoint) -> Self {
-        Self {
-            tab_id,
-            anchor,
-            focus: anchor,
-            phase: SelectionGesturePhase::Prepared,
-        }
-    }
-
-    pub(crate) const fn phase(&self) -> SelectionGesturePhase {
-        self.phase
-    }
-
-    pub(crate) const fn active(&self) -> bool {
-        matches!(
-            self.phase,
-            SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
-        )
-    }
-
-    pub(crate) fn bounds(&self) -> (RemotePoint, RemotePoint) {
-        if self.anchor <= self.focus {
-            (self.anchor, self.focus)
-        } else {
-            (self.focus, self.anchor)
-        }
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.anchor == self.focus
-    }
-
-    pub(crate) fn drag_to(&mut self, focus: RemotePoint) -> &mut Self {
-        if !self.active() {
-            return self;
-        }
-        self.focus = focus;
-        self.phase = if self.is_empty() {
-            SelectionGesturePhase::Prepared
-        } else {
-            SelectionGesturePhase::Dragging
-        };
-        self
-    }
-
-    pub(crate) fn complete(&mut self) -> bool {
-        if self.phase != SelectionGesturePhase::Dragging || self.is_empty() {
-            self.phase = SelectionGesturePhase::Cancelled;
-            return false;
-        }
-        self.phase = SelectionGesturePhase::Completed;
-        true
-    }
-
-    pub(crate) fn cancel(&mut self) -> &mut Self {
-        self.phase = SelectionGesturePhase::Cancelled;
-        self
-    }
-}
-
+pub(crate) type RemoteSelectionGesture = SelectionGestureState<String, RemotePoint>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AutoScrollDirection {
     Up,
@@ -470,7 +430,7 @@ mod tests {
         let prepared = SelectionGesture::prepare(7, anchor, 4, 8).unwrap();
         assert_eq!(prepared.phase(), SelectionGesturePhase::Prepared);
 
-        let dragging = prepared.drag_to(TerminalPoint { row: 2, col: 5 }, 4, 8);
+        let dragging = prepared.drag_to_clamped(TerminalPoint { row: 2, col: 5 }, 4, 8);
         assert_eq!(dragging.phase(), SelectionGesturePhase::Dragging);
         let completed = dragging.complete();
         assert_eq!(completed.phase(), SelectionGesturePhase::Completed);
@@ -486,7 +446,7 @@ mod tests {
         );
         assert_eq!(
             completed
-                .drag_to(TerminalPoint { row: 0, col: 0 }, 4, 8)
+                .drag_to_clamped(TerminalPoint { row: 0, col: 0 }, 4, 8)
                 .phase(),
             SelectionGesturePhase::Completed
         );

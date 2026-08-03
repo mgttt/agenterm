@@ -2800,7 +2800,7 @@ impl UnixApp {
     }
 
     fn drag_terminal_selection(&mut self, x: f64, y: f64) {
-        let Some(gesture) = self.terminal_selection_gesture else {
+        let Some(gesture) = self.terminal_selection_gesture.clone() else {
             return;
         };
         if !gesture.active() {
@@ -2827,7 +2827,7 @@ impl UnixApp {
         ) else {
             return;
         };
-        let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
+        let updated = gesture.drag_to_clamped(TerminalPoint { row, col }, rows, cols);
         let next_autoscroll =
             autoscroll_step(y as i32, terminal.top, terminal.bottom, cell_height as i32);
         self.terminal_selection = updated.selection();
@@ -2885,7 +2885,7 @@ impl UnixApp {
         let Some(step) = self.terminal_selection_autoscroll else {
             return false;
         };
-        let Some(gesture) = self.terminal_selection_gesture else {
+        let Some(gesture) = self.terminal_selection_gesture.clone() else {
             return false;
         };
         if !gesture.active() || self.active != Some(gesture.tab_id()) {
@@ -2914,7 +2914,7 @@ impl UnixApp {
                 cell_height as i32,
             ) {
                 let (rows, cols) = self.tabs[position].last_size;
-                let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
+                let updated = gesture.drag_to_clamped(TerminalPoint { row, col }, rows, cols);
                 self.terminal_selection = updated.selection();
                 self.terminal_selection_gesture = Some(updated);
             }
@@ -5093,6 +5093,7 @@ impl UnixApp {
                     self.drag_scrollbar(y as i32);
                 } else if self
                     .terminal_selection_gesture
+                    .as_ref()
                     .is_some_and(|gesture| gesture.active())
                 {
                     self.drag_terminal_selection(x, y);
@@ -5228,7 +5229,8 @@ impl UnixApp {
         let mut wake_at = cursor_active.then(|| self.cursor_blink.next_toggle());
         if self
             .terminal_selection_gesture
-            .is_some_and(SelectionGesture::active)
+            .as_ref()
+            .is_some_and(|gesture| gesture.active())
             && self.terminal_selection_autoscroll.is_some()
         {
             changed |= self.tick_terminal_selection_autoscroll();
