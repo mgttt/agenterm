@@ -498,3 +498,38 @@ crates/agenterm-platform/       # 只机制
 证据：boundary regression 断言「frontend 不 path 进 adapters」「services 无
 frontend 死文件」；parity smoke 按场景 ID 出 Supported/Unsupported。
 
+
+---
+
+## 九、代码 review：UI/UX 跨平台统一对齐与抽象复用机会（2026-08-03）
+
+### 9.1 已确认的单点化（共享面）
+- [x] 交互语义：FocusTransitionGate / CancelTarget / ConfirmTarget / ModalSurface 全单点
+- [x] 输入：classify_key_press / KeyClassification 两端共用
+- [x] 滚轮/滚动条：WheelAccumulator / ScrollbarThumbDrag / route_wheel 共享
+- [x] 模态对话框状态：CloseConfirmation / WindowCloseDialog / CwdEditor / Settings / NewTerminal / TabEditor 两端直接实例化共享 struct
+- [x] 焦点 surface：FocusSurface::as_str() / from_ipc() 单点；host-local 枚举（RemoteFocusSurface / UnixFocusSurface）只做内部桥接
+- [x] Mouse report：MouseReportInput / Outcome / Encoding / mouse_report_outcome 共享；两端 mouse_report_button/cell 字段同构
+- [x] Selection：SelectionGesturePhase / SelectionGestureState 泛型定义单份；word_selection_bounds 共用 vt100 与 snapshot cell grid
+- [x] Snapshot 字段形状对齐：Win `ui_snapshot_json` / Unix `build_ui_snapshot_json` schema 一致
+- [x] O2 复核通过：src 非平台目录无 is_windows_host / cfg 分支
+
+### 9.2 差异残留与可复用机会（主机层）
+
+| # | 发现 | 文件 | 影响 | 建议 |
+|---|------|------|------|------|
+| R1 | reconcile_* 系列 4 方法同构 | `remote_frontend.rs` / `unix/frontend/mod.rs` | "目标仍存在？不存在则关闭+回退 UI"模式重复 2 份，每份 ~50 行 | 提取共享 reconcile 辅助：`frontend/reconcile.rs`，参数化 client/snapshot 查询闭包 |
+| R2 | Snapshot 构建仍有各自的字段填充 | `build_ui_snapshot_json` (Unix) / `ui_snapshot_json` (Win) | schema 形状对齐但填充逻辑不共享；增字段需改两处 | 抽取 `frontend/snapshot.rs` 统一填充管线，host 只提供差异表（如控件可见性 / native 指针位置） |
+| R3 | Focus surface 桥接重复 | `RemoteFocusSurface ↔ FocusSurface` vs `UnixFocusSurface ↔ FocusSurface` | 两端各写 to_shared/from_shared，模式相同仅 variant 映射不同 | 可在 `src/frontend/interaction.rs` 加 `HostFocusSurface` trait，两端实现 |
+| R4 | 巨型状态机未继续拆解 | 222KB/213fn (Unix) + 265KB/239fn (Win) | 体积不是 bug，但是"单点化不完全"的症状——仍有交互逻辑驻留在主机而非共享模块 | v0.2.0 逐块拆解：composer 输入管线 → tab 生命周期 → UI action 分发；每块独立测试 |
+| R5 | Composer 同步逻辑可能重复 | `sync_composer_buffer_to_tab` / `load_composer_buffer_from_tab` (Unix) vs load_composer/save_composer (Win) | host 特有控件绑定使得共用困难，但中间状态（ComposerWriteMode/raw text）可共享 | 共用 composer 中间表示层，host 只绑 native 控件 |
+| R6 | sidebar/toolbar paint 仍各自实现 | `unix/frontend/layout.rs` + `render.rs` vs Win GDI `paint_tabs` | 渲染管线(像素坐标/颜色/字体)分叉是主机机制差异（winit vs GDI），共享成本高 | 维持分叉；几何计算（bounds/row_capacity）已共享，无需进一步统一 |
+
+### 9.3 推荐开工 v0.1.13 的切入顺序
+1. **R1 reconcile 提取**（低风险，~200 行删除，两端对称消重）
+2. **R2 snapshot 统一填充**（中风险，需保证 schema 回退兼容）
+3. **R3 focus bridge trait**（低风险，纯 trait 定义+两端 impl）
+4. **R5 composer 中间层**（中风险，与 R1 有交互但可独立测试）
+5. **R4 状态机拆解** → 归 v0.2.0（大工程，不挡 0.1.13）
+
+R1/R3 文件域不相交（前者 `src/platform/adapters/{windows,unix}`，后者 `src/frontend/interaction.rs` + 两端 adapter），可并行开工。
