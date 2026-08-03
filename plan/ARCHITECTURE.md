@@ -36,6 +36,7 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
   interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state（语义 surface 存 FocusState + adapter focus_gate()，Win/Unix 共用）；raw-mouse arbitration/report outcome 策略与 xterm mouse report 编码器（Unix embedded 与 Windows remote 共用）；alternate-screen wheel fallback 用 commands::alternate_screen_wheel_bytes 单点编码
+  composer.rs                ComposerWriteMode（empty-only/append/replace）单点定义，embedded、remote UI、server dispatch 共用
   selection.rs               线性选区 / autoscroll / word-boundary 语义（SelectionGesturePhase + 泛型 SelectionGestureState<TabId, Point> 单份定义；TerminalCellSource + word_selection_bounds 让 vt100 与 snapshot cell grid 共用；Unix embedded 与 Windows remote 共用状态机、autoscroll_step）
   control_center.rs         Control Center 产品 facade（native 能力仍走 platform services）
 

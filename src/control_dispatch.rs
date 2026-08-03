@@ -7,6 +7,7 @@ use crate::{
         positional_values, supported_commands, tmux_key_bytes,
     },
     event_journal::{EventEnvelope, EventJournal, EventKind, EventPosition},
+    frontend::composer::ComposerWriteMode,
     frontend::interaction::{
         ApplicationMouseMode, MouseReportEncoding, mouse_protocol_mode_name,
         mouse_report_encoding_name,
@@ -1603,17 +1604,19 @@ pub(crate) fn dispatch_shared_command(
                 return Some(IpcResponse::failure(format!("{command} requires --path")));
             };
             let mode = match command {
-                "cwd-prepare-append" => "append",
-                "cwd-prepare-replace" => "replace",
-                _ => option_value(args, "--mode").unwrap_or("empty-only"),
+                "cwd-prepare-append" => ComposerWriteMode::Append,
+                "cwd-prepare-replace" => ComposerWriteMode::Replace,
+                _ => match ComposerWriteMode::parse(option_value(args, "--mode")) {
+                    Ok(mode) => mode,
+                    Err(error) => {
+                        return Some(IpcResponse::failure(format!(
+                            "CWD composer mode must be empty-only, append, or replace: {error}"
+                        )));
+                    }
+                },
             };
-            if !matches!(mode, "empty-only" | "append" | "replace") {
-                return Some(IpcResponse::failure(
-                    "CWD composer mode must be empty-only, append, or replace",
-                ));
-            }
             let id = host.tabs()[position].id;
-            match host.prepare_cwd(id, path, mode) {
+            match host.prepare_cwd(id, path, mode.as_str()) {
                 Ok(()) => Some(ui_snapshot_response(host)),
                 Err(error) => Some(IpcResponse::failure(error)),
             }

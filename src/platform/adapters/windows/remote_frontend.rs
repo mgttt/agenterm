@@ -28,6 +28,7 @@ use crate::{
     },
     frontend::{
         action,
+        composer::ComposerWriteMode,
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
@@ -1348,7 +1349,7 @@ impl RemoteWindowState {
                 } else if self.settings_open {
                     self.finish_settings(false);
                 } else if self.cwd_edit_tab_id.is_some() {
-                    self.finish_cwd_editor(false);
+                    self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
                 } else if self.pending_close_tab_id.is_some() {
                     self.finish_close_tab(false);
                 } else if self.editing_tab_id.is_some() {
@@ -2329,7 +2330,7 @@ impl RemoteWindowState {
 
     fn set_tabs_visible(&mut self, visible: bool) {
         self.invalidate_sidebar_text_click();
-        self.finish_cwd_editor(false);
+        self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
         self.finish_tab_edit(false);
         self.tabs_visible = visible;
         self.config.tabs_visible = visible;
@@ -3158,7 +3159,7 @@ impl RemoteWindowState {
 
     fn send_composer(&mut self) {
         if self.cwd_edit_tab_id.is_some() {
-            self.finish_cwd_editor(true);
+            self.finish_cwd_editor(true, ComposerWriteMode::EmptyOnly);
             return;
         }
         let Some(tab_id) = self
@@ -3223,7 +3224,7 @@ impl RemoteWindowState {
         self.last_error = None;
     }
 
-    fn finish_cwd_editor(&mut self, prepare: bool) {
+    fn finish_cwd_editor(&mut self, prepare: bool, mode: ComposerWriteMode) {
         let Some(tab_id) = self.cwd_edit_tab_id.clone() else {
             return;
         };
@@ -3238,8 +3239,13 @@ impl RemoteWindowState {
                 .as_mut()
                 .context("UI is disconnected")
                 .and_then(|client| {
+                    let command = match mode {
+                        ComposerWriteMode::EmptyOnly => "cwd-prepare",
+                        ComposerWriteMode::Append => "cwd-prepare-append",
+                        ComposerWriteMode::Replace => "cwd-prepare-replace",
+                    };
                     client.run_control(vec![
-                        "cwd-prepare-replace".to_owned(),
+                        command.to_owned(),
                         "-t".to_owned(),
                         tab_id,
                         "--path".to_owned(),
@@ -3268,11 +3274,18 @@ impl RemoteWindowState {
             return false;
         }
         if key == u32::from(KEY_ESCAPE) {
-            self.finish_cwd_editor(false);
+            self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
             return true;
         }
         if key == 0x0d && modifiers.control {
-            self.finish_cwd_editor(true);
+            let mode = if modifiers.shift {
+                ComposerWriteMode::Append
+            } else if modifiers.alt {
+                ComposerWriteMode::Replace
+            } else {
+                ComposerWriteMode::EmptyOnly
+            };
+            self.finish_cwd_editor(true, mode);
             return true;
         }
         false
@@ -3313,7 +3326,7 @@ impl RemoteWindowState {
             return;
         }
         self.finish_tab_edit(false);
-        self.finish_cwd_editor(false);
+        self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
         self.new_terminal_open = true;
         self.new_shell_choice = NewShellChoice::Default;
         self.last_error = None;
@@ -4093,7 +4106,7 @@ impl RemoteWindowState {
             return;
         }
         if self.cwd_edit_tab_id.is_some() {
-            self.finish_cwd_editor(false);
+            self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
         }
         if self.pending_close_tab_id.is_some() {
             self.finish_close_tab(false);
@@ -5020,7 +5033,7 @@ impl RemoteWindowState {
             && y >= cwd_status.top
             && y < cwd_status.bottom;
         if self.cwd_edit_tab_id.is_some() {
-            self.finish_cwd_editor(false);
+            self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
             if in_cwd_status {
                 return true;
             }
@@ -5356,7 +5369,7 @@ impl RemoteWindowState {
                 }
             }
             action::OPEN_SETTINGS => {
-                self.finish_cwd_editor(false);
+                self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
                 self.open_settings();
             }
             action::TOGGLE_LOCALE => self.toggle_locale(),

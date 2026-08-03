@@ -71,6 +71,7 @@ use crate::{
 };
 
 use self::wake::install_unix_wake;
+use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
     MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
@@ -282,32 +283,6 @@ impl RecentSidebarTextClick {
 #[derive(Clone, Copy, Debug)]
 struct TabsResizeDrag {
     original_width: u16,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ComposerWriteMode {
-    EmptyOnly,
-    Append,
-    Replace,
-}
-
-impl ComposerWriteMode {
-    fn parse(value: Option<&str>) -> Result<Self, String> {
-        match value.unwrap_or("empty-only") {
-            "empty" | "empty-only" => Ok(Self::EmptyOnly),
-            "append" => Ok(Self::Append),
-            "replace" => Ok(Self::Replace),
-            other => Err(format!("unknown composer write mode: {other}")),
-        }
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::EmptyOnly => "empty",
-            Self::Append => "append",
-            Self::Replace => "replace",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
