@@ -2,7 +2,6 @@ mod clipboard;
 mod cursor_blink;
 pub(crate) mod font;
 mod layout;
-mod new_terminal;
 mod render;
 mod screenshot;
 mod wake;
@@ -78,6 +77,7 @@ use crate::frontend::interaction::{
     WheelAccumulator, WheelTarget, mouse_report_outcome, route_wheel,
     sidebar_scroll_offset_for_thumb_top,
 };
+use crate::frontend::new_terminal;
 use crate::frontend::selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
@@ -89,9 +89,9 @@ use crate::ui_snapshot::{
     working_context_json,
 };
 
+use crate::frontend::new_terminal::{NewTerminalDialog, ui_action_open};
 use cursor_blink::CursorBlink;
 use font::resolved_font_name;
-use new_terminal::{NewTerminalDialog, ui_action_open};
 use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,

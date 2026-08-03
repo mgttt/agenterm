@@ -1,9 +1,9 @@
-//! Unix new-terminal modal state, validation, and ui-action handlers.
+//! Shared new-terminal modal state, validation, and ui-action policy.
 
 use crate::working_context::parse_proxy_url;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) enum NewShellChoice {
+pub(crate) enum NewShellChoice {
     #[default]
     Default,
     Primary,
@@ -11,7 +11,7 @@ pub(super) enum NewShellChoice {
 }
 
 impl NewShellChoice {
-    pub(super) fn id(self) -> &'static str {
+    pub(crate) fn id(self) -> &'static str {
         match self {
             Self::Default => "default",
             Self::Primary => primary_shell().id,
@@ -19,15 +19,8 @@ impl NewShellChoice {
         }
     }
 
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Default => "Default",
-            Self::Primary => primary_shell().label,
-            Self::Bash => "bash",
-        }
-    }
-
-    pub(super) fn from_action_id(action: &str) -> Option<Self> {
+    #[cfg(test)]
+    pub(crate) fn from_action_id(action: &str) -> Option<Self> {
         match action {
             "shell-default" => Some(Self::Default),
             "shell-primary" | "shell-zsh" | "shell-sh" | "shell-cmd" => Some(Self::Primary),
@@ -42,13 +35,13 @@ fn primary_shell() -> crate::platform::contract::runtime::TerminalShellDescripto
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct CreateParams {
+pub(crate) struct CreateParams {
     pub command_line: Vec<String>,
     pub tab_environment: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct NewTerminalDialog {
+pub(crate) struct NewTerminalDialog {
     open: bool,
     shell_choice: NewShellChoice,
     initial_command_draft: String,
@@ -58,7 +51,7 @@ pub(super) struct NewTerminalDialog {
 }
 
 impl NewTerminalDialog {
-    pub(super) const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             open: false,
             shell_choice: NewShellChoice::Default,
@@ -69,43 +62,43 @@ impl NewTerminalDialog {
         }
     }
 
-    pub(super) const fn is_open(&self) -> bool {
+    pub(crate) const fn is_open(&self) -> bool {
         self.open
     }
 
-    pub(super) fn last_error(&self) -> Option<&str> {
+    pub(crate) fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
     }
 
-    pub(super) fn shell_choice(&self) -> NewShellChoice {
+    pub(crate) fn shell_choice(&self) -> NewShellChoice {
         self.shell_choice
     }
 
-    pub(super) fn initial_command_draft(&self) -> &str {
+    pub(crate) fn initial_command_draft(&self) -> &str {
         &self.initial_command_draft
     }
 
-    pub(super) fn initial_command_draft_mut(&mut self) -> &mut String {
+    pub(crate) fn initial_command_draft_mut(&mut self) -> &mut String {
         &mut self.initial_command_draft
     }
 
-    pub(super) fn http_proxy_draft(&self) -> &str {
+    pub(crate) fn http_proxy_draft(&self) -> &str {
         &self.http_proxy_draft
     }
 
-    pub(super) fn http_proxy_draft_mut(&mut self) -> &mut String {
+    pub(crate) fn http_proxy_draft_mut(&mut self) -> &mut String {
         &mut self.http_proxy_draft
     }
 
-    pub(super) fn https_proxy_draft(&self) -> &str {
+    pub(crate) fn https_proxy_draft(&self) -> &str {
         &self.https_proxy_draft
     }
 
-    pub(super) fn https_proxy_draft_mut(&mut self) -> &mut String {
+    pub(crate) fn https_proxy_draft_mut(&mut self) -> &mut String {
         &mut self.https_proxy_draft
     }
 
-    pub(super) fn open(&mut self) {
+    pub(crate) fn open(&mut self) {
         self.open = true;
         self.shell_choice = NewShellChoice::Default;
         self.initial_command_draft.clear();
@@ -114,13 +107,13 @@ impl NewTerminalDialog {
         self.last_error = None;
     }
 
-    pub(super) fn cancel(&mut self) {
+    pub(crate) fn cancel(&mut self) {
         if self.open {
             self.close_without_create();
         }
     }
 
-    pub(super) fn finish(&mut self, create: bool) -> Result<Option<CreateParams>, String> {
+    pub(crate) fn finish(&mut self, create: bool) -> Result<Option<CreateParams>, String> {
         if !self.open {
             return Ok(None);
         }
@@ -159,31 +152,31 @@ impl NewTerminalDialog {
         }))
     }
 
-    pub(super) fn choose_shell(&mut self, choice: NewShellChoice) {
+    pub(crate) fn choose_shell(&mut self, choice: NewShellChoice) {
         if self.open {
             self.shell_choice = choice;
         }
     }
 
-    pub(super) fn set_initial_command_draft(&mut self, value: String) {
+    pub(crate) fn set_initial_command_draft(&mut self, value: String) {
         if self.open {
             self.initial_command_draft = value;
         }
     }
 
-    pub(super) fn set_http_proxy_draft(&mut self, value: String) {
+    pub(crate) fn set_http_proxy_draft(&mut self, value: String) {
         if self.open {
             self.http_proxy_draft = value;
         }
     }
 
-    pub(super) fn set_https_proxy_draft(&mut self, value: String) {
+    pub(crate) fn set_https_proxy_draft(&mut self, value: String) {
         if self.open {
             self.https_proxy_draft = value;
         }
     }
 
-    pub(super) fn snapshot_modal(&self) -> serde_json::Value {
+    pub(crate) fn snapshot_modal(&self) -> serde_json::Value {
         serde_json::json!({
             "kind": "new-terminal",
             "shell": self.shell_choice.id(),
@@ -224,7 +217,7 @@ fn build_command_line(choice: NewShellChoice, initial: &str) -> Vec<String> {
     }
 }
 
-pub(super) fn ui_action_open(dialog: &mut NewTerminalDialog) -> bool {
+pub(crate) fn ui_action_open(dialog: &mut NewTerminalDialog) -> bool {
     if dialog.is_open() {
         return false;
     }
@@ -232,7 +225,7 @@ pub(super) fn ui_action_open(dialog: &mut NewTerminalDialog) -> bool {
     true
 }
 
-pub(super) fn ui_action_create(
+pub(crate) fn ui_action_create(
     dialog: &mut NewTerminalDialog,
 ) -> Result<Option<CreateParams>, String> {
     if !dialog.is_open() {
@@ -241,7 +234,7 @@ pub(super) fn ui_action_create(
     dialog.finish(true)
 }
 
-pub(super) fn ui_action_cancel(dialog: &mut NewTerminalDialog) -> bool {
+pub(crate) fn ui_action_cancel(dialog: &mut NewTerminalDialog) -> bool {
     if !dialog.is_open() {
         return false;
     }
@@ -249,7 +242,7 @@ pub(super) fn ui_action_cancel(dialog: &mut NewTerminalDialog) -> bool {
     true
 }
 
-pub(super) fn ui_action_choose_shell(
+pub(crate) fn ui_action_choose_shell(
     dialog: &mut NewTerminalDialog,
     choice: NewShellChoice,
 ) -> bool {
@@ -260,7 +253,7 @@ pub(super) fn ui_action_choose_shell(
     true
 }
 
-pub(super) fn ui_action_set_initial_command(dialog: &mut NewTerminalDialog, text: &str) -> bool {
+pub(crate) fn ui_action_set_initial_command(dialog: &mut NewTerminalDialog, text: &str) -> bool {
     if !dialog.is_open() {
         return false;
     }
@@ -268,7 +261,7 @@ pub(super) fn ui_action_set_initial_command(dialog: &mut NewTerminalDialog, text
     true
 }
 
-pub(super) fn ui_action_set_http_proxy(dialog: &mut NewTerminalDialog, text: &str) -> bool {
+pub(crate) fn ui_action_set_http_proxy(dialog: &mut NewTerminalDialog, text: &str) -> bool {
     if !dialog.is_open() {
         return false;
     }
@@ -276,7 +269,7 @@ pub(super) fn ui_action_set_http_proxy(dialog: &mut NewTerminalDialog, text: &st
     true
 }
 
-pub(super) fn ui_action_set_https_proxy(dialog: &mut NewTerminalDialog, text: &str) -> bool {
+pub(crate) fn ui_action_set_https_proxy(dialog: &mut NewTerminalDialog, text: &str) -> bool {
     if !dialog.is_open() {
         return false;
     }
@@ -285,7 +278,7 @@ pub(super) fn ui_action_set_https_proxy(dialog: &mut NewTerminalDialog, text: &s
 }
 
 /// Shared ui-action entry for new-terminal modal actions.
-pub(super) fn dispatch_ui_action(
+pub(crate) fn dispatch_ui_action(
     dialog: &mut NewTerminalDialog,
     action: &str,
     text: Option<&str>,
