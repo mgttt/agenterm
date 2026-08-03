@@ -579,7 +579,7 @@ v0.1.13 发文方向从「更多抽象」调整为：**守住边界 + 补齐功�
 |------|------|
 | REPL 行编辑/history、Cockpit 诊断小步、Rhai catalog #13、macOS pointer 诊断 | **v0.1.13** |
 | 巨型状态机拆解（Unix 223KB / Win 266KB）、snapshot 填充管线统一（R2） | **v0.2.0** |
-| B 组 `[~]` facade 2 处纯转发删除（需跨 target CI） | **v0.1.13 尾叶**（CI 就绪后） |
+| B 组 `[x]` facade 2 处纯转发删除（已删；跨 target 编译亲测绿） | **v0.1.13 尾叶**（2026-08-04 完成） |
 | A 组 4 项（Candidate/Promotion/冻结纪律/计时） | 授权流程，不在本版自主执行 |
 
 ### 10.2 波次（执行投影）
