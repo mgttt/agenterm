@@ -969,9 +969,11 @@ pair to the top-level window. `window_message` accepts the complete unsigned
 pointer-width `lparam`;
 it does not maintain a message allowlist. `window_resize` preserves position
 and Z order and requests no activation. Linux X11 and macOS provide exact-PID
-key/pointer adapters; Wayland reports typed Unsupported, and macOS input first
-performs the non-interactive TCC preflight. Win32-only messages, controls, and
-resize remain typed Unsupported on Unix. macOS outer-window geometry is
+keyboard adapters; macOS background pointer posting is typed Unsupported
+because pointer events are not delivered to a non-frontmost child window.
+Wayland reports typed Unsupported, and macOS input first performs the
+non-interactive TCC preflight. Win32-only messages, controls, and resize
+remain typed Unsupported on Unix. macOS outer-window geometry is
 available, while `window_client_rect` is typed Unsupported because WindowServer
 does not expose an exact cross-process client rectangle; it never relabels the
 outer frame as client geometry. These are platform-availability boundaries,

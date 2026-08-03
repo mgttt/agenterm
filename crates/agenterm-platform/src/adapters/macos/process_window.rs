@@ -460,7 +460,8 @@ pub(crate) fn pointer(
     let _ = (process_id, action, x, y);
     Err(error(
         "process_window_input_unsupported",
-        "macOS does not provide reliable process-targeted background pointer delivery",
+        "macOS background pointer delivery is unavailable: pointer events are not \
+         delivered to a non-frontmost child window (keyboard input remains supported)",
         "unsupported",
     ))
 }
@@ -570,7 +571,8 @@ mod tests {
             pointer(7, ProcessWindowPointerAction::Click, 120, 401),
             Err(error(
                 "process_window_input_unsupported",
-                "macOS does not provide reliable process-targeted background pointer delivery",
+                "macOS background pointer delivery is unavailable: pointer events are not \
+                 delivered to a non-frontmost child window (keyboard input remains supported)",
                 "unsupported"
             ))
         );
