@@ -2381,7 +2381,10 @@ const COCKPIT_VISIBLE_TAB_ROWS: usize = 3;
 
 struct CockpitPresentation {
     lines: Vec<String>,
+    /// `(line index, tab id)` for tab rows that are directly pointer-hittable.
     tab_lines: Vec<(usize, String)>,
+    /// All tab ids in viewport order (unbounded, used by key navigation).
+    ordered_tab_ids: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -2417,10 +2420,15 @@ fn cockpit_presentation(
         if let Some(status) = navigation_status {
             lines.push(status.to_owned());
         }
-        return CockpitPresentation { lines, tab_lines };
+        return CockpitPresentation {
+            lines,
+            tab_lines,
+            ordered_tab_ids: Vec::new(),
+        };
     };
 
     lines.push("Tabs        click or arrows · Enter selects".to_owned());
+    let ordered_tab_ids = server.tabs.iter().map(|tab| tab.id.clone()).collect();
     let selected_index = selected_tab_id
         .and_then(|selected| server.tabs.iter().position(|tab| tab.id == selected))
         .or_else(|| {
@@ -2460,7 +2468,11 @@ fn cockpit_presentation(
     if let Some(status) = navigation_status {
         lines.push(status.to_owned());
     }
-    CockpitPresentation { lines, tab_lines }
+    CockpitPresentation {
+        lines,
+        tab_lines,
+        ordered_tab_ids,
+    }
 }
 
 fn classify_cockpit_input(
@@ -2468,6 +2480,7 @@ fn classify_cockpit_input(
     server: Option<&ConnectedServer>,
     selected_tab_id: &mut Option<String>,
     tab_lines: &[(usize, String)],
+    ordered_tab_ids: &[String],
 ) -> CockpitInputAction {
     use crate::platform::services::control_center_shell::{
         ControlCenterInputEvent, ControlCenterKey, ControlCenterPointerButton,
@@ -2508,26 +2521,66 @@ fn classify_cockpit_input(
             .unwrap_or(CockpitInputAction::None),
         ControlCenterInputEvent::KeyPressed { key, repeat } => match key {
             ControlCenterKey::ArrowUp => {
-                *selected_tab_id = Some(server.tabs[selected_index.saturating_sub(1)].id.clone());
+                let index = ordered_tab_ids
+                    .iter()
+                    .position(|id| id == selected_tab_id.as_deref().unwrap_or_default())
+                    .unwrap_or(selected_index)
+                    .saturating_sub(1);
+                *selected_tab_id = Some(
+                    ordered_tab_ids
+                        .get(index)
+                        .cloned()
+                        .or_else(|| ordered_tab_ids.first().cloned())
+                        .expect("non-empty ordered tab ids"),
+                );
                 CockpitInputAction::Redraw
             }
             ControlCenterKey::ArrowDown => {
-                let index = selected_index
+                let index = ordered_tab_ids
+                    .iter()
+                    .position(|id| id == selected_tab_id.as_deref().unwrap_or_default())
+                    .unwrap_or(selected_index)
                     .saturating_add(1)
-                    .min(server.tabs.len().saturating_sub(1));
-                *selected_tab_id = Some(server.tabs[index].id.clone());
+                    .min(ordered_tab_ids.len().saturating_sub(1));
+                *selected_tab_id = Some(
+                    ordered_tab_ids
+                        .get(index)
+                        .cloned()
+                        .or_else(|| ordered_tab_ids.last().cloned())
+                        .expect("non-empty ordered tab ids"),
+                );
                 CockpitInputAction::Redraw
             }
             ControlCenterKey::Home => {
-                *selected_tab_id = Some(server.tabs[0].id.clone());
+                *selected_tab_id = Some(
+                    ordered_tab_ids
+                        .first()
+                        .expect("non-empty ordered tab ids")
+                        .clone(),
+                );
                 CockpitInputAction::Redraw
             }
             ControlCenterKey::End => {
-                *selected_tab_id = Some(server.tabs[server.tabs.len() - 1].id.clone());
+                *selected_tab_id = Some(
+                    ordered_tab_ids
+                        .last()
+                        .expect("non-empty ordered tab ids")
+                        .clone(),
+                );
                 CockpitInputAction::Redraw
             }
             ControlCenterKey::Enter if !repeat => {
-                CockpitInputAction::Activate(server.tabs[selected_index].id.clone())
+                let index = ordered_tab_ids
+                    .iter()
+                    .position(|id| id == selected_tab_id.as_deref().unwrap_or_default())
+                    .unwrap_or(selected_index);
+                CockpitInputAction::Activate(
+                    ordered_tab_ids
+                        .get(index)
+                        .cloned()
+                        .or_else(|| ordered_tab_ids.first().cloned())
+                        .expect("non-empty ordered tab ids"),
+                )
             }
             ControlCenterKey::Escape => CockpitInputAction::ClearStatus,
             ControlCenterKey::Enter => CockpitInputAction::None,
@@ -2730,18 +2783,18 @@ impl crate::platform::services::control_center_shell::ControlCenterShellHost for
         event: crate::platform::services::control_center_shell::ControlCenterInputEvent,
     ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<bool> {
         self.last_native_input = Some(event.into());
-        let tab_lines = cockpit_presentation(
+        let presentation = cockpit_presentation(
             self.projection.lines(),
             self.projection.snapshot.connected_server.as_ref(),
             self.selected_tab_id.as_deref(),
             self.navigation_status.as_deref(),
-        )
-        .tab_lines;
+        );
         let action = classify_cockpit_input(
             event,
             self.projection.snapshot.connected_server.as_ref(),
             &mut self.selected_tab_id,
-            &tab_lines,
+            &presentation.tab_lines,
+            &presentation.ordered_tab_ids,
         );
         match action {
             CockpitInputAction::None => Ok(false),
@@ -3240,6 +3293,7 @@ mod tests {
                 Some(&server),
                 &mut selected,
                 &presentation.tab_lines,
+                &presentation.ordered_tab_ids,
             ),
             CockpitInputAction::Redraw
         );
@@ -3253,6 +3307,7 @@ mod tests {
                 Some(&server),
                 &mut selected,
                 &presentation.tab_lines,
+                &presentation.ordered_tab_ids,
             ),
             CockpitInputAction::Activate("@2".to_owned())
         );
@@ -3265,6 +3320,7 @@ mod tests {
                 Some(&server),
                 &mut selected,
                 &presentation.tab_lines,
+                &presentation.ordered_tab_ids,
             ),
             CockpitInputAction::None
         );
@@ -3282,6 +3338,7 @@ mod tests {
                 Some(&server),
                 &mut selected,
                 &presentation.tab_lines,
+                &presentation.ordered_tab_ids,
             ),
             CockpitInputAction::Activate("@2".to_owned())
         );
