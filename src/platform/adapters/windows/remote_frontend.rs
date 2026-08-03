@@ -10,11 +10,11 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ModalSurface, MouseReportInput,
-    MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest,
-    modal_surface_from_gate, mouse_protocol_mode_from_str, mouse_report_encoding_from_str,
-    mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
-    system_menu_clipboard_state, window_close_request,
+    CancelTarget, FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ModalSurface,
+    MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
+    WindowCloseRequest, cancel_target, modal_surface_from_gate, mouse_protocol_mode_from_str,
+    mouse_report_encoding_from_str, mouse_report_outcome, route_wheel,
+    sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state, window_close_request,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -1297,23 +1297,17 @@ impl RemoteWindowState {
                     anyhow::bail!("tab close could not be confirmed");
                 }
             }
-            "cancel" => {
-                if self.window_close_dialog.is_open() {
-                    self.finish_window_close(WindowCloseChoice::Cancel);
-                } else if self.new_terminal_dialog.is_open() {
-                    self.finish_new_terminal(false);
-                } else if self.settings_dialog.is_open() {
-                    self.finish_settings(false);
-                } else if self.cwd_editor_dialog.is_open() {
-                    self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
-                } else if self.close_confirmation.is_open() {
-                    self.finish_close_tab(false);
-                } else if self.tab_editor_dialog.is_open() {
-                    self.finish_tab_edit(false);
-                } else {
-                    anyhow::bail!("no modal is pending");
+            "cancel" => match cancel_target(self.focus_gate()) {
+                CancelTarget::WindowClose => self.finish_window_close(WindowCloseChoice::Cancel),
+                CancelTarget::LiveTabClose => self.finish_close_tab(false),
+                CancelTarget::Settings => self.finish_settings(false),
+                CancelTarget::NewTerminal => self.finish_new_terminal(false),
+                CancelTarget::CwdEditor => {
+                    self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly)
                 }
-            }
+                CancelTarget::TabEditor => self.finish_tab_edit(false),
+                CancelTarget::None => anyhow::bail!("no modal is pending"),
+            },
             "copy-selection" => self.copy_terminal_selection()?,
             "close-window" => {
                 self.request_window_close();

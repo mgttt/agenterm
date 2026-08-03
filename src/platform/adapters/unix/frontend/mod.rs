@@ -74,11 +74,11 @@ use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
 use crate::frontend::interaction::{
-    ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-    ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
-    WheelAccumulator, WheelTarget, WindowCloseRequest, modal_surface_from_gate,
-    mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
-    system_menu_clipboard_state, window_close_request,
+    ApplicationMouseMode, CancelTarget, FocusDirection, FocusState, FocusSurface,
+    FocusTransitionGate, ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
+    ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest, cancel_target,
+    modal_surface_from_gate, mouse_report_outcome, route_wheel,
+    sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state, window_close_request,
 };
 use crate::frontend::new_terminal;
 use crate::frontend::selection::{
@@ -4624,29 +4624,32 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_cancel(&mut self) -> Result<bool, String> {
-        if self.window_close_dialog.is_open() {
-            self.finish_window_close(WindowCloseChoice::Cancel);
-            return Ok(true);
-        }
-        if self.close_confirmation.is_open() {
-            self.finish_close_confirmation(false);
-            return Ok(true);
-        }
-        if self.settings_dialog.is_open() {
-            self.close_settings(false)?;
-            return Ok(true);
-        }
-        if self.new_terminal_dialog.is_open() {
-            self.finish_new_terminal_dialog(false);
-            return Ok(true);
-        }
-        if self.cwd_editor_dialog.is_open() {
-            self.close_cwd_editor();
-            return Ok(true);
-        }
-        if self.tab_editor_dialog.is_open() {
-            self.complete_tab_editor(false)?;
-            return Ok(true);
+        match cancel_target(self.focus_gate()) {
+            CancelTarget::WindowClose => {
+                self.finish_window_close(WindowCloseChoice::Cancel);
+                return Ok(true);
+            }
+            CancelTarget::LiveTabClose => {
+                self.finish_close_confirmation(false);
+                return Ok(true);
+            }
+            CancelTarget::Settings => {
+                self.close_settings(false)?;
+                return Ok(true);
+            }
+            CancelTarget::NewTerminal => {
+                self.finish_new_terminal_dialog(false);
+                return Ok(true);
+            }
+            CancelTarget::CwdEditor => {
+                self.close_cwd_editor();
+                return Ok(true);
+            }
+            CancelTarget::TabEditor => {
+                self.complete_tab_editor(false)?;
+                return Ok(true);
+            }
+            CancelTarget::None => {}
         }
         if self.cancel_terminal_selection(true) {
             return Ok(true);

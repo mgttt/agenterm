@@ -126,6 +126,7 @@ v0.1.13  Trust & platform narrowness
 │  ├─ [x] modal 入口守卫单点：FocusTransitionGate::modal_entry_blocked()（interaction.rs；Win/Unix 共用，settings/new-terminal/CWD/live-tab close 入口共用）
 │  ├─ [x] window-close 请求分支单点：WindowCloseRequest/window_close_request()（interaction.rs；Win/Unix 共用，live-close 取消后不再继续弹窗关闭）
 │  ├─ [x] live-tab close 请求对齐：两端先取消 inline editors/CWD、同步 composer，再打开 close confirmation；full-modal 打开时拒绝
+│  ├─ [x] cancel 动作优先级单点：CancelTarget/cancel_target()（interaction.rs；Win/Unix 共用，window-close > live-tab close > settings > new-terminal > CWD > tab editor）
 │  ├─ [x] composer/workspace 可见性策略单点：FocusTransitionGate::workspace_controls_visible()（interaction.rs；Win/Unix 共用）
 │  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略

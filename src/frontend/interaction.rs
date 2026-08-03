@@ -183,6 +183,35 @@ pub(crate) const fn window_close_request(gate: FocusTransitionGate) -> WindowClo
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CancelTarget {
+    WindowClose,
+    LiveTabClose,
+    Settings,
+    NewTerminal,
+    CwdEditor,
+    TabEditor,
+    None,
+}
+
+pub(crate) const fn cancel_target(gate: FocusTransitionGate) -> CancelTarget {
+    if gate.window_close_pending {
+        CancelTarget::WindowClose
+    } else if gate.close_confirmation_open {
+        CancelTarget::LiveTabClose
+    } else if gate.settings_open {
+        CancelTarget::Settings
+    } else if gate.new_terminal_open {
+        CancelTarget::NewTerminal
+    } else if gate.cwd_editor_open {
+        CancelTarget::CwdEditor
+    } else if gate.tab_editor_open {
+        CancelTarget::TabEditor
+    } else {
+        CancelTarget::None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FocusState {
     surface: FocusSurface,
     gate: FocusTransitionGate,
@@ -481,12 +510,12 @@ pub(crate) fn sidebar_scroll_offset_for_thumb_top(
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-        ModalSurface, MouseDelivery, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
-        ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest,
-        focus_surface_navigation, modal_surface_from_gate, mouse_delivery, mouse_report_outcome,
-        route_wheel, sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
-        window_close_request,
+        ApplicationMouseMode, CancelTarget, FocusDirection, FocusState, FocusSurface,
+        FocusTransitionGate, ModalSurface, MouseDelivery, MouseReportEncoding, MouseReportInput,
+        MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest,
+        cancel_target, focus_surface_navigation, modal_surface_from_gate, mouse_delivery,
+        mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
+        system_menu_clipboard_state, window_close_request,
     };
 
     #[test]
@@ -616,6 +645,64 @@ mod tests {
                 ..idle
             }
             .modal_entry_blocked(ModalSurface::WindowClose)
+        );
+    }
+
+    #[test]
+    fn cancel_target_uses_shared_modal_priority() {
+        let idle = FocusTransitionGate::default();
+        assert_eq!(cancel_target(idle), CancelTarget::None);
+        assert_eq!(
+            cancel_target(FocusTransitionGate {
+                window_close_pending: true,
+                close_confirmation_open: true,
+                settings_open: true,
+                new_terminal_open: true,
+                cwd_editor_open: true,
+                tab_editor_open: true,
+            }),
+            CancelTarget::WindowClose
+        );
+        assert_eq!(
+            cancel_target(FocusTransitionGate {
+                close_confirmation_open: true,
+                settings_open: true,
+                new_terminal_open: true,
+                ..idle
+            }),
+            CancelTarget::LiveTabClose
+        );
+        assert_eq!(
+            cancel_target(FocusTransitionGate {
+                settings_open: true,
+                new_terminal_open: true,
+                ..idle
+            }),
+            CancelTarget::Settings
+        );
+        assert_eq!(
+            cancel_target(FocusTransitionGate {
+                new_terminal_open: true,
+                cwd_editor_open: true,
+                tab_editor_open: true,
+                ..idle
+            }),
+            CancelTarget::NewTerminal
+        );
+        assert_eq!(
+            cancel_target(FocusTransitionGate {
+                cwd_editor_open: true,
+                tab_editor_open: true,
+                ..idle
+            }),
+            CancelTarget::CwdEditor
+        );
+        assert_eq!(
+            cancel_target(FocusTransitionGate {
+                tab_editor_open: true,
+                ..idle
+            }),
+            CancelTarget::TabEditor
         );
     }
 
