@@ -165,6 +165,23 @@ pub(crate) fn modal_surface_from_gate(gate: FocusTransitionGate) -> Option<Modal
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WindowCloseRequest {
+    AlreadyOpen,
+    CancelLiveClose,
+    Prepare,
+}
+
+pub(crate) const fn window_close_request(gate: FocusTransitionGate) -> WindowCloseRequest {
+    if gate.window_close_pending {
+        WindowCloseRequest::AlreadyOpen
+    } else if gate.close_confirmation_open {
+        WindowCloseRequest::CancelLiveClose
+    } else {
+        WindowCloseRequest::Prepare
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FocusState {
     surface: FocusSurface,
     gate: FocusTransitionGate,
@@ -465,9 +482,10 @@ mod tests {
     use super::{
         ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
         ModalSurface, MouseDelivery, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
-        ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
-        modal_surface_from_gate, mouse_delivery, mouse_report_outcome, route_wheel,
-        sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
+        ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest,
+        focus_surface_navigation, modal_surface_from_gate, mouse_delivery, mouse_report_outcome,
+        route_wheel, sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
+        window_close_request,
     };
 
     #[test]
@@ -597,6 +615,34 @@ mod tests {
                 ..idle
             }
             .modal_entry_blocked(ModalSurface::WindowClose)
+        );
+    }
+
+    #[test]
+    fn window_close_request_captures_live_close_cancel() {
+        let idle = FocusTransitionGate::default();
+        assert_eq!(window_close_request(idle), WindowCloseRequest::Prepare);
+        assert_eq!(
+            window_close_request(FocusTransitionGate {
+                window_close_pending: true,
+                ..idle
+            }),
+            WindowCloseRequest::AlreadyOpen
+        );
+        assert_eq!(
+            window_close_request(FocusTransitionGate {
+                close_confirmation_open: true,
+                ..idle
+            }),
+            WindowCloseRequest::CancelLiveClose
+        );
+        assert_eq!(
+            window_close_request(FocusTransitionGate {
+                settings_open: true,
+                new_terminal_open: true,
+                ..idle
+            }),
+            WindowCloseRequest::Prepare
         );
     }
 

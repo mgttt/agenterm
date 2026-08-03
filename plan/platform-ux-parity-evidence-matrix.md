@@ -38,6 +38,7 @@
 > 说明：
 > - full-modal 输入拦截由 FocusTransitionGate::full_modal_blocked() 单点生成（window-close/settings/new-terminal/tab-close），Win/Unix 的 terminal mouse、wheel、focus ring、system menu 与 CWD 入口共用。
 > - modal 打开入口由 FocusTransitionGate::modal_entry_blocked() 单点判定；Windows/Unix 的 settings、new-terminal、CWD editor 共用同一互斥规则。
+> - window-close 请求分支由 WindowCloseRequest/window_close_request() 单点判定；任一平台若正在 live-tab close 确认，先取消该确认并返回，不再叠加窗口关闭确认。
 > - modal/focus 表面命名由 src/frontend/interaction.rs 的 ModalSurface + modal_surface_from_gate() 单点生成（window-close > settings > new-terminal > cwd-editor > tab-close；tab-editor 走独立 `tab_editor` 快照），普通 focus 表面也由 `FocusSurface::as_str()/from_ipc()` 单点生成（terminal/composer/tabs|sidebar），Windows remote 与 Unix embedded 共用。
 > - `Supported`/`Failed`/`Unsupported` 只允许取 `Unsupported` 来表示“当前平台能力缺口”。`Failed` 代表脚本执行失败（回归阻断）。
 

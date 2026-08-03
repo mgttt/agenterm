@@ -58,6 +58,20 @@ fn json(context, cli, arguments) {
     rhai::json::parse(text(context, cli, arguments))
 }
 
+fn wait_sidebar_snapshot(context, cli, configured_width) {
+    for attempt in 0..200 {
+        let snapshot = json(context, cli, ["ui-snapshot"]);
+        if snapshot.layout.sidebar != ()
+            && snapshot.layout.sidebar.configured_width == configured_width
+            && snapshot.layout.sidebar.visible
+        {
+            return snapshot;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "cli_smoke_sidebar_width_timeout";
+}
+
 fn direct(context, program, arguments, expected_failure) {
     let command = test_harness::configured_command(
         context,
@@ -755,12 +769,7 @@ try {
         ).contains("operation_unknown[tabs-teleport]"),
         "cli_smoke_unknown_tabs_action"
     );
-    let after_invalid = json(context, cli, ["ui-snapshot"]);
-    require(
-        after_invalid.layout.sidebar.configured_width == 480
-            && after_invalid.layout.sidebar.visible,
-        "cli_smoke_invalid_tabs_mutated"
-    );
+    let after_invalid = wait_sidebar_snapshot(context, cli, 480);
     text(
         context,
         cli,

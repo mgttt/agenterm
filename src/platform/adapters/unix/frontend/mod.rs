@@ -76,8 +76,9 @@ use crate::frontend::input;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
     ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
-    WheelAccumulator, WheelTarget, modal_surface_from_gate, mouse_report_outcome, route_wheel,
-    sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
+    WheelAccumulator, WheelTarget, WindowCloseRequest, modal_surface_from_gate,
+    mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
+    system_menu_clipboard_state, window_close_request,
 };
 use crate::frontend::new_terminal;
 use crate::frontend::selection::{
@@ -1433,23 +1434,28 @@ impl UnixApp {
     }
 
     fn request_window_close(&mut self) {
-        if self.window_close_dialog.is_open() {
-            return;
-        }
-        let _ = self.cancel_terminal_selection(true);
-        if self.tab_editor_dialog.is_open() {
-            let _ = self.complete_tab_editor(false);
-        }
-        if self.settings_dialog.is_open() {
-            let _ = self.close_settings(false);
-        }
-        if self.close_confirmation.is_open() {
-            self.finish_close_confirmation(false);
+        match window_close_request(self.focus_gate()) {
+            WindowCloseRequest::AlreadyOpen => return,
+            WindowCloseRequest::CancelLiveClose => {
+                self.finish_close_confirmation(false);
+                return;
+            }
+            WindowCloseRequest::Prepare => {}
         }
         if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
         }
+        let _ = self.cancel_terminal_selection(true);
+        if self.settings_dialog.is_open() {
+            let _ = self.close_settings(false);
+        }
+        if self.new_terminal_dialog.is_open() {
+            self.finish_new_terminal_dialog(false);
+        }
         self.sync_composer_buffer_to_tab();
+        if self.tab_editor_dialog.is_open() {
+            let _ = self.complete_tab_editor(false);
+        }
         self.window_close_dialog.open();
         self.request_redraw();
     }

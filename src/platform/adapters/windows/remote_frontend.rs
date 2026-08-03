@@ -11,9 +11,10 @@ use std::{
 
 use crate::frontend::interaction::{
     FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ModalSurface, MouseReportInput,
-    MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, modal_surface_from_gate,
-    mouse_protocol_mode_from_str, mouse_report_encoding_from_str, mouse_report_outcome,
-    route_wheel, sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
+    MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest,
+    modal_surface_from_gate, mouse_protocol_mode_from_str, mouse_report_encoding_from_str,
+    mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
+    system_menu_clipboard_state, window_close_request,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -3849,15 +3850,16 @@ impl RemoteWindowState {
     }
 
     fn request_window_close(&mut self) {
-        if self.window_close_dialog.is_open() {
-            return;
+        match window_close_request(self.focus_gate()) {
+            WindowCloseRequest::AlreadyOpen => return,
+            WindowCloseRequest::CancelLiveClose => {
+                self.finish_close_tab(false);
+                return;
+            }
+            WindowCloseRequest::Prepare => {}
         }
         if self.cwd_editor_dialog.is_open() {
             self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
-        }
-        if self.close_confirmation.is_open() {
-            self.finish_close_tab(false);
-            return;
         }
         self.cancel_terminal_selection();
         if self.settings_dialog.is_open() {
