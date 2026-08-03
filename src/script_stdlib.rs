@@ -62,6 +62,16 @@ impl Drop for InvocationTempScope {
 }
 
 pub fn register_local(engine: &mut Engine) {
+    let (std_module, rhai_module) = build_local_modules(engine);
+    engine.register_static_module("std", Shared::new(std_module));
+    engine.register_static_module("rhai", Shared::new(rhai_module));
+}
+
+/// Build the `std` and `rhai` module trees plus every type and getter
+/// registration exactly as the runtime receives them. The catalog-vs-
+/// registration guard walks this tree, so construction stays here instead of
+/// being duplicated for tests.
+pub(crate) fn build_local_modules(engine: &mut Engine) -> (Module, Module) {
     crate::script_stream::register(engine);
 
     engine.register_type_with_name::<ScriptPath>("PathBuf");
@@ -174,7 +184,6 @@ pub fn register_local(engine: &mut Engine) {
     crate::script_process::register(engine, &mut std_module, &mut time);
     crate::script_net::register(engine, &mut std_module);
     std_module.set_sub_module("time", time);
-    engine.register_static_module("std", Shared::new(std_module));
 
     let mut json = Module::new();
     json.set_native_fn("parse", json_parse);
@@ -210,7 +219,7 @@ pub fn register_local(engine: &mut Engine) {
     crate::script_image::register(engine, &mut rhai_module);
     crate::script_task::register(engine, &mut rhai_module);
     crate::script_http::register(engine, &mut rhai_module);
-    engine.register_static_module("rhai", Shared::new(rhai_module));
+    (std_module, rhai_module)
 }
 
 fn path_from(value: &str) -> Result<ScriptPath, Box<EvalAltResult>> {

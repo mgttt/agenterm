@@ -164,7 +164,7 @@ v0.1.13  Trust & platform narrowness
    │     （不冒充 shipped；真机正向证据若不可得则保留 typed 边界）
    ├─ [ ] Cockpit 只读事实/导航小步：加深诊断面板（事件/PTY/租约读数），
    │     不做 Workflows 内容
-   └─ [ ] precision-audit #13：Rhai catalog-vs-registration 自动化测试
+   └─ [x] precision-audit #13：Rhai catalog-vs-registration 自动化测试
          （Engine-introspection；补 std.net/std.fs 之外的全量检查）
 ```
 
@@ -566,7 +566,7 @@ v0.1.13 发文方向从「更多抽象」调整为：**守住边界 + 补齐功�
 v0.1.13 Wave A（功能补齐 — 用户体感优先）
 ├─ [ ] REPL 行编辑/history（E 组叶，Script 体验）
 ├─ [ ] Cockpit 诊断小步（E 组叶，只读事实加深）
-└─ [ ] precision-audit #13 Rhai catalog 自动化（E 组叶，信任面）
+└─ [x] precision-audit #13 Rhai catalog 自动化（E 组叶，信任面；rhai metadata 仅 dev-dependency 启用，release 预算不受影响）
 
 v0.1.13 Wave B（信任面收口）
 ├─ [ ] macOS pointer Unsupported 诊断清晰化（E 组叶）

@@ -2121,4 +2121,154 @@ mod tests {
             }
         }
     }
+
+    const NON_CALLABLE_SURFACE_TRIAGE: &[&str] = &[
+        // Type-method/property groups, import and CLI surfaces documented in
+        // the catalog but not expressible as one module-native call. Method
+        // names inside these groups are still checked for registration below;
+        // property getters (engine::register_get) are covered by the
+        // black-box runtime suites under tests/.
+        "std.fs.dir-entry-path",
+        "std.fs.dir-entry-file-name",
+        "std.fs.dir-entry-types",
+        "std.fs.dir-entry-metadata",
+        "std.fs.metadata-facts",
+        "std.path.path-buf-join",
+        "std.path.path-buf-display",
+        "std.path.path-buf-file-name",
+        "std.path.path-buf-extension",
+        "std.path.path-buf-is-absolute",
+        "std.time.system-time-unix-millis",
+        "std.time.system-time-rfc3339",
+        "std.net.tcp-stream",
+        "std.net.tcp-listener",
+        "std.process.command-builder",
+        "std.process.command-output",
+        "std.process.command-start",
+        "std.process.child",
+        "std.process.child-window-input",
+        "std.process.output",
+        "rhai.stream.handle",
+        "rhai.bytes.length",
+        "rhai.bytes.raw-operations",
+        "rhai.bytes.to-text",
+        "rhai.task.handle",
+        "rhai.http.response",
+        "runtime.project.module-import",
+        "runtime.project.named-task",
+    ];
+
+    fn collect_module_surface(
+        module: &rhai::Module,
+        prefix: &str,
+        out: &mut std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    ) {
+        for signature in module.gen_fn_signatures_with_mapper(std::borrow::Cow::Borrowed) {
+            let (name, params) = signature.split_once('(').unwrap_or((signature.as_str(), ""));
+            let params = params.trim_end_matches(')').trim();
+            let arity = if params.is_empty() { 0 } else { params.split(',').count() };
+            out.entry(format!("{prefix}{name}"))
+                .or_default()
+                .insert(arity);
+        }
+        for (name, sub) in module.iter_sub_modules() {
+            collect_module_surface(sub, &format!("{prefix}{name}::"), out);
+        }
+    }
+
+    fn catalog_arity(signature: &str) -> usize {
+        let params = signature
+            .split_once('(')
+            .map(|(_, rest)| rest.split(')').next().unwrap_or(""))
+            .unwrap_or("");
+        if params.trim().is_empty() {
+            0
+        } else {
+            params.split(',').count()
+        }
+    }
+
+    fn documented_callee_names(signature: &str) -> std::collections::HashSet<&str> {
+        signature
+            .split('/')
+            .filter_map(|part| {
+                part.split_once('(').map(|(head, _)| {
+                    head.trim()
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                })
+            })
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    #[test]
+    fn every_shipped_plain_api_resolves_in_registered_surface() {
+        let mut engine = rhai::Engine::new();
+        let (std_module, rhai_module) = crate::script_stdlib::build_local_modules(&mut engine);
+        let mut surface: std::collections::HashMap<String, std::collections::HashSet<usize>> =
+            std::collections::HashMap::new();
+        collect_module_surface(&std_module, "std::", &mut surface);
+        collect_module_surface(&rhai_module, "rhai::", &mut surface);
+        let mut names: std::collections::HashSet<String> = surface
+            .keys()
+            .filter_map(|path| path.rsplit("::").next().map(str::to_owned))
+            .collect();
+        for signature in engine.gen_fn_signatures(true) {
+            if let Some(name) = signature.split('(').next() {
+                let params = signature
+                    .split_once('(')
+                    .map(|(_, rest)| rest.split(')').next().unwrap_or(""))
+                    .unwrap_or("");
+                let arity = if params.trim().is_empty() {
+                    0
+                } else {
+                    params.split(',').count()
+                };
+                surface.entry(name.to_owned()).or_default().insert(arity);
+                names.insert(name.to_owned());
+            }
+        }
+
+        let mut triaged = Vec::new();
+        for entry in entries().into_iter().filter(|entry| {
+            entry.status == ScriptApiStatus::Shipped && entry.operation_id.is_none()
+        }) {
+            if entry.signature.starts_with(&format!("{}(", entry.surface_path)) {
+                let arity = catalog_arity(entry.signature);
+                let registered = surface.get(entry.surface_path);
+                assert!(
+                    registered.is_some_and(|arities| arities.contains(&arity)),
+                    "{}: surface {} with arity {} is not registered",
+                    entry.stable_id,
+                    entry.surface_path,
+                    arity
+                );
+            } else {
+                triaged.push(entry.stable_id);
+                for callee in documented_callee_names(entry.signature) {
+                    assert!(
+                        names.contains(callee),
+                        "{}: documented callee {} is not registered anywhere",
+                        entry.stable_id,
+                        callee
+                    );
+                }
+            }
+        }
+        for stable_id in NON_CALLABLE_SURFACE_TRIAGE {
+            assert!(
+                triaged.contains(stable_id),
+                "{stable_id} is triaged as non-callable but is directly callable"
+            );
+        }
+        for stable_id in triaged {
+            assert!(
+                NON_CALLABLE_SURFACE_TRIAGE.contains(&stable_id),
+                "{stable_id} is a non-direct surface and must be added to the triage allowlist"
+            );
+        }
+    }
 }
