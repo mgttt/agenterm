@@ -42,8 +42,13 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
     };
     let times_ok =
         unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) } != 0;
+    // Capture each call's error immediately after it, before any later Win32
+    // call can clobber the thread's last-error value (a success doesn't
+    // reliably leave a prior failure's code intact).
+    let times_error = (!times_ok).then(std::io::Error::last_os_error);
     let memory_ok = unsafe { K32GetProcessMemoryInfo(process, &mut memory, memory.cb) } != 0;
-    let error = (!times_ok || !memory_ok).then(std::io::Error::last_os_error);
+    let memory_error = (!memory_ok).then(std::io::Error::last_os_error);
+    let error = times_error.or(memory_error);
     unsafe { CloseHandle(process) };
     if let Some(error) = error {
         return Err(ProcessMetricsError::new(
