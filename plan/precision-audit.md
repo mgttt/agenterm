@@ -30,3 +30,11 @@ separately, then update this table.
 ## Done
 
 - #1 `8e1e413` — fork()/execve() async-signal-safety in the POSIX PTY adapter.
+- #5 `20144a1` (refined by `7c7409e`/`7dead17`) — reentrant `window_proc` `&mut State` aliasing.
+- #9 — Unix `close_tab_id` now keeps the closest surviving neighbor active, matching `server_app.rs`.
+- #10 `524ac98` — Windows sidebar geometry delegates to the shared `ui_geometry` functions.
+
+## Open
+
+- #5b — remaining unsafe surface in `control_window.rs` (mouse wheel/DPI/scrollbar, window-creation teardown).
+- #8 — unbounded HTTP stream-pump threads; needs a decision on concurrency limit + failure mode before implementing.
