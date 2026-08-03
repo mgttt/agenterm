@@ -77,7 +77,7 @@ use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
     ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
     WheelAccumulator, WheelTarget, modal_surface_from_gate, mouse_report_outcome, route_wheel,
-    sidebar_scroll_offset_for_thumb_top,
+    sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
 };
 use crate::frontend::new_terminal;
 use crate::frontend::selection::{
@@ -1962,7 +1962,7 @@ impl UnixApp {
         // read is in flight.
         let clipboard_has_text =
             self.pending_terminal_paste.is_none() && clipboard::clipboard_has_unicode_text();
-        system_menu_clipboard_state_pure(
+        system_menu_clipboard_state(
             self.is_edit_focus(),
             self.terminal_ready_for_system_menu(),
             self.terminal_selection
@@ -5397,21 +5397,6 @@ fn compact_cwd_for_status(path: &str, home_dir: Option<&Path>) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn system_menu_clipboard_state_pure(
-    edit_focus: bool,
-    terminal_ready: bool,
-    selection_nonempty: bool,
-    clipboard_has_text: bool,
-) -> (bool, bool) {
-    if edit_focus {
-        return (true, clipboard_has_text);
-    }
-    (
-        terminal_ready && selection_nonempty,
-        terminal_ready && clipboard_has_text,
-    )
-}
-
 fn terminal_paste_target_is_current(
     request_tab_id: u64,
     active_tab_id: Option<u64>,
@@ -5444,8 +5429,7 @@ mod system_menu_tests {
         GuiLaunchResult, RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure,
         UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, UnixFocusSurface, compact_cwd_for_status,
         gui_help_result, parse_gui_launch_target, scale_frame_nearest, scale_rect_to_frame,
-        system_menu_clipboard_state_pure, terminal_paste_bytes, terminal_paste_target_is_current,
-        workspace_toolbar_snapshot_json,
+        terminal_paste_bytes, terminal_paste_target_is_current, workspace_toolbar_snapshot_json,
     };
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
@@ -5710,46 +5694,6 @@ mod system_menu_tests {
         assert!(!click.matches(8, 11, now + Duration::from_millis(100)));
         assert!(!click.matches(7, 12, now + Duration::from_millis(100)));
         assert!(!click.matches(7, 11, now + Duration::from_millis(501)));
-    }
-
-    #[test]
-    fn edit_focus_enables_copy_and_paste_follows_clipboard() {
-        assert_eq!(
-            system_menu_clipboard_state_pure(true, false, false, false),
-            (true, false)
-        );
-        assert_eq!(
-            system_menu_clipboard_state_pure(true, false, false, true),
-            (true, true)
-        );
-    }
-
-    #[test]
-    fn terminal_ready_requires_selection_for_copy_and_clipboard_for_paste() {
-        assert_eq!(
-            system_menu_clipboard_state_pure(false, true, false, false),
-            (false, false)
-        );
-        assert_eq!(
-            system_menu_clipboard_state_pure(false, true, true, false),
-            (true, false)
-        );
-        assert_eq!(
-            system_menu_clipboard_state_pure(false, true, false, true),
-            (false, true)
-        );
-        assert_eq!(
-            system_menu_clipboard_state_pure(false, true, true, true),
-            (true, true)
-        );
-    }
-
-    #[test]
-    fn terminal_not_ready_disables_copy_and_paste() {
-        assert_eq!(
-            system_menu_clipboard_state_pure(false, false, true, true),
-            (false, false)
-        );
     }
 
     #[test]

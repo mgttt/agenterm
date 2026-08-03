@@ -13,7 +13,7 @@ use crate::frontend::interaction::{
     FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ModalSurface, MouseReportInput,
     MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, modal_surface_from_gate,
     mouse_protocol_mode_from_str, mouse_report_encoding_from_str, mouse_report_outcome,
-    route_wheel, sidebar_scroll_offset_for_thumb_top,
+    route_wheel, sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -4318,23 +4318,22 @@ impl RemoteWindowState {
 
     fn system_menu_state(&self) -> (bool, bool) {
         let focused = self.window.focused_target();
-        if let FocusTarget::Control(control) = focused
-            && self.is_edit_control(control)
-        {
-            return (true, clipboard::has_unicode_text());
-        }
+        let edit_focus = match focused {
+            FocusTarget::Control(control) => self.is_edit_control(control),
+            _ => false,
+        };
         let terminal_ready = focused == FocusTarget::Window
             && !self.window_close_dialog.is_open()
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self.active_tab().is_some_and(|tab| !tab.dead);
-        (
-            terminal_ready
-                && self
-                    .terminal_selection
-                    .as_ref()
-                    .is_some_and(RemoteTerminalSelection::can_copy),
-            terminal_ready && clipboard::has_unicode_text(),
+        system_menu_clipboard_state(
+            edit_focus,
+            terminal_ready,
+            self.terminal_selection
+                .as_ref()
+                .is_some_and(RemoteTerminalSelection::can_copy),
+            clipboard::has_unicode_text(),
         )
     }
 

@@ -364,6 +364,21 @@ pub(crate) fn mouse_report_outcome(input: MouseReportInput) -> MouseReportOutcom
     mouse_report_bytes(encoding, code, column, row, pressed)
         .map_or(MouseReportOutcome::LocalSelection, MouseReportOutcome::Send)
 }
+pub(crate) fn system_menu_clipboard_state(
+    edit_focus: bool,
+    terminal_ready: bool,
+    selection_nonempty: bool,
+    clipboard_has_text: bool,
+) -> (bool, bool) {
+    if edit_focus {
+        return (true, clipboard_has_text);
+    }
+    (
+        terminal_ready && selection_nonempty,
+        terminal_ready && clipboard_has_text,
+    )
+}
+
 pub(crate) fn mouse_delivery(
     mode: ApplicationMouseMode,
     shift_override: bool,
@@ -438,7 +453,7 @@ mod tests {
         ModalSurface, MouseDelivery, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
         ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
         modal_surface_from_gate, mouse_delivery, mouse_report_outcome, route_wheel,
-        sidebar_scroll_offset_for_thumb_top,
+        sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
     };
 
     #[test]
@@ -820,6 +835,45 @@ mod tests {
         assert_eq!(sidebar_scroll_offset_for_thumb_top(geometry, 80, 100), 100);
     }
 
+    #[test]
+    fn system_menu_edit_focus_enables_copy_and_paste_follows_clipboard() {
+        assert_eq!(
+            system_menu_clipboard_state(true, false, false, false),
+            (true, false)
+        );
+        assert_eq!(
+            system_menu_clipboard_state(true, false, false, true),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn system_menu_terminal_ready_requires_selection_and_clipboard() {
+        assert_eq!(
+            system_menu_clipboard_state(false, true, false, false),
+            (false, false)
+        );
+        assert_eq!(
+            system_menu_clipboard_state(false, true, true, false),
+            (true, false)
+        );
+        assert_eq!(
+            system_menu_clipboard_state(false, true, false, true),
+            (false, true)
+        );
+        assert_eq!(
+            system_menu_clipboard_state(false, true, true, true),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn system_menu_terminal_not_ready_disables_copy_and_paste() {
+        assert_eq!(
+            system_menu_clipboard_state(false, false, true, true),
+            (false, false)
+        );
+    }
     #[test]
     fn mouse_report_outcome_dedupes_motion_and_encodes_modifiers() {
         let deduplicated = MouseReportInput {
