@@ -636,6 +636,25 @@ impl ShellProjection {
 /// How many per-tab detail rows the Cockpit shows before collapsing the rest.
 const COCKPIT_TAB_ROWS_SHOWN: usize = 16;
 
+/// Neutralize control characters (embedded newlines, ANSI escapes) from a
+/// user-set tab title or note before it goes into a diagnostic line.
+///
+/// Tab names come from `rename-window`'s free-form argument with no content
+/// restriction beyond a byte-length cap, but every Cockpit line here is
+/// assumed to render as exactly one terminal row.
+fn cockpit_display_field(value: &str) -> std::borrow::Cow<'_, str> {
+    if value.chars().any(char::is_control) {
+        std::borrow::Cow::Owned(
+            value
+                .chars()
+                .map(|ch| if ch.is_control() { ' ' } else { ch })
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
+}
+
 fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
     let authority = server.logical_instance.as_deref().unwrap_or("explicit");
     let version = server.version.as_deref().unwrap_or("unknown");
@@ -647,7 +666,7 @@ fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
                 .tabs
                 .iter()
                 .find(|tab| tab.id == id)
-                .map(|tab| format!("{id} · {}", tab.title))
+                .map(|tab| format!("{id} · {}", cockpit_display_field(&tab.title)))
         })
         .unwrap_or_else(|| "none".to_owned());
     let mut lines = vec![
@@ -681,11 +700,16 @@ fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
             let note = if tab.note.is_empty() {
                 String::new()
             } else {
-                format!(" · {}", tab.note)
+                format!(" · {}", cockpit_display_field(&tab.note))
             };
             lines.push(format!(
                 "  #{:<3}{} {} · {} · {}{}",
-                tab.index, tab.id, tab.title, state, pid, note
+                tab.index,
+                tab.id,
+                cockpit_display_field(&tab.title),
+                state,
+                pid,
+                note
             ));
         }
         if server.tabs.len() > COCKPIT_TAB_ROWS_SHOWN {
@@ -3230,6 +3254,50 @@ mod tests {
         assert!(lines[6].contains("Tabs        2 total"));
         assert!(lines[7].contains("#0  @1 build · running · pid 41"));
         assert!(lines[8].contains("#1  @2 finished · dead · pid 42"));
+    }
+
+    #[test]
+    fn cockpit_lines_neutralize_control_characters_in_tab_names_and_notes() {
+        // rename-window accepts any argument string with only a byte-length
+        // cap (see UiBootstrapSnapshot::validate) - a title or note carrying
+        // an embedded newline or ANSI escape must not corrupt this function's
+        // one-line-per-Vec-entry invariant.
+        let tabs = vec![TabSummary {
+            id: "@1".to_owned(),
+            index: 0,
+            title: "evil\ntitle\x1b[31m".to_owned(),
+            note: "note\r\nwith break".to_owned(),
+            process_id: Some(41),
+            dead: false,
+        }];
+        let server = ConnectedServer {
+            endpoint: "pipe:test".to_owned(),
+            logical_instance: Some("dev".to_owned()),
+            pid: 123,
+            epoch: "epoch".to_owned(),
+            sequence: 1,
+            version: Some("0.1.12".to_owned()),
+            build: Value::Null,
+            active_tab_id: Some("@1".to_owned()),
+            tab_counts: TabCounts::from_tabs(&tabs),
+            tabs,
+            components: ComponentAvailability {
+                server: "available",
+                workflows: "unavailable",
+                extensions: "unavailable",
+                info_hub: "unavailable",
+            },
+        };
+
+        let lines = connected_cockpit_lines(&server);
+        assert!(
+            lines.iter().all(|line| !line.chars().any(char::is_control)),
+            "a control character from a tab title/note leaked into a cockpit line: {lines:?}"
+        );
+        assert!(lines[4].contains("evil title"));
+        assert!(lines.iter().any(|line| line.contains("evil title")
+            && line.contains("note")
+            && line.contains("with break")));
     }
 
     #[test]
