@@ -52,6 +52,14 @@ fn require_window_control(control, name) {
     control
 }
 
+fn wheel_message_lparam(gui) {
+    let window_rect = gui.window_rect();
+    let client_rect = gui.window_client_rect();
+    let x = window_rect.left + client_rect.width / 2;
+    let y = window_rect.top + client_rect.height / 2;
+    y * 65536 + x
+}
+
 fn double_click_point(gui_child, x, y) {
     gui_child.window_pointer("click", x, y);
     gui_child.window_message(0x0203, 0, y * 65536 + x);
@@ -2185,7 +2193,7 @@ try {
         cli,
         ["ui-snapshot"]
     ).event_position;
-    gui.window_message(0x020A, 7864320, 0);
+    gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
     wait_viewport_mutation(
         context,
         cli,
@@ -2205,7 +2213,7 @@ try {
         cli,
         ["ui-snapshot"]
     ).event_position;
-    gui.window_message(0x020A, 4287102976, 0);
+    gui.window_message(0x020A, 4287102976, wheel_message_lparam(gui));
     wait_viewport_mutation(
         context,
         cli,
@@ -2316,13 +2324,13 @@ try {
         alternate_snapshot.focus.window_id == alternate_id,
         "remote_ui_raw_application_not_active"
     );
-    gui.window_message(0x020A, 7864320, 0);
+    gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
     wait_file_text(
         alternate_result,
         "up=27,79,65,27,79,65,27,79,65",
         "remote_ui_alternate_wheel_up_input_invalid"
     );
-    gui.window_message(0x020A, 4287102976, 0);
+    gui.window_message(0x020A, 4287102976, wheel_message_lparam(gui));
     wait_file_text(
         alternate_result,
         "up=27,79,65,27,79,65,27,79,65;down=27,79,66,27,79,66,27,79,66",
