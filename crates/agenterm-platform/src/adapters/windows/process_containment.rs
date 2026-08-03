@@ -413,4 +413,58 @@ mod tests {
             ProcessContainmentErrorKind::Closed
         );
     }
+
+    #[test]
+    fn process_ids_grows_the_buffer_past_the_initial_capacity() {
+        // process_ids()'s initial buffer holds 16 process ids; assigning more
+        // than that forces the ERROR_MORE_DATA regrowth branch, which the
+        // other tests here never exercise (they only ever assign one child).
+        // Each `cmd.exe /c "ping ..."` child also spawns a ping.exe
+        // descendant that inherits job membership automatically, so the
+        // observed set is a superset of the directly-assigned pids, not an
+        // exact match -- assert the subset relationship and that the count
+        // actually exceeded the initial capacity, rather than exact equality.
+        const CHILD_COUNT: usize = 20;
+        let containment = crate::process_containment::ProcessContainment::create(
+            None,
+            crate::process_containment::ProcessContainmentOptions {
+                terminate_on_last_close: true,
+                ..crate::process_containment::ProcessContainmentOptions::default()
+            },
+        )
+        .expect("create containment");
+        let mut children = Vec::with_capacity(CHILD_COUNT);
+        for _ in 0..CHILD_COUNT {
+            let child = Command::new("cmd.exe")
+                .args(["/d", "/c", "ping -n 30 127.0.0.1 >nul"])
+                .spawn()
+                .expect("spawn containment child");
+            let process = ProcessReference::duplicate_from(child.as_handle())
+                .expect("retain containment child");
+            containment.assign(&process).expect("assign child");
+            children.push(child);
+        }
+        let assigned: std::collections::HashSet<u32> =
+            children.iter().map(|child| child.id()).collect();
+        let observed: std::collections::HashSet<u32> = containment
+            .process_ids()
+            .expect("query members past the initial buffer capacity")
+            .into_iter()
+            .collect();
+        assert!(
+            assigned.is_subset(&observed),
+            "assigned {assigned:?} is not a subset of observed {observed:?}"
+        );
+        assert!(
+            observed.len() > 16,
+            "expected more than the initial 16-slot capacity, got {}",
+            observed.len()
+        );
+        containment
+            .terminate(37)
+            .expect("terminate over-capacity containment");
+        for mut child in children {
+            let _ = child.wait();
+        }
+    }
 }
