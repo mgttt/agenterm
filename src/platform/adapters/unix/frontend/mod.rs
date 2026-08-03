@@ -3087,23 +3087,26 @@ impl UnixApp {
         let Some((geometry, current, maximum)) = self.sidebar_scrollbar_state() else {
             return false;
         };
-        if !geometry.track.contains(x, y) {
+        let Some(hit) = scrollbar_hit_test(&geometry, x, y) else {
             return false;
-        }
+        };
         self.invalidate_sidebar_text_click();
         if maximum == 0 {
             return true;
         }
-        if geometry.thumb.contains(x, y) {
-            self.sidebar_scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
-        } else {
-            let page = self.sidebar_row_capacity().max(1);
-            self.sidebar_scroll_offset = if y < geometry.thumb.top {
-                current.saturating_sub(page)
-            } else {
-                current.saturating_add(page).min(maximum)
-            };
-            self.request_redraw();
+        match hit {
+            ScrollbarHit::Thumb => {
+                self.sidebar_scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
+            }
+            ScrollbarHit::TrackAbove | ScrollbarHit::TrackBelow => {
+                let page = self.sidebar_row_capacity().max(1);
+                self.sidebar_scroll_offset = if matches!(hit, ScrollbarHit::TrackAbove) {
+                    current.saturating_sub(page)
+                } else {
+                    current.saturating_add(page).min(maximum)
+                };
+                self.request_redraw();
+            }
         }
         true
     }

@@ -58,11 +58,12 @@ use crate::{
     ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
     ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand},
     ui_geometry::{
-        PixelRect as ProductPixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
-        TreeRowActionDensity, TreeRowGeometry, TreeRowMode, WHEEL_ROWS_PER_NOTCH, WorkspaceLayout,
-        WorkspaceLayoutInput, composer_geometry, pixel_rect_json, reset_tabs_width,
-        scrollback_for_thumb_top, sidebar_row_capacity, sidebar_scrollbar_geometry,
-        sidebar_scrollbar_track, sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
+        PixelRect as ProductPixelRect, ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH,
+        TerminalScrollbarGeometry, TreeRowActionDensity, TreeRowGeometry, TreeRowMode,
+        WHEEL_ROWS_PER_NOTCH, WorkspaceLayout, WorkspaceLayoutInput, composer_geometry,
+        pixel_rect_json, reset_tabs_width, scrollback_for_thumb_top, scrollbar_hit_test,
+        sidebar_row_capacity, sidebar_scrollbar_geometry, sidebar_scrollbar_track,
+        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
         terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y, wheel_delta_units,
         workspace_layout,
     },
@@ -4561,27 +4562,30 @@ impl RemoteWindowState {
         let Some((geometry, current, maximum)) = self.scrollbar_state() else {
             return false;
         };
-        if !geometry.track.contains(x, y) {
+        let Some(hit) = scrollbar_hit_test(&geometry, x, y) else {
             return false;
-        }
+        };
         self.cancel_terminal_selection();
         if maximum == 0 {
             return true;
         }
-        if geometry.thumb.contains(x, y) {
-            self.scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
-            let _ = self.window.set_pointer_capture(true);
-        } else {
-            let page = self
-                .active_tab()
-                .map(|tab| usize::try_from(tab.screen.rows).unwrap_or(1))
-                .unwrap_or(1)
-                .max(1);
-            self.set_scrollback(if y < geometry.thumb.top {
-                current.saturating_add(page).min(maximum)
-            } else {
-                current.saturating_sub(page)
-            });
+        match hit {
+            ScrollbarHit::Thumb => {
+                self.scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
+                let _ = self.window.set_pointer_capture(true);
+            }
+            ScrollbarHit::TrackAbove | ScrollbarHit::TrackBelow => {
+                let page = self
+                    .active_tab()
+                    .map(|tab| usize::try_from(tab.screen.rows).unwrap_or(1))
+                    .unwrap_or(1)
+                    .max(1);
+                self.set_scrollback(if matches!(hit, ScrollbarHit::TrackAbove) {
+                    current.saturating_add(page).min(maximum)
+                } else {
+                    current.saturating_sub(page)
+                });
+            }
         }
         true
     }
@@ -4625,24 +4629,27 @@ impl RemoteWindowState {
         let Some((geometry, current, maximum)) = self.sidebar_scrollbar_state() else {
             return false;
         };
-        if !geometry.track.contains(x, y) {
+        let Some(hit) = scrollbar_hit_test(&geometry, x, y) else {
             return false;
-        }
+        };
         self.invalidate_sidebar_text_click();
         if maximum == 0 {
             return true;
         }
-        if geometry.thumb.contains(x, y) {
-            self.sidebar_scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
-            let _ = self.window.set_pointer_capture(true);
-        } else {
-            let page = self.sidebar_row_capacity().max(1);
-            self.sidebar_scroll_offset = if y < geometry.thumb.top {
-                current.saturating_sub(page)
-            } else {
-                current.saturating_add(page).min(maximum)
-            };
-            self.layout_tab_editor();
+        match hit {
+            ScrollbarHit::Thumb => {
+                self.sidebar_scroll_drag = Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
+                let _ = self.window.set_pointer_capture(true);
+            }
+            ScrollbarHit::TrackAbove | ScrollbarHit::TrackBelow => {
+                let page = self.sidebar_row_capacity().max(1);
+                self.sidebar_scroll_offset = if matches!(hit, ScrollbarHit::TrackAbove) {
+                    current.saturating_sub(page)
+                } else {
+                    current.saturating_add(page).min(maximum)
+                };
+                self.layout_tab_editor();
+            }
         }
         true
     }
