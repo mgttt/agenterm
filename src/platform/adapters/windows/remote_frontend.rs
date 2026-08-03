@@ -37,6 +37,7 @@ use crate::{
             remote_word_selection,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope},
+        tab_editor::{TabEditorDialog, TabEditorFocus},
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
@@ -49,10 +50,7 @@ use crate::{
     },
     tab_tree::{TabTreeNode, tree_rows},
     theme::{Rgb, ThemeId, ThemePalette},
-    ui_bridge::{
-        UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,
-        UiTabBootstrap,
-    },
+    ui_bridge::{UiCellStyle, UiColor, UiScreenSnapshot, UiTabBootstrap},
     ui_client::{UiClientModel, tab_by_id},
     ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
     ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand},
@@ -656,7 +654,7 @@ struct RemoteWindowState {
     pending_terminal_paste: Option<RemoteTerminalPasteRequest>,
     terminal_paste_worker: RemoteTerminalPasteWorker,
     tabs_resize_dragging: bool,
-    editing_tab_id: Option<String>,
+    tab_editor_dialog: TabEditorDialog,
     window_close_pending: bool,
     new_terminal_dialog: NewTerminalDialog,
     settings_dialog: SettingsDialog,
@@ -845,7 +843,7 @@ impl RemoteWindowState {
             pending_terminal_paste: None,
             terminal_paste_worker,
             tabs_resize_dragging: false,
-            editing_tab_id: None,
+            tab_editor_dialog: TabEditorDialog::new(),
             window_close_pending: false,
             new_terminal_dialog: NewTerminalDialog::new(),
             settings_dialog: SettingsDialog::new(settings_default_draft),
@@ -901,7 +899,9 @@ impl RemoteWindowState {
                 let composer = self.client.as_ref().and_then(remote_composer_identity);
                 if active != self.last_active_id {
                     self.invalidate_sidebar_text_click();
-                    if self.editing_tab_id.as_ref() != active.as_ref() {
+                    if self.tab_editor_dialog.is_open()
+                        && self.tab_editor_dialog.target() != active.as_deref()
+                    {
                         self.finish_tab_edit(false);
                     }
                 }
@@ -964,7 +964,7 @@ impl RemoteWindowState {
                             self.client = Some(client);
                             self.server_recovery.on_reconnected(Instant::now());
                             self.last_published_snapshot = None;
-                            self.editing_tab_id = None;
+                            self.tab_editor_dialog.close();
                             self.terminal_selection = None;
                             self.close_confirmation.close();
                             self.cwd_edit_tab_id = None;
@@ -1151,11 +1151,11 @@ impl RemoteWindowState {
                 self.begin_tab_edit(tab);
             }
             "tab-editor-save" => {
-                if self.editing_tab_id.is_none() {
+                if !self.tab_editor_dialog.is_open() {
                     anyhow::bail!("no tab editor is open");
                 }
                 self.finish_tab_edit(true);
-                if self.editing_tab_id.is_some() {
+                if self.tab_editor_dialog.is_open() {
                     anyhow::bail!(
                         "{}",
                         self.last_error
@@ -1165,7 +1165,7 @@ impl RemoteWindowState {
                 }
             }
             "tab-editor-cancel" => {
-                if self.editing_tab_id.is_none() {
+                if !self.tab_editor_dialog.is_open() {
                     anyhow::bail!("no tab editor is open");
                 }
                 self.finish_tab_edit(false);
@@ -1312,7 +1312,7 @@ impl RemoteWindowState {
                     self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
                 } else if self.close_confirmation.is_open() {
                     self.finish_close_tab(false);
-                } else if self.editing_tab_id.is_some() {
+                } else if self.tab_editor_dialog.is_open() {
                     self.finish_tab_edit(false);
                 } else {
                     anyhow::bail!("no modal is pending");
@@ -1374,7 +1374,7 @@ impl RemoteWindowState {
                 let target = option_value(&command.args, "-t")
                     .or_else(|| self.active_tab().map(|tab| tab.id.as_str()))
                     .context("set-composer requires an active tab")?;
-                if self.editing_tab_id.as_deref() != Some(target) {
+                if self.tab_editor_dialog.target() != Some(target) {
                     anyhow::bail!("set-composer target is not open in the inline tab editor");
                 }
                 let text = positional_values(&command.args, &["-t"], &[]).join(" ");
@@ -1384,6 +1384,7 @@ impl RemoteWindowState {
                     .unwrap_or((normalized.as_str(), ""));
                 self.set_control_text(self.tab_title_edit, title);
                 self.set_control_text(self.tab_note_edit, note);
+                self.sync_tab_editor_drafts();
                 self.focus_control(self.tab_title_edit);
             }
             "focus" => {
@@ -1607,13 +1608,13 @@ impl RemoteWindowState {
     }
 
     fn reconcile_tab_editor(&mut self) {
-        let still_exists = self.editing_tab_id.as_deref().is_some_and(|id| {
+        let still_exists = self.tab_editor_dialog.target().is_some_and(|id| {
             self.client
                 .as_ref()
                 .is_some_and(|client| client.snapshot().tabs.iter().any(|tab| tab.id == id))
         });
-        if self.editing_tab_id.is_some() && !still_exists {
-            self.editing_tab_id = None;
+        if self.tab_editor_dialog.is_open() && !still_exists {
+            self.tab_editor_dialog.close();
             self.show_tab_editor(false);
         }
     }
@@ -1784,7 +1785,7 @@ impl RemoteWindowState {
                     })
                     .flatten();
                 let depth = remote_tab_depth(&source.tabs, tab);
-                let mode = if self.editing_tab_id.as_ref() == Some(&tab.id) {
+                let mode = if self.tab_editor_dialog.target() == Some(tab.id.as_str()) {
                     TreeRowMode::Editing
                 } else {
                     TreeRowMode::Normal
@@ -1936,21 +1937,17 @@ impl RemoteWindowState {
             .map(|tab| (tab.screen.rows, tab.screen.columns))
             .unwrap_or_default();
         let (desired_rows, desired_columns) = self.desired_terminal_grid();
-        let tab_editor = self.editing_tab_id.as_ref().map(|id| {
+        let tab_editor = if self.tab_editor_dialog.is_open() {
             let focused = self.window.focused_target();
-            serde_json::json!({
-                "target": id,
-                "name_length": self.control_text(self.tab_title_edit).chars().count(),
-                "note_length": self.control_text(self.tab_note_edit).chars().count(),
-                "focus": if focused == FocusTarget::Control(self.tab_title_edit) {
-                    Some("name")
-                } else if focused == FocusTarget::Control(self.tab_note_edit) {
-                    Some("note")
-                } else {
-                    None
-                },
-            })
-        });
+            if focused == FocusTarget::Control(self.tab_title_edit) {
+                self.tab_editor_dialog.set_focus(TabEditorFocus::Name);
+            } else if focused == FocusTarget::Control(self.tab_note_edit) {
+                self.tab_editor_dialog.set_focus(TabEditorFocus::Note);
+            }
+            Some(self.tab_editor_dialog.snapshot_modal())
+        } else {
+            None
+        };
         let modal = if self.window_close_pending {
             Some(serde_json::json!({
                 "kind": "confirm-window-close",
@@ -2002,7 +1999,7 @@ impl RemoteWindowState {
             "cwd-editor"
         } else if self.close_confirmation.is_open() {
             "tab-close"
-        } else if self.editing_tab_id.is_some() {
+        } else if self.tab_editor_dialog.is_open() {
             "tab-editor"
         } else {
             match self.current_focus_surface() {
@@ -2469,7 +2466,7 @@ impl RemoteWindowState {
     }
 
     fn layout_tab_editor(&self) {
-        let Some(tab_id) = self.editing_tab_id.as_deref() else {
+        let Some(tab_id) = self.tab_editor_dialog.target() else {
             self.show_tab_editor(false);
             return;
         };
@@ -2594,7 +2591,7 @@ impl RemoteWindowState {
         ] {
             self.set_control_visible(control, toolbar_visible);
         }
-        self.show_tab_editor(visible && self.tabs_visible && self.editing_tab_id.is_some());
+        self.show_tab_editor(visible && self.tabs_visible && self.tab_editor_dialog.is_open());
     }
 
     fn settings_modal_geometry(&self) -> (ProductPixelRect, [ProductPixelRect; 12]) {
@@ -3023,7 +3020,7 @@ impl RemoteWindowState {
                 && !self.window_close_pending
                 && !self.settings_dialog.is_open()
                 && !self.new_terminal_dialog.is_open()
-                && self.editing_tab_id.is_none()
+                && !self.tab_editor_dialog.is_open()
                 && !self.close_confirmation.is_open()
                 && self.cwd_edit_tab_id.is_none();
             if !current {
@@ -3146,7 +3143,7 @@ impl RemoteWindowState {
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.close_confirmation.is_open()
-            || self.editing_tab_id.is_some()
+            || self.tab_editor_dialog.is_open()
         {
             return;
         }
@@ -3237,7 +3234,7 @@ impl RemoteWindowState {
     }
 
     fn handle_tab_editor_keydown(&mut self, key: u32, modifiers: input::ModifierState) -> bool {
-        if self.editing_tab_id.is_none() {
+        if !self.tab_editor_dialog.is_open() {
             return false;
         }
         let focused = self.window.focused_target();
@@ -3658,38 +3655,46 @@ impl RemoteWindowState {
         self.window.focus();
     }
 
+    fn sync_tab_editor_drafts(&mut self) {
+        if !self.tab_editor_dialog.is_open() {
+            return;
+        }
+        self.tab_editor_dialog
+            .set_name_draft(self.control_text(self.tab_title_edit));
+        self.tab_editor_dialog
+            .set_note_draft(self.control_text(self.tab_note_edit));
+    }
+
     fn begin_tab_edit(&mut self, tab: UiTabBootstrap) {
         self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
-        self.editing_tab_id = Some(tab.id);
-        self.set_control_text(self.tab_title_edit, &tab.title);
-        self.set_control_text(self.tab_note_edit, &tab.note);
+        let tab_id = tab.id.clone();
+        let title = tab.title.clone();
+        let note = tab.note.clone();
+        self.tab_editor_dialog
+            .open(tab_id, title.clone(), note.clone());
+        self.set_control_text(self.tab_title_edit, &title);
+        self.set_control_text(self.tab_note_edit, &note);
         self.layout_tab_editor();
         self.focus_control(self.tab_title_edit);
     }
 
     fn finish_tab_edit(&mut self, save: bool) {
-        let Some(tab_id) = self.editing_tab_id.clone() else {
+        if !self.tab_editor_dialog.is_open() {
+            return;
+        }
+        self.sync_tab_editor_drafts();
+        let Some(tab_id) = self.tab_editor_dialog.target().map(str::to_owned) else {
             return;
         };
         if save {
-            let title = self.control_text(self.tab_title_edit);
-            let note = self.control_text(self.tab_note_edit);
-            if title.trim().is_empty() {
-                self.last_error = Some("Tab title cannot be empty".to_owned());
-                return;
-            }
-            if title.len() > UI_TAB_TITLE_MAX_BYTES {
-                self.last_error = Some(format!(
-                    "Tab title exceeds the {UI_TAB_TITLE_MAX_BYTES}-byte UI limit"
-                ));
-                return;
-            }
-            if note.len() > UI_TAB_NOTE_MAX_BYTES {
-                self.last_error = Some(format!(
-                    "Tab note exceeds the {UI_TAB_NOTE_MAX_BYTES}-byte UI limit"
-                ));
-                return;
-            }
+            let (title, note) = match self.tab_editor_dialog.capture(true) {
+                Ok(Some(changes)) => (changes.name, changes.note),
+                Ok(None) => return,
+                Err(error) => {
+                    self.last_error = Some(error);
+                    return;
+                }
+            };
             let result = self
                 .client
                 .as_mut()
@@ -3715,7 +3720,7 @@ impl RemoteWindowState {
                 return;
             }
         }
-        self.editing_tab_id = None;
+        self.tab_editor_dialog.close();
         self.show_tab_editor(false);
         self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
         self.window.focus();
@@ -4335,7 +4340,7 @@ impl RemoteWindowState {
             window_close_pending: self.window_close_pending,
             settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
-            tab_editor_open: self.editing_tab_id.is_some(),
+            tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_edit_tab_id.is_some(),
         }
@@ -5711,7 +5716,7 @@ impl RemoteWindowState {
                     palette.muted_text.canvas_rgb(),
                 );
             }
-            if self.editing_tab_id.as_deref() == Some(tab.id.as_str()) {
+            if self.tab_editor_dialog.target() == Some(tab.id.as_str()) {
                 continue;
             }
             if active {
@@ -6091,6 +6096,9 @@ impl RemoteWindowApplication {
             || control_id == state.new_https_proxy
         {
             state.sync_new_terminal_drafts();
+        }
+        if control_id == state.tab_title_edit || control_id == state.tab_note_edit {
+            state.sync_tab_editor_drafts();
         }
         if control_id == state.settings_font || control_id == state.settings_size {
             state.sync_settings_drafts();

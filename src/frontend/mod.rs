@@ -21,6 +21,7 @@ pub(crate) mod interaction;
 pub(crate) mod new_terminal;
 pub(crate) mod selection;
 pub(crate) mod settings;
+pub(crate) mod tab_editor;
 pub(crate) mod toolbar;
 pub(crate) mod window;
 

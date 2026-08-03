@@ -84,6 +84,7 @@ use crate::frontend::selection::{
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
 };
 use crate::frontend::settings::{self, SettingsDialog};
+use crate::frontend::tab_editor::{TabEditorDialog, TabEditorFocus};
 use crate::ui_snapshot::{
     PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
     embedded_window_json, event_position_json, locale_json, schema_version_json,
@@ -477,21 +478,6 @@ enum SidebarTabAction {
     Cancel,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TabEditorFocus {
-    Name,
-    Note,
-}
-
-impl TabEditorFocus {
-    const fn snapshot_str(self) -> &'static str {
-        match self {
-            Self::Name => "name",
-            Self::Note => "note",
-        }
-    }
-}
-
 pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if let Some(result) = gui_help_result(&arguments, UNIX_GUI_USAGE) {
@@ -596,10 +582,7 @@ struct UnixApp {
     new_terminal_focus: NewTerminalFocusView,
     window_state_tracker: WindowStateTracker,
     collapsed_tabs: HashSet<u64>,
-    note_edit_target: Option<u64>,
-    tab_name_draft: String,
-    tab_note_draft: String,
-    tab_editor_focus: TabEditorFocus,
+    tab_editor_dialog: TabEditorDialog,
     wheel_accumulator: WheelAccumulator,
     scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_scroll_offset: usize,
@@ -702,10 +685,7 @@ impl UnixApp {
             new_terminal_focus: NewTerminalFocusView::InitialCommand,
             window_state_tracker: WindowStateTracker::new(),
             collapsed_tabs: HashSet::new(),
-            note_edit_target: None,
-            tab_name_draft: String::new(),
-            tab_note_draft: String::new(),
-            tab_editor_focus: TabEditorFocus::Name,
+            tab_editor_dialog: TabEditorDialog::new(),
             wheel_accumulator: WheelAccumulator::default(),
             scroll_drag: None,
             sidebar_scroll_offset: 0,
@@ -933,14 +913,14 @@ impl UnixApp {
             self.request_redraw();
             return;
         }
-        if self.note_edit_target.is_some() {
-            let multiline = self.tab_editor_focus == TabEditorFocus::Note;
+        if self.tab_editor_dialog.is_open() {
+            let multiline = self.tab_editor_dialog.focus() == TabEditorFocus::Note;
             let text = input::normalize_ime_commit(raw, multiline);
             let select_all = &mut self.text_field_select_all;
-            let draft = match self.tab_editor_focus {
-                TabEditorFocus::Name => &mut self.tab_name_draft,
-                TabEditorFocus::Note => &mut self.tab_note_draft,
-            };
+            let draft = self
+                .tab_editor_dialog
+                .active_draft_mut()
+                .expect("tab editor is open");
             input::prepare_composer_edit(draft, select_all);
             draft.push_str(&text);
             self.request_redraw();
@@ -1075,7 +1055,7 @@ impl UnixApp {
             window_close_pending: self.window_close_pending,
             settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
-            tab_editor_open: self.note_edit_target.is_some(),
+            tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_edit_target.is_some(),
         }
@@ -1097,7 +1077,7 @@ impl UnixApp {
         if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         if self.cwd_edit_target.is_some() {
@@ -1299,7 +1279,7 @@ impl UnixApp {
         if self.settings_dialog.is_open()
             || self.close_confirmation.is_open()
             || self.window_close_pending
-            || self.note_edit_target.is_some()
+            || self.tab_editor_dialog.is_open()
         {
             return Err("another modal surface is active".to_owned());
         }
@@ -1441,7 +1421,7 @@ impl UnixApp {
             return;
         }
         let _ = self.cancel_terminal_selection(true);
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         if self.settings_dialog.is_open() {
@@ -1587,7 +1567,7 @@ impl UnixApp {
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         self.sync_composer_buffer_to_tab();
@@ -1625,6 +1605,13 @@ impl UnixApp {
             .unwrap_or(self.config.terminal_font_size)
     }
 
+    fn tab_editor_target_id(&self) -> Option<u64> {
+        self.tab_editor_dialog
+            .target()
+            .and_then(|target| target.strip_prefix('@'))
+            .and_then(|id| id.parse().ok())
+    }
+
     fn open_tab_editor_for(&mut self, tab_id: u64) -> Result<(), String> {
         if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
@@ -1632,10 +1619,8 @@ impl UnixApp {
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id) else {
             return Err(format!("can't find tab: @{tab_id}"));
         };
-        self.note_edit_target = Some(tab_id);
-        self.tab_name_draft = tab.title.clone();
-        self.tab_note_draft = tab.note.clone();
-        self.tab_editor_focus = TabEditorFocus::Name;
+        self.tab_editor_dialog
+            .open(format!("@{tab_id}"), tab.title.clone(), tab.note.clone());
         self.text_field_select_all = false;
         self.active = Some(tab_id);
         self.ensure_editing_tab_visible();
@@ -1644,7 +1629,7 @@ impl UnixApp {
     }
 
     fn ensure_editing_tab_visible(&mut self) {
-        let Some(tab_id) = self.note_edit_target else {
+        let Some(tab_id) = self.tab_editor_target_id() else {
             return;
         };
         let rows = self.visible_tree_rows();
@@ -1661,33 +1646,21 @@ impl UnixApp {
     }
 
     fn complete_tab_editor(&mut self, save: bool) -> Result<(), String> {
-        let Some(tab_id) = self.note_edit_target else {
+        let Some(tab_id) = self.tab_editor_target_id() else {
             return Err("tab editor is not open".to_owned());
         };
         if save {
-            let name = self.tab_name_draft.trim();
-            if name.is_empty() {
-                return Err("Tab title cannot be empty".to_owned());
-            }
-            if name.len() > crate::ui_bridge::UI_TAB_TITLE_MAX_BYTES {
-                return Err(format!(
-                    "Tab title exceeds the {}-byte UI limit",
-                    crate::ui_bridge::UI_TAB_TITLE_MAX_BYTES
-                ));
-            }
-            let note = self.tab_note_draft.clone();
-            if note.len() > crate::ui_bridge::UI_TAB_NOTE_MAX_BYTES {
-                return Err(format!(
-                    "Tab note exceeds the {}-byte UI limit",
-                    crate::ui_bridge::UI_TAB_NOTE_MAX_BYTES
-                ));
-            }
+            let changes = self
+                .tab_editor_dialog
+                .capture(true)?
+                .expect("tab editor capture returns changes when saving");
+            let name = changes.name;
+            let note = changes.note;
             let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                 return Err(format!("can't find tab: @{tab_id}"));
             };
             let previous_name = self.tabs[position].title.clone();
             let previous_note = self.tabs[position].note.clone();
-            let name = name.to_owned();
             self.tabs[position].title = name.clone();
             self.tabs[position].note = note.clone();
             if previous_name != name {
@@ -1711,10 +1684,7 @@ impl UnixApp {
                 );
             }
         }
-        self.note_edit_target = None;
-        self.tab_name_draft.clear();
-        self.tab_note_draft.clear();
-        self.tab_editor_focus = TabEditorFocus::Name;
+        self.tab_editor_dialog.close();
         self.text_field_select_all = false;
         self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor-close");
         self.request_redraw();
@@ -1722,24 +1692,20 @@ impl UnixApp {
     }
 
     fn tab_editor_draft_mut(&mut self) -> Option<&mut String> {
-        self.note_edit_target?;
-        match self.tab_editor_focus {
-            TabEditorFocus::Name => Some(&mut self.tab_name_draft),
-            TabEditorFocus::Note => Some(&mut self.tab_note_draft),
-        }
+        self.tab_editor_dialog.active_draft_mut()
     }
 
     fn handle_tab_editor_key(&mut self, event: &NormalizedKeyEvent) -> bool {
-        if self.note_edit_target.is_none() {
+        if !self.tab_editor_dialog.is_open() {
             return false;
         }
-        let multiline = self.tab_editor_focus == TabEditorFocus::Note;
+        let multiline = self.tab_editor_dialog.focus() == TabEditorFocus::Note;
         let action = {
             let select_all = &mut self.text_field_select_all;
-            let draft = match self.tab_editor_focus {
-                TabEditorFocus::Name => &mut self.tab_name_draft,
-                TabEditorFocus::Note => &mut self.tab_note_draft,
-            };
+            let draft = self
+                .tab_editor_dialog
+                .active_draft_mut()
+                .expect("tab editor is open");
             input::text_field_key_action(event, draft, multiline, select_all)
         };
         match action {
@@ -1749,7 +1715,7 @@ impl UnixApp {
             input::TextFieldKeyAction::NextField => {
                 self.text_field_select_all = false;
                 self.reset_ime_context();
-                self.tab_editor_focus = TabEditorFocus::Note;
+                self.tab_editor_dialog.next_field();
                 self.request_redraw();
             }
             input::TextFieldKeyAction::Submit => {
@@ -1782,19 +1748,17 @@ impl UnixApp {
                 if let Ok(raw) = clipboard::get_clipboard_text() {
                     let normalized = raw.replace("\r\n", "\n");
                     let select_all = &mut self.text_field_select_all;
-                    let text = match self.tab_editor_focus {
-                        TabEditorFocus::Name => &mut self.tab_name_draft,
-                        TabEditorFocus::Note => &mut self.tab_note_draft,
-                    };
-                    if self.note_edit_target.is_some() {
-                        input::prepare_composer_edit(text, select_all);
-                        text.push_str(&normalized);
-                        self.set_status_message(format!(
-                            "Pasted {} characters into tab editor",
-                            normalized.len()
-                        ));
-                        self.request_redraw();
-                    }
+                    let text = self
+                        .tab_editor_dialog
+                        .active_draft_mut()
+                        .expect("tab editor is open");
+                    input::prepare_composer_edit(text, select_all);
+                    text.push_str(&normalized);
+                    self.set_status_message(format!(
+                        "Pasted {} characters into tab editor",
+                        normalized.len()
+                    ));
+                    self.request_redraw();
                 }
             }
             input::TextFieldKeyAction::Ignored => {}
@@ -1932,7 +1896,7 @@ impl UnixApp {
         depth: usize,
         tab_id: u64,
     ) -> crate::ui_geometry::TreeRowGeometry {
-        let mode = if self.note_edit_target == Some(tab_id) {
+        let mode = if self.tab_editor_target_id() == Some(tab_id) {
             TreeRowMode::Editing
         } else {
             TreeRowMode::Normal
@@ -1967,7 +1931,7 @@ impl UnixApp {
 
     fn is_edit_focus(&self) -> bool {
         self.focus_surface == UnixFocusSurface::Composer
-            || self.note_edit_target.is_some()
+            || self.tab_editor_dialog.is_open()
             || self.new_terminal_dialog.is_open()
     }
 
@@ -2045,14 +2009,10 @@ impl UnixApp {
                 dragging: selection.dragging,
             }
         });
-        let tab_editor = self.note_edit_target.map(|id| {
-            serde_json::json!({
-                "target": format!("@{id}"),
-                "name_length": self.tab_name_draft.chars().count(),
-                "note_length": self.tab_note_draft.chars().count(),
-                "focus": self.tab_editor_focus.snapshot_str(),
-            })
-        });
+        let tab_editor = self
+            .tab_editor_dialog
+            .is_open()
+            .then(|| self.tab_editor_dialog.snapshot_modal());
         let tabs = all_rows
             .iter()
             .filter_map(|row| {
@@ -2305,8 +2265,8 @@ impl UnixApp {
                 }))
             } else if self.new_terminal_dialog.is_open() {
                 Some(self.new_terminal_dialog.snapshot_modal())
-            } else if self.note_edit_target.is_some() {
-                Some(serde_json::json!({"kind": "tab-editor"}))
+            } else if self.tab_editor_dialog.is_open() {
+                Some(self.tab_editor_dialog.snapshot_modal())
             } else {
                 self.close_confirmation.is_open().then(|| self.close_confirmation.snapshot_modal())
             },
@@ -2374,7 +2334,7 @@ impl UnixApp {
         if row.id != active_id {
             return None;
         }
-        let mode = if self.note_edit_target == Some(row.id) {
+        let mode = if self.tab_editor_target_id() == Some(row.id) {
             TreeRowMode::Editing
         } else {
             TreeRowMode::Normal
@@ -2408,13 +2368,15 @@ impl UnixApp {
     }
 
     fn sidebar_tab_editor_hit(&self, x: i32, y: i32) -> Option<TabEditorFocus> {
-        self.note_edit_target?;
+        if !self.tab_editor_dialog.is_open() {
+            return None;
+        }
         let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
         let row_index = sidebar_row_at_y(y as u32, tree_height)?;
         let source_index = self.sidebar_offset() + row_index;
         let visible_rows = self.visible_tree_rows();
         let row = visible_rows.get(source_index)?;
-        if self.note_edit_target != Some(row.id) {
+        if self.tab_editor_target_id() != Some(row.id) {
             return None;
         }
         let geometry = sidebar_tree_row_geometry(
@@ -2529,15 +2491,15 @@ impl UnixApp {
             return;
         }
         if let Some(focus) = self.sidebar_tab_editor_hit(click_x, click_y) {
-            if self.tab_editor_focus != focus {
+            if self.tab_editor_dialog.focus() != focus {
                 self.text_field_select_all = false;
                 self.reset_ime_context();
             }
-            self.tab_editor_focus = focus;
+            self.tab_editor_dialog.set_focus(focus);
             self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor-focus");
             return;
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         let text_tab = self.sidebar_tab_text_at(click_x, click_y);
@@ -2610,7 +2572,7 @@ impl UnixApp {
         if self.handle_window_close_click(x, y) {
             return;
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         if self.handle_status_click(x as i32, y as i32) {
@@ -3349,13 +3311,13 @@ impl UnixApp {
                 NewTerminalFocusView::HttpsProxy => modal.https_proxy_field,
             });
         }
-        if let Some(tab_id) = self.note_edit_target {
+        if let Some(tab_id) = self.tab_editor_target_id() {
             let rows = self.sidebar_viewport_rows();
             let (viewport_position, row) =
                 rows.iter().enumerate().find(|(_, row)| row.id == tab_id)?;
             let geometry = self.sidebar_row_geometry(viewport_position, row.depth, tab_id);
             let editors = geometry.editors?;
-            let field = match self.tab_editor_focus {
+            let field = match self.tab_editor_dialog.focus() {
                 TabEditorFocus::Name => editors.name,
                 TabEditorFocus::Note => editors.note,
             };
@@ -4059,15 +4021,16 @@ impl UnixApp {
             .then(|| WindowCloseView::for_client(logical_width, logical_height));
         let resize_grip = layout.resize_grip.map(u32_rect);
 
-        let tab_editor = self.note_edit_target.map(|_| TabEditorView {
-            name_draft: self.tab_name_draft.clone(),
-            note_draft: self.tab_note_draft.clone(),
-            focus: match self.tab_editor_focus {
+        let tab_editor = self.tab_editor_dialog.is_open().then(|| TabEditorView {
+            name_draft: self.tab_editor_dialog.name_draft().to_owned(),
+            note_draft: self.tab_editor_dialog.note_draft().to_owned(),
+            focus: match self.tab_editor_dialog.focus() {
                 TabEditorFocus::Name => TabEditorFocusView::Name,
                 TabEditorFocus::Note => TabEditorFocusView::Note,
             },
             selected_all: self.text_field_select_all,
         });
+        let editing_tab_id = self.tab_editor_target_id();
         let ime_preedit = ime_anchor
             .filter(|_| !self.ime_preedit.is_empty())
             .map(|anchor| ImePreeditView {
@@ -4124,7 +4087,7 @@ impl UnixApp {
                 terminal_at_logical_resolution: !hidpi_terminal_active,
                 sidebar_rows: &sidebar_rows,
                 sidebar_tree: layout.sidebar_tree,
-                editing_tab_id: self.note_edit_target,
+                editing_tab_id,
                 tab_editor,
                 workspace_toolbar,
                 terminal_top: layout.terminal.top.max(0) as u32,
@@ -4316,7 +4279,7 @@ impl UnixApp {
         if self.cwd_edit_target == Some(id) {
             self.close_cwd_editor();
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
@@ -4491,7 +4454,7 @@ impl ControlHost for UnixApp {
         }
         if surface == UnixFocusSurface::Settings
             && !self.settings_dialog.is_open()
-            && self.note_edit_target.is_none()
+            && !self.tab_editor_dialog.is_open()
         {
             return Err(format!(
                 "focus surface is unavailable: {}",
@@ -4541,14 +4504,14 @@ impl ControlHost for UnixApp {
 
     fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
         let id = self.tabs[position].id;
-        if let Some(editing_id) = self.note_edit_target {
+        if let Some(editing_id) = self.tab_editor_target_id() {
             if editing_id != id {
                 return Err("set-composer target is not open in the inline tab editor".to_owned());
             }
             let normalized = text.replace("\r\n", "\n");
             let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
-            self.tab_name_draft = name.to_owned();
-            self.tab_note_draft = note.to_owned();
+            self.tab_editor_dialog.set_name_draft(name.to_owned());
+            self.tab_editor_dialog.set_note_draft(note.to_owned());
             self.request_redraw();
             return Ok(());
         }
@@ -4580,7 +4543,7 @@ impl ControlHost for UnixApp {
             return Ok(());
         }
         self.invalidate_sidebar_text_click();
-        if !visible && self.note_edit_target.is_some() {
+        if !visible && self.tab_editor_dialog.is_open() {
             self.complete_tab_editor(false)?;
         }
         self.config.tabs_visible = visible;
@@ -4673,7 +4636,7 @@ impl ControlHost for UnixApp {
             self.close_cwd_editor();
             return Ok(true);
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             self.complete_tab_editor(false)?;
             return Ok(true);
         }
@@ -4808,7 +4771,7 @@ impl ControlHost for UnixApp {
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
-        if self.note_edit_target.is_some() {
+        if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
         if self.focus_surface == UnixFocusSurface::Composer {
@@ -4967,7 +4930,7 @@ impl UnixApp {
                     }
                     return;
                 }
-                if self.note_edit_target.is_some() {
+                if self.tab_editor_dialog.is_open() {
                     self.handle_tab_editor_key(&event);
                     return;
                 }

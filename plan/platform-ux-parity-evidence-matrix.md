@@ -1,4 +1,4 @@
-﻿# 平台 UX 对齐证据矩阵（并发回归模板）
+# 平台 UX 对齐证据矩阵（并发回归模板）
 
 本文件用于每轮回归后的“分支-场景-证据”归并。未通过项直接阻断该分支收敛，先补齐 `platform` 能力或产品行为再推进。
 
@@ -233,6 +233,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | new-terminal modal | src/frontend/new_terminal.rs | open/reset/校验/action 与 shell argv 单点；Unix embedded 迁出 adapter，Windows remote 继续原生控件呈现，状态/校验/action/argv 与 Unix 共用共享 dialog 与 platform policy | Supported | Supported | Supported |
 | settings modal | src/frontend/settings.rs | open/重置/校验/scope/override/theme/action 单点；Unix embedded 与 Windows remote 共用 SettingsDialog，adapter 只负责原生呈现与事件映射 | Supported | Supported | Supported |
 | live-tab close confirmation | src/frontend/close_confirmation.rs | open/close/snapshot 单点；Unix embedded 与 Windows remote 共用 CloseConfirmation，adapter 只负责原生确认控件与关闭执行 | Supported | Supported | Supported |
+| inline tab editor | src/frontend/tab_editor.rs | open/draft/focus/校验/snapshot 单点；Unix embedded 与 Windows remote 共用 TabEditorDialog，adapter 只保留原生编辑控件/IME/事件映射 | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 
