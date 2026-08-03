@@ -443,6 +443,30 @@ fn incompatible_listener(
     throw code + "_ready_timeout";
 }
 
+fn wait_incompatible_snapshot(
+    context, control_center, registry, runtime, incompatible_endpoint
+) {
+    for attempt in 0..100 {
+        let snapshot = json_command(
+            context,
+            control_center,
+            registry,
+            runtime,
+            [
+                "snapshot", "--json",
+                "--endpoint", incompatible_endpoint
+            ]
+        );
+        if snapshot.server_state == "unavailable"
+            && snapshot.server_reason == "server_incompatible"
+        {
+            return snapshot;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "control_center_macos_incompatible_snapshot";
+}
+
 fn prove_pty(context, cli, registry, runtime, label) {
     let marker = "AGENTERM_CC_MACOS_" + label + "_" + context.run_id;
     let created = invoke(
@@ -1159,20 +1183,12 @@ try {
     );
     owned_children.push(incompatible_probe);
     let incompatible_endpoint = "tcp:" + context.address;
-    let incompatible = json_command(
+    let incompatible = wait_incompatible_snapshot(
         context,
         control_center,
         registry,
         runtime,
-        [
-            "snapshot", "--json",
-            "--endpoint", incompatible_endpoint
-        ]
-    );
-    require(
-        incompatible.server_state == "unavailable"
-            && incompatible.server_reason == "server_incompatible",
-        "control_center_macos_incompatible_snapshot"
+        incompatible_endpoint
     );
     std::fs::write(incompatible_probe_stop, "stop");
     let incompatible_probe_output = wait_exit(
