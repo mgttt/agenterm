@@ -672,7 +672,6 @@ fn tree_row_geometry_impl(
     }
 }
 
-#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
     PixelRect {
         left: sidebar_tree.left,
@@ -682,7 +681,6 @@ pub(crate) fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
     }
 }
 
-#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_row_capacity(sidebar_tree_height: i32) -> usize {
     usize::try_from((sidebar_tree_height - TAB_TOP).max(0) / TAB_HEIGHT)
         .unwrap_or_default()
@@ -799,7 +797,6 @@ pub(crate) fn tree_connector_segments(
     segments
 }
 
-#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_scrollbar_geometry(
     track: PixelRect,
     offset: usize,

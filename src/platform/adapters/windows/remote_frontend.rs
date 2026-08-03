@@ -57,10 +57,10 @@ use crate::{
     ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
     ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand},
     ui_geometry::{
-        PixelRect as ProductPixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH,
-        TerminalScrollbarGeometry, TreeRowActionDensity, TreeRowGeometry, TreeRowMode,
-        WHEEL_ROWS_PER_NOTCH, WorkspaceLayout, WorkspaceLayoutInput, pixel_rect_json,
-        reset_tabs_width, scrollback_for_thumb_top, sidebar_scrollbar_track,
+        PixelRect as ProductPixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
+        TreeRowActionDensity, TreeRowGeometry, TreeRowMode, WHEEL_ROWS_PER_NOTCH, WorkspaceLayout,
+        WorkspaceLayoutInput, pixel_rect_json, reset_tabs_width, scrollback_for_thumb_top,
+        sidebar_row_capacity, sidebar_scrollbar_geometry, sidebar_scrollbar_track,
         sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
         terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y, wheel_delta_units,
         workspace_layout,
@@ -1660,10 +1660,7 @@ impl RemoteWindowState {
     }
 
     fn sidebar_row_capacity(&self) -> usize {
-        let height = self.workspace_geometry().sidebar_tree.height();
-        usize::try_from((height - TAB_TOP).max(0) / TAB_HEIGHT)
-            .unwrap_or_default()
-            .max(1)
+        sidebar_row_capacity(self.workspace_geometry().sidebar_tree.height())
     }
 
     fn sidebar_row_count(&self) -> usize {
@@ -1704,34 +1701,14 @@ impl RemoteWindowState {
         let track = sidebar_scrollbar_track(layout.sidebar_tree);
         let maximum = self.sidebar_max_offset();
         let offset = self.sidebar_offset();
-        let track_height = track.height().max(0);
-        let total = self.sidebar_row_count().max(1);
-        let visible = self.sidebar_row_capacity().min(total).max(1);
-        let proportional = (i64::from(track_height) * visible as i64 / total as i64) as i32;
-        let thumb_height = if maximum == 0 {
-            track_height
-        } else {
-            proportional.max(24).min(track_height)
-        };
-        let travel = (track_height - thumb_height).max(0);
-        let thumb_top = if maximum == 0 {
-            track.top
-        } else {
-            track.top + (offset as i64 * i64::from(travel) / maximum as i64) as i32
-        };
-        Some((
-            TerminalScrollbarGeometry {
-                track,
-                thumb: ProductPixelRect {
-                    left: track.left + 2,
-                    top: thumb_top,
-                    right: (track.right - 2).max(track.left + 2),
-                    bottom: thumb_top + thumb_height,
-                },
-            },
+        let geometry = sidebar_scrollbar_geometry(
+            track,
             offset,
             maximum,
-        ))
+            self.sidebar_row_capacity(),
+            self.sidebar_row_count(),
+        );
+        Some((geometry, offset, maximum))
     }
 
     fn sidebar_row_index_at_y(&self, y: i32) -> Option<usize> {
