@@ -606,6 +606,12 @@ v0.1.13 完成定义（在 §六基础上）
 - Wave A/B 全勾选；每叶独立提交 + cargo check/clippy -D warnings 亲测绿
 - 601 tests + platform all-feature 全绿；无未提交残留
 - 不触发 Candidate/tag；v0.1.12 授权链不动
+
+状态（2026-08-04）：Wave A/B 全勾选完成。CI run 30837071052：
+windows / windows-aarch64 / linux-aarch64 / macos×2 / platform-contract×4 全绿；
+linux-x86_64 仅遗留已知 `control_center_linux_native_pointer_navigation_timeout`
+（X11/XTest CC pointer smoke，与 v0.1.13 叶子无关，独立归因）。
+v0.1.12 授权链未触发；Candidate dispatch 仍待 PAT 加 Actions write 或 UI 手动触发。
 ```
 
 ### 10.3 边界（不做的）
