@@ -972,7 +972,7 @@ impl UnixApp {
         self.sync_composer_buffer_to_tab();
         if self.cwd_editor_dialog.is_open() {
             return self
-                .prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)
+                .prepare_cwd(None, None, ComposerWriteMode::Replace)
                 .map_err(|error| error.to_string());
         }
         let Some(position) = self.active_position() else {
@@ -4435,7 +4435,7 @@ impl ControlHost for UnixApp {
 
     fn prepare_composer_send(&mut self) -> Result<bool, String> {
         if self.cwd_editor_dialog.is_open() {
-            self.prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)?;
+            self.prepare_cwd(None, None, ComposerWriteMode::Replace)?;
             return Ok(true);
         }
         Ok(false)
