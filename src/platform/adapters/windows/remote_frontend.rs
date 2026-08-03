@@ -10,8 +10,8 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, MouseReportInput,
-    MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
+    FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ModalSurface, MouseReportInput,
+    MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, modal_surface_from_gate,
     mouse_protocol_mode_from_str, mouse_report_encoding_from_str, mouse_report_outcome,
     route_wheel, sidebar_scroll_offset_for_thumb_top,
 };
@@ -1943,19 +1943,13 @@ impl RemoteWindowState {
         } else {
             None
         };
-        let modal = if self.window_close_dialog.is_open() {
-            Some(self.window_close_dialog.snapshot_modal())
-        } else if self.new_terminal_dialog.is_open() {
-            Some(self.new_terminal_dialog.snapshot_modal())
-        } else if self.settings_dialog.is_open() {
-            Some(self.settings_dialog.snapshot_modal())
-        } else if self.cwd_editor_dialog.is_open() {
-            Some(self.cwd_editor_dialog.snapshot_modal())
-        } else {
-            self.close_confirmation
-                .is_open()
-                .then(|| self.close_confirmation.snapshot_modal())
-        };
+        let modal = modal_surface_from_gate(self.focus_gate()).map(|surface| match surface {
+            ModalSurface::WindowClose => self.window_close_dialog.snapshot_modal(),
+            ModalSurface::Settings => self.settings_dialog.snapshot_modal(),
+            ModalSurface::NewTerminal => self.new_terminal_dialog.snapshot_modal(),
+            ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
+            ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
+        });
         let (copy_enabled, paste_enabled) = self.system_menu_state();
         let composer_input = ProductPixelRect {
             left: layout.composer.left + MARGIN,
@@ -1964,16 +1958,8 @@ impl RemoteWindowState {
                 .max(layout.composer.left + MARGIN + 80),
             bottom: (layout.composer.bottom - 8).max(layout.composer.top + 56),
         };
-        let focus = if self.window_close_dialog.is_open() {
-            "window-close"
-        } else if self.new_terminal_dialog.is_open() {
-            "new-terminal"
-        } else if self.settings_dialog.is_open() {
-            "settings"
-        } else if self.cwd_editor_dialog.is_open() {
-            "cwd-editor"
-        } else if self.close_confirmation.is_open() {
-            "tab-close"
+        let focus = if let Some(surface) = modal_surface_from_gate(self.focus_gate()) {
+            surface.as_str()
         } else if self.tab_editor_dialog.is_open() {
             "tab-editor"
         } else {

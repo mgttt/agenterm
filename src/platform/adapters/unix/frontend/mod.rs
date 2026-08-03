@@ -75,8 +75,8 @@ use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-    MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
-    WheelAccumulator, WheelTarget, mouse_report_outcome, route_wheel,
+    ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,
+    WheelAccumulator, WheelTarget, modal_surface_from_gate, mouse_report_outcome, route_wheel,
     sidebar_scroll_offset_for_thumb_top,
 };
 use crate::frontend::new_terminal;
@@ -2231,7 +2231,13 @@ impl UnixApp {
                 },
             },
             "focus": {
-                "surface": self.focus_surface.as_str(),
+                "surface": if let Some(surface) = modal_surface_from_gate(self.focus_gate()) {
+                    surface.as_str()
+                } else if self.tab_editor_dialog.is_open() {
+                    "tab-editor"
+                } else {
+                    self.focus_surface.as_str()
+                },
                 "window_id": active.map(|id| format!("@{id}")),
                 // This fact is updated only by the native FocusChanged event. An
                 // activation request must not optimistically claim compositor focus.
@@ -2247,19 +2253,13 @@ impl UnixApp {
                 "draft_length": self.composer_buffer.chars().count(),
                 "focused": self.focus_surface == UnixFocusSurface::Composer,
             },
-            "modal": if self.window_close_dialog.is_open() {
-                Some(self.window_close_dialog.snapshot_modal())
-            } else if self.settings_dialog.is_open() {
-                Some(self.settings_dialog.snapshot_modal())
-            } else if self.cwd_editor_dialog.is_open() {
-                Some(self.cwd_editor_dialog.snapshot_modal())
-            } else if self.new_terminal_dialog.is_open() {
-                Some(self.new_terminal_dialog.snapshot_modal())
-            } else if self.tab_editor_dialog.is_open() {
-                Some(self.tab_editor_dialog.snapshot_modal())
-            } else {
-                self.close_confirmation.is_open().then(|| self.close_confirmation.snapshot_modal())
-            },
+            "modal": modal_surface_from_gate(self.focus_gate()).map(|surface| match surface {
+                ModalSurface::WindowClose => self.window_close_dialog.snapshot_modal(),
+                ModalSurface::Settings => self.settings_dialog.snapshot_modal(),
+                ModalSurface::NewTerminal => self.new_terminal_dialog.snapshot_modal(),
+                ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
+                ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
+            }),
             "system_menu": system_menu_json(
                 self.config.tabs_visible,
                 copy_enabled,

@@ -88,6 +88,43 @@ impl FocusTransitionGate {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModalSurface {
+    WindowClose,
+    Settings,
+    NewTerminal,
+    CwdEditor,
+    TabClose,
+}
+
+impl ModalSurface {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::WindowClose => "window-close",
+            Self::Settings => "settings",
+            Self::NewTerminal => "new-terminal",
+            Self::CwdEditor => "cwd-editor",
+            Self::TabClose => "tab-close",
+        }
+    }
+}
+
+pub(crate) fn modal_surface_from_gate(gate: FocusTransitionGate) -> Option<ModalSurface> {
+    if gate.window_close_pending {
+        Some(ModalSurface::WindowClose)
+    } else if gate.settings_open {
+        Some(ModalSurface::Settings)
+    } else if gate.new_terminal_open {
+        Some(ModalSurface::NewTerminal)
+    } else if gate.cwd_editor_open {
+        Some(ModalSurface::CwdEditor)
+    } else if gate.close_confirmation_open {
+        Some(ModalSurface::TabClose)
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FocusState {
     surface: FocusSurface,
     gate: FocusTransitionGate,
@@ -372,9 +409,10 @@ pub(crate) fn sidebar_scroll_offset_for_thumb_top(
 mod tests {
     use super::{
         ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
-        MouseDelivery, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
+        ModalSurface, MouseDelivery, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
         ScrollbarThumbDrag, WheelAccumulator, WheelTarget, focus_surface_navigation,
-        mouse_delivery, mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
+        modal_surface_from_gate, mouse_delivery, mouse_report_outcome, route_wheel,
+        sidebar_scroll_offset_for_thumb_top,
     };
 
     #[test]
@@ -422,6 +460,62 @@ mod tests {
                 ..idle
             }
             .blocked()
+        );
+    }
+
+    #[test]
+    fn modal_surface_uses_single_priority_and_excludes_tab_editor() {
+        let idle = FocusTransitionGate::default();
+        assert_eq!(modal_surface_from_gate(idle), None);
+        assert_eq!(
+            modal_surface_from_gate(FocusTransitionGate {
+                tab_editor_open: true,
+                ..idle
+            }),
+            None
+        );
+        let gate = FocusTransitionGate {
+            window_close_pending: true,
+            settings_open: true,
+            new_terminal_open: true,
+            cwd_editor_open: true,
+            close_confirmation_open: true,
+            tab_editor_open: true,
+        };
+        assert_eq!(
+            modal_surface_from_gate(gate),
+            Some(ModalSurface::WindowClose)
+        );
+        assert_eq!(
+            modal_surface_from_gate(FocusTransitionGate {
+                settings_open: true,
+                new_terminal_open: true,
+                ..idle
+            }),
+            Some(ModalSurface::Settings)
+        );
+        assert_eq!(
+            modal_surface_from_gate(FocusTransitionGate {
+                new_terminal_open: true,
+                cwd_editor_open: true,
+                ..idle
+            }),
+            Some(ModalSurface::NewTerminal)
+        );
+        assert_eq!(
+            modal_surface_from_gate(FocusTransitionGate {
+                cwd_editor_open: true,
+                close_confirmation_open: true,
+                ..idle
+            }),
+            Some(ModalSurface::CwdEditor)
+        );
+        assert_eq!(
+            modal_surface_from_gate(FocusTransitionGate {
+                close_confirmation_open: true,
+                ..idle
+            }),
+            Some(ModalSurface::TabClose)
         );
     }
 

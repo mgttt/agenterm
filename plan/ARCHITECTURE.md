@@ -35,7 +35,7 @@ src/frontend/                产品 GUI 入口 + UI/UX 语义
   action.rs                  canonical action identities（toolbar/shortcut 共用）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
-  interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state（语义 surface 存 FocusState + adapter focus_gate()，Win/Unix 共用）；raw-mouse arbitration/report outcome 策略与 xterm mouse report 编码器（Unix embedded 与 Windows remote 共用）；alternate-screen wheel fallback 用 commands::alternate_screen_wheel_bytes 单点编码
+  interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state + modal surface priority/snapshot naming（FocusState + adapter focus_gate() + ModalSurface/modal_surface_from_gate()，Win/Unix 共用）；raw-mouse arbitration/report outcome 策略与 xterm mouse report 编码器（Unix embedded 与 Windows remote 共用）；alternate-screen wheel fallback 用 commands::alternate_screen_wheel_bytes 单点编码
   composer.rs                ComposerWriteMode（empty-only/append/replace）单点定义，embedded、remote UI、server dispatch 共用
   cwd_editor.rs             CWD editor modal 状态/action/snapshot 单点；Unix embedded 与 Windows remote 共用 CwdEditorDialog，adapter 只保留原生编辑控件/焦点与命令执行
   input.rs                  keyboard/composer/tab-editor/terminal-shortcut 输入语义单点；Unix embedded adapter 经 `frontend::input` 引用，Windows remote 保留原生控件映射
