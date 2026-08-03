@@ -633,6 +633,9 @@ impl ShellProjection {
     }
 }
 
+/// How many per-tab detail rows the Cockpit shows before collapsing the rest.
+const COCKPIT_TAB_ROWS_SHOWN: usize = 16;
+
 fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
     let authority = server.logical_instance.as_deref().unwrap_or("explicit");
     let version = server.version.as_deref().unwrap_or("unknown");
@@ -647,7 +650,7 @@ fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
                 .map(|tab| format!("{id} · {}", tab.title))
         })
         .unwrap_or_else(|| "none".to_owned());
-    vec![
+    let mut lines = vec![
         format!("Server      {authority} · PID {} · v{version}", server.pid),
         format!("Build       {}", build_identity_summary(&server.build)),
         format!(
@@ -667,7 +670,32 @@ fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
             server.components.extensions,
             server.components.info_hub
         ),
-    ]
+    ];
+    if !server.tabs.is_empty() {
+        lines.push(format!("Tabs        {} total", server.tabs.len()));
+        for tab in server.tabs.iter().take(COCKPIT_TAB_ROWS_SHOWN) {
+            let state = if tab.dead { "dead" } else { "running" };
+            let pid = tab
+                .process_id
+                .map_or_else(|| "no pid".to_owned(), |pid| format!("pid {pid}"));
+            let note = if tab.note.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", tab.note)
+            };
+            lines.push(format!(
+                "  #{:<3}{} {} · {} · {}{}",
+                tab.index, tab.id, tab.title, state, pid, note
+            ));
+        }
+        if server.tabs.len() > COCKPIT_TAB_ROWS_SHOWN {
+            lines.push(format!(
+                "  … {} more",
+                server.tabs.len() - COCKPIT_TAB_ROWS_SHOWN
+            ));
+        }
+    }
+    lines
 }
 
 fn build_identity_summary(build: &Value) -> String {
@@ -3138,7 +3166,7 @@ mod tests {
         };
 
         let lines = connected_cockpit_lines(&server);
-        assert_eq!(lines.len(), 6);
+        assert_eq!(lines.len(), 9);
         assert!(lines[0].contains("dev · PID 123 · v0.1.12"));
         assert!(lines[1].contains("abcdef012345… · dev · clean"));
         assert!(lines[2].contains("epoch epoch-012345… · sequence 77"));
@@ -3146,6 +3174,9 @@ mod tests {
         assert!(lines[4].contains("@1 · build"));
         assert!(lines[5].contains("server available"));
         assert!(lines[5].contains("workflows unavailable"));
+        assert!(lines[6].contains("Tabs        2 total"));
+        assert!(lines[7].contains("#0  @1 build · running · pid 41"));
+        assert!(lines[8].contains("#1  @2 finished · dead · pid 42"));
     }
 
     #[test]

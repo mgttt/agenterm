@@ -168,8 +168,12 @@ v0.1.13  Trust & platform narrowness
    │     Ctrl+C 仍走 ConsoleInterruptObserver（编辑器保留 ENABLE_PROCESSED_INPUT/ISIG）
    ├─ [ ] macOS pointer 诊断：Unsupported 时错误信息给清「缺哪项能力」
    │     （不冒充 shipped；真机正向证据若不可得则保留 typed 边界）
-   ├─ [ ] Cockpit 只读事实/导航小步：加深诊断面板（事件/PTY/租约读数），
+   ├─ [x] Cockpit 只读事实/导航小步：加深诊断面板（事件/PTY/租约读数），
    │     不做 Workflows 内容
+   │     证据：connected_cockpit_lines 新增每 tab 只读行（#index id title ·
+   │     running/dead · pid · note，上限 16 行折叠）；数据全部来自已有
+   │     bootstrap 投影，零 server 侧改动；control_center 41 tests 绿 +
+   │     lib 602 绿 + clippy 零告警（2026-08-04）
    └─ [x] precision-audit #13：Rhai catalog-vs-registration 自动化测试
          （Engine-introspection；补 std.net/std.fs 之外的全量检查）
 ```
@@ -572,7 +576,8 @@ v0.1.13 发文方向从「更多抽象」调整为：**守住边界 + 补齐功�
 v0.1.13 Wave A（功能补齐 — 用户体感优先）
 ├─ [x] REPL 行编辑/history（E 组叶，Script 体验；console-line-editor feature，
 │      2026-08-04 亲测：clippy 零告警 + lib 602 + platform 237 + 非 tty 冒烟绿）
-├─ [ ] Cockpit 诊断小步（E 组叶，只读事实加深）
+├─ [x] Cockpit 诊断小步（E 组叶，只读事实加深；每 tab 只读行 2026-08-04
+│      已入：41 tests 绿 + lib 602 绿）
 └─ [x] precision-audit #13 Rhai catalog 自动化（E 组叶，信任面；rhai metadata 仅 dev-dependency 启用，release 预算不受影响）
 
 v0.1.13 Wave B（信任面收口）
