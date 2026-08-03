@@ -1,4 +1,8 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
@@ -48,7 +52,23 @@ pub(crate) fn save_workspace(workspace: &SavedWorkspace) -> Result<()> {
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     let json = serde_json::to_string_pretty(workspace)?;
-    std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))
+    // Write to a co-located temp file and rename into place so a crash or
+    // power loss mid-write can never leave workspace.json truncated --
+    // load_workspace() treats a parse failure the same as "no saved
+    // workspace", which would otherwise silently discard the whole tab tree
+    // (names, notes, drafts, command lines).
+    let temporary = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::write(&temporary, json)
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
+    std::fs::rename(&temporary, &path)
+        .with_context(|| format!("failed to publish {}", path.display()))
 }
 
 #[cfg(test)]
