@@ -108,10 +108,13 @@ v0.1.13  Trust & platform narrowness
 │  │     （Win=DirectNativeWindow / Unix=RendererRequest；mod.rs 测试断言单点映射）
 │  ├─ [x] CapabilityStatus / PlatformSnapshot 减少主 crate 重复映射：
 │  │     `src/platform/policy/capability.rs` 单点（client/mod.rs 只消费）
-│  ├─ [~] 薄包装 facade 审计（2026-08-03）：contract/ipc.rs 发现 2 处
+│  ├─ [x] 薄包装 facade 审计（2026-08-03 发现 / 2026-08-04 执行）：contract/ipc.rs 发现 2 处
 │  │     #[allow(dead_code)] 纯转发（default_workspace_path/unix_data_root_from，
 │  │     与 services/ipc.rs 重复）；其余兼容性 re-export 均有跨 target 注释依据；
-│  │     真删除需跨 target CI（本机 Windows 无法验证 Unix adapter）——待 v0.1.13 开工后执行
+│  │     已删除并直调 crate::platform::ipc::*（同一 SSOT）；其余兼容性
+│  │     re-export 保留。证据：Windows clippy --all-targets 绿 + lib 602 绿；
+│  │     跨 target `cargo check --target x86_64-unknown-linux-gnu
+│  │     --all-targets -p agenterm` 绿（zig cc 亲测，#[cfg(unix)] 测试编译通过）
 │  ├─ [x] 外部依赖依赖树审计（2026-08-03）：cargo tree 11 个直接依赖
 │  │     + 2 个 vendored patch（softbuffer/vt100）；无 feature 扩散迹象；
 │  │     回归测试归 CI Candidate 封印流程
@@ -591,7 +594,7 @@ v0.1.13 Wave A（功能补齐 — 用户体感优先）
 
 v0.1.13 Wave B（信任面收口）
 ├─ [x] macOS pointer Unsupported 诊断清晰化（E 组叶）
-├─ [ ] B 组 [~] facade 纯转发删除（待跨 target CI）
+├─ [x] B 组 [~] facade 纯转发删除（跨 target 编译亲测绿）
 └─ [ ] 六平台 parity-smoke 宿主矩阵门禁记录（Windows 已绿；Linux/macOS 归 CI）
 
 v0.1.13 完成定义（在 §六基础上）

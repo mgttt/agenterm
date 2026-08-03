@@ -384,25 +384,11 @@ fn legacy_default_main_endpoint() -> IpcEndpoint {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn default_workspace_path(scope: &ServerScopeId) -> PathBuf {
-    crate::platform::ipc::default_workspace_path(scope)
-}
-
 pub(crate) fn default_workspace_path_for(resolved: &ResolvedIpcEndpoint) -> PathBuf {
     crate::platform::ipc::default_workspace_path_for(
         &resolved.server_scope_id,
         resolved.logical_instance == LogicalInstance::Main,
     )
-}
-
-#[allow(dead_code)]
-pub(crate) fn unix_data_root_from(
-    xdg_data_home: Option<std::ffi::OsString>,
-    home: Option<std::ffi::OsString>,
-    temp_dir: PathBuf,
-) -> PathBuf {
-    crate::platform::ipc::unix_data_root_from(xdg_data_home, home, temp_dir)
 }
 
 fn default_native_endpoint(scope: &ServerScopeId) -> IpcEndpoint {
@@ -723,7 +709,7 @@ mod tests {
         #[cfg(unix)]
         assert_eq!(
             default_workspace_path_for(&default),
-            default_workspace_path(&default.server_scope_id)
+            crate::platform::ipc::default_workspace_path(&default.server_scope_id)
         );
 
         let native_main = resolve_ipc_endpoint_with_environment(
@@ -742,12 +728,12 @@ mod tests {
         #[cfg(windows)]
         assert_ne!(
             default_workspace_path_for(&native_main),
-            default_workspace_path(&native_main.server_scope_id)
+            crate::platform::ipc::default_workspace_path(&native_main.server_scope_id)
         );
         #[cfg(unix)]
         assert_eq!(
             default_workspace_path_for(&native_main),
-            default_workspace_path(&native_main.server_scope_id)
+            crate::platform::ipc::default_workspace_path(&native_main.server_scope_id)
         );
 
         let legacy = legacy_default_main_endpoint();
@@ -792,7 +778,7 @@ mod tests {
     #[test]
     fn unix_persistence_root_prefers_absolute_xdg_then_absolute_home() {
         assert_eq!(
-            unix_data_root_from(
+            crate::platform::ipc::unix_data_root_from(
                 Some("/srv/profile-data".into()),
                 Some("/home/example".into()),
                 PathBuf::from("/var/tmp"),
@@ -800,7 +786,7 @@ mod tests {
             PathBuf::from("/srv/profile-data/agenterm")
         );
         assert_eq!(
-            unix_data_root_from(
+            crate::platform::ipc::unix_data_root_from(
                 Some("relative-data".into()),
                 Some("/home/example".into()),
                 PathBuf::from("/var/tmp"),
@@ -808,7 +794,7 @@ mod tests {
             PathBuf::from("/home/example/.local/share/agenterm")
         );
         assert_eq!(
-            unix_data_root_from(None, None, PathBuf::from("relative-tmp")),
+            crate::platform::ipc::unix_data_root_from(None, None, PathBuf::from("relative-tmp")),
             PathBuf::from("/tmp/agenterm")
         );
     }
@@ -839,7 +825,13 @@ mod tests {
         assert!(main_path.is_absolute());
         assert!(dev_path.is_absolute());
         assert_ne!(main_path, dev_path);
-        assert_eq!(main_path, default_workspace_path(&main.server_scope_id));
-        assert_eq!(dev_path, default_workspace_path(&dev.server_scope_id));
+        assert_eq!(
+            main_path,
+            crate::platform::ipc::default_workspace_path(&main.server_scope_id)
+        );
+        assert_eq!(
+            dev_path,
+            crate::platform::ipc::default_workspace_path(&dev.server_scope_id)
+        );
     }
 }
