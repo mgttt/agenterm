@@ -3159,7 +3159,7 @@ impl RemoteWindowState {
 
     fn send_composer(&mut self) {
         if self.cwd_edit_tab_id.is_some() {
-            self.finish_cwd_editor(true, ComposerWriteMode::EmptyOnly);
+            self.finish_cwd_editor(true, ComposerWriteMode::Replace);
             return;
         }
         let Some(tab_id) = self
