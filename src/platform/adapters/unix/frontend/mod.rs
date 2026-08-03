@@ -74,10 +74,10 @@ use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
 use crate::frontend::interaction::{
-    ApplicationMouseMode, CancelTarget, FocusDirection, FocusState, FocusSurface,
+    ApplicationMouseMode, CancelTarget, ConfirmTarget, FocusDirection, FocusState, FocusSurface,
     FocusTransitionGate, ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
     ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest, cancel_target,
-    modal_surface_from_gate, mouse_report_outcome, route_wheel,
+    confirm_target, modal_surface_from_gate, mouse_report_outcome, route_wheel,
     sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state, window_close_request,
 };
 use crate::frontend::new_terminal;
@@ -4661,15 +4661,17 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_confirm(&mut self) -> Result<bool, String> {
-        if self.window_close_dialog.is_open() {
-            self.finish_window_close(WindowCloseChoice::KeepServerRunning);
-            return Ok(true);
+        match confirm_target(self.focus_gate()) {
+            ConfirmTarget::WindowClose => {
+                self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+                Ok(true)
+            }
+            ConfirmTarget::LiveTabClose => {
+                self.finish_close_confirmation(true);
+                Ok(true)
+            }
+            ConfirmTarget::None => Ok(false),
         }
-        if self.close_confirmation.is_open() {
-            self.finish_close_confirmation(true);
-            return Ok(true);
-        }
-        Ok(false)
     }
 
     fn close_tab_by_ui_action(&mut self, id: u64) -> Result<(), String> {

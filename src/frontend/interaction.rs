@@ -212,6 +212,23 @@ pub(crate) const fn cancel_target(gate: FocusTransitionGate) -> CancelTarget {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConfirmTarget {
+    WindowClose,
+    LiveTabClose,
+    None,
+}
+
+pub(crate) const fn confirm_target(gate: FocusTransitionGate) -> ConfirmTarget {
+    if gate.window_close_pending {
+        ConfirmTarget::WindowClose
+    } else if gate.close_confirmation_open {
+        ConfirmTarget::LiveTabClose
+    } else {
+        ConfirmTarget::None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FocusState {
     surface: FocusSurface,
     gate: FocusTransitionGate,
@@ -510,12 +527,12 @@ pub(crate) fn sidebar_scroll_offset_for_thumb_top(
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplicationMouseMode, CancelTarget, FocusDirection, FocusState, FocusSurface,
-        FocusTransitionGate, ModalSurface, MouseDelivery, MouseReportEncoding, MouseReportInput,
-        MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget, WindowCloseRequest,
-        cancel_target, focus_surface_navigation, modal_surface_from_gate, mouse_delivery,
-        mouse_report_outcome, route_wheel, sidebar_scroll_offset_for_thumb_top,
-        system_menu_clipboard_state, window_close_request,
+        ApplicationMouseMode, CancelTarget, ConfirmTarget, FocusDirection, FocusState,
+        FocusSurface, FocusTransitionGate, ModalSurface, MouseDelivery, MouseReportEncoding,
+        MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
+        WindowCloseRequest, cancel_target, confirm_target, focus_surface_navigation,
+        modal_surface_from_gate, mouse_delivery, mouse_report_outcome, route_wheel,
+        sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state, window_close_request,
     };
 
     #[test]
@@ -703,6 +720,28 @@ mod tests {
                 ..idle
             }),
             CancelTarget::TabEditor
+        );
+    }
+
+    #[test]
+    fn confirm_target_uses_shared_modal_priority() {
+        let idle = FocusTransitionGate::default();
+        assert_eq!(confirm_target(idle), ConfirmTarget::None);
+        assert_eq!(
+            confirm_target(FocusTransitionGate {
+                window_close_pending: true,
+                close_confirmation_open: true,
+                ..idle
+            }),
+            ConfirmTarget::WindowClose
+        );
+        assert_eq!(
+            confirm_target(FocusTransitionGate {
+                close_confirmation_open: true,
+                settings_open: true,
+                ..idle
+            }),
+            ConfirmTarget::LiveTabClose
         );
     }
 

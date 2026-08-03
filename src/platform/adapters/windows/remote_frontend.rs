@@ -10,11 +10,12 @@ use std::{
 };
 
 use crate::frontend::interaction::{
-    CancelTarget, FocusDirection, FocusState, FocusSurface, FocusTransitionGate, ModalSurface,
-    MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator, WheelTarget,
-    WindowCloseRequest, cancel_target, modal_surface_from_gate, mouse_protocol_mode_from_str,
-    mouse_report_encoding_from_str, mouse_report_outcome, route_wheel,
-    sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state, window_close_request,
+    CancelTarget, ConfirmTarget, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
+    ModalSurface, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag, WheelAccumulator,
+    WheelTarget, WindowCloseRequest, cancel_target, confirm_target, modal_surface_from_gate,
+    mouse_protocol_mode_from_str, mouse_report_encoding_from_str, mouse_report_outcome,
+    route_wheel, sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state,
+    window_close_request,
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
@@ -1289,15 +1290,15 @@ impl RemoteWindowState {
                     self.window.focus();
                 }
             }
-            "confirm" => {
-                if !self.close_confirmation.is_open() {
-                    anyhow::bail!("no confirmation is pending");
+            "confirm" => match confirm_target(self.focus_gate()) {
+                ConfirmTarget::WindowClose => {
+                    self.relay_close_after_completion = Some(WindowCloseChoice::KeepServerRunning);
                 }
-                self.finish_close_tab(true);
-                if self.close_confirmation.is_open() {
-                    anyhow::bail!("tab close could not be confirmed");
+                ConfirmTarget::LiveTabClose => {
+                    self.finish_close_tab(true);
                 }
-            }
+                ConfirmTarget::None => anyhow::bail!("no confirmation is pending"),
+            },
             "cancel" => match cancel_target(self.focus_gate()) {
                 CancelTarget::WindowClose => self.finish_window_close(WindowCloseChoice::Cancel),
                 CancelTarget::LiveTabClose => self.finish_close_tab(false),
@@ -4998,19 +4999,19 @@ impl RemoteWindowState {
     }
 
     fn handle_window_keydown(&mut self, key: u32, modifiers: input::ModifierState) -> bool {
-        if self.window_close_dialog.is_open() {
-            match key {
-                0x0d => self.finish_window_close(WindowCloseChoice::KeepServerRunning),
-                0x1b => self.finish_window_close(WindowCloseChoice::Cancel),
-                _ => {}
-            }
-            return true;
-        }
-        if self.close_confirmation.is_open() {
-            match key {
-                0x0d => self.finish_close_tab(true),
-                0x1b => self.finish_close_tab(false),
-                _ => {}
+        if self.window_close_dialog.is_open() || self.close_confirmation.is_open() {
+            match confirm_target(self.focus_gate()) {
+                ConfirmTarget::WindowClose => match key {
+                    0x0d => self.finish_window_close(WindowCloseChoice::KeepServerRunning),
+                    0x1b => self.finish_window_close(WindowCloseChoice::Cancel),
+                    _ => {}
+                },
+                ConfirmTarget::LiveTabClose => match key {
+                    0x0d => self.finish_close_tab(true),
+                    0x1b => self.finish_close_tab(false),
+                    _ => {}
+                },
+                ConfirmTarget::None => {}
             }
             return true;
         }
