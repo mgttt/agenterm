@@ -1367,14 +1367,25 @@ mod tests {
     fn wait_for_descendants(root_id: u32) -> Vec<ObservedProcess> {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
+            // A shell setup child can exit before its parent reaps it. Skip
+            // dead/unreaped inventory entries and wait for a live descendant
+            // whose start identity is observable.
             let descendants = descendant_ids(root_id)
                 .into_iter()
-                .map(|id| {
-                    let start_identity =
-                        child_process_tree::start_identity(id).unwrap_or_else(|error| {
-                            panic!("descendant {id} start identity unavailable: {error}")
-                        });
-                    ObservedProcess { id, start_identity }
+                .filter_map(|id| match child_process_tree::observe(id) {
+                    child_process_tree::ProcessObservation::Live {
+                        start_identity: Some(start_identity),
+                    } => Some(ObservedProcess { id, start_identity }),
+                    child_process_tree::ProcessObservation::Dead { .. } => None,
+                    child_process_tree::ProcessObservation::Live {
+                        start_identity: None,
+                    } => panic!("descendant {id} is live without a start identity"),
+                    child_process_tree::ProcessObservation::Unknown { reason } => {
+                        panic!("descendant {id} start identity unavailable: {reason}")
+                    }
+                    _ => panic!(
+                        "descendant {id} start identity unavailable: unrecognized observation"
+                    ),
                 })
                 .collect::<Vec<_>>();
             if !descendants.is_empty() {
