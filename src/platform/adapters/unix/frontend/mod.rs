@@ -1,7 +1,6 @@
 mod clipboard;
 mod cursor_blink;
 pub(crate) mod font;
-mod input;
 mod layout;
 mod new_terminal;
 mod render;
@@ -72,6 +71,7 @@ use crate::{
 
 use self::wake::install_unix_wake;
 use crate::frontend::composer::ComposerWriteMode;
+use crate::frontend::input;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
     MouseReportEncoding, MouseReportInput, MouseReportOutcome, ScrollbarThumbDrag,

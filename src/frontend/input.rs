@@ -1,4 +1,4 @@
-//! Unix frontend native input translation.
+//! Shared frontend keyboard and text-field input policy.
 
 use agenterm_platform::input::{
     KeyPressState, LogicalKey as Key, ModifierState, NamedKey, NormalizedKeyEvent as KeyEvent,
@@ -8,7 +8,7 @@ use agenterm_platform::input::{
 use crate::commands::{tmux_key_bytes, tmux_key_bytes_with_modifiers};
 
 /// Result of handling a key in composer focus.
-pub(super) enum ComposerKeyAction {
+pub(crate) enum ComposerKeyAction {
     /// Text changed; redraw only.
     Edited,
     /// Submit the draft to the active tab.
@@ -28,7 +28,7 @@ pub(super) enum ComposerKeyAction {
 }
 
 /// Filters platform input-method commits before they reach an editable surface.
-pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
+pub(crate) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
     text.replace("\r\n", "\n")
         .chars()
         .filter(|ch| {
@@ -38,12 +38,12 @@ pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
         .collect()
 }
 
-pub(super) fn primary_shortcut(modifiers: ModifierState) -> bool {
+pub(crate) fn primary_shortcut(modifiers: ModifierState) -> bool {
     agenterm_platform::input::is_primary_shortcut(modifiers)
 }
 
 /// Maps a normalized key event to composer edits when the composer strip has focus.
-pub(super) fn composer_key_action(
+pub(crate) fn composer_key_action(
     event: &KeyEvent,
     buffer: &mut String,
     select_all: &mut bool,
@@ -110,6 +110,7 @@ fn composer_control_chord_action(
     })
 }
 
+#[cfg(test)]
 fn composer_logical_key_action(
     logical_key: &Key,
     modifiers: ModifierState,
@@ -176,7 +177,7 @@ fn composer_logical_key_action(
     }
 }
 
-pub(super) fn prepare_composer_edit(buffer: &mut String, select_all: &mut bool) -> bool {
+pub(crate) fn prepare_composer_edit(buffer: &mut String, select_all: &mut bool) -> bool {
     if !std::mem::take(select_all) {
         return false;
     }
@@ -186,7 +187,7 @@ pub(super) fn prepare_composer_edit(buffer: &mut String, select_all: &mut bool) 
 }
 
 /// Result of handling a key in a single-line sidebar tab editor field.
-pub(super) enum TextFieldKeyAction {
+pub(crate) enum TextFieldKeyAction {
     Edited,
     NextField,
     Submit,
@@ -199,7 +200,7 @@ pub(super) enum TextFieldKeyAction {
 }
 
 /// Maps a normalized key event to inline tab-editor field edits.
-pub(super) fn text_field_key_action(
+pub(crate) fn text_field_key_action(
     event: &KeyEvent,
     buffer: &mut String,
     multiline: bool,
@@ -212,6 +213,7 @@ pub(super) fn text_field_key_action(
     platform_text_field_key_action(event, buffer, multiline, select_all)
 }
 
+#[cfg(test)]
 fn text_field_logical_key_action(
     logical_key: &Key,
     modifiers: ModifierState,
@@ -286,7 +288,7 @@ fn text_field_logical_key_action(
 /// EOF chord that passes through to the active PTY even while the composer
 /// strip owns focus. Ctrl+C stays in the composer as copy; the terminal
 /// surface owns interrupt semantics.
-pub(super) fn composer_passthrough_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
+pub(crate) fn composer_passthrough_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
     if event.state != KeyPressState::Pressed {
         return None;
     }
@@ -313,14 +315,14 @@ pub(super) fn composer_passthrough_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TerminalShortcutAction {
+pub(crate) enum TerminalShortcutAction {
     Copy,
     Paste,
     Suppress,
     Forward,
 }
 
-pub(super) fn terminal_shortcut_action(
+pub(crate) fn terminal_shortcut_action(
     key: &Key,
     modifiers: ModifierState,
     has_selection: bool,
@@ -351,13 +353,14 @@ pub(super) fn terminal_shortcut_action(
 /// Maps a normalized key event to bytes suitable for PTY input.
 ///
 /// Returns `None` for keys that should not be forwarded (modifiers-only, dead keys, etc.).
-pub(super) fn key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
+pub(crate) fn key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
     if event.state != KeyPressState::Pressed {
         return None;
     }
     platform_key_event_to_bytes(event)
 }
 
+#[cfg(test)]
 fn logical_key_to_bytes(key: &Key, modifiers: ModifierState) -> Option<Vec<u8>> {
     match key {
         Key::Named(named) => {
