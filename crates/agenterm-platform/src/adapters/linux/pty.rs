@@ -223,6 +223,23 @@ fn spawn_child(command: ChildCommand) -> io::Result<SpawnedPty> {
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "program path contains NUL"))?;
     let args = build_argv(&program, &command.args)?;
     let env_pairs = build_env_pairs(&command.env)?;
+    let current_dir = command
+        .current_dir
+        .as_ref()
+        .map(|directory| CString::new(directory.as_os_str().as_bytes()))
+        .transpose()
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "working directory contains NUL",
+            )
+        })?;
+    // Built pre-fork: a multithreaded process only clones the calling thread on
+    // fork(), so the child may only call async-signal-safe functions until it
+    // execve()s. The Rust allocator is not on that list, so every pointer the
+    // child needs (argv, envp, cwd) must already exist before fork() runs.
+    let argv_ptrs = build_ptr_array(&args);
+    let envp_ptrs = build_ptr_array(&env_pairs);
 
     let child_pid = unsafe { libc::fork() };
     if child_pid == -1 {
@@ -234,10 +251,10 @@ fn spawn_child(command: ChildCommand) -> io::Result<SpawnedPty> {
         if let Err(error) = child_setup(
             master_raw,
             slave_fd.as_raw_fd(),
-            &command,
+            current_dir.as_deref(),
             &program,
-            &args,
-            &env_pairs,
+            &argv_ptrs,
+            &envp_ptrs,
         ) {
             let message = CString::new(format!("pty child setup failed: {error}"))
                 .unwrap_or_else(|_| CString::new("pty child setup failed").expect("static"));
@@ -270,13 +287,18 @@ fn spawn_child(command: ChildCommand) -> io::Result<SpawnedPty> {
     })
 }
 
+/// Runs between `fork()` and `execve()`. Every argument is pre-built by the
+/// parent so this function performs no heap allocation: POSIX only guarantees
+/// async-signal-safe functions are safe to call here in a process that had
+/// more than one thread at fork time (see fork(2)), and the Rust allocator
+/// gives no such guarantee.
 fn child_setup(
     master_fd: RawFd,
     slave_fd: RawFd,
-    command: &ChildCommand,
+    current_dir: Option<&CStr>,
     program: &CStr,
-    args: &[CString],
-    env_pairs: &[CString],
+    argv: &[*const libc::c_char],
+    envp: &[*const libc::c_char],
 ) -> io::Result<()> {
     unsafe {
         if libc::close(master_fd) == -1 {
@@ -306,37 +328,29 @@ fn child_setup(
         if libc::tcsetpgrp(libc::STDIN_FILENO, child_pid) == -1 {
             return Err(io::Error::last_os_error());
         }
-    }
 
-    if let Some(directory) = &command.current_dir
-        && std::env::set_current_dir(directory).is_err()
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "failed to set child working directory",
-        ));
-    }
+        if let Some(directory) = current_dir
+            && libc::chdir(directory.as_ptr()) == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
 
-    for (key, value) in &command.env {
-        set_os_env(key, value)?;
+        let result = libc::execve(program.as_ptr(), argv.as_ptr(), envp.as_ptr());
+        if result == -1 {
+            return Err(io::Error::last_os_error());
+        }
     }
+    Ok(())
+}
 
-    let argv: Vec<*const libc::c_char> = args
-        .iter()
-        .map(|arg| arg.as_ptr())
-        .chain(std::iter::once(std::ptr::null()))
-        .collect();
-    let envp: Vec<*const libc::c_char> = env_pairs
+/// Builds a null-terminated argv/envp-style pointer array. Must be called
+/// before `fork()`; see [`child_setup`].
+fn build_ptr_array(entries: &[CString]) -> Vec<*const libc::c_char> {
+    entries
         .iter()
         .map(|entry| entry.as_ptr())
         .chain(std::iter::once(std::ptr::null()))
-        .collect();
-
-    let result = unsafe { libc::execve(program.as_ptr(), argv.as_ptr(), envp.as_ptr()) };
-    if result == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+        .collect()
 }
 
 fn build_argv(program: &CStr, args: &[OsString]) -> io::Result<Vec<CString>> {
@@ -389,22 +403,6 @@ fn env_entry_to_cstring(key: &OsStr, value: &OsStr) -> io::Result<CString> {
             "environment value contains NUL",
         )
     })
-}
-
-fn set_os_env(key: &OsStr, value: &OsStr) -> io::Result<()> {
-    let key = CString::new(key.as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "environment key contains NUL"))?;
-    let value = CString::new(value.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "environment value contains NUL",
-        )
-    })?;
-    let result = unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) };
-    if result == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 fn open_pty_pair(size: Option<TerminalSize>) -> io::Result<(OwnedFd, OwnedFd)> {
