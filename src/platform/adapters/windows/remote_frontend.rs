@@ -3037,7 +3037,10 @@ impl RemoteWindowState {
     }
 
     fn open_cwd_editor(&mut self) {
-        if self.focus_gate().blocked() {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::CwdEditor)
+        {
             return;
         }
         let Some(tab) = self.active_tab().cloned() else {
@@ -3139,7 +3142,10 @@ impl RemoteWindowState {
     }
 
     fn open_new_terminal(&mut self) {
-        if self.focus_gate().full_modal_blocked() {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::NewTerminal)
+        {
             return;
         }
         self.cancel_terminal_selection();
@@ -3607,9 +3613,9 @@ impl RemoteWindowState {
     }
 
     fn open_settings(&mut self) {
-        if self.settings_dialog.is_open()
-            || self.new_terminal_dialog.is_open()
-            || self.window_close_dialog.is_open()
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::Settings)
         {
             return;
         }

@@ -111,6 +111,14 @@ impl FocusTransitionGate {
             || self.close_confirmation_open
     }
 
+    pub(crate) const fn modal_entry_blocked(self, surface: ModalSurface) -> bool {
+        match surface {
+            ModalSurface::WindowClose => self.window_close_pending,
+            ModalSurface::Settings | ModalSurface::NewTerminal => self.full_modal_blocked(),
+            ModalSurface::CwdEditor | ModalSurface::TabClose => self.blocked(),
+        }
+    }
+
     pub(crate) const fn workspace_controls_visible(self) -> bool {
         !self.window_close_pending
             && !self.settings_open
@@ -557,6 +565,41 @@ mod tests {
             .blocked()
         );
     }
+
+    #[test]
+    fn modal_entry_policy_is_shared_across_full_and_inline_surfaces() {
+        let idle = FocusTransitionGate::default();
+        assert!(!idle.modal_entry_blocked(ModalSurface::NewTerminal));
+        assert!(!idle.modal_entry_blocked(ModalSurface::Settings));
+        assert!(!idle.modal_entry_blocked(ModalSurface::CwdEditor));
+        assert!(!idle.modal_entry_blocked(ModalSurface::TabClose));
+
+        let full = FocusTransitionGate {
+            close_confirmation_open: true,
+            ..idle
+        };
+        assert!(full.modal_entry_blocked(ModalSurface::NewTerminal));
+        assert!(full.modal_entry_blocked(ModalSurface::Settings));
+        assert!(full.modal_entry_blocked(ModalSurface::CwdEditor));
+        assert!(full.modal_entry_blocked(ModalSurface::TabClose));
+
+        let inline = FocusTransitionGate {
+            tab_editor_open: true,
+            ..idle
+        };
+        assert!(!inline.modal_entry_blocked(ModalSurface::NewTerminal));
+        assert!(!inline.modal_entry_blocked(ModalSurface::Settings));
+        assert!(inline.modal_entry_blocked(ModalSurface::CwdEditor));
+        assert!(inline.modal_entry_blocked(ModalSurface::TabClose));
+        assert!(
+            FocusTransitionGate {
+                window_close_pending: true,
+                ..idle
+            }
+            .modal_entry_blocked(ModalSurface::WindowClose)
+        );
+    }
+
     #[test]
     fn modal_surface_uses_single_priority_and_excludes_tab_editor() {
         let idle = FocusTransitionGate::default();

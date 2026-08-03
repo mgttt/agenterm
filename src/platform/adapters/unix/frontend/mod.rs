@@ -1070,6 +1070,12 @@ impl UnixApp {
     }
 
     fn open_new_terminal_dialog(&mut self) {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::NewTerminal)
+        {
+            return;
+        }
         if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
         }
@@ -1279,7 +1285,10 @@ impl UnixApp {
     }
 
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
-        if self.focus_gate().blocked() {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::CwdEditor)
+        {
             return Err("another modal surface is active".to_owned());
         }
         let _ = self.cancel_terminal_selection(true);
@@ -1571,6 +1580,12 @@ impl UnixApp {
     }
 
     fn open_settings(&mut self) {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::Settings)
+        {
+            return;
+        }
         if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
         }
