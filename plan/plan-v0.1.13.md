@@ -118,6 +118,7 @@ v0.1.13  Trust & platform narrowness
 │  ├─ [x] 取消 `frontend.rs` 对 adapter 的 `#[path]` 虚树；adapter 归属 `platform::adapters`
 │  ├─ [x] new-terminal / settings / live-tab close / tab editor / window-close / CWD editor 语义已进 `src/frontend/{new_terminal,settings,close_confirmation,tab_editor,window_close,cwd_editor}.rs`
 │  │     （Win/Unix 共用状态/校验/action，adapter 只保留原生呈现与事件映射）
+│  ├─ [x] modal/focus surface 命名/解析单点：ModalSurface + FocusSurface::as_str()/from_ipc()（interaction.rs；Win/Unix 共用）
 │  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略
 │  ├─ [ ] `platform/mod.rs` 产品策略表 vs `agenterm-platform` 机制 再切割

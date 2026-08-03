@@ -9,7 +9,7 @@ use crate::{
     event_journal::{EventEnvelope, EventJournal, EventKind, EventPosition},
     frontend::composer::ComposerWriteMode,
     frontend::interaction::{
-        ApplicationMouseMode, MouseReportEncoding, mouse_protocol_mode_name,
+        ApplicationMouseMode, FocusSurface, MouseReportEncoding, mouse_protocol_mode_name,
         mouse_report_encoding_name,
     },
     operations::{UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE},
@@ -488,10 +488,7 @@ pub(crate) trait ControlHost {
     }
 
     fn set_ipc_focus_surface(&mut self, surface: &str) -> Result<(), String> {
-        match surface {
-            "terminal" | "composer" | "tabs" | "sidebar" => Ok(()),
-            other => Err(format!("unknown focus surface: {other}")),
-        }
+        FocusSurface::from_ipc(surface).map(|_| ())
     }
 
     fn settings_json(&self) -> String {

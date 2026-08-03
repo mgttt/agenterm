@@ -13,6 +13,25 @@ pub(crate) enum FocusSurface {
     Sidebar,
 }
 
+impl FocusSurface {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Composer => "composer",
+            Self::Sidebar => "tabs",
+        }
+    }
+
+    pub(crate) fn from_ipc(value: &str) -> Result<Self, String> {
+        match value {
+            "terminal" => Ok(Self::Terminal),
+            "composer" => Ok(Self::Composer),
+            "tabs" | "sidebar" => Ok(Self::Sidebar),
+            other => Err(format!("unknown focus surface: {other}")),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FocusDirection {
     Up,
@@ -516,6 +535,23 @@ mod tests {
                 ..idle
             }),
             Some(ModalSurface::TabClose)
+        );
+    }
+
+    #[test]
+    fn focus_surface_canonical_names_and_ipc_aliases_round_trip() {
+        for (surface, name) in [
+            (FocusSurface::Terminal, "terminal"),
+            (FocusSurface::Composer, "composer"),
+            (FocusSurface::Sidebar, "tabs"),
+        ] {
+            assert_eq!(surface.as_str(), name);
+            assert_eq!(FocusSurface::from_ipc(name), Ok(surface));
+        }
+        assert_eq!(FocusSurface::from_ipc("sidebar"), Ok(FocusSurface::Sidebar));
+        assert_eq!(
+            FocusSurface::from_ipc("settings"),
+            Err("unknown focus surface: settings".to_owned())
         );
     }
 

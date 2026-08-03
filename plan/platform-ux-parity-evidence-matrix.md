@@ -36,7 +36,7 @@
 - P2（能力边界）：`platform-gap` / `infra/platform-binary-missing` 归类为能力边界，需在对应 host pipeline 补齐后重试，而不阻塞其他平台分支。
 
 > 说明：
-> - modal/focus 表面命名由 `src/frontend/interaction.rs` 的 `ModalSurface` + `modal_surface_from_gate()` 单点生成（window-close > settings > new-terminal > cwd-editor > tab-close；tab-editor 走独立 `tab_editor` 快照），Windows remote 与 Unix embedded 共用。
+> - modal/focus 表面命名由 `src/frontend/interaction.rs` 的 `ModalSurface` + `modal_surface_from_gate()` 单点生成（window-close > settings > new-terminal > cwd-editor > tab-close；tab-editor 走独立 `tab_editor` 快照），普通 focus 表面也由 `FocusSurface::as_str()/from_ipc()` 单点生成（terminal/composer/tabs|sidebar），Windows remote 与 Unix embedded 共用。
 > - `Supported`/`Failed`/`Unsupported` 只允许取 `Unsupported` 来表示“当前平台能力缺口”。`Failed` 代表脚本执行失败（回归阻断）。
 
 ## 证据与分支归因规则

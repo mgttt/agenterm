@@ -1389,12 +1389,9 @@ impl RemoteWindowState {
                     .get(1)
                     .map(String::as_str)
                     .unwrap_or("terminal");
-                let target = match surface {
-                    "terminal" => RemoteFocusSurface::Terminal,
-                    "composer" => RemoteFocusSurface::Composer,
-                    "tabs" | "sidebar" => RemoteFocusSurface::Tabs,
-                    other => anyhow::bail!("unknown focus surface: {other}"),
-                };
+                let target = RemoteFocusSurface::from_shared(
+                    FocusSurface::from_ipc(surface).map_err(|message| anyhow::anyhow!(message))?,
+                );
                 if !self.set_focus_surface(target) {
                     anyhow::bail!("focus surface is unavailable: {surface}");
                 }
@@ -1963,11 +1960,7 @@ impl RemoteWindowState {
         } else if self.tab_editor_dialog.is_open() {
             "tab-editor"
         } else {
-            match self.current_focus_surface() {
-                RemoteFocusSurface::Terminal => "terminal",
-                RemoteFocusSurface::Composer => "composer",
-                RemoteFocusSurface::Tabs => "tabs",
-            }
+            self.current_focus_surface().to_shared().as_str()
         };
         let native_window_state = self.window.state();
         let window_state = WindowSemanticState::from_native_flags(

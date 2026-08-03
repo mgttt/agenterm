@@ -455,14 +455,24 @@ impl UnixFocusSurface {
         }
     }
 
-    fn from_ipc(value: &str) -> Result<Self, String> {
-        match value {
-            "terminal" => Ok(Self::Terminal),
-            "composer" => Ok(Self::Composer),
-            "tabs" | "sidebar" => Ok(Self::Sidebar),
-            "settings" => Ok(Self::Settings),
-            other => Err(format!("unknown focus surface: {other}")),
+    const fn to_shared(self) -> Option<FocusSurface> {
+        match self {
+            Self::Terminal => Some(FocusSurface::Terminal),
+            Self::Composer => Some(FocusSurface::Composer),
+            Self::Sidebar => Some(FocusSurface::Sidebar),
+            Self::Settings => None,
         }
+    }
+
+    fn from_ipc(value: &str) -> Result<Self, String> {
+        if value == "settings" {
+            return Ok(Self::Settings);
+        }
+        Ok(match FocusSurface::from_ipc(value)? {
+            FocusSurface::Terminal => Self::Terminal,
+            FocusSurface::Composer => Self::Composer,
+            FocusSurface::Sidebar => Self::Sidebar,
+        })
     }
 }
 
@@ -836,12 +846,7 @@ impl UnixApp {
         }
         self.focus_surface = surface;
         let gate = self.focus_gate();
-        if let Some(semantic) = match surface {
-            UnixFocusSurface::Terminal => Some(FocusSurface::Terminal),
-            UnixFocusSurface::Composer => Some(FocusSurface::Composer),
-            UnixFocusSurface::Sidebar => Some(FocusSurface::Sidebar),
-            UnixFocusSurface::Settings => None,
-        } {
+        if let Some(semantic) = surface.to_shared() {
             self.focus_state = FocusState::new(semantic, gate);
         }
         self.reset_ime_context();
@@ -2236,7 +2241,7 @@ impl UnixApp {
                 } else if self.tab_editor_dialog.is_open() {
                     "tab-editor"
                 } else {
-                    self.focus_surface.as_str()
+                    self.focus_state.surface().as_str()
                 },
                 "window_id": active.map(|id| format!("@{id}")),
                 // This fact is updated only by the native FocusChanged event. An
