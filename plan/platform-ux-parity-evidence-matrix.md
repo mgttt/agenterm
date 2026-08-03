@@ -226,6 +226,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | mouse report encoding | `src/frontend/interaction.rs` | `MouseReportEncoding` + `mouse_report_bytes`；Windows remote 与 Unix embedded 共用同一编码器 | Supported | Supported | Supported |
 | raw-mouse arbitration | src/frontend/interaction.rs | mouse_report_outcome 统一裁决/编码，组合 mouse_delivery 与 mouse_report_bytes；两端 adapter 只映射原生事件 | Supported | Supported | Supported |
 | selection autoscroll | src/frontend/selection.rs | utoscroll_step 单份计算；Unix embedded 与 Windows remote poll tick 共用同一拖出视口滚动语义 | Supported | Supported | Supported |
+| word/line selection | `src/frontend/selection.rs` | `TerminalCellSource` + `word_selection_bounds` 统一 vt100 与 snapshot cell grid 的单词边界；Windows remote 双击/三击接线已补，raw-mouse 优先时仍走应用上报 | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 

@@ -29,7 +29,8 @@ use crate::{
         action,
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
-            SelectionGesturePhase, autoscroll_step,
+            SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
+            remote_word_selection,
         },
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
@@ -101,6 +102,8 @@ const KEY_F9: u16 = 0x78;
 const KEY_F10: u16 = 0x79;
 const KEY_F11: u16 = 0x7a;
 const KEY_F12: u16 = 0x7b;
+const DOUBLE_CLICK_MS: u64 = 500;
+
 const EDIT_ID: ControlId = ControlId(2101);
 const SEND_ID: ControlId = ControlId(2102);
 const NEW_ID: ControlId = ControlId(2103);
@@ -511,6 +514,20 @@ impl RemoteSidebarTextClick {
     }
 }
 
+#[derive(Clone, Debug)]
+struct RecentRemoteTerminalClick {
+    tab_id: String,
+    point: RemotePoint,
+    at: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct RemoteTerminalDoubleClick {
+    tab_id: String,
+    point: RemotePoint,
+    expires_at: Instant,
+}
+
 impl RemoteTerminalSelection {
     fn bounds(&self) -> (RemotePoint, RemotePoint) {
         self.gesture.bounds()
@@ -687,6 +704,8 @@ struct RemoteWindowState {
     sidebar_scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_geometry_generation: u64,
     recent_sidebar_text_click: Option<RemoteSidebarTextClick>,
+    recent_terminal_click: Option<RecentRemoteTerminalClick>,
+    terminal_double_click: Option<RemoteTerminalDoubleClick>,
     focus_surface: RemoteFocusSurface,
     focus_state: FocusState,
     pending_close_tab_id: Option<String>,
@@ -880,6 +899,8 @@ impl RemoteWindowState {
             sidebar_scroll_drag: None,
             sidebar_geometry_generation: 0,
             recent_sidebar_text_click: None,
+            recent_terminal_click: None,
+            terminal_double_click: None,
             focus_surface: RemoteFocusSurface::Terminal,
             focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             pending_close_tab_id: None,
@@ -4189,11 +4210,17 @@ impl RemoteWindowState {
             tab_id: tab_id.clone(),
             rows,
             columns,
-            gesture: RemoteSelectionGesture::begin(tab_id, point),
+            gesture: RemoteSelectionGesture::begin(tab_id.clone(), point),
             cached_text: None,
         });
         self.terminal_selection_pointer = Some((x, y));
         self.terminal_selection_autoscroll = None;
+        self.terminal_double_click = None;
+        self.recent_terminal_click = Some(RecentRemoteTerminalClick {
+            tab_id: tab_id.clone(),
+            point,
+            at: Instant::now(),
+        });
         self.last_error = None;
         true
     }
@@ -4241,14 +4268,7 @@ impl RemoteWindowState {
             self.terminal_selection = None;
             return true;
         }
-        let cached_text = self.terminal_selection.as_ref().and_then(|selection| {
-            self.active_tab()
-                .filter(|tab| selection.matches_screen(&tab.screen))
-                .map(|tab| screen_selection_text(&tab.screen, selection))
-        });
-        if let Some(selection) = self.terminal_selection.as_mut() {
-            selection.cached_text = cached_text.filter(|text| !text.is_empty());
-        }
+        self.cache_terminal_selection_text();
         true
     }
 
@@ -4948,7 +4968,7 @@ impl RemoteWindowState {
         }
     }
 
-    fn handle_left_double_click(&mut self, x: i32, y: i32) -> bool {
+    fn handle_left_double_click(&mut self, x: i32, y: i32, clicks: u8) -> bool {
         if self.window_close_pending
             || self.settings_open
             || self.new_terminal_open
@@ -4970,7 +4990,7 @@ impl RemoteWindowState {
             self.window.focus();
             true
         } else {
-            false
+            self.handle_terminal_double_click(x, y, clicks)
         }
     }
 
@@ -5042,6 +5062,107 @@ impl RemoteWindowState {
             self.window.focus();
         }
         true
+    }
+
+    fn handle_terminal_double_click(&mut self, x: i32, y: i32, clicks: u8) -> bool {
+        let Some(point) = self.terminal_point(x, y, false) else {
+            return false;
+        };
+        let Some((tab_id, rows, columns)) = self
+            .active_tab()
+            .map(|tab| (tab.id.clone(), tab.screen.rows, tab.screen.columns))
+        else {
+            return false;
+        };
+        let now = Instant::now();
+
+        if clicks >= 3
+            && self.terminal_double_click.as_ref().is_some_and(|click| {
+                click.tab_id == tab_id && click.point == point && now <= click.expires_at
+            })
+        {
+            self.terminal_double_click = None;
+            self.recent_terminal_click = None;
+            if let Some((start, end)) = remote_visible_row_selection(rows, columns, point.row) {
+                self.set_completed_terminal_selection(tab_id, rows, columns, start, end);
+                let _ = self.copy_terminal_selection();
+            }
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+            self.window.focus();
+            return true;
+        }
+
+        if self.recent_terminal_click.as_ref().is_some_and(|click| {
+            click.tab_id == tab_id
+                && click.point == point
+                && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+        }) {
+            self.recent_terminal_click = None;
+            let cells = self.active_tab().map(|tab| screen_cells(&tab.screen));
+            let selected = cells
+                .as_deref()
+                .and_then(|cells| remote_word_selection(cells, point));
+            if let Some((start, end)) = selected {
+                self.set_completed_terminal_selection(tab_id.clone(), rows, columns, start, end);
+                self.terminal_double_click = now
+                    .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
+                    .map(|expires_at| RemoteTerminalDoubleClick {
+                        tab_id: tab_id.clone(),
+                        point,
+                        expires_at,
+                    });
+                let _ = self.copy_terminal_selection();
+            }
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+            self.window.focus();
+            return true;
+        }
+
+        false
+    }
+
+    fn set_completed_terminal_selection(
+        &mut self,
+        tab_id: String,
+        rows: u32,
+        columns: u32,
+        start: RemotePoint,
+        end: RemotePoint,
+    ) -> bool {
+        self.cancel_terminal_selection();
+        if rows == 0 || columns == 0 {
+            return false;
+        }
+        self.terminal_selection = Some(RemoteTerminalSelection {
+            tab_id: tab_id.clone(),
+            rows,
+            columns,
+            gesture: RemoteSelectionGesture::completed_unchecked(tab_id, start, end),
+            cached_text: None,
+        });
+        self.terminal_selection_pointer = None;
+        self.terminal_selection_autoscroll = None;
+        self.cache_terminal_selection_text();
+        true
+    }
+
+    fn cache_terminal_selection_text(&mut self) {
+        let cached_text = {
+            let Some(selection) = self.terminal_selection.as_ref() else {
+                return;
+            };
+            let Some(tab) = self.active_tab() else {
+                return;
+            };
+            if !selection.matches_screen(&tab.screen) {
+                return;
+            }
+            screen_selection_text(&tab.screen, selection)
+        };
+        let cached_text = (!cached_text.is_empty()).then_some(cached_text);
+        if let Some(selection) = self.terminal_selection.as_mut() {
+            selection.cached_text = cached_text;
+        }
     }
 
     fn handle_pointer_moved(&mut self, x: i32, y: i32) -> bool {
@@ -6217,7 +6338,7 @@ impl ControlWindowApplication for RemoteWindowApplication {
             } => {
                 state.pointer_modifiers = modifiers;
                 redraw = if clicks > 1 {
-                    state.handle_left_double_click(position.x, position.y)
+                    state.handle_left_double_click(position.x, position.y, clicks)
                 } else {
                     state.handle_left_button_down(position.x, position.y)
                 };

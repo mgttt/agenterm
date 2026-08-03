@@ -68,6 +68,14 @@ impl<TabId: Clone, Point: Copy + Eq + Ord> SelectionGestureState<TabId, Point> {
             phase: SelectionGesturePhase::Prepared,
         }
     }
+    pub(crate) fn completed_unchecked(tab_id: TabId, anchor: Point, focus: Point) -> Self {
+        Self {
+            tab_id,
+            anchor,
+            focus,
+            phase: SelectionGesturePhase::Completed,
+        }
+    }
 
     pub(crate) const fn phase(&self) -> SelectionGesturePhase {
         self.phase
@@ -261,44 +269,121 @@ pub(crate) fn clamp_point(point: TerminalPoint, rows: u16, cols: u16) -> Option<
     })
 }
 
+trait TerminalCellSource {
+    fn rows(&self) -> u32;
+    fn cols(&self) -> u32;
+    fn cell(&self, row: u32, col: u32) -> Option<(&str, bool)>;
+}
+
+impl TerminalCellSource for &vt100::Screen {
+    fn rows(&self) -> u32 {
+        u32::from(self.size().0)
+    }
+
+    fn cols(&self) -> u32 {
+        u32::from(self.size().1)
+    }
+
+    fn cell(&self, row: u32, col: u32) -> Option<(&str, bool)> {
+        let row = u16::try_from(row).ok()?;
+        let col = u16::try_from(col).ok()?;
+        let cell = (*self).cell(row, col)?;
+        Some((cell.contents(), cell.is_wide_continuation()))
+    }
+}
+
+impl TerminalCellSource for &[Vec<Option<String>>] {
+    fn rows(&self) -> u32 {
+        u32::try_from(self.len()).unwrap_or_default()
+    }
+
+    fn cols(&self) -> u32 {
+        self.first()
+            .map_or(0, |row| u32::try_from(row.len()).unwrap_or_default())
+    }
+
+    fn cell(&self, row: u32, col: u32) -> Option<(&str, bool)> {
+        let text = self
+            .get(usize::try_from(row).ok()?)?
+            .get(usize::try_from(col).ok()?)?
+            .as_deref()?;
+        Some((text, text.is_empty()))
+    }
+}
+
 pub(crate) fn word_selection(
     screen: &vt100::Screen,
     point: TerminalPoint,
 ) -> Option<(TerminalPoint, TerminalPoint)> {
-    let (rows, cols) = screen.size();
-    let point = clamp_point(point, rows, cols)?;
-    let row = point.row;
-    let mut clicked_col = point.col;
+    let (start, end) =
+        word_selection_bounds(&screen, (u32::from(point.row), u32::from(point.col)))?;
+    Some((
+        TerminalPoint {
+            row: u16::try_from(start.0).ok()?,
+            col: u16::try_from(start.1).ok()?,
+        },
+        TerminalPoint {
+            row: u16::try_from(end.0).ok()?,
+            col: u16::try_from(end.1).ok()?,
+        },
+    ))
+}
+
+pub(crate) fn remote_word_selection(
+    cells: &[Vec<Option<String>>],
+    point: RemotePoint,
+) -> Option<(RemotePoint, RemotePoint)> {
+    let (start, end) = word_selection_bounds(&cells, (point.row, point.column))?;
+    Some((
+        RemotePoint {
+            row: start.0,
+            column: start.1,
+        },
+        RemotePoint {
+            row: end.0,
+            column: end.1,
+        },
+    ))
+}
+
+fn word_selection_bounds(
+    source: &dyn TerminalCellSource,
+    point: (u32, u32),
+) -> Option<((u32, u32), (u32, u32))> {
+    let rows = source.rows();
+    let cols = source.cols();
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    let row = point.0.min(rows - 1);
+    let mut clicked_col = point.1.min(cols - 1);
     while clicked_col > 0
-        && screen
+        && source
             .cell(row, clicked_col)
-            .is_some_and(vt100::Cell::is_wide_continuation)
+            .is_some_and(|(_, continuation)| continuation)
     {
         clicked_col -= 1;
     }
 
-    let clicked_class = cell_word_class(screen, row, clicked_col);
+    let clicked_class = cell_word_class(source, row, clicked_col);
     let mut start = clicked_col;
     while start > 0 {
-        let previous = previous_cell_start(screen, row, start);
-        if cell_word_class(screen, row, previous) != clicked_class {
+        let previous = previous_cell_start(source, row, start);
+        if cell_word_class(source, row, previous) != clicked_class {
             break;
         }
         start = previous;
     }
 
     let mut end_start = clicked_col;
-    while let Some(next) = next_cell_start(screen, row, end_start, cols) {
-        if cell_word_class(screen, row, next) != clicked_class {
+    while let Some(next) = next_cell_start(source, row, end_start, cols) {
+        if cell_word_class(source, row, next) != clicked_class {
             break;
         }
         end_start = next;
     }
-    let end = cell_end(screen, row, end_start, cols);
-    Some((
-        TerminalPoint { row, col: start },
-        TerminalPoint { row, col: end },
-    ))
+    let end = cell_end(source, row, end_start, cols);
+    Some(((row, start), (row, end)))
 }
 
 pub(crate) fn visible_row_selection(
@@ -316,6 +401,23 @@ pub(crate) fn visible_row_selection(
     ))
 }
 
+pub(crate) fn remote_visible_row_selection(
+    rows: u32,
+    cols: u32,
+    row: u32,
+) -> Option<(RemotePoint, RemotePoint)> {
+    if rows == 0 || cols == 0 || row >= rows {
+        return None;
+    }
+    Some((
+        RemotePoint { row, column: 0 },
+        RemotePoint {
+            row,
+            column: cols - 1,
+        },
+    ))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CellWordClass {
     Whitespace,
@@ -323,10 +425,10 @@ enum CellWordClass {
     Punctuation(char),
 }
 
-fn cell_word_class(screen: &vt100::Screen, row: u16, col: u16) -> CellWordClass {
-    let contents = screen
+fn cell_word_class(source: &dyn TerminalCellSource, row: u32, col: u32) -> CellWordClass {
+    let contents = source
         .cell(row, col)
-        .map(vt100::Cell::contents)
+        .map(|(contents, _)| contents)
         .unwrap_or_default();
     let Some(first) = contents.chars().next() else {
         return CellWordClass::Whitespace;
@@ -345,28 +447,28 @@ fn is_terminal_word_character(character: char) -> bool {
         || matches!(character, '_' | '-' | '.' | '/' | '\\' | ':' | '@' | '~')
 }
 
-fn previous_cell_start(screen: &vt100::Screen, row: u16, col: u16) -> u16 {
+fn previous_cell_start(source: &dyn TerminalCellSource, row: u32, col: u32) -> u32 {
     let mut previous = col - 1;
     while previous > 0
-        && screen
+        && source
             .cell(row, previous)
-            .is_some_and(vt100::Cell::is_wide_continuation)
+            .is_some_and(|(_, continuation)| continuation)
     {
         previous -= 1;
     }
     previous
 }
 
-fn next_cell_start(screen: &vt100::Screen, row: u16, col: u16, cols: u16) -> Option<u16> {
-    let next = cell_end(screen, row, col, cols).saturating_add(1);
+fn next_cell_start(source: &dyn TerminalCellSource, row: u32, col: u32, cols: u32) -> Option<u32> {
+    let next = cell_end(source, row, col, cols).saturating_add(1);
     (next < cols).then_some(next)
 }
 
-fn cell_end(screen: &vt100::Screen, row: u16, col: u16, cols: u16) -> u16 {
+fn cell_end(source: &dyn TerminalCellSource, row: u32, col: u32, cols: u32) -> u32 {
     if col + 1 < cols
-        && screen
+        && source
             .cell(row, col + 1)
-            .is_some_and(vt100::Cell::is_wide_continuation)
+            .is_some_and(|(_, continuation)| continuation)
     {
         col + 1
     } else {
@@ -502,6 +604,57 @@ mod tests {
                 TerminalPoint { row: 0, col: 16 },
             ))
         );
+    }
+
+    #[test]
+    fn remote_word_selection_uses_snapshot_cell_grid_and_wide_spans() {
+        let mut cells = vec![vec![None; 24]; 1];
+        for (column, text) in [
+            "a", "l", "p", "h", "a", ".", "r", "s", " ", "你", "", "好", "", " ", "o", "k", "!",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            cells[0][column] = Some(text.to_owned());
+        }
+        assert_eq!(
+            remote_word_selection(&cells, RemotePoint { row: 0, column: 3 }),
+            Some((
+                RemotePoint { row: 0, column: 0 },
+                RemotePoint { row: 0, column: 7 },
+            ))
+        );
+        assert_eq!(
+            remote_word_selection(&cells, RemotePoint { row: 0, column: 10 }),
+            Some((
+                RemotePoint { row: 0, column: 9 },
+                RemotePoint { row: 0, column: 12 },
+            ))
+        );
+        assert_eq!(
+            remote_word_selection(&cells, RemotePoint { row: 0, column: 16 }),
+            Some((
+                RemotePoint { row: 0, column: 16 },
+                RemotePoint { row: 0, column: 16 },
+            ))
+        );
+        assert_eq!(
+            remote_visible_row_selection(3, 8, 1),
+            Some((
+                RemotePoint { row: 1, column: 0 },
+                RemotePoint { row: 1, column: 7 },
+            ))
+        );
+        assert_eq!(remote_visible_row_selection(3, 8, 99), None);
+    }
+
+    #[test]
+    fn remote_gesture_can_complete_without_a_drag() {
+        let start = RemotePoint { row: 2, column: 3 };
+        let end = RemotePoint { row: 2, column: 9 };
+        let gesture = RemoteSelectionGesture::completed_unchecked("tab".to_owned(), start, end);
+        assert_eq!(gesture.phase(), SelectionGesturePhase::Completed);
+        assert_eq!(gesture.bounds(), (start, end));
     }
 
     #[test]
