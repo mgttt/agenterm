@@ -10,13 +10,11 @@ use windows_sys::Win32::{
     Foundation::{GetLastError, HANDLE},
     System::Console::{
         ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle,
-        PeekConsoleInputW, ReadConsoleInputW, SetConsoleMode, STD_ERROR_HANDLE,
-        STD_INPUT_HANDLE, INPUT_RECORD, KEY_EVENT,
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, INPUT_RECORD, KEY_EVENT,
+        PeekConsoleInputW, ReadConsoleInputW, STD_ERROR_HANDLE, STD_INPUT_HANDLE, SetConsoleMode,
     },
     UI::Input::KeyboardAndMouse::{
-        VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT,
-        VK_UP,
+        VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP,
     },
 };
 
@@ -75,7 +73,10 @@ impl Editor {
         let editor_mode =
             input_mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT) | ENABLE_PROCESSED_INPUT;
         if unsafe { SetConsoleMode(input_handle, editor_mode) } == 0 {
-            return Err(native_failure("set-input-mode", "SetConsoleMode failed".to_owned()));
+            return Err(native_failure(
+                "set-input-mode",
+                "SetConsoleMode failed".to_owned(),
+            ));
         }
         let editor = Self {
             input_handle,
@@ -145,9 +146,7 @@ impl Drop for Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        VK_A, VK_TAB,
-    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_TAB};
 
     #[test]
     fn maps_printable_unicode_and_control_keys() {

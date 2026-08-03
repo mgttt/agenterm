@@ -2164,9 +2164,15 @@ mod tests {
         out: &mut std::collections::HashMap<String, std::collections::HashSet<usize>>,
     ) {
         for signature in module.gen_fn_signatures_with_mapper(std::borrow::Cow::Borrowed) {
-            let (name, params) = signature.split_once('(').unwrap_or((signature.as_str(), ""));
+            let (name, params) = signature
+                .split_once('(')
+                .unwrap_or((signature.as_str(), ""));
             let params = params.trim_end_matches(')').trim();
-            let arity = if params.is_empty() { 0 } else { params.split(',').count() };
+            let arity = if params.is_empty() {
+                0
+            } else {
+                params.split(',').count()
+            };
             out.entry(format!("{prefix}{name}"))
                 .or_default()
                 .insert(arity);
@@ -2192,13 +2198,8 @@ mod tests {
         signature
             .split('/')
             .filter_map(|part| {
-                part.split_once('(').map(|(head, _)| {
-                    head.trim()
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                })
+                part.split_once('(')
+                    .map(|(head, _)| head.trim().rsplit('.').next().unwrap_or("").trim())
             })
             .filter(|name| !name.is_empty())
             .collect()
@@ -2236,7 +2237,10 @@ mod tests {
         for entry in entries().into_iter().filter(|entry| {
             entry.status == ScriptApiStatus::Shipped && entry.operation_id.is_none()
         }) {
-            if entry.signature.starts_with(&format!("{}(", entry.surface_path)) {
+            if entry
+                .signature
+                .starts_with(&format!("{}(", entry.surface_path))
+            {
                 let arity = catalog_arity(entry.signature);
                 let registered = surface.get(entry.surface_path);
                 assert!(

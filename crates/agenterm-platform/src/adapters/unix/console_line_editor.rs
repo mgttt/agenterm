@@ -36,10 +36,7 @@ impl Editor {
         // interrupt observer keeps working while we read per-key input.
         raw.c_lflag |= libc::ISIG;
         if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw) } != 0 {
-            return Err(native_failure(
-                "set-raw-mode",
-                io::Error::last_os_error(),
-            ));
+            return Err(native_failure("set-raw-mode", io::Error::last_os_error()));
         }
         Ok(Self {
             original,
@@ -74,13 +71,8 @@ impl Editor {
                 return Ok(None);
             }
             let mut bytes = [0_u8; 64];
-            let read = unsafe {
-                libc::read(
-                    libc::STDIN_FILENO,
-                    bytes.as_mut_ptr().cast(),
-                    bytes.len(),
-                )
-            };
+            let read =
+                unsafe { libc::read(libc::STDIN_FILENO, bytes.as_mut_ptr().cast(), bytes.len()) };
             if read < 0 {
                 let error = io::Error::last_os_error();
                 if error.kind() == io::ErrorKind::Interrupted {

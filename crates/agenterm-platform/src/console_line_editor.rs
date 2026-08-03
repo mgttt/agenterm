@@ -494,9 +494,6 @@ mod tests {
         let mut parser = EscapeParser::new();
         assert_eq!(feed_all(&mut parser, b"\x04"), vec![ConsoleKey::Eof]);
         let mut parser = EscapeParser::new();
-        assert_eq!(
-            feed_all(&mut parser, b"\x1b[5~"),
-            vec![ConsoleKey::Unknown]
-        );
+        assert_eq!(feed_all(&mut parser, b"\x1b[5~"), vec![ConsoleKey::Unknown]);
     }
 }

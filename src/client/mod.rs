@@ -435,9 +435,7 @@ fn run_repl_line_editor(
             }
             Ok(None) => {}
             Err(error) => {
-                let _ = input_tx.send(ReplInputEvent::Failed(format!(
-                    "host_line_editor: {error}"
-                )));
+                let _ = input_tx.send(ReplInputEvent::Failed(format!("host_line_editor: {error}")));
                 return;
             }
         }
