@@ -4276,6 +4276,12 @@ impl UnixApp {
     }
 
     fn request_close_tab(&mut self, id: u64) {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::TabClose)
+        {
+            return;
+        }
         let _ = self.cancel_terminal_selection(true);
         if self.cwd_editor_target_id() == Some(id) {
             self.close_cwd_editor();
@@ -4290,6 +4296,7 @@ impl UnixApp {
             let _ = self.close_tab_id(id);
             return;
         }
+        self.sync_composer_buffer_to_tab();
         self.close_confirmation.open(format!("@{id}"));
         self.request_redraw();
     }

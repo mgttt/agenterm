@@ -115,7 +115,8 @@ impl FocusTransitionGate {
         match surface {
             ModalSurface::WindowClose => self.window_close_pending,
             ModalSurface::Settings | ModalSurface::NewTerminal => self.full_modal_blocked(),
-            ModalSurface::CwdEditor | ModalSurface::TabClose => self.blocked(),
+            ModalSurface::TabClose => self.full_modal_blocked(),
+            ModalSurface::CwdEditor => self.blocked(),
         }
     }
 
@@ -608,7 +609,7 @@ mod tests {
         assert!(!inline.modal_entry_blocked(ModalSurface::NewTerminal));
         assert!(!inline.modal_entry_blocked(ModalSurface::Settings));
         assert!(inline.modal_entry_blocked(ModalSurface::CwdEditor));
-        assert!(inline.modal_entry_blocked(ModalSurface::TabClose));
+        assert!(!inline.modal_entry_blocked(ModalSurface::TabClose));
         assert!(
             FocusTransitionGate {
                 window_close_pending: true,

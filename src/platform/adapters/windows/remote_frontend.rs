@@ -3486,6 +3486,15 @@ impl RemoteWindowState {
         let Some(tab) = self.tab_at_y(y).cloned() else {
             return;
         };
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::TabClose)
+        {
+            return;
+        }
+        if self.cwd_editor_dialog.target() == Some(tab.id.as_str()) {
+            self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
+        }
         self.cancel_terminal_selection();
         if tab.dead {
             let _ = self.close_tab_now(tab.id);
