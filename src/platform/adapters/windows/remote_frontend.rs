@@ -27,7 +27,10 @@ use crate::{
     },
     frontend::{
         action,
-        selection::{RemotePoint, RemoteSelectionGesture, SelectionGesturePhase},
+        selection::{
+            AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
+            SelectionGesturePhase, autoscroll_step,
+        },
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
@@ -673,6 +676,8 @@ struct RemoteWindowState {
     settings_override_draft: TerminalAppearanceOverride,
     settings_target_tab_id: Option<String>,
     terminal_selection: Option<RemoteTerminalSelection>,
+    terminal_selection_pointer: Option<(i32, i32)>,
+    terminal_selection_autoscroll: Option<AutoScrollStep>,
     pointer_modifiers: input::ModifierState,
     mouse_report_button: Option<u8>,
     mouse_report_cell: Option<(u16, u16)>,
@@ -864,6 +869,8 @@ impl RemoteWindowState {
             settings_override_draft: TerminalAppearanceOverride::default(),
             settings_target_tab_id: None,
             terminal_selection: None,
+            terminal_selection_pointer: None,
+            terminal_selection_autoscroll: None,
             pointer_modifiers: input::ModifierState::empty(),
             mouse_report_button: None,
             mouse_report_cell: None,
@@ -901,6 +908,7 @@ impl RemoteWindowState {
                 self.reconcile_pending_terminal_resize();
                 self.reconcile_tab_editor();
                 self.reconcile_terminal_selection();
+                let autoscroll_changed = self.tick_terminal_selection_autoscroll();
                 self.reconcile_tab_close();
                 self.reconcile_cwd_editor();
                 let active = self
@@ -937,7 +945,12 @@ impl RemoteWindowState {
                 };
                 match self.publish_ui_snapshot() {
                     Ok(published) => {
-                        resize_changed || paste_changed || changed || command_changed || published
+                        resize_changed
+                            || paste_changed
+                            || changed
+                            || command_changed
+                            || autoscroll_changed
+                            || published
                     }
                     Err(error) => {
                         self.last_error =
@@ -2199,7 +2212,7 @@ impl RemoteWindowState {
                             "rendered": !highlight.is_empty(),
                             "bounds": highlight.into_iter().map(pixel_rect_json).collect::<Vec<_>>(),
                         },
-                        "autoscroll": {"active": false},
+                        "autoscroll": {"active": self.terminal_selection_autoscroll.is_some()},
                     })
                 }),
                 "raw_mouse_arbitration": true,
@@ -4179,6 +4192,8 @@ impl RemoteWindowState {
             gesture: RemoteSelectionGesture::begin(tab_id, point),
             cached_text: None,
         });
+        self.terminal_selection_pointer = Some((x, y));
+        self.terminal_selection_autoscroll = None;
         self.last_error = None;
         true
     }
@@ -4197,6 +4212,10 @@ impl RemoteWindowState {
         if let Some(selection) = self.terminal_selection.as_mut() {
             selection.drag_to(point);
         }
+        let terminal = self.workspace_geometry().terminal;
+        self.terminal_selection_pointer = Some((x, y));
+        self.terminal_selection_autoscroll =
+            autoscroll_step(y, terminal.top, terminal.bottom, self.cell_height.max(1));
         true
     }
 
@@ -4204,6 +4223,7 @@ impl RemoteWindowState {
         if !self.drag_terminal_selection(x, y) {
             return false;
         }
+        self.clear_terminal_selection_autoscroll();
         let completed = self
             .terminal_selection
             .as_mut()
@@ -4242,6 +4262,7 @@ impl RemoteWindowState {
                 selection.cancel();
             }
             self.terminal_selection = None;
+            self.clear_terminal_selection_autoscroll();
         }
     }
 
@@ -4254,6 +4275,7 @@ impl RemoteWindowState {
             selection.cancel();
         }
         self.terminal_selection = None;
+        self.clear_terminal_selection_autoscroll();
         if captured && let Err(error) = self.window.set_pointer_capture(false) {
             self.last_error = Some(format!(
                 "Selection failed to release pointer capture: {error}"
@@ -4261,6 +4283,69 @@ impl RemoteWindowState {
         }
     }
 
+    fn clear_terminal_selection_autoscroll(&mut self) {
+        self.terminal_selection_pointer = None;
+        self.terminal_selection_autoscroll = None;
+    }
+
+    fn tick_terminal_selection_autoscroll(&mut self) -> bool {
+        let Some(step) = self.terminal_selection_autoscroll else {
+            return false;
+        };
+        if !self
+            .terminal_selection
+            .as_ref()
+            .is_some_and(RemoteTerminalSelection::active_gesture)
+        {
+            self.clear_terminal_selection_autoscroll();
+            return false;
+        }
+        let Some((x, y)) = self.terminal_selection_pointer else {
+            self.clear_terminal_selection_autoscroll();
+            return false;
+        };
+        let Some(tab) = self.active_tab() else {
+            self.clear_terminal_selection_autoscroll();
+            return false;
+        };
+        let tab_id = tab.id.clone();
+        let action = match step.direction {
+            AutoScrollDirection::Up => "up",
+            AutoScrollDirection::Down => "down",
+        };
+        let terminal = self.workspace_geometry().terminal;
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| {
+                client.run_control(vec![
+                    "scroll-pane".to_owned(),
+                    "-t".to_owned(),
+                    tab_id,
+                    action.to_owned(),
+                    step.rows.to_string(),
+                ])?;
+                client.poll_deltas()
+            });
+        match result {
+            Ok(_) => {
+                if let Some(point) = self.terminal_point(x, y, true)
+                    && let Some(selection) = self.terminal_selection.as_mut()
+                {
+                    selection.drag_to(point);
+                }
+                self.terminal_selection_autoscroll =
+                    autoscroll_step(y, terminal.top, terminal.bottom, self.cell_height.max(1));
+                true
+            }
+            Err(error) => {
+                self.last_error = Some(format!("Selection autoscroll failed: {error:#}"));
+                self.clear_terminal_selection_autoscroll();
+                false
+            }
+        }
+    }
     fn copy_terminal_selection(&mut self) -> Result<()> {
         let selection = self
             .terminal_selection
