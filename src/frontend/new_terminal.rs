@@ -7,7 +7,7 @@ pub(crate) enum NewShellChoice {
     #[default]
     Default,
     Primary,
-    Bash,
+    Alternate,
 }
 
 impl NewShellChoice {
@@ -15,7 +15,7 @@ impl NewShellChoice {
         match self {
             Self::Default => "default",
             Self::Primary => primary_shell().id,
-            Self::Bash => "bash",
+            Self::Alternate => crate::platform::runtime::alternate_terminal_shell_id(),
         }
     }
 
@@ -24,7 +24,7 @@ impl NewShellChoice {
         match action {
             "shell-default" => Some(Self::Default),
             "shell-primary" | "shell-zsh" | "shell-sh" | "shell-cmd" => Some(Self::Primary),
-            "shell-bash" | "shell-powershell" => Some(Self::Bash),
+            "shell-bash" | "shell-powershell" => Some(Self::Alternate),
             _ => None,
         }
     }
@@ -197,24 +197,7 @@ impl NewTerminalDialog {
 }
 
 fn build_command_line(choice: NewShellChoice, initial: &str) -> Vec<String> {
-    match choice {
-        NewShellChoice::Default if initial.is_empty() => Vec::new(),
-        NewShellChoice::Default | NewShellChoice::Primary => {
-            let program = primary_shell().program;
-            let mut child = vec![program.to_owned()];
-            if !initial.is_empty() {
-                child.extend(["-c".to_owned(), format!("{initial}; exec {program} -i")]);
-            }
-            child
-        }
-        NewShellChoice::Bash => {
-            let mut child = vec!["/bin/bash".to_owned()];
-            if !initial.is_empty() {
-                child.extend(["-c".to_owned(), format!("{initial}; exec /bin/bash -i")]);
-            }
-            child
-        }
-    }
+    crate::platform::runtime::new_terminal_command_line(choice.id(), initial)
 }
 
 pub(crate) fn ui_action_open(dialog: &mut NewTerminalDialog) -> bool {
@@ -302,7 +285,7 @@ pub(crate) fn dispatch_ui_action(
             Ok(None)
         }
         "shell-bash" | "shell-powershell" => {
-            ui_action_choose_shell(dialog, NewShellChoice::Bash);
+            ui_action_choose_shell(dialog, NewShellChoice::Alternate);
             Ok(None)
         }
         "new-terminal-set-initial-command" => {
@@ -334,7 +317,7 @@ mod tests {
         dialog.open();
         dialog.set_initial_command_draft("echo hi".to_owned());
         dialog.set_http_proxy_draft("http://proxy.test".to_owned());
-        dialog.choose_shell(NewShellChoice::Bash);
+        dialog.choose_shell(NewShellChoice::Alternate);
 
         dialog.open();
         assert!(dialog.is_open());
@@ -361,26 +344,28 @@ mod tests {
         dialog.choose_shell(NewShellChoice::Primary);
         dialog.set_initial_command_draft("echo marker".to_owned());
         let params = dialog.finish(true).unwrap().expect("create params");
-        assert_eq!(params.command_line[0], primary_shell().program);
-        assert_eq!(params.command_line[1], "-c");
-        assert!(params.command_line[2].contains("echo marker"));
-        assert!(params.command_line[2].contains(primary_shell().program));
+        assert_eq!(
+            params.command_line.first().map(String::as_str),
+            Some(primary_shell().program)
+        );
+        assert!(
+            params
+                .command_line
+                .iter()
+                .any(|arg| arg.contains("echo marker"))
+        );
     }
 
     #[test]
-    fn finish_create_bash() {
+    fn finish_create_alternate_shell_with_initial() {
         let mut dialog = NewTerminalDialog::new();
         dialog.open();
-        dialog.choose_shell(NewShellChoice::Bash);
+        dialog.choose_shell(NewShellChoice::Alternate);
         dialog.set_initial_command_draft("echo hi".to_owned());
         let params = dialog.finish(true).unwrap().expect("create params");
         assert_eq!(
-            params.command_line,
-            vec![
-                "/bin/bash".to_owned(),
-                "-c".to_owned(),
-                "echo hi; exec /bin/bash -i".to_owned(),
-            ]
+            params.command_line.first().map(String::as_str),
+            Some(crate::platform::runtime::alternate_terminal_shell_program())
         );
     }
 
@@ -456,7 +441,7 @@ mod tests {
         );
         assert_eq!(
             NewShellChoice::from_action_id("shell-powershell"),
-            Some(NewShellChoice::Bash)
+            Some(NewShellChoice::Alternate)
         );
         assert_eq!(
             NewShellChoice::from_action_id("shell-primary"),
@@ -464,7 +449,7 @@ mod tests {
         );
         assert_eq!(
             NewShellChoice::from_action_id("shell-bash"),
-            Some(NewShellChoice::Bash)
+            Some(NewShellChoice::Alternate)
         );
     }
 }

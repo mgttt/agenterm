@@ -12,6 +12,18 @@ pub(crate) fn primary_terminal_shell() -> crate::platform::contract::runtime::Te
     crate::platform::services::runtime::primary_terminal_shell()
 }
 
+pub(crate) fn alternate_terminal_shell_id() -> &'static str {
+    crate::platform::policy::runtime::alternate_terminal_shell_id()
+}
+
+pub(crate) fn alternate_terminal_shell_program() -> &'static str {
+    crate::platform::policy::runtime::alternate_terminal_shell_program()
+}
+
+pub(crate) fn new_terminal_command_line(shell_id: &str, initial: &str) -> Vec<String> {
+    crate::platform::policy::runtime::new_terminal_command_line(shell_id, initial)
+}
+
 /// Returns the `LANG` value to inject into terminal children when the GUI
 /// process environment has no locale, or `None` to leave it untouched.
 pub(crate) fn preferred_terminal_lang() -> Option<String> {

@@ -29,6 +29,7 @@ use crate::{
     frontend::{
         action,
         composer::ComposerWriteMode,
+        new_terminal::NewShellChoice,
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
@@ -466,23 +467,6 @@ enum AppearanceField {
     FontFamily,
     FontSize,
     Theme,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NewShellChoice {
-    Default,
-    CommandPrompt,
-    PowerShell,
-}
-
-impl NewShellChoice {
-    const fn id(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::CommandPrompt => "cmd",
-            Self::PowerShell => "powershell",
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -3352,14 +3336,10 @@ impl RemoteWindowState {
             (self.new_default_shell, NewShellChoice::Default, "Default"),
             (
                 self.new_cmd_shell,
-                NewShellChoice::CommandPrompt,
+                NewShellChoice::Primary,
                 "Command Prompt",
             ),
-            (
-                self.new_powershell,
-                NewShellChoice::PowerShell,
-                "PowerShell",
-            ),
+            (self.new_powershell, NewShellChoice::Alternate, "PowerShell"),
         ] {
             let selected = self.new_shell_choice == choice;
             self.set_control_text(
@@ -3409,23 +3389,10 @@ impl RemoteWindowState {
             //         args.push(format!("{name}={value}"));
             //     }
             // }
-            let mut child = match self.new_shell_choice {
-                NewShellChoice::Default if initial.is_empty() => Vec::new(),
-                NewShellChoice::Default | NewShellChoice::CommandPrompt => {
-                    let mut child = vec!["cmd.exe".to_owned(), "/d".to_owned()];
-                    if !initial.is_empty() {
-                        child.extend(["/k".to_owned(), initial]);
-                    }
-                    child
-                }
-                NewShellChoice::PowerShell => {
-                    let mut child = vec!["powershell.exe".to_owned(), "-NoLogo".to_owned()];
-                    if !initial.is_empty() {
-                        child.extend(["-NoExit".to_owned(), "-Command".to_owned(), initial]);
-                    }
-                    child
-                }
-            };
+            let mut child = crate::platform::runtime::new_terminal_command_line(
+                self.new_shell_choice.id(),
+                &initial,
+            );
             if !child.is_empty() {
                 args.push("--".to_owned());
                 args.append(&mut child);
@@ -4718,8 +4685,9 @@ impl RemoteWindowState {
         let before = tab.screen.scrollback_offset;
         let alternate_screen = tab.screen.alternate_screen;
         let application_cursor = tab.screen.application_cursor;
+        let full_screen_input = alternate_screen || application_cursor;
         if tab.screen.max_scrollback == 0 {
-            if alternate_screen {
+            if full_screen_input {
                 self.terminal_input(&alternate_screen_wheel_bytes(
                     wheel_notches > 0,
                     count,
@@ -4749,7 +4717,7 @@ impl RemoteWindowState {
                 let scrolled = self
                     .active_tab()
                     .is_some_and(|tab| tab.screen.scrollback_offset != before);
-                if !scrolled && alternate_screen {
+                if !scrolled && full_screen_input {
                     self.terminal_input(&alternate_screen_wheel_bytes(
                         wheel_notches > 0,
                         count,
@@ -6259,8 +6227,8 @@ impl RemoteWindowApplication {
             TAB_CLOSE_CONFIRM_ID => state.finish_close_tab(true),
             TAB_CLOSE_CANCEL_ID => state.finish_close_tab(false),
             NEW_DEFAULT_SHELL_ID => state.choose_new_shell(NewShellChoice::Default),
-            NEW_CMD_SHELL_ID => state.choose_new_shell(NewShellChoice::CommandPrompt),
-            NEW_POWERSHELL_ID => state.choose_new_shell(NewShellChoice::PowerShell),
+            NEW_CMD_SHELL_ID => state.choose_new_shell(NewShellChoice::Primary),
+            NEW_POWERSHELL_ID => state.choose_new_shell(NewShellChoice::Alternate),
             NEW_CREATE_ID => state.finish_new_terminal(true),
             NEW_CANCEL_ID => state.finish_new_terminal(false),
             _ => {}

@@ -54,9 +54,8 @@ fn require_window_control(control, name) {
 
 fn wheel_message_lparam(gui) {
     let window_rect = gui.window_rect();
-    let client_rect = gui.window_client_rect();
-    let x = window_rect.left + client_rect.width / 2;
-    let y = window_rect.top + client_rect.height / 2;
+    let x = (window_rect.left + window_rect.right) / 2;
+    let y = (window_rect.top + window_rect.bottom) / 2;
     y * 65536 + x
 }
 
@@ -444,6 +443,9 @@ fn wait_file_text(path, expected, code) {
             }
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    if std::fs::exists(path) {
+        throw code + ":observed=" + std::fs::read_to_string(path);
     }
     throw code;
 }
@@ -2274,7 +2276,7 @@ function Read-NineCharacters {
 }
 
 try {
-    [Console]::Write($escape + "[?1049h" + $escape + "[?1hALT_WHEEL_READY")
+    [Console]::Write($escape + "[?1047h" + $escape + "[?1hALT_WHEEL_READY")
     $up = @(Read-NineCharacters)
     [System.IO.File]::WriteAllText(
         $ResultPath,
@@ -2286,7 +2288,7 @@ try {
         "up=" + ($up -join ",") + ";down=" + ($down -join ",")
     )
 } finally {
-    [Console]::Write($escape + "[?1l" + $escape + "[?1049l")
+    [Console]::Write($escape + "[?1l" + $escape + "[?1047l")
 }
 `
     );
@@ -2324,6 +2326,7 @@ try {
         alternate_snapshot.focus.window_id == alternate_id,
         "remote_ui_raw_application_not_active"
     );
+
     gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
     wait_file_text(
         alternate_result,

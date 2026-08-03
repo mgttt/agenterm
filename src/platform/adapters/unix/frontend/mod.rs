@@ -1080,7 +1080,7 @@ impl UnixApp {
         match self.new_terminal_dialog.shell_choice() {
             new_terminal::NewShellChoice::Default => RenderShellChoice::Default,
             new_terminal::NewShellChoice::Primary => RenderShellChoice::Primary,
-            new_terminal::NewShellChoice::Bash => RenderShellChoice::Bash,
+            new_terminal::NewShellChoice::Alternate => RenderShellChoice::Bash,
         }
     }
 
@@ -1142,7 +1142,7 @@ impl UnixApp {
             }
             NewTerminalHit::BashShell => {
                 self.new_terminal_dialog
-                    .choose_shell(new_terminal::NewShellChoice::Bash);
+                    .choose_shell(new_terminal::NewShellChoice::Alternate);
             }
             NewTerminalHit::InitialCommand => {
                 self.new_terminal_focus = NewTerminalFocusView::InitialCommand;

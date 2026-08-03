@@ -221,7 +221,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | wheel accumulation | `src/frontend/interaction.rs` | `WheelAccumulator`，高分辨率增量按 `WHEEL_DELTA` 统一累积 | Supported | Supported | Supported |
 | modal focus state | `src/frontend/interaction.rs` | `FocusState`（surface+gate），语义 surface 由两端存储，modal 打开时禁止 focus transition/navigation；两端 adapter 以 `focus_gate()` 单点映射原生 modal flags | Supported | Supported | Supported |
 | wheel routing | `src/frontend/interaction.rs` | `route_wheel`，sidebar/terminal/ignored 目标统一 | Supported | Supported | Supported |
-| alternate-screen wheel fallback | `src/commands.rs` + Windows remote | `alternate_screen_wheel_bytes` 单份编码；Windows remote 在无可滚动 viewport 时按 Unix 语义只对 alternate screen 回退发送箭头序列 | Supported | Supported | Supported |
+| alternate-screen wheel fallback | `src/commands.rs` + Windows remote | `alternate_screen_wheel_bytes` 单份编码；Windows ConPTY 会吞掉 alternate-screen 序列，remote 以 `application_cursor` 识别 raw full-screen 状态，无可滚动 viewport 时回退发送箭头序列 | Supported | Supported | Supported |
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
 | pointer modifiers | `agenterm-platform::contract::input::ModifierState` | Windows `ControlWindowEvent` 与 Unix `PixelWindowEvent` 都携带 modifiers；Win32 鼠标消息从同一 `current_modifiers()` 读取 | Supported | Supported | Supported |
 | mouse report encoding | `src/frontend/interaction.rs` | `MouseReportEncoding` + `mouse_report_bytes`；Windows remote 与 Unix embedded 共用同一编码器 | Supported | Supported | Supported |
@@ -230,7 +230,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | word/line selection | `src/frontend/selection.rs` | `TerminalCellSource` + `word_selection_bounds` 统一 vt100 与 snapshot cell grid 的单词边界；Windows remote 双击/三击接线已补，raw-mouse 优先时仍走应用上报 | Supported | Supported | Supported |
 | CWD editor write modes | `src/frontend/composer.rs` | `ComposerWriteMode` 单点定义并供 Unix embedded、Windows remote、server dispatch 共用；Windows Ctrl+Enter=empty-only、Shift+Ctrl+Enter=append、Alt+Ctrl+Enter=replace 与 Unix 对齐 | Supported | Supported | Supported |
 | keyboard/text-field policy | `src/frontend/input.rs` | Composer/TextField/Terminal shortcut 与 PTY key bytes 单点定义；Unix embedded 从 `src/platform/adapters/unix/frontend` 迁出引用 | Supported | Supported | Supported |
-| new-terminal modal | src/frontend/new_terminal.rs | open/reset/校验/action 单点；Unix embedded 迁出 adapter，Windows remote 继续原生控件呈现 | Supported | Supported | Supported |
+| new-terminal modal | src/frontend/new_terminal.rs | open/reset/校验/action 与 shell argv 单点；Unix embedded 迁出 adapter，Windows remote 继续原生控件呈现并复用 platform policy argv | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 
