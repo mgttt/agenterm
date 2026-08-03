@@ -3192,14 +3192,9 @@ impl RemoteWindowState {
             self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
             return true;
         }
-        if key == 0x0d && modifiers.control {
-            let mode = if modifiers.shift {
-                ComposerWriteMode::Append
-            } else if modifiers.alt {
-                ComposerWriteMode::Replace
-            } else {
-                ComposerWriteMode::EmptyOnly
-            };
+        if key == 0x0d
+            && let Some(mode) = CwdEditorDialog::submit_mode(modifiers)
+        {
             self.finish_cwd_editor(true, mode);
             return true;
         }

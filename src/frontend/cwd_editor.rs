@@ -53,6 +53,26 @@ impl CwdEditorDialog {
         }
     }
 
+    pub(crate) fn submit_mode(
+        modifiers: agenterm_platform::input::ModifierState,
+    ) -> Option<ComposerWriteMode> {
+        let primary = if crate::platform::is_primary_shortcut_via_meta() {
+            modifiers.meta
+        } else {
+            modifiers.control
+        };
+        if !primary {
+            return None;
+        }
+        Some(if modifiers.shift {
+            ComposerWriteMode::Append
+        } else if modifiers.alt {
+            ComposerWriteMode::Replace
+        } else {
+            ComposerWriteMode::EmptyOnly
+        })
+    }
+
     pub(crate) fn snapshot_modal(&self) -> serde_json::Value {
         json!({
             "kind": "cwd-editor",
@@ -108,6 +128,48 @@ mod tests {
         assert_eq!(snapshot["window_id"], "@7");
         assert_eq!(snapshot["default_action"], "cwd-prepare");
         assert_eq!(snapshot["actions"][3], "cwd-send-now");
+    }
+
+    #[test]
+    fn submit_mode_uses_platform_primary_shortcut_and_modes() {
+        let via_meta = crate::platform::is_primary_shortcut_via_meta();
+        let primary = agenterm_platform::input::ModifierState {
+            control: !via_meta,
+            shift: false,
+            alt: false,
+            meta: via_meta,
+        };
+        assert_eq!(
+            CwdEditorDialog::submit_mode(primary),
+            Some(ComposerWriteMode::EmptyOnly)
+        );
+        assert_eq!(
+            CwdEditorDialog::submit_mode(agenterm_platform::input::ModifierState {
+                control: false,
+                shift: false,
+                alt: false,
+                meta: false,
+            }),
+            None
+        );
+        assert_eq!(
+            CwdEditorDialog::submit_mode(agenterm_platform::input::ModifierState {
+                control: !via_meta,
+                shift: true,
+                alt: false,
+                meta: via_meta,
+            }),
+            Some(ComposerWriteMode::Append)
+        );
+        assert_eq!(
+            CwdEditorDialog::submit_mode(agenterm_platform::input::ModifierState {
+                control: !via_meta,
+                shift: false,
+                alt: true,
+                meta: via_meta,
+            }),
+            Some(ComposerWriteMode::Replace)
+        );
     }
 
     #[test]

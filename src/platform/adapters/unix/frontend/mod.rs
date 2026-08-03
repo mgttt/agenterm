@@ -4947,16 +4947,9 @@ impl UnixApp {
                             self.close_cwd_editor();
                             return;
                         }
-                        if input::primary_shortcut(event.modifiers)
-                            && matches!(event.logical, Key::Named(NamedKey::Enter))
+                        if matches!(event.logical, Key::Named(NamedKey::Enter))
+                            && let Some(mode) = CwdEditorDialog::submit_mode(event.modifiers)
                         {
-                            let mode = if event.modifiers.shift {
-                                ComposerWriteMode::Append
-                            } else if event.modifiers.alt {
-                                ComposerWriteMode::Replace
-                            } else {
-                                ComposerWriteMode::EmptyOnly
-                            };
                             let _ = self.prepare_cwd(None, None, mode);
                             return;
                         }
