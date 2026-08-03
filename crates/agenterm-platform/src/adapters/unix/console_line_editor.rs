@@ -20,6 +20,13 @@ fn native_failure(code: &'static str, error: io::Error) -> ConsoleLineEditorErro
 pub(crate) struct Editor {
     original: libc::termios,
     parser: EscapeParser,
+    /// Keys already decoded from a `read()` chunk but not yet returned.
+    ///
+    /// A single `read()` call commonly returns more than one typed byte (fast
+    /// typing, paste), and `EscapeParser::feed` decodes all of them at once.
+    /// `read_key`'s contract is one key per call, so extras queue here in
+    /// order instead of being discarded.
+    pending: std::collections::VecDeque<ConsoleKey>,
 }
 
 impl Editor {
@@ -41,10 +48,14 @@ impl Editor {
         Ok(Self {
             original,
             parser: EscapeParser::new(),
+            pending: std::collections::VecDeque::new(),
         })
     }
 
     pub(crate) fn read_key(&mut self) -> Result<Option<ConsoleKey>, ConsoleLineEditorError> {
+        if let Some(key) = self.pending.pop_front() {
+            return Ok(Some(key));
+        }
         loop {
             let window = if self.parser.has_pending() {
                 ESC_PENDING_WINDOW_MS
@@ -83,11 +94,12 @@ impl Editor {
             if read == 0 {
                 return Ok(Some(ConsoleKey::Eof));
             }
-            let mut keys = self.parser.feed(&bytes[..read as usize]);
+            let keys = self.parser.feed(&bytes[..read as usize]);
             if keys.is_empty() {
                 continue;
             }
-            return Ok(keys.pop());
+            self.pending.extend(keys);
+            return Ok(self.pending.pop_front());
         }
     }
 }
@@ -95,5 +107,30 @@ impl Editor {
 impl Drop for Editor {
     fn drop(&mut self) {
         let _ = unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.original) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keys_decoded_from_one_read_are_all_replayed_in_order() {
+        // A single read() can return multiple typed bytes (fast typing,
+        // paste); feed() decodes all of them, and every one of them must
+        // come back out of read_key(), in order, across successive calls.
+        let mut editor = Editor {
+            original: unsafe { std::mem::zeroed() },
+            parser: EscapeParser::new(),
+            pending: std::collections::VecDeque::from([
+                ConsoleKey::Char('a'),
+                ConsoleKey::Char('b'),
+                ConsoleKey::Char('c'),
+            ]),
+        };
+        assert_eq!(editor.read_key().unwrap(), Some(ConsoleKey::Char('a')));
+        assert_eq!(editor.read_key().unwrap(), Some(ConsoleKey::Char('b')));
+        assert_eq!(editor.read_key().unwrap(), Some(ConsoleKey::Char('c')));
+        assert!(editor.pending.is_empty());
     }
 }
