@@ -1,6 +1,10 @@
 //! Win32 native control-window host. Native handles never cross this module.
 
-use std::{cell::Cell, collections::HashMap, io, mem, ptr, rc::Rc, time::Instant};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    io, mem, ptr, rc::Rc, time::Instant,
+};
 
 use windows_sys::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
@@ -731,9 +735,12 @@ thread_local! {
     // `state_ptr` into a second `&mut State` while the outer dispatch still
     // holds one live through `state.application` — an aliasing violation
     // regardless of whether it happens to behave today. Reentrant messages
-    // fall back to the default window procedure instead; the next poll
-    // tick reconciles layout from the authoritative state.
+    // fall back to the default window procedure immediately so the Win32
+    // call keeps its synchronous contract, and are queued for the normal
+    // dispatch path once the outer dispatch has released `&mut State`.
     static DISPATCHING: Cell<bool> = const { Cell::new(false) };
+    static PENDING_MESSAGES: RefCell<Vec<(u32, WPARAM, LPARAM)>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -748,10 +755,30 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
     if DISPATCHING.with(Cell::get) {
+        PENDING_MESSAGES.with(|pending| {
+            pending.borrow_mut().push((msg, wp, lp));
+        });
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
     DISPATCHING.with(|flag| flag.set(true));
     let result = dispatch_window_message(hwnd, msg, wp, lp, unsafe { &mut *state_ptr });
+    loop {
+        let pending = PENDING_MESSAGES.with(|messages| {
+            std::mem::take(&mut *messages.borrow_mut())
+        });
+        if pending.is_empty() {
+            break;
+        }
+        for (pending_msg, pending_wp, pending_lp) in pending {
+            let _ = dispatch_window_message(
+                hwnd,
+                pending_msg,
+                pending_wp,
+                pending_lp,
+                unsafe { &mut *state_ptr },
+            );
+        }
+    }
     DISPATCHING.with(|flag| flag.set(false));
     result
 }
