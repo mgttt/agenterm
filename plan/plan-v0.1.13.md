@@ -157,10 +157,15 @@ v0.1.13  Trust & platform narrowness
 │  │     无 panic 噪音；命名映射/句柄继承/竞态回归均覆盖）
 │  └─ [x] quick 绿 ≠ 六平台 CI / smoke / Candidate；宿主矩阵门禁已记录（本机 601 tests + clippy 全绿 = Windows 单平台；六平台 CI 归 v0.1.12 授权链）
 │
-└─ E. 体验小叶（可选，按用户痛点排序，不做大 CC）
-   ├─ [ ] REPL 行编辑/history（若仍痛）
-   ├─ [ ] macOS pointer：Unsupported 诊断更清楚或真机正向证据
-   └─ [ ] Cockpit 只读事实/导航小步，不进 Workflows 内容
+└─ E. v0.1.13 功能叶（守住边界 + 补齐功能；不做大 CC、不进 Workflows 内容）
+   ├─ [ ] REPL 行编辑/history：`agenterm-rhai` REPL 支持方向键编辑 +
+   │     上下历史（supervision/Ctrl+C 已有；交互编辑开放）
+   ├─ [ ] macOS pointer 诊断：Unsupported 时错误信息给清「缺哪项能力」
+   │     （不冒充 shipped；真机正向证据若不可得则保留 typed 边界）
+   ├─ [ ] Cockpit 只读事实/导航小步：加深诊断面板（事件/PTY/租约读数），
+   │     不做 Workflows 内容
+   └─ [ ] precision-audit #13：Rhai catalog-vs-registration 自动化测试
+         （Engine-introspection；补 std.net/std.fs 之外的全量检查）
 ```
 
 ---
@@ -537,3 +542,46 @@ v0.1.13 发文方向从「更多抽象」调整为：**守住边界 + 补齐功�
 - R5：已共享（`ComposerWriteMode` 单点）
 - R4：始终归 v0.2.0
 - R6：维持分叉（几何已共享）
+
+
+---
+
+## 十、v0.1.13 执行规划（2026-08-03 review 后定版）
+
+> 前提：§九 review 证明确认跨平台 UI/UX 对齐已达标（R1/R3 不成立、R5 已共享、
+> R2/R4 归 v0.2.0）。本版方向 = **守住已验证边界 + 补齐功能**，不再加新共享层。
+
+### 10.1 版本归属裁定
+
+| 内容 | 归属 |
+|------|------|
+| REPL 行编辑/history、Cockpit 诊断小步、Rhai catalog #13、macOS pointer 诊断 | **v0.1.13** |
+| 巨型状态机拆解（Unix 223KB / Win 266KB）、snapshot 填充管线统一（R2） | **v0.2.0** |
+| B 组 `[~]` facade 2 处纯转发删除（需跨 target CI） | **v0.1.13 尾叶**（CI 就绪后） |
+| A 组 4 项（Candidate/Promotion/冻结纪律/计时） | 授权流程，不在本版自主执行 |
+
+### 10.2 波次（执行投影）
+
+```text
+v0.1.13 Wave A（功能补齐 — 用户体感优先）
+├─ [ ] REPL 行编辑/history（E 组叶，Script 体验）
+├─ [ ] Cockpit 诊断小步（E 组叶，只读事实加深）
+└─ [ ] precision-audit #13 Rhai catalog 自动化（E 组叶，信任面）
+
+v0.1.13 Wave B（信任面收口）
+├─ [ ] macOS pointer Unsupported 诊断清晰化（E 组叶）
+├─ [ ] B 组 [~] facade 纯转发删除（待跨 target CI）
+└─ [ ] 六平台 parity-smoke 宿主矩阵门禁记录（Windows 已绿；Linux/macOS 归 CI）
+
+v0.1.13 完成定义（在 §六基础上）
+- Wave A/B 全勾选；每叶独立提交 + cargo check/clippy -D warnings 亲测绿
+- 601 tests + platform all-feature 全绿；无未提交残留
+- 不触发 Candidate/tag；v0.1.12 授权链不动
+```
+
+### 10.3 边界（不做的）
+
+- 不做巨型状态机拆解（v0.2.0）
+- 不做 snapshot 填充管线统一（v0.2.0）
+- 不进 Workflows / 大 Control Center / net / WebView（v0.2.0）
+- 不冒充 shipped 能力（macOS pointer 无正向证据则保留 typed Unsupported）
