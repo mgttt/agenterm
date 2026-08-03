@@ -709,9 +709,11 @@ fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<Inst
     ));
     fs::write(&temporary, serde_json::to_vec_pretty(&record)?)
         .with_context(|| format!("failed to write {}", temporary.display()))?;
-    if path.exists() {
-        fs::remove_file(&path).with_context(|| format!("failed to replace {}", path.display()))?;
-    }
+    // fs::rename atomically replaces an existing destination on both POSIX
+    // and Windows (confirmed empirically: it succeeds even while another
+    // handle holds the destination open under Rust's default sharing
+    // flags), so there is no window here where a concurrent reader could
+    // observe the path as missing.
     fs::rename(&temporary, &path)
         .with_context(|| format!("failed to publish {}", path.display()))?;
     let legacy_alias_path = record
