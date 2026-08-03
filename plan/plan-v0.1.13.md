@@ -519,17 +519,21 @@ frontend 死文件」；parity smoke 按场景 ID 出 Supported/Unsupported。
 | # | 发现 | 文件 | 影响 | 建议 |
 |---|------|------|------|------|
 | R1 | ~~reconcile_* 系列同构~~（2026-08-03 复核：**不成立**） | `remote_frontend.rs` | reconcile 是 Windows remote 特有（server/client 分离需与 server snapshot 对账）；Unix embedded 同树巨石状态机无等价方法，两端不对称 | **跳过**：4 方法在 Windows 内部可提取私有辅助（~60 行），但无跨端复用价值，归 v0.1.13 内部清理可选叶 |
-| R2 | Snapshot 构建仍有各自的字段填充 | `build_ui_snapshot_json` (Unix) / `ui_snapshot_json` (Win) | schema 形状对齐但填充逻辑不共享；增字段需改两处 | 抽取 `frontend/snapshot.rs` 统一填充管线，host 只提供差异表（如控件可见性 / native 指针位置） |
-| R3 | Focus surface 桥接重复 | `RemoteFocusSurface ↔ FocusSurface` vs `UnixFocusSurface ↔ FocusSurface` | 两端各写 to_shared/from_shared，模式相同仅 variant 映射不同 | 可在 `src/frontend/interaction.rs` 加 `HostFocusSurface` trait，两端实现 |
+| R2 | ~~Snapshot 填充管线统一~~（2026-08-03 复核：**高成本，归 v0.2.0**） | 两端 | Win snapshot 深度依赖 host 状态（`tabs_visible`/`sidebar_offset`/`terminal_selection`/`config.locale`/`window.client_size`），与 Unix 结构差异大 | **归 v0.2.0**：schema 已对齐（已达成目标），填充逻辑共享需搬大量 host 上下文入共享模块，性价比低 |
+| R3 | ~~Focus surface 桥接 trait~~（2026-08-03 复核：**不成立**） | 两端 | Unix 4 variant（含 host-only `Settings`→`None`），Win 3 variant；签名不对称（Option vs 非-Option）；bridge 代码各仅 ~15 行 | **跳过**：强行 trait 化需解决 `Option` 差异 + variant 命名对账，复杂度 > 收益 |
 | R4 | 巨型状态机未继续拆解 | 222KB/213fn (Unix) + 265KB/239fn (Win) | 体积不是 bug，但是"单点化不完全"的症状——仍有交互逻辑驻留在主机而非共享模块 | v0.2.0 逐块拆解：composer 输入管线 → tab 生命周期 → UI action 分发；每块独立测试 |
-| R5 | Composer 同步逻辑可能重复 | `sync_composer_buffer_to_tab` / `load_composer_buffer_from_tab` (Unix) vs load_composer/save_composer (Win) | host 特有控件绑定使得共用困难，但中间状态（ComposerWriteMode/raw text）可共享 | 共用 composer 中间表示层，host 只绑 native 控件 |
+| R5 | ~~Composer 中间层~~（2026-08-03 复核：**已共享**） | 两端 | `ComposerWriteMode` 已在 `src/frontend/composer.rs` 单点定义、两端直接消费；剩余 `sync/load` 逻辑深绑 host 控件（Unix 直写 tab buffer，Win 经 server 同步），不构成重复 | **已达成**，无需额外动作 |
 | R6 | sidebar/toolbar paint 仍各自实现 | `unix/frontend/layout.rs` + `render.rs` vs Win GDI `paint_tabs` | 渲染管线(像素坐标/颜色/字体)分叉是主机机制差异（winit vs GDI），共享成本高 | 维持分叉；几何计算（bounds/row_capacity）已共享，无需进一步统一 |
 
-### 9.3 推荐开工 v0.1.13 的切入顺序
-1. **R3 focus bridge trait**（低风险，纯 trait 定义+两端 impl，真跨端复用）
-2. **R2 snapshot 统一填充**（中风险，需保证 schema 回退兼容）
-3. **R5 composer 中间层**（中风险，独立测试）
-4. **R1 Windows 内部 reconcile 清理**（可选，~60 行，无跨端价值）
-5. **R4 状态机拆解** → 归 v0.2.0（大工程，不挡 0.1.13）
+### 9.3 复核后修正：v0.1.13 发文方向（2026-08-03）
 
-R1/R3 文件域不相交（前者 `src/platform/adapters/{windows,unix}`，后者 `src/frontend/interaction.rs` + 两端 adapter），可并行开工。
+逐项深评后：R1/R3 不成立（两端不对称），R2 高成本（归 v0.2.0），R5 已共享。**跨平台对齐已达标**——前期单点化（interaction/selection/模态/mouse_report/snapshot schema）覆盖充分，剩余差异是合法 host 适配边界（Windows remote 对账 vs Unix 同树内联；host 控件绑定），不是意外重复。
+
+v0.1.13 发文方向从「更多抽象」调整为：**守住边界 + 补齐功能**——不再加新共享层，在已验证的单点边界上构建新 feature（Cockpit 深度 / REPL 行编辑 / 多平台 PTY 鲁棒性），持续维护证明对齐度不退化。
+
+候选归档：
+- R1 / R3：已证不成立（不对称）
+- R2：归 v0.2.0（schema 已对齐，填充管线统一为长期优化）
+- R5：已共享（`ComposerWriteMode` 单点）
+- R4：始终归 v0.2.0
+- R6：维持分叉（几何已共享）
