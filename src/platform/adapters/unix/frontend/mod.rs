@@ -58,10 +58,10 @@ use crate::{
     },
     ui_geometry::{
         ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode,
-        WHEEL_ROWS_PER_NOTCH, WorkspaceToolbarLayout, pixel_rect_json, scrollback_for_thumb_top,
-        scrollbar_hit_test, sidebar_row_capacity, sidebar_scrollbar_geometry,
-        sidebar_scrollbar_track, sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
-        wheel_delta_units,
+        WHEEL_ROWS_PER_NOTCH, WorkspaceToolbarLayout, composer_geometry, pixel_rect_json,
+        scrollback_for_thumb_top, scrollbar_hit_test, sidebar_row_capacity,
+        sidebar_scrollbar_geometry, sidebar_scrollbar_track, sidebar_tree_row_geometry,
+        tabs_width_from_drag, terminal_cell_at, wheel_delta_units,
     },
     wake_signal::WakeSignal,
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
@@ -98,7 +98,7 @@ use crate::frontend::new_terminal::{NewTerminalDialog, ui_action_open};
 use cursor_blink::CursorBlink;
 use font::resolved_font_name;
 use render::{
-    COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
+    ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
     NewTerminalModalView, SettingsHit, SettingsModalView, SidebarTabRow, StatusBarView,
     TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid, TerminalLayerGeometry,
@@ -1015,18 +1015,14 @@ impl UnixApp {
     }
 
     fn composer_send_hit(&self, x: f64, y: f64) -> bool {
-        let layout = self.layout();
-        let sidebar_width = self.sidebar_width();
-        let composer_top = layout.composer.top.max(0) as u32;
-        let composer_width = self.client_size().0.saturating_sub(sidebar_width);
-        const SEND_W: u32 = 72;
-        let send_x = sidebar_width + composer_width.saturating_sub(SEND_W + 8);
-        let send_y = composer_top + 7;
-        let send_h = COMPOSER_HEIGHT - 14;
-        x >= f64::from(send_x)
-            && x < f64::from(send_x + SEND_W)
-            && y >= f64::from(send_y)
-            && y < f64::from(send_y + send_h)
+        let send = composer_geometry(self.layout().composer).send;
+        let (left, top, right, bottom) = (
+            send.left as f64,
+            send.top as f64,
+            send.right as f64,
+            send.bottom as f64,
+        );
+        x >= left && x < right && y >= top && y < bottom
     }
 
     fn paste_clipboard_into_composer(&mut self) -> Result<(), String> {
@@ -2004,14 +2000,8 @@ impl UnixApp {
         let sidebar_scrollbar = self
             .sidebar_scrollbar_state()
             .map(|(geometry, offset, maximum)| scrollbar_state_json(&geometry, offset, maximum));
-        const COMPOSER_SEND_WIDTH: i32 = 72;
-        let composer_send_left = layout.composer.right - COMPOSER_SEND_WIDTH - 8;
-        let composer_input = crate::ui_geometry::PixelRect {
-            left: layout.composer.left,
-            top: layout.composer.top,
-            right: composer_send_left,
-            bottom: layout.composer.bottom,
-        };
+        let composer_geometry = composer_geometry(layout.composer);
+        let composer_input = composer_geometry.input;
         let workspace_controls_visible = self.focus_gate().workspace_controls_visible();
         let interaction_selection = self.terminal_selection.map(|selection| {
             let (start, end) = selection.bounds();
@@ -3982,16 +3972,20 @@ impl UnixApp {
             })
         };
         let composer_top = layout.composer.top.max(0) as u32;
-        let composer_width = logical_width.saturating_sub(sidebar_width);
-        const SEND_W: u32 = 72;
-        let send_x = sidebar_width + composer_width.saturating_sub(SEND_W + 8);
+        let composer_geometry = composer_geometry(layout.composer);
+        let send = composer_geometry.send;
         let composer_view = ComposerView {
             text: &self.composer_buffer,
             focused: self.focus_surface == UnixFocusSurface::Composer,
             selected_all: self.composer_select_all,
             top: composer_top,
             label: composer_label,
-            send_button: (send_x, composer_top + 7, SEND_W, COMPOSER_HEIGHT - 14),
+            send_button: (
+                send.left.max(0) as u32,
+                send.top.max(0) as u32,
+                send.width().max(0) as u32,
+                send.height().max(0) as u32,
+            ),
         };
         let status_view = StatusBarView {
             bounds: u32_rect(layout.status),

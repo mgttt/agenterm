@@ -76,7 +76,39 @@ impl PixelRect {
     }
 }
 
+const COMPOSER_MARGIN: i32 = 6;
+const COMPOSER_SEND_WIDTH: i32 = 76;
+const COMPOSER_SEND_HEIGHT: i32 = 34;
+const COMPOSER_INPUT_TOP: i32 = 26;
+const COMPOSER_INPUT_BOTTOM_INSET: i32 = 8;
+const COMPOSER_INPUT_MIN_WIDTH: i32 = 80;
+const COMPOSER_INPUT_MIN_HEIGHT: i32 = 56;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ComposerGeometry {
+    pub(crate) input: PixelRect,
+    pub(crate) send: PixelRect,
+}
+
+/// Product-owned Composer input and Send geometry shared by Windows and Unix
+/// adapters. Hosts still decide how to paint these rectangles, but the visible
+/// hit regions and snapshot bounds must not diverge.
+pub(crate) fn composer_geometry(composer: PixelRect) -> ComposerGeometry {
+    let send = PixelRect {
+        left: composer.right - COMPOSER_SEND_WIDTH - COMPOSER_MARGIN,
+        top: composer.top + COMPOSER_INPUT_TOP,
+        right: composer.right - COMPOSER_MARGIN,
+        bottom: composer.top + COMPOSER_INPUT_TOP + COMPOSER_SEND_HEIGHT,
+    };
+    let input = PixelRect {
+        left: composer.left + COMPOSER_MARGIN,
+        top: composer.top + COMPOSER_INPUT_TOP,
+        right: (composer.right - COMPOSER_SEND_WIDTH - COMPOSER_MARGIN * 2)
+            .max(composer.left + COMPOSER_MARGIN + COMPOSER_INPUT_MIN_WIDTH),
+        bottom: (composer.bottom - COMPOSER_INPUT_BOTTOM_INSET)
+            .max(composer.top + COMPOSER_INPUT_MIN_HEIGHT),
+    };
+    ComposerGeometry { input, send }
+}
 pub(crate) struct WorkspaceLayoutInput {
     pub(crate) client_width: i32,
     pub(crate) client_height: i32,
@@ -1008,6 +1040,51 @@ mod tests {
         assert_eq!(reset_tabs_width(), 250);
     }
 
+    #[test]
+    fn composer_geometry_matches_shared_windows_reference() {
+        let composer = PixelRect {
+            left: 250,
+            top: 510,
+            right: 1000,
+            bottom: 614,
+        };
+        let geometry = composer_geometry(composer);
+        assert_eq!(
+            geometry.input,
+            PixelRect {
+                left: 256,
+                top: 536,
+                right: 912,
+                bottom: 606,
+            }
+        );
+        assert_eq!(
+            geometry.send,
+            PixelRect {
+                left: 918,
+                top: 536,
+                right: 994,
+                bottom: 570,
+            }
+        );
+        assert!(geometry.send.left >= geometry.input.right);
+        assert!(geometry.send.right <= composer.right);
+    }
+
+    #[test]
+    fn composer_geometry_keeps_tiny_composer_usable() {
+        let composer = PixelRect {
+            left: 0,
+            top: 0,
+            right: 120,
+            bottom: 60,
+        };
+        let geometry = composer_geometry(composer);
+        assert!(geometry.input.width() >= COMPOSER_INPUT_MIN_WIDTH);
+        assert!(geometry.input.height() > 0);
+        assert_eq!(geometry.send.width(), COMPOSER_SEND_WIDTH);
+        assert_eq!(geometry.send.height(), COMPOSER_SEND_HEIGHT);
+    }
     #[test]
     fn normal_workspace_partitions_sidebar_terminal_composer_and_status() {
         let geometry = layout(1000, 700, true, 250);

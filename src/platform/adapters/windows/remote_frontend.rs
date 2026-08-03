@@ -59,9 +59,9 @@ use crate::{
     ui_geometry::{
         PixelRect as ProductPixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
         TreeRowActionDensity, TreeRowGeometry, TreeRowMode, WHEEL_ROWS_PER_NOTCH, WorkspaceLayout,
-        WorkspaceLayoutInput, pixel_rect_json, reset_tabs_width, scrollback_for_thumb_top,
-        sidebar_row_capacity, sidebar_scrollbar_geometry, sidebar_scrollbar_track,
-        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
+        WorkspaceLayoutInput, composer_geometry, pixel_rect_json, reset_tabs_width,
+        scrollback_for_thumb_top, sidebar_row_capacity, sidebar_scrollbar_geometry,
+        sidebar_scrollbar_track, sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
         terminal_scrollbar_geometry, tree_connector_segments, tree_row_at_y, wheel_delta_units,
         workspace_layout,
     },
@@ -1925,13 +1925,8 @@ impl RemoteWindowState {
             ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
         });
         let (copy_enabled, paste_enabled) = self.system_menu_state();
-        let composer_input = ProductPixelRect {
-            left: layout.composer.left + MARGIN,
-            top: layout.composer.top + 26,
-            right: (layout.composer.right - 76 - MARGIN * 2)
-                .max(layout.composer.left + MARGIN + 80),
-            bottom: (layout.composer.bottom - 8).max(layout.composer.top + 56),
-        };
+        let composer_geometry = composer_geometry(layout.composer);
+        let composer_input = composer_geometry.input;
         let focus = if let Some(surface) = modal_surface_from_gate(self.focus_gate()) {
             surface.as_str()
         } else if self.tab_editor_dialog.is_open() {
@@ -2349,25 +2344,9 @@ impl RemoteWindowState {
                 self.set_control_bounds(control, bounds);
             }
         }
-        let send_width = 76;
-        self.set_control_bounds(
-            self.edit,
-            ProductPixelRect {
-                left: composer.left + MARGIN,
-                top: composer.top + 26,
-                right: composer.right - send_width - MARGIN * 2,
-                bottom: (composer.bottom - 8).max(composer.top + 56),
-            },
-        );
-        self.set_control_bounds(
-            self.send,
-            ProductPixelRect {
-                left: composer.right - send_width - MARGIN,
-                top: composer.top + 26,
-                right: composer.right - MARGIN,
-                bottom: composer.top + 60,
-            },
-        );
+        let composer_geometry = composer_geometry(composer);
+        self.set_control_bounds(self.edit, composer_geometry.input);
+        self.set_control_bounds(self.send, composer_geometry.send);
         let toolbar_visible =
             geometry.workspace_toolbar.is_some() && self.focus_gate().workspace_controls_visible();
         for control in [
