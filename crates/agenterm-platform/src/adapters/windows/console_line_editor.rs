@@ -56,6 +56,15 @@ pub(crate) struct Editor {
     original_input_mode: u32,
     error_handle: HANDLE,
     original_error_mode: u32,
+    /// Remaining repeats of `pending_key` from a coalesced `INPUT_RECORD`.
+    ///
+    /// The console can report a held key as one record with `wRepeatCount`
+    /// greater than one instead of one record per press (documented Win32
+    /// behavior, confirmed by round-tripping a synthetic record through a
+    /// real console on this host). Reading exactly one record per call would
+    /// silently drop `wRepeatCount - 1` presses without this queue.
+    pending_key: Option<ConsoleKey>,
+    pending_repeat: u32,
 }
 
 impl Editor {
@@ -83,6 +92,8 @@ impl Editor {
             original_input_mode: input_mode,
             error_handle,
             original_error_mode: error_mode,
+            pending_key: None,
+            pending_repeat: 0,
         };
         if console_has_error_mode {
             // Best effort: redraws use ANSI; legacy consoles simply keep the
@@ -98,6 +109,10 @@ impl Editor {
     }
 
     pub(crate) fn read_key(&mut self) -> Result<Option<ConsoleKey>, ConsoleLineEditorError> {
+        if self.pending_repeat > 0 {
+            self.pending_repeat -= 1;
+            return Ok(self.pending_key);
+        }
         loop {
             let mut record = unsafe { std::mem::zeroed::<INPUT_RECORD>() };
             let mut pending = 0_u32;
@@ -129,7 +144,13 @@ impl Editor {
                 continue;
             }
             let unicode = unsafe { event.uChar.UnicodeChar };
-            return Ok(Some(map_key(event.wVirtualKeyCode, unicode)));
+            let key = map_key(event.wVirtualKeyCode, unicode);
+            // wRepeatCount can legitimately be >1 for one held key (the
+            // console coalesces repeats into a single record); queue the
+            // remainder instead of dropping them.
+            self.pending_repeat = u32::from(event.wRepeatCount).saturating_sub(1);
+            self.pending_key = Some(key);
+            return Ok(Some(key));
         }
     }
 }
@@ -147,6 +168,31 @@ impl Drop for Editor {
 mod tests {
     use super::*;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_TAB};
+
+    #[test]
+    fn held_key_repeat_count_is_replayed_not_dropped() {
+        // A console can coalesce a held key into one INPUT_RECORD with
+        // wRepeatCount > 1 (confirmed by round-tripping a synthetic record
+        // through a real console on this host) instead of one record per
+        // press. read_key() must replay every repeat, not just the first.
+        let mut editor = Editor {
+            input_handle: std::ptr::null_mut(),
+            original_input_mode: 0,
+            error_handle: std::ptr::null_mut(),
+            original_error_mode: 0,
+            pending_key: Some(ConsoleKey::Right),
+            pending_repeat: 2,
+        };
+        assert_eq!(editor.read_key().unwrap(), Some(ConsoleKey::Right));
+        assert_eq!(editor.pending_repeat, 1);
+        assert_eq!(editor.read_key().unwrap(), Some(ConsoleKey::Right));
+        assert_eq!(editor.pending_repeat, 0);
+        // The next call must fall through to reading the console instead of
+        // replaying again; with a null handle that surfaces as an error
+        // rather than a third phantom Right, which is exactly what the
+        // "not dropped" half of this test needs distinguished from.
+        assert!(editor.read_key().is_err());
+    }
 
     #[test]
     fn maps_printable_unicode_and_control_keys() {
