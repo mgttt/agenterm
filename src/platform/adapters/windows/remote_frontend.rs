@@ -1944,10 +1944,7 @@ impl RemoteWindowState {
             native_window_state.minimized,
             native_window_state.maximized,
         );
-        let workspace_controls_visible = !self.window_close_dialog.is_open()
-            && !self.settings_dialog.is_open()
-            && !self.new_terminal_dialog.is_open()
-            && !self.close_confirmation.is_open();
+        let workspace_controls_visible = self.focus_gate().composer_visible();
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,

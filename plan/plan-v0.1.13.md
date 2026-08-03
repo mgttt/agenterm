@@ -120,6 +120,7 @@ v0.1.13  Trust & platform narrowness
 │  │     （Win/Unix 共用状态/校验/action，adapter 只保留原生呈现与事件映射）
 │  ├─ [x] modal/focus surface 命名/解析单点：ModalSurface + FocusSurface::as_str()/from_ipc()（interaction.rs；Win/Unix 共用）
 │  ├─ [x] sidebar scrollbar geometry 单点：sidebar_row_capacity/sidebar_scrollbar_geometry（ui_geometry.rs；Win/Unix 共用）
+│  ├─ [x] composer/workspace 可见性策略单点：FocusTransitionGate::composer_visible()（interaction.rs；Win/Unix 共用）
 │  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略
 │  ├─ [ ] `platform/mod.rs` 产品策略表 vs `agenterm-platform` 机制 再切割

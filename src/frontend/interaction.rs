@@ -104,6 +104,13 @@ impl FocusTransitionGate {
             || self.close_confirmation_open
             || self.cwd_editor_open
     }
+
+    pub(crate) const fn composer_visible(self) -> bool {
+        !self.window_close_pending
+            && !self.settings_open
+            && !self.new_terminal_open
+            && !self.close_confirmation_open
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -553,6 +560,46 @@ mod tests {
             FocusSurface::from_ipc("settings"),
             Err("unknown focus surface: settings".to_owned())
         );
+    }
+
+    #[test]
+    fn composer_visibility_keeps_cwd_and_tab_editors_but_hides_full_modals() {
+        let idle = FocusTransitionGate::default();
+        assert!(idle.composer_visible());
+        assert!(
+            FocusTransitionGate {
+                cwd_editor_open: true,
+                ..idle
+            }
+            .composer_visible()
+        );
+        assert!(
+            FocusTransitionGate {
+                tab_editor_open: true,
+                ..idle
+            }
+            .composer_visible()
+        );
+        for gate in [
+            FocusTransitionGate {
+                window_close_pending: true,
+                ..idle
+            },
+            FocusTransitionGate {
+                settings_open: true,
+                ..idle
+            },
+            FocusTransitionGate {
+                new_terminal_open: true,
+                ..idle
+            },
+            FocusTransitionGate {
+                close_confirmation_open: true,
+                ..idle
+            },
+        ] {
+            assert!(!gate.composer_visible());
+        }
     }
 
     #[test]

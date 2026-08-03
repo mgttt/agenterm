@@ -2012,7 +2012,7 @@ impl UnixApp {
             right: composer_send_left,
             bottom: layout.composer.bottom,
         };
-        let composer_visible = !self.modal_surface_active();
+        let composer_visible = self.focus_gate().composer_visible();
         let interaction_selection = self.terminal_selection.map(|selection| {
             let (start, end) = selection.bounds();
             TerminalSelectionSnapshotInput {

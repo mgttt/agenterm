@@ -226,6 +226,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | scrollbar thumb drag | `src/frontend/interaction.rs` | `ScrollbarThumbDrag` + sidebar offset 单点计算 | Supported | Supported | Supported |
 | sidebar scrollbar geometry | `src/ui_geometry.rs` | `sidebar_row_capacity` + `sidebar_scrollbar_geometry` 单点；Windows remote 与 Unix embedded 共用同一 track/thumb/row-capacity 算法 | Supported | Supported | Supported |
 | modal/focus surface naming | `src/frontend/interaction.rs` | `ModalSurface` + `modal_surface_from_gate()` + `FocusSurface::as_str()/from_ipc()` 单点生成 ui-snapshot `modal`/`focus.surface` 与 IPC 别名；tab-editor 走独立 `tab_editor` 快照 | Supported | Supported | Supported |
+| composer visibility | `src/frontend/interaction.rs` | `FocusTransitionGate::composer_visible()` 单点：window-close/settings/new-terminal/tab-close 隐藏 composer；cwd-editor 与 tab-editor 保持可见 | Supported | Supported | Supported |
 | pointer modifiers | `agenterm-platform::contract::input::ModifierState` | Windows `ControlWindowEvent` 与 Unix `PixelWindowEvent` 都携带 modifiers；Win32 鼠标消息从同一 `current_modifiers()` 读取 | Supported | Supported | Supported |
 | mouse report encoding | `src/frontend/interaction.rs` | `MouseReportEncoding` + `mouse_report_bytes`；Windows remote 与 Unix embedded 共用同一编码器 | Supported | Supported | Supported |
 | raw-mouse arbitration | src/frontend/interaction.rs | mouse_report_outcome 统一裁决/编码，组合 mouse_delivery 与 mouse_report_bytes；两端 adapter 只映射原生事件 | Supported | Supported | Supported |
