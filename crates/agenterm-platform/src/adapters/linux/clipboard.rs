@@ -12,6 +12,8 @@
 //! - Wayland helpers only count on Wayland; X11 helpers only on X11
 //! - every helper call has an explicit wall timeout and must not block the GUI
 //! - stdout is scanned with a live byte budget (never `read_to_end` then check)
+//! - the `sh -c "command -v ..."` existence probe passes the program name as
+//!   a positional parameter, never interpolated into the script text
 
 #![cfg(target_os = "linux")]
 
@@ -404,9 +406,16 @@ fn classify_attempt_errors(op: &str, errors: &[String]) -> ClipboardError {
 }
 
 fn command_exists(program: &str) -> bool {
+    // `command -v` is a shell builtin, so it must run under `sh -c`, but
+    // `program` reaches this function as a plain argument rather than a
+    // literal today. Pass it as a positional parameter ($1) instead of
+    // interpolating it into the script text so this stays injection-proof
+    // even if a future caller ever derives `program` from configuration.
     Command::new("sh")
         .arg("-c")
-        .arg(format!("command -v {program} >/dev/null 2>&1"))
+        .arg("command -v \"$1\" >/dev/null 2>&1")
+        .arg("sh")
+        .arg(program)
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
