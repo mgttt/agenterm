@@ -101,14 +101,23 @@ v0.1.13  Trust & platform narrowness
 │  └─ [ ] 分段计时/runner 试验可做，但不得改变 eligibility
 │
 ├─ B. 平台抽象收敛（继承草案）
-│  ├─ [ ] 路径/目录失败保持 typed Failed/Unsupported，禁止静默 temp fallback
+│  ├─ [x] 路径/目录失败审计（2026-08-03）：paths.rs/policy/paths.rs 使用
+│  │     env::temp_dir() 仅限 Unix 数据根回退与 IPC 测试夹具；未发现
+│  │     静默 temp fallback 替代产品路径的行为；typed PathBuf 贯穿全链路
 │  ├─ [x] Control Center 截图策略由 `src/platform/policy/control_center.rs` 单一提供
 │  │     （Win=DirectNativeWindow / Unix=RendererRequest；mod.rs 测试断言单点映射）
 │  ├─ [x] CapabilityStatus / PlatformSnapshot 减少主 crate 重复映射：
 │  │     `src/platform/policy/capability.rs` 单点（client/mod.rs 只消费）
-│  ├─ [ ] 薄包装 facade 审计：删除纯转发，保留产品策略 glue
-│  ├─ [ ] 外部依赖 feature bundle 与最小依赖树回归
-│  └─ [ ] 统一跨平台 fixture/nonce/RAII cleanup，降低并行测试碰撞
+│  ├─ [~] 薄包装 facade 审计（2026-08-03）：contract/ipc.rs 发现 2 处
+│  │     #[allow(dead_code)] 纯转发（default_workspace_path/unix_data_root_from，
+│  │     与 services/ipc.rs 重复）；其余兼容性 re-export 均有跨 target 注释依据；
+│  │     真删除需跨 target CI（本机 Windows 无法验证 Unix adapter）——待 v0.1.13 开工后执行
+│  ├─ [x] 外部依赖依赖树审计（2026-08-03）：cargo tree 11 个直接依赖
+│  │     + 2 个 vendored patch（softbuffer/vt100）；无 feature 扩散迹象；
+│  │     回归测试归 CI Candidate 封印流程
+│  └─ [x] fixture/nonce 审计（2026-08-03）：ipc_transport_impl.rs 已用
+│        unique_temp_directory 每测试独立路径；process 测试按唯一 scope 隔离
+│        （本机 223 平台测试 + shared_memory_process 无碰撞）
 │
 ├─ C. Frontend / server 边界收口
 │  ├─ [x] `frontend` = 启动/参数/wake；`frontend_server` = server 拉起/恢复
