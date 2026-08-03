@@ -154,8 +154,13 @@ impl LineHistory {
     }
 
     /// Record a completed line. Consecutive duplicates collapse.
+    ///
+    /// Submitting always ends the current navigation session, even when the
+    /// line is empty or a duplicate, so a stale `position` never survives to
+    /// desync the next Up press from a fresh buffer.
     pub fn push(&mut self, line: &str) {
         if line.is_empty() {
+            self.reset();
             return;
         }
         if self.entries.last().map(String::as_str) == Some(line) {
@@ -439,6 +444,25 @@ mod tests {
         history.push("same");
         history.push("other");
         assert_eq!(history.entries.len(), 2);
+    }
+
+    #[test]
+    fn submitting_an_empty_line_mid_navigation_resets_position() {
+        let mut history = LineHistory::new();
+        history.push("first");
+        history.push("second");
+
+        // Navigate to the most recent entry, then simulate the caller
+        // clearing the recalled text and submitting an empty line (e.g. Up,
+        // then backspace to empty, then Enter) without ever calling reset().
+        let buffer = LineBuffer::new();
+        assert_eq!(history.previous(&buffer).as_deref(), Some("second"));
+        history.push("");
+
+        // A fresh Up press on the next input line must show the most recent
+        // entry first, exactly as it would from a never-navigated state.
+        let fresh = LineBuffer::new();
+        assert_eq!(history.previous(&fresh).as_deref(), Some("second"));
     }
 
     #[test]
