@@ -1944,7 +1944,7 @@ impl RemoteWindowState {
             native_window_state.minimized,
             native_window_state.maximized,
         );
-        let workspace_controls_visible = self.focus_gate().composer_visible();
+        let workspace_controls_visible = self.focus_gate().workspace_controls_visible();
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
@@ -2368,15 +2368,10 @@ impl RemoteWindowState {
                 bottom: composer.top + 60,
             },
         );
-        let toolbar_visible = geometry.workspace_toolbar.is_some()
-            && !self.window_close_dialog.is_open()
-            && !self.settings_dialog.is_open()
-            && !self.new_terminal_dialog.is_open();
-        self.set_control_visible(
-            self.new_tab,
-            toolbar_visible && !self.close_confirmation.is_open(),
-        );
+        let toolbar_visible =
+            geometry.workspace_toolbar.is_some() && self.focus_gate().workspace_controls_visible();
         for control in [
+            self.new_tab,
             self.tabs_button,
             self.control_center,
             self.settings,
@@ -2509,7 +2504,7 @@ impl RemoteWindowState {
         self.set_control_visible(self.send, visible);
         let toolbar_visible = visible
             && self.workspace_geometry().workspace_toolbar.is_some()
-            && !self.close_confirmation.is_open();
+            && self.focus_gate().workspace_controls_visible();
         for control in [
             self.tabs_button,
             self.control_center,

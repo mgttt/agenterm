@@ -105,7 +105,7 @@ impl FocusTransitionGate {
             || self.cwd_editor_open
     }
 
-    pub(crate) const fn composer_visible(self) -> bool {
+    pub(crate) const fn workspace_controls_visible(self) -> bool {
         !self.window_close_pending
             && !self.settings_open
             && !self.new_terminal_open
@@ -563,22 +563,22 @@ mod tests {
     }
 
     #[test]
-    fn composer_visibility_keeps_cwd_and_tab_editors_but_hides_full_modals() {
+    fn workspace_controls_visibility_keeps_cwd_and_tab_editors_but_hides_full_modals() {
         let idle = FocusTransitionGate::default();
-        assert!(idle.composer_visible());
+        assert!(idle.workspace_controls_visible());
         assert!(
             FocusTransitionGate {
                 cwd_editor_open: true,
                 ..idle
             }
-            .composer_visible()
+            .workspace_controls_visible()
         );
         assert!(
             FocusTransitionGate {
                 tab_editor_open: true,
                 ..idle
             }
-            .composer_visible()
+            .workspace_controls_visible()
         );
         for gate in [
             FocusTransitionGate {
@@ -598,7 +598,7 @@ mod tests {
                 ..idle
             },
         ] {
-            assert!(!gate.composer_visible());
+            assert!(!gate.workspace_controls_visible());
         }
     }
 

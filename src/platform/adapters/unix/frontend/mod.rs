@@ -2012,7 +2012,7 @@ impl UnixApp {
             right: composer_send_left,
             bottom: layout.composer.bottom,
         };
-        let composer_visible = self.focus_gate().composer_visible();
+        let workspace_controls_visible = self.focus_gate().workspace_controls_visible();
         let interaction_selection = self.terminal_selection.map(|selection| {
             let (start, end) = selection.bounds();
             TerminalSelectionSnapshotInput {
@@ -2206,9 +2206,9 @@ impl UnixApp {
                     "scrollbar": terminal_scrollbar,
                 },
                 "composer": {
-                    "visible": composer_visible,
-                    "input_visible": composer_visible,
-                    "send_visible": composer_visible,
+                    "visible": workspace_controls_visible,
+                    "input_visible": workspace_controls_visible,
+                    "send_visible": workspace_controls_visible,
                     "x": layout.composer.left,
                     "y": layout.composer.top,
                     "width": layout.composer.width(),
@@ -3970,7 +3970,7 @@ impl UnixApp {
         };
 
         let modal_active = self.modal_surface_active();
-        let workspace_toolbar = if modal_active {
+        let workspace_toolbar = if !self.focus_gate().workspace_controls_visible() {
             None
         } else {
             layout.workspace_toolbar.map(|toolbar| {
