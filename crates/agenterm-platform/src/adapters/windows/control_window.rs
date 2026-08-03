@@ -721,12 +721,48 @@ fn native_menu_id(id: MenuCommandId) -> Result<u32, ControlWindowError> {
     }
 }
 
+thread_local! {
+    // Guards against re-entering the state-dispatch path for the same
+    // thread while a message is already being dispatched. `Backend`
+    // methods such as `set_presentation`/`set_client_size` call
+    // `ShowWindow`/`MoveWindow` on this same `hwnd`, and Win32 delivers the
+    // resulting WM_SIZE/WM_WINDOWPOSCHANGED/... messages synchronously and
+    // reentrantly. Without this guard, the reentrant call would dereference
+    // `state_ptr` into a second `&mut State` while the outer dispatch still
+    // holds one live through `state.application` — an aliasing violation
+    // regardless of whether it happens to behave today. Reentrant messages
+    // fall back to the default window procedure instead; the next poll
+    // tick reconciles layout from the authoritative state.
+    static DISPATCHING: Cell<bool> = const { Cell::new(false) };
+}
+
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut State;
     if state_ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
-    let state = unsafe { &mut *state_ptr };
+    if msg == WM_NCDESTROY {
+        unsafe {
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        }
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
+    if DISPATCHING.with(Cell::get) {
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
+    DISPATCHING.with(|flag| flag.set(true));
+    let result = dispatch_window_message(hwnd, msg, wp, lp, unsafe { &mut *state_ptr });
+    DISPATCHING.with(|flag| flag.set(false));
+    result
+}
+
+fn dispatch_window_message(
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+    state: &mut State,
+) -> LRESULT {
     let event = match msg {
         WM_TIMER => Some(ControlWindowEvent::Poll {
             now: Instant::now(),
@@ -864,12 +900,6 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 PostQuitMessage(0);
             }
             return 0;
-        }
-        WM_NCDESTROY => {
-            unsafe {
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            }
-            return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
         }
         _ => None,
     };
