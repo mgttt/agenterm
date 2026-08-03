@@ -649,6 +649,14 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
             command.capture_bytes,
         )
     };
+    let stdout = match stdout {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
     let stderr = if command.stderr_file.is_some() {
         from_reader(std::io::empty(), "bytes", 0)
     } else {
@@ -657,6 +665,14 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
             "bytes",
             command.capture_bytes,
         )
+    };
+    let stderr = match stderr {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
     };
     if let Some(mut stdin) = child.stdin.take() {
         stdin

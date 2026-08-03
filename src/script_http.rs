@@ -345,7 +345,8 @@ fn perform_request(spec: HttpRequestSpec) -> Result<ScriptHttpResponse, String> 
     let headers = response_headers_native(&parts.headers);
     let status = i64::from(parts.status.as_u16());
     let version = version_name(parts.version);
-    let body = from_bounded_reader(body.into_reader(), "bytes", 0, spec.max_body_bytes);
+    let body = from_bounded_reader(body.into_reader(), "bytes", 0, spec.max_body_bytes)
+        .map_err(|error| error.to_string())?;
     Ok(ScriptHttpResponse {
         status,
         version,
