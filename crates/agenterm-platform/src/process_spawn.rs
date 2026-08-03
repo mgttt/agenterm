@@ -64,6 +64,13 @@ pub fn classify_exit_status(status: &ExitStatus) -> ProcessExit {
 ///
 /// Prefer [`spawn_detached_child`] when spawning immediately: that entry point
 /// also applies the Windows ambient-standard-handle guard.
+///
+/// On Windows this sets `command`'s creation flags outright rather than
+/// merging with any the caller already set: `CommandExt::creation_flags`
+/// replaces the prior value on each call (verified empirically — it does not
+/// OR bits across calls), so any flags set on `command` before this call are
+/// discarded. Give this function (or [`spawn_detached_child`]) an otherwise
+/// unconfigured `Command`.
 pub fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     crate::selected::process_spawn::configure_detached_command(command)
 }
