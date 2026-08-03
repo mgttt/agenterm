@@ -28,6 +28,7 @@ use crate::{
     },
     frontend::{
         action,
+        close_confirmation::CloseConfirmation,
         composer::ComposerWriteMode,
         new_terminal::{self, NewShellChoice, NewTerminalDialog},
         selection::{
@@ -675,7 +676,7 @@ struct RemoteWindowState {
     terminal_double_click: Option<RemoteTerminalDoubleClick>,
     focus_surface: RemoteFocusSurface,
     focus_state: FocusState,
-    pending_close_tab_id: Option<String>,
+    close_confirmation: CloseConfirmation,
     cwd_edit_tab_id: Option<String>,
     last_published_snapshot: Option<String>,
     render_activity_sample: Option<ControlWindowRenderActivity>,
@@ -864,7 +865,7 @@ impl RemoteWindowState {
             terminal_double_click: None,
             focus_surface: RemoteFocusSurface::Terminal,
             focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
-            pending_close_tab_id: None,
+            close_confirmation: CloseConfirmation::new(),
             cwd_edit_tab_id: None,
             last_published_snapshot: None,
             render_activity_sample: None,
@@ -965,7 +966,7 @@ impl RemoteWindowState {
                             self.last_published_snapshot = None;
                             self.editing_tab_id = None;
                             self.terminal_selection = None;
-                            self.pending_close_tab_id = None;
+                            self.close_confirmation.close();
                             self.cwd_edit_tab_id = None;
                             self.show_tab_editor(false);
                             self.show_tab_close_controls(false);
@@ -1285,18 +1286,18 @@ impl RemoteWindowState {
                 } else {
                     self.sync_composer()?;
                     self.finish_tab_edit(false);
-                    self.pending_close_tab_id = Some(tab.id);
+                    self.close_confirmation.open(tab.id);
                     self.show_workspace_controls(false);
                     self.layout_tab_close_controls();
                     self.window.focus();
                 }
             }
             "confirm" => {
-                if self.pending_close_tab_id.is_none() {
+                if !self.close_confirmation.is_open() {
                     anyhow::bail!("no confirmation is pending");
                 }
                 self.finish_close_tab(true);
-                if self.pending_close_tab_id.is_some() {
+                if self.close_confirmation.is_open() {
                     anyhow::bail!("tab close could not be confirmed");
                 }
             }
@@ -1309,7 +1310,7 @@ impl RemoteWindowState {
                     self.finish_settings(false);
                 } else if self.cwd_edit_tab_id.is_some() {
                     self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
-                } else if self.pending_close_tab_id.is_some() {
+                } else if self.close_confirmation.is_open() {
                     self.finish_close_tab(false);
                 } else if self.editing_tab_id.is_some() {
                     self.finish_tab_edit(false);
@@ -1628,13 +1629,13 @@ impl RemoteWindowState {
     }
 
     fn reconcile_tab_close(&mut self) {
-        let still_exists = self.pending_close_tab_id.as_ref().is_some_and(|id| {
+        let still_exists = self.close_confirmation.target().is_some_and(|id| {
             self.client
                 .as_ref()
-                .is_some_and(|client| client.snapshot().tabs.iter().any(|tab| &tab.id == id))
+                .is_some_and(|client| client.snapshot().tabs.iter().any(|tab| tab.id == id))
         });
-        if self.pending_close_tab_id.is_some() && !still_exists {
-            self.pending_close_tab_id = None;
+        if self.close_confirmation.is_open() && !still_exists {
+            self.close_confirmation.close();
             self.show_tab_close_controls(false);
             self.show_workspace_controls(true);
         }
@@ -1979,12 +1980,9 @@ impl RemoteWindowState {
                 ],
             }))
         } else {
-            self.pending_close_tab_id.as_ref().map(|id| {
-                serde_json::json!({
-                    "kind": "confirm-close-live",
-                    "window_id": id,
-                })
-            })
+            self.close_confirmation
+                .is_open()
+                .then(|| self.close_confirmation.snapshot_modal())
         };
         let (copy_enabled, paste_enabled) = self.system_menu_state();
         let composer_input = ProductPixelRect {
@@ -2002,7 +2000,7 @@ impl RemoteWindowState {
             "settings"
         } else if self.cwd_edit_tab_id.is_some() {
             "cwd-editor"
-        } else if self.pending_close_tab_id.is_some() {
+        } else if self.close_confirmation.is_open() {
             "tab-close"
         } else if self.editing_tab_id.is_some() {
             "tab-editor"
@@ -2021,7 +2019,7 @@ impl RemoteWindowState {
         let workspace_controls_visible = !self.window_close_pending
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
-            && self.pending_close_tab_id.is_none();
+            && !self.close_confirmation.is_open();
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
@@ -2451,7 +2449,7 @@ impl RemoteWindowState {
             && !self.new_terminal_dialog.is_open();
         self.set_control_visible(
             self.new_tab,
-            toolbar_visible && self.pending_close_tab_id.is_none(),
+            toolbar_visible && !self.close_confirmation.is_open(),
         );
         for control in [
             self.tabs_button,
@@ -2506,7 +2504,7 @@ impl RemoteWindowState {
         self.set_control_bounds(self.tab_save, geometry.actions.primary);
         self.set_control_bounds(self.tab_cancel, geometry.actions.secondary);
         self.show_tab_editor(
-            self.tabs_visible && !self.window_close_pending && self.pending_close_tab_id.is_none(),
+            self.tabs_visible && !self.window_close_pending && !self.close_confirmation.is_open(),
         );
     }
 
@@ -2584,7 +2582,7 @@ impl RemoteWindowState {
         self.set_control_visible(self.send, visible);
         let toolbar_visible = visible
             && self.workspace_geometry().workspace_toolbar.is_some()
-            && self.pending_close_tab_id.is_none();
+            && !self.close_confirmation.is_open();
         for control in [
             self.tabs_button,
             self.control_center,
@@ -2877,7 +2875,7 @@ impl RemoteWindowState {
         ] {
             self.set_control_bounds(control, rect);
         }
-        self.show_tab_close_controls(self.pending_close_tab_id.is_some());
+        self.show_tab_close_controls(self.close_confirmation.is_open());
     }
 
     fn show_tab_close_controls(&self, visible: bool) {
@@ -3026,7 +3024,7 @@ impl RemoteWindowState {
                 && !self.settings_dialog.is_open()
                 && !self.new_terminal_dialog.is_open()
                 && self.editing_tab_id.is_none()
-                && self.pending_close_tab_id.is_none()
+                && !self.close_confirmation.is_open()
                 && self.cwd_edit_tab_id.is_none();
             if !current {
                 self.last_error = Some(
@@ -3147,7 +3145,7 @@ impl RemoteWindowState {
             || self.window_close_pending
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
-            || self.pending_close_tab_id.is_some()
+            || self.close_confirmation.is_open()
             || self.editing_tab_id.is_some()
         {
             return;
@@ -3263,7 +3261,7 @@ impl RemoteWindowState {
         if self.new_terminal_dialog.is_open()
             || self.settings_dialog.is_open()
             || self.window_close_pending
-            || self.pending_close_tab_id.is_some()
+            || self.close_confirmation.is_open()
         {
             return;
         }
@@ -3614,7 +3612,7 @@ impl RemoteWindowState {
             return;
         }
         self.finish_tab_edit(false);
-        self.pending_close_tab_id = Some(tab.id);
+        self.close_confirmation.open(tab.id);
         self.show_workspace_controls(false);
         self.layout_tab_close_controls();
         self.window.focus();
@@ -3646,14 +3644,14 @@ impl RemoteWindowState {
     }
 
     fn finish_close_tab(&mut self, confirm: bool) {
-        let pending = self.pending_close_tab_id.clone();
+        let pending = self.close_confirmation.target().map(str::to_owned);
         if confirm
             && let Some(tab_id) = pending
             && !self.close_tab_now(tab_id)
         {
             return;
         }
-        self.pending_close_tab_id = None;
+        self.close_confirmation.close();
         self.show_tab_close_controls(false);
         self.show_workspace_controls(true);
         self.set_focus_surface_unchecked(RemoteFocusSurface::Tabs);
@@ -3966,7 +3964,7 @@ impl RemoteWindowState {
         if self.cwd_edit_tab_id.is_some() {
             self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
         }
-        if self.pending_close_tab_id.is_some() {
+        if self.close_confirmation.is_open() {
             self.finish_close_tab(false);
             return;
         }
@@ -4338,7 +4336,7 @@ impl RemoteWindowState {
             settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.editing_tab_id.is_some(),
-            close_confirmation_open: self.pending_close_tab_id.is_some(),
+            close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_edit_tab_id.is_some(),
         }
     }
@@ -4526,7 +4524,7 @@ impl RemoteWindowState {
         if self.settings_dialog.is_open()
             || self.window_close_pending
             || self.new_terminal_dialog.is_open()
-            || self.pending_close_tab_id.is_some()
+            || self.close_confirmation.is_open()
         {
             return false;
         }
@@ -4848,7 +4846,7 @@ impl RemoteWindowState {
         if self.window_close_pending
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
-            || self.pending_close_tab_id.is_some()
+            || self.close_confirmation.is_open()
         {
             return false;
         }
@@ -4875,7 +4873,7 @@ impl RemoteWindowState {
         if self.window_close_pending
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
-            || self.pending_close_tab_id.is_some()
+            || self.close_confirmation.is_open()
         {
             return false;
         }
@@ -5079,7 +5077,7 @@ impl RemoteWindowState {
         if self.window_close_pending
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
-            || self.pending_close_tab_id.is_some()
+            || self.close_confirmation.is_open()
         {
             return;
         }
@@ -5124,7 +5122,7 @@ impl RemoteWindowState {
             }
             return true;
         }
-        if self.pending_close_tab_id.is_some() {
+        if self.close_confirmation.is_open() {
             match key {
                 0x0d => self.finish_close_tab(true),
                 0x1b => self.finish_close_tab(false),
@@ -5356,7 +5354,7 @@ impl RemoteWindowState {
         if !self.window_close_pending
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
-            && self.pending_close_tab_id.is_none()
+            && !self.close_confirmation.is_open()
         {
             let focus = match self.current_focus_surface() {
                 RemoteFocusSurface::Terminal => terminal,
@@ -5371,7 +5369,7 @@ impl RemoteWindowState {
             self.paint_settings(device, palette);
         } else if self.new_terminal_dialog.is_open() {
             self.paint_new_terminal(device, palette);
-        } else if self.pending_close_tab_id.is_some() {
+        } else if self.close_confirmation.is_open() {
             self.paint_tab_close(device, palette);
         }
     }
@@ -5627,7 +5625,7 @@ impl RemoteWindowState {
             "Close live tab?",
             palette.text.canvas_rgb(),
         );
-        let target = self.pending_close_tab_id.as_deref().unwrap_or("-");
+        let target = self.close_confirmation.target().unwrap_or("-");
         draw_text(
             device,
             ProductPixelRect {

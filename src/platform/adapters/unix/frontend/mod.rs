@@ -69,6 +69,7 @@ use crate::{
 };
 
 use self::wake::install_unix_wake;
+use crate::frontend::close_confirmation::CloseConfirmation;
 use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::input;
 use crate::frontend::interaction::{
@@ -611,7 +612,7 @@ struct UnixApp {
     recent_terminal_click: Option<RecentTerminalClick>,
     recent_sidebar_text_click: Option<RecentSidebarTextClick>,
     sidebar_geometry_generation: u64,
-    pending_close: Option<u64>,
+    close_confirmation: CloseConfirmation,
     window_close_pending: bool,
     cwd_edit_target: Option<u64>,
     tabs_resize_drag: Option<TabsResizeDrag>,
@@ -717,7 +718,7 @@ impl UnixApp {
             recent_terminal_click: None,
             recent_sidebar_text_click: None,
             sidebar_geometry_generation: 0,
-            pending_close: None,
+            close_confirmation: CloseConfirmation::new(),
             window_close_pending: false,
             cwd_edit_target: None,
             tabs_resize_drag: None,
@@ -901,7 +902,7 @@ impl UnixApp {
 
     fn commit_ime_text(&mut self, raw: &str) {
         if self.window_close_pending
-            || self.pending_close.is_some()
+            || self.close_confirmation.is_open()
             || self.settings_dialog.is_open()
         {
             return;
@@ -1075,7 +1076,7 @@ impl UnixApp {
             settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.note_edit_target.is_some(),
-            close_confirmation_open: self.pending_close.is_some(),
+            close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_edit_target.is_some(),
         }
     }
@@ -1296,7 +1297,7 @@ impl UnixApp {
 
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
         if self.settings_dialog.is_open()
-            || self.pending_close.is_some()
+            || self.close_confirmation.is_open()
             || self.window_close_pending
             || self.note_edit_target.is_some()
         {
@@ -1446,7 +1447,7 @@ impl UnixApp {
         if self.settings_dialog.is_open() {
             let _ = self.close_settings(false);
         }
-        if self.pending_close.is_some() {
+        if self.close_confirmation.is_open() {
             self.finish_close_confirmation(false);
         }
         if self.cwd_edit_target.is_some() {
@@ -2307,12 +2308,7 @@ impl UnixApp {
             } else if self.note_edit_target.is_some() {
                 Some(serde_json::json!({"kind": "tab-editor"}))
             } else {
-                self.pending_close.map(|id| {
-                    serde_json::json!({
-                        "kind": "confirm-close-live",
-                        "window_id": format!("@{id}"),
-                    })
-                })
+                self.close_confirmation.is_open().then(|| self.close_confirmation.snapshot_modal())
             },
             "system_menu": system_menu_json(
                 self.config.tabs_visible,
@@ -2620,13 +2616,15 @@ impl UnixApp {
         if self.handle_status_click(x as i32, y as i32) {
             return;
         }
-        if let Some(id) = self.pending_close {
+        if self.close_confirmation.is_open() {
             let (width, height) = self.client_size();
-            let modal = ConfirmCloseView::for_client(width, height, id);
-            match modal.hit_test(x, y) {
-                Some(ConfirmCloseHit::Confirm) => self.finish_close_confirmation(true),
-                Some(ConfirmCloseHit::Cancel) => self.finish_close_confirmation(false),
-                None => {}
+            if let Some(id) = self.close_confirmation_target_id() {
+                let modal = ConfirmCloseView::for_client(width, height, id);
+                match modal.hit_test(x, y) {
+                    Some(ConfirmCloseHit::Confirm) => self.finish_close_confirmation(true),
+                    Some(ConfirmCloseHit::Cancel) => self.finish_close_confirmation(false),
+                    None => {}
+                }
             }
             return;
         }
@@ -3183,7 +3181,7 @@ impl UnixApp {
     ) -> bool {
         if self.settings_dialog.is_open()
             || self.window_close_pending
-            || self.pending_close.is_some()
+            || self.close_confirmation.is_open()
             || self.new_terminal_dialog.is_open()
         {
             return false;
@@ -3329,7 +3327,7 @@ impl UnixApp {
 
     fn ime_anchor(&self) -> Option<(u32, u32, u32, u32)> {
         if self.window_close_pending
-            || self.pending_close.is_some()
+            || self.close_confirmation.is_open()
             || self.settings_dialog.is_open()
         {
             return None;
@@ -4054,7 +4052,7 @@ impl UnixApp {
             .terminal_selection
             .filter(|selection| self.active == Some(selection.tab_id));
         let confirm_close = self
-            .pending_close
+            .close_confirmation_target_id()
             .map(|id| ConfirmCloseView::for_client(logical_width, logical_height, id));
         let window_close = self
             .window_close_pending
@@ -4328,15 +4326,23 @@ impl UnixApp {
             let _ = self.close_tab_id(id);
             return;
         }
-        self.pending_close = Some(id);
+        self.close_confirmation.open(format!("@{id}"));
         self.request_redraw();
     }
 
+    fn close_confirmation_target_id(&self) -> Option<u64> {
+        self.close_confirmation
+            .target()
+            .and_then(|target| target.strip_prefix('@'))
+            .and_then(|id| id.parse().ok())
+    }
+
     fn finish_close_confirmation(&mut self, confirm: bool) {
-        let pending = self.pending_close.take();
+        let pending = self.close_confirmation_target_id();
         if confirm && let Some(id) = pending {
             let _ = self.close_tab_id(id);
         }
+        self.close_confirmation.close();
         self.request_redraw();
     }
 
@@ -4651,7 +4657,7 @@ impl ControlHost for UnixApp {
             self.finish_window_close(WindowCloseChoice::Cancel);
             return Ok(true);
         }
-        if self.pending_close.is_some() {
+        if self.close_confirmation.is_open() {
             self.finish_close_confirmation(false);
             return Ok(true);
         }
@@ -4682,7 +4688,7 @@ impl ControlHost for UnixApp {
             self.finish_window_close(WindowCloseChoice::KeepServerRunning);
             return Ok(true);
         }
-        if self.pending_close.is_some() {
+        if self.close_confirmation.is_open() {
             self.finish_close_confirmation(true);
             return Ok(true);
         }
@@ -4955,7 +4961,7 @@ impl UnixApp {
                     self.handle_new_terminal_key(&event);
                     return;
                 }
-                if self.pending_close.is_some() {
+                if self.close_confirmation.is_open() {
                     if let Key::Named(NamedKey::Escape) = event.logical {
                         self.finish_close_confirmation(false);
                     }

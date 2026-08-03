@@ -1,4 +1,4 @@
-# AgenTerm v0.1.13 公开计划
+﻿# AgenTerm v0.1.13 公开计划
 
 状态：布点草案（2026-08-02，持续增补）；**不改变 v0.1.12 发布状态**，
 不触发 Candidate、tag 或 Release。本文记录：为何对 v0.1.12 仍不满意、
@@ -116,7 +116,7 @@ v0.1.13  Trust & platform narrowness
 │
 ├─ F. 跨平台分层（重点，见 §八）
 │  ├─ [x] 取消 `frontend.rs` 对 adapter 的 `#[path]` 虚树；adapter 归属 `platform::adapters`
-│  ├─ [x] new-terminal / settings modal 语义已进 `src/frontend/{new_terminal,settings}.rs`
+│  ├─ [x] new-terminal / settings / live-tab close 语义已进 `src/frontend/{new_terminal,settings,close_confirmation}.rs`
 │  │     （Win/Unix 共用状态/校验/action，adapter 只保留原生呈现与事件映射）
 │  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略

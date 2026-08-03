@@ -13,6 +13,7 @@ use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIV
 use crate::wake_signal::WakeSignal;
 
 pub(crate) mod action;
+pub(crate) mod close_confirmation;
 pub(crate) mod composer;
 pub(crate) mod control_center;
 pub(crate) mod input;
