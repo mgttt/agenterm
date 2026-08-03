@@ -71,6 +71,7 @@ use crate::{
 use self::wake::install_unix_wake;
 use crate::frontend::close_confirmation::CloseConfirmation;
 use crate::frontend::composer::ComposerWriteMode;
+use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
 use crate::frontend::interaction::{
     ApplicationMouseMode, FocusDirection, FocusState, FocusSurface, FocusTransitionGate,
@@ -591,7 +592,7 @@ struct UnixApp {
     sidebar_geometry_generation: u64,
     close_confirmation: CloseConfirmation,
     window_close_dialog: WindowCloseDialog,
-    cwd_edit_target: Option<u64>,
+    cwd_editor_dialog: CwdEditorDialog,
     tabs_resize_drag: Option<TabsResizeDrag>,
     render_buffers: RenderBuffers,
     status_message: String,
@@ -694,7 +695,7 @@ impl UnixApp {
             sidebar_geometry_generation: 0,
             close_confirmation: CloseConfirmation::new(),
             window_close_dialog: WindowCloseDialog::new(),
-            cwd_edit_target: None,
+            cwd_editor_dialog: CwdEditorDialog::new(),
             tabs_resize_drag: None,
             render_buffers: RenderBuffers::default(),
             status_message: String::from("Ready"),
@@ -794,7 +795,7 @@ impl UnixApp {
             return;
         };
         let tab_id = self.tabs[position].id;
-        if self.cwd_edit_target == Some(tab_id) {
+        if self.cwd_editor_target_id() == Some(tab_id) {
             return;
         }
         if self.tabs[position].sensitive_composer.is_some() {
@@ -808,7 +809,7 @@ impl UnixApp {
 
     fn load_composer_buffer_from_tab(&mut self) {
         self.composer_select_all = false;
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             return;
         }
         self.composer_buffer = self
@@ -963,7 +964,7 @@ impl UnixApp {
 
     fn send_active_composer(&mut self) -> Result<(), String> {
         self.sync_composer_buffer_to_tab();
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             return self
                 .prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)
                 .map_err(|error| error.to_string());
@@ -1051,7 +1052,7 @@ impl UnixApp {
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
-            cwd_editor_open: self.cwd_edit_target.is_some(),
+            cwd_editor_open: self.cwd_editor_dialog.is_open(),
         }
     }
 
@@ -1074,7 +1075,7 @@ impl UnixApp {
         if self.tab_editor_dialog.is_open() {
             let _ = self.complete_tab_editor(false);
         }
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
         }
         let _ = self.cancel_terminal_selection(true);
@@ -1269,6 +1270,13 @@ impl UnixApp {
             .unwrap_or_else(|| "CWD · unknown".to_owned())
     }
 
+    fn cwd_editor_target_id(&self) -> Option<u64> {
+        self.cwd_editor_dialog
+            .target()
+            .and_then(|target| target.strip_prefix('@'))
+            .and_then(|value| value.parse().ok())
+    }
+
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
         if self.settings_dialog.is_open()
             || self.close_confirmation.is_open()
@@ -1285,7 +1293,7 @@ impl UnixApp {
         self.sync_composer_buffer_to_tab();
         let id = self.tabs[position].id;
         self.active = Some(id);
-        self.cwd_edit_target = Some(id);
+        self.cwd_editor_dialog.open(format!("@{id}"));
         self.composer_buffer = self.tabs[position]
             .cwd
             .path()
@@ -1302,7 +1310,15 @@ impl UnixApp {
     }
 
     fn close_cwd_editor(&mut self) {
-        let Some(id) = self.cwd_edit_target.take() else {
+        let Some(id) = self
+            .cwd_editor_dialog
+            .close_and_take_target()
+            .and_then(|target| {
+                target
+                    .strip_prefix('@')
+                    .and_then(|value| value.parse().ok())
+            })
+        else {
             return;
         };
         self.load_composer_buffer_from_tab();
@@ -1324,7 +1340,7 @@ impl UnixApp {
         let position = self
             .target_position(target)
             .or_else(|| {
-                self.cwd_edit_target
+                self.cwd_editor_target_id()
                     .and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
             })
             .or_else(|| self.active_position())
@@ -1367,7 +1383,7 @@ impl UnixApp {
                 "composer_mode": mode.as_str(),
             }),
         );
-        if self.cwd_edit_target == Some(id) {
+        if self.cwd_editor_target_id() == Some(id) {
             self.close_cwd_editor();
         } else if self.active == Some(id) {
             self.load_composer_buffer_from_tab();
@@ -1403,7 +1419,7 @@ impl UnixApp {
                 "shell": shell.as_str(),
             }),
         );
-        if self.cwd_edit_target == Some(id) {
+        if self.cwd_editor_target_id() == Some(id) {
             self.close_cwd_editor();
         }
         self.request_redraw();
@@ -1424,7 +1440,7 @@ impl UnixApp {
         if self.close_confirmation.is_open() {
             self.finish_close_confirmation(false);
         }
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
         }
         self.sync_composer_buffer_to_tab();
@@ -1558,7 +1574,7 @@ impl UnixApp {
     }
 
     fn open_settings(&mut self) {
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
         }
         if self.tab_editor_dialog.is_open() {
@@ -2235,20 +2251,8 @@ impl UnixApp {
                 Some(self.window_close_dialog.snapshot_modal())
             } else if self.settings_dialog.is_open() {
                 Some(self.settings_dialog.snapshot_modal())
-            } else if let Some(id) = self.cwd_edit_target {
-                Some(serde_json::json!({
-                    "kind": "cwd-editor",
-                    "target": format!("@{id}"),
-                    "window_id": format!("@{id}"),
-                    "default_action": "cwd-prepare",
-                    "actions": [
-                        "cwd-prepare",
-                        "cwd-prepare-append",
-                        "cwd-prepare-replace",
-                        "cwd-send-now",
-                        "cancel"
-                    ],
-                }))
+            } else if self.cwd_editor_dialog.is_open() {
+                Some(self.cwd_editor_dialog.snapshot_modal())
             } else if self.new_terminal_dialog.is_open() {
                 Some(self.new_terminal_dialog.snapshot_modal())
             } else if self.tab_editor_dialog.is_open() {
@@ -3617,7 +3621,7 @@ impl UnixApp {
             None if command == Some("ui-action") => {
                 let args = &envelope.request.args;
                 let action = args.get(1).map(String::as_str).unwrap_or("");
-                if self.cwd_edit_target.is_some()
+                if self.cwd_editor_dialog.is_open()
                     && !matches!(
                         action,
                         "cwd-prepare"
@@ -3918,7 +3922,7 @@ impl UnixApp {
         let (cell_width, cell_height) = self.cell_dimensions();
         let content_height = layout.terminal.bottom.max(0) as u32;
         let cwd_label = self.active_cwd_status_text();
-        let composer_label = if self.cwd_edit_target.is_some() {
+        let composer_label = if self.cwd_editor_dialog.is_open() {
             "CWD> "
         } else {
             ""
@@ -4263,7 +4267,7 @@ impl UnixApp {
 
     fn request_close_tab(&mut self, id: u64) {
         let _ = self.cancel_terminal_selection(true);
-        if self.cwd_edit_target == Some(id) {
+        if self.cwd_editor_target_id() == Some(id) {
             self.close_cwd_editor();
         }
         if self.tab_editor_dialog.is_open() {
@@ -4409,7 +4413,7 @@ impl ControlHost for UnixApp {
     }
 
     fn prepare_composer_send(&mut self) -> Result<bool, String> {
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)?;
             return Ok(true);
         }
@@ -4619,7 +4623,7 @@ impl ControlHost for UnixApp {
             self.finish_new_terminal_dialog(false);
             return Ok(true);
         }
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
             return Ok(true);
         }
@@ -4755,7 +4759,7 @@ impl ControlHost for UnixApp {
             self.invalidate_sidebar_text_click();
         }
         let _ = self.cancel_terminal_selection(true);
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.close_cwd_editor();
         }
         if self.tab_editor_dialog.is_open() {
@@ -4938,7 +4942,7 @@ impl UnixApp {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Composer {
-                    if self.cwd_edit_target.is_some() {
+                    if self.cwd_editor_dialog.is_open() {
                         if matches!(event.logical, Key::Named(NamedKey::Escape)) {
                             self.close_cwd_editor();
                             return;
@@ -4957,7 +4961,7 @@ impl UnixApp {
                             return;
                         }
                     }
-                    if self.cwd_edit_target.is_none()
+                    if !self.cwd_editor_dialog.is_open()
                         && let Some(bytes) = input::composer_passthrough_bytes(&event)
                     {
                         self.queue_pty_input(bytes);
@@ -4981,7 +4985,7 @@ impl UnixApp {
                             }
                         }
                         input::ComposerKeyAction::Escape => {
-                            if self.cwd_edit_target.is_some() {
+                            if self.cwd_editor_dialog.is_open() {
                                 self.close_cwd_editor();
                             } else {
                                 self.sync_composer_buffer_to_tab();

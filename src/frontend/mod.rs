@@ -16,6 +16,7 @@ pub(crate) mod action;
 pub(crate) mod close_confirmation;
 pub(crate) mod composer;
 pub(crate) mod control_center;
+pub(crate) mod cwd_editor;
 pub(crate) mod input;
 pub(crate) mod interaction;
 pub(crate) mod new_terminal;

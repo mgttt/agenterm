@@ -30,6 +30,7 @@ use crate::{
         action,
         close_confirmation::CloseConfirmation,
         composer::ComposerWriteMode,
+        cwd_editor::CwdEditorDialog,
         new_terminal::{self, NewShellChoice, NewTerminalDialog},
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
@@ -669,7 +670,7 @@ struct RemoteWindowState {
     focus_surface: RemoteFocusSurface,
     focus_state: FocusState,
     close_confirmation: CloseConfirmation,
-    cwd_edit_tab_id: Option<String>,
+    cwd_editor_dialog: CwdEditorDialog,
     last_published_snapshot: Option<String>,
     render_activity_sample: Option<ControlWindowRenderActivity>,
     render_activity_sample_sequence: u64,
@@ -858,7 +859,7 @@ impl RemoteWindowState {
             focus_surface: RemoteFocusSurface::Terminal,
             focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             close_confirmation: CloseConfirmation::new(),
-            cwd_edit_tab_id: None,
+            cwd_editor_dialog: CwdEditorDialog::new(),
             last_published_snapshot: None,
             render_activity_sample: None,
             render_activity_sample_sequence: 0,
@@ -961,7 +962,7 @@ impl RemoteWindowState {
                             self.tab_editor_dialog.close();
                             self.terminal_selection = None;
                             self.close_confirmation.close();
-                            self.cwd_edit_tab_id = None;
+                            self.cwd_editor_dialog.close();
                             self.show_tab_editor(false);
                             self.show_tab_close_controls(false);
                             self.apply_locale();
@@ -1249,7 +1250,7 @@ impl RemoteWindowState {
                         .poll_deltas()?;
                 }
                 self.open_cwd_editor();
-                if self.cwd_edit_tab_id.is_none() {
+                if !self.cwd_editor_dialog.is_open() {
                     anyhow::bail!("CWD editor could not be opened");
                 }
             }
@@ -1302,7 +1303,7 @@ impl RemoteWindowState {
                     self.finish_new_terminal(false);
                 } else if self.settings_dialog.is_open() {
                     self.finish_settings(false);
-                } else if self.cwd_edit_tab_id.is_some() {
+                } else if self.cwd_editor_dialog.is_open() {
                     self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
                 } else if self.close_confirmation.is_open() {
                     self.finish_close_tab(false);
@@ -1637,13 +1638,13 @@ impl RemoteWindowState {
     }
 
     fn reconcile_cwd_editor(&mut self) {
-        let still_active = self.cwd_edit_tab_id.as_ref().is_some_and(|id| {
+        let still_active = self.cwd_editor_dialog.target().is_some_and(|id| {
             self.client
                 .as_ref()
-                .is_some_and(|client| client.snapshot().active_tab_id.as_ref() == Some(id))
+                .is_some_and(|client| client.snapshot().active_tab_id.as_deref() == Some(id))
         });
-        if self.cwd_edit_tab_id.is_some() && !still_active {
-            self.cwd_edit_tab_id = None;
+        if self.cwd_editor_dialog.is_open() && !still_active {
+            self.cwd_editor_dialog.close();
             self.set_control_text(self.send, "Send");
             self.load_composer();
         }
@@ -1948,19 +1949,8 @@ impl RemoteWindowState {
             Some(self.new_terminal_dialog.snapshot_modal())
         } else if self.settings_dialog.is_open() {
             Some(self.settings_dialog.snapshot_modal())
-        } else if let Some(id) = &self.cwd_edit_tab_id {
-            Some(serde_json::json!({
-                "kind": "cwd-editor",
-                "window_id": id,
-                "default_action": "cwd-prepare",
-                "actions": [
-                    "cwd-prepare",
-                    "cwd-prepare-append",
-                    "cwd-prepare-replace",
-                    "cwd-send-now",
-                    "cancel"
-                ],
-            }))
+        } else if self.cwd_editor_dialog.is_open() {
+            Some(self.cwd_editor_dialog.snapshot_modal())
         } else {
             self.close_confirmation
                 .is_open()
@@ -1980,7 +1970,7 @@ impl RemoteWindowState {
             "new-terminal"
         } else if self.settings_dialog.is_open() {
             "settings"
-        } else if self.cwd_edit_tab_id.is_some() {
+        } else if self.cwd_editor_dialog.is_open() {
             "cwd-editor"
         } else if self.close_confirmation.is_open() {
             "tab-close"
@@ -3009,7 +2999,7 @@ impl RemoteWindowState {
                 && !self.new_terminal_dialog.is_open()
                 && !self.tab_editor_dialog.is_open()
                 && !self.close_confirmation.is_open()
-                && self.cwd_edit_tab_id.is_none();
+                && !self.cwd_editor_dialog.is_open();
             if !current {
                 self.last_error = Some(
                     "Paste cancelled because the active terminal or paste mode changed".to_owned(),
@@ -3051,7 +3041,7 @@ impl RemoteWindowState {
     }
 
     fn load_composer(&self) {
-        if self.cwd_edit_tab_id.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             return;
         }
         let text = self
@@ -3062,7 +3052,7 @@ impl RemoteWindowState {
     }
 
     fn sync_composer(&mut self) -> Result<()> {
-        if self.cwd_edit_tab_id.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             return Ok(());
         }
         let Some(tab_id) = self
@@ -3087,7 +3077,7 @@ impl RemoteWindowState {
     }
 
     fn send_composer(&mut self) {
-        if self.cwd_edit_tab_id.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.finish_cwd_editor(true, ComposerWriteMode::Replace);
             return;
         }
@@ -3125,7 +3115,7 @@ impl RemoteWindowState {
     }
 
     fn open_cwd_editor(&mut self) {
-        if self.cwd_edit_tab_id.is_some()
+        if self.cwd_editor_dialog.is_open()
             || self.window_close_dialog.is_open()
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
@@ -3142,7 +3132,7 @@ impl RemoteWindowState {
             return;
         }
         self.cancel_terminal_selection();
-        self.cwd_edit_tab_id = Some(tab.id);
+        self.cwd_editor_dialog.open(tab.id.clone());
         self.set_control_text(
             self.edit,
             tab.working_context.cwd.as_deref().unwrap_or_default(),
@@ -3154,7 +3144,7 @@ impl RemoteWindowState {
     }
 
     fn finish_cwd_editor(&mut self, prepare: bool, mode: ComposerWriteMode) {
-        let Some(tab_id) = self.cwd_edit_tab_id.clone() else {
+        let Some(tab_id) = self.cwd_editor_dialog.target().map(str::to_owned) else {
             return;
         };
         if prepare {
@@ -3168,11 +3158,7 @@ impl RemoteWindowState {
                 .as_mut()
                 .context("UI is disconnected")
                 .and_then(|client| {
-                    let command = match mode {
-                        ComposerWriteMode::EmptyOnly => "cwd-prepare",
-                        ComposerWriteMode::Append => "cwd-prepare-append",
-                        ComposerWriteMode::Replace => "cwd-prepare-replace",
-                    };
+                    let command = CwdEditorDialog::prepare_action(mode);
                     client.run_control(vec![
                         command.to_owned(),
                         "-t".to_owned(),
@@ -3188,7 +3174,7 @@ impl RemoteWindowState {
                 return;
             }
         }
-        self.cwd_edit_tab_id = None;
+        self.cwd_editor_dialog.close();
         self.set_control_text(self.send, "Send");
         self.load_composer();
         self.set_focus_surface_unchecked(RemoteFocusSurface::Composer);
@@ -3197,7 +3183,7 @@ impl RemoteWindowState {
     }
 
     fn handle_cwd_editor_keydown(&mut self, key: u32, modifiers: input::ModifierState) -> bool {
-        if self.cwd_edit_tab_id.is_none()
+        if !self.cwd_editor_dialog.is_open()
             || self.window.focused_target() != FocusTarget::Control(self.edit)
         {
             return false;
@@ -3953,7 +3939,7 @@ impl RemoteWindowState {
         if self.window_close_dialog.is_open() {
             return;
         }
-        if self.cwd_edit_tab_id.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
         }
         if self.close_confirmation.is_open() {
@@ -4329,7 +4315,7 @@ impl RemoteWindowState {
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
-            cwd_editor_open: self.cwd_edit_tab_id.is_some(),
+            cwd_editor_open: self.cwd_editor_dialog.is_open(),
         }
     }
 
@@ -4881,7 +4867,7 @@ impl RemoteWindowState {
             && x < cwd_status.right
             && y >= cwd_status.top
             && y < cwd_status.bottom;
-        if self.cwd_edit_tab_id.is_some() {
+        if self.cwd_editor_dialog.is_open() {
             self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
             if in_cwd_status {
                 return true;
@@ -5272,7 +5258,7 @@ impl RemoteWindowState {
                     right: composer.right - MARGIN,
                     bottom: composer.top + 24,
                 },
-                &if self.cwd_edit_tab_id.as_deref() == Some(tab.id.as_str()) {
+                &if self.cwd_editor_dialog.target() == Some(tab.id.as_str()) {
                     format!("CWD → {}  Ctrl+Enter prepares · Esc cancels", tab.id)
                 } else {
                     format!(

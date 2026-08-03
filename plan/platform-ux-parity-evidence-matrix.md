@@ -228,6 +228,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | raw-mouse arbitration | src/frontend/interaction.rs | mouse_report_outcome 统一裁决/编码，组合 mouse_delivery 与 mouse_report_bytes；两端 adapter 只映射原生事件 | Supported | Supported | Supported |
 | selection autoscroll | src/frontend/selection.rs | utoscroll_step 单份计算；Unix embedded 与 Windows remote poll tick 共用同一拖出视口滚动语义 | Supported | Supported | Supported |
 | word/line selection | `src/frontend/selection.rs` | `TerminalCellSource` + `word_selection_bounds` 统一 vt100 与 snapshot cell grid 的单词边界；Windows remote 双击/三击接线已补，raw-mouse 优先时仍走应用上报 | Supported | Supported | Supported |
+| CWD editor modal | src/frontend/cwd_editor.rs | open/close/target/action/snapshot 单点；Unix embedded 与 Windows remote 共用 CwdEditorDialog，adapter 只保留原生编辑控件/焦点与平台命令执行 | Supported | Supported | Supported |
 | CWD editor write modes | `src/frontend/composer.rs` | `ComposerWriteMode` 单点定义并供 Unix embedded、Windows remote、server dispatch 共用；Windows Ctrl+Enter=empty-only、Shift+Ctrl+Enter=append、Alt+Ctrl+Enter=replace 与 Unix 对齐 | Supported | Supported | Supported |
 | keyboard/text-field policy | `src/frontend/input.rs` | Composer/TextField/Terminal shortcut 与 PTY key bytes 单点定义；Unix embedded 从 `src/platform/adapters/unix/frontend` 迁出引用 | Supported | Supported | Supported |
 | new-terminal modal | src/frontend/new_terminal.rs | open/reset/校验/action 与 shell argv 单点；Unix embedded 迁出 adapter，Windows remote 继续原生控件呈现，状态/校验/action/argv 与 Unix 共用共享 dialog 与 platform policy | Supported | Supported | Supported |
