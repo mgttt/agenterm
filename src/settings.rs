@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, env, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    env,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -218,7 +223,22 @@ pub(crate) fn save_config(config: &AppConfig) -> Result<()> {
     let mut normalized = config.clone();
     normalized.normalize();
     let json = serde_json::to_string_pretty(&normalized)?;
-    std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))
+    // Write to a co-located temp file and rename into place so a crash or
+    // power loss mid-write can never leave settings.json truncated --
+    // load_config() falls back to all-defaults on a parse failure, which
+    // would otherwise silently discard every user preference.
+    let temporary = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::write(&temporary, json)
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
+    std::fs::rename(&temporary, &path)
+        .with_context(|| format!("failed to publish {}", path.display()))
 }
 
 #[cfg(test)]
