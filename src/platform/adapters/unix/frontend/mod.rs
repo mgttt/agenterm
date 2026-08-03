@@ -3255,7 +3255,7 @@ impl UnixApp {
             .unwrap_or(before);
         if after != before {
             self.on_viewport_scrolled(position, after, "mouse-wheel");
-        } else if alternate_screen {
+        } else if alternate_screen || application_cursor {
             let _ = self.cancel_terminal_selection(true);
             self.queue_pty_input(alternate_screen_wheel_bytes(
                 notches > 0,
