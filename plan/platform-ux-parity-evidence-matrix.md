@@ -234,6 +234,7 @@ ci-2026-08-02-0001,2026-08-02T08:00:00Z,platform-ux-parity-smoke,remote-ui,selec
 | settings modal | src/frontend/settings.rs | open/重置/校验/scope/override/theme/action 单点；Unix embedded 与 Windows remote 共用 SettingsDialog，adapter 只负责原生呈现与事件映射 | Supported | Supported | Supported |
 | live-tab close confirmation | src/frontend/close_confirmation.rs | open/close/snapshot 单点；Unix embedded 与 Windows remote 共用 CloseConfirmation，adapter 只负责原生确认控件与关闭执行 | Supported | Supported | Supported |
 | inline tab editor | src/frontend/tab_editor.rs | open/draft/focus/校验/snapshot 单点；Unix embedded 与 Windows remote 共用 TabEditorDialog，adapter 只保留原生编辑控件/IME/事件映射 | Supported | Supported | Supported |
+| window close confirmation | src/frontend/window_close.rs | choice/state/snapshot 单点；Unix embedded 与 Windows remote 共用 WindowCloseDialog/WindowCloseChoice，adapter 只保留原生窗口执行与按钮呈现 | Supported | Supported | Supported |
 
 说明：Windows 列来自本地 Quick Gate/单元测试；Linux/macOS 列由 CI 全矩阵编译与 `unix-frontend-smoke` 真机证据支撑（见下方 D4）。
 

@@ -24,6 +24,7 @@ pub(crate) mod settings;
 pub(crate) mod tab_editor;
 pub(crate) mod toolbar;
 pub(crate) mod window;
+pub(crate) mod window_close;
 
 // Shared GUI launch usage for both platform frontends.
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\

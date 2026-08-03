@@ -40,6 +40,7 @@ use crate::{
         tab_editor::{TabEditorDialog, TabEditorFocus},
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
+        window_close::{WindowCloseChoice, WindowCloseDialog},
     },
     locale::UiText,
     platform::KeyClassification,
@@ -417,13 +418,6 @@ impl RemoteControls {
     }
 }
 
-#[derive(Clone, Copy)]
-enum RemoteCloseChoice {
-    KeepServerRunning,
-    StopServerAndExit,
-    Cancel,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RemoteFocusSurface {
     Terminal,
@@ -655,7 +649,7 @@ struct RemoteWindowState {
     terminal_paste_worker: RemoteTerminalPasteWorker,
     tabs_resize_dragging: bool,
     tab_editor_dialog: TabEditorDialog,
-    window_close_pending: bool,
+    window_close_dialog: WindowCloseDialog,
     new_terminal_dialog: NewTerminalDialog,
     settings_dialog: SettingsDialog,
     terminal_selection: Option<RemoteTerminalSelection>,
@@ -679,7 +673,7 @@ struct RemoteWindowState {
     last_published_snapshot: Option<String>,
     render_activity_sample: Option<ControlWindowRenderActivity>,
     render_activity_sample_sequence: u64,
-    relay_close_after_completion: Option<RemoteCloseChoice>,
+    relay_close_after_completion: Option<WindowCloseChoice>,
     no_activate: bool,
 }
 
@@ -844,7 +838,7 @@ impl RemoteWindowState {
             terminal_paste_worker,
             tabs_resize_dragging: false,
             tab_editor_dialog: TabEditorDialog::new(),
-            window_close_pending: false,
+            window_close_dialog: WindowCloseDialog::new(),
             new_terminal_dialog: NewTerminalDialog::new(),
             settings_dialog: SettingsDialog::new(settings_default_draft),
             terminal_selection: None,
@@ -1046,16 +1040,16 @@ impl RemoteWindowState {
                 close_after_completion.is_some(),
                 matches!(
                     close_after_completion,
-                    Some(RemoteCloseChoice::StopServerAndExit)
+                    Some(WindowCloseChoice::StopServerAndExit)
                 ),
             )?;
         if let Some(choice) = close_after_completion {
-            self.window_close_pending = false;
+            self.window_close_dialog.close();
             match choice {
-                RemoteCloseChoice::KeepServerRunning | RemoteCloseChoice::StopServerAndExit => {
+                WindowCloseChoice::KeepServerRunning | WindowCloseChoice::StopServerAndExit => {
                     self.window.close();
                 }
-                RemoteCloseChoice::Cancel => {}
+                WindowCloseChoice::Cancel => {}
             }
             return Ok(true);
         }
@@ -1302,8 +1296,8 @@ impl RemoteWindowState {
                 }
             }
             "cancel" => {
-                if self.window_close_pending {
-                    self.finish_window_close(RemoteCloseChoice::Cancel);
+                if self.window_close_dialog.is_open() {
+                    self.finish_window_close(WindowCloseChoice::Cancel);
                 } else if self.new_terminal_dialog.is_open() {
                     self.finish_new_terminal(false);
                 } else if self.settings_dialog.is_open() {
@@ -1321,7 +1315,7 @@ impl RemoteWindowState {
             "copy-selection" => self.copy_terminal_selection()?,
             "close-window" => {
                 self.request_window_close();
-                if !self.window_close_pending {
+                if !self.window_close_dialog.is_open() {
                     anyhow::bail!("window-close confirmation could not be opened");
                 }
             }
@@ -1339,16 +1333,16 @@ impl RemoteWindowState {
                     .map_err(|error| anyhow::anyhow!(error))?;
             }
             "keep-server-running" => {
-                if !self.window_close_pending {
+                if !self.window_close_dialog.is_open() {
                     anyhow::bail!("no window-close confirmation is pending");
                 }
-                self.relay_close_after_completion = Some(RemoteCloseChoice::KeepServerRunning);
+                self.relay_close_after_completion = Some(WindowCloseChoice::KeepServerRunning);
             }
             "stop-server-and-exit" => {
-                if !self.window_close_pending {
+                if !self.window_close_dialog.is_open() {
                     anyhow::bail!("no window-close confirmation is pending");
                 }
-                self.relay_close_after_completion = Some(RemoteCloseChoice::StopServerAndExit);
+                self.relay_close_after_completion = Some(WindowCloseChoice::StopServerAndExit);
             }
             action if action.starts_with("proxy-") || action == "open-proxy-editor" => {
                 anyhow::bail!("proxy workbench controls are archived")
@@ -1948,17 +1942,8 @@ impl RemoteWindowState {
         } else {
             None
         };
-        let modal = if self.window_close_pending {
-            Some(serde_json::json!({
-                "kind": "confirm-window-close",
-                "default_action": "keep-server-running",
-                "actions": ["keep-server-running", "stop-server-and-exit", "cancel"],
-                "buttons": [
-                    close_button_snapshot("keep-server-running", "Keep Server Running"),
-                    close_button_snapshot("stop-server-and-exit", "Stop Server & Exit"),
-                    close_button_snapshot("cancel", "Cancel"),
-                ],
-            }))
+        let modal = if self.window_close_dialog.is_open() {
+            Some(self.window_close_dialog.snapshot_modal())
         } else if self.new_terminal_dialog.is_open() {
             Some(self.new_terminal_dialog.snapshot_modal())
         } else if self.settings_dialog.is_open() {
@@ -1989,7 +1974,7 @@ impl RemoteWindowState {
                 .max(layout.composer.left + MARGIN + 80),
             bottom: (layout.composer.bottom - 8).max(layout.composer.top + 56),
         };
-        let focus = if self.window_close_pending {
+        let focus = if self.window_close_dialog.is_open() {
             "window-close"
         } else if self.new_terminal_dialog.is_open() {
             "new-terminal"
@@ -2013,7 +1998,7 @@ impl RemoteWindowState {
             native_window_state.minimized,
             native_window_state.maximized,
         );
-        let workspace_controls_visible = !self.window_close_pending
+        let workspace_controls_visible = !self.window_close_dialog.is_open()
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && !self.close_confirmation.is_open();
@@ -2441,7 +2426,7 @@ impl RemoteWindowState {
             },
         );
         let toolbar_visible = geometry.workspace_toolbar.is_some()
-            && !self.window_close_pending
+            && !self.window_close_dialog.is_open()
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open();
         self.set_control_visible(
@@ -2501,7 +2486,9 @@ impl RemoteWindowState {
         self.set_control_bounds(self.tab_save, geometry.actions.primary);
         self.set_control_bounds(self.tab_cancel, geometry.actions.secondary);
         self.show_tab_editor(
-            self.tabs_visible && !self.window_close_pending && !self.close_confirmation.is_open(),
+            self.tabs_visible
+                && !self.window_close_dialog.is_open()
+                && !self.close_confirmation.is_open(),
         );
     }
 
@@ -2565,7 +2552,7 @@ impl RemoteWindowState {
         ] {
             self.set_control_bounds(control, rect);
         }
-        self.show_close_controls(self.window_close_pending);
+        self.show_close_controls(self.window_close_dialog.is_open());
     }
 
     fn show_close_controls(&self, visible: bool) {
@@ -3017,7 +3004,7 @@ impl RemoteWindowState {
                     })
             }) && self.window.focused_target() == FocusTarget::Window
                 && self.current_focus_surface() == RemoteFocusSurface::Terminal
-                && !self.window_close_pending
+                && !self.window_close_dialog.is_open()
                 && !self.settings_dialog.is_open()
                 && !self.new_terminal_dialog.is_open()
                 && !self.tab_editor_dialog.is_open()
@@ -3139,7 +3126,7 @@ impl RemoteWindowState {
 
     fn open_cwd_editor(&mut self) {
         if self.cwd_edit_tab_id.is_some()
-            || self.window_close_pending
+            || self.window_close_dialog.is_open()
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.close_confirmation.is_open()
@@ -3257,7 +3244,7 @@ impl RemoteWindowState {
     fn open_new_terminal(&mut self) {
         if self.new_terminal_dialog.is_open()
             || self.settings_dialog.is_open()
-            || self.window_close_pending
+            || self.window_close_dialog.is_open()
             || self.close_confirmation.is_open()
         {
             return;
@@ -3729,7 +3716,7 @@ impl RemoteWindowState {
     fn open_settings(&mut self) {
         if self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
-            || self.window_close_pending
+            || self.window_close_dialog.is_open()
         {
             return;
         }
@@ -3963,7 +3950,7 @@ impl RemoteWindowState {
     }
 
     fn request_window_close(&mut self) {
-        if self.window_close_pending {
+        if self.window_close_dialog.is_open() {
             return;
         }
         if self.cwd_edit_tab_id.is_some() {
@@ -3986,7 +3973,7 @@ impl RemoteWindowState {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
         }
         self.finish_tab_edit(false);
-        self.window_close_pending = true;
+        self.window_close_dialog.open();
         self.show_workspace_controls(false);
         self.layout_close_controls();
         // A close request can arrive from the taskbar while this window is
@@ -3999,16 +3986,16 @@ impl RemoteWindowState {
         self.window.focus();
     }
 
-    fn finish_window_close(&mut self, choice: RemoteCloseChoice) {
-        if !self.window_close_pending {
+    fn finish_window_close(&mut self, choice: WindowCloseChoice) {
+        if !self.window_close_dialog.is_open() {
             return;
         }
         match choice {
-            RemoteCloseChoice::KeepServerRunning => {
-                self.window_close_pending = false;
+            WindowCloseChoice::KeepServerRunning => {
+                self.window_close_dialog.close();
                 self.window.close();
             }
-            RemoteCloseChoice::StopServerAndExit => {
+            WindowCloseChoice::StopServerAndExit => {
                 let result =
                     self.client
                         .as_mut()
@@ -4019,17 +4006,17 @@ impl RemoteWindowState {
                         });
                 if let Err(error) = result {
                     self.last_error = Some(format!("Server shutdown failed: {error:#}"));
-                    self.window_close_pending = false;
+                    self.window_close_dialog.close();
                     self.show_close_controls(false);
                     self.show_workspace_controls(true);
                     self.window.focus();
                     return;
                 }
-                self.window_close_pending = false;
+                self.window_close_dialog.close();
                 self.window.close();
             }
-            RemoteCloseChoice::Cancel => {
-                self.window_close_pending = false;
+            WindowCloseChoice::Cancel => {
+                self.window_close_dialog.close();
                 self.show_close_controls(false);
                 self.show_workspace_controls(true);
                 self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
@@ -4337,7 +4324,7 @@ impl RemoteWindowState {
 
     fn focus_gate(&self) -> FocusTransitionGate {
         FocusTransitionGate {
-            window_close_pending: self.window_close_pending,
+            window_close_pending: self.window_close_dialog.is_open(),
             settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.tab_editor_dialog.is_open(),
@@ -4429,7 +4416,7 @@ impl RemoteWindowState {
             return (true, clipboard::has_unicode_text());
         }
         let terminal_ready = focused == FocusTarget::Window
-            && !self.window_close_pending
+            && !self.window_close_dialog.is_open()
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self.active_tab().is_some_and(|tab| !tab.dead);
@@ -4527,7 +4514,7 @@ impl RemoteWindowState {
         motion: bool,
     ) -> bool {
         if self.settings_dialog.is_open()
-            || self.window_close_pending
+            || self.window_close_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.close_confirmation.is_open()
         {
@@ -4848,7 +4835,7 @@ impl RemoteWindowState {
     }
 
     fn handle_left_double_click(&mut self, x: i32, y: i32, clicks: u8) -> bool {
-        if self.window_close_pending
+        if self.window_close_dialog.is_open()
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.close_confirmation.is_open()
@@ -4875,7 +4862,7 @@ impl RemoteWindowState {
 
     fn handle_left_button_down(&mut self, x: i32, y: i32) -> bool {
         self.recent_sidebar_text_click = None;
-        if self.window_close_pending
+        if self.window_close_dialog.is_open()
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.close_confirmation.is_open()
@@ -5079,7 +5066,7 @@ impl RemoteWindowState {
     }
 
     fn handle_wheel(&mut self, x: i32, y: i32, delta: i32) {
-        if self.window_close_pending
+        if self.window_close_dialog.is_open()
             || self.settings_dialog.is_open()
             || self.new_terminal_dialog.is_open()
             || self.close_confirmation.is_open()
@@ -5119,10 +5106,10 @@ impl RemoteWindowState {
     }
 
     fn handle_window_keydown(&mut self, key: u32, modifiers: input::ModifierState) -> bool {
-        if self.window_close_pending {
+        if self.window_close_dialog.is_open() {
             match key {
-                0x0d => self.finish_window_close(RemoteCloseChoice::KeepServerRunning),
-                0x1b => self.finish_window_close(RemoteCloseChoice::Cancel),
+                0x0d => self.finish_window_close(WindowCloseChoice::KeepServerRunning),
+                0x1b => self.finish_window_close(WindowCloseChoice::Cancel),
                 _ => {}
             }
             return true;
@@ -5356,7 +5343,7 @@ impl RemoteWindowState {
             &format!("CWD: {cwd}"),
             palette.muted_text.canvas_rgb(),
         );
-        if !self.window_close_pending
+        if !self.window_close_dialog.is_open()
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && !self.close_confirmation.is_open()
@@ -5368,7 +5355,7 @@ impl RemoteWindowState {
             };
             frame(device, &focus, palette.focus_ring.canvas_rgb());
         }
-        if self.window_close_pending {
+        if self.window_close_dialog.is_open() {
             self.paint_window_close(device, palette);
         } else if self.settings_dialog.is_open() {
             self.paint_settings(device, palette);
@@ -6111,9 +6098,9 @@ impl RemoteWindowApplication {
             SEND_ID => state.send_composer(),
             TAB_SAVE_ID => state.finish_tab_edit(true),
             TAB_CANCEL_ID => state.finish_tab_edit(false),
-            CLOSE_KEEP_ID => state.finish_window_close(RemoteCloseChoice::KeepServerRunning),
-            CLOSE_STOP_ID => state.finish_window_close(RemoteCloseChoice::StopServerAndExit),
-            CLOSE_CANCEL_ID => state.finish_window_close(RemoteCloseChoice::Cancel),
+            CLOSE_KEEP_ID => state.finish_window_close(WindowCloseChoice::KeepServerRunning),
+            CLOSE_STOP_ID => state.finish_window_close(WindowCloseChoice::StopServerAndExit),
+            CLOSE_CANCEL_ID => state.finish_window_close(WindowCloseChoice::Cancel),
             SETTINGS_DARK_ID => state.preview_settings_theme(ThemeId::Dark),
             SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
             SETTINGS_DEFAULT_SCOPE_ID => state.switch_settings_scope(SettingsScope::Defaults),

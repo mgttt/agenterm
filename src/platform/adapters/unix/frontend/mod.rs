@@ -85,6 +85,7 @@ use crate::frontend::selection::{
 };
 use crate::frontend::settings::{self, SettingsDialog};
 use crate::frontend::tab_editor::{TabEditorDialog, TabEditorFocus};
+use crate::frontend::window_close::{WindowCloseChoice, WindowCloseDialog};
 use crate::ui_snapshot::{
     PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
     embedded_window_json, event_position_json, locale_json, schema_version_json,
@@ -286,13 +287,6 @@ impl RecentSidebarTextClick {
 #[derive(Clone, Copy, Debug)]
 struct TabsResizeDrag {
     original_width: u16,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowCloseChoice {
-    KeepServerRunning,
-    StopServerAndExit,
-    Cancel,
 }
 
 const DOUBLE_CLICK_MS: u64 = 500;
@@ -596,7 +590,7 @@ struct UnixApp {
     recent_sidebar_text_click: Option<RecentSidebarTextClick>,
     sidebar_geometry_generation: u64,
     close_confirmation: CloseConfirmation,
-    window_close_pending: bool,
+    window_close_dialog: WindowCloseDialog,
     cwd_edit_target: Option<u64>,
     tabs_resize_drag: Option<TabsResizeDrag>,
     render_buffers: RenderBuffers,
@@ -699,7 +693,7 @@ impl UnixApp {
             recent_sidebar_text_click: None,
             sidebar_geometry_generation: 0,
             close_confirmation: CloseConfirmation::new(),
-            window_close_pending: false,
+            window_close_dialog: WindowCloseDialog::new(),
             cwd_edit_target: None,
             tabs_resize_drag: None,
             render_buffers: RenderBuffers::default(),
@@ -881,7 +875,7 @@ impl UnixApp {
     }
 
     fn commit_ime_text(&mut self, raw: &str) {
-        if self.window_close_pending
+        if self.window_close_dialog.is_open()
             || self.close_confirmation.is_open()
             || self.settings_dialog.is_open()
         {
@@ -1052,7 +1046,7 @@ impl UnixApp {
 
     fn focus_gate(&self) -> FocusTransitionGate {
         FocusTransitionGate {
-            window_close_pending: self.window_close_pending,
+            window_close_pending: self.window_close_dialog.is_open(),
             settings_open: self.settings_dialog.is_open(),
             new_terminal_open: self.new_terminal_dialog.is_open(),
             tab_editor_open: self.tab_editor_dialog.is_open(),
@@ -1278,7 +1272,7 @@ impl UnixApp {
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
         if self.settings_dialog.is_open()
             || self.close_confirmation.is_open()
-            || self.window_close_pending
+            || self.window_close_dialog.is_open()
             || self.tab_editor_dialog.is_open()
         {
             return Err("another modal surface is active".to_owned());
@@ -1417,7 +1411,7 @@ impl UnixApp {
     }
 
     fn request_window_close(&mut self) {
-        if self.window_close_pending {
+        if self.window_close_dialog.is_open() {
             return;
         }
         let _ = self.cancel_terminal_selection(true);
@@ -1434,15 +1428,15 @@ impl UnixApp {
             self.close_cwd_editor();
         }
         self.sync_composer_buffer_to_tab();
-        self.window_close_pending = true;
+        self.window_close_dialog.open();
         self.request_redraw();
     }
 
     fn finish_window_close(&mut self, choice: WindowCloseChoice) {
-        if !self.window_close_pending {
+        if !self.window_close_dialog.is_open() {
             return;
         }
-        self.window_close_pending = false;
+        self.window_close_dialog.close();
         if !matches!(choice, WindowCloseChoice::Cancel) {
             let _ = self.persist_workspace();
         }
@@ -1538,7 +1532,7 @@ impl UnixApp {
     }
 
     fn handle_window_close_click(&mut self, x: f64, y: f64) -> bool {
-        if !self.window_close_pending {
+        if !self.window_close_dialog.is_open() {
             return false;
         }
         let (width, height) = self.client_size();
@@ -1937,7 +1931,7 @@ impl UnixApp {
 
     fn terminal_ready_for_system_menu(&self) -> bool {
         self.focus_surface == UnixFocusSurface::Terminal
-            && !self.window_close_pending
+            && !self.window_close_dialog.is_open()
             && !self.settings_dialog.is_open()
             && !self.new_terminal_dialog.is_open()
             && self
@@ -2237,16 +2231,8 @@ impl UnixApp {
                 "draft_length": self.composer_buffer.chars().count(),
                 "focused": self.focus_surface == UnixFocusSurface::Composer,
             },
-            "modal": if self.window_close_pending {
-                Some(serde_json::json!({
-                    "kind": "confirm-window-close",
-                    "default_action": "keep-server-running",
-                    "actions": [
-                        "keep-server-running",
-                        "stop-server-and-exit",
-                        "cancel"
-                    ],
-                }))
+            "modal": if self.window_close_dialog.is_open() {
+                Some(self.window_close_dialog.snapshot_modal())
             } else if self.settings_dialog.is_open() {
                 Some(self.settings_dialog.snapshot_modal())
             } else if let Some(id) = self.cwd_edit_target {
@@ -3142,7 +3128,7 @@ impl UnixApp {
         motion: bool,
     ) -> bool {
         if self.settings_dialog.is_open()
-            || self.window_close_pending
+            || self.window_close_dialog.is_open()
             || self.close_confirmation.is_open()
             || self.new_terminal_dialog.is_open()
         {
@@ -3203,7 +3189,7 @@ impl UnixApp {
     }
 
     fn mouse_wheel(&mut self, x: f64, y: f64, vertical_delta: f64, line_based: bool) {
-        if self.settings_dialog.is_open() || self.window_close_pending {
+        if self.settings_dialog.is_open() || self.window_close_dialog.is_open() {
             return;
         }
         let layout = self.layout();
@@ -3288,7 +3274,7 @@ impl UnixApp {
     }
 
     fn ime_anchor(&self) -> Option<(u32, u32, u32, u32)> {
-        if self.window_close_pending
+        if self.window_close_dialog.is_open()
             || self.close_confirmation.is_open()
             || self.settings_dialog.is_open()
         {
@@ -3651,7 +3637,7 @@ impl UnixApp {
                             None
                         }
                         "keep-server-running" => {
-                            if !self.window_close_pending {
+                            if !self.window_close_dialog.is_open() {
                                 Some(IpcResponse::failure(
                                     "no window-close confirmation is pending",
                                 ))
@@ -3661,7 +3647,7 @@ impl UnixApp {
                             }
                         }
                         "stop-server-and-exit" => {
-                            if !self.window_close_pending {
+                            if !self.window_close_dialog.is_open() {
                                 Some(IpcResponse::failure(
                                     "no window-close confirmation is pending",
                                 ))
@@ -4017,7 +4003,8 @@ impl UnixApp {
             .close_confirmation_target_id()
             .map(|id| ConfirmCloseView::for_client(logical_width, logical_height, id));
         let window_close = self
-            .window_close_pending
+            .window_close_dialog
+            .is_open()
             .then(|| WindowCloseView::for_client(logical_width, logical_height));
         let resize_grip = layout.resize_grip.map(u32_rect);
 
@@ -4616,7 +4603,7 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_cancel(&mut self) -> Result<bool, String> {
-        if self.window_close_pending {
+        if self.window_close_dialog.is_open() {
             self.finish_window_close(WindowCloseChoice::Cancel);
             return Ok(true);
         }
@@ -4647,7 +4634,7 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_confirm(&mut self) -> Result<bool, String> {
-        if self.window_close_pending {
+        if self.window_close_dialog.is_open() {
             self.finish_window_close(WindowCloseChoice::KeepServerRunning);
             return Ok(true);
         }
@@ -4908,7 +4895,7 @@ impl UnixApp {
                     return;
                 }
                 self.cursor_blink.reset(Instant::now());
-                if self.window_close_pending {
+                if self.window_close_dialog.is_open() {
                     if let Key::Named(NamedKey::Escape) = event.logical {
                         self.finish_window_close(WindowCloseChoice::Cancel);
                     } else if matches!(event.logical, Key::Named(NamedKey::Enter)) {
