@@ -49,5 +49,9 @@ separately, then update this table.
 ## Open
 
 - #8 — unbounded HTTP stream-pump threads; needs a decision on concurrency limit + failure mode before implementing.
+  - 现状确认（2026-08-03 代码复查）：`src/script_stream.rs::from_reader_inner` 对每个 stream 无条件 `thread::spawn` 泵线程，无并发上限；`src/script_http.rs:348` 对每个 HTTP response body 调 `from_bounded_reader`（每请求一泵线程，不受 worker_supervisor 的 `PROCESS_CONCURRENCY_LIMIT=2` / `GLOBAL_CONCURRENCY_LIMIT=8` 进程闸约束）；`script_process.rs` 的 stdout/stderr 泵受进程闸间接约束。
+  - 方案候选 A（typed error，推荐）：`script_stream` 加全局 pump 信号量（如 64），超限时 `from_reader`/`from_bounded_reader` 返回 typed `StreamError::ConcurrencyLimit`，HTTP 请求直接失败并报诊断；符合 AGENTS.md「robustness limits 明确命名」纪律，实现面小（4 个调用点 + 错误面）。
+  - 方案候选 B（阻塞背压）：超限时 pump 线程等待 slot，HTTP 下载不失败但挂起；对慢下载更友好，但需防脚本持流不读导致的 slot 饥饿。
+  - 决策点：上限值（64？128？）、失败模式（A 失败 / B 阻塞）、是否区分 HTTP 与 process 两类配额。待产品裁定后实现。
 - #13 (partial) — Rhai catalog-vs-registration check only covers `std.net.*`/`std.fs.*` so far; a real automated Engine-introspection test is a bigger follow-up.
 - #16's two sub-observations (redundant pre-rename `remove_file` narrowing atomicity; unconfirmed symlink hardening on the instances directory) — left alone pending more confidence or a steer.

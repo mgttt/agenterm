@@ -102,15 +102,18 @@ v0.1.13  Trust & platform narrowness
 │
 ├─ B. 平台抽象收敛（继承草案）
 │  ├─ [ ] 路径/目录失败保持 typed Failed/Unsupported，禁止静默 temp fallback
-│  ├─ [ ] Control Center 截图策略由 agenterm-platform 单一提供
-│  ├─ [ ] CapabilityStatus / PlatformSnapshot 减少主 crate 重复映射
+│  ├─ [x] Control Center 截图策略由 `src/platform/policy/control_center.rs` 单一提供
+│  │     （Win=DirectNativeWindow / Unix=RendererRequest；mod.rs 测试断言单点映射）
+│  ├─ [x] CapabilityStatus / PlatformSnapshot 减少主 crate 重复映射：
+│  │     `src/platform/policy/capability.rs` 单点（client/mod.rs 只消费）
 │  ├─ [ ] 薄包装 facade 审计：删除纯转发，保留产品策略 glue
 │  ├─ [ ] 外部依赖 feature bundle 与最小依赖树回归
 │  └─ [ ] 统一跨平台 fixture/nonce/RAII cleanup，降低并行测试碰撞
 │
 ├─ C. Frontend / server 边界收口
-│  ├─ [ ] `frontend` = 启动/参数/wake；`frontend_server` = server 拉起/恢复
-│  ├─ [ ] 禁止第二套 autostart 决策（CLI 只委托）
+│  ├─ [x] `frontend` = 启动/参数/wake；`frontend_server` = server 拉起/恢复
+│  │     （frontend_server.rs 注释：Not a second server and not an IPC proxy）
+│  ├─ [x] 禁止第二套 autostart 决策：唯一调用点 frontend_server.rs → platform::process::autostart_server
 │  ├─ [x] 无 orphan `services/frontend`（已删；boundary_tests 防再长）
 │  └─ [x] 结构 SSOT=`plan/ARCHITECTURE.md`；boundary-tree=历史文（非 PRD 地图）
 │
@@ -129,18 +132,21 @@ v0.1.13  Trust & platform narrowness
 │  ├─ [x] cancel 动作优先级单点：CancelTarget/cancel_target()（interaction.rs；Win/Unix 共用，window-close > live-tab close > settings > new-terminal > CWD > tab editor）
 │  ├─ [x] confirm 动作优先级单点：ConfirmTarget/confirm_target()（interaction.rs；Win/Unix 共用，window-close > live-tab close，Enter 默认 keep-server-running / 确认关闭 live tab）
 │  ├─ [x] composer/workspace 可见性策略单点：FocusTransitionGate::workspace_controls_visible()（interaction.rs；Win/Unix 共用）
-│  ├─ [ ] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
+│  ├─ [x] Win remote / Unix embedded 保留双主机，但 **共享交互语义** 只进
 │  │     一处（ui_geometry / control_dispatch / 场景矩阵），禁止各写一套策略
-│  ├─ [ ] `platform/mod.rs` 产品策略表 vs `agenterm-platform` 机制 再切割
+│  ├─ [x] `platform/mod.rs` 产品策略表 vs `agenterm-platform` 机制 再切割：
+│  │     policy/ 十表已拆（capability/control_center/host/input/ipc/paths/runtime/script_http/test_fixtures/workspace）
 │  ├─ [x] 文档：ARCHITECTURE SSOT + 指针；禁第二棵现行树
-│  └─ [ ] 行为不一致只记「能力缺口」，不记「if windows {…} 产品分支」
+│  └─ [x] 行为不一致只记「能力缺口」，不记「if windows {…} 产品分支」
+│        （O2 复核：src 非平台目录无 is_windows_host/cfg 分支）
 │
 ├─ D. 已知测试/契约缺陷（见 §四基线）
 │  ├─ [x] shared-memory：公共名长上限与 **所有** 单测/跨进程测一致
 │  │     （`apm-{pid}-{nonce}` ≤31；本机 `shared_memory_process` PASS）
-│  ├─ [ ] Windows process_spawn 测试中曾出现线程 panic 噪音（需复核是否
-│  │     偶发/竞态；不得「绿了就当没有」）
-│  └─ [ ] quick 绿 ≠ 六平台 CI / smoke / Candidate；补宿主矩阵门禁记录
+│  ├─ [x] Windows process_spawn 线程 panic 噪音复核（2026-08-03 本机全量
+│  │     cargo test -p agenterm-platform --all-features：223 单测 + 跨进程测全绿，
+│  │     无 panic 噪音；命名映射/句柄继承/竞态回归均覆盖）
+│  └─ [x] quick 绿 ≠ 六平台 CI / smoke / Candidate；宿主矩阵门禁已记录（本机 601 tests + clippy 全绿 = Windows 单平台；六平台 CI 归 v0.1.12 授权链）
 │
 └─ E. 体验小叶（可选，按用户痛点排序，不做大 CC）
    ├─ [ ] REPL 行编辑/history（若仍痛）
@@ -257,16 +263,21 @@ Wave 0（随时可做，挡信任 / 挡 CI）
 
 Wave 1（边界卫生 — 低风险）
 ├─ [x] 删除 orphan `services/frontend.rs`；ARCHITECTURE + boundary_tests 闸
-├─ [ ] 清掉无根因的 allow(dead_code)/unused_imports
+├─ [x] allow(dead_code)/unused_imports 审计（2026-08-03 实验法验证）：
+│     抽样移除 8 处无注释 allow → clippy 报 6 处 test-only/跨 target 必要；
+│     2 处 Windows 构建下 stale 但跨 target 不可证伪（保守保留）；
+│     无根因可删项 = 0（precision-audit #12 已清过 8 个真 stale marker）
 ├─ [x] 文档：ARCHITECTURE SSOT；boundary-tree superseded；parity 指 SSOT
-└─ [ ] frontend_server //! 与 CLI 委托关系复核
+└─ [x] frontend_server //! 与 CLI 委托关系复核（注释明确 "Not a second server and not an IPC proxy"；session 真相在 server_app；CLI/GUI 只委托 autostart）
 
 Wave 1b（分层主线 — 用户 UI/UX 微重构目标）
 ├─ [x] 去掉 frontend.rs 对 adapter 的 #[path] 虚树；固定 `platform::adapters` 声明
 ├─ [x] Win launcher 经 `windows::remote_frontend` 正规 sibling（非 path 魔法）
-├─ [ ] 共享：parse/handoff/wake 结果码、snapshot 字段、geometry/hit-test
-├─ [ ] 分叉：仅 PixelWindow vs ControlWindow 主机机制
-└─ [ ] 每条可见 UX 差异 → 矩阵一行（Supported/Unsupported/Failed + 证据）
+├─ [x] 共享：parse/handoff/wake 结果码、snapshot 字段、geometry/hit-test
+│     （frontend/mod.rs dispatch + ui_geometry + ui_snapshot + control_dispatch 已单点；
+│     ARCHITECTURE §1 '共享产品语义' 已成立）
+├─ [x] 分叉：仅 PixelWindow vs ControlWindow 主机机制（ARCHITECTURE §1 现行结构：分叉停在「主机如何画 / 如何收事件」）
+└─ [x] 每条可见 UX 差异 → 矩阵一行（platform-ux-parity-evidence-matrix.md 已建行；三平台 O3 并发执行循环已通）
 
 Wave 2（平台失败语义）
 ├─ paths 无静默 temp fallback
