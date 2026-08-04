@@ -1,10 +1,12 @@
 use std::borrow::Cow;
+use std::io::Write as _;
 
 use windows_sys::Win32::{
-    Foundation::{POINT, RECT},
+    Foundation::{HWND, POINT, RECT},
     Globalization::{GetLocaleInfoW, LOCALE_SLOCALIZEDLANGUAGENAME},
     Graphics::Gdi::ClientToScreen,
     UI::{
+        HiDpi::GetDpiForWindow,
         Input::{
             Ime::{
                 CANDIDATEFORM, CFS_POINT, COMPOSITIONFORM, IME_CMODE_FULLSHAPE, IME_CMODE_NATIVE,
@@ -13,7 +15,7 @@ use windows_sys::Win32::{
             },
             KeyboardAndMouse::{GetFocus, GetKeyboardLayout},
         },
-        WindowsAndMessaging::GetForegroundWindow,
+        WindowsAndMessaging::{GetClientRect, GetForegroundWindow, GetWindowRect},
     },
 };
 
@@ -39,7 +41,9 @@ pub(crate) fn set_anchor_position(x: i32, y: i32) {
         return;
     }
     let mut point = POINT { x, y };
-    if unsafe { ClientToScreen(focus, &mut point) } == 0 {
+    let converted = unsafe { ClientToScreen(focus, &mut point) };
+    trace_anchor(focus, x, y, &point, converted);
+    if converted == 0 {
         return;
     }
     let context = unsafe { ImmGetContext(focus) };
@@ -68,6 +72,41 @@ pub(crate) fn set_anchor_position(x: i32, y: i32) {
         ImmSetCandidateWindow(context, &candidate);
         ImmReleaseContext(focus, context);
     }
+}
+
+/// Diagnostic trace behind `AGENTERM_IME_DEBUG=1` for candidate-window
+/// position debugging. Writes one line per anchor update to
+/// `%TEMP%\agenterm-ime-debug.log`.
+fn trace_anchor(focus: HWND, x: i32, y: i32, screen: &POINT, converted: i32) {
+    if std::env::var_os("AGENTERM_IME_DEBUG").is_none() {
+        return;
+    }
+    let mut window_rect: RECT = unsafe { std::mem::zeroed() };
+    let mut client_rect: RECT = unsafe { std::mem::zeroed() };
+    unsafe {
+        GetWindowRect(focus, &mut window_rect);
+        GetClientRect(focus, &mut client_rect);
+    }
+    let dpi = unsafe { GetDpiForWindow(focus) };
+    let line = format!(
+        "hwnd={focus:p} client=({x},{y}) screen=({},{}) win=({},{},{},{}) cli=({},{},{},{}) dpi={dpi} cs={converted}\n",
+        screen.x,
+        screen.y,
+        window_rect.left,
+        window_rect.top,
+        window_rect.right,
+        window_rect.bottom,
+        client_rect.left,
+        client_rect.top,
+        client_rect.right,
+        client_rect.bottom,
+    );
+    let path = std::env::temp_dir().join("agenterm-ime-debug.log");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(line.as_bytes()));
 }
 
 /// Describe the input method the caller's focused surface is typing through.

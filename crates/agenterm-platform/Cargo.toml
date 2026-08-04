@@ -235,6 +235,7 @@ ime = [
     "input",
     "windows-sys/Win32_Globalization",
     "windows-sys/Win32_UI_Input_Ime",
+    "windows-sys/Win32_UI_HiDpi",
 ]
 activation = ["window", "dep:winit"]
 clipboard = [
