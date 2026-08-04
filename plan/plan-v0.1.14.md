@@ -117,7 +117,7 @@ v0.1.14 Release 推进
 |------|------|
 | `plan/ARCHITECTURE.md` | 现行结构 SSOT；本文不重画结构树 |
 | `plan/plan-v0.1.13.md` | 上一版权威执行记录（§10.2.1 发布坑清单来源） |
-| `plan/plan-v0.2.0.md` | 大重构去向 |
+| `prd/PRD_02_18_roadmap.md` M12 | 大重构去向（原 plan-v0.2.0.md 已并入） |
 | `plan/precision-audit.md` | 持续审查权威记录；B 组决策后回写该文件 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同 |
 | `prd/PRD_02_18_roadmap.md` | 里程碑权威；0.1.13/0.1.14 为 M11→M12 间信任收口迭代 |

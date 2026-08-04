@@ -514,10 +514,35 @@ track remains planned, but every declared dependency must still pass.
   - [ ] durable scheduling, public marketplace transactions and stable
     decentralized service integration remain separately gated even if their
     navigation exists
-  - [ ] sequencing and delivery history are owned by
-    [the redirected v0.2.0 public plan](../plan/plan-v0.2.0.md); inspiration
-    lanes J1–J5 remain in
-    [Inspiration backlog](PRD_02_19_inspiration_and_future_vision.md)
+  - [ ] execution prerequisites and phases (folded from the former
+    `plan/plan-v0.2.0.md`, removed 2026-08-04 so `plan/` stays current-version
+    only):
+    - [ ] prerequisites already shipped: v0.1.11 Control Center shell +
+      typed bridge + read-only Cockpit; Platform Facade revision 4;
+      shared UX single-point semantics. `agenterm-net` N2-M1 stays in
+      `research/` and is not a v0.2.0 prerequisite
+    - [ ] Phase A — Cockpit first operable vertical slice (no external
+      authority dependency): health/exception/runs/evidence drill-down,
+      typed actions with receipt/post-state, epoch-gap rebuild baseline
+    - [ ] Phase B — Workflows + Extensions (depend on external authorities
+      C1 orchestration and D1/D2 softmgr substrate; until those ship, views
+      expose truthful planned/unavailable state, never promote Rhai tasks
+      to durable flows)
+    - [ ] Phase C — InfoHub + optional WebView (depend on E1 source
+      framework; WebView production only after the six-target
+      availability/bridge/offline/crash/size gates pass)
+    - [ ] non-goals: no second PTY/server/workflow/softmgr/net authority in
+      Control Center; no public marketplace transactions, silent installs,
+      or libp2p/IPFS embedded in the stable server; no privileged bridge for
+      remote web pages; remote package management (agenterm.work) stays a
+      later line
+    - [ ] future-lane boundaries: InfoHub may reserve a net source type,
+      Extensions may reserve a remote catalog concept, but neither embeds a
+      node; computer-use (P4) and mobile (plan-mobile.md) are independent
+    - [ ] sequencing and delivery history belong to this milestone; the
+      former public plan file is deleted (2026-08-04); inspiration lanes
+      J1–J5 remain in
+      [Inspiration backlog](PRD_02_19_inspiration_and_future_vision.md)
 - [ ] Multi-platform GUI track (independent of v0.1.8–v0.1.10 version gates):
   shared PTY backend, Unix IPC server, Linux/macOS `winit`+`softbuffer`
   human window MVP, and release packages that include `agenterm` on

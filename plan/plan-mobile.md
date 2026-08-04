@@ -157,7 +157,7 @@ Mobile  接入端 + 去中心化链接端
 | `src/ui_bridge.rs` | M-A 抽取的**唯一真源**；本文不复制其字段定义 |
 | `src/platform/contract/ipc.rs` | 身份契约来源；可抽子集与不可抽部分见 §二 A2 |
 | `plan/plan-v0.1.15.md` | 发布链经济学；移动端必须不与其 30min 目标冲突 |
-| `plan/plan-v0.2.0.md` | Control Center 内容成熟；CC 与 mobile 都是 server 的消费者，不互为前置 |
+| `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟；CC 与 mobile 都是 server 的消费者，不互为前置（原 plan-v0.2.0.md 已并入） |
 | `prd/PRD_02_22_decentralized_network.md` | agenterm-net 成熟度门（N0→N4），约束 §四 |
 | `prd/PRD_02_20_native_platform.md` | Platform Facade 纪律来源；capability/typed Unsupported 的样板 |
 | `prd/PRD_02_18_roadmap.md` | 里程碑权威；移动端立项后需在此登记归口 |

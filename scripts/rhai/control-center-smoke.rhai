@@ -1239,11 +1239,21 @@ try {
         "control_center_native_keyboard_navigation_truth"
     );
 
-    // Cockpit keeps only three tab rows visible and scrolls that window around
-    // the selected keyboard target. Derive a different, currently rendered
-    // target from the same bounded-window contract. Product lines occupy
-    // 0..10, the "Tabs" help line is 11, and the platform adapter maps each
-    // following 28-pixel row to a tab.
+    // The Cockpit per-tab facts leaf grew the projection by one Tabs-total
+    // line plus one detail row per tab, pushing the three clickable tab rows
+    // below the default client height on Windows entirely. Grow the window
+    // first so the whole projection is inside the client, then derive the
+    // strip's first line from the projection contract instead of the retired
+    // pre-facts layout: two chrome lines, six product lines, the Tabs-total
+    // line, the detail rows (16-row cap plus a collapse marker), the strip
+    // itself follows. Rows are 28 pixels tall below a 16-pixel top offset.
+    first.window_resize(760, 900);
+    for attempt in 0..600 {
+        if first.window_client_rect().height >= 860 {
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
     let visible_start = if native_input_index > 0 {
         native_input_index - 1
     } else {
@@ -1263,7 +1273,12 @@ try {
     }
     let pointer_target = live_server.tabs[pointer_index].id;
     let pointer_row = pointer_index - visible_start;
-    let pointer_y = 16 + (12 + pointer_row) * 28 + 14;
+    let detail_rows = if live_server.tabs.len > 16 {
+        17
+    } else {
+        live_server.tabs.len
+    };
+    let pointer_y = 16 + (13 + detail_rows + pointer_row) * 28 + 14;
     first.window_pointer("click", 120, pointer_y);
     let pointer_selected = wait_for_active_tab(
         context,

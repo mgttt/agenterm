@@ -69,29 +69,70 @@ tree does not promise a version or implementation strategy.
 
 ## Product tree
 
-- AgenTerm
-  - [Terminal runtime](prd/PRD_02_01_terminal_runtime.md) — ConPTY, rendering, input, selection, scrollback, and terminal performance.
-  - [Executable family](prd/PRD_02_02_executable_family.md) — Binary roles, boundaries, budgets, and sidecar ownership.
-  - [Default shell (`agenterm-bash.exe`)](prd/PRD_02_03_default_shell.md) — Real Bash runtime strategy and compatibility gate.
-  - [Optional component lifecycle (`agenterm-softmgr.exe`)](prd/PRD_02_04_optional_components.md) — Signed inventory, installation, update, rollback, and supply-chain safety.
-  - [Fleet multiplexer (`agenterm-mux.exe`)](prd/PRD_02_05_fleet_multiplexer.md) — tmux/RMUX-compatible control over the shared AgenTerm authority.
-  - [Human workspace](prd/PRD_02_06_human_workspace.md) — Tabs, composer, settings, persistence, status bar, and interaction design.
-  - [Agent control plane](prd/PRD_02_07_agent_control_plane.md) — Observation, control, protocol, identity, and deterministic waits.
-  - [Observable Fleet event core](prd/PRD_02_08_observable_fleet.md) — Epoch/sequence journal, reads, waits, gaps, restart, and consumers.
-  - [Self-hosted development loop](prd/PRD_02_09_self_hosted_development.md) — Building, staging, update visibility, and safe developer iteration.
-  - [Rust host + Rhai scripting](prd/PRD_02_10_rhai_scripting.md) — Unrestricted local runtime, supervisor, registry, control, audit, and providers; Agent permissions live above it.
-  - [MCP and agentic orchestration (`agenterm-mcp.exe`)](prd/PRD_02_11_mcp_orchestration.md) — Read-only MCP first, then governed tools, flows, and scheduling.
-  - [Lightweight specialized intelligence (`agenterm-ai.exe`)](prd/PRD_02_12_specialized_intelligence.md) — Evidence gates for an unassigned optional-intelligence research direction.
-  - [Local LLM gateway (`agenterm-llm-gateway.exe`)](prd/PRD_02_13_llm_gateway.md) — Safety gates for an unassigned governed-gateway hypothesis.
-  - [Research provenance and clean-room boundary](prd/PRD_02_14_research_provenance.md) — Source review, licensing, provenance, and independent implementation.
-  - [Command line (`agenterm-cli.exe`)](prd/PRD_02_15_command_line.md) — Public commands, discovery, output contracts, and lifecycle semantics.
-  - [tmux/RMUX compatibility](prd/PRD_02_16_tmux_rmux_compatibility.md) — Compatibility matrix, explicit differences, and conformance evidence.
-  - [Delivery and quality](prd/PRD_02_17_delivery_quality.md) — Builds, tests, artifacts, release gates, and regression budgets.
-  - [Focused product roadmap](prd/PRD_02_18_roadmap.md) — Version ownership, milestone gates, and future product lanes.
-  - [Inspiration backlog and future vision](prd/PRD_02_19_inspiration_and_future_vision.md) — Idea garden, north-star layers, and promotion path into owning modules (not shipped status).
-  - [Native platform abstraction](prd/PRD_02_20_native_platform.md) — Shared native-window, input, IME, DPI, clipboard, font, and OS-integration contracts with Windows, macOS, and Linux adapters.
-  - [Control Center (`agenterm-cc`)](prd/PRD_02_21_control_center.md) — Independent secondary workspace for Fleet cockpit, workflow, extension, application, and information projections.
-  - [Decentralized network (`agenterm-net`)](prd/PRD_02_22_decentralized_network.md) — Independently matured libp2p identity, IPFS content-addressing, storage, transport, and service-integration contracts.
+```text
+AgenTerm — local agent & process fleet work OS
+│
+├─ 终端与运行时
+│  ├─ 01 Terminal runtime        ConPTY、渲染、输入、选择、滚动、性能
+│  ├─ 03 Default shell          agenterm-bash.exe 策略与兼容门
+│  └─ 16 tmux/RMUX compatibility  兼容矩阵、显式差异、一致性证据
+│
+├─ 工作区与权威
+│  ├─ 06 Human workspace        Tabs、composer、settings、持久化、状态栏
+│  ├─ 02 Executable family      二进制角色、边界、预算、sidecar 归属
+│  ├─ 05 Fleet multiplexer      agenterm-mux.exe（tmux/RMUX 兼容控制）
+│  ├─ 08 Observable Fleet       纪元/序列日志、读取、等待、缺口、重启
+│  └─ 07 Agent control plane    观察、控制、协议、身份、确定性等待
+│
+├─ 自动化与智能
+│  ├─ 10 Rust host + Rhai       本地无限制运行时、监督、注册、审计；Agent 权限在其上层
+│  ├─ 11 MCP orchestration      agenterm-mcp.exe（只读 MCP → 受管工具/流/调度）
+│  ├─ 12 Specialized intelligence  agenterm-ai.exe（未指派研究方向的证据门）
+│  └─ 13 Local LLM gateway      agenterm-llm-gateway.exe（受管网关假设门）
+│
+├─ 分发与治理
+│  ├─ 04 Optional components    agenterm-softmgr.exe（签名清单/安装/更新/回滚）
+│  ├─ 09 Self-hosted dev loop   构建、暂存、更新可见性、安全迭代
+│  ├─ 14 Research provenance    源码审查、许可、来源、独立实现
+│  ├─ 15 Command line           agenterm-cli.exe（公共命令/发现/输出契约）
+│  └─ 17 Delivery and quality   构建、测试、产物、发布门、回归预算
+│
+├─ 平台抽象
+│  └─ 20 Native platform        Win/macOS/Linux 原生适配（窗口/输入/IME/DPI/剪贴板/字体）
+│
+└─ 未来面（里程碑 / 灵感）
+   ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
+   ├─ 19 Inspiration backlog      灵感花园、北极星层、晋升路径（非 shipped）
+   ├─ 21 Control Center          agenterm-cc（独立次级工作区：Cockpit/workflow/extension/info）
+   └─ 22 Decentralized network   agenterm-net（libp2p/IPFS 独立成熟）
+```
+
+### Module index
+
+| # | 模块 | 一句话 |
+|---|------|--------|
+| 01 | [Terminal runtime](prd/PRD_02_01_terminal_runtime.md) | ConPTY、渲染、输入、选择、滚动、性能 |
+| 02 | [Executable family](prd/PRD_02_02_executable_family.md) | 二进制角色、边界、预算、sidecar 归属 |
+| 03 | [Default shell (`agenterm-bash.exe`)](prd/PRD_02_03_default_shell.md) | 真实 Bash 策略与兼容门 |
+| 04 | [Optional component lifecycle (`agenterm-softmgr.exe`)](prd/PRD_02_04_optional_components.md) | 签名清单、安装、更新、回滚、供应链安全 |
+| 05 | [Fleet multiplexer (`agenterm-mux.exe`)](prd/PRD_02_05_fleet_multiplexer.md) | tmux/RMUX 兼容控制 |
+| 06 | [Human workspace](prd/PRD_02_06_human_workspace.md) | Tabs、composer、settings、持久化、状态栏、交互设计 |
+| 07 | [Agent control plane](prd/PRD_02_07_agent_control_plane.md) | 观察、控制、协议、身份、确定性等待 |
+| 08 | [Observable Fleet event core](prd/PRD_02_08_observable_fleet.md) | 纪元/序列日志、读取、等待、缺口、重启、消费者 |
+| 09 | [Self-hosted development loop](prd/PRD_02_09_self_hosted_development.md) | 构建、暂存、更新可见性、安全迭代 |
+| 10 | [Rust host + Rhai scripting](prd/PRD_02_10_rhai_scripting.md) | 本地无限制运行时、监督、注册、审计、providers |
+| 11 | [MCP and agentic orchestration (`agenterm-mcp.exe`)](prd/PRD_02_11_mcp_orchestration.md) | 只读 MCP 先行，再受管工具、流、调度 |
+| 12 | [Lightweight specialized intelligence (`agenterm-ai.exe`)](prd/PRD_02_12_specialized_intelligence.md) | 未指派可选智能研究方向的证据门 |
+| 13 | [Local LLM gateway (`agenterm-llm-gateway.exe`)](prd/PRD_02_13_llm_gateway.md) | 未指派受管网关假设的安全门 |
+| 14 | [Research provenance and clean-room boundary](prd/PRD_02_14_research_provenance.md) | 源码审查、许可、来源、独立实现 |
+| 15 | [Command line (`agenterm-cli.exe`)](prd/PRD_02_15_command_line.md) | 公共命令、发现、输出契约、生命周期 |
+| 16 | [tmux/RMUX compatibility](prd/PRD_02_16_tmux_rmux_compatibility.md) | 兼容矩阵、显式差异、一致性证据 |
+| 17 | [Delivery and quality](prd/PRD_02_17_delivery_quality.md) | 构建、测试、产物、发布门、回归预算 |
+| 18 | [Focused product roadmap](prd/PRD_02_18_roadmap.md) | 版本归属、里程碑门、未来产品泳道 |
+| 19 | [Inspiration backlog and future vision](prd/PRD_02_19_inspiration_and_future_vision.md) | 灵感花园、北极星层、晋升路径（非 shipped） |
+| 20 | [Native platform abstraction](prd/PRD_02_20_native_platform.md) | Win/macOS/Linux 窗口/输入/IME/DPI/剪贴板/字体契约 |
+| 21 | [Control Center (`agenterm-cc`)](prd/PRD_02_21_control_center.md) | 独立次级工作区：Fleet cockpit/workflow/extension/info 投影 |
+| 22 | [Decentralized network (`agenterm-net`)](prd/PRD_02_22_decentralized_network.md) | libp2p 身份、IPFS 内容寻址、存储、传输、服务集成契约 |
 
 ## Non-negotiable invariants
 

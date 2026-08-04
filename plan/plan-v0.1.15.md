@@ -150,7 +150,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | `plan/plan-v0.1.14.md` | 上一版执行记录；本文数据与止血项的出处 |
 | `plan/plan-v0.1.13.md` §10.2.1 | 发布链坑清单（runbook 素材，E2 配套） |
 | `plan/ARCHITECTURE.md` | 结构 SSOT；本文不重画结构树 |
-| `plan/plan-v0.2.0.md` | Control Center 内容成熟（§五 L-CC 的版本归口） |
+| `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟（§五 L-CC 的版本归口；原 plan-v0.2.0.md 已并入） |
 | `plan/plan-mobile.md` | 移动端计划（第三个 host：接入端 + 去中心化链接端）；与 L-NET/L-PKG 共享去中心化底座，文件域独立 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同；D1 若通过需回写 |
 | `prd/PRD_02_18_roadmap.md` | 里程碑权威（M11 收敛 / M12 = v0.2.0） |
@@ -209,7 +209,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 ### 5.3 主线 L-CC：Control Center 内容成熟（PRD_02_21 → v0.2.0）
 
 - v0.1.11 壳层已 shipped（进程边界/typed bridge/Cockpit read-only）；
-  v0.2.0（plan-v0.2.0.md）做内容成熟。
+  v0.2.0（PRD_02_18 M12，原 plan-v0.2.0.md 已并入）做内容成熟。
 - 用户点名内容：**workflow/pipeline 工作台**（C1 promoted →
   MCP orchestration authority + CC 投影）、**AgenTerm 扩展能力台
   【插件/皮肤/信息】**（J4 promoted → softmgr substrate + PluginHub/
