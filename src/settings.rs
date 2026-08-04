@@ -208,10 +208,15 @@ fn scoped_settings_path_from(
 }
 
 pub(crate) fn load_config() -> AppConfig {
-    std::fs::read_to_string(config_path())
+    let mut config: AppConfig = std::fs::read_to_string(config_path())
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // save_config() always normalizes before writing, but settings.json is
+    // human-editable and could predate a range change, so a value read back
+    // must not bypass the same bounds a freshly-saved config would enforce.
+    config.normalize();
+    config
 }
 
 pub(crate) fn save_config(config: &AppConfig) -> Result<()> {
