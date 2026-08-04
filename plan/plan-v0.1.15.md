@@ -107,18 +107,27 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  └─ [ ] D3 发布窗口纪律 vs 工具化：发布期并发 agent 推 main 的协调
 │        （若 D1 通过则大幅弱化此需求）
 │
-└─ E. 发布链卫生（低成本噪音/存储治理）
-   ├─ [ ] E1 pages-build-deployment 噪音：每次 push 都产生一个
-   │     pages build run（GitHub Pages 自动构建），占 Actions 列表与
-   │     存储且与产品资格无关；确认是否需要 Pages（不需要则关设置
-   │     消除源头），需要则纳入清理策略
-   │     现状（review）：仓库启用 Pages（docs/ + CNAME 生效），用户此前
-   │     报告 Actions 列表存在大量 pages-build 噪音；域名为 agenterm.mega.tech，
-   │     与用户所述 agenterm.work 的归属/迁移关系见 §五 决策项 P1
-   └─ [ ] E2 定期清理旧 run：moltbaby 侧已有 gh-ci-cleanup.sh
-         （支持 --hours/--days/--keep-release-runs/--keep-pages-build/
-         --verify-rounds/--dry-run，删除后全量复核），agenterm 侧
-         建议 cron 保留 14 天；runbook 素材来自 plan-v0.1.13 §10.2.1
+├─ E. 发布链卫生（低成本噪音/存储治理）
+│  ├─ [ ] E1 pages-build-deployment 噪音：每次 push 都产生一个
+│  │     pages build run（GitHub Pages 自动构建），占 Actions 列表与
+│  │     存储且与产品资格无关；确认是否需要 Pages（不需要则关设置
+│  │     消除源头），需要则纳入清理策略
+│  │     现状（review）：仓库启用 Pages（docs/ + CNAME 生效），用户此前
+│  │     报告 Actions 列表存在大量 pages-build 噪音；域名为 agenterm.mega.tech，
+│  │     与用户所述 agenterm.work 的归属/迁移关系见 §五 决策项 P1
+│  └─ [ ] E2 定期清理旧 run：moltbaby 侧已有 gh-ci-cleanup.sh
+│        （支持 --hours/--days/--keep-release-runs/--keep-pages-build/
+│        --verify-rounds/--dry-run，删除后全量复核），agenterm 侧
+│        建议 cron 保留 14 天；runbook 素材来自 plan-v0.1.13 §10.2.1
+│
+└─ F. Linux 云桌面实测尾账（2026-08-04 DISPLAY=:1，详见 §七）
+   ├─ [x] 单测误耦合：child_id_remains_stable_after_wait 把
+   │     top_level_window_supported 绑到 hosted_script_worker_available
+   │     （有 X11 才失败；无 DISPLAY 的 CI 绿掩盖）——已修进 main
+   ├─ [ ] F1 云环境快照补齐 libxkbcommon-x11-0 + libxcb-xkb1
+   │     （缺则 agenterm/agenterm-cc 在 xkbcommon-dl panic）
+   └─ [ ] F2 云桌面默认 Xft.dpi=96（VNC 0mm + DPI=-1 → scale≈0.99，
+         触发 control_center_linux_renderer_evidence）
 ```
 
 ## 二、排序建议（起稿人观点）
@@ -129,6 +138,8 @@ v0.1.15  Feedback shift-left & release-lane economics
 3. **B1**：独立叶，收益确定（每轮 -2.8min）。
 4. **B2**：版本发布日专项收益；实现前先在分支验证 key 稳定性。
 5. C 组按复发率排优先级；D 组等人工。
+6. **F1 + F2**：云快照一改即永久消除桌面 smoke 首轮噪音（见 §七）；
+   单测误耦合已修，不必再排期。
 
 > v0.1.15 是**纯发布链经济学**版本，不与 §五 未来主线（net / CC 内容 /
 > 远程包管理 / computer-use）抢工期；未来主线只做「对齐记录 + 决策项」，
@@ -301,4 +312,52 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 2026-08-04 | 并发提交 2c5f3d4 已并入 plan-v0.1.15.md 主体与 plan-mobile.md；本工作区仅剩自审修正（E1 措辞 / 决策记录口径 / §三 引用） |
 | 2026-08-05 | 自截图 + ui-snapshot-full.json + 源码复核完成标签树区 UI/UX 观察（§三·五 T1-T6/TB1-TB2/SB1-SB2/W1）；全部为观察不改变 v0.1.15 授权范围；T2/SB1/W1 标 v0.1.15 顺手、其余归 v0.2.0+ |
 
+| 2026-08-04 | Linux 云桌面（DISPLAY=:1 XFCE）实测意见写入 §七 / F 组；单测误耦合已修进 main；F1/F2 为环境快照尾账，不走 PR |
+
+---
+
+## 七、Linux 云桌面实测意见（2026-08-04）
+
+宿主：Cursor Cloud `DISPLAY=:1` TigerVNC + XFCE（非 CI Xvfb）。
+入口与 CI 同款：`AGENTERM_BOOTSTRAP_TASK=… ./scripts/bootstrap.sh`。
+
+### 7.1 结果（环境补齐后）
+
+| 套件 | 结果 |
+|------|------|
+| `control-center-linux-smoke --backend x11` | PASS |
+| `unix-frontend-linux-smoke` | PASS |
+| `./check.sh --quick` | PASS（615 lib） |
+
+产品侧 Linux GUI journey **本身可绿**；首轮失败几乎全是环境/断言耦合，不是渲染回归。
+
+### 7.2 失败树（按暴露顺序）
+
+1. **缺 `libxkbcommon-x11-0`**（连带 `libxcb-xkb1`）  
+   `agenterm` / `agenterm-cc` 在 `xkbcommon-dl` panic：
+   `Library libxkbcommon-x11.so could not be loaded`。  
+   README 已列包；云快照未装 → **F1**。
+
+2. **`scale_factor ≈ 0.9896 < 1.0`**  
+   VNC `xrandr` 报 `0mm×0mm`，XFCE `Xft/DPI=-1` → winit 给出亚 1.0 scale；
+   smoke 断言 `scale_factor >= 1.0` 失败于 `control_center_linux_renderer_evidence`。  
+   会话内 `Xft.dpi: 96` + `xfconf-query …/Xft/DPI -s 96` 后 scale=1.0、全绿 → **F2**。  
+   意见：断言保持 `>= 1.0` 合理；应修环境默认 DPI，不要放宽产品契约。
+
+3. **单测误耦合（已修）**  
+   `child_id_remains_stable_after_wait` 要求  
+   `top_level_window_supported == hosted_script_worker_available()`。  
+   后者 Windows-only；前者在 Linux 有 X11 时为 true。  
+   **无 DISPLAY 的 CI 绿掩盖，桌面 Quick 必挂**——典型「反馈左移」反例，
+   与 v0.1.15 主题同构。修复：去掉该等式，只断言非 GUI 子进程无窗。
+
+### 7.3 意见（给 v0.1.15 / 环境维护）
+
+- **云环境 install**：把 README 的 X11 运行库写进快照（至少
+  `libxkbcommon-x11-0 libxcb-xkb1`）；桌面会话默认 `Xft.dpi=96`。
+- **不要用 headless CI 代替桌面观察**：`platform_facts` / scale / focus
+  类断言在有 DISPLAY 时语义不同；Quick 若在桌面跑，应用真 DISPLAY。
+- **Linux host-native smoke 可继续只在 push-main + Xvfb**；云桌面是
+  额外真机车道，适合抓 F1/F2 这类快照缺口，不必再拆 PR。
+- AGENTS.md Cursor Cloud 段已补 smoke 前置说明，与本 § 互为索引。
 

@@ -1705,12 +1705,15 @@ mod tests {
         assert!(before > 0);
         assert_eq!(before, after);
         assert_eq!(state, "exited");
-        assert_eq!(
-            facts.top_level_window_supported,
-            crate::platform::hosted_script_worker_available()
-        );
+        // A non-GUI child never owns a top-level window. Observation support is
+        // a host capability (Windows always; Linux when X11 is reachable;
+        // macOS when the window server answers) and must not be confused with
+        // hosted_script_worker_available(), which remains Windows-only for
+        // agenterm-cli script hosting.
         assert!(!facts.top_level_window_present);
         assert_eq!(facts.top_level_window_id, 0);
+        assert!(!facts.top_level_window_is_foreground);
+        assert!(facts.top_level_window_title.is_empty());
     }
 
     #[test]
