@@ -2073,7 +2073,27 @@ fn assert_fleet_and_north_star(
         );
 
         print("STEP Script API v2 Fleet mutation receipt, event, and post-state");
-        let baseline_visible = snapshot.layout.sidebar.visible;
+        // Sidebar layout drops out of the snapshot for a frame while the GUI
+        // relays out, so every read of it below settles instead of racing.
+        let baseline_visible = ();
+        for attempt in 0..600 {
+            let baseline_snapshot = helper::cli_json(
+                context,
+                cli,
+                ["ui-snapshot"],
+                audit_path
+            );
+            if baseline_snapshot.layout != ()
+                    && baseline_snapshot.layout.sidebar != () {
+                baseline_visible = baseline_snapshot.layout.sidebar.visible;
+                break;
+            }
+            rhai::task::sleep(std::time::Duration::from_millis(50));
+        }
+        require(
+            baseline_visible != (),
+            "script_fleet_sidebar_baseline_unavailable"
+        );
         let mutation = script_eval_json(
             context,
             cli,
@@ -2087,12 +2107,23 @@ let receipt=fleet.ui.tabs.toggle();
 }`,
             audit_path
         );
-        let mutated_snapshot = helper::cli_json(
-            context,
-            cli,
-            ["ui-snapshot"],
-            audit_path
-        );
+        let mutated_visible_flipped = false;
+        for attempt in 0..600 {
+            let mutated_snapshot = helper::cli_json(
+                context,
+                cli,
+                ["ui-snapshot"],
+                audit_path
+            );
+            if mutated_snapshot.layout != ()
+                    && mutated_snapshot.layout.sidebar != ()
+                    && mutated_snapshot.layout.sidebar.visible
+                        != baseline_visible {
+                mutated_visible_flipped = true;
+                break;
+            }
+            rhai::task::sleep(std::time::Duration::from_millis(50));
+        }
         require(
             mutation.ok
                 && mutation.value.request_id != ""
@@ -2105,8 +2136,7 @@ let receipt=fleet.ui.tabs.toggle();
                 && mutation.value.event_kind ==
                     "layout.tabs.visibility"
                 && mutation.value.verified
-                && mutated_snapshot.layout.sidebar.visible !=
-                    baseline_visible,
+                && mutated_visible_flipped,
             "script_fleet_mutation_receipt_mismatch"
         );
         require(
@@ -2118,14 +2148,25 @@ let receipt=fleet.ui.tabs.toggle();
             ) == "true",
             "script_fleet_visibility_restore_failed"
         );
-        let restored = helper::cli_json(
-            context,
-            cli,
-            ["ui-snapshot"],
-            audit_path
-        );
+        let restored = ();
+        let restored_visible_back = false;
+        for attempt in 0..600 {
+            restored = helper::cli_json(
+                context,
+                cli,
+                ["ui-snapshot"],
+                audit_path
+            );
+            if restored.layout != ()
+                    && restored.layout.sidebar != ()
+                    && restored.layout.sidebar.visible == baseline_visible {
+                restored_visible_back = true;
+                break;
+            }
+            rhai::task::sleep(std::time::Duration::from_millis(50));
+        }
         require(
-            restored.layout.sidebar.visible == baseline_visible,
+            restored_visible_back,
             "script_fleet_visibility_not_restored"
         );
         let active_tab = ();
