@@ -206,6 +206,104 @@
       color: var(--muted);
       font-size: .86rem;
     }
+    .install-panel {
+      margin-top: 34px;
+      max-width: 760px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #080d12;
+      box-shadow: inset 3px 0 0 var(--green-strong);
+      overflow: hidden;
+    }
+    .install-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .install-tabs button {
+      flex: 1 1 auto;
+      min-width: 120px;
+      padding: 11px 14px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      background: transparent;
+      font: 700 .76rem/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .install-tabs button[aria-selected="true"] {
+      color: var(--green);
+      border-bottom-color: var(--green);
+      background: rgba(126, 231, 135, .06);
+    }
+    .install-body { padding: 0; }
+    .install-command {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+    }
+    .install-command pre {
+      flex: 1;
+      margin: 0;
+      padding: 18px 20px;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      font-size: .82rem;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .copy-button {
+      flex: 0 0 auto;
+      align-self: stretch;
+      padding: 0 16px;
+      border: 0;
+      border-left: 1px solid var(--border);
+      color: var(--muted);
+      background: var(--surface-2);
+      font: 700 .72rem/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .copy-button:hover { color: var(--text); background: var(--surface); }
+    .copy-button.copied { color: var(--green); }
+    .install-notes {
+      margin: 0;
+      padding: 14px 20px 18px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      background: var(--surface);
+      font-size: .84rem;
+      line-height: 1.55;
+    }
+    .install-notes a { color: var(--blue); }
+    .install-notes code {
+      color: #c8d6e0;
+      font-size: .88em;
+    }
+    .platform-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .platform-pill {
+      padding: 6px 11px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      background: rgba(17, 24, 33, .72);
+      font: 600 .7rem/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .platform-pill strong { color: var(--green); font-weight: 700; }
     .github-proof {
       display: inline-flex;
       align-items: center;
@@ -579,6 +677,7 @@
       <a class="brand" href="#"><span>&gt;_</span> AgenTerm™</a>
       <nav aria-label="Primary navigation" data-i18n-aria-label="navLabel">
         <a href="#why" data-i18n="navWhy">Why</a>
+        <a href="#install" data-i18n="navInstall">Install</a>
         <a href="#story" data-i18n="navStory">Story</a>
         <a href="#workspace" data-i18n="navWorkspace">Workspace</a>
         <a href="#automation" data-i18n="navAutomation">Automation</a>
@@ -595,7 +694,7 @@
   <main id="main">
     <section class="hero">
       <div class="wrap">
-        <p class="eyebrow" data-i18n="heroEyebrow">Fleet work OS · Windows shipped · active development</p>
+        <p class="eyebrow" data-i18n="heroEyebrow">Fleet work OS · Windows, macOS &amp; Linux · v0.1.14</p>
         <h1 data-i18n-html="heroTitle">Organize your <em>crew</em>—not just another shell window.</h1>
         <p class="hero-emotion" data-i18n="heroEmotion">Everything on your machine, under your control.</p>
         <p class="lead" data-i18n="heroLead">
@@ -605,13 +704,19 @@
           share the same durable control plane.
         </p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/mgttt/agenterm/releases" data-i18n="download">Download for Windows</a>
+          <a class="button primary" id="hero-primary-cta" href="#install" data-i18n="download">Install AgenTerm</a>
+          <a class="button" href="https://github.com/mgttt/agenterm/releases/latest" data-i18n="allReleases">All releases</a>
           <a class="button" href="https://github.com/mgttt/agenterm#build-and-run" data-i18n="build">Build from source</a>
           <a class="github-proof" id="github-proof" href="https://github.com/mgttt/agenterm" aria-label="GitHub repository">
             <span aria-hidden="true">★</span> <strong id="github-stars">—</strong> <span data-i18n="githubStarsLabel">on GitHub</span>
           </a>
         </div>
-        <p class="hero-cta-hint" data-i18n="heroCtaHint">Portable build · unzip and run · detach close keeps your fleet alive</p>
+        <p class="hero-cta-hint" data-i18n="heroCtaHint">One-line install on macOS &amp; Linux · portable zip on Windows · detach close keeps your fleet alive</p>
+        <div class="platform-pills" aria-label="Supported platforms" data-i18n-aria-label="platformLabel">
+          <span class="platform-pill" data-i18n-html="platformWindows"><strong>Windows</strong> x64 / arm64</span>
+          <span class="platform-pill" data-i18n-html="platformMacos"><strong>macOS</strong> x64 / arm64</span>
+          <span class="platform-pill" data-i18n-html="platformLinux"><strong>Linux</strong> x64 / arm64</span>
+        </div>
         <div class="spec-row" aria-label="Product specs" data-i18n-aria-label="specLabel">
           <span class="spec-pill" data-i18n-html="specPortable"><strong>Portable</strong> dist</span>
           <span class="spec-pill" data-i18n-html="specSize"><strong>4 MiB</strong> GUI budget</span>
@@ -637,6 +742,32 @@
             <span class="rule" data-i18n="invariant3Rule">Verify ≠ sleep</span>
             <p data-i18n="invariant3Body">Automation waits on snapshots, events, and receipts—not arbitrary timers.</p>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="install">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 data-i18n="installTitle">Get started in seconds.</h2>
+          <p data-i18n="installLead">
+            No package manager required. macOS and Linux use a checksum-verified
+            installer; Windows ships a portable zip you can unzip anywhere.
+          </p>
+        </div>
+        <div class="install-panel" id="install-panel">
+          <div class="install-tabs" role="tablist" aria-label="Install method" data-i18n-aria-label="installTabsLabel">
+            <button type="button" role="tab" id="install-tab-macos" aria-selected="false" aria-controls="install-pane-macos" data-install-tab="macos" data-i18n="installTabMacos">macOS</button>
+            <button type="button" role="tab" id="install-tab-linux" aria-selected="false" aria-controls="install-pane-linux" data-install-tab="linux" data-i18n="installTabLinux">Linux</button>
+            <button type="button" role="tab" id="install-tab-windows" aria-selected="false" aria-controls="install-pane-windows" data-install-tab="windows" data-i18n="installTabWindows">Windows</button>
+          </div>
+          <div class="install-body">
+            <div class="install-command">
+              <pre id="install-command-text" aria-live="polite"></pre>
+              <button type="button" class="copy-button" id="install-copy" data-i18n="installCopy">Copy</button>
+            </div>
+            <p class="install-notes" id="install-notes"></p>
+          </div>
         </div>
       </div>
     </section>
@@ -858,11 +989,11 @@
         <div class="principle-grid">
           <article class="principle-card">
             <strong data-i18n="principle1Title">Lightweight native core</strong>
-            <p data-i18n="principle1Body">Portable Windows builds with strict binary budgets. Network, marketplace, and heavy runtimes stay optional sidecars—not GUI bloat.</p>
+            <p data-i18n="principle1Body">Portable builds with strict binary budgets on every platform. Network, marketplace, and heavy runtimes stay optional sidecars—not GUI bloat.</p>
           </article>
           <article class="principle-card">
-            <strong data-i18n="principle2Title">Windows shipped, core expanding</strong>
-            <p data-i18n="principle2Body">Windows is the shipped surface today. Linux and macOS share protocol, clients, and terminal kernel while native GUI delivery progresses.</p>
+            <strong data-i18n="principle2Title">Desktop on every platform</strong>
+            <p data-i18n="principle2Body">Windows, macOS, and Linux share the same protocol, clients, and terminal kernel. One installer script on Unix; portable zips everywhere else.</p>
           </article>
           <article class="principle-card">
             <strong data-i18n="principle3Title">Active development, honest scope</strong>
@@ -916,7 +1047,7 @@
     <div class="wrap">
       <p>
         © 2026 PARTNERNET SOFTWARE PTY LTD.<br>
-        <span data-i18n="footerTagline">AgenTerm · Windows shipped · Linux and macOS in active delivery · MIT OR Apache-2.0</span>
+        <span data-i18n="footerTagline">AgenTerm · Windows, macOS &amp; Linux · MIT OR Apache-2.0</span>
       </p>
       <p>
         <a href="https://github.com/mgttt/agenterm" data-i18n="footerRepository">Repository</a>
@@ -932,14 +1063,27 @@
           title: "AgenTerm™ — Local agent fleet work OS",
           description: "AgenTerm — the verifiable fleet OS for local processes and agents. Tree, viewport, Composer, and one control contract.",
           skip: "Skip to content", navLabel: "Primary navigation", languageLabel: "Language",
-          navWhy: "Why", navStory: "Story", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
-          heroEyebrow: "Fleet work OS · Windows shipped · active development",
+          navWhy: "Why", navInstall: "Install", navStory: "Story", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
+          heroEyebrow: "Fleet work OS · Windows, macOS & Linux · v0.1.14",
           heroTitle: "Organize your <em>crew</em>—not just another shell window.",
           heroEmotion: "Everything on your machine, under your control.",
           heroLead: "The verifiable fleet OS for local processes and agents. A team tree on the left, the terminal as viewport, and an external Composer for real input—built for programmers and sysadmins first; scripts and agents share the same durable control plane.",
-          download: "Download for Windows", build: "Build from source",
+          download: "Install AgenTerm", allReleases: "All releases", build: "Build from source",
           githubStarsLabel: "on GitHub",
-          heroCtaHint: "Portable build · unzip and run · detach close keeps your fleet alive",
+          heroCtaHint: "One-line install on macOS & Linux · portable zip on Windows · detach close keeps your fleet alive",
+          platformLabel: "Supported platforms",
+          platformWindows: "<strong>Windows</strong> x64 / arm64",
+          platformMacos: "<strong>macOS</strong> x64 / arm64",
+          platformLinux: "<strong>Linux</strong> x64 / arm64",
+          installTitle: "Get started in seconds.",
+          installLead: "No package manager required. macOS and Linux use a checksum-verified installer; Windows ships a portable zip you can unzip anywhere.",
+          installTabsLabel: "Install method",
+          installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
+          installCopy: "Copy", installCopied: "Copied",
+          installNoteMacos: "No <code>sudo</code>. Verifies SHA-256, links commands into <code>~/.local/bin</code>, and creates <code>~/Applications/AgenTerm.app</code>. macOS currently ships as a labeled unsigned developer preview — read the <a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md\">safety notes</a> before opting in.",
+          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, <code>agenterm-mux</code>, <code>agenterm-rhai</code>, and <code>agenterm-mcp</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
+          installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All seven client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
+          downloadWindowsCta: "Download for Windows",
           specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specServer: "Headless server authority", specMux: "tmux/RMUX subset via mux",
           invariantHeading: "Core invariants",
           invariant1Rule: "Exit ≠ erase", invariant1Body: "A dead process keeps its final screen in a readable tab until you explicitly close it.",
@@ -976,31 +1120,44 @@
           compareThem: "Typical terminals", compareThem1: "Flat tabs; context vanishes when a process exits", compareThem2: "Typing competes with streaming output", compareThem3: "Scripts sleep and guess instead of waiting on state", compareThem4: "Close the window, lose the session",
           compareUs: "AgenTerm", compareUs1: "Team tree for agents, shells, and long-running jobs", compareUs2: "External Composer per tab for real editing", compareUs3: "CLI, script, mux, MCP on one typed contract", compareUs4: "Detach-first close; headless server keeps running",
           stackTitle: "One authority. Several clients.", stackLead: "<code>agenterm-server</code> owns the fleet; everything else observes and acts through the same public contract.", stackLabel: "Architecture stack",
-          principle1Title: "Lightweight native core", principle1Body: "Portable Windows builds with strict binary budgets. Network, marketplace, and heavy runtimes stay optional sidecars—not GUI bloat.",
-          principle2Title: "Windows shipped, core expanding", principle2Body: "Windows is the shipped surface today. Linux and macOS share protocol, clients, and terminal kernel while native GUI delivery progresses.",
+          principle1Title: "Lightweight native core", principle1Body: "Portable builds with strict binary budgets on every platform. Network, marketplace, and heavy runtimes stay optional sidecars—not GUI bloat.",
+          principle2Title: "Desktop on every platform", principle2Body: "Windows, macOS, and Linux share the same protocol, clients, and terminal kernel. One installer script on Unix; portable zips everywhere else.",
           principle3Title: "Active development, honest scope", principle3Body: "Shipped, partial, and planned capability are labeled in the product tree. Inspiration and roadmap items are not release promises until promoted.",
           docsTitle: "Start with the contract.", docsLead: "AgenTerm is under active development. The product tree distinguishes shipped, partial, and planned capability; consult it before relying on roadmap work.",
-          readmeTitle: "README →", readmeBody: "Current highlights, build commands, CLI examples, and release workflow.",
+          readmeTitle: "README →", readmeBody: "Current highlights, install commands, CLI examples, and release workflow.",
           productTitle: "Product tree →", productBody: "Canonical requirements, current status, invariants, and links to owning modules.",
           visionTitle: "Product vision →", visionBody: "Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.",
           scriptTitle: "Script runtime specification →", scriptBody: "The versioned Rhai runtime contract, including shipped foundations and clearly marked planned work.",
           macPreviewTitle: "macOS preview safety →", macPreviewBody: "Verification and per-app Gatekeeper instructions for the unsigned developer preview.",
           macLocalTitle: "Local macOS build →", macLocalBody: "Build source, install a real application bundle, and keep the correct Dock item.",
-          footerTagline: "AgenTerm · Fleet work OS · Windows shipped · MIT OR Apache-2.0",
+          footerTagline: "AgenTerm · Windows, macOS & Linux · MIT OR Apache-2.0",
           footerRepository: "Repository", footerReleases: "Releases", footerNotices: "Notices"
         },
         "zh-Hant": {
           title: "AgenTerm™ — 本機 Agent 艦隊工作 OS",
           description: "AgenTerm——本機程序與 Agent 的可驗證艦隊 OS。樹、視口、Composer 與同一控制契約。",
           skip: "跳至主要內容", navLabel: "主要導覽", languageLabel: "語言",
-          navWhy: "為何不同", navStory: "場景", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
-          heroEyebrow: "艦隊工作 OS · Windows 已交付 · 積極開發中",
+          navWhy: "為何不同", navInstall: "安裝", navStory: "場景", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
+          heroEyebrow: "艦隊工作 OS · Windows、macOS 與 Linux · v0.1.14",
           heroTitle: "組織你的<em>艦隊</em>——不只是又一個 Shell 視窗。",
           heroEmotion: "掌控你機器上的每一條程序與 Agent。",
           heroLead: "本機程序與 Agent 的可驗證艦隊 OS。左側團隊樹、終端作視口、外置 Composer 負責輸入——先服務程式設計師與系統管理員；腳本與 Agent 共用同一耐久控制面。",
-          download: "下載 Windows 版", build: "從原始碼建置",
+          download: "安裝 AgenTerm", allReleases: "所有發行版", build: "從原始碼建置",
           githubStarsLabel: "GitHub 星標",
-          heroCtaHint: "便攜建置 · 解壓即用 · detach 關窗艦隊仍活",
+          heroCtaHint: "macOS 與 Linux 一行安裝 · Windows 便攜 zip · detach 關窗艦隊仍活",
+          platformLabel: "支援平台",
+          platformWindows: "<strong>Windows</strong> x64 / arm64",
+          platformMacos: "<strong>macOS</strong> x64 / arm64",
+          platformLinux: "<strong>Linux</strong> x64 / arm64",
+          installTitle: "幾秒內開始使用。",
+          installLead: "無需套件管理器。macOS 與 Linux 使用校驗安裝腳本；Windows 提供可解壓至任意位置的便攜 zip。",
+          installTabsLabel: "安裝方式",
+          installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
+          installCopy: "複製", installCopied: "已複製",
+          installNoteMacos: "無需 <code>sudo</code>。驗證 SHA-256、將命令連結至 <code>~/.local/bin</code>，並建立 <code>~/Applications/AgenTerm.app</code>。macOS 目前以標示清楚的未簽署開發者預覽版發布——請先閱讀<a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.zh-Hant.md\">安全說明</a>再選擇安裝。",
+          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code>、<code>agenterm-mux</code>、<code>agenterm-rhai</code>、<code>agenterm-mcp</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
+          installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部七個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
+          downloadWindowsCta: "下載 Windows 版",
           specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specServer: "無頭 server 權威", specMux: "mux 提供 tmux/RMUX 子集",
           invariantHeading: "核心不變量",
           invariant1Rule: "結束 ≠ 消失", invariant1Body: "程序結束後，最終畫面仍留在可讀分頁中，直到你明確關閉。",
@@ -1037,17 +1194,17 @@
           compareThem: "常見終端機", compareThem1: "扁平分頁；程序一結束上下文就消失", compareThem2: "輸入與串流輸出互相干擾", compareThem3: "腳本靠睡眠猜測，不等待狀態", compareThem4: "關窗即失去會話",
           compareUs: "AgenTerm", compareUs1: "Agent、Shell 與長跑任務的團隊樹", compareUs2: "每分頁外置 Composer，適合真正編輯", compareUs3: "CLI、script、mux、MCP 共用 typed 契約", compareUs4: "Detach-first 關窗；無頭 server 持續運行",
           stackTitle: "單一權威，多個用戶端。", stackLead: "<code>agenterm-server</code> 持有艦隊；其餘皆透過同一份公開契約觀察與操作。", stackLabel: "架構堆疊",
-          principle1Title: "輕量原生核心", principle1Body: "便攜 Windows 建置與嚴格二進位預算。網路、市場與重型執行時留在可選 sidecar——不撐胖 GUI。",
-          principle2Title: "Windows 已交付，核心向外延伸", principle2Body: "Windows 是現已交付的平台；Linux 與 macOS 共用通訊協定、用戶端與終端核心，原生 GUI 持續推進。",
+          principle1Title: "輕量原生核心", principle1Body: "各平台皆為便攜建置並遵守嚴格二進位預算。網路、市場與重型執行時留在可選 sidecar——不撐胖 GUI。",
+          principle2Title: "全平台桌面", principle2Body: "Windows、macOS 與 Linux 共用通訊協定、用戶端與終端核心。Unix 一行安裝腳本；其餘平台提供便攜 zip。",
           principle3Title: "積極開發，誠實標示範圍", principle3Body: "產品樹標示已交付、部分完成與規劃中能力。靈感與 roadmap 項目在晋升前不是發布承諾。",
           docsTitle: "從契約開始。", docsLead: "AgenTerm 正在積極開發。產品樹會區分已交付、部分完成與規劃中的能力；依賴 roadmap 功能前，請先查閱產品樹。",
-          readmeTitle: "README →", readmeBody: "目前重點、建置命令、CLI 範例與發行流程。",
+          readmeTitle: "README →", readmeBody: "目前重點、安裝命令、CLI 範例與發行流程。",
           productTitle: "產品樹 →", productBody: "正式需求、目前狀態、不變條件，以及各負責模組的連結。",
           visionTitle: "產品願景 →", visionBody: "思維樹、靈感採集與長期方向——與版本執行計劃分開。",
           scriptTitle: "Script Runtime 規格 →", scriptBody: "具版本的 Rhai Runtime 契約，包含已交付的基礎與明確標示的規劃工作。",
           macPreviewTitle: "macOS 預覽版安全指南 →", macPreviewBody: "未簽署開發者預覽版的檔案驗證與個別 App Gatekeeper 操作說明。",
           macLocalTitle: "本機 macOS 建置 →", macLocalBody: "從原始碼建置、安裝真正的 App bundle，並保留正確的 Dock 項目。",
-          footerTagline: "AgenTerm · 艦隊工作 OS · Windows 已交付 · MIT OR Apache-2.0",
+          footerTagline: "AgenTerm · Windows、macOS 與 Linux · MIT OR Apache-2.0",
           footerRepository: "程式庫", footerReleases: "發行版本", footerNotices: "第三方聲明"
         }
       };
@@ -1060,6 +1217,65 @@
       const twitterDescription = document.querySelector('meta[name="twitter:description"]');
       const choices = [...document.querySelectorAll("[data-locale-choice]")];
       const supported = new Set(Object.keys(copy));
+      const INSTALL_SCRIPT = "https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh";
+      const RELEASES_URL = "https://github.com/mgttt/agenterm/releases/latest";
+      const CURRENT_VERSION = "0.1.14";
+      let activeInstallPlatform = "linux";
+
+      function detectPlatform() {
+        const ua = navigator.userAgent || "";
+        const platform = navigator.platform || "";
+        if (/Win/i.test(platform) || /Windows/i.test(ua)) return "windows";
+        if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) return "macos";
+        if (/Linux/i.test(platform) || /CrOS/i.test(ua)) return "linux";
+        return "linux";
+      }
+
+      function detectWindowsArch() {
+        const ua = navigator.userAgent || "";
+        return /aarch64|arm64|ARM64/i.test(ua) ? "aarch64" : "x86_64";
+      }
+
+      function installCommand(platform) {
+        if (platform === "macos") {
+          return `curl -fsSL ${INSTALL_SCRIPT} \\\n  | AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 bash`;
+        }
+        if (platform === "linux") {
+          return `curl -fsSL ${INSTALL_SCRIPT} | bash`;
+        }
+        const arch = detectWindowsArch();
+        const asset = `agenterm-${CURRENT_VERSION}-windows-${arch}.zip`;
+        return `# Download ${asset}, extract anywhere, then run agenterm.exe\n` +
+          `${RELEASES_URL}/download/v${CURRENT_VERSION}/${asset}`;
+      }
+
+      function installNoteKey(platform) {
+        return `installNote${platform.charAt(0).toUpperCase()}${platform.slice(1)}`;
+      }
+
+      function renderInstall(platform) {
+        activeInstallPlatform = platform;
+        const locale = document.documentElement.dataset.locale || "en";
+        const values = copy[supported.has(locale) ? locale : "en"];
+        const commandEl = document.getElementById("install-command-text");
+        const notesEl = document.getElementById("install-notes");
+        const heroCta = document.getElementById("hero-primary-cta");
+        if (commandEl) commandEl.textContent = installCommand(platform);
+        if (notesEl) notesEl.innerHTML = values[installNoteKey(platform)] || "";
+        document.querySelectorAll("[data-install-tab]").forEach((button) => {
+          const selected = button.dataset.installTab === platform;
+          button.setAttribute("aria-selected", String(selected));
+        });
+        if (heroCta) {
+          if (platform === "windows") {
+            heroCta.textContent = values.downloadWindowsCta;
+            heroCta.href = RELEASES_URL;
+          } else {
+            heroCta.textContent = values.download;
+            heroCta.href = "#install";
+          }
+        }
+      }
 
       function applyLocale(locale) {
         const selected = supported.has(locale) ? locale : "en";
@@ -1088,6 +1304,7 @@
         choices.forEach((button) => {
           button.setAttribute("aria-pressed", String(button.dataset.localeChoice === selected));
         });
+        renderInstall(activeInstallPlatform);
         try { localStorage.setItem("agenterm-locale", selected); } catch (_) {}
       }
 
@@ -1096,6 +1313,36 @@
       try { savedLocale = localStorage.getItem("agenterm-locale"); } catch (_) {}
       const browserLocale = navigator.language.toLowerCase().startsWith("zh") ? "zh-Hant" : "en";
       applyLocale(queryLocale || savedLocale || browserLocale);
+      renderInstall(detectPlatform());
+
+      document.querySelectorAll("[data-install-tab]").forEach((button) => {
+        button.addEventListener("click", () => renderInstall(button.dataset.installTab));
+      });
+
+      const copyButton = document.getElementById("install-copy");
+      const commandEl = document.getElementById("install-command-text");
+      if (copyButton && commandEl) {
+        copyButton.addEventListener("click", async () => {
+          const locale = document.documentElement.dataset.locale || "en";
+          const values = copy[supported.has(locale) ? locale : "en"];
+          const text = commandEl.textContent || "";
+          try {
+            await navigator.clipboard.writeText(text);
+            copyButton.textContent = values.installCopied;
+            copyButton.classList.add("copied");
+            window.setTimeout(() => {
+              copyButton.textContent = values.installCopy;
+              copyButton.classList.remove("copied");
+            }, 1600);
+          } catch (_) {
+            const range = document.createRange();
+            range.selectNodeContents(commandEl);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        });
+      }
 
       choices.forEach((button) => {
         button.addEventListener("click", () => {

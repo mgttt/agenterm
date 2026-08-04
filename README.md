@@ -1,8 +1,7 @@
 # AgenTerm
 
-AgenTerm is a Rust-native terminal and local AI fleet controller. Windows is
-the shipped desktop surface; Linux and macOS native GUIs are active preview
-channels over the same terminal, protocol, and automation core. It combines
+AgenTerm is a Rust-native terminal and local AI fleet controller for
+**Windows, macOS, and Linux** (`x86_64` and `aarch64`). It combines
 hierarchical tabs, per-tab composers and environments, a native automation
 client, and a deliberately bounded tmux/RMUX frontend.
 
@@ -55,28 +54,30 @@ client, and a deliberately bounded tmux/RMUX frontend.
 
 ## Install
 
-On macOS or Linux (`aarch64` and `x86_64`), install the matching package from
-the latest GitHub Release:
+### macOS & Linux
+
+One line — no `sudo`, checksum-verified, commands linked into `~/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh | bash
 ```
 
-The installer does not require `sudo`. It verifies the release SHA-256 before
-extraction, checks Apple Developer ID signatures for stable macOS packages,
-keeps versioned payloads under `~/.local/share/agenterm`, links commands into
-`~/.local/bin`, and starts the GUI. On macOS it also creates
+The installer resolves the latest GitHub Release, verifies SHA-256 before
+extraction, keeps versioned payloads under `~/.local/share/agenterm`, and
+starts the GUI when a graphical session is available. On macOS it also creates
 `~/Applications/AgenTerm.app`.
 
-Pin a release or install without launching the GUI:
+Pin a version or install without launching:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
-  | AGENTERM_VERSION=v0.1.10 AGENTERM_NO_LAUNCH=1 bash
+  | AGENTERM_VERSION=v0.1.14 AGENTERM_NO_LAUNCH=1 bash
 ```
 
-If a release only provides the explicitly labeled macOS unsigned preview, it
-is never selected silently. Read the
+### macOS developer preview
+
+v0.1.14 ships macOS as a labeled **unsigned developer preview**. The
+installer never selects it silently. Read the
 [unsigned-preview security notes](docs/macos-unsigned-preview.md), then opt in:
 
 ```bash
@@ -84,10 +85,21 @@ curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
   | AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 bash
 ```
 
+### Windows
+
+Download the portable zip for your CPU architecture from
+[GitHub Releases](https://github.com/mgttt/agenterm/releases/latest), extract
+it anywhere, and run `agenterm.exe`. All seven client binaries plus build
+metadata ship in the same folder — no installer and no admin rights required.
+
+| Architecture | Asset |
+|---|---|
+| x86_64 | `agenterm-<version>-windows-x86_64.zip` |
+| arm64 | `agenterm-<version>-windows-aarch64.zip` |
+
 The installer exits without changing the active installation when the selected
-release has no package for the current platform. Windows users can download the
-signed package from [GitHub Releases](https://github.com/mgttt/agenterm/releases).
-List all installer overrides with:
+release has no package for the current platform. List all installer overrides
+with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
@@ -165,7 +177,7 @@ Window/Input/IME/Clipboard/Font/Screenshot/Activation/Integration status.
 Missing behavior is reported as `unsupported` or `failed`, never silently
 relabeled as available.
 
-### Linux GUI (preview)
+### Linux GUI
 
 Native Linux `agenterm` and `agenterm-cc` use winit. Control clients
 (`agenterm-cli`, `agenterm-mux`, `agenterm-rhai`, `agenterm-mcp`) do not need
