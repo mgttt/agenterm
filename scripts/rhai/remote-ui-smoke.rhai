@@ -2708,8 +2708,53 @@ try {
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     require(bracketed_mode_on, "remote_ui_bracketed_paste_mode_missing");
+    // The paste menu message targets the GUI's active tab, so pin the focus
+    // down before pasting instead of assuming select-window already settled.
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "--active", bracketed_id,
+            "--timeout-ms", "30000"
+        ]
+    );
     rhai::clipboard::set_text(bracketed_payload);
-    gui.window_message(0x0112, 0x1F10, 0);
+    let bracketed_input_before = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
+    );
+    bracketed_input_before.trim();
+    bracketed_input_before = bracketed_input_before.parse_int();
+    // Paste delivery has been observed to be lost outright on loaded CI
+    // runners: the result file never appears and the pane input counter
+    // never moves. Re-issue the paste only while nothing at all has been
+    // delivered; once any byte reaches the pane a duplicate paste would
+    // corrupt the framing comparison, so from then on just wait.
+    let bracketed_delivered = false;
+    for paste_attempt in 0..6 {
+        gui.window_message(0x0112, 0x1F10, 0);
+        for poll in 0..40 {
+            if std::fs::exists(bracketed_result) {
+                bracketed_delivered = true;
+                break;
+            }
+            let bracketed_input_now = text_cli(
+                context,
+                cli,
+                ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
+            );
+            bracketed_input_now.trim();
+            if bracketed_input_now.parse_int() > bracketed_input_before {
+                bracketed_delivered = true;
+                break;
+            }
+            rhai::task::sleep(std::time::Duration::from_millis(25));
+        }
+        if bracketed_delivered {
+            break;
+        }
+    }
     wait_file_text(
         bracketed_result,
         "ok",
