@@ -303,10 +303,20 @@ jobs:
               "repos/$GITHUB_REPOSITORY/git/refs" \
               -f ref="refs/tags/$TAG" \
               -f sha="$SOURCE_SHA" >/dev/null
-            actual_tag_sha="$(
-              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
-                --jq .object.sha
-            )"
+            # The ref API is read-after-write eventually consistent: the
+            # immediate lookup can 404 for a moment after a successful POST.
+            actual_tag_sha=""
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if actual_tag_sha="$(
+                  gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+                    --jq .object.sha 2>/dev/null
+                )" && [[ -n "$actual_tag_sha" ]]
+              then
+                break
+              fi
+              sleep 3
+            done
+            [[ -n "$actual_tag_sha" ]]
           fi
           [[ "$actual_tag_sha" == "$SOURCE_SHA" ]]
 
