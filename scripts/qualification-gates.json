@@ -23,6 +23,10 @@
       "evidence": []
     },
     {
+      "id": "artifact-build-fast",
+      "evidence": []
+    },
+    {
       "id": "rhai-lint",
       "evidence": []
     },
