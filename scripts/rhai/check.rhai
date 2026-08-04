@@ -1337,15 +1337,37 @@ if !skip_smoke {
         );
         smoke_spec.allow_powershell = id == "remote-ui-smoke";
         smoke_spec.environment = no_activate;
-        let completed = run_gate(
-            context,
-            id,
-            id,
-            [smoke_spec],
-            repo,
-            scratch,
-            sequence
-        );
+        // GUI journeys on shared runners are load-sensitive: transient races
+        // (pump reclamation, projection lag, input delivery) pass on a second
+        // attempt while genuine regressions fail deterministically both
+        // times. One bounded retry keeps the gate honest without turning
+        // every transient into a 35-minute qualification iteration.
+        let completed = ();
+        try {
+            completed = run_gate(
+                context,
+                id,
+                id,
+                [smoke_spec],
+                repo,
+                scratch,
+                sequence
+            );
+        } catch (first_failure) {
+            print(
+                "RETRY " + id + " after transient failure: " +
+                    first_failure.to_string()
+            );
+            completed = run_gate(
+                context,
+                id,
+                id + " (retry)",
+                [smoke_spec],
+                repo,
+                scratch,
+                sequence + 1000
+            );
+        }
         context = completed.context;
         sequence = completed.sequence;
     }

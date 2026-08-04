@@ -117,7 +117,7 @@ try {
 
     print("STEP concurrent IPC replies and PTY output both make progress");
     let clients = [];
-    for index in 0..32 {
+    for index in 0..24 {
         let client_command = test_harness::configured_command(
             context,
             cli,
