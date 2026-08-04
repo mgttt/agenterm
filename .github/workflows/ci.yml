@@ -1,6 +1,10 @@
 name: CI
 
 on:
+  # Manual re-run lane: the Candidate preflight requires a successful CI run
+  # at the exact main HEAD SHA. If that run is cancelled or deleted, a push
+  # cannot re-trigger CI for the same SHA, so the release chain dead-ends.
+  workflow_dispatch:
   push:
     # Documentation-only commits cannot change build or test outcomes, and
     # every extra full-matrix run competes for the runners that release CI
