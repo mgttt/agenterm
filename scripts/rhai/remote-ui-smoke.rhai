@@ -2697,9 +2697,10 @@ try {
             "--timeout-ms", "30000"
         ]
     );
+    let bracketed_bootstrap = ();
     let bracketed_mode_on = false;
     for attempt in 0..600 {
-        let bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
+        bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
         let bracketed_tab = find_tab(bracketed_bootstrap, bracketed_id);
         if bracketed_tab != () && bracketed_tab.screen.bracketed_paste {
             bracketed_mode_on = true;
@@ -2708,6 +2709,18 @@ try {
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     require(bracketed_mode_on, "remote_ui_bracketed_paste_mode_missing");
+    // The bootstrap above is the SERVER's view. The GUI frames a paste from
+    // its own event-driven replica (remote_frontend captures
+    // tab.screen.bracketed_paste at request time), so pasting before the GUI
+    // has observed the mode change delivers the payload unframed and the
+    // fixture waits forever for framing bytes that never arrive. Wait until
+    // the GUI reports it has consumed at least the sequence at which the
+    // server saw the mode on.
+    wait_observed(
+        context,
+        cli,
+        bracketed_bootstrap.position.sequence
+    );
     // The paste menu message targets the GUI's active tab, so pin the focus
     // down before pasting instead of assuming select-window already settled.
     text_cli(
