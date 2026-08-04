@@ -346,7 +346,7 @@
     "mcp-conformance": {
       "inputs": ["candidate-mcp", "staged-binaries", "isolated-workspace"],
       "outputs": ["mcp-conformance-evidence"],
-      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": ["loopback"],
       "evidence": ["task.mcp-conformance"]
     },

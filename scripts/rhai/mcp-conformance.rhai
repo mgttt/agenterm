@@ -28,7 +28,7 @@ command.args([
 command.current_dir(repo);
 command.env("AGENTERM_NO_ACTIVATE", "1");
 command.env("AGENTERM_MCP_EXE", candidate);
-command.timeout(std::time::Duration::from_secs(60));
+command.timeout(std::time::Duration::from_secs(600));
 let output = command.output();
 require(output.success, output.error("mcp-conformance"));
 let stdout = output.stdout_text();

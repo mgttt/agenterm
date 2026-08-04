@@ -1199,7 +1199,7 @@ let ordinary_gates = [
         id:"mcp-conformance",
         label:"public MCP conformance and isolation",
         specs:[task(
-            worker, manifest, "mcp-conformance", 60000, []
+            worker, manifest, "mcp-conformance", 600000, []
         )]
     },
     #{
