@@ -65,7 +65,12 @@ fn find_tab(snapshot, target) {
 fn wait_tab_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tab = find_tab(snapshot, target);
+        let tab = ();
+        try {
+            tab = find_tab(snapshot, target);
+        } catch (missing) {
+            tab = ();
+        }
         if tab != ()
                 && tab.render != ()
                 && tab.render.text != ()
@@ -84,7 +89,14 @@ fn wait_tab_render(context, cli, target) {
 fn wait_tab_label_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tab = find_tab(snapshot, target);
+        // find_tab throws while the row is briefly absent mid-relayout;
+        // treat that exactly like missing geometry and keep polling.
+        let tab = ();
+        try {
+            tab = find_tab(snapshot, target);
+        } catch (missing) {
+            tab = ();
+        }
         if tab != ()
                 && tab.render != ()
                 && tab.render.name != ()
