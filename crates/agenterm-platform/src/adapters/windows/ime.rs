@@ -1,15 +1,20 @@
 use std::borrow::Cow;
 
-use windows_sys::Win32::Globalization::{GetLocaleInfoW, LOCALE_SLOCALIZEDLANGUAGENAME};
-use windows_sys::Win32::UI::{
-    Input::{
-        Ime::{
-            IME_CMODE_FULLSHAPE, IME_CMODE_NATIVE, ImmGetContext, ImmGetConversionStatus,
-            ImmGetDescriptionW, ImmGetOpenStatus, ImmReleaseContext,
+use windows_sys::Win32::{
+    Foundation::{POINT, RECT},
+    Globalization::{GetLocaleInfoW, LOCALE_SLOCALIZEDLANGUAGENAME},
+    Graphics::Gdi::ClientToScreen,
+    UI::{
+        Input::{
+            Ime::{
+                CANDIDATEFORM, CFS_POINT, COMPOSITIONFORM, IME_CMODE_FULLSHAPE, IME_CMODE_NATIVE,
+                ImmGetContext, ImmGetConversionStatus, ImmGetDescriptionW, ImmGetOpenStatus,
+                ImmReleaseContext, ImmSetCandidateWindow, ImmSetCompositionWindow,
+            },
+            KeyboardAndMouse::{GetFocus, GetKeyboardLayout},
         },
-        KeyboardAndMouse::{GetFocus, GetKeyboardLayout},
+        WindowsAndMessaging::GetForegroundWindow,
     },
-    WindowsAndMessaging::GetForegroundWindow,
 };
 
 use crate::{CapabilityStatus, contract::ime::ImeStatus};
@@ -17,6 +22,51 @@ use crate::{CapabilityStatus, contract::ime::ImeStatus};
 pub(crate) fn capability_status(_display_available: bool) -> CapabilityStatus {
     CapabilityStatus::Unsupported {
         reason: Cow::Borrowed("ime-preedit-not-yet-adapted"),
+    }
+}
+
+/// Point the IME composition and candidate windows at a client-area caret.
+///
+/// The terminal grid is not a native editable control, so the OS has no caret
+/// to anchor the candidate window to; without this call the candidate bar
+/// appears at a default position. IMM32 positioning is honored by both legacy
+/// IMM32 IMEs and modern TSF text services (Microsoft Pinyin, MS-IME, ...).
+/// Coordinates are client-area pixels; IMM32 wants screen coordinates, so the
+/// point is converted with `ClientToScreen` before being reported.
+pub(crate) fn set_anchor_position(x: i32, y: i32) {
+    let focus = unsafe { GetFocus() };
+    if focus.is_null() {
+        return;
+    }
+    let mut point = POINT { x, y };
+    if unsafe { ClientToScreen(focus, &mut point) } == 0 {
+        return;
+    }
+    let context = unsafe { ImmGetContext(focus) };
+    if context.is_null() {
+        return;
+    }
+    let empty_rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    let composition = COMPOSITIONFORM {
+        dwStyle: CFS_POINT,
+        ptCurrentPos: point,
+        rcArea: empty_rect,
+    };
+    let candidate = CANDIDATEFORM {
+        dwIndex: 0,
+        dwStyle: CFS_POINT,
+        ptCurrentPos: point,
+        rcArea: empty_rect,
+    };
+    unsafe {
+        ImmSetCompositionWindow(context, &composition);
+        ImmSetCandidateWindow(context, &candidate);
+        ImmReleaseContext(focus, context);
     }
 }
 

@@ -15,6 +15,20 @@ pub fn status() -> Option<ImeStatus> {
     selected::ime::status()
 }
 
+/// Anchor the IME composition and candidate windows to a client-area point.
+///
+/// `x` and `y` are client coordinates of the active caret (for a terminal,
+/// the cursor cell's top-left corner). Native adapters convert to screen
+/// coordinates internally. Platforms whose input-method events arrive through
+/// a different mechanism (winit on macOS/Linux) treat this as a no-op.
+///
+/// The terminal grid is not a native editable control, so without this call
+/// the OS has no caret to anchor the candidate window to and the candidate
+/// bar appears at an arbitrary position.
+pub fn set_anchor_position(x: i32, y: i32) {
+    selected::ime::set_anchor_position(x, y)
+}
+
 pub fn classify_event(event: ImeEvent, anchor_available: bool) -> ImeAction {
     match event {
         ImeEvent::Enabled => ImeAction::None,

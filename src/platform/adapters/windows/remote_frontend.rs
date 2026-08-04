@@ -5173,7 +5173,7 @@ impl RemoteWindowState {
         fill(device, &status, palette.status.canvas_rgb());
         self.paint_tabs(device, sidebar, palette);
         if let Some(tab) = self.active_tab() {
-            paint_screen(
+            let cursor_rect = paint_screen(
                 device,
                 terminal,
                 &tab.screen,
@@ -5181,6 +5181,18 @@ impl RemoteWindowState {
                 self.cell_height,
                 palette,
             );
+            // 终端网格不是原生编辑控件，OS 无从得知 caret 位置；把 IME
+            // 组合/候选窗锚到终端光标处，否则中文候选条出现在默认位置。
+            if self.current_focus_surface() == RemoteFocusSurface::Terminal
+                && let Some(cursor) = cursor_rect.filter(|cursor| {
+                    cursor.left >= terminal.left
+                        && cursor.top >= terminal.top
+                        && cursor.left < terminal.right
+                        && cursor.top < terminal.bottom
+                })
+            {
+                agenterm_platform::ime::set_anchor_position(cursor.left, cursor.top);
+            }
             self.paint_terminal_selection(device, terminal, &tab.screen, palette);
             self.paint_terminal_scrollbar(device, palette);
             draw_text(
@@ -6376,7 +6388,7 @@ fn paint_screen(
     cell_width: i32,
     cell_height: i32,
     palette: &ThemePalette,
-) {
+) -> Option<ProductPixelRect> {
     for run in &screen.runs {
         let left = terminal.left + i32::try_from(run.column).unwrap_or(0) * cell_width;
         let top = terminal.top + i32::try_from(run.row).unwrap_or(0) * cell_height;
@@ -6411,7 +6423,9 @@ fn paint_screen(
                 + (i32::try_from(screen.cursor.row).unwrap_or(0) + 1) * cell_height,
         };
         frame(device, &cursor, palette.accent.canvas_rgb());
+        return Some(cursor);
     }
+    None
 }
 
 fn style_colors(style: &UiCellStyle, palette: &ThemePalette) -> (Rgb8, Rgb8) {

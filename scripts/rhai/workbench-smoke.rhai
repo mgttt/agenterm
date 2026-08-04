@@ -546,13 +546,11 @@ try {
         "candidate-tab-switch"
     );
     json_cli(context, cli, ["ui-action", "select-tab", "-t", root]);
-    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    let root_tab = find_tab(snapshot, root);
+    let root_tab = wait_tab_render(context, cli, root);
     click_bounds(gui_child, root_tab.render.text);
     json_cli(context, cli, ["ui-action", "tabs-hide"]);
     json_cli(context, cli, ["ui-action", "tabs-show"]);
-    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    let root_tab = find_tab(snapshot, root);
+    let root_tab = wait_tab_render(context, cli, root);
     double_click_message(gui_child, root_tab.render.text);
     assert_editor_closed(
         json_cli(context, cli, ["ui-snapshot"]),
@@ -570,7 +568,21 @@ try {
     );
 
     print("STEP archived Proxy status surface releases its layout and actions");
-    let proxy = snapshot.layout.status_bar.proxy;
+    // The status bar block also drops out of the snapshot during relayout;
+    // settle it like every other geometry read instead of reusing a stale
+    // snapshot binding from an earlier step.
+    let proxy = ();
+    for attempt in 0..600 {
+        let proxy_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        if proxy_snapshot.layout != ()
+                && proxy_snapshot.layout.status_bar != ()
+                && proxy_snapshot.layout.status_bar.proxy != () {
+            proxy = proxy_snapshot.layout.status_bar.proxy;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(proxy != (), "workbench_proxy_surface_unavailable");
     require(
         proxy.archived
             && !proxy.available

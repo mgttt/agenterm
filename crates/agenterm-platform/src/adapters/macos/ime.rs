@@ -8,6 +8,9 @@ pub(crate) fn status() -> Option<ImeStatus> {
     None
 }
 
+/// winit positions the composition/candidate UI on our behalf; no-op.
+pub(crate) fn set_anchor_position(_x: i32, _y: i32) {}
+
 pub(crate) fn capability_status(display_available: bool) -> CapabilityStatus {
     if display_available {
         CapabilityStatus::Available

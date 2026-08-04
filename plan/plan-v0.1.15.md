@@ -1,4 +1,4 @@
-﻿# AgenTerm v0.1.15 公开计划（占位稿 / 思维工作树）
+# AgenTerm v0.1.15 公开计划（占位稿 / 思维工作树）
 
 状态：**占位草案**（2026-08-04 起草，基于 v0.1.14 发布日全天真实遥测；
 2026-08-04 晚外部 review 逐条对照最新代码核验并补充「现状（review）」行；
@@ -143,6 +143,35 @@ v0.1.15  Feedback shift-left & release-lane economics
 - **不把 §五 未来主线塞进 v0.1.15**：agenterm-net 稳定化、Control Center
   内容成熟、远程包管理、computer-use 各归其版本 plan 与 owning PRD。
 
+
+## 三·五、UI/UX 现场观察（2026-08-05，自截图 + ui-snapshot-full.json + 源码复核）
+
+> 证据：dist/evidence/{tab-tree-uiux-review,sidebar-zoom,sidebar-top-zoom,tab-tree-collapsed}.png
+> ＋ ui-snapshot-full.json（1180x760 窗口，dark 主题）+ src/ui_geometry.rs + unix frontend render.rs。
+> 全部为「观察/建议」，不改变 v0.1.15 授权范围；按影响面标注归口（v0.1.15 顺手 / v0.2.0+）。
+
+### 3.5.1 标签树区（重点）
+
+| # | 观察（证据） | 问题 | 建议 | 归口 |
+|---|--------------|------|------|------|
+| T1 | 行高 36px = name 17px + note 16px；10 tab 中 9 个 note 为空仍占满 | 空 note 行浪费 ~44% 垂直空间，视口可容行数少 | 无 note 时单行渲染（行高 ~20px）或按内容自适应 | v0.2.0+ |
+| T2 | status 状态点几何存在（8x9，快照有），render_sidebar 无绘制调用 | 运行/退出/错误状态不可见，树行左侧留空 | 补渲染 status 色点（复用 success/warning/danger 调色板） | v0.1.15 顺手 |
+| T3 | control_hover / control_pressed / active_border 全仓零使用 | 按钮、active 行无 hover/pressed/边框反馈 | 工具栏与树操作按钮接 hover/pressed；active 行加 active_border | v0.2.0+ |
+| T4 | TREE_INDENT=10px，CJK 宽字符层级感弱 | 深层级树难辨归属 | 缩进 10→14~16px 或加连接线分段着色 | v0.2.0+ |
+| T5 | marker 为文本 [+]/[-] 3 字符 | 与 11x11 expander 几何不符，视觉粗糙 | 换 8x8 三角/箭头字形，保持 hit 区不变 | v0.2.0+ |
+| T6 | 树连接线用 divider 1px | 层级线不醒目 | 保留（或浅色变体），低优先 | 观察 |
+
+### 3.5.2 工具栏 / 状态栏 / 整体
+
+| # | 观察（证据） | 问题 | 建议 | 归口 |
+|---|--------------|------|------|------|
+| TB1 | 工具栏 7 按钮同底同色，无 hover/pressed（同 T3） | 无可点击性提示 | 与 T3 同修 | v0.2.0+ |
+| TB2 | tabs 按钮 52px 标签 "<Tabs" | 信息性弱，与 New 无主次 | 折叠时可显示 tab 计数或当前 tab 名 | v0.2.0+ |
+| SB1 | terminal/sidebar scrollbar visible=true 且 max_offset=0 | 无内容可滚动仍占 12px 轨道 | 无可滚动内容时隐藏滚动条 | v0.1.15 顺手 |
+| SB2 | 状态栏 cwd 260px 显示全路径 | 窗口窄时挤压其它段 | 紧凑模式（home 缩写 + 省略号） | v0.2.0+ |
+| W1 | 窗口标题带 profile 后缀（如 custom:uiux-review） | 用户可见噪音 | 发布构建隐藏 profile 后缀 | v0.1.15 顺手 |
+
+
 ## 四、与其它文档的关系
 
 | 文档 | 关系 |
@@ -270,3 +299,6 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 2026-08-04 | 代码复核：win-full-gate profile/并发组、candidate dispatch-only、script-smoke 仅 release lane、net-research release 门、hashFiles 缓存 key、release-fast profile、Pages/CNAME、gh-ci-cleanup.sh 参数均属实；run 30907369093 与 pages-build 噪音为 review 结论（本地 gh 不可用，落地时以 Actions 复核） |
 | 2026-08-04 | §五 未来主线按用户声明对齐 PRD；P1–P4 为待拍板决策项，未开工 |
 | 2026-08-04 | 并发提交 2c5f3d4 已并入 plan-v0.1.15.md 主体与 plan-mobile.md；本工作区仅剩自审修正（E1 措辞 / 决策记录口径 / §三 引用） |
+| 2026-08-05 | 自截图 + ui-snapshot-full.json + 源码复核完成标签树区 UI/UX 观察（§三·五 T1-T6/TB1-TB2/SB1-SB2/W1）；全部为观察不改变 v0.1.15 授权范围；T2/SB1/W1 标 v0.1.15 顺手、其余归 v0.2.0+ |
+
+
