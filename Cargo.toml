@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "agenterm"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 rust-version = "1.97"
 description = "A tabbed Windows cmd.exe terminal with persistent exited tabs"

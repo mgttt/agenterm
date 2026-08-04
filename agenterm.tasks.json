@@ -2,7 +2,7 @@
   "schema_version": 3,
   "project": {
     "id": "agenterm-development",
-    "version": "0.1.12",
+    "version": "0.1.13",
     "requires": {
       "script_api": {
         "minimum": 2,
@@ -63,7 +63,7 @@
     },
     "provenance": {
       "producer": "agenterm-rhai",
-      "revision": "v0.1.12-rc-unpublished"
+      "revision": "v0.1.13-rc-unpublished"
     }
   },
   "contracts": {
