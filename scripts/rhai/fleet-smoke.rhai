@@ -950,9 +950,12 @@ try {
     );
 
     print("STEP supported Codex launcher proxy workflow");
-    let agent_command =
-        "if defined HTTPS_PROXY echo HTTPS_PROXY_PRESENT&" +
-        "set NO_PROXY&set AGENTERM_TAB_ID";
+    // --proxy is still parsed and validated, but 7338a93 paused HTTPS_PROXY
+    // injection on every create path (see PRD_02_06), so the child only sees
+    // whatever proxy variables the caller already exported. Assert the paused
+    // contract directly against the tab environment below instead of probing
+    // an inherited variable, which passed only on proxied developer machines.
+    let agent_command = "set NO_PROXY&set AGENTERM_TAB_ID";
     text(
         context,
         cli,
@@ -983,8 +986,7 @@ try {
         ["inspect", "-t", agent_tab.id]
     );
     require(
-        agent_capture.contains("HTTPS_PROXY_PRESENT")
-            && agent_capture.contains(
+        agent_capture.contains(
                 "NO_PROXY=localhost,127.0.0.1"
             )
             && agent_capture.contains(
@@ -993,8 +995,14 @@ try {
             && !agent_capture.contains(
                 "--dangerously-bypass-approvals-and-sandbox"
             )
-            && agent_inspect.windows[0].environment_names.contains(
+            && !agent_inspect.windows[0].environment_names.contains(
                 "HTTPS_PROXY"
+            )
+            && !agent_inspect.windows[0].environment_names.contains(
+                "HTTP_PROXY"
+            )
+            && agent_inspect.windows[0].environment_names.contains(
+                "NO_PROXY"
             ),
         "fleet_codex_proxy_context"
     );

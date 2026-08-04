@@ -1013,9 +1013,14 @@ try {
     let new_marker = "AGENTERM_NEW_DIALOG_" + context.run_id;
     let proxy_secret =
         "http://dialog-user:dialog-pass@127.0.0.1:48888";
-    initial_command.set_text(
-        "if defined HTTP_PROXY echo " + new_marker
-    );
+    // Echo unconditionally. This step proves the dialog's initial command
+    // reaches the created terminal; it must not depend on HTTP_PROXY being
+    // defined. Create-path proxy injection was intentionally paused in
+    // 7338a93 (see PRD_02_06), after which the old conditional form only
+    // still printed on machines that already exported HTTP_PROXY -- green on
+    // proxied dev boxes, timing out on every clean CI runner. Proxy handling
+    // is covered by the redaction assertions above.
+    initial_command.set_text("echo " + new_marker);
     http_proxy.set_text(proxy_secret);
     https_proxy.set_text(proxy_secret);
     let new_modal_text = "";
