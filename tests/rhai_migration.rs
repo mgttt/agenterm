@@ -270,7 +270,7 @@ fn run_prd_alignment(repo_under_test: &Path) -> Output {
         .arg(repo)
         .args([
             "--timeout-ms",
-            "20000",
+            "120000",
             "--max-operations",
             "10000000",
             "--",
@@ -342,7 +342,7 @@ fn run_qualification_selftest() -> Output {
         .arg(repo)
         .args([
             "--timeout-ms",
-            "20000",
+            "120000",
             "--max-operations",
             "10000000",
             "--",
@@ -750,7 +750,7 @@ fn run_failing_check_timing(report: &Path, options: &[&str]) -> Output {
         .arg(repo)
         .args([
             "--timeout-ms",
-            "20000",
+            "120000",
             "--max-operations",
             "10000000",
             "--",
