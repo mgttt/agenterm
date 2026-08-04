@@ -447,7 +447,12 @@ fn is_terminal_word_character(character: char) -> bool {
         || matches!(character, '_' | '-' | '.' | '/' | '\\' | ':' | '@' | '~')
 }
 
+/// Walks left from `col` to the start of its continuation-cell run.
+///
+/// `col` must be greater than zero: the only call site is already gated by
+/// `start > 0`, and `col - 1` below relies on that to avoid underflowing.
 fn previous_cell_start(source: &dyn TerminalCellSource, row: u32, col: u32) -> u32 {
+    debug_assert!(col > 0, "previous_cell_start requires col > 0");
     let mut previous = col - 1;
     while previous > 0
         && source
