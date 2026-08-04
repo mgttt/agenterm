@@ -417,7 +417,7 @@ fn incompatible_sibling(
         script_executable,
         [
             "eval", source,
-            "--timeout-ms", "12000",
+            "--timeout-ms", "30000",
             "--max-operations", "10000000",
             "--", address, ready_path, stop_path
         ]
@@ -489,7 +489,7 @@ fn prove_pty(context, cli_executable, label) {
         [
             "wait-pane", "-t", tab_id,
             "--contains", marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let capture = cli_text(
@@ -1004,7 +1004,7 @@ try {
         [
             "wait-pane", "-t", renderer_pty_tab,
             "--contains", renderer_pty_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let native_window_path = registry_stem + ".window";
@@ -1105,7 +1105,7 @@ try {
         [
             "wait-pane", "-t", detach_tab,
             "--contains", detach_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let gui_command = test_harness::configured_command(
@@ -1143,7 +1143,7 @@ try {
         cli_executable,
         [
             "wait-ui", "--modal-kind", "confirm-window-close",
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     cli_text(

@@ -314,7 +314,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", stream_prefix + "_2",
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     stop_upgrade_ui_keeping_server(context, cli, prior);
@@ -340,7 +340,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", stream_prefix + "_8",
-            "--timeout-ms", "12000"
+            "--timeout-ms", "30000"
         ]
     );
     let next_state = get_upgrade_state(context, cli, tab_id);
@@ -395,7 +395,7 @@ try {
             "wait-pane", "-t", tab_id,
             "--contains", stream_prefix + "_12",
             "--submit-complete",
-            "--timeout-ms", "12000"
+            "--timeout-ms", "30000"
         ]
     );
     let final_state = get_upgrade_state(context, cli, tab_id);

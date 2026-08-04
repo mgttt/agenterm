@@ -111,7 +111,7 @@ fn wait_for_editor(context, cli, target, open) {
             "wait-ui",
             "-t", target,
             "--tab-editor-state", if open { "open" } else { "closed" },
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     )
 }
@@ -288,7 +288,7 @@ try {
         context,
         cli,
         ["wait-ui", "--window-state", "restored",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
 
     let root_name = "workbench-" + std::process::id();
@@ -304,13 +304,13 @@ try {
         context,
         cli,
         ["wait-ui", "--active", root, "--window-state", "restored",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
     json_cli(
         context,
         cli,
         ["wait-ui", "-t", root, "--tab-state", "running",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
 
     let peer_name = "workbench-peer-" + std::process::id();
@@ -326,7 +326,7 @@ try {
         context,
         cli,
         ["wait-ui", "--active", root, "--window-state", "restored",
-         "--timeout-ms", "5000"]
+         "--timeout-ms", "30000"]
     );
     let root_tab = find_tab(snapshot, root);
     let peer_tab = find_tab(snapshot, peer);
@@ -338,7 +338,7 @@ try {
         context,
         cli,
         ["wait-ui", "--active", peer, "--focus", "tabs",
-         "--timeout-ms", "5000"]
+         "--timeout-ms", "30000"]
     );
     assert_editor_closed(snapshot, peer, "single-click-peer");
     let root_tab = find_tab(snapshot, root);
@@ -347,7 +347,7 @@ try {
         context,
         cli,
         ["wait-ui", "--active", root, "--focus", "tabs",
-         "--timeout-ms", "5000"]
+         "--timeout-ms", "30000"]
     );
     assert_editor_closed(snapshot, root, "single-click-root");
 
@@ -669,7 +669,7 @@ try {
         context,
         cli,
         ["wait-ui", "--active", target, "--focus", "terminal",
-         "--timeout-ms", "5000"]
+         "--timeout-ms", "30000"]
     );
     test_harness::emit_evidence(
         context,

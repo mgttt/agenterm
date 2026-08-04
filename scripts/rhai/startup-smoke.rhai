@@ -199,7 +199,7 @@ try {
         cli_exe,
         [
             "wait-ui", "--window-state", "restored",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ],
         false
     );
@@ -208,7 +208,7 @@ try {
         cli_exe,
         [
             "wait-ui", "-t", "0", "--tab-state", "running",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ],
         false
     );

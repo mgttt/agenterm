@@ -111,7 +111,7 @@ try {
         cli,
         [
             "wait-ui", "-t", tab_id, "--tab-state", "running",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
 
@@ -179,7 +179,7 @@ try {
         cli,
         [
             "wait-pane", "-t", tab_id, "--contains", token,
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
 

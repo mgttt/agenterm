@@ -36,8 +36,13 @@ v0.1.14  Identity correctness & trust tail
 │  ├─ [ ] 真机回归：`--instance custom:work` → `server-list` INSTANCE 显示
 │  │     `<user>_work`（等含本修复的二进制；display label 已去 "custom:"
 │  │     前缀，见 6e6dcca + 0129a9b 测试对齐）
-│  └─ [ ] 复核其余 autostart/respawn 路径无同类身份丢失
-│        （CLI server-start、CC 迁移路径、Unix embedded 拉起）
+│  └─ [x] 复核其余 autostart/respawn 路径无同类身份丢失（2026-08-04）：
+│        全部 CLI/GUI 自启动汇聚单点 start_frontend_server_process
+│        （client/mod.rs::start_server_process 仅转发）；kill-server 走
+│        已解析 endpoint 的 IPC、server-list/list-instances 读注册记录，
+│        注册身份修复后自动正确；CC 迁移路径用 resolved.logical_instance
+│        （control_center.rs:1338）。残留：旧二进制所起 server 的记录
+│        仍标 main，server 重启后自愈，非代码缺陷
 │
 ├─ B. precision-audit 决策项收口（继承占位稿 §三，机制已明、待拍板）
 │  ├─ [ ] item 22：script_protocol/agenterm-rhai 三个 dedup HashSet 在

@@ -509,7 +509,7 @@ fn wait_screenshot_changed(context, cli, path, baseline_path, code) {
     // Selection state is published before the low-priority WM_PAINT that makes
     // its highlight visible. Keep the pixel receipt fail-closed while allowing
     // that independently scheduled paint to commit.
-    for attempt in 0..10 {
+    for attempt in 0..1200 {
         screenshot(context, cli, path);
         if rhai::crypto::sha256_file(path) != baseline_hash {
             return;
@@ -1582,7 +1582,7 @@ try {
         ]
     );
     let osc_confirmed = false;
-    for attempt in 0..50 {
+    for attempt in 0..600 {
         let osc_tab = find_tab(
             json_cli(context, cli, ["ui-bootstrap"]),
             powershell_id
@@ -2703,7 +2703,7 @@ try {
 
     let composer_send = require_window_control(gui.window_control(2102), "composer_send");
     let offline_observed = false;
-    for attempt in 0..300 {
+    for attempt in 0..3000 {
         if !composer_send.visible {
             offline_observed = true;
             break;

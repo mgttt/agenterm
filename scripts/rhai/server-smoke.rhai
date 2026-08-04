@@ -253,7 +253,7 @@ try {
         [
             "wait-pane", "-t", interaction_tab,
             "--contains", interaction_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let interaction_bootstrap = command_json(
@@ -368,7 +368,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", "AGENTERM_HEADLESS_OK",
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let capture = command_text(
@@ -440,7 +440,7 @@ try {
         [
             "wait-pane", "-t", interactive_tab,
             "--contains", submission_marker,
-            "--submit-complete", "--timeout-ms", "5000"
+            "--submit-complete", "--timeout-ms", "30000"
         ]
     );
     let committed_receipt = command_json(

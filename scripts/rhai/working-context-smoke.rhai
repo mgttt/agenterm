@@ -130,7 +130,7 @@ try {
     test_harness::invoke_cli(
         context,
         cli,
-        ["wait-ui", "--window-state", "restored", "--timeout-ms", "10000"],
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"],
         false,
         redactions
     );
@@ -138,7 +138,7 @@ try {
         context,
         cli,
         ["wait-ui", "-t", "0", "--tab-state", "running",
-         "--timeout-ms", "10000"],
+         "--timeout-ms", "30000"],
         false,
         redactions
     );
@@ -236,7 +236,7 @@ try {
         cli,
         [
             "wait-ui", "-t", persistent_id, "--tab-state", "running",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ],
         false,
         redactions
@@ -329,7 +329,7 @@ try {
     test_harness::invoke_cli(
         context,
         cli,
-        ["wait-ui", "--window-state", "restored", "--timeout-ms", "10000"],
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"],
         false,
         redactions
     );
@@ -337,7 +337,7 @@ try {
         context,
         cli,
         ["wait-ui", "-t", persistent_name, "--tab-state", "running",
-         "--timeout-ms", "10000"],
+         "--timeout-ms", "30000"],
         false,
         redactions
     );

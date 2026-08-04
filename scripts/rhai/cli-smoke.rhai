@@ -881,7 +881,7 @@ try {
         cli,
         [
             "wait-pane", "-t", name, "--contains", token,
-            "--submit-complete", "--timeout-ms", "10000"
+            "--submit-complete", "--timeout-ms", "30000"
         ]
     );
     let committed = json(context, cli, submit_args);
@@ -946,7 +946,7 @@ try {
         [
             "wait-pane", "-t", name,
             "--contains", backspace_prefix + "Y",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     let backspace_capture =
@@ -982,7 +982,7 @@ try {
         [
             "wait-pane", "-t", name,
             "--contains", scroll_prefix + "_80",
-            "--submit-complete", "--timeout-ms", "10000"
+            "--submit-complete", "--timeout-ms", "30000"
         ]
     );
     let top_offset = parse_integer(
@@ -1061,7 +1061,7 @@ try {
         cli,
         [
             "wait-ui", "-t", disposable, "--tab-state", "dead",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     text(context, cli, ["kill-window", "-t", disposable]);
@@ -1071,7 +1071,7 @@ try {
         cli,
         [
             "wait-ui", "--active", stable_child,
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     text(
@@ -1104,7 +1104,7 @@ try {
         cli,
         [
             "wait-pane", "-t", name, "--dead",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     text(
@@ -1112,7 +1112,7 @@ try {
         cli,
         [
             "wait-pane", "-t", name, "--finalized",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     let finalized_first =

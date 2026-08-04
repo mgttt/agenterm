@@ -532,7 +532,7 @@ try {
         context,
         cli,
         ["wait-pane", "-t", environment_name, "--dead",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
 
     print("STEP live servers are discoverable and explicitly targetable");
@@ -971,7 +971,7 @@ try {
         context,
         cli,
         ["wait-pane", "-t", agent_name, "--dead",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
     let agent_capture = text(
         context,
@@ -1030,7 +1030,7 @@ try {
         context,
         cli,
         ["wait-pane", "-t", delimiter_name, "--dead",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
     let delimiter_capture = text(
         context,

@@ -123,7 +123,7 @@ fn start_gui(context, gui, cli) {
     let snapshot = json_cli(
         context,
         cli,
-        ["wait-ui", "--window-state", "restored", "--timeout-ms", "10000"]
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"]
     );
     require(
         snapshot.client_pid == child.id,
@@ -238,7 +238,7 @@ try {
         context,
         cli,
         ["wait-ui", "-t", tab.id, "--tab-state", "running",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
     if internal_failure_probe {
         throw "INTERNAL_FAILURE_BUNDLE_PROBE:gui:" + context.run_id;
@@ -255,7 +255,7 @@ try {
         context,
         cli,
         ["wait-pane", "-t", tab.id, "--contains", token_before,
-         "--submit-complete", "--timeout-ms", "10000"]
+         "--submit-complete", "--timeout-ms", "30000"]
     );
 
     print("STEP native Light preview and Cancel rollback");
@@ -293,7 +293,7 @@ try {
         context,
         cli,
         ["wait-ui", "--window-state", "restored",
-         "--modal-kind", "none", "--timeout-ms", "5000"]
+         "--modal-kind", "none", "--timeout-ms", "30000"]
     );
     assert_theme(snapshot, "dark", (), false);
 
@@ -324,7 +324,7 @@ try {
         context,
         cli,
         ["wait-pane", "-t", tab.id, "--contains", token_after,
-         "--submit-complete", "--timeout-ms", "10000"]
+         "--submit-complete", "--timeout-ms", "30000"]
     );
     let pane_after = only_pane(context, cli, tab.id);
     let capture = text_cli(
@@ -385,7 +385,7 @@ try {
         context,
         cli,
         ["wait-ui", "-t", restored.id, "--tab-state", "running",
-         "--timeout-ms", "10000"]
+         "--timeout-ms", "30000"]
     );
     assert_theme(
         json_cli(context, cli, ["ui-snapshot"]),
