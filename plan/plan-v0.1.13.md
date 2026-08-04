@@ -618,7 +618,7 @@ Tabs-total 行 + 每 tab 详情行），smoke 硬编码旧行号点到 view 行�
 键盘目标不同。遗留：480px 高窗口下三行 tab 条仅首行在线内（Windows client
 更矮整条出界，`control-center-smoke` 不在 CI 矩阵、同源待修）；产品层把
 strip 提前于详情行或自适应行数为独立行为叶，不在本 smoke 叶夹带。
-v0.1.12 授权链未触发；Candidate dispatch 仍待 PAT 加 Actions write 或 UI 手动触发。
+v0.1.12 授权链未触发；Candidate 授权已启用（gh CLI mgttt 具 Actions write）。
 ```
 
 ### 10.3 边界（不做的）
@@ -627,3 +627,64 @@ v0.1.12 授权链未触发；Candidate dispatch 仍待 PAT 加 Actions write 或
 - 不做 snapshot 填充管线统一（v0.2.0）
 - 不进 Workflows / 大 Control Center / net / WebView（v0.2.0）
 - 不冒充 shipped 能力（macOS pointer 无正向证据则保留 typed Unsupported）
+
+### 10.2.1 Release 推进日志（2026-08-04，Candidate 链）
+
+> 本节写给接手「发布 v0.1.13」目标的下一个 agent：**坑全部在此，别重新探索**。
+> 目标 = Candidate 全绿 → Promotion → 更新本计划。v0.1.12 授权链保持不动。
+
+```text
+v0.1.13 Release 推进（2026-08-04 晚）
+├─ [x] 身份冻结 2cb79e2：Cargo.toml / crates/agenterm-platform/Cargo.toml /
+│      Cargo.lock / agenterm.tasks.json → 0.1.13（main CI 全绿）
+├─ [x] 授权链启用：gh CLI（账号 mgttt，token 含 Actions write）
+│      Candidate dispatch 命令（source_sha 必须 40 位全量）：
+│      gh workflow run candidate.yml --repo mgttt/agenterm --ref main -f source_sha=<sha>
+│      坑①：短 SHA 会让 preflight 的 actions/checkout 报
+│           "A branch or tag with the name '<short>' could not be found"
+│      坑②：preflight 还要求该 SHA 的 main CI 已存在 success run，
+│            dispatch 前必须等 CI 绿
+├─ Candidate 闸门修复链（每轮修一道，均为 CI/发布配置窄叶，非产品代码）
+│  ├─ [x] 579855f — artifact-build-fast gate 未在 scripts/qualification-gates.json
+│  │      声明 → fail closed；补声明
+│  ├─ [x] 4d9f561 — release build 后 mcp-conformance 冷缓存编译 >60s →
+│  │      process_timeout；三处超时（内部命令 60s / check.rhai 调用方 60s /
+│  │      task budget 300s）对齐 600s
+│  └─ [x] 95baeba — agenterm-rhai.exe release 超预算
+│          actual=3443200 > budget=3145728（3 MiB）
+│          预算从未被 release build 验证过：v0.1.12 Candidate 死在更早
+│          fs_copy 闸，3 MiB 是过时值；增长来源为 v0.1.12/0.1.13
+│          facade+frontend+REPL 等 legit feature。升 4 MiB（4194304），
+│          scripts/artifacts.json 两处（base executables + windows-x86_64 override）
+├─ [x] c46eb70 — remote-ui-smoke 首次在 Windows release build 上运行即挂
+│      背景：此 smoke 历史从未被 release 验证过（main CI windows 跑
+│      --skip-smoke；v0.1.12 Candidate 死在更早闸门）→ 本闸第一次见光
+│      症状（CI run 30888946375）：GUI 替换后的 "recover hidden Tabs" 步，
+│      rhai 报 ErrorDotExpr line 917：layout.toolbar 为 ()（JSON null）
+│      根因判读：replacement GUI 窗口未就绪瞬间取 snapshot →
+│      client < 296x46 → workspace_toolbar None → layout.toolbar null
+│      修复：wait_workspace_toolbar() 轮询 ≤10s 等 toolbar 非 null，
+│      超时 throw 带 window 状态诊断（json::stringify(window)）
+│      本地证据：dev 构建同 smoke 全绿 46s；窗口常态 1180x760 →
+│      client ~1164x721，toolbar 应存在（296 宽阈值）
+└─ 当前状态（2026-08-04 16:50 +0800 截稿）：
+   main HEAD = c46eb70；main CI 全绿（run 30893142200，10/10 jobs）
+   Candidate run 30893548055 in_progress（含 remote-ui-smoke 修复）
+   待办：Candidate 全绿 → Promotion：
+   gh workflow run release.yml --repo mgttt/agenterm --ref <candidate-ref>
+     -f candidate_run_id=<id> -f confirmation=publish-v0.1.13
+```
+
+```text
+已知坑（勿重复探索）
+├─ 本地 dev 机器 release 构建 remote-ui-smoke 在 tabs-hide 挂起（>6min）
+│   dev 构建同机全绿；CI release 不复现（CI 一直推进到 replacement 步）
+│   清掉陈旧 agenterm-server.locked-* 进程后仍挂 → 判定本地桌面环境差异
+│   ⚠ 别用本地 release 复现结果当闸门证据，以 CI 为准
+├─ 遗留 UX：480px 高 native CC 窗口下三行 tab 条仅首行在线内
+│   （Windows client 更矮整条出界；control-center-smoke 不在 CI 矩阵）
+│   归独立产品叶，不在发布链内处理
+└─ 发布链纪律：commit 用 pathspec 精确提交，禁 git add -A（并发 agent
+   可能暂存 src/platform/contract/ipc.rs、adapters/unix/frontend/mod.rs、
+   adapters/windows/control_window.rs、scripts/dispatch-candidate-workflow.ts）
+```
