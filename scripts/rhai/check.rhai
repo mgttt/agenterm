@@ -1320,13 +1320,18 @@ if !skip_smoke {
             worker,
             manifest,
             id,
+            // Wall budgets are upper bounds, not pacing: every smoke returns
+            // as soon as its conditions settle. Cold CI runners under release
+            // builds repeatedly proved the old 60/120s ceilings were sized to
+            // warm dev machines — each newly reached step burned a full
+            // Candidate iteration on a budget failure instead of a real one.
             if id == "remote-ui-smoke"
                     || id == "cli-smoke"
                     || id == "fleet-smoke"
                     || id == "script-smoke" {
-                120000
+                600000
             } else {
-                60000
+                300000
             },
             extra
         );

@@ -118,7 +118,7 @@ fn discard_cli(context, cli, arguments, output_name) {
 }
 
 fn wait_for_exit(child, code) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         if child.state == "exited" {
             return child.wait_with_output(
                 std::time::Duration::from_secs(2)
@@ -130,7 +130,7 @@ fn wait_for_exit(child, code) {
 }
 
 fn wait_for_window(child, code) {
-    for attempt in 0..240 {
+    for attempt in 0..1200 {
         if child.platform_facts.top_level_window_present {
             return;
         }
@@ -183,14 +183,14 @@ fn start_gui(context, gui, cli) {
         context,
         cli,
         child,
-        240,
+        1200,
         "remote_ui_lease_timeout"
     );
     #{ child: child, lease: lease }
 }
 
 fn wait_projection(context, cli, projection) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let output = test_harness::run_cli(
             context,
             cli,
@@ -210,7 +210,7 @@ fn wait_projection(context, cli, projection) {
 }
 
 fn wait_observed(context, cli, sequence) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let lease = json_cli(context, cli, ["ui-lease", "status"]);
         if lease.observed_sequence >= sequence {
             return lease;
@@ -221,7 +221,7 @@ fn wait_observed(context, cli, sequence) {
 }
 
 fn wait_workspace_toolbar(context, cli, code) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         if snapshot.layout.toolbar != () {
             return snapshot;
@@ -235,7 +235,7 @@ fn wait_workspace_toolbar(context, cli, code) {
 }
 
 fn wait_locale(context, cli, locale_id) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         if snapshot.locale.id == locale_id {
             return snapshot;
@@ -246,7 +246,7 @@ fn wait_locale(context, cli, locale_id) {
 }
 
 fn wait_effective_font_size(context, cli, size, overridden) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         if snapshot.settings != () && snapshot.settings.effective != () {
             let terminal_override = snapshot.settings.current_terminal_override;
@@ -262,7 +262,7 @@ fn wait_effective_font_size(context, cli, size, overridden) {
 }
 
 fn wait_terminal_resize_settled(context, cli) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let terminal = snapshot.layout.terminal;
         if !terminal.resize_pending
@@ -277,7 +277,7 @@ fn wait_terminal_resize_settled(context, cli) {
 
 fn wait_terminal_selection(
         context, cli, phase, capture_owned, copyable, code) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let interaction = snapshot.terminal_interaction;
         if interaction != () {
@@ -308,7 +308,7 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
         gui.window_message(0x8004, 0, 0) == 1,
         "remote_ui_render_activity_sample_rejected"
     );
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let activity = snapshot.render_activity;
         if activity != () && activity.sequence > required_sequence {
@@ -364,7 +364,7 @@ fn measure_theme_render(
         cli,
         [
             "wait-ui", "--modal-kind", "closed",
-            "--timeout-ms", "1000"
+            "--timeout-ms", "30000"
         ]
     );
     let result = #{
@@ -388,7 +388,7 @@ fn wait_viewport_mutation(context, cli, baseline, tab_id) {
             "--after", baseline.sequence.to_string(),
             "--kind", "terminal.viewport",
             "--tab", tab_id,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
 }
@@ -438,7 +438,7 @@ fn process_present(id) {
 }
 
 fn wait_process_gone(id, code) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         if !process_present(id) {
             return;
         }
@@ -448,7 +448,7 @@ fn wait_process_gone(id, code) {
 }
 
 fn wait_file_text(path, expected, code) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         if std::fs::exists(path) {
             let observed = std::fs::read_to_string(path);
             observed.trim();
@@ -465,7 +465,7 @@ fn wait_file_text(path, expected, code) {
 }
 
 fn wait_pane_input_bytes(context, cli, tab_id, minimum, code) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let observed = text_cli(
             context,
             cli,
@@ -536,7 +536,7 @@ fn pane_screenshot(context, cli, path) {
 }
 
 fn assert_instance_directory_empty(context) {
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let files = std::fs::read_dir(context.instance_directory);
         if files.len == 0 {
             return;
@@ -612,7 +612,7 @@ try {
         cli,
         [
             "wait-ui", "--window-state", "minimized",
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     require(
@@ -624,19 +624,19 @@ try {
     json_cli(
         context,
         cli,
-        ["wait-ui", "--window-state", "restored", "--timeout-ms", "5000"]
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"]
     );
     json_cli(context, cli, ["ui-action", "window-maximize"]);
     json_cli(
         context,
         cli,
-        ["wait-ui", "--window-state", "maximized", "--timeout-ms", "5000"]
+        ["wait-ui", "--window-state", "maximized", "--timeout-ms", "30000"]
     );
     json_cli(context, cli, ["ui-action", "window-restore"]);
     json_cli(
         context,
         cli,
-        ["wait-ui", "--window-state", "restored", "--timeout-ms", "5000"]
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"]
     );
     let resized_width = if original_width > 720 {
         original_width - 80
@@ -666,7 +666,7 @@ try {
             "--client-height", resized_height.to_string(),
             "--terminal-grid-changed-from",
                 original_rows.to_string() + "x" + original_columns,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     require(
@@ -690,7 +690,7 @@ try {
             "wait-ui",
             "--client-width", original_width.to_string(),
             "--client-height", original_height.to_string(),
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
 
@@ -722,7 +722,7 @@ try {
         cli,
         [
             "wait-ui", "--modal-kind", "settings",
-            "--timeout-ms", "1000"
+            "--timeout-ms", "30000"
         ]
     );
     require(
@@ -736,7 +736,7 @@ try {
         cli,
         [
             "wait-ui", "--modal-kind", "closed",
-            "--timeout-ms", "1000"
+            "--timeout-ms", "30000"
         ]
     );
     let composer = json_cli(context, cli, ["focus", "composer"]);
@@ -808,7 +808,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let rendered = json_cli(context, cli, ["ui-bootstrap"]);
@@ -1001,7 +1001,7 @@ try {
         cli,
         [
             "wait-ui", "--modal-kind", "new-terminal",
-            "--timeout-ms", "1000"
+            "--timeout-ms", "30000"
         ]
     );
     require(
@@ -1020,7 +1020,7 @@ try {
     https_proxy.set_text(proxy_secret);
     let new_modal_text = "";
     let new_modal = ();
-    for attempt in 0..80 {
+    for attempt in 0..400 {
         new_modal_text = text_cli(context, cli, ["ui-snapshot"]);
         new_modal = rhai::json::parse(new_modal_text);
         if new_modal.modal.initial_command_configured
@@ -1045,7 +1045,7 @@ try {
         cli,
         [
             "wait-pane", "--contains", new_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let created_bootstrap = json_cli(
@@ -1065,7 +1065,7 @@ try {
         cli,
         [
             "wait-ui", "--active", tab_id,
-            "--focus", "terminal", "--timeout-ms", "1000"
+            "--focus", "terminal", "--timeout-ms", "30000"
         ]
     );
 
@@ -1348,7 +1348,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", font_input_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let settings_current_scope = require_window_control(gui.window_control(2133), "settings_current_scope");
@@ -1435,7 +1435,7 @@ try {
         [
             "wait-ui", "--modal-kind", "cwd-editor",
             "--modal-target", tab_id,
-            "--timeout-ms", "1000"
+            "--timeout-ms", "30000"
         ]
     );
     require(
@@ -1446,7 +1446,7 @@ try {
     json_cli(
         context,
         cli,
-        ["wait-ui", "--modal-kind", "none", "--timeout-ms", "1000"]
+        ["wait-ui", "--modal-kind", "none", "--timeout-ms", "30000"]
     );
 
     let pane_input_before = text_cli(
@@ -1533,7 +1533,7 @@ try {
         [
             "wait-ui", "-t", powershell_id,
             "--tab-state", "running",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     text_cli(
@@ -1573,7 +1573,7 @@ try {
         cli,
         [
             "wait-pane", "-t", powershell_id,
-            "--submit-complete", "--timeout-ms", "10000"
+            "--submit-complete", "--timeout-ms", "30000"
         ]
     );
     let osc_confirmed = false;
@@ -1610,7 +1610,7 @@ try {
         cli,
         [
             "wait-pane", "-t", powershell_id,
-            "--submit-complete", "--timeout-ms", "10000"
+            "--submit-complete", "--timeout-ms", "30000"
         ]
     );
     let invalid_snapshot = json_cli(context, cli, ["ui-bootstrap"]);
@@ -1673,7 +1673,7 @@ try {
             "wait-ui",
             "--terminal-grid-changed-from",
             rows_before + "x" + columns_before,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let resized_settings =
@@ -1710,14 +1710,14 @@ try {
             "--epoch", root_ui.event_position.epoch,
             "--after", root_ui.event_position.sequence.to_string(),
             "--kind", "tab.created",
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let child_id = "@" + created_event.tab_id;
     text_cli(
         context,
         cli,
-        ["wait-ui", "--active", child_id, "--timeout-ms", "5000"]
+        ["wait-ui", "--active", child_id, "--timeout-ms", "30000"]
     );
     let child_bootstrap = json_cli(
         context,
@@ -1895,7 +1895,7 @@ try {
             "--after", hierarchy.event_position.sequence.to_string(),
             "--kind", "tab.closed",
             "--tab", hierarchy_child_id,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let promoted = json_cli(context, cli, ["ui-bootstrap"]);
@@ -1999,7 +1999,7 @@ try {
     gui.window_resize(900, 320);
     let sidebar_ui = ();
     let sidebar_ready = false;
-    for attempt in 0..200 {
+    for attempt in 0..1200 {
         let candidate = json_cli(context, cli, ["ui-snapshot"]);
         if candidate.projection == "replaceable_ui_client"
                 && candidate.layout.sidebar.scrollbar != ()
@@ -2053,7 +2053,7 @@ try {
     gui.window_pointer("up", sidebar_x, sidebar_bottom_y);
     gui.window_message(0x0113, 0, 0);
     let sidebar_scrolled = ();
-    for attempt in 0..80 {
+    for attempt in 0..400 {
         sidebar_scrolled = json_cli(context, cli, ["ui-snapshot"]);
         if sidebar_scrolled.layout.sidebar.scrollbar.offset > 0 {
             break;
@@ -2098,7 +2098,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", scroll_marker + "80",
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     text_cli(
@@ -2106,7 +2106,7 @@ try {
         cli,
         [
             "wait-pane", "-t", tab_id,
-            "--submit-complete", "--timeout-ms", "5000"
+            "--submit-complete", "--timeout-ms", "30000"
         ]
     );
     let scroll_bootstrap = json_cli(
@@ -2326,7 +2326,7 @@ try {
         [
             "wait-pane", "-t", alternate_id,
             "--contains", "ALT_WHEEL_READY",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     let alternate_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
@@ -2358,7 +2358,7 @@ try {
         cli,
         [
             "wait-ui", "-t", alternate_id,
-            "--tab-state", "dead", "--timeout-ms", "10000"
+            "--tab-state", "dead", "--timeout-ms", "30000"
         ]
     );
     text_cli(context, cli, ["select-window", "-t", tab_id]);
@@ -2383,7 +2383,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", copy_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let selection_bootstrap = json_cli(
@@ -2439,7 +2439,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", selection_delta,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
     let selection_prepared = wait_terminal_selection(
@@ -2566,7 +2566,7 @@ try {
         [
             "wait-pane", "-t", tab_id,
             "--contains", paste_marker,
-            "--timeout-ms", "5000"
+            "--timeout-ms", "30000"
         ]
     );
 
@@ -2657,7 +2657,7 @@ try {
         [
             "wait-pane", "-t", bracketed_id,
             "--contains", "BRACKET_PASTE_READY",
-            "--timeout-ms", "10000"
+            "--timeout-ms", "30000"
         ]
     );
     let bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
@@ -2678,7 +2678,7 @@ try {
         cli,
         [
             "wait-ui", "-t", bracketed_id,
-            "--tab-state", "dead", "--timeout-ms", "10000"
+            "--tab-state", "dead", "--timeout-ms", "30000"
         ]
     );
     text_cli(context, cli, ["select-window", "-t", tab_id]);
@@ -2721,7 +2721,7 @@ try {
         context,
         cli,
         gui,
-        300,
+        1200,
         "remote_ui_in_place_reconnect_timeout"
     );
     let reconnected_bootstrap = json_cli(
