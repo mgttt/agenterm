@@ -74,11 +74,14 @@ pub(crate) fn set_anchor_position(x: i32, y: i32) {
     }
 }
 
-/// Diagnostic trace behind `AGENTERM_IME_DEBUG=1` for candidate-window
+/// Diagnostic trace behind `PLATFORM_IME_DEBUG=1` for candidate-window
 /// position debugging. Writes one line per anchor update to
-/// `%TEMP%\agenterm-ime-debug.log`.
+/// `%TEMP%\platform-ime-debug.log`.
+///
+/// The gate is deliberately product-neutral: this crate must stay
+/// independently consumable, so it reads no product-branded environment.
 fn trace_anchor(focus: HWND, x: i32, y: i32, screen: &POINT, converted: i32) {
-    if std::env::var_os("AGENTERM_IME_DEBUG").is_none() {
+    if std::env::var_os("PLATFORM_IME_DEBUG").is_none() {
         return;
     }
     let mut window_rect: RECT = unsafe { std::mem::zeroed() };
@@ -101,7 +104,7 @@ fn trace_anchor(focus: HWND, x: i32, y: i32, screen: &POINT, converted: i32) {
         client_rect.right,
         client_rect.bottom,
     );
-    let path = std::env::temp_dir().join("agenterm-ime-debug.log");
+    let path = std::env::temp_dir().join("platform-ime-debug.log");
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
