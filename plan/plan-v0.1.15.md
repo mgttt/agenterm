@@ -5,7 +5,7 @@
 2026-08-04 深夜二次复核全部 review 行与 PRD 未来主线对齐，见 §五）。
 不改变任何已发布/在途版本的授权状态；不创建 tag/Candidate/Release。
 主题预定：**反馈左移 + 发布链降本**——把「问题在离引入点最远、最贵的
-车道才暴露」这一根因打掉。开工前需人工确认范围与 §三 的政策决策项。
+车道才暴露」这一根因打掉。开工前需人工确认范围与 §一 D 组、§五 5.7 的政策决策项。
 
 数据来源：v0.1.14 发布日 ~10 轮 gate 级迭代的 timing 遥测
 （candidate-quality-timing artifacts + job/step API 计时），关键事实：
@@ -112,8 +112,8 @@ v0.1.15  Feedback shift-left & release-lane economics
    │     pages build run（GitHub Pages 自动构建），占 Actions 列表与
    │     存储且与产品资格无关；确认是否需要 Pages（不需要则关设置
    │     消除源头），需要则纳入清理策略
-   │     现状（review，已核）：仓库启用 Pages（docs/ + CNAME 生效），
-   │     每次 push 确实触发 pages build；域名为 agenterm.mega.tech，
+   │     现状（review）：仓库启用 Pages（docs/ + CNAME 生效），用户此前
+   │     报告 Actions 列表存在大量 pages-build 噪音；域名为 agenterm.mega.tech，
    │     与用户所述 agenterm.work 的归属/迁移关系见 §五 决策项 P1
    └─ [ ] E2 定期清理旧 run：moltbaby 侧已有 gh-ci-cleanup.sh
          （支持 --hours/--days/--keep-release-runs/--keep-pages-build/
@@ -151,6 +151,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | `plan/plan-v0.1.13.md` §10.2.1 | 发布链坑清单（runbook 素材，E2 配套） |
 | `plan/ARCHITECTURE.md` | 结构 SSOT；本文不重画结构树 |
 | `plan/plan-v0.2.0.md` | Control Center 内容成熟（§五 L-CC 的版本归口） |
+| `plan/plan-mobile.md` | 移动端计划（第三个 host：接入端 + 去中心化链接端）；与 L-NET/L-PKG 共享去中心化底座，文件域独立 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同；D1 若通过需回写 |
 | `prd/PRD_02_18_roadmap.md` | 里程碑权威（M11 收敛 / M12 = v0.2.0） |
 | `prd/PRD_02_19_inspiration_and_future_vision.md` | 灵感库；§五 各主线 promotion 的入口 |
@@ -166,7 +167,8 @@ v0.1.15  Feedback shift-left & release-lane economics
 > 目的：把「当前发布链经济学」与「产品未来主线」对齐，避免 v0.1.15
 > 完工后产品断档。以下主线按用户已声明的方向整理（ipfs/libp2p、Control
 > Center 内容、扩展能力台、rhai、远程包管理、computer-use），每线标注
-> PRD 归口、成熟度现状、以及「开工前需拍板的决策项」。
+> PRD 归口、成熟度现状、以及「开工前需拍板的决策项」。移动端
+> （`plan/plan-mobile.md`，第三个 host）与 L-NET/L-PKG 共享去中心化底座。
 
 ### 5.1 前置判断：多平台 UI/UX 对齐 + 底层库封装（用户第一关注）
 
@@ -265,5 +267,6 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 日期 | 决策 |
 |------|------|
 | 2026-08-04 | v0.1.15 主题定为反馈左移 + 发布链降本（占位稿，未授权开工） |
-| 2026-08-04 | 全部「现状（review）」行经代码复核属实（win-full-gate profile/并发组、candidate dispatch-only、script-smoke 仅 release lane、net-research release 门、hashFiles 缓存 key、release-fast profile、run 30907369093 证据链、Pages/CNAME、gh-ci-cleanup.sh 参数） |
+| 2026-08-04 | 代码复核：win-full-gate profile/并发组、candidate dispatch-only、script-smoke 仅 release lane、net-research release 门、hashFiles 缓存 key、release-fast profile、Pages/CNAME、gh-ci-cleanup.sh 参数均属实；run 30907369093 与 pages-build 噪音为 review 结论（本地 gh 不可用，落地时以 Actions 复核） |
 | 2026-08-04 | §五 未来主线按用户声明对齐 PRD；P1–P4 为待拍板决策项，未开工 |
+| 2026-08-04 | 并发提交 2c5f3d4 已并入 plan-v0.1.15.md 主体与 plan-mobile.md；本工作区仅剩自审修正（E1 措辞 / 决策记录口径 / §三 引用） |
