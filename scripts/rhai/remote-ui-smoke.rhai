@@ -1872,9 +1872,10 @@ try {
     // The snapshot projection can lag the server acknowledgment of the two
     // creations, so poll until the hierarchy shape settles instead of racing
     // it with one read.
+    let hierarchy = ();
     let hierarchy_confirmed = false;
     for attempt in 0..600 {
-        let hierarchy = json_cli(context, cli, ["ui-snapshot"]);
+        hierarchy = json_cli(context, cli, ["ui-snapshot"]);
         let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
         let hierarchy_grandchild =
             find_tab(hierarchy, hierarchy_grandchild_id);
