@@ -1869,17 +1869,27 @@ try {
         cli,
         hierarchy_grandchild_bootstrap.position.sequence
     );
-    let hierarchy = json_cli(context, cli, ["ui-snapshot"]);
-    let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
-    let hierarchy_grandchild =
-        find_tab(hierarchy, hierarchy_grandchild_id);
-    require(
-        hierarchy_child.parent_id == tab_id
-            && hierarchy_grandchild.parent_id == hierarchy_child_id
-            && hierarchy_child.depth >= 1
-            && hierarchy_grandchild.depth >= 2,
-        "remote_ui_hierarchy_shape_invalid"
-    );
+    // The snapshot projection can lag the server acknowledgment of the two
+    // creations, so poll until the hierarchy shape settles instead of racing
+    // it with one read.
+    let hierarchy_confirmed = false;
+    for attempt in 0..600 {
+        let hierarchy = json_cli(context, cli, ["ui-snapshot"]);
+        let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
+        let hierarchy_grandchild =
+            find_tab(hierarchy, hierarchy_grandchild_id);
+        if hierarchy_child != ()
+                && hierarchy_grandchild != ()
+                && hierarchy_child.parent_id == tab_id
+                && hierarchy_grandchild.parent_id == hierarchy_child_id
+                && hierarchy_child.depth >= 1
+                && hierarchy_grandchild.depth >= 2 {
+            hierarchy_confirmed = true;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(hierarchy_confirmed, "remote_ui_hierarchy_shape_invalid");
     if requested_screenshot != "" {
         screenshot(context, cli, requested_screenshot);
     }
@@ -1913,14 +1923,20 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    let promoted = json_cli(context, cli, ["ui-bootstrap"]);
-    let promoted_grandchild =
-        find_tab(promoted, hierarchy_grandchild_id);
-    require(
-        promoted_grandchild != ()
-            && promoted_grandchild.parent_id == tab_id,
-        "remote_ui_hierarchy_child_not_promoted"
-    );
+    let promoted = ();
+    let promotion_confirmed = false;
+    for attempt in 0..600 {
+        promoted = json_cli(context, cli, ["ui-bootstrap"]);
+        let promoted_grandchild =
+            find_tab(promoted, hierarchy_grandchild_id);
+        if promoted_grandchild != ()
+                && promoted_grandchild.parent_id == tab_id {
+            promotion_confirmed = true;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(promotion_confirmed, "remote_ui_hierarchy_child_not_promoted");
     wait_observed(
         context,
         cli,
@@ -2350,11 +2366,16 @@ try {
         cli,
         alternate_bootstrap.position.sequence
     );
-    let alternate_snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    require(
-        alternate_snapshot.focus.window_id == alternate_id,
-        "remote_ui_raw_application_not_active"
-    );
+    let alternate_active = false;
+    for attempt in 0..600 {
+        let alternate_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        if alternate_snapshot.focus.window_id == alternate_id {
+            alternate_active = true;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(alternate_active, "remote_ui_raw_application_not_active");
 
     gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
     wait_file_text(
@@ -2675,12 +2696,17 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    let bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
-    let bracketed_tab = find_tab(bracketed_bootstrap, bracketed_id);
-    require(
-        bracketed_tab != () && bracketed_tab.screen.bracketed_paste,
-        "remote_ui_bracketed_paste_mode_missing"
-    );
+    let bracketed_mode_on = false;
+    for attempt in 0..600 {
+        let bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
+        let bracketed_tab = find_tab(bracketed_bootstrap, bracketed_id);
+        if bracketed_tab != () && bracketed_tab.screen.bracketed_paste {
+            bracketed_mode_on = true;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(bracketed_mode_on, "remote_ui_bracketed_paste_mode_missing");
     rhai::clipboard::set_text(bracketed_payload);
     gui.window_message(0x0112, 0x1F10, 0);
     wait_file_text(
