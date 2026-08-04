@@ -609,8 +609,15 @@ v0.1.13 完成定义（在 §六基础上）
 
 状态（2026-08-04）：Wave A/B 全勾选完成。CI run 30837071052：
 windows / windows-aarch64 / linux-aarch64 / macos×2 / platform-contract×4 全绿；
-linux-x86_64 仅遗留已知 `control_center_linux_native_pointer_navigation_timeout`
-（X11/XTest CC pointer smoke，与 v0.1.13 叶子无关，独立归因）。
+linux-x86_64 的 `control_center_linux_native_pointer_navigation_timeout` 已
+归因并修复（2026-08-04 更新）：根因正是 Cockpit 每 tab 只读事实叶
+（`2ff9dbdf`）把可点击 tab 条推到 480px 高 client 折叠线下（新增
+Tabs-total 行 + 每 tab 详情行），smoke 硬编码旧行号点到 view 行导致无动作。
+修复 `edd35f4`（smoke 窄叶）：Linux/macOS CC smoke 改从投影契约推导首个
+可点击行并选择 strip 首行（唯一保证在 client 界内）为 pointer 目标，且与
+键盘目标不同。遗留：480px 高窗口下三行 tab 条仅首行在线内（Windows client
+更矮整条出界，`control-center-smoke` 不在 CI 矩阵、同源待修）；产品层把
+strip 提前于详情行或自适应行数为独立行为叶，不在本 smoke 叶夹带。
 v0.1.12 授权链未触发；Candidate dispatch 仍待 PAT 加 Actions write 或 UI 手动触发。
 ```
 
