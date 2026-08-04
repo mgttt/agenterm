@@ -58,6 +58,25 @@ fn find_tab(snapshot, target) {
     throw "workbench_tab_missing:" + target;
 }
 
+// Tab render geometry drops out of the snapshot for a frame while the
+// sidebar re-renders (tab creation, tabs-show, selection changes), so any
+// read that immediately consumes render bounds must settle instead of
+// racing the redraw.
+fn wait_tab_render(context, cli, target) {
+    for attempt in 0..600 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let tab = find_tab(snapshot, target);
+        if tab != ()
+                && tab.render != ()
+                && tab.render.text != ()
+                && tab.render.text.width > 0 {
+            return tab;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "workbench_tab_render_timeout:" + target;
+}
+
 fn active_tab(snapshot) {
     for tab in snapshot.tabs {
         if tab.active {
@@ -333,6 +352,7 @@ try {
     assert_editor_closed(snapshot, root, "initial-normal");
 
     print("STEP a single text click selects without entering edit mode");
+    let peer_tab = wait_tab_render(context, cli, peer);
     click_bounds(gui_child, peer_tab.render.text);
     let snapshot = json_cli(
         context,
@@ -341,7 +361,7 @@ try {
          "--timeout-ms", "30000"]
     );
     assert_editor_closed(snapshot, peer, "single-click-peer");
-    let root_tab = find_tab(snapshot, root);
+    let root_tab = wait_tab_render(context, cli, root);
     click_bounds(gui_child, root_tab.render.text);
     let snapshot = json_cli(
         context,
@@ -352,7 +372,7 @@ try {
     assert_editor_closed(snapshot, root, "single-click-root");
 
     print("STEP non-text double clicks never enter tab editing");
-    let root_tab = find_tab(snapshot, root);
+    let root_tab = wait_tab_render(context, cli, root);
     for zone in [
         root_tab.render.disclosure_hit,
         root_tab.render.status,
@@ -380,8 +400,7 @@ try {
     print(
         "STEP double-clicking tab text opens independent controls and Save restores normal mode"
     );
-    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    let root_tab = find_tab(snapshot, root);
+    let root_tab = wait_tab_render(context, cli, root);
     double_click_text(gui_child, root_tab.render.text);
     let snapshot = wait_for_editor(context, cli, root, true);
     assert_editor_open(snapshot, root, "mouse-double-click");
@@ -510,14 +529,14 @@ try {
         "tabs-hide"
     );
     json_cli(context, cli, ["ui-action", "tabs-show"]);
-    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    let root_tab = find_tab(snapshot, root);
+    let root_tab = wait_tab_render(context, cli, root);
     require(
         root_tab.name == saved_name && root_tab.note == saved_note,
         "workbench_tabs_hide_persisted_draft"
     );
 
     print("STEP layout changes invalidate an unfinished double-click candidate");
+    let root_tab = wait_tab_render(context, cli, root);
     click_bounds(gui_child, root_tab.render.text);
     json_cli(context, cli, ["ui-action", "select-tab", "-t", peer]);
     double_click_message(gui_child, root_tab.render.text);
