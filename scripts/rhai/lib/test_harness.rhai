@@ -203,7 +203,11 @@ fn run_cli(context, cli, arguments, expected_failure, redactions) {
     let command_arguments = ["--address", context.address];
     command_arguments.append(arguments);
     let command = configured_command(context, cli, command_arguments);
-    command.timeout(std::time::Duration::from_secs(15));
+    // The child deadline must exceed the longest wait a CLI command may be
+    // asked to perform (wait-pane/wait-ui run up to 30s on cold CI runners),
+    // or the harness kills a healthy wait as process_timeout. Keep the
+    // configured_command 60s ceiling instead of overriding it downward.
+    command.timeout(std::time::Duration::from_secs(60));
     let output = command.output();
     append_command_record(
         context,
