@@ -937,9 +937,39 @@ try {
             "control_center_linux_native_keyboard_receipt_truth"
         );
 
-        // Product lines occupy 0..10, the Tabs help line is 11, and the Unix
-        // adapter maps each following 26-pixel row to one Cockpit tab.
-        let baseline_pointer_y = 76 + (11 + baseline_index) * 26 + 13;
+        // The projection contract fixes every line before the three clickable
+        // tab rows: two chrome lines, six product lines, the Tabs-total line,
+        // one detail row per tab (16-row cap plus a collapse marker), the
+        // remaining view lines, and the Tabs help line. The Unix adapter maps
+        // each 26-pixel body row to one Cockpit line. Only the strip's first
+        // rendered row is guaranteed inside the 480-px-tall client, so the
+        // pointer target is that row — never the keyboard-selected tab.
+        let tab_count = selected.connected_server.tabs.len;
+        let visible_start = if native_input_index > 0 {
+            native_input_index - 1
+        } else {
+            0
+        };
+        let maximum_start = if tab_count > 3 {
+            tab_count - 3
+        } else {
+            0
+        };
+        if visible_start > maximum_start {
+            visible_start = maximum_start;
+        }
+        let pointer_index = visible_start;
+        require(
+            pointer_index != native_input_index
+                && pointer_index < tab_count
+                && baseline_tab != native_input_tab,
+            "control_center_linux_native_pointer_target_not_visible"
+        );
+        let pointer_target = selected.connected_server.tabs[pointer_index].id;
+        let detail_rows = if tab_count > 16 { 17 } else { tab_count };
+        let clickable_line = 2 + 6 + 1 + detail_rows
+            + (selected.views.len - 1) + 1;
+        let baseline_pointer_y = 76 + (clickable_line - 1) * 26 + 13;
         cc.window_pointer("move", 120, baseline_pointer_y);
         cc.window_pointer("click", 120, baseline_pointer_y);
         let pointer_selected = wait_active_tab(
@@ -949,13 +979,13 @@ try {
             endpoint,
             backend,
             cc,
-            baseline_tab,
+            pointer_target,
             server.id,
             selected.connected_server.epoch,
             "control_center_linux_native_pointer_navigation"
         );
         require(
-            pointer_selected.connected_server.active_tab_id == baseline_tab
+            pointer_selected.connected_server.active_tab_id == pointer_target
                 && pointer_selected.connected_server.pid == server.id
                 && pointer_selected.connected_server.epoch
                     == selected.connected_server.epoch
@@ -990,7 +1020,7 @@ try {
                 && pointer_receipt.rendered_snapshot.last_native_input.physical_y
                     == baseline_pointer_y
                 && pointer_receipt.rendered_snapshot.last_native_input.line
-                    == 12 + baseline_index,
+                    == clickable_line,
             "control_center_linux_native_pointer_receipt_truth"
         );
 

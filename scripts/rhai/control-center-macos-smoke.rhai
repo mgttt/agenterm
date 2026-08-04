@@ -805,30 +805,16 @@ try {
     } else {
         selected.connected_server.tabs.len
     };
-    let pointer_index = ();
-    for index in visible_start..visible_end {
-        let tab = selected.connected_server.tabs[index];
-        if tab.id == baseline_tab && !tab.dead {
-            pointer_index = index;
-        }
-    }
-    if pointer_index == () {
-        for index in visible_start..visible_end {
-            let tab = selected.connected_server.tabs[index];
-            if pointer_index == ()
-                    && index != native_input_index
-                    && !tab.dead {
-                pointer_index = index;
-            }
-        }
-    }
+    // Only the strip's first rendered row is guaranteed inside the 480-px-tall
+    // client, so the pointer target is that row — never the keyboard-selected
+    // tab.
+    let pointer_index = visible_start;
     require(
-        pointer_index != ()
-            && pointer_index < selected.connected_server.tabs.len
+        pointer_index < selected.connected_server.tabs.len
             && pointer_index >= visible_start
             && pointer_index < visible_end
             && pointer_index != native_input_index,
-        "control_center_macos_native_pointer_target_not_live_visible"
+        "control_center_macos_native_pointer_target_not_visible"
     );
     let pointer_target = selected.connected_server.tabs[pointer_index].id;
     let pointer_row = pointer_index - visible_start;
@@ -877,10 +863,17 @@ try {
     );
     let body_scale = if capture.width >= 640 { 2 } else { 1 };
     let line_height = 7 * body_scale + 12;
-    // Product lines are 0..10, the Tabs help line is 11, and the following
-    // renderer rows are the three bounded Cockpit tab targets.
+    // The projection contract fixes every line before the three clickable
+    // tab rows: two chrome lines, six product lines, the Tabs-total line,
+    // one detail row per tab (16-row cap plus a collapse marker), the
+    // remaining view lines, and the Tabs help line. The renderer rows that
+    // follow are the three bounded Cockpit tab targets.
+    let tab_count = selected.connected_server.tabs.len;
+    let detail_rows = if tab_count > 16 { 17 } else { tab_count };
+    let clickable_line = 2 + 6 + 1 + detail_rows
+        + (selected.views.len - 1) + 1 + pointer_row;
     let content_pointer_x = 120;
-    let content_pointer_y = 76 + (11 + pointer_row) * line_height
+    let content_pointer_y = 76 + (clickable_line - 1) * line_height
         + line_height / 2;
     let pointer_x = ((client_left_points
         + content_pointer_x.to_float() / renderer_scale) * pointer_scale)
