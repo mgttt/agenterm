@@ -6,3 +6,4 @@
 /AgenTerm/settings.json
 /AgenTerm/workspace.json
 *.swp
+*.log
