@@ -40,7 +40,9 @@ fn write_manifest(path: &Path, channel: &str, source: &str) {
             "{}\n",
             serde_json::to_string_pretty(&json!({
                 "schema_version": 1,
-                "kind": "agenterm-release-candidate",
+                // Mirrors what release_candidate.rhai actually seals: the
+                // manifest is identified by product, not by a kind field.
+                "product": "AgenTerm",
                 "version": CURRENT_VERSION,
                 "expected_tag": expected_tag,
                 "source_sha": source,
