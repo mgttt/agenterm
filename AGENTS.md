@@ -378,15 +378,24 @@ Clippy (all four bins unless noted): append `-- -D warnings` to the matching
 - aarch64: install `gcc-aarch64-linux-gnu`, then
   `./scripts/build-linux-aarch64-clients.sh` (or the `lnx × aarch64` cargo line above).
   Smoke under QEMU: `qemu-aarch64-static target/aarch64-unknown-linux-gnu/debug/agenterm-cli --help`
-- GUI `agenterm` builds on Linux/macOS; CI only checks the binary exists (no DISPLAY smoke).
+- Native GUI packages needed for `agenterm` / `agenterm-cc` on X11 (see README):
+  `libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcb1 libxcb-xkb1`.
+  Missing `libxkbcommon-x11-0` panics in `xkbcommon-dl` at window open.
+- Native desktop smoke on `DISPLAY=:1` (TigerVNC/XFCE) or CI Xvfb:
+  `AGENTERM_NO_ACTIVATE=1 AGENTERM_BOOTSTRAP_TASK=control-center-linux-smoke ./scripts/bootstrap.sh --backend x11`
+  and `...=unix-frontend-linux-smoke ./scripts/bootstrap.sh <gui> <cli> --platform linux`.
+  If XFCE `Xft/DPI` is `-1` on a VNC screen that reports `0mm×0mm`, winit can
+  emit `scale_factor≈0.99` and fail `control_center_linux_renderer_evidence`
+  (`scale_factor >= 1.0`). Fix with `echo 'Xft.dpi: 96' | xrdb -merge` and
+  `xfconf-query -c xsettings -p /Xft/DPI -s 96` before the smoke.
 
 **Wine / ConPTY limits**: Wine cannot sustain an interactive ConPTY shell — a
 tab's `cmd.exe` starts and immediately exits `dead`, so live terminal I/O,
 `capture-pane` output, and the `tests/*.ps1` smoke suites cannot pass on Linux.
 Interactive-terminal and rendering work must be validated on a real Windows host
-(that is what CI on `windows-latest` covers). Treat Linux here as a fast
-lint/build/unit-test and control-plane sanity loop, not a full end-to-end
-terminal environment.
+(that is what CI on `windows-latest` covers). Treat Linux Wine here as a fast
+Windows-target lint/build/unit-test and control-plane sanity loop; native Linux
+GUI/PTY smokes use the real `DISPLAY=:1` desktop or CI Xvfb instead.
 
 On Linux/macOS, `agenterm-cli script` hosting is Windows-only for now — invoke
 `agenterm-rhai` directly. Instance discovery uses
