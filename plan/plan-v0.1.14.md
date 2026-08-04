@@ -90,12 +90,37 @@ v0.1.14 Release 推进
 │      沿用既有 key 模式）
 ├─ [x] 身份冻结 0.1.14：Cargo.toml ×2 / Cargo.lock / agenterm.tasks.json
 │      （version + rc revision）
-├─ [ ] main CI 全绿 → Candidate（40 位全量 SHA，dispatch 前确认
-│      HEAD 未被并发推前）
-└─ [ ] Candidate 全绿 → Promotion：
+├─ [x] main CI 全绿 → Candidate（40 位全量 SHA，dispatch 前确认
+│      HEAD 未被并发推前）：CI run 30941772992 绿 @ 8ff2b5a；
+│      Candidate run 30942173420 六平台 + aggregate 全绿
+└─ [x] Candidate 全绿 → Promotion：run 30944087372 成功
        gh workflow run release.yml --repo mgttt/agenterm --ref main
-         -f candidate_run_id=<id> -f confirmation=publish-v0.1.14
+         -f candidate_run_id=30942173420 -f confirmation=publish-v0.1.14
 ```
+
+### 发布结果（2026-08-05 03:37 +0800）
+
+`v0.1.14` 已发布（非 draft），tag = `8ff2b5a`（== Candidate source_sha），
+23 个资产：六平台包 + 各自 `.sha256`/`.provenance.json` + SBOM +
+两份 macOS preview README + qualification receipt。
+
+### 本轮修掉的发布链缺陷（八个，均为首次真正跑通该链路才暴露）
+
+交接文档称「收据之后已无未验证环节」并不成立：`release.yml` 本次是
+**该仓库有史以来第一次运行**，promotion 车道整段从未被执行过。
+
+| # | 缺陷 | 提交 |
+|---|------|------|
+| 1 | workbench-smoke 宽度扫描读 render 竞态（`ErrorDotExpr` on `()`） | `b098110` + 并发 agent `ae3f748` 加固 |
+| 2 | `agenterm-platform` 读 `AGENTERM_IME_DEBUG`，违反产品中立边界，**自 f42fdab 起 main CI 一直红** | `538ec73` |
+| 3 | SPDX id 由含绝对路径的 `pkg.id` 派生 → SBOM 跨 runner 不可复现 | 并发 agent `bffb7b8`（与我 `2aef42d` 同解，我弃用重复提交） |
+| 4 | verify 步骤写的 `candidate-run-identity.json` 被随后的 checkout 删除 | `4e6ef06`（我先前 `e15ce6e` 的 `clean: false` 判断有误，已纠正） |
+| 5 | `promotion-identity.rhai` 断言从不存在的 `manifest.kind` | `80096e4` + 并发 agent `8ff2b5a` 从 sealer 侧补写 |
+| 6 | `tests/promotion_identity.rs` fixture 编码了生产从未实现的 schema，导致 #5 长期不可见 | `ac068ff` |
+| 7 | 创建 tag 后立即回读，撞 ref API 最终一致性（404） | `ab1b09e` |
+| 8 | 创建 draft 后立即回读，撞 releases 列表最终一致性 | `56a2e17` |
+
+> 注：#1/#3/#5 与并发 agent 同时定位，取先落地的一方，避免无谓冲突。
 
 ## 二、明确暂不纳入（继续挂 v0.2.0，避免范围蔓延）
 
