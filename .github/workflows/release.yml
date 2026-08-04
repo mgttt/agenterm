@@ -65,14 +65,13 @@ jobs:
               source_sha: $source_sha,
               run_id: $run_id,
               run_attempt: $run_attempt
-            }' >candidate-run-identity.json
+            }' >"$RUNNER_TEMP/candidate-run-identity.json"
 
-      # clean: false preserves candidate-run-identity.json, which the
-      # preceding step writes into the workspace and "Download sealed
-      # candidate" copies into candidate/. A cleaning checkout deletes it.
+      # The preceding step runs before any checkout, so it writes the run
+      # identity to RUNNER_TEMP: actions/checkout deletes the contents of a
+      # not-yet-initialized workspace before git init, regardless of `clean`.
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
-          clean: false
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ steps.candidate.outputs.source_sha }}
@@ -88,7 +87,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --name "release-candidate-$CANDIDATE_RUN_ID" \
             --dir candidate
-          cp candidate-run-identity.json candidate/
+          cp "$RUNNER_TEMP/candidate-run-identity.json" candidate/
 
       - name: Extract candidate Script Runtime
         run: |
@@ -119,11 +118,11 @@ jobs:
           source_sha="$(jq -r .source_sha "$manifest")"
           [[ "$source_sha" == "${{ steps.candidate.outputs.source_sha }}" ]]
           [[ "$(jq -r .run.id "$manifest")" == \
-            "$(jq -r .run_id candidate-run-identity.json)" ]]
+            "$(jq -r .run_id "$RUNNER_TEMP/candidate-run-identity.json")" ]]
           [[ "$(jq -r .run.attempt "$manifest")" == \
-            "$(jq -r .run_attempt candidate-run-identity.json)" ]]
+            "$(jq -r .run_attempt "$RUNNER_TEMP/candidate-run-identity.json")" ]]
           [[ "$(jq -r .run.event "$manifest")" == \
-            "$(jq -r .event candidate-run-identity.json)" ]]
+            "$(jq -r .event "$RUNNER_TEMP/candidate-run-identity.json")" ]]
           [[ "$tag" == "v$version" ]]
           [[ "$tag" != "v0.1.7" ]]
           [[ "$CONFIRMATION" == "publish-$tag" ]]
