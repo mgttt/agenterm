@@ -55,7 +55,7 @@ require(
 let manifest = rhai::json::parse_file(manifest_path);
 require(
     manifest.schema_version == 1
-        && manifest.kind == "agenterm-release-candidate"
+        && manifest.product == "AgenTerm"
         && manifest.source_sha == source_sha
         && manifest.run.id.to_string() == candidate_run_id
         && manifest.version != ""
