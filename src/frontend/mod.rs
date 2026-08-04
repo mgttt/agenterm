@@ -30,11 +30,11 @@ pub(crate) mod window_close;
 // Shared GUI launch usage for both platform frontends.
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\
 Usage: agenterm.exe [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\n\
-Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main or dev)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help\n\n\
+Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help\n\n\
 This binary is the GUI launcher. For command operations use agenterm-cli.exe.";
 pub(crate) const UNIX_GUI_USAGE: &str = "\
 Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\
-Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main or dev)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help";
+Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help";
 
 pub(crate) const WINDOWS_GUI_CLI_NAME: &str = "agenterm-cli.exe";
 pub(crate) const UNIX_GUI_CLI_NAME: &str = "agenterm-cli";

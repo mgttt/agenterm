@@ -89,8 +89,10 @@ pub(crate) struct ParseLogicalInstanceError;
 
 impl fmt::Display for ParseLogicalInstanceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .write_str("logical instance must be main, dev, ephemeral:<name>, or custom:<name>")
+        formatter.write_str(
+            "logical instance must be main, dev, a bare custom name, \
+             ephemeral:<name>, or custom:<name>",
+        )
     }
 }
 
@@ -111,6 +113,10 @@ impl FromStr for LogicalInstance {
                         .strip_prefix("custom:")
                         .map(|name| Self::named("custom", name))
                 })
+                // A bare name is sugar for custom:<name>. Anything containing
+                // a colon stays an error so a typoed prefix ("epheremal:x")
+                // cannot silently become a custom instance.
+                .or_else(|| (!value.contains(':')).then(|| Self::named("custom", value)))
                 .unwrap_or(Err(ParseLogicalInstanceError)),
         }
     }
@@ -463,6 +469,25 @@ mod tests {
         }
         assert!("custom:".parse::<LogicalInstance>().is_err());
         assert!("custom:bad\nname".parse::<LogicalInstance>().is_err());
+    }
+
+    #[test]
+    fn bare_instance_names_are_custom_sugar_but_unknown_prefixes_stay_errors() {
+        assert_eq!(
+            "work".parse::<LogicalInstance>().unwrap(),
+            LogicalInstance::Custom("work".to_owned())
+        );
+        assert_eq!(
+            "work".parse::<LogicalInstance>().unwrap().to_string(),
+            "custom:work"
+        );
+        assert_eq!(
+            "舰队".parse::<LogicalInstance>().unwrap(),
+            LogicalInstance::Custom("舰队".to_owned())
+        );
+        assert!("epheremal:typo".parse::<LogicalInstance>().is_err());
+        assert!("".parse::<LogicalInstance>().is_err());
+        assert!("bad\ncontrol".parse::<LogicalInstance>().is_err());
     }
 
     #[test]
