@@ -403,14 +403,24 @@ fn find_tab(snapshot, id) {
 }
 
 fn double_click_tab_text(context, cli, gui_child, id) {
-    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    let tab = find_tab(snapshot, id);
-    require(tab != (), "remote_ui_tab_missing");
-    let text_geometry = tab.render.text;
-    require(
-        text_geometry.width > 0 && text_geometry.height > 0,
-        "remote_ui_tab_text_geometry_missing"
-    );
+    // Tab render geometry disappears from the snapshot for a frame while the
+    // sidebar re-renders (for example right after dismissing an editor), so a
+    // single-shot read races the redraw. Poll until the geometry settles.
+    let text_geometry = ();
+    for attempt in 0..600 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let tab = find_tab(snapshot, id);
+        if tab != ()
+                && tab.render != ()
+                && tab.render.text != ()
+                && tab.render.text.width > 0
+                && tab.render.text.height > 0 {
+            text_geometry = tab.render.text;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(text_geometry != (), "remote_ui_tab_text_geometry_missing");
     double_click_point(
         gui_child,
         text_geometry.left + text_geometry.width / 2,
