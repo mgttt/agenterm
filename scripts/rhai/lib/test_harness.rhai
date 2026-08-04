@@ -266,6 +266,16 @@ fn emit_evidence(context, declared, id) {
     } else {
         ""
     };
+    // Emission is idempotent: a journey step may prove the same declared id
+    // more than once (loops, repeated scenarios), but the qualification
+    // receipt requires each gate to report every id exactly once.
+    for line in existing.split("\n") {
+        let seen = line;
+        seen.trim();
+        if seen == id {
+            return;
+        }
+    }
     rhai::runtime::atomic_write(
         context.evidence_path,
         existing + id + "\n"
