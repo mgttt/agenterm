@@ -122,6 +122,100 @@ v0.1.14 Release 推进
 
 > 注：#1/#3/#5 与并发 agent 同时定位，取先落地的一方，避免无谓冲突。
 
+### 发布经验总结（写给下一个接手发布的 agent）
+
+#### 一、耗时结构：贵的是 Candidate，不是 Promotion
+
+实测（2026-08-04 夜，共 6 次 Candidate + 7 次 Promotion）：
+
+| 阶段 | 失败耗时 | 成功耗时 | 说明 |
+|------|---------|---------|------|
+| Candidate preflight 失败 | **15–20 秒** | — | 极便宜，随便撞 |
+| Candidate 完整跑 | 15–32 分钟 | ~17 分钟 | windows job 是唯一长杆 |
+| Promotion 失败 | **13–36 秒** | — | 几乎零成本 |
+| Promotion 成功 | — | ~60 秒 | 不重新构建 |
+
+**推论**：Promotion 失败几乎不花钱，Candidate 失败很贵。所以优化目标是
+**「让每次 Candidate 都尽可能成功」**，而不是省 Promotion 次数。
+
+#### 二、最关键的一条：哪些修复需要重跑 Candidate？
+
+本轮踩得最痛的坑。判据是**该文件在哪个 ref 下被执行**：
+
+| 修改对象 | 执行 ref | 是否需要新 Candidate |
+|---------|---------|--------------------|
+| `.github/workflows/release.yml` | `--ref main` | **不需要**，改完直接重发 Promotion |
+| `scripts/rhai/promotion-identity.rhai`<br>`scripts/rhai/candidate-verify.rhai` | checkout `ref: source_sha`<br>（= Candidate 的 SHA） | **必须重跑 Candidate** |
+| `scripts/rhai/lib/release_candidate.rhai`<br>及一切 gate/smoke 脚本 | Candidate 自身构建 | **必须重跑 Candidate** |
+
+verify job 用 `ref: ${{ steps.candidate.outputs.source_sha }}` 检出，
+是**刻意设计**：promotion 必须用「构建该 Candidate 的那份代码」来验证。
+后果是——改了 promotion 脚本却复用旧 Candidate，会**一模一样地再失败一次**，
+无论 main 上修得多正确。本轮为此白跑了一次 Promotion（30940776700）。
+
+#### 三、离线预演：把 Promotion 的失败提前到本地
+
+Promotion 每轮只暴露一个断言。与其一次次 20 分钟往返，不如把 sealed bundle
+拉到本地整段预演——本轮靠这招一次性预清了 publish job 的全部断言：
+
+```bash
+gh run download <candidate_run_id> -R mgttt/agenterm \
+  -n "release-candidate-<candidate_run_id>" -D /tmp/prom
+# 1) 字节级校验（与 CI 同一脚本，输出应为 VALID CANDIDATE ...）
+./target/debug/agenterm-rhai run scripts/rhai/candidate-verify.rhai \
+  --project-root . -- . /tmp/prom/agenterm-*-candidate-manifest.json /tmp/prom/payload
+# 2) 生成 promotion identity（退出 0 即通过 verify job 的核心断言）
+./target/debug/agenterm-rhai run scripts/rhai/promotion-identity.rhai \
+  --project-root . -- /tmp/prom/agenterm-*-candidate-manifest.json \
+  <candidate_run_id> <source_sha> /tmp/id.json
+# 3) 再用 jq/shasum 复算 publish job 的 body_sha256 / marker / mac_channel
+```
+
+本地结论与 CI 完全一致（`VALID CANDIDATE` 逐字相同），说明这套预演可信。
+
+#### 四、诊断纪律（本轮验证有效的）
+
+1. **先下 artifact 再动手**：`candidate-quality-timing-<run>` 的
+   `first_failure.gate_id` 直接点名失败门；`first_failure: null` 则说明
+   gate 全过、问题在 job 的其它步骤（本轮据此定位到 aggregate seal）。
+2. **区分「同一步骤」与「同一原因」**：#7/#8 都报在 publish 步骤，但一个是
+   tag 回读、一个是 draft 回读；#4 两次都报 `cp: cannot stat`，但
+   `clean: false` 无效——必须读日志里的真实机制行
+   （`Deleting the contents of '...'`），不能凭默认行为推断。
+3. **重试通过 ≠ 瞬态**：release 车道 smoke 自带一次 retry，#1 两次都挂，
+   据此判定为真回归而非竞态偶发——这个判据本轮成立。
+4. **改脚本前先找它的 fixture**：#6 就是反例。`promotion-identity.rhai`
+   有 `tests/promotion_identity.rs`，我改了脚本没看测试，CI 才拦下。
+5. **验证要针对缺陷成因**：#3 的复现条件是「不同绝对路径」，只跑两次同路径
+   生成会假绿。本轮用 `git clone` 到另一路径再生成，得到逐字节相同才算数。
+
+#### 五、并发 agent 协作（共享 checkout）
+
+本轮 #1/#3/#5 与另一 agent 同时定位。有效做法：
+
+- **提交必须精确 pathspec**，禁 `git add -A/-u`（交接文档已警告，确实必要）。
+- push 被拒先 `git log HEAD..origin/main` 看对方改了什么，再决定 rebase 还是
+  弃用自己的重复提交。#3 我与对方同解，直接 `reset --hard` 弃用己方提交，
+  比强行合并干净。
+- 对方的修复可能**比自己的更完整**（#1 对方补了 `find_tab` 抛异常的兜底，
+  是我漏掉的），也可能**验证更弱**（#3 对方只跑了两次同路径）。取谁先落地，
+  但自己更强的证据要留在提交信息里。
+- Candidate dispatch 前 `git fetch` 确认 HEAD 未被推前：本轮 30941774787 就是
+  在检查与派发之间被并发 push 挤掉，preflight 15 秒拦下——代价很小，别怕。
+
+#### 六、下一版（v0.1.15）可直接落地的改进
+
+1. **promotion 车道加 dry-run**：现在只能靠真发布来验证 verify+publish，
+   建议加 `-f dry_run=true`，跑完 verify 全部断言但不建 tag/release。
+   本轮 8 个缺陷里有 4 个可被 dry-run 在几十秒内全部暴露。
+2. **fixture 从 sealer 生成**：#6 的根因是手写 fixture 与生产 schema 漂移。
+   让 `tests/promotion_identity.rs` 直接调 `build_manifest` 产出 fixture，
+   或加一个「fixture 字段集 == sealed manifest 字段集」的断言。
+3. **GitHub API 回读统一加重试**：#7/#8 同类。ref / releases 列表都是最终
+   一致的，凡「写后立即读」都应轮询而非直读。
+4. **SBOM 可复现性纳入 CI**：#3 这类缺陷只在跨 runner 比对时才暴露，
+   建议 CI 里从两个不同路径各生成一次并比对 sha256。
+
 ## 二、明确暂不纳入（继续挂 v0.2.0，避免范围蔓延）
 
 - 巨型状态机拆解（Unix ~223KB / Windows ~266KB）
