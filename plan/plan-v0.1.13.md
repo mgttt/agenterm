@@ -675,6 +675,20 @@ v0.1.13 Release 推进（2026-08-04 晚）
      -f candidate_run_id=<id> -f confirmation=publish-v0.1.13
 ```
 
+**终局（2026-08-04 晚，用户裁定）：v0.1.13 不发布，发布目标移至 v0.1.14。**
+
+- Candidate 30893548055（c46eb70）在用户要求的远程 CI 清理中被取消；main
+  已被并发提交推前（6e6dcca IME），preflight 要求 source_sha == main HEAD，
+  c46eb70 无法重新封印。
+- 6e6dcca 首次全量 CI 暴露两处测试失败（display label 前缀测试未同步 +
+  AGENTERM_IME_TRACE 触发平台中立性边界测试），修复于 0129a9b。
+- 重派 Candidate 30895701567（0129a9b）在 windows-x86_64 release gate 的
+  remote-ui-smoke 新到达步骤 `wait-pane AGENTERM_NEW_DIALOG` 5s 超时失败
+  ——与 c46eb70 轮的 toolbar 失败同类：该 smoke 从未被 release CI 跑通过，
+  每前进一步暴露一个按开发机手感标定的紧超时。
+- 用户裁定：停止 v0.1.13 发布，直接发 v0.1.14（含 smoke 整体加固 +
+  instance 身份修复 + IME/状态栏工作）。见 plan-v0.1.14.md 发布节。
+
 ```text
 已知坑（勿重复探索）
 ├─ 本地 dev 机器 release 构建 remote-ui-smoke 在 tabs-hide 挂起（>6min）

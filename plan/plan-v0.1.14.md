@@ -65,6 +65,29 @@ v0.1.14  Identity correctness & trust tail
          （占位稿 §二 记录的两次 rustfmt fail-closed 教训）
 ```
 
+## 一.5、发布推进（2026-08-04 晚，用户授权：停 v0.1.13 改发 v0.1.14）
+
+```text
+v0.1.14 Release 推进
+├─ [x] v0.1.13 发布终止归档（plan-v0.1.13 §10.2.1 终局节）
+├─ [x] remote-ui-smoke 整体加固（对症 CI 迭代烧钱根因）：
+│      所有 --timeout-ms 等待统一 30s 上限（33 处）；纯轮询循环
+│      200/240×25ms → 1200×25ms（30s）；wait_for_lease 240/300 → 1200；
+│      new-dialog modal 配置轮询 80 → 400；等待均为条件满足即返回，
+│      健康路径零成本。check.rhai smoke 外层墙钟预算 120s/60s →
+│      600s/300s（防内部等待放宽后撞外层预算）。两脚本 agenterm-rhai
+│      check 解析 OK
+├─ [x] ci.yml platform-contract 4 job 补 cargo-home 缓存（restore+save，
+│      沿用既有 key 模式）
+├─ [x] 身份冻结 0.1.14：Cargo.toml ×2 / Cargo.lock / agenterm.tasks.json
+│      （version + rc revision）
+├─ [ ] main CI 全绿 → Candidate（40 位全量 SHA，dispatch 前确认
+│      HEAD 未被并发推前）
+└─ [ ] Candidate 全绿 → Promotion：
+       gh workflow run release.yml --repo mgttt/agenterm --ref main
+         -f candidate_run_id=<id> -f confirmation=publish-v0.1.14
+```
+
 ## 二、明确暂不纳入（继续挂 v0.2.0，避免范围蔓延）
 
 - 巨型状态机拆解（Unix ~223KB / Windows ~266KB）
