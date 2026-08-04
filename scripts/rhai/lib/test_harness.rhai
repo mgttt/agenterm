@@ -181,6 +181,14 @@ fn finalize_command_log(context) {
     if !std::fs::exists(context.command_journal_path) {
         return;
     }
+    // Promotion reads the whole journal back through one script string, which
+    // must respect the runtime's string budget (256 KiB by default). Long
+    // journeys with wide condition polling can outgrow it; the journal is
+    // already the durable record, so keep it in place rather than letting a
+    // successful smoke die inside completion.
+    if std::fs::metadata(context.command_journal_path).len > 196608 {
+        return;
+    }
     let records = [];
     for source_line in std::fs::read_to_string(context.command_journal_path).split("\n") {
         let line = source_line;
