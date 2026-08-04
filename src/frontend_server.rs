@@ -5,7 +5,6 @@
 //! and apply limited reconnect restart policy. Session truth stays in
 //! `server_app`; live UI I/O stays on the direct client↔server path after connect.
 
-use crate::client::ipc_endpoint;
 use crate::instances::intentional_shutdown_matches;
 use crate::ui_client::UiClientModel;
 use std::time::{Duration, Instant};
@@ -127,18 +126,36 @@ pub(crate) fn is_frontend_server_endpoint_listening() -> bool {
 }
 
 pub(crate) fn start_frontend_server_process() -> Result<(), String> {
-    let endpoint = ipc_endpoint().map_err(|error| error.to_string())?;
-    let parameter = if let Some(address) = endpoint.legacy_address() {
-        ("--address", address)
-    } else {
-        ("--endpoint", endpoint.to_string())
-    };
+    let resolved = crate::client::resolved_ipc_endpoint().map_err(|error| error.to_string())?;
+    let parameter = frontend_server_spawn_parameter(&resolved);
     let started = crate::platform::process::autostart_server(parameter.0, &parameter.1)
         .map_err(|error| error.to_string())?;
     if !started {
         Err("independent AgenTerm server autostart is unavailable".to_owned())
     } else {
         Ok(())
+    }
+}
+
+// The spawned server re-resolves its own identity from the one CLI selector
+// it receives, and an endpoint selector cannot carry a logical-instance name
+// (the scope hash is one-way, and a CLI selector suppresses inherited
+// environment selectors by design). Passing the scope-default native endpoint
+// as `--endpoint` therefore registered every autostarted server as `main`
+// even when the client was launched with `--instance custom:...`. Hand the
+// instance name across the spawn boundary whenever the endpoint is exactly
+// the one derived from it; the child re-derives the identical endpoint.
+pub(crate) fn frontend_server_spawn_parameter(
+    resolved: &crate::ipc_endpoint::ResolvedIpcEndpoint,
+) -> (&'static str, String) {
+    if let Some(address) = resolved.endpoint.legacy_address() {
+        ("--address", address)
+    } else if resolved.endpoint
+        == crate::platform::ipc::default_native_endpoint(&resolved.server_scope_id)
+    {
+        ("--instance", resolved.logical_instance.canonical_name())
+    } else {
+        ("--endpoint", resolved.endpoint.to_string())
     }
 }
 
@@ -149,6 +166,52 @@ mod tests {
         next_frontend_server_restart_after,
     };
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn spawn_parameter_carries_the_instance_name_for_scope_default_endpoints() {
+        let logical_instance = crate::ipc_endpoint::LogicalInstance::Custom("work".to_owned());
+        let server_scope_id = crate::ipc_endpoint::ServerScopeId::current(&logical_instance)
+            .expect("current OS-user scope");
+        let resolved = crate::ipc_endpoint::ResolvedIpcEndpoint {
+            endpoint: crate::platform::ipc::default_native_endpoint(&server_scope_id),
+            logical_instance,
+            server_scope_id,
+            explicit: true,
+        };
+        assert_eq!(
+            super::frontend_server_spawn_parameter(&resolved),
+            ("--instance", "custom:work".to_owned())
+        );
+    }
+
+    #[test]
+    fn spawn_parameter_preserves_explicit_endpoint_and_legacy_address_authority() {
+        let logical_instance = crate::ipc_endpoint::LogicalInstance::Main;
+        let server_scope_id = crate::ipc_endpoint::ServerScopeId::current(&logical_instance)
+            .expect("current OS-user scope");
+        let custom = crate::ipc_endpoint::ResolvedIpcEndpoint {
+            endpoint: crate::ipc_endpoint::IpcEndpoint::NamedPipe("agenterm-custom".to_owned()),
+            logical_instance: logical_instance.clone(),
+            server_scope_id: server_scope_id.clone(),
+            explicit: true,
+        };
+        let (custom_name, custom_value) = super::frontend_server_spawn_parameter(&custom);
+        assert_eq!(custom_name, "--endpoint");
+        assert!(custom_value.contains("agenterm-custom"));
+        let legacy = crate::ipc_endpoint::ResolvedIpcEndpoint {
+            endpoint: crate::ipc_endpoint::IpcEndpoint::Tcp {
+                host: "127.0.0.1".to_owned(),
+                port: 48815,
+            },
+            logical_instance,
+            server_scope_id,
+            explicit: true,
+        };
+        assert_eq!(
+            super::frontend_server_spawn_parameter(&legacy),
+            ("--address", "127.0.0.1:48815".to_owned())
+        );
+    }
 
     #[test]
     fn recovery_delay_is_computable() {
