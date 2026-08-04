@@ -47,7 +47,7 @@
       "pe_subsystem": 3,
       "documentation_role": "public Rhai scripting CLI and worker",
       "offline_probe": ["--version"],
-      "release_budget_bytes": 3145728
+      "release_budget_bytes": 4194304
     },
     {
       "name": "agenterm-mcp.exe",
@@ -110,7 +110,7 @@
           "pe_subsystem": 3,
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--version"],
-          "release_budget_bytes": 3145728
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-mcp.exe",
