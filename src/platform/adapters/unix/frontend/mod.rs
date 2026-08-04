@@ -4919,6 +4919,12 @@ impl UnixApp {
             }
             PixelWindowEvent::FocusChanged(focused) => {
                 self.window_focused = focused;
+                // A modifier held (or released) while this window wasn't
+                // focused never reaches us as an event, so pointer_modifiers
+                // could otherwise stay stale until the next real keyboard or
+                // pointer event corrects it - clear it here rather than risk
+                // misclassifying the very next click after refocus.
+                self.pointer_modifiers = agenterm_platform::input::ModifierState::empty();
                 self.cursor_blink.reset(Instant::now());
                 if let Some(window) = self.window.as_ref() {
                     self.window_state_tracker
