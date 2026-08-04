@@ -4982,6 +4982,18 @@ impl UnixApp {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Composer {
+                    // Some IMEs deliver the Enter that confirms a composed
+                    // candidate as a regular keydown in addition to their own
+                    // commit event, rather than exclusively through the IME
+                    // channel. Without this guard that Enter also reaches the
+                    // submit paths below, so composing text ("提交两次") ends
+                    // in two submissions: one for the confirm keystroke, one
+                    // for the user's actual follow-up Enter.
+                    if matches!(event.logical, Key::Named(NamedKey::Enter))
+                        && !self.ime_preedit.is_empty()
+                    {
+                        return;
+                    }
                     if self.cwd_editor_dialog.is_open() {
                         if matches!(event.logical, Key::Named(NamedKey::Escape)) {
                             self.close_cwd_editor();

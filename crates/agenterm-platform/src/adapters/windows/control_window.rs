@@ -745,7 +745,52 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
+// Temporary diagnostic aid for the IME double-commit investigation. Set
+// AGENTERM_IME_TRACE=1 to log every keyboard/IME message this window
+// receives (including whether it was queued behind reentrant dispatch) to
+// stderr, so the actual Win32 message sequence can be inspected instead of
+// guessed at. No effect when unset beyond one OnceLock read per message.
+fn ime_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AGENTERM_IME_TRACE").is_some())
+}
+
+fn describe_msg(msg: u32) -> &'static str {
+    match msg {
+        WM_KEYDOWN => "WM_KEYDOWN",
+        WM_KEYUP => "WM_KEYUP",
+        WM_CHAR => "WM_CHAR",
+        0x0281 => "WM_IME_SETCONTEXT",
+        0x0282 => "WM_IME_NOTIFY",
+        0x0283 => "WM_IME_CONTROL",
+        0x0284 => "WM_IME_COMPOSITIONFULL",
+        0x0285 => "WM_IME_SELECT",
+        0x0286 => "WM_IME_CHAR",
+        0x0288 => "WM_IME_REQUEST",
+        0x0290 => "WM_IME_KEYDOWN",
+        0x0291 => "WM_IME_KEYUP",
+        0x010d => "WM_IME_STARTCOMPOSITION",
+        0x010e => "WM_IME_ENDCOMPOSITION",
+        0x010f => "WM_IME_COMPOSITION",
+        _ => "other",
+    }
+}
+
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if ime_trace_enabled()
+        && matches!(
+            msg,
+            WM_KEYDOWN | WM_KEYUP | WM_CHAR
+                | 0x0281..=0x0291
+                | 0x010d..=0x010f
+        )
+    {
+        eprintln!(
+            "[ime-trace] {} (0x{msg:04x}) wp=0x{wp:x} lp=0x{lp:x} dispatching={}",
+            describe_msg(msg),
+            DISPATCHING.with(Cell::get),
+        );
+    }
     let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut State;
     if state_ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
@@ -763,16 +808,26 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
     DISPATCHING.with(|flag| flag.set(true));
-    let result = dispatch_window_message(hwnd, msg, wp, lp, unsafe { &mut *state_ptr });
+    let result = dispatch_window_message(hwnd, msg, wp, lp, unsafe { &mut *state_ptr }, true);
     loop {
         let pending = PENDING_MESSAGES.with(|messages| std::mem::take(&mut *messages.borrow_mut()));
         if pending.is_empty() {
             break;
         }
         for (pending_msg, pending_wp, pending_lp) in pending {
-            let _ = dispatch_window_message(hwnd, pending_msg, pending_wp, pending_lp, unsafe {
-                &mut *state_ptr
-            });
+            // Replay only delivers the application event: the queue path above
+            // already handed this message to DefWindowProcW when it arrived.
+            // Default-processing it a second time duplicates every message
+            // DefWindowProcW *generates* — WM_IME_CHAR synthesizes a WM_CHAR,
+            // so composed text arrived twice ("测试" as "测试测试").
+            let _ = dispatch_window_message(
+                hwnd,
+                pending_msg,
+                pending_wp,
+                pending_lp,
+                unsafe { &mut *state_ptr },
+                false,
+            );
         }
     }
     DISPATCHING.with(|flag| flag.set(false));
@@ -785,6 +840,7 @@ fn dispatch_window_message(
     wp: WPARAM,
     lp: LPARAM,
     state: &mut State,
+    default_process: bool,
 ) -> LRESULT {
     let event = match msg {
         WM_TIMER => Some(ControlWindowEvent::Poll {
@@ -930,7 +986,10 @@ fn dispatch_window_message(
         dispatch(state, event);
         return 0;
     }
-    unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+    if default_process {
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
+    0
 }
 
 fn dispatch(state: &mut State, event: ControlWindowEvent) -> Option<ControlWindowDirective> {

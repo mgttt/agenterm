@@ -51,7 +51,15 @@ impl LogicalInstance {
         {
             display_username = "user".to_owned();
         }
-        format!("{display_username}_{}", self.canonical_name())
+        // canonical_name() carries a "custom:"/"ephemeral:" prefix so it
+        // stays unambiguous for parsing/hashing (see ServerScopeId), but the
+        // prefix is redundant noise in a display label meant for humans.
+        let suffix = match self {
+            Self::Main => "main",
+            Self::Dev => "dev",
+            Self::Ephemeral(value) | Self::Custom(value) => value.as_str(),
+        };
+        format!("{display_username}_{suffix}")
     }
 
     fn named(kind: &'static str, value: &str) -> Result<Self, ParseLogicalInstanceError> {
