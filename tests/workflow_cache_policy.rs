@@ -99,7 +99,58 @@ fn cache_pilot_is_sha_pinned_and_covers_all_ci_cache_cells() {
         );
         assert!(!pilot.contains("enableCrossOsArchive"));
     }
-    assert_eq!(WORKFLOW.matches(CACHE_SHA).count(), 20);
+    assert_eq!(WORKFLOW.matches(CACHE_SHA).count(), 22);
+}
+
+#[test]
+fn platform_contract_download_cache_is_pinned_fail_safe_and_bounded() {
+    let start = WORKFLOW
+        .find("  platform-contract:\n")
+        .expect("missing platform-contract job");
+    let end = WORKFLOW
+        .find("\n  windows:\n")
+        .expect("missing windows job boundary");
+    let pilot = &WORKFLOW[start..end];
+
+    // Download cache only: the four matrix cells compile little enough that a
+    // per-cell target cache is not worth its eviction pressure.
+    assert_eq!(pilot.matches("uses: actions/cache/restore@").count(), 1);
+    assert_eq!(pilot.matches("uses: actions/cache/save@").count(), 1);
+    for action in pilot
+        .lines()
+        .filter(|line| line.contains("uses: actions/cache/"))
+    {
+        assert!(
+            action.contains(CACHE_SHA),
+            "cache action is not pinned to the approved SHA: {action}"
+        );
+    }
+    let cache_steps = pilot
+        .split("      - name:")
+        .filter(|step| step.contains("uses: actions/cache/"))
+        .collect::<Vec<_>>();
+    assert_eq!(cache_steps.len(), 2);
+    assert!(
+        cache_steps
+            .iter()
+            .all(|step| step.contains("continue-on-error: true")),
+        "every cache step must remain fail-safe"
+    );
+    assert_eq!(pilot.matches(SAVE_CONDITION).count(), 1);
+
+    let download_prefix = "cargo-home-v2-platform-contract-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-";
+    assert!(
+        pilot.contains(&format!("key: {download_prefix}{INPUT_HASH}")),
+        "missing dependency-identity cargo-home key for platform-contract"
+    );
+    assert!(
+        pilot.contains(&format!("restore-keys: |\n            {download_prefix}")),
+        "missing compatible cargo-home restore prefix for platform-contract"
+    );
+    assert!(
+        !pilot.contains("target/debug/"),
+        "platform-contract must not cache build targets"
+    );
 }
 
 #[test]
