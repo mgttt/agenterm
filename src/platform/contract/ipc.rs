@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn username_is_only_present_in_the_display_label() {
         let instance = LogicalInstance::Custom("舰队".to_owned());
-        assert_eq!(instance.display_label("用户"), "用户_custom:舰队");
+        assert_eq!(instance.display_label("用户"), "用户_舰队");
         let scope = ServerScopeId::derive(
             &TrustedOsUserScope::for_test("uid", &1000_u32.to_le_bytes()),
             &instance,
