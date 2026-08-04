@@ -65,6 +65,18 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
+      - name: Restore Cargo downloads
+        id: restore-cargo-home-platform-contract
+        continue-on-error: true
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-home-v2-platform-contract-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          restore-keys: |
+            cargo-home-v2-platform-contract-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-
       - name: Install target
         run: rustup target add ${{ matrix.target }}
       - name: Check filesystem conventions minimal feature
@@ -103,6 +115,16 @@ jobs:
         run: >-
           cargo test --locked -p agenterm-platform --all-features
           --target ${{ matrix.target }}
+      - name: Save Cargo downloads
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-home-v2-platform-contract-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
 
   windows:
     runs-on: windows-latest
