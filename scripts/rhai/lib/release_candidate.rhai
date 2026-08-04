@@ -783,6 +783,7 @@ fn build_manifest(
 
     let manifest = #{
         schema_version: 1,
+        kind: "agenterm-release-candidate",
         product: "AgenTerm",
         source_sha: metadata.source_sha,
         version: metadata.version,
