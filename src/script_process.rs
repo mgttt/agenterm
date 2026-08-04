@@ -1433,7 +1433,10 @@ mod tests {
     }
 
     fn wait_for_processes_to_disappear(processes: &[ObservedProcess]) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        // Reaping a multi-process tree on a loaded CI runner can take far
+        // longer than on a warm dev machine; this is a settle ceiling, not a
+        // pace, so the healthy path returns as soon as every process is gone.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let observations = processes
                 .iter()

@@ -66,8 +66,12 @@ v0.1.14  Identity correctness & trust tail
    ├─ [ ] 发布 runbook 固化：把 plan-v0.1.13 §10.2.1 坑清单提炼为
    │     prd/PRD_02_17 或 docs 稳定条目（短 SHA、HEAD==source_sha、
    │     exact-SHA 绿 CI、并发 agent 推 main 的窗口风险）
-   └─ [ ] 多文件/新文件改动前置 cargo fmt --check 清单化
-         （占位稿 §二 记录的两次 rustfmt fail-closed 教训）
+   ├─ [ ] 多文件/新文件改动前置 cargo fmt --check 清单化
+   │     （占位稿 §二 记录的两次 rustfmt fail-closed 教训）
+   └─ [ ] flaky 复核：script_process::child_wait_timeout_reaps_descendants
+         在高负载 CI runner 偶发（run 30906435620，2026-08-04：owned
+         descendants survived cleanup or could not be observed；同 SHA 重跑
+         即绿）。方向：收割等待窗口 vs 观察竞态；归 precision-audit 风格叶
 ```
 
 ## 一.5、发布推进（2026-08-04 晚，用户授权：停 v0.1.13 改发 v0.1.14）
