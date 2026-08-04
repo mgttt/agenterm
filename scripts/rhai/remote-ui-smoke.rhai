@@ -220,6 +220,20 @@ fn wait_observed(context, cli, sequence) {
     throw "remote_ui_observed_sequence_timeout";
 }
 
+fn wait_workspace_toolbar(context, cli, code) {
+    for attempt in 0..200 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        if snapshot.layout.toolbar != () {
+            return snapshot;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    throw code
+        + ":window=" + rhai::json::stringify(snapshot.window)
+        + ":projection=" + snapshot.projection;
+}
+
 fn wait_locale(context, cli, locale_id) {
     for attempt in 0..200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
@@ -911,7 +925,7 @@ try {
     let locale_button = require_window_control(gui.window_control(2129), "locale_button");
     let font_decrease_button = require_window_control(gui.window_control(2130), "font_decrease_button");
     let font_increase_button = require_window_control(gui.window_control(2131), "font_increase_button");
-    let toolbar = json_cli(context, cli, ["ui-snapshot"]);
+    let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
     require(
         tabs_button.text == "<Tabs"
             && toolbar.layout.toolbar.tabs.left
