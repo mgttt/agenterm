@@ -296,7 +296,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let title = format!(
         "AgenTerm-{}:{}",
         env!("CARGO_PKG_VERSION"),
-        resolved_ipc_endpoint()?.logical_instance
+        resolved_ipc_endpoint()?.logical_instance.display_name()
     );
     let mut options = ControlWindowOptions::new(title, PixelSize::new(1180, 760));
     options.controls = remote_control_specs();
@@ -1952,7 +1952,7 @@ impl RemoteWindowState {
                 "sequence": source.position.sequence,
             },
             "window": {
-                "title": format!("AgenTerm-{}:{}", env!("CARGO_PKG_VERSION"), resolved_ipc_endpoint()?.logical_instance),
+                "title": format!("AgenTerm-{}:{}", env!("CARGO_PKG_VERSION"), resolved_ipc_endpoint()?.logical_instance.display_name()),
                 "client_width": client_size.width,
                 "client_height": client_size.height,
                 "visible": native_window_state.visible,

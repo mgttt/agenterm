@@ -33,6 +33,17 @@ impl LogicalInstance {
         }
     }
 
+    /// Human-facing instance name: the canonical `custom:`/`ephemeral:`
+    /// prefix keeps parsing and scope hashing unambiguous, but surfaces meant
+    /// for people (window titles, labels) show just the name.
+    pub(crate) fn display_name(&self) -> &str {
+        match self {
+            Self::Main => "main",
+            Self::Dev => "dev",
+            Self::Ephemeral(value) | Self::Custom(value) => value.as_str(),
+        }
+    }
+
     pub(crate) fn display_label(&self, username: &str) -> String {
         let mut display_username = username
             .chars()
@@ -51,15 +62,7 @@ impl LogicalInstance {
         {
             display_username = "user".to_owned();
         }
-        // canonical_name() carries a "custom:"/"ephemeral:" prefix so it
-        // stays unambiguous for parsing/hashing (see ServerScopeId), but the
-        // prefix is redundant noise in a display label meant for humans.
-        let suffix = match self {
-            Self::Main => "main",
-            Self::Dev => "dev",
-            Self::Ephemeral(value) | Self::Custom(value) => value.as_str(),
-        };
-        format!("{display_username}_{suffix}")
+        format!("{display_username}_{}", self.display_name())
     }
 
     fn named(kind: &'static str, value: &str) -> Result<Self, ParseLogicalInstanceError> {
