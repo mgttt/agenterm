@@ -1106,44 +1106,30 @@ sequence = unit_gate.sequence;
 
 let upgrade_fixture =
     std::path::join(scratch, "prior-agenterm.exe").display;
-let build_specs = [];
+// The release-fast fixture must be captured before the release build runs:
+// a staged release reclaims the development target with `cargo clean`, which
+// would otherwise remove target/release-fast/agenterm.exe before the copy.
 if !skip_smoke {
-    build_specs.push(spec(
-        "cmd.exe",
-        [
-            "/d", "/c",
-            std::path::join(repo, "build.bat").display,
-            "release-fast"
-        ],
-        300000,
-        build_environment
-    ));
-}
-let final_build_arguments = [
-    "/d", "/c",
-    std::path::join(repo, "build.bat").display
-];
-if release {
-    final_build_arguments.push("release");
-}
-build_specs.push(spec(
-    "cmd.exe",
-    final_build_arguments,
-    if release { 600000 } else { 60000 },
-    build_environment
-));
-let build_gate = run_gate(
-    context,
-    "artifact-build",
-    "current artifact and alternate GUI fixture",
-    build_specs,
-    repo,
-    scratch,
-    sequence
-);
-context = build_gate.context;
-sequence = build_gate.sequence;
-if !skip_smoke {
+    let fixture_gate = run_gate(
+        context,
+        "artifact-build-fast",
+        "alternate GUI fixture build",
+        [spec(
+            "cmd.exe",
+            [
+                "/d", "/c",
+                std::path::join(repo, "build.bat").display,
+                "release-fast"
+            ],
+            300000,
+            build_environment
+        )],
+        repo,
+        scratch,
+        sequence
+    );
+    context = fixture_gate.context;
+    sequence = fixture_gate.sequence;
     try {
         std::fs::copy(
             std::path::join(
@@ -1160,6 +1146,29 @@ if !skip_smoke {
         throw error;
     }
 }
+let final_build_arguments = [
+    "/d", "/c",
+    std::path::join(repo, "build.bat").display
+];
+if release {
+    final_build_arguments.push("release");
+}
+let build_gate = run_gate(
+    context,
+    "artifact-build",
+    "current artifact",
+    [spec(
+        "cmd.exe",
+        final_build_arguments,
+        if release { 600000 } else { 60000 },
+        build_environment
+    )],
+    repo,
+    scratch,
+    sequence
+);
+context = build_gate.context;
+sequence = build_gate.sequence;
 let worker =
     std::path::join(repo, "dist/agenterm-rhai.exe").display;
 
