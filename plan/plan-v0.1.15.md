@@ -2,10 +2,12 @@
 
 状态：**占位草案**（2026-08-04 起草，基于 v0.1.14 发布日全天真实遥测；
 2026-08-04 晚外部 review 逐条对照最新代码核验并补充「现状（review）」行；
-2026-08-04 深夜二次复核全部 review 行与 PRD 未来主线对齐，见 §五）。
+2026-08-04 深夜二次复核全部 review 行与 PRD 未来主线对齐，见 §五；
+2026-08-05 补 macOS 真机安装/更新实测 → §一 G 组 + §八）。
 不改变任何已发布/在途版本的授权状态；不创建 tag/Candidate/Release。
-主题预定：**反馈左移 + 发布链降本**——把「问题在离引入点最远、最贵的
-车道才暴露」这一根因打掉。开工前需人工确认范围与 §一 D 组、§五 5.7 的政策决策项。
+主题预定：**反馈左移 + 发布链降本**（附带交付后 install 卫生）——把「问题在
+离引入点最远、最贵的车道才暴露」这一根因打掉。开工前需人工确认范围与
+§一 D/G-P1 组、§五 5.7 的政策决策项。
 
 数据来源：v0.1.14 发布日 ~10 轮 gate 级迭代的 timing 遥测
 （candidate-quality-timing artifacts + job/step API 计时），关键事实：
@@ -120,14 +122,55 @@ v0.1.15  Feedback shift-left & release-lane economics
 │        --verify-rounds/--dry-run，删除后全量复核），agenterm 侧
 │        建议 cron 保留 14 天；runbook 素材来自 plan-v0.1.13 §10.2.1
 │
-└─ F. Linux 云桌面实测尾账（2026-08-04 DISPLAY=:1，详见 §七）
-   ├─ [x] 单测误耦合：child_id_remains_stable_after_wait 把
-   │     top_level_window_supported 绑到 hosted_script_worker_available
-   │     （有 X11 才失败；无 DISPLAY 的 CI 绿掩盖）——已修进 main
-   ├─ [ ] F1 云环境快照补齐 libxkbcommon-x11-0 + libxcb-xkb1
-   │     （缺则 agenterm/agenterm-cc 在 xkbcommon-dl panic）
-   └─ [ ] F2 云桌面默认 Xft.dpi=96（VNC 0mm + DPI=-1 → scale≈0.99，
-         触发 control_center_linux_renderer_evidence）
+├─ F. Linux 云桌面实测尾账（2026-08-04 DISPLAY=:1，详见 §七）
+│  ├─ [x] 单测误耦合：child_id_remains_stable_after_wait 把
+│  │     top_level_window_supported 绑到 hosted_script_worker_available
+│  │     （有 X11 才失败；无 DISPLAY 的 CI 绿掩盖）——已修进 main
+│  ├─ [ ] F1 云环境快照补齐 libxkbcommon-x11-0 + libxcb-xkb1
+│  │     （缺则 agenterm/agenterm-cc 在 xkbcommon-dl panic）
+│  └─ [ ] F2 云桌面默认 Xft.dpi=96（VNC 0mm + DPI=-1 → scale≈0.99，
+│        触发 control_center_linux_renderer_evidence）
+│
+└─ G. 安装/更新体验（2026-08-05 macOS aarch64 真机：0.1.12-local → v0.1.14，详见 §八）
+   ├─ [ ] G1 macOS 默认 `curl | bash` 失败面：无 signed asset 时
+   │     必须 AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 才装得上
+   │     动机：现网 v0.1.14 只有 `*-macos-*-unsigned-preview.zip`；
+   │     未设 env 的 install 报「signed unavailable」即死，happy path 断
+   │     建议（择一或组合，政策见 G-P1）：
+   │       a) 无 signed 时自动回落 unsigned-preview 并打印信任模型警告
+   │       b) 发布页/README 首屏固定写 macOS 必带 env 的一行命令
+   │       c) 提供 `agenterm-cli update` 封装上述选择
+   ├─ [ ] G2 升级后 BIN 断链清理：旧 `agenterm-script` 等残留 symlink
+   │     动机：0.1.12-local 有 agenterm-script；0.1.14 包改为 agenterm-rhai
+   │     （另含 agenterm-cc/agenterm-server 未入 BIN 链接集）。install 只
+   │     replace REQUIRED_EXECUTABLES 五元组，不删 BIN 中指向
+   │     `$INSTALL_ROOT/current/*` 但目标已不存在的孤儿链 → 实测
+   │     `~/.local/bin/agenterm-script` 断链
+   │     建议：装完扫描 `$BIN_DIR/agenterm*`，orphan 且 target 落在
+   │     current/releases 下则移除并 say；可选把 agenterm-cc/server 纳入
+   │     optional link 集合（或明确「仅五元组进 PATH」契约）
+   ├─ [ ] G3 版本可观测性：GUI `agenterm --version` 拒收；无 VERSION 文件
+   │     动机：用户/agent 要确认「窗口还是旧」时只能
+   │     `agenterm-cli --version` 或 strings 二进制；GUI launcher 帮助
+   │     不暴露版本；`~/.local/share/agenterm/current` 无旁路 VERSION
+   │     建议：`agenterm --version` 打印即退（不启 GUI）；install 写
+   │     `current/VERSION` 或 `INSTALL_ROOT/installed.json`
+   │     （version/channel/source_tag/installed_at）
+   ├─ [ ] G4 升级后运行态提示：装完未告知「已开窗口仍旧码」
+   │     动机：install 成功后 symlink 已指 0.1.14，但既有 GUI/server
+   │     进程仍跑旧映像；本机实测窗口仍 0.1.12 直至重开
+   │     建议：收尾 say「若 GUI 已在运行请完全退出后重开」；可选探测
+   │     本机 agenterm/agenterm-server 进程并提示 pid（不强制杀）
+   ├─ [ ] G5 无 first-class 更新入口 / 无 old→new 摘要
+   │     动机：无 `agenterm-cli update` / `install.sh --check`；不打印
+   │     当前已装版本、channel（unsigned-preview vs signed）、是否已最新
+   │     建议：resolve 后对比 current；已最新则 no-op 退出 0；否则打印
+   │     `0.1.12-local → 0.1.14 (macos-unsigned-preview)` 再下载
+   ├─ [ ] G6 releases 目录不修剪：0.1.11-local / 0.1.12-local 永久堆积
+   │     建议：保留 current + N 个历史（默认 2）或 `AGENTERM_KEEP_RELEASES`
+   └─ [ ] G-P1（政策）macOS 长期 channel：unsigned-preview 是否为默认
+         公开通道，还是必须等 Developer ID 签名 asset 才算 stable
+         （影响 G1 默认行为与 Promotion 文案）
 ```
 
 ## 二、排序建议（起稿人观点）
@@ -140,6 +183,8 @@ v0.1.15  Feedback shift-left & release-lane economics
 5. C 组按复发率排优先级；D 组等人工。
 6. **F1 + F2**：云快照一改即永久消除桌面 smoke 首轮噪音（见 §七）；
    单测误耦合已修，不必再排期。
+7. **G2 + G4 + G3（文档级）**：安装卫生三件套，不碰发布链语义，可与
+   A 组并行；G1/G-P1 等 macOS channel 政策拍板后再改默认回落行为。
 
 > v0.1.15 是**纯发布链经济学**版本，不与 §五 未来主线（net / CC 内容 /
 > 远程包管理 / computer-use）抢工期；未来主线只做「对齐记录 + 决策项」，
@@ -199,6 +244,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | `prd/PRD_02_22_decentralized_network.md` | agenterm-net 成熟度门（N0→N4） |
 | `prd/PRD_02_20_native_platform.md` | Platform Facade 收口证据（§五 前置判断） |
 | `plan/precision-audit.md` | C 组竞态根因复核的记录处 |
+| `install.sh` | 安装/更新实现 SSOT；§八 / G 组改进入口 |
 
 ---
 
@@ -299,6 +345,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | P3 | 「皮肤」扩展面与 theme/plugin 打包的边界 | 决定 L-EXT 的范围与版本归口 |
 | P4 | computer-use 是否立项、归口 PRD、首发平台与证据门 | 决定 L-CU 是否进 v0.2.0 或更后 |
 | D1–D3 | 见 §一 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
+| G-P1 | macOS unsigned-preview 是否为默认公开通道（无 signed 时自动回落 vs 强制 opt-in） | 决定 G1 默认行为与 install/README 首屏命令 |
 
 ---
 
@@ -313,6 +360,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 2026-08-05 | 自截图 + ui-snapshot-full.json + 源码复核完成标签树区 UI/UX 观察（§三·五 T1-T6/TB1-TB2/SB1-SB2/W1）；全部为观察不改变 v0.1.15 授权范围；T2/SB1/W1 标 v0.1.15 顺手、其余归 v0.2.0+ |
 
 | 2026-08-04 | Linux 云桌面（DISPLAY=:1 XFCE）实测意见写入 §七 / F 组；单测误耦合已修进 main；F1/F2 为环境快照尾账，不走 PR |
+| 2026-08-05 | macOS aarch64 真机 0.1.12-local→v0.1.14 安装更新实测写入 §八 / G 组；G1–G6 + G-P1 为改进需求，未授权开工 |
 
 ---
 
@@ -360,4 +408,96 @@ v0.1.15  Feedback shift-left & release-lane economics
 - **Linux host-native smoke 可继续只在 push-main + Xvfb**；云桌面是
   额外真机车道，适合抓 F1/F2 这类快照缺口，不必再拆 PR。
 - AGENTS.md Cursor Cloud 段已补 smoke 前置说明，与本 § 互为索引。
+
+---
+
+## 八、安装与更新实测（2026-08-05，macOS aarch64）
+
+> 场景：本机已装 `0.1.12-local-macos-aarch64`（`current` 指向
+> `~/.local/share/agenterm/releases/…`；BIN 链在 `~/.local/bin`），
+> GitHub 已发布 `v0.1.14`（含 unsigned-preview zip）。由 agent 执行
+> `AGENTERM_VERSION=v0.1.14 AGENTERM_NO_LAUNCH=1
+> AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 bash install.sh` 完成升级。
+> 对照源：`install.sh`（resolve / symlink / macOS channel）、
+> `agenterm-cli --version`、`readlink …/current`、BIN 目录。
+
+### 8.1 结果
+
+| 检查项 | 结果 |
+|--------|------|
+| 下载 + SHA-256 校验 | PASS（`aace8af7…`） |
+| `current` → `0.1.14-macos-aarch64` | PASS |
+| `agenterm-cli --version` → `0.1.14` | PASS |
+| 五元组 BIN 链（agenterm / cli / mux / rhai / mcp） | PASS |
+| 无 env 的 macOS happy path | **未走通**（见 G1；须 `ALLOW_UNSIGNED_PREVIEW=1`） |
+| 旧 `agenterm-script` BIN 链 | **断链残留**（装完后仍在，手动 `rm`） |
+| 已运行 GUI 是否自动吃新码 | **否**（须重开窗口） |
+
+### 8.2 问题树（按暴露顺序）
+
+1. **版本确认成本高**  
+   `agenterm --version` → GUI launcher 报 unknown option；只能
+   `agenterm-cli --version` 或 `strings` 二进制里的
+   `TERM_PROGRAM_VERSION`/`0.1.12`。→ **G3**
+
+2. **macOS 默认安装命令不可用**  
+   发布资产名为 `…-macos-aarch64-unsigned-preview.zip`；
+   `install.sh` 仅在 `AGENTERM_ALLOW_UNSIGNED_PREVIEW=1` 时改
+   `PACKAGE_STEM`。未设 env 时下载 signed 名失败并 fail-closed。
+   对「发了 0.1.14 请更新」的一线指令不友好。→ **G1 / G-P1**
+
+3. **升级不清理过时 BIN 名**  
+   local 0.1.12 曾链 `agenterm-script`；0.1.14 payload 无此文件
+   （脚本面为 `agenterm-rhai`）。`replace_symlink` 只覆盖
+   `REQUIRED_EXECUTABLES`，不扫孤儿。→ **G2**
+
+4. **payload 与 PATH 契约未文档化**  
+   0.1.14 zip 另有 `agenterm-cc`、`agenterm-server` 等，install 不链
+   进 `BIN_DIR`。合理与否需写成契约，避免「装了但 PATH 没有 cc」。
+   → **G2 可选叶**
+
+5. **运行中实例无切换提示**  
+   升级成功后用户窗口仍显示/行为旧版本直至退出重开；
+   install 收尾无 say。→ **G4**
+
+6. **无 update 语义**  
+   不比较已装版本；不打印 channel；已最新仍会重下重装（本轮因
+   显式 `AGENTERM_VERSION` 未踩，但 `resolve_version=latest` 路径
+   同样缺 no-op）。releases 下旧 local 目录永留。→ **G5 / G6**
+
+### 8.3 建议落地切分（给 v0.1.15）
+
+| 优先级 | 项 | 改动面 | 风险 |
+|--------|----|--------|------|
+| P0 | G2 孤儿 symlink 清理 | `install.sh` 收尾 | 低：仅删指向 current 且 target 缺失的 agenterm* 链 |
+| P0 | G4 重启提示 | `install.sh` say 一行 | 低 |
+| P1 | G3 VERSION 文件 + `agenterm --version` | install + GUI launcher 早退 | 中：launcher 参数解析需测 |
+| P1 | G5 old→new / already-latest | `install.sh` | 低 |
+| P2 | G1 自动回落 unsigned | `install.sh` + 文案 | **政策依赖 G-P1** |
+| P2 | G6 keep-N releases | `install.sh` | 低；勿删仍被非 current 链引用的目录 |
+
+### 8.4 与 v0.1.15 主题的关系
+
+- 不改变 Candidate/Promotion 授权语义；属**交付后用户路径**卫生。
+- 与 E 组（发布链噪音）独立；与 L-PKG（远程包管理）远期可汇合
+  （`agenterm-cli update` 未来可接 softmgr），但 v0.1.15 只做
+  install.sh / 本地可观测性，不预支包服务。
+- 复现命令（脱敏）：
+
+```bash
+# 查当前
+readlink ~/.local/share/agenterm/current
+agenterm-cli --version
+
+# 升到指定 tag（macOS 现网）
+AGENTERM_VERSION=v0.1.14 \
+AGENTERM_NO_LAUNCH=1 \
+AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 \
+  bash install.sh
+
+# 装后自检
+agenterm-cli --version
+ls -la ~/.local/bin/agenterm*
+# 期望：无断链；version=0.1.14；已开 GUI 需手动重开
+```
 

@@ -216,6 +216,112 @@ gh run download <candidate_run_id> -R mgttt/agenterm \
 4. **SBOM 可复现性纳入 CI**：#3 这类缺陷只在跨 runner 比对时才暴露，
    建议 CI 里从两个不同路径各生成一次并比对 sha256。
 
+### 七、CI 日志实测分析（基于成功 Candidate 30942173420）
+
+#### 7.1 关键路径：整条 Candidate 卡在一个 job 上
+
+| job | wall clock |
+|-----|-----------|
+| **build (windows-x86_64)** | **16.6 min** |
+| build (windows-aarch64) | 5.5 min |
+| build (linux-aarch64) | 3.9 min |
+| build (linux-x86_64) | 3.8 min |
+| build (macos-x86_64) | 3.3 min |
+| build (macos-aarch64) | 2.5 min |
+| aggregate / preflight | 0.2 / 0.1 min |
+
+windows-x86_64 是次慢 job 的 **3 倍**，其余五平台全在它的阴影里空等。
+拆解这 16.6 分钟（两项相加 950s ≈ 15.8 min，与实测吻合）：
+
+- bootstrap（worker 重建）：**80.9s**
+- 39 个 gate **串行**执行：**869.1s**
+
+#### 7.2 Gate 耗时分布：前三名占 55%
+
+| 耗时 | 占比 | gate |
+|-----|------|------|
+| 211.3s | 24.3% | `artifact-build` |
+| 142.2s | 16.4% | `agenterm-net-research` |
+| 127.5s | 14.7% | `artifact-build-fast` |
+| 72.5s | 8.3% | `mcp-conformance` |
+| 64.5s | 7.4% | `unit-tests` |
+| 50.1s | 5.8% | `preflight-selftest` |
+| 39.3s | 4.5% | `clippy` |
+
+**两个 build gate 合计 338.8s（39%）**。作为对照，14 个 smoke gate 全部加起来
+仅 **124.4s（14.3%）**，最慢的 `remote-ui-smoke` 也只有 26.4s
+——即「smoke 很慢」是错觉，真正的成本在构建与 net-research。
+（v0.1.14 前期对 remote-ui-smoke 的超时加固是为了**消除假失败**，
+不是为了提速；本轮数据证明它确实不是瓶颈。）
+
+#### 7.3 最大发现：cache 因**总量撞顶**而系统性失效
+
+四次 Candidate 的 bootstrap 全是 `worker.state = "rebuilt"`，且**成本在涨**：
+
+| run | setup | worker |
+|-----|-------|--------|
+| 30932517512 | 47.1s | rebuilt |
+| 30935141454 | 49.7s | rebuilt |
+| 30938667830 | 59.4s | rebuilt |
+| 30942173420 | **80.9s** | rebuilt |
+
+windows 日志两条 cache 全 miss：
+
+```
+Cache not found for input keys: cargo-target-v2-windows-x86_64-candidate-...
+Cache not found for input keys: cargo-home-candidate-v2-windows-x86_64-...
+```
+
+**但 key 本身是稳定的**——我核对了 `538ec73/bffb7b8/ac068ff/8ff2b5a` 四个
+commit 的 `Cargo.lock`/`Cargo.toml`/`scripts/artifacts.json` 哈希，**完全相同**，
+所以不是 key 漂移。真正原因是仓库 cache 总量：
+
+```
+19 个 entry，合计 9.9 GB —— GitHub 单仓库上限 10 GB
+```
+
+撞顶后 GitHub 按 LRU 驱逐。Candidate 自己的 cache 很小
+（target 0.22GB + home 0.06GB），却被 CI 的 debug target cache 挤掉：
+
+| 占用 | 份数 | 家族 |
+|-----|-----|------|
+| 3.18GB | **3** | `cargo-target-v2-windows-x86_64-native-...-debug` |
+| 3.13GB | **2** | `cargo-target-v2-linux-x86_64-...-debug` |
+| 1.09GB | 2 | `cargo-target-v2-linux-aarch64-...-debug` |
+| 0.88GB | 2 | `cargo-target-v2-macos-aarch64-...-debug` |
+| 0.22GB | 1 | `cargo-target-v2-windows-x86_64-**candidate**` |
+| 0.06GB | 1 | `cargo-home-candidate-v2-windows-x86_64` |
+
+**CI 的 debug target cache 独占 8.7GB / 9.9GB**，且同一家族存着 2–3 份陈旧世代。
+于是每次 Candidate 存进去的 cache，在下次 Candidate 用到之前就被 CI 挤掉了。
+这解释了：为什么 `worker` 永远 rebuilt、为什么两条 cache 永远 miss、
+以及为什么 bootstrap 从 47s 一路涨到 81s。
+
+#### 7.4 由此得出的改进项（按性价比排序）
+
+1. **清理 cache 配额（最高优先，改动最小）**。当前 8.7GB 被 debug target
+   占据且有多份陈旧世代。建议：
+   - CI 的 debug target cache 加**保留份数上限**或缩小缓存路径
+     （`target/debug/` 整目录过大，可只缓存 `deps/` 与 `.rustc_info.json`）；
+   - 或给 candidate 车道的 cache 换独立前缀并定期清理其余家族，
+     确保 release 关键路径的 cache 不被 CI 挤掉。
+   - 预期收益：bootstrap 80.9s → 接近 0，且两个 build gate 可复用增量产物，
+     **约 3 分钟／次 Candidate**，按本轮 6 次 Candidate 计约省 18 分钟。
+2. **`cargo-home-candidate-v2` 补 `restore-keys`**。它目前**只有 `key`、
+   没有 restore-keys**（对照 `cargo-target-v2` 是有的），意味着一旦
+   `hashFiles(...)` 变化就彻底 miss，没有近似回退。加一行前缀回退即可。
+3. **gate 并行化 / 分片**。39 个 gate 串行 869s，其中彼此无依赖的占多数。
+   若把 windows job 拆成 2–3 个并行分片（构建类一片、smoke 一片、
+   静态检查一片），关键路径有望从 16.6 min 压到 7–9 min。
+4. **`agenterm-net-research` 单独评估（142s，16.4%）**。它是耗时第二名却与
+   发布产物正确性关系最弱，建议改为 nightly 或 PR-only，不进 release 车道。
+5. **`artifact-build` 与 `artifact-build-fast` 是否必须同跑**（合计 339s，39%）。
+   若二者只是 profile 差异，考虑在 candidate 车道只跑其一。
+
+> 方法论：以上全部基于 `candidate-quality-timing-<run>` artifact 与
+> `gh api .../actions/caches`，而非日志肉眼估算。复现命令：
+> `gh api repos/mgttt/agenterm/actions/caches --jq '[.actions_caches[].size_in_bytes]|add'`
+
 ## 二、明确暂不纳入（继续挂 v0.2.0，避免范围蔓延）
 
 - 巨型状态机拆解（Unix ~223KB / Windows ~266KB）
