@@ -67,8 +67,12 @@ jobs:
               run_attempt: $run_attempt
             }' >candidate-run-identity.json
 
+      # clean: false preserves candidate-run-identity.json, which the
+      # preceding step writes into the workspace and "Download sealed
+      # candidate" copies into candidate/. A cleaning checkout deletes it.
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
+          clean: false
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ steps.candidate.outputs.source_sha }}
