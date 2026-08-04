@@ -285,8 +285,12 @@ for pkg in dependencies {
     let package_source = pkg.source.to_string();
     let key =
         pkg.name + "\n" + pkg.version + "\n" + package_source;
+    // pkg.id embeds the absolute manifest path for path (vendored)
+    // dependencies, which varies per runner OS and broke the cross-platform
+    // deterministic-bytes contract the aggregate SBOM check relies on.
+    // Derive the SPDX id from the platform-independent identity instead.
     let id_hash = rhai::crypto::sha256(
-        rhai::bytes::from_text(pkg.id)
+        rhai::bytes::from_text(key)
     );
     let spdx_id = "SPDXRef-Package-" + id_hash.sub_string(0, 16);
     let record = #{
