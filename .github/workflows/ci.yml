@@ -190,6 +190,24 @@ jobs:
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Run release-lane GUI smokes on the debug build
+        # remote-ui-smoke and fleet-smoke used to execute only inside the
+        # Candidate release gate, so a stale assertion or timing regression
+        # surfaced ~35 minutes into a release attempt instead of minutes into
+        # the push that introduced it. Debug-build behavior is the same
+        # product journey; run them on every push.
+        id: release-lane-smokes
+        shell: bash
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
+          dist/agenterm-rhai.exe task run remote-ui-smoke --manifest agenterm.tasks.json
+          dist/agenterm-rhai.exe task run fleet-smoke --manifest agenterm.tasks.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Prove native Windows IPC main/dev authorities
         id: native-ipc-main-dev
         shell: bash
