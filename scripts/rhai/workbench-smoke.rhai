@@ -77,6 +77,29 @@ fn wait_tab_render(context, cli, target) {
     throw "workbench_tab_render_timeout:" + target;
 }
 
+// tabs-set-width forces the same sidebar redraw as creation/selection, and
+// the label geometry (name/note/node) repopulates independently of
+// render.text, so width-sensitive reads must settle on the fields they
+// actually consume rather than on text alone.
+fn wait_tab_label_render(context, cli, target) {
+    for attempt in 0..600 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let tab = find_tab(snapshot, target);
+        if tab != ()
+                && tab.render != ()
+                && tab.render.name != ()
+                && tab.render.note != ()
+                && tab.render.node != ()
+                && tab.actions != ()
+                && tab.actions.close != ()
+                && tab.actions.new_child != () {
+            return tab;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "workbench_tab_label_render_timeout:" + target;
+}
+
 fn active_tab(snapshot) {
     for tab in snapshot.tabs {
         if tab.active {
@@ -714,8 +737,7 @@ try {
             cli,
             ["ui-action", "tabs-set-width", "--width", width.to_string()]
         );
-        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tab = find_tab(snapshot, target);
+        let tab = wait_tab_label_render(context, cli, target);
         assert_inside(
             tab.bounds,
             tab.render.name,
