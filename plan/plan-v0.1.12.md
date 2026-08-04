@@ -781,6 +781,19 @@ selected adapter 装配；遗留的 Unix socket / Windows named-pipe 实现副�
   并完成旧 TCP ↔ HEAD、v0.1.11 native → HEAD upgrade、HEAD state write 及
   v0.1.11/HEAD rollback read。Windows mixed-version 阻断关闭；Linux/macOS 新
   matching-host 回执仍开放，不能据此声明三平台完成。
+- 2026-08-04 v0.1.12 Candidate 首跑（run 30868346027，冻结 SHA `026b294`）
+  五平台 build 绿，windows-x86_64 release quality gate 红于
+  `fs_copy: prior-agenterm.exe (os error 3)`。根因：gate 先 `build.bat
+  release-fast` 产出 `target/release-fast/agenterm.exe`，随后 `build.bat
+  release` 的 staged-release 流程以 `cargo clean --target-dir target`
+  回收开发目标，upgrade fixture 复制发生在两次构建之后，源目录已被清空。
+  修复（`6beacb1`，`scripts/rhai/check.rhai`）：fixture 复制提前到
+  release-fast 构建之后、release 构建之前，独立为 `artifact-build-fast`
+  gate；`artifact-build` gate 只保留当前产物。rhai repository lint 绿。
+  main CI（18f74f7 push）仅 linux-x86_64 遗留已知
+  `control_center_linux_native_pointer_navigation_timeout`（X11/XTest CC
+  pointer smoke，独立归因，plan-v0.1.13.md 已登记）。重跑 Candidate 与
+  Promotion 仍属独立授权门。
 
 ## 七、三平台 GUI 与 Control Center 收敛
 
