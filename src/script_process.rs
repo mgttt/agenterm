@@ -1380,7 +1380,25 @@ mod tests {
         start_identity: String,
     }
 
+    fn start_identity_ordinal(identity: &str) -> Option<u128> {
+        identity
+            .rsplit(':')
+            .next()
+            .and_then(|value| value.parse().ok())
+    }
+
     fn wait_for_descendants(root_id: u32) -> Vec<ObservedProcess> {
+        // Parent-PID chains are stale under PID reuse: on a churning runner,
+        // unrelated processes whose long-dead parent's PID was recycled into
+        // this root walk up to root_id and would be misclassified as owned
+        // descendants that never exit. A genuine descendant always starts
+        // after its root, so filter candidates by start-identity ordinal.
+        let root_started = match child_process_tree::observe(root_id) {
+            child_process_tree::ProcessObservation::Live {
+                start_identity: Some(identity),
+            } => start_identity_ordinal(&identity),
+            _ => None,
+        };
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             // A shell setup child can exit before its parent reaps it. Skip
@@ -1402,6 +1420,15 @@ mod tests {
                     _ => panic!(
                         "descendant {id} start identity unavailable: unrecognized observation"
                     ),
+                })
+                .filter(|process| {
+                    match (
+                        root_started,
+                        start_identity_ordinal(&process.start_identity),
+                    ) {
+                        (Some(root), Some(candidate)) => candidate >= root,
+                        _ => true,
+                    }
                 })
                 .collect::<Vec<_>>();
             if !descendants.is_empty() {
