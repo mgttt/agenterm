@@ -639,6 +639,7 @@ struct RemoteWindowState {
     server_recovery: crate::frontend_server::FrontendServerRecoveryState,
     last_message: Option<String>,
     last_error: Option<String>,
+    last_ime_label: String,
     tabs_visible: bool,
     config: AppConfig,
     font: agenterm_platform::font::NativeFont,
@@ -828,6 +829,7 @@ impl RemoteWindowState {
             ),
             last_message: None,
             last_error: None,
+            last_ime_label: String::new(),
             tabs_visible: config.tabs_visible,
             config,
             font,
@@ -872,6 +874,7 @@ impl RemoteWindowState {
     }
 
     fn tick(&mut self) -> bool {
+        let ime_changed = self.refresh_ime_label();
         let resize_changed = self.process_terminal_resize_results();
         let paste_changed = self.process_terminal_paste_results();
         let result = self
@@ -926,7 +929,8 @@ impl RemoteWindowState {
                 };
                 match self.publish_ui_snapshot() {
                     Ok(published) => {
-                        resize_changed
+                        ime_changed
+                            || resize_changed
                             || paste_changed
                             || changed
                             || command_changed
@@ -2180,6 +2184,28 @@ impl RemoteWindowState {
 
     fn cwd_status_rect(&self) -> ProductPixelRect {
         win_rect(self.workspace_geometry().status_segments.cwd)
+    }
+
+    fn provider_status_rect(&self) -> ProductPixelRect {
+        win_rect(self.workspace_geometry().status_segments.provider)
+    }
+
+    /// Re-read the host input method into the status-bar label, reporting
+    /// whether the rendered text changed.
+    ///
+    /// The host only answers while our window holds focus, so a `None` keeps
+    /// the previous reading rather than blanking the label every time the
+    /// user alt-tabs away.
+    fn refresh_ime_label(&mut self) -> bool {
+        let Some(status) = agenterm_platform::ime::status() else {
+            return false;
+        };
+        let label = status.label();
+        if label == self.last_ime_label {
+            return false;
+        }
+        self.last_ime_label = label;
+        true
     }
 
     fn tabs_recovery_rect(&self) -> Option<ProductPixelRect> {
@@ -5236,6 +5262,20 @@ impl RemoteWindowState {
             &format!("CWD: {cwd}"),
             palette.muted_text.canvas_rgb(),
         );
+        if !self.last_ime_label.is_empty() {
+            let provider = self.provider_status_rect();
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: provider.left + MARGIN,
+                    top: provider.top,
+                    right: provider.right - MARGIN,
+                    bottom: provider.bottom,
+                },
+                &self.last_ime_label,
+                palette.muted_text.canvas_rgb(),
+            );
+        }
         if !self.focus_gate().full_modal_blocked() {
             let focus = match self.current_focus_surface() {
                 RemoteFocusSurface::Terminal => terminal,

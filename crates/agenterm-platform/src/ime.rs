@@ -1,10 +1,18 @@
 //! Selected IME capability and platform-neutral composition state machine.
 
-pub use crate::contract::ime::{ImeAction, ImeEvent};
+pub use crate::contract::ime::{ImeAction, ImeEvent, ImeStatus};
 use crate::{CapabilityStatus, input::KeyClassification, selected};
 
 pub fn capability_status(display_available: bool) -> CapabilityStatus {
     selected::ime::capability_status(display_available)
+}
+
+/// Input method currently backing this thread's focused surface, when the
+/// host can report one. `None` means "unknown", which callers should render
+/// as absence rather than as a disabled IME.
+#[must_use]
+pub fn status() -> Option<ImeStatus> {
+    selected::ime::status()
 }
 
 pub fn classify_event(event: ImeEvent, anchor_available: bool) -> ImeAction {
