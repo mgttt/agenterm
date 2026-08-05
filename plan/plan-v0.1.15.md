@@ -444,6 +444,55 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **成本**：中；**依赖**：G3（共用 installed.json）、H1（读索引取 variant）
 
 
+### N. 新功能（**本版唯一的"往前走"叶**；其余全是修补与降本）
+
+> 自查发现的问题：R/A′/G′/H′ 共 13 叶**全部是修补、降本或地基**，
+> 没有一片是新开工的功能——那是把 v0.1.14 的账还完，不是往前走。
+> 本组补上一叶，且刻意只补一叶（v0.1.14 教训：宁可少而全绿）。
+
+- [ ] **N1 补齐 macOS/Linux 的 `ImeStatus`**（兑现 platform facade 的封装承诺）
+  - **动机（封装失衡的实证）**：`contract/ime.rs` 定义了完整的 `ImeStatus`
+    （name / available / open / native_mode / full_shape）并配 4 个单测，
+    但**只有 Windows 实现了**（`adapters/windows/ime.rs` 286 行）；
+    **macOS 与 Linux 各 30 行 stub，`status()` 一律 `return None`**。
+    后果：状态栏的中/英指示、输入法名称在 Unix 侧**永远显示 `IME: off`**，
+    契约形同虚设。**这正是"封装"应当消除的平台失衡**。
+  - **已实测可行（2026-08-05 本机 macOS 26.5 验证）**：
+    ```c
+    TISCopyCurrentKeyboardInputSource()
+      → kTISPropertyInputSourceID   = "com.tencent.inputmethod.wetype.pinyin"
+      → kTISPropertyLocalizedName   = "微信输入法"
+      → kTISPropertyInputSourceType = "TISTypeKeyboardInputMode"
+      → kTISPropertyInputSourceLanguages[0] = "zh-Hans"
+    ```
+    即 `name` / `available` / `native_mode` **三个字段可如实填充**
+    （native_mode 由 input-mode 类别 + 语言标签推导）。
+  - **诚实的能力边界（不猜、不假装）**：macOS **无公开 API** 可读
+    `open`（IME 是否处于合成态）与 `full_shape`（全角半角）——
+    二者是 Windows IMM 的概念。按 `contract/ime.rs` 自身的规定
+    「hosts that cannot report a given field leave it empty rather than
+    guessing」，这两个字段在 macOS 保持默认值，**不伪造**。
+  - **做法**：
+    - macOS：新增 Carbon/HIToolbox 绑定（`TISCopyCurrentKeyboardInputSource`
+      + 三个属性读取），落在 `adapters/macos/ime.rs`；
+      注意 `objc2-app-kit` 已是依赖，但 TIS 属 Carbon framework，需另加链接
+    - Linux：读 XKB 布局组／或探测 fcitx5/ibus 的 DBus 接口（二选一，
+      先做能力探测再定；探测不到则维持 `available: false`，不 panic）
+  - **验收（可证伪）**：
+    - macOS 真机切到中文输入法时 `ImeStatus.label()` 返回
+      `IME: 微信输入法 · native`；切回 ABC 返回 `IME: … · latin`
+      （**本机可直接验证**，不像 X2 那样悬着）
+    - `open`/`full_shape` 在 macOS 保持 false 且**有注释说明为何不可得**
+    - 新增单测覆盖「能报的字段照实报、不能报的字段不猜」
+    - Linux 无 IME 环境下不 panic、`available: false`
+  - **成本**：中（macOS 部分小；Linux 部分取决于走 XKB 还是 DBus）
+  - **依赖**：无
+  - **与 Windows agent 的分工（不冲突）**：他改的是 Windows **合成输入路径**
+    （WM_IME_* → 内联 preedit，见 §三·五 3.5.3 I1）；本叶补的是
+    **Unix 侧的状态读取**。两者在 facade 的不同侧，互不触碰对方文件。
+  - **若工期紧**：可只做 macOS 档（Linux 留 stub 并注明），仍然兑现
+    「三平台平权」的一半，且我方能真机验证
+
 ### X. 已在途/已落地（**并发 agent 泳道**——非本次规划产出，登记以免范围失真）
 
 定稿时（2026-08-05）本工作区尚未看到；`fe51c7c` 合并后补记。
@@ -477,15 +526,31 @@ v0.1.15  Feedback shift-left & release-lane economics
 
 **规模自查（2026-08-05 补记后）**：
 
-| 泳道 | 叶数 | 状态 |
-|------|-----|------|
-| R / A′ / G′ / H′（本次规划产出） | **13** | 待授权开工，8 叶「极小/小」 |
-| X（并发 agent 已落地） | 2 已完成 + 1 归 v0.2.0 | 约 2900 行已入 main |
+| 泳道 | 叶数 | 性质 | 状态 |
+|------|-----|------|------|
+| R / A′ / G′ / H′ | 13 | 修补 · 降本 · 地基 | 待授权开工 |
+| **N** | **1** | **新功能** | 待授权开工 |
+| X（并发 agent） | 2 已完成 + 1 归 v0.2.0 | 功能 | 约 2900 行已入 main |
 
-对照 v0.1.14 的教训（发布日 5–6 小时耗在从未跑过的车道上），本次规划的
-13 叶宽度本身可控；但**加上 X 组已落地部分，本版实际范围已不算窄**。
-因此：若开工后工期吃紧，**优先砍 H1/H3，其次 R4，绝不砍 R1/R2**——
-R 组是本版主题且收益已实测，H 组是下版地基。
+对照 v0.1.14 的教训（发布日 5–6 小时耗在从未跑过的车道上），14 叶宽度本身
+可控；但**加上 X 组已落地部分，本版实际范围已不算窄**。因此若工期吃紧，
+砍叶顺序：**H1/H3 → R4 → N1 的 Linux 档**，绝不砍 R1/R2。
+
+### 为什么 v0.1.15 不推进 L-NET（ipfs/libp2p）
+
+用户 2026-08-05 原话：本想督促 ipfs/libp2p 功能，但认同「先把底子弄好」——
+多平台 UI/UX 对齐、稳定性增强、功能补丁优先。这个判断与实测证据一致：
+
+- **L-NET 的下一关不是写代码，是定形态**。§5.2.1 实查表明 research spike
+  已自证完备（进程隔离／CID／block store 全绿，每轮 release 门真跑 142s），
+  但 `src/` **零 import**——卡点是 N3「产品消费者以什么形态存在」
+  （Script API？InfoHub？CC 诊断？），那是**拍板题不是工程题**。
+  在形态未定前投工程，做出来的接口大概率要返工。
+- **底子确实欠账**：N1 揭示 `ImeStatus` 契约只有 Windows 实现、Unix 两档全是
+  stub；§八 实测的安装/升级体验有 G2/G3/G6/G7a 四处硬伤；cache 撞顶正在
+  单调恶化。这些都是**用户每天碰得到**的，而 L-NET 目前无人使用。
+- **结论**：v0.1.15 做底子，L-NET 保持 research 车道（R3 只是把它从 release
+  门移到 push CI，**验证不减**）。待 N3 形态拍板后，L-NET 作为 v0.2.0 主线开工。
 
 ## 二、排序与理由（**基于实测数字，非直觉**）
 
@@ -934,7 +999,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 定稿产出 §一·五 收敛工作树（13 叶，含动机/可证伪验收/成本/依赖）、§二 排序理由、§二·五 决策阻塞关系、§二·六 推迟表（含理由）、§二·七 PRD 一致性核对 |
 | 2026-08-05 | **PRD 核对纠错**：H4 原称「sbom_sha256 空串违反声明」不成立——逐平台实测 macOS 两档已填、Linux/Windows 未填，而 `PRD_02_17:237-240` 只要求 macOS 双档，故当前实现合规。H4 改为「把该保证扩展到六平台」；PRD 侧待 H4 落地后再升级为六平台描述（先实现后改契约） |
 | 2026-08-05 | **定稿后补记**：`fe51c7c` 合并带入并发 agent 的内置皮肤 v1（四预设，约 1600 行，`prd/PRD_02_06` §Built-in skins 已立契约）与 Windows IME/协议兼容 UX（见 §三·五 3.5.3）。二者已入 main 但**不在本次规划的 13 叶内** → 新增 §一·五 X 组登记，并据此调整规模自查：实际范围已不算窄，工期紧时的砍叶顺序定为 H1/H3 → R4，绝不砍 R1/R2。Control Center UX 明确归 v0.2.0，不占本版工期 |
-
+| 2026-08-05 | 用户指出两点：(1) Windows agent 在修其 IME，osx 侧「要有自己的思路，这才是封装的意义」；(2) 工作树全是补丁，问「哪些是新开工的功能」。自查属实——13 叶无一新功能。实证核查发现 `ImeStatus` 契约仅 Windows 实现（286 行），macOS/Linux 各 30 行 stub 恒返回 None，状态栏在 Unix 侧永远 `IME: off` → 新增 **N 组 / N1** 补齐，并本机实测 TIS API 可行（`TISCopyCurrentKeyboardInputSource` 读到「微信输入法」/ zh-Hans）；同时诚实标注 macOS 无法获取 `open`/`full_shape`，按契约规定留空不猜 |\n| 2026-08-05 | 用户认同「先把底子弄好」优先于督促 ipfs/libp2p → 新增 §一·五「为什么 v0.1.15 不推进 L-NET」：L-NET 卡点是 N3 产品消费者**形态未定（拍板题）**而非工程量，形态未定前投工程会返工；底子欠账（IME 契约失衡、install 四处硬伤、cache 恶化）是用户每天碰得到的。L-NET 保持 research 车道，R3 只换车道不减验证 |\n
 ---
 
 ## 十、粘贴失败问题树（2026-08-05 · 规划，未开工）
