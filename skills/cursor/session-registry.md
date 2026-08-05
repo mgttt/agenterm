@@ -23,7 +23,7 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`�
 
 | Name | cron (UTC) | environmentPublicId | 备注 |
 |------|------------|---------------------|------|
-| `主控 造梦` | `21 * * * *` | `4f22874a-8a90-11f1-b532-320a589b8025` | prompt=`fleet-duty`；`--apply --from '主控 造梦'`；日常主控仍为 主控2 |
+| `主控 造梦` | `21 * * * *` | **必须** `7ef6e5b0-8a35-11f1-b532-320a589b8025` | 旧登记 `4f22874a-8a90-…` 与主控2 环境不一致；2026-08-05 查：本环境 `source=automations` agent **0** 个（含 archived）。改绑后点 Run now 验证；把 automation UUID URL 回填本表 |
 
 链接：
 
