@@ -339,62 +339,23 @@ v0.1.15  Feedback shift-left & release-lane economics
 │        债务钩 L2/L3/L4 在 ARCHITECTURE §4；落地须同批回写 §1/§3
 │
 └─ O. **macOS / OSX 本机跟进泳道**（2026-08-05 派发 · 见 **§十一** 完整作业规格）
-   ├─ [ ] O0 接手基线（先做，只读）
-   │     HEAD 与 `origin/main` 对齐；`agenterm-cli --version`；本机 0.1.14+
-   │     二进制路径；`ImeStatus`/粘贴各跑一次对照；记基线绿
-   ├─ [ ] O1 **ImeStatus macOS 真实现**（= N1 的 osx 半叶 · 首选开工）
-   │     域：`crates/agenterm-platform/src/adapters/macos/ime.rs` +
-   │     必要 link（Carbon/HIToolbox TIS）；**禁** `windows/ime.rs` /
-   │     `windows/control_window.rs`
-   │     验收：中文输入法显示名 + ABC latin；`open`/`full_shape` 不伪造
-   │     细节与 TIS 实测见 §一·五 N1 / §十一 O1
-   ├─ [ ] O2 **粘贴 macOS 真机诊断 → T0 文案/错误码**（P 组本机半叶）
-   │     复现：emoji/CJK 大段、SGR 假终端拷贝、截图-only、真空剪贴板
-   │     产出：根因表（A 读盘 / B 归一 / C 无投递）+ 最小 T0 修复或报告
-   │     域：`macos/clipboard.rs`、`ui_clipboard.rs`、unix frontend paste
-   │     **禁** 擅自做 T1 图→路径 / T2 多 MIME（须 P-P1 / PRD）
-   ├─ [ ] O3 **install / 升级 UX 本机**（G 组可真机叶）
-   │     G7a 类：磁盘版 vs 运行 server 版提示；stop-server 文案
-   │     G2 孤儿 symlink 清理（若本机仍有）
-   │     G1 **仅文档/探测** 除非 G-P1 已拍板（勿擅自默认 unsigned 回落）
-   ├─ [ ] O4 **Unix/macOS IME 合成路径对照**（不碰 Win I1–I3）
-   │     真机：vim/中文 preedit、状态栏 IME 读数与 O1 联动
-   │     若 winit IME 事件缺洞：记诊断，**不**抄 Win WM_IME 进 macos
-   ├─ [ ] O5 可选尾账（低优先）
-   │     macOS physical pointer acceptance（parity 矩阵）
-   │     `plan/osx-cpu-improve.md` 标 shipped——仅当用户仍报高 CPU 再回归测
-   ├─ [ ] O6 **Shift+鼠标选区无法复制**（用户 2026-08-05 真机痛点 · **阻塞工作**）
-   │     症状：在 AgenTerm 终端区用 **Shift + 鼠标**（或拖选）选出文字后，
-   │     **复制不成功**（无法粘到别处 / 无「Copied N characters」反馈）
-   │     代码锚（unix embedded / macOS 路径，待证）：
-   │       - 拖选松手：`complete_terminal_selection` → `copy_terminal_selection`
-   │         但 `let _ = …` **吞掉** clipboard 写失败，状态栏可无声失败
-   │       - 快捷键：`Cmd+C` 走 `terminal_shortcut_action`（macOS primary=meta）；
-   │         仅当 `has_selection && !empty` 才 Copy，否则 Suppress/Forward
-   │       - 写盘：`clipboard::set_clipboard_text` → platform `pbcopy` 路径
-   │       - 选区：`frontend/selection` + `begin_terminal_selection`；
-   │         **未见** 明确的 Shift-扩展选区分支（若用户依赖 shift-click 扩展，
-   │         可能根本没进 completed selection）
-   │     疑点（接手 agent 须分类，勿一次乱改）：
-   │       a) 选区视觉有、松手 auto-copy 写盘失败被吞
-   │       b) 选区空/未 complete（shift 手势未建 gesture）
-   │       c) Cmd+C 未识别为 primary 或 has_selection 假
-   │       d) 与 O2 同源：clipboard 写路径（pbcopy）失败
-   │     验收（可证伪，本机）：
-   │       1) 左键拖选多行 → 松手后 `pbpaste` 含所选正文；或状态栏 Copied N
-   │       2) 拖选后 **Cmd+C** → 同上
-   │       3) 用户原手势 **Shift+鼠标** 若产品应支持扩展选区：文档化或实现；
-   │          若不应支持：UI 不暗示成功、文案说明「用拖选或 Cmd+C」
-   │       4) 写盘失败时**禁止静默**：status/feedback 带 code（勿 `let _ =`）
-   │     域：`unix/frontend/mod.rs`（选区/complete/copy）、
-   │     `frontend/selection.rs`、`frontend/input.rs`（Cmd+C）、
-   │     `macos/clipboard.rs` set_text；**禁** windows remote 除非共享叶
-   │     优先级：**≥ O2**（同属复制粘贴刚需）；建议 O0 基线后 **O6 与 O1 可并行**
-   │     （文件域：O6 偏 frontend/clipboard 写，O1 偏 ime.rs）
-   └─ [ ] O-禁 文件域 / 协作
-         禁：`adapters/windows/**`、Win-only smoke 改绿、改 Candidate 政策
-         单写者：O1/O2/O6 注意 clipboard 写路径共享；O6 与 O2 可同 agent 串行
-         回写：每叶绿后 pathspec 提交 + 更新本节 checkbox + §十一 进度
+   ├─ [x] O0 接手基线（先做，只读）
+   ├─ [x] O1a **ImeStatus macOS adapter** `28d6959`（N1 osx 半叶）
+   │     ⚠ O1b Unix 状态栏 IME 段 **未开工**（跨平台布局，等用户定）— §11.7
+   ├─ [x] O2 粘贴 macOS 诊断完成、**判定不改码**（Ok("") 三态；T2 等 P-P1）— §11.11
+   ├─ [x] O3 install G7a 文案 `ee41cc6`；G2 无断链；G1 等 G-P1 — §11.12
+   ├─ [x] O4 合成路径对照：无需改码 — §11.9
+   ├─ [x] O5 CPU 实测无需开工 — §11.10
+   ├─ [x] O6 **Shift+选区复制** 已解 `fb573f9`（O6a 禁静默 + O6b shift-extend）
+   │     交付 §11.13；定因 §11.8 **全部成立**；修饰键管线早已存在只是未读
+   │     ⚠ 顺带暴露 main 红灯：`prd_alignment_public_command_missing:delete-buffer`
+   │     （非 O6 引入、非 flake；须有人认领 PRD 公开命令目录，§11.13）
+   ├─ [ ] O1b Unix 状态栏 IME 段 — **已拍板开工**（编排者 2026-08-05，见 §六）
+   │     对齐 Win `refresh_ime_label`；poll `ime::status()`；禁伪造 full_shape
+   ├─ [ ] O-fix 红灯认领：`prd_alignment_public_command_missing:delete-buffer`
+   │     **已拍板**：补 PRD 公开命令面提及 B′ buffer 族（含 delete-buffer），
+   │     使 prd-alignment 绿；**不**删 CLI 命令
+   └─ [x] O-禁：禁 Win IME 域；P-P1/G-P1/O1b **已由编排 agent 拍板**（§六）
 ```
 
 ## 一·五、v0.1.15 收敛工作树（**这是可执行清单**；上面 §一 是素材全集）
@@ -1088,10 +1049,12 @@ M. 多 Agent 观察与交接
 | **G-P2**（升级遇 running server 的默认策略） | G7b/c/d；**G7a 不受阻**（纯文案） | 只做 G7a 即可交付主要价值 |
 | **D1**（preflight 放宽 HEAD 约束） | 本版无叶依赖 | 不阻塞；但若拍板通过会弱化 D3 |
 | **P6**（Hub 是否单一 kind 底座） | 本版无叶依赖（H 组只做地基） | 不阻塞 v0.1.15 |
-| **P-P1**（粘贴 lossy vs 硬失败） | P 组全部（本版未纳入） | 不阻塞 |
+| **P-P1** | **已拍板（编排 2026-08-05）** 见 §六：T2 立项 v0.2.x；T1 不做；v0.1.15 不阻塞 | 粘贴产品化归 v0.2.x |
+| **G-P1** | **已拍板**：无 signed 时 **自动回落 unsigned-preview + 强制信任警告**（G1 可开工） | 解锁 G1 |
+| **O1b** | **已拍板开工** | Unix 状态栏 IME |
+| **O-fix** | **已拍板**：PRD 补 buffer 公开命令（修 prd_alignment 红） | main 红灯 |
 
-> **本版可在零决策拍板的情况下启动**：R 组 + A3/A4 + H4 + G2/G3/G6/G7a
-> 全部不依赖任何政策项。这是刻意的——不让计划卡在等拍板上。
+> **O 泳道技术决策由编排 agent 拍板，不转嫁董事长。** 域名/预算/Hub 形态等仍见 §五 5.7 人工项。
 
 ## 二·六 推迟表（**明确不进 v0.1.15，含理由**）
 
@@ -1485,11 +1448,13 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | P3 | 「皮肤」扩展面与 theme/plugin 打包的边界 | 决定 L-EXT 的范围与版本归口 |
 | P4 | computer-use 是否立项、归口 PRD、首发平台与证据门 | 决定 L-CU 是否进 v0.2.0 或更后 |
 | D1–D3 | 见 §一 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
-| G-P1 | macOS unsigned-preview 是否为默认公开通道（无 signed 时自动回落 vs 强制 opt-in） | 决定 G1 默认行为与 install/README 首屏命令 |
-| G-P2 | 升级遇到 running server：仅文案提示 / 关窗改 default 为 stop-server / 一键 apply 热切换 | 决定 G7 落 a–d 哪几档；用户已要求自适应或提示 |
-| P-P1 | 非法 UTF-8：lossy 还是硬失败；图像粘贴是否永远拒绝（建议 hard-deny 文案） | 决定 P1/P2 默认策略与错误码集合 |
-| P5 | 分发面归属：agenterm.work 作单一入口（含 releases.json 索引）还是仅 docs 别名 | 决定 H1/H5 形态与 E1 走向；P1 的具体化 |
-| P6 | Hub 是否统一为单一 `kind` 底座（plugin/skin/app/info 共用 catalog+验签+事务）还是分立系统 | 决定 P3 皮肤边界的答案与 M14 的范围 |
+| G-P1 | ~~待拍~~ → **2026-08-05 编排裁定**：无 Developer ID signed asset 时 install **自动选用 unsigned-preview**，并 **强制打印多行信任/预览警告**（不得静默当 stable）；有 signed 则优先 signed。G1 可据此实现 | 解锁 G1 |
+| G-P2 | ~~全档待拍~~ → **2026-08-05 编排裁定**：默认 **不**把关窗 default 改成 stop-server（保会话）；**已装 version > 运行 server version 时必须可感知提示**（G7a 已部分交付；G7b/c 可做文案/标注，**不**自动 kill）。一键 apply（G7d）默认 off，仅显式 flag | G7b/c 可开工；G7d 可选 |
+| P-P1 | ~~打包待拍~~ → **2026-08-05 编排裁定**：**拆开**——(1) **T2 类型感知** 立项，目标 v0.2.x（O2 已证 pbpaste 无法区分空/图/非法）；(2) **T1 图→路径 本版与下版均不做**（零证据）；(3) v0.1.15 粘贴保持 text-only，图像/无文本继续硬失败，文案可在 T2 前仅做「可能无文本」级提示 | O2 不改码成立；T2 进 v0.2.x |
+| P5 | 分发面归属：agenterm.work 作单一入口（含 releases.json 索引）还是仅 docs 别名 | 决定 H1/H5 形态与 E1 走向；P1 的具体化（**仍人工**） |
+| P6 | Hub 是否统一为单一 `kind` 底座（plugin/skin/app/info 共用 catalog+验签+事务）还是分立系统 | 决定 P3 皮肤边界的答案与 M14 的范围（**仍人工**） |
+| O1b | ~~等用户~~ → **2026-08-05 编排裁定：开工** Unix/macOS 状态栏增加 IME 段，消费 `ime::status()`，对齐 Win 语义；`full_shape` 不可得则不显示伪状态 | O1 闭环用户可见 |
+| O-fix | ~~只记录~~ → **2026-08-05 编排裁定：认领** B′ buffer 族（含 `delete-buffer`）写入 owning PRD 公开命令叙述，修 `prd_alignment_public_command_missing`；不删命令 | main 红灯 |
 
 ---
 
@@ -1526,6 +1491,8 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
 | 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§一 O 组 + §十一**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
 | 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
+| 2026-08-05 | **O6 关闭** `fb573f9`（O6a+O6b）；§11.8 定因全成立；agent(cc) 更正「pre-existing flake」归因 → 稳定红 `prd_alignment_public_command_missing:delete-buffer` |
+| 2026-08-05 | **编排拍板（不转嫁董事长）**：P-P1=T2 立 v0.2.x / T1 不做 / v0.1.15 text-only；G-P1=无 signed 自动 unsigned+警告；G-P2=不默认 kill server，版本落后须提示；**O1b 开工**；**O-fix 认领** PRD 补 buffer 公开命令。agent 问决策 → 编排回写 §五 5.7 + §一 O |
 
 ---
 
@@ -1667,9 +1634,9 @@ N1 原叙述「Unix 状态栏永远 `IME: off`」**不够准确**——真实情
 O1b **未擅自开工**：要动 `unix/frontend/render.rs` 状态栏布局（跨平台 UI 决策面），
 且 Win agent 正在同 crate 活动——先报用户再定。
 
-### 11.8 O6 代码级定因（2026-08-05 · 未改代码）
+### 11.8 O6 代码级定因（2026-08-05 · 诊断时未改代码；已由 `fb573f9` 落地，见 §11.13）
 
-按 §一 O6 的 a–d 分类逐条查证：
+按 §一 O6 的 a–d 分类逐条查证（诊断结论；实现状态见 §11.13）：
 
 | 疑点 | 结论 | 证据 |
 |------|------|------|
@@ -1697,8 +1664,8 @@ O1b **未擅自开工**：要动 `unix/frontend/render.rs` 状态栏布局（跨
   按住 Shift 且已有 `terminal_selection` 时，**扩展**锚点到当前 cell 而非新建手势。
   需先定：锚点取上次选区的 start 还是 end（xterm 取「较远端」）。
 
-**未擅自开工**：O6b 是行为新增且涉及手势语义（属产品决策）；
-O6a 虽小但会改 4 处调用点的用户可见文案。均先报用户。
+**历史注记**：诊断阶段曾「未擅自开工」；后由 agent(cc) 在用户阻塞优先级下
+落地 O6a+O6b（`fb573f9`），§11.13 为交付记录。
 
 ### 11.9 O4 合成路径对照（2026-08-05 · 只读核查，**结论：无需改动**）
 
@@ -1820,7 +1787,19 @@ $ pbpaste | wc -c
 需动 frontend 且受 G-P2 门控；未对真实运行中的 server（PID 48771）
 执行 `shutdown` 实测——那会打断用户正在用的会话，改用源码+pgrep 推证。
 
-### 11.13 O6 交付（2026-08-05 · `fb573f9` · **用户阻塞项已解**）
+### 11.13 O6 交付（2026-08-05 · `fb573f9` + `53a3749`）
+
+> ⚠️ **验证状态必须如实说明（我先前说过头了，此处更正）**：
+> 我一度写「O6 已修/用户阻塞项已解」，但**当时只跑了单测，没跑 GUI**。
+> 用户随后反馈「选中文复制还是不成功」——**根因是他跑的二进制不是修复后的**：
+> 安装版 `0.1.14-macos-aarch64` 构建于 **8/4 19:14**，
+> 而 O6 修复提交于 **8/5 22:44**。**旧码不含修复**。
+>
+> 现已 `cargo build --release` 出新二进制并在独立 instance（`--instance o6test`）
+> 拉起验证进程存活、CLI 可驱动。但**「Shift+鼠标选中文→复制成功」这一条
+> 端到端真实手势仍未由我亲手点击验证**（GUI 选区只能鼠标驱动，
+> `ui-interact select` 是窗口选择不是文本选区）。
+> **待用户在新二进制上实测确认后方可标记为已验证。**
 
 **O6a 止血**：四处 `let _ = copy_terminal_selection()` 全部改为
 `Err` 时 `set_status_message("Copy failed: {error}")`，
@@ -1841,6 +1820,23 @@ Cmd+C 那处另加 `request_redraw()`（对齐紧邻 `Paste` 分支的写法）�
 > 这也解释了为什么 §11.8 的「文档与实现不一致」成立得如此彻底。
 
 **§11.8 定因全部成立**，无一条被推翻。
+
+#### 中文场景的追加核查（`53a3749`）
+
+用户报「选含中文的复制不成功」，我逐层查证**中文本身不是断点**：
+
+| 层 | 实测 |
+|----|------|
+| 剪贴板写入 | `set_text("中文测试")` → `pbpaste` 完全一致；多行中文、emoji 混排同样 `match=true` |
+| 选区取文本 | `terminal_selection_text` 用 `is_wide_continuation` 跳过续格，**不会把中文切半**；新增单测 `all_wide_selection_returns_whole_characters_and_counts_chars_not_bytes` |
+| 命中测试 | `terminal_cell_at` 按网格列算，宽字符无特殊路径 |
+
+**但查出一个真 bug 并已修**（`53a3749`）：
+`copy_terminal_selection` 用 `text.len()` 报长度——
+**Rust `String::len()` 是字节数不是字符数**。
+选 4 个中文会显示 **`Copied 12 characters`**，
+**复制其实成功了，但反馈数字是错的**，容易被读成「复制坏了」。
+已改为 `text.chars().count()`，并加单测钉住 4 chars / 12 bytes 的区别。
 
 #### ⚠️ 一处需要更正的测试归因（我复核后修正）
 
@@ -1878,6 +1874,17 @@ prd_alignment_public_command_missing:delete-buffer
 ### 11.5 激励
 
 每一步都在把 macOS 从「stub 假平权」拉回 facade 真契约；本机验证是 Win 侧无法替代的价值。
+
+### 11.14 编排拍板后的 OSX agent 下一刀（2026-08-05）
+
+> **给仍在本机的 agent：以下为已授权动作，勿再问董事长。**
+
+| 序 | 叶 | 动作 | 验收 |
+|----|-----|------|------|
+| 1 | **O1b** | Unix `StatusBarView` + 布局加 IME 段；poll/刷新 `ime::status()`；对齐 Win 文案风格 | 真机：微信输入法时栏上可见名；ABC 为 latin/布局名 |
+| 2 | **O-fix** | 在 owning PRD（建议 `PRD_02_17` 或 control/CLI 契约段）**提及** B′ 公开命令：`set-buffer`/`load-buffer`/`show-buffer`/`list-buffers`/`delete-buffer`/`paste-buffer`（及已 shipped 别名），满足 `product_mentions` | `prd_alignment` / 相关 rhai 绿；**不**删 CLI |
+| 3 | **G1**（若碰 install） | 无 signed asset → 自动 unsigned-preview + 多行警告 | `curl\|bash` 无 env 可装 macOS preview |
+| 4 | **勿做** | T1 图路径；G7d 默认热切换；改 Win IME | — |
 
 ---
 
