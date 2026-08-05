@@ -557,6 +557,61 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M9 governed LLM gateway hypothesis: local forwarding, routing, quota,
   audit, cost, credential isolation, and redaction remain unassigned until
   scripting, MCP, and event-core gates produce a concrete product need
+- [ ] M13 / v0.2.x Distribution surface and one package substrate
+  - [ ] `agenterm.work` becomes the single public distribution entry point:
+    OS/architecture detection, one copyable install command per platform, a
+    `302` artifact redirect to the Release bytes, and a machine-readable
+    `releases.json` index derived from the existing per-artifact
+    `.provenance.json` and the sealed candidate manifest; no second source of
+    release truth and no proxying of Release bytes
+  - [ ] the installer surface reaches platform parity: `install.sh` and a new
+    `install.ps1` share one channel model (`stable` / `preview`), one
+    versioned `releases/<version>` + `current` layout, one SHA-256 gate and
+    one `installed.json` record; Windows stays a portable no-admin payload and
+    does not acquire an MSI or registry footprint
+  - [ ] supply-chain evidence becomes user-visible rather than CI-only: the
+    installer verifies the artifact `.provenance.json` against the requested
+    version and measured digest, prints commit / tag / build log / signed /
+    notarized state, and stores it locally; `provenance.sbom_sha256` is
+    populated rather than the empty string it ships as today
+  - [ ] macOS publishing is data-driven, not documentation-driven: while the
+    Apple Developer enrollment is incomplete, `variant: unsigned-preview` is a
+    labeled public preview channel that requires one explicit acknowledgement
+    and never installs silently; once `ENABLE_SIGNED_MACOS_RELEASE` is true the
+    same clients prefer the signed and notarized artifact with no copy change
+  - [ ] `agenterm-cli update` owns check / apply / rollback / retention over
+    the same verification path as first install; delta updates are an explicit
+    non-goal, and applying an update to a running server keeps the existing
+    keep-server session semantics while making the disk-versus-live version
+    difference understandable without reading documentation
+- [ ] M14 / v0.2.x–v0.3.x Hub ecosystem over one substrate
+  - [ ] PluginHub, SkinHub, AppHub and InfoHub are product-class views over a
+    single softmgr catalog / source / install / update / rollback substrate
+    keyed by a `kind` field; skins are `kind: skin` packages over the existing
+    theme contract and never become a second extension system
+  - [ ] discovery is cross-kind and renders one signed registry index that both
+    the web surface and Control Center consume; the index is a static signed
+    document before it is ever a service
+  - [ ] trust is tiered and visible: `first-party` / `verified` / `community` /
+    `unverified` derive from provenance, SBOM and digest evidence equivalent to
+    the product's own release chain; executing kinds (`plugin`, `app`) default
+    to `verified` or better and declare a permission manifest, while
+    non-executing kinds may relax to `community`
+  - [ ] host compatibility is declared per package and pre-checked before a
+    host upgrade disables installed content; the plugin API revision reuses the
+    Script Runtime and MCP contracts rather than defining a third surface
+  - [ ] offline is a first-class state: a stale-labeled local index, fully
+    offline operation of installed packages, offline export/import over the
+    same verification path, and a self-hosted index URL for restricted networks
+  - [ ] curation starts closed and opens on evidence: repository-reviewed
+    manifests first, self-service submission with automated provenance and
+    permission gates second, and content-addressed distribution over
+    `agenterm-net` only after N3; the trust index and its signing key remain
+    centrally owned even when hosting is decentralized
+  - [ ] non-goals: no public marketplace transactions, no silent installs, no
+    privileged bridge for remote pages, and no distribution-native packages
+    (deb / rpm / Homebrew / MSI / Store) until one channel is proven worth its
+    standing maintenance cost
 - [ ] Unscheduled optional-application ecosystem
   - [ ] treat the independently versioned `agenterm-{role}.exe` family as
     future software-distribution units backed by signed inventory,

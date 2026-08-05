@@ -203,6 +203,48 @@ v0.1.15  Feedback shift-left & release-lane economics
          仅提示 / 关窗改 default / 提供一键 apply（G7 a–d）——
          用户已要求「自适应或提示，否则用户不知道该怎么做」；
          agent 不自主改 keep-server 默认语义，须人工拍板后再改 default_action
+
+└─ H. 分发面地基（Hub 前置，只做地基不做 Hub；对应 PRD 未来树 M13/M14）
+   ├─ [ ] H1 生成 `releases.json` 发布索引（CI 静态产物）
+   │     动机：install.sh 现在靠字符串拼 artifact 名 + `releases/latest`
+   │     重定向猜版本；未来 `agenterm-cli update`、agenterm.work 下载页、
+   │     Hub 客户端会各自再 scrape 一遍 GitHub → 四个真相源
+   │     现状（已核）：v0.1.14 资产共 23 项，每包已带 `.sha256` +
+   │     `.provenance.json`，另有 sbom.spdx.json / qualification-receipt.json /
+   │     candidate-manifest.json；字段齐全，索引可**纯派生**不新造事实
+   │     建议：release.yml 成功后由 provenance 派生 `releases.json`
+   │     （channels{stable,preview} + releases[].artifacts[]{os,arch,
+   │     variant,name,sha256,provenance,signed,notarized}）发到 Pages；
+   │     `variant` 字段直接解掉 macOS `-unsigned-preview` 后缀猜测
+   ├─ [ ] H2 install.sh 改为消费 `releases.json`（与 G1/G5 合并落地）
+   │     动机：G1 的 macOS happy path 断裂本质是「后缀靠 env 变量猜」；
+   │     有索引后它退化成读一个 `variant` 字段
+   │     建议：与 G5（old→new 摘要 / already-latest no-op）同批改，
+   │     避免两次动同一段 resolve 逻辑
+   ├─ [ ] H3 provenance 用户可见化（把 CI 证据交到用户手上）
+   │     动机：`.provenance.json` 每包都发但**用户端零消费**——install.sh
+   │     只校 sha256，从不下载 provenance
+   │     建议：下载并校验 provenance 的 sha256/version/source_tag 与实测
+   │     一致，收尾打印 commit / tag / build_log / signed / notarized；
+   │     与 G3 的 `installed.json`（version/channel/variant/source_commit/
+   │     sha256/installed_at/provenance 原文）同一批写入
+   ├─ [ ] H4 修 `provenance.sbom_sha256` 空串
+   │     动机：**已实测核实** v0.1.14 linux-x86_64 的 provenance
+   │     `sbom_sha256` 确为空字符串——声明了字段却未填，是真实证据缺口，
+   │     且 Hub 信任分级（M14）要复用这个字段
+   │     建议：打包步骤把 `dist/agenterm-<version>-sbom.spdx.json` 的
+   │     摘要写进各平台 provenance；低风险，纯补值
+   ├─ [ ] H5 agenterm.work 接通（**依赖决策项 P1**，本版只做别名不改内容）
+   │     现状（已核）：根 CNAME 与 docs/CNAME 均为 agenterm.mega.tech，
+   │     docs/index.html 的 canonical/og:url 同；agenterm.work 未接任何内容
+   │     建议：agenterm.work 设为 canonical，mega.tech 301 过去；
+   │     README 的 raw.githubusercontent 安装命令换成
+   │     `https://agenterm.work/install.sh`（技术债短链化，不改脚本实现）
+   │     联动：与 E1（pages-build 噪音）取向绑定——走 Pages 则 Pages 保留
+   └─ [ ] H6 PRD 未来树落文：M13（分发面）/ M14（Hub 底座）
+         **已落地**（本轮已写入 `prd/PRD_02_18_roadmap.md`），
+         与 §五 L-EXT / L-PKG 主线互链
+         非目标：本版**不写任何 Hub 代码**，不建 registry，不动 softmgr
 ```
 
 ## 二、排序建议（起稿人观点）
@@ -390,6 +432,18 @@ v0.1.15  Feedback shift-left & release-lane economics
 - rhai：扩展脚本/任务目录已走 `agenterm-rhai` unrestricted runtime；
   包管理与脚本分发未来可接 L-NET 的内容寻址（H-T1 CID-signed modules）。
 
+**产品设计补充（2026-08-05，已写入 PRD_02_18 M14）**：把 M12「PluginHub 与
+AppHub 同底座」这句**扩展到全部四类 Hub**——plugin / skin / app / info
+只是同一包描述里 `kind` 字段的取值，共用 catalog、验签路径与事务安装器。
+这直接给出 **P3 的候选答案：皮肤不是新的扩展体系，是 `kind: skin` 的包**
+（纯数据、权限清单为空、宿主耦合最低），因此它也是验证整条
+catalog→install→rollback 链路**最安全的第一个靶子**，建议 SkinHub 先落地。
+信任分级 `first-party / verified / community / unverified` 由 provenance +
+SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 与 H3/H4），
+**这是相对多数插件市场的真实差异化点**，而非新造机制。
+执行类（plugin/app）默认要求 ≥ `verified` 且需声明权限清单；
+非执行类（skin/info）可放宽到 `community`。见新增决策项 P6。
+
 ### 5.5 主线 L-PKG：远程包管理（agenterm.work 域名）
 
 - 用户声明：`https://agenterm.work/` 对应本仓；目前仓库 CNAME 与
@@ -476,6 +530,8 @@ v0.1.15  Feedback shift-left & release-lane economics
 | D1–D3 | 见 §一 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
 | G-P1 | macOS unsigned-preview 是否为默认公开通道（无 signed 时自动回落 vs 强制 opt-in） | 决定 G1 默认行为与 install/README 首屏命令 |
 | G-P2 | 升级遇到 running server：仅文案提示 / 关窗改 default 为 stop-server / 一键 apply 热切换 | 决定 G7 落 a–d 哪几档；用户已要求自适应或提示 |
+| P5 | 分发面归属：agenterm.work 作单一入口（含 releases.json 索引）还是仅 docs 别名 | 决定 H1/H5 形态与 E1 走向；P1 的具体化 |
+| P6 | Hub 是否统一为单一 `kind` 底座（plugin/skin/app/info 共用 catalog+验签+事务）还是分立系统 | 决定 P3 皮肤边界的答案与 M14 的范围 |
 
 ---
 
