@@ -56,10 +56,10 @@
 - 阻塞: 无
 
 ### 分身4 · 2026-08-05
-- 状态: IDLE→已唤醒做 Phase 2B
+- 状态: RUNNING — Phase 2B（rebase main 后消费 assets/skins）
 - bcId: `bc-c3e01145-b870-4e74-b18c-f3aea06ea800`
 - URL: https://cursor.com/agents/bc-c3e01145-b870-4e74-b18c-f3aea06ea800
-- 分支: `cursor/skins-eng-phase2a` tip `0f4e4b6`（Phase 2A 待合；先做 2B 再一并审）
-- 证据 2A: AppearancePreset 四 id；settings 迁移；Win/Unix picker；theme-smoke；`cargo test --lib` 618 passed（自称）
-- 下一步: rebase main → Phase 2B 消费 `assets/skins/**`
+- 分支: `cursor/skins-eng-phase2a`
+- 证据 2A: AppearancePreset 四 id；settings 迁移；Win/Unix picker；theme-smoke；`cargo test --lib` 618 passed
+- 下一步: palette/manifest/title/metrics/icon；fancy≠classic smoke
 - 阻塞: 无
