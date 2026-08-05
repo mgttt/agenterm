@@ -3000,7 +3000,10 @@ impl UnixApp {
         }
         let text = terminal_selection_text(self.tabs[position].parser.screen(), selection);
         clipboard::set_clipboard_text(&text)?;
-        self.set_status_message(format!("Copied {} characters", text.len()));
+        // Count characters, not bytes: `String::len` is a byte count, so a
+        // CJK selection reported three times its real size ("Copied 12
+        // characters" for four Chinese characters).
+        self.set_status_message(format!("Copied {} characters", text.chars().count()));
         Ok(())
     }
 

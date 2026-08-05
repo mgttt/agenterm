@@ -734,4 +734,39 @@ mod tests {
         };
         assert_eq!(terminal_selection_text(wide_parser.screen(), wide), "你A");
     }
+
+    /// An all-CJK selection is the case users actually hit, and it is the one
+    /// where a byte/column confusion would show up: every glyph occupies two
+    /// grid columns, so the column span is twice the character count.
+    #[test]
+    fn all_wide_selection_returns_whole_characters_and_counts_chars_not_bytes() {
+        let mut parser = vt100::Parser::new(1, 12, 0);
+        parser.process("中文测试".as_bytes());
+
+        // Four characters span eight columns; select all of them.
+        let whole = TerminalSelection {
+            tab_id: 1,
+            anchor: TerminalPoint { row: 0, col: 0 },
+            focus: TerminalPoint { row: 0, col: 7 },
+            dragging: false,
+            moved: true,
+        };
+        let text = terminal_selection_text(parser.screen(), whole);
+        assert_eq!(text, "中文测试");
+        // The status line reports characters, so it must not report the 12
+        // UTF-8 bytes this string occupies.
+        assert_eq!(text.chars().count(), 4);
+        assert_eq!(text.len(), 12);
+
+        // Ending on a wide character's continuation column must still yield
+        // that whole character rather than half of it or nothing.
+        let ends_mid_glyph = TerminalSelection {
+            focus: TerminalPoint { row: 0, col: 2 },
+            ..whole
+        };
+        assert_eq!(
+            terminal_selection_text(parser.screen(), ends_mid_glyph),
+            "中文"
+        );
+    }
 }
