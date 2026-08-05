@@ -17,7 +17,7 @@
 | `origin/main` | skins Phase 2B 已合；`bb5ef28` cursor_agent.py |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
-| palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 删除中 |
+| palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | auto-dream | Automations **`主控 造梦`** cron `21 * * * *` UTC；skill=`fleet-duty.md`；`duty.lock` 空闲 |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -39,7 +39,7 @@
 ### 主控2 · 2026-08-05
 - 状态: RUNNING — 自主推进抽象复用
 - 分支: `main`
-- 下一步: skins palette SSOT（去 DARK/LIGHT）→ 可选 shared preset picker
+- 下一步: 可选 Win/Unix shared preset picker；deferred skins 叶按需再派
 - 阻塞: 无
 - 已合: 分身3 Phase 1；分身4 Phase 2A/2B；`bb5ef28` cursor_agent.py
 - 舰队: pulse/duty；Automations `主控 造梦` 已挂
