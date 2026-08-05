@@ -47,12 +47,12 @@
 - 已合: 分身3 Phase 1（`cursor/skins-design-v1` → main）
 
 ### 分身3 · 2026-08-05
-- 状态: DONE — Phase 1 已合 main
+- 状态: IDLE — Phase 1 已合 main @ 09b275a
 - bcId: `bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b`
 - URL: https://cursor.com/agents/bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b
-- 分支: `cursor/skins-design-v1`（已 ff 合 main，可删）
-- 证据: `assets/skins/**` @ 合入 tip
-- 下一步: 待命；品牌终稿 icon 若需再开叶
+- 分支: —（设计叶已删）
+- 证据: `assets/skins/**`
+- 下一步: 待命；fancy 终稿 icon 再开 `cursor/skins-design-icon`（仅 `assets/skins/fancy/icon.*` + `icon-direction.md`）
 - 阻塞: 无
 
 ### 分身4 · 2026-08-05
