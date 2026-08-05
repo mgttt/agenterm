@@ -2,7 +2,7 @@
 use crate::{
     locale::{LocaleId, UiText},
     settings::AppConfig,
-    theme::ThemeId,
+    theme::AppearancePreset,
     ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
     ui_geometry::{PixelRect, TerminalScrollbarGeometry, pixel_rect_json},
     working_context::{CwdTracker, ProxyState, ShellKind},
@@ -52,29 +52,62 @@ pub(crate) fn locale_json(locale: LocaleId) -> serde_json::Value {
 
 pub(crate) fn settings_json(
     config: &AppConfig,
+    locale: LocaleId,
     settings_open: bool,
-    theme_draft: Option<&str>,
+    preset_draft: Option<&str>,
     address: &str,
     active_tab_id: Option<&str>,
 ) -> serde_json::Value {
     let terminal_override =
         active_tab_id.and_then(|tab_id| config.terminal_override_entry(address, tab_id).cloned());
     let effective = config.effective_terminal_appearance(address, active_tab_id);
+    let draft = preset_draft.unwrap_or(config.appearance_preset.as_str());
     serde_json::json!({
         "terminal_font_family": config.terminal_font_family,
         "terminal_font_size": config.terminal_font_size,
-        "color_theme": config.color_theme.as_str(),
+        "appearance_preset": config.appearance_preset.as_str(),
+        "skin": config.appearance_preset.skin().as_str(),
+        "luminance": config.appearance_preset.luminance().as_str(),
+        "color_theme": config.appearance_preset.color_theme().as_str(),
         "current_terminal_override": terminal_override,
         "effective": {
             "terminal_font_family": effective.terminal_font_family,
             "terminal_font_size": effective.terminal_font_size,
-            "color_theme": effective.color_theme.as_str(),
+            "appearance_preset": effective.appearance_preset.as_str(),
+            "skin": effective.appearance_preset.skin().as_str(),
+            "luminance": effective.appearance_preset.luminance().as_str(),
+            "color_theme": effective.color_theme().as_str(),
         },
-        "theme_draft": settings_open.then(|| theme_draft.unwrap_or(config.color_theme.as_str())),
-        "theme_options": ThemeId::ALL.map(|theme| serde_json::json!({
-            "id": theme.as_str(),
-            "label": theme.label(),
-        })),
+        "appearance_preset_draft": settings_open.then(|| draft),
+        "theme_draft": settings_open.then(|| draft),
+        "theme_options": AppearancePreset::ALL.map(|preset| {
+            let metrics = preset.skin_metrics();
+            serde_json::json!({
+            "id": preset.as_str(),
+            "label": preset.label(locale),
+            "description": preset.description(locale),
+            "skin": preset.skin().as_str(),
+            "luminance": preset.luminance().as_str(),
+            "color_theme": preset.color_theme().as_str(),
+            "accent": format!(
+                "#{:02X}{:02X}{:02X}",
+                preset.palette().accent.red,
+                preset.palette().accent.green,
+                preset.palette().accent.blue
+            ),
+            "metrics": {
+                "corner_radius_control_px": metrics.corner_radius_control_px,
+                "corner_radius_modal_px": metrics.corner_radius_modal_px,
+                "border_width_px": metrics.border_width_px,
+                "scrollbar_style": metrics.scrollbar_style,
+            },
+        })}),
+        "appearance_metrics": {
+            "corner_radius_control_px": config.appearance_preset.skin_metrics().corner_radius_control_px,
+            "corner_radius_modal_px": config.appearance_preset.skin_metrics().corner_radius_modal_px,
+            "border_width_px": config.appearance_preset.skin_metrics().border_width_px,
+            "scrollbar_style": config.appearance_preset.skin_metrics().scrollbar_style,
+        },
         "tabs_visible": config.tabs_visible,
         "tabs_width": config.tabs_width,
     })
@@ -218,12 +251,20 @@ mod tests {
     #[test]
     fn locale_and_settings_blocks_match_win_shape() {
         let config = AppConfig::default();
-        let settings = settings_json(&config, true, Some("dark"), "local", Some("@1"));
+        let settings = settings_json(
+            &config,
+            LocaleId::English,
+            true,
+            Some("classic-night"),
+            "local",
+            Some("@1"),
+        );
         assert_eq!(
             settings["terminal_font_family"],
             config.terminal_font_family
         );
-        assert!(settings["theme_options"].is_array());
+        assert_eq!(settings["appearance_preset"], "classic-night");
+        assert_eq!(settings["theme_options"].as_array().unwrap().len(), 4);
         assert_eq!(locale_json(LocaleId::English)["controls"]["send"], "Send");
     }
 

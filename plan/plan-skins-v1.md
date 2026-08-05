@@ -64,7 +64,7 @@ Deliver under `assets/skins/`:
 Evidence: files on a short-lived `cursor/skins-design-*` branch; draft PR
 optional; 主控2 merges to `main` after review.
 
-### Phase 2A — Engineering scaffold (分身4, parallel with Phase 1)
+### Phase 2A — Engineering scaffold (分身4, parallel with Phase 1) ✅
 
 1. Introduce `SkinId` × `Luminance` (or `AppearancePreset`) with composite ids
 2. Map `classic-night`/`classic-day` to existing `DARK`/`LIGHT` const palettes
@@ -76,13 +76,19 @@ optional; 主控2 merges to `main` after review.
 7. Small commits; prefer merge to `main` via 主控2 review (avoid long-lived
    orphan branches)
 
-### Phase 2B — Consume design (分身4 after Phase 1 merge)
+### Phase 2B — Consume design (分身4 after Phase 1 merge) ✅
 
 1. Wire fancy (and any classic tweaks) from `assets/skins` or generated consts
 2. Title template unification (Win + Unix)
 3. Fancy icons + Linux runtime window icon where feasible
 4. Render metrics (radius/border) if the design freeze includes them
 5. PNG/render-parity evidence for luminance pairs; snapshot proves fancy≠classic
+
+**Phase 2B deferred (post-merge leaves):**
+
+- Apply 后 Linux window icon 不刷新（仅 startup 设一次）
+- Windows `build.rs` 仍 embed `assets/agenterm.ico`，未切 fancy skin icon
+- `SkinMetrics` corner radius / border 仅暴露于 `ui-snapshot`，Win/Unix render 仍 rectilinear
 
 ### Phase 3 — Integration (主控2)
 

@@ -215,7 +215,7 @@ try {
     let live_window = gui.platform_facts;
     require(
         live_window.top_level_window_title ==
-            "AgenTerm-" + version + ":main",
+            "AgenTerm " + version + " — main",
         "startup_window_title:" + live_window.top_level_window_title
     );
 
