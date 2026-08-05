@@ -254,6 +254,16 @@ impl ControlWindowBackend for Backend {
         }
         Ok(())
     }
+    fn select_all_control_text(&self, id: ControlId) -> Result<(), ControlWindowError> {
+        // EM_SETSEL(0, -1) selects the whole buffer in a native edit control.
+        // The Win32 edit does not handle Ctrl+A itself, so the product layer
+        // routes the chord here instead of relying on default processing.
+        const EM_SETSEL: u32 = 0x00B1;
+        unsafe {
+            SendMessageW(self.control(id)?, EM_SETSEL, 0, -1);
+        }
+        Ok(())
+    }
     fn set_control_bounds(&self, id: ControlId, b: PixelRect) -> Result<(), ControlWindowError> {
         let control = self.control(id)?;
         let mut current: RECT = unsafe { mem::zeroed() };

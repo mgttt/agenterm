@@ -313,6 +313,7 @@ pub(crate) trait ControlWindowBackend {
     fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError>;
     fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn paste_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError>;
+    fn select_all_control_text(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn set_control_bounds(
         &self,
         id: ControlId,
@@ -410,6 +411,10 @@ impl ControlWindow {
     /// Pastes the platform clipboard at the current native text-control selection.
     pub fn paste_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {
         self.0.paste_control_selection(id)
+    }
+    /// Selects the whole text of a native text control.
+    pub fn select_all_control_text(&self, id: ControlId) -> Result<(), ControlWindowError> {
+        self.0.select_all_control_text(id)
     }
     pub fn set_control_bounds(
         &self,

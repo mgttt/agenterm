@@ -49,6 +49,8 @@ const WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH: i32 = 36;
 const WORKSPACE_COMPACT_FONT_BUTTON_WIDTH: i32 = 22;
 const STATUS_TABS_WIDTH: i32 = 72;
 const STATUS_CWD_WIDTH: i32 = 260;
+const STATUS_CURSOR_WIDTH: i32 = 148;
+const STATUS_MOUSE_WIDTH: i32 = 172;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PixelRect {
@@ -127,6 +129,10 @@ pub(crate) struct StatusSegmentLayout {
     pub(crate) cwd: PixelRect,
     /// Flexible space reserved for future bounded status providers.
     pub(crate) provider: PixelRect,
+    /// Terminal cursor readout (CURSOR(column,row)).
+    pub(crate) cursor: PixelRect,
+    /// Pointer readout (MOUSE(column,row)).
+    pub(crate) mouse: PixelRect,
     pub(crate) proxy: PixelRect,
 }
 
@@ -385,11 +391,20 @@ fn status_segment_layout(status: PixelRect, tabs_visible: bool) -> StatusSegment
     // let proxy_left = right - proxy_width;
     let cwd_width = STATUS_CWD_WIDTH.min((right - left).max(0));
     let cwd_right = left + cwd_width;
+    // Right-anchored telemetry readouts. CWD keeps priority: on narrow bars the
+    // readout group collapses toward the right edge instead of overlapping CWD,
+    // and the provider keeps whatever flexible space remains between them.
+    let mouse_width = STATUS_MOUSE_WIDTH.min((right - cwd_right).max(0));
+    let mouse_left = right - mouse_width;
+    let cursor_width = STATUS_CURSOR_WIDTH.min((mouse_left - cwd_right).max(0));
+    let cursor_left = mouse_left - cursor_width;
 
     StatusSegmentLayout {
         tabs_recovery,
         cwd: rect(left, status.top, cwd_right, status.bottom),
-        provider: rect(cwd_right, status.top, right, status.bottom),
+        provider: rect(cwd_right, status.top, cursor_left, status.bottom),
+        cursor: rect(cursor_left, status.top, mouse_left, status.bottom),
+        mouse: rect(mouse_left, status.top, right, status.bottom),
         proxy: rect(right, status.top, right, status.bottom),
     }
 }
@@ -1096,7 +1111,13 @@ mod tests {
         assert_eq!(geometry.status_segments.tabs_recovery, None);
         assert_eq!(geometry.status_segments.cwd.width(), STATUS_CWD_WIDTH);
         assert_eq!(geometry.status_segments.proxy.width(), 0);
-        assert_eq!(geometry.status_segments.provider.width(), 490);
+        assert_eq!(geometry.status_segments.provider.width(), 170);
+        assert_eq!(geometry.status_segments.cursor.width(), STATUS_CURSOR_WIDTH);
+        assert_eq!(geometry.status_segments.mouse.width(), STATUS_MOUSE_WIDTH);
+        assert_eq!(
+            geometry.status_segments.mouse.right,
+            geometry.status_segments.proxy.left
+        );
         assert_eq!(geometry.sidebar_tree, rect(0, 0, 244, 700));
         assert_toolbar_valid(geometry, WorkspaceToolbarMode::Full);
     }
@@ -1188,12 +1209,16 @@ mod tests {
         assert_eq!(segments.proxy.width(), 0);
         assert_eq!(segments.cwd.width(), 138);
         assert_eq!(segments.cwd.right, segments.provider.left);
+        assert_eq!(segments.cursor.width(), 0);
+        assert_eq!(segments.mouse.width(), 0);
         assert_eq!(segments.provider.right, segments.proxy.left);
 
         let tiny = layout(40, 100, false, 250);
         assert_eq!(tiny.status_segments.tabs_recovery.unwrap().width(), 40);
         assert_eq!(tiny.status_segments.cwd.width(), 0);
         assert_eq!(tiny.status_segments.provider.width(), 0);
+        assert_eq!(tiny.status_segments.cursor.width(), 0);
+        assert_eq!(tiny.status_segments.mouse.width(), 0);
         assert_eq!(tiny.status_segments.proxy.width(), 0);
     }
 
@@ -1226,6 +1251,8 @@ mod tests {
                 geometry.status,
                 geometry.status_segments.cwd,
                 geometry.status_segments.provider,
+                geometry.status_segments.cursor,
+                geometry.status_segments.mouse,
                 geometry.status_segments.proxy,
             ] {
                 assert_valid_rect(candidate, geometry.client);

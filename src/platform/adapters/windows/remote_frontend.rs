@@ -685,6 +685,9 @@ struct RemoteWindowState {
     pointer_modifiers: input::ModifierState,
     mouse_report_button: Option<u8>,
     mouse_report_cell: Option<(u16, u16)>,
+    /// Last pointer cell over the terminal grid, kept for the status-bar
+    /// MOUSE readout. `None` until the pointer first enters the grid.
+    last_pointer_cell: Option<(u32, u32)>,
     wheel_accumulator: WheelAccumulator,
     scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_scroll_offset: usize,
@@ -883,6 +886,7 @@ impl RemoteWindowState {
             pointer_modifiers: input::ModifierState::empty(),
             mouse_report_button: None,
             mouse_report_cell: None,
+            last_pointer_cell: None,
             wheel_accumulator: WheelAccumulator::default(),
             scroll_drag: None,
             sidebar_scroll_offset: 0,
@@ -2263,6 +2267,14 @@ impl RemoteWindowState {
         win_rect(self.workspace_geometry().status_segments.provider)
     }
 
+    fn cursor_status_rect(&self) -> ProductPixelRect {
+        win_rect(self.workspace_geometry().status_segments.cursor)
+    }
+
+    fn mouse_status_rect(&self) -> ProductPixelRect {
+        win_rect(self.workspace_geometry().status_segments.mouse)
+    }
+
     /// Re-read the host input method into the status-bar label, reporting
     /// whether the rendered text changed.
     ///
@@ -3287,6 +3299,59 @@ impl RemoteWindowState {
             return true;
         }
         false
+    }
+
+    /// Composer strip key chords on the native edit control: Ctrl+O submits
+    /// (Send) and Ctrl+A selects all. Everything else falls through to the
+    /// edit control's native processing (including native Ctrl+C/V/X).
+    fn handle_composer_keydown(&mut self, event: &input::NormalizedKeyEvent) -> bool {
+        if self.window.focused_target() != FocusTarget::Control(self.edit) {
+            return false;
+        }
+        let mut scratch = String::new();
+        let mut scratch_select_all = false;
+        match crate::frontend::input::composer_key_action(
+            event,
+            &mut scratch,
+            &mut scratch_select_all,
+        ) {
+            crate::frontend::input::ComposerKeyAction::Submit => {
+                self.send_composer();
+                true
+            }
+            crate::frontend::input::ComposerKeyAction::SelectAll => {
+                if let Err(error) = self.window.select_all_control_text(self.edit) {
+                    self.last_error = Some(format!("Select all failed: {error}"));
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Remember the terminal cell under the pointer for the status-bar MOUSE
+    /// readout, reporting whether the cell changed since the last move.
+    fn track_pointer_cell(&mut self, x: i32, y: i32) -> bool {
+        let (_, terminal, _, _) = self.layout_rects();
+        let cell = if x >= terminal.left
+            && x < terminal.right
+            && y >= terminal.top
+            && y < terminal.bottom
+            && self.cell_width > 0
+            && self.cell_height > 0
+        {
+            Some((
+                u32::try_from((x - terminal.left) / self.cell_width).unwrap_or(0),
+                u32::try_from((y - terminal.top) / self.cell_height).unwrap_or(0),
+            ))
+        } else {
+            None
+        };
+        if cell == self.last_pointer_cell {
+            return false;
+        }
+        self.last_pointer_cell = cell;
+        true
     }
 
     fn handle_tab_editor_keydown(&mut self, key: u32, modifiers: input::ModifierState) -> bool {
@@ -5474,6 +5539,34 @@ impl RemoteWindowState {
                 palette.muted_text.canvas_rgb(),
             );
         }
+        if let Some(tab) = self.active_tab() {
+            let cursor_segment = self.cursor_status_rect();
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: cursor_segment.left + MARGIN,
+                    top: cursor_segment.top,
+                    right: cursor_segment.right - MARGIN,
+                    bottom: cursor_segment.bottom,
+                },
+                &format!("CURSOR({},{})", tab.screen.cursor.column, tab.screen.cursor.row),
+                palette.muted_text.canvas_rgb(),
+            );
+        }
+        if let Some((column, row)) = self.last_pointer_cell {
+            let mouse_segment = self.mouse_status_rect();
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: mouse_segment.left + MARGIN,
+                    top: mouse_segment.top,
+                    right: mouse_segment.right - MARGIN,
+                    bottom: mouse_segment.bottom,
+                },
+                &format!("MOUSE({column},{row})"),
+                palette.muted_text.canvas_rgb(),
+            );
+        }
         if !self.focus_gate().full_modal_blocked() {
             let focus = match self.current_focus_surface() {
                 RemoteFocusSurface::Terminal => terminal,
@@ -6322,6 +6415,7 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 if let Some(key) = normalized_virtual_key(&event.logical) {
                     consumed = state.handle_tab_editor_keydown(key, event.modifiers)
                         || state.handle_cwd_editor_keydown(key, event.modifiers)
+                        || state.handle_composer_keydown(&event)
                         || state.handle_keyboard_navigation_with_modifiers(key, event.modifiers)
                         || state.handle_window_keydown(key, event.modifiers);
                     redraw = consumed;
@@ -6340,7 +6434,8 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 modifiers,
             } => {
                 state.pointer_modifiers = modifiers;
-                redraw = state.handle_pointer_moved(position.x, position.y);
+                let cell_changed = state.track_pointer_cell(position.x, position.y);
+                redraw = state.handle_pointer_moved(position.x, position.y) || cell_changed;
             }
             ControlWindowEvent::PointerButton {
                 button: PointerButton::Left,
