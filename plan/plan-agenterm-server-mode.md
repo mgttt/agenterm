@@ -1,4 +1,4 @@
-# Plan: `agenterm --server` authority entry
+# Plan: `agenterm server` authority entry
 
 Status: **implemented on main** (2026-08-05).  
 Product contract: [`prd/PRD_02_02_executable_family.md`](../prd/PRD_02_02_executable_family.md).  
@@ -6,10 +6,14 @@ Does not create a tag/Candidate/Release by itself.
 
 ## Outcome
 
-User-facing authority entry is **`agenterm --server`** (separate process).  
-Windows still ships a thin **`agenterm-server(.exe)` image alias** so the
-replaceable GUI PE is not locked by a long-lived authority mapping the same
-path (v0.1.9 invariant). Kill the *third product brand*, not the *second PE*.
+User-facing authority entry is **`agenterm server`** (subcommand, separate
+process). Windows still ships a thin **`agenterm-server(.exe)` image alias**
+so the replaceable GUI PE is not locked by a long-lived authority mapping the
+same path (v0.1.9 invariant). Kill the *third product brand*, not the
+*second PE*.
+
+Transitional: the short-lived `agenterm --server` flag remains accepted as an
+alias and will be removed once no internal callers depend on it.
 
 ## Why not delete the PE in this leaf
 
@@ -18,19 +22,20 @@ GUI maps agenterm.exe
 Server maps agenterm-server.exe   ← distinct image → GUI upgrade/replace OK
 ```
 
-If both processes map `agenterm.exe` (`agenterm --server` spawned from
+If both processes map `agenterm.exe` (`agenterm server` spawned from
 `current_exe`), Windows locks that image and `remote-ui-upgrade` / Keep Server
 + replace GUI regresses. Separate **process** ≠ separate **image**.
 
 ## Tree
 
 ```text
-Outcome: agenterm --server is the preferred authority entry
+Outcome: agenterm server is the preferred authority entry
 │
 ├─ A Entry / argv
-│  ├─ A1 agenterm main: --server → run_server_entry (strip flag)
-│  ├─ A2 configure_server_launch accepts remaining selectors only
-│  └─ A3 agenterm-server bin remains thin alias → same entry
+│  ├─ A1 agenterm main: first token `server` → run_server_entry
+│  ├─ A2 transitional `--server` flag alias still accepted
+│  ├─ A3 configure_server_launch accepts remaining selectors only
+│  └─ A4 agenterm-server bin remains thin alias → same entry
 │
 ├─ B Spawn / discovery (Windows)
 │  ├─ B1 autostart still launches sibling agenterm-server.exe
@@ -43,7 +48,7 @@ Outcome: agenterm --server is the preferred authority entry
 │  └─ C3 plan note: full PE deletion deferred until upgrade story exists
 │
 └─ D Evidence
-   ├─ D1 unit: --server argv / alias parity
+   ├─ D1 unit: `server` / `--server` token + selector parity
    └─ D2 local: cargo fmt + lib tests for touched modules
 ```
 
@@ -57,16 +62,15 @@ Outcome: agenterm --server is the preferred authority entry
 
 ## Sequencing
 
-1. Code A1–A3 + B docs comments (single owner: `src/bin/agenterm.rs`,
-   `server_app.rs`, process comment, PRD/plan/README/AGENTS/ARCHITECTURE)
+1. Code A1–A4 + docs (single owner)
 2. Unit tests
-3. `cargo fmt` + `cargo test --lib` for `server_app`/`ui_bridge`/`frontend`
+3. `cargo fmt` + `cargo test --lib` for `server_app`
 4. Commit/push on `main`
 
 ## Success evidence
 
-- `agenterm --server --help`-class argv: unsupported unknown flags still fail;
-  `--instance`/`--endpoint`/`--address` work when invoked via `--server`
+- `agenterm server --instance NAME` / `--endpoint` / `--address` work
+- Unknown server argv → exit 2
 - Thin `agenterm-server` still enters the same `run_server_entry`
 - Autostart path still targets sibling `agenterm-server.exe` on Windows
 - PRD states preferred entry + alias rationale

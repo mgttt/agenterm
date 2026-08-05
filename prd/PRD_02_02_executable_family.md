@@ -18,14 +18,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory
   ownership question:
-  - [x] preferred authority entry is **`agenterm --server`** (same process
-    role, separate process from the GUI). The thin sibling
+  - [x] preferred authority entry is **`agenterm server`** (subcommand; same
+    process role, separate process from the GUI). The thin sibling
     `agenterm-server.exe` remains the Windows **image-isolation alias**
     autostart target so a long-lived authority does not map/lock the
     replaceable `agenterm.exe` PE (see
     [`plan/plan-agenterm-server-mode.md`](../plan/plan-agenterm-server-mode.md)).
     Deleting that sibling PE is deferred until an upgrade story that keeps
-    GUI replaceability is proven.
+    GUI replaceability is proven. The short-lived `agenterm --server` flag
+    remains a transitional alias.
   - [x] the headless authority process is the stable owner of workspace/tree
     selection, PTYs and child PIDs, terminal parser/scrollback, composer
     drafts, working-context facts, operation receipts and the event journal;
@@ -34,10 +35,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the first internal headless server is a real process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal, shared replay/receipt authority outside Win32 `AppState`, and a single live interactive UI lease; public server smoke proves hello/bootstrap/delta, lease attach/idempotent renewal/live-owner conflict/heartbeat/detach, lease-gated stable-ID selection/bounded binary input/PTY resize, terminal output, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
     - [x] the shared command surface and ordinary-launch black boxes prove this
       process is the default authority
-  - [x] `agenterm.exe` without `--server` always runs the current on-disk
-    replaceable GUI client; if no compatible server exists it bootstraps the
-    sibling `agenterm-server.exe` image alias, then connects through the same
-    typed loopback control boundary instead of becoming the server itself
+  - [x] `agenterm.exe` without the `server` subcommand always runs the current
+    on-disk replaceable GUI client; if no compatible server exists it
+    bootstraps the sibling `agenterm-server.exe` image alias, then connects
+    through the same typed loopback control boundary instead of becoming the
+    server itself
     - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
       - [x] Windows GUI server autostart reuses the platform process facade so
         the independent authority has null stdio, no console window, and breaks

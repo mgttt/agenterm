@@ -141,8 +141,10 @@ pub fn run_server_entry() -> i32 {
     run_server_entry_with_args(env::args().skip(1).collect())
 }
 
-/// Headless authority entry used by `agenterm --server` and the thin
-/// `agenterm-server` image alias. `arguments` must not include `--server`.
+/// Headless authority entry used by `agenterm server` and the thin
+/// `agenterm-server` image alias. `arguments` should be selector flags only
+/// (`--address` / `--endpoint` / `--instance`); a leading `server` / `--server`
+/// token is tolerated for wrappers.
 pub fn run_server_entry_with_args(arguments: Vec<String>) -> i32 {
     if let Err(error) = configure_server_launch(&arguments) {
         eprintln!("AgenTerm server argument error: {error:#}");
@@ -162,41 +164,41 @@ fn configure_server_launch(arguments: &[String]) -> Result<()> {
     let mut position = 0;
     while position < arguments.len() {
         match arguments[position].as_str() {
-            "--server" => {
-                // Tolerated when the thin alias or wrappers forward raw argv.
+            "server" | "--server" => {
+                // Tolerated when wrappers forward the mode token into this entry.
                 position += 1;
             }
             "--address" => {
                 if selectors.address.is_some() {
-                    anyhow::bail!("agenterm --server --address may be specified only once");
+                    anyhow::bail!("agenterm server --address may be specified only once");
                 }
                 let value = arguments
                     .get(position + 1)
-                    .context("agenterm --server --address requires HOST:PORT")?;
+                    .context("agenterm server --address requires HOST:PORT")?;
                 crate::client::parse_loopback_ipc_address(value)?;
                 selectors.address = Some(value.clone());
                 position += 2;
             }
             "--endpoint" => {
                 if selectors.endpoint.is_some() {
-                    anyhow::bail!("agenterm --server --endpoint may be specified only once");
+                    anyhow::bail!("agenterm server --endpoint may be specified only once");
                 }
                 selectors.endpoint = Some(
                     arguments
                         .get(position + 1)
-                        .context("agenterm --server --endpoint requires ENDPOINT")?
+                        .context("agenterm server --endpoint requires ENDPOINT")?
                         .clone(),
                 );
                 position += 2;
             }
             "--instance" => {
                 if selectors.instance.is_some() {
-                    anyhow::bail!("agenterm --server --instance may be specified only once");
+                    anyhow::bail!("agenterm server --instance may be specified only once");
                 }
                 selectors.instance = Some(
                     arguments
                         .get(position + 1)
-                        .context("agenterm --server --instance requires NAME")?
+                        .context("agenterm server --instance requires NAME")?
                         .clone(),
                 );
                 position += 2;
@@ -1988,18 +1990,19 @@ mod tests {
     }
 
     #[test]
-    fn server_mode_flag_is_tolerated_and_selectors_remain_loopback_only() {
+    fn server_subcommand_token_is_tolerated_and_selectors_remain_loopback_only() {
+        assert!(configure_server_launch(&["server".to_owned()]).is_ok());
         assert!(configure_server_launch(&["--server".to_owned()]).is_ok());
         assert!(
             configure_server_launch(&[
-                "--server".to_owned(),
+                "server".to_owned(),
                 "--instance".to_owned(),
                 "main".to_owned()
             ])
             .is_ok()
         );
         let error = configure_server_launch(&[
-            "--server".to_owned(),
+            "server".to_owned(),
             "--address".to_owned(),
             "8.8.8.8:1".to_owned(),
         ])
@@ -2012,7 +2015,7 @@ mod tests {
             "127.0.0.1:2".to_owned(),
         ])
         .expect_err("duplicate address");
-        assert!(dup.to_string().contains("agenterm --server"));
+        assert!(dup.to_string().contains("agenterm server"));
     }
 
     #[test]

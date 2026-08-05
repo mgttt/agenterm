@@ -101,7 +101,7 @@ pub const fn current_facts() -> UiBridgeFacts {
         ownership_mode: UiOwnershipMode::CombinedGuiServer,
         replaceable_ui: false,
         // Combined mode still names the GUI image; split autostart targets the
-        // thin image alias (`agenterm --server` equivalent) so Windows does not
+        // thin image alias (`agenterm server` equivalent) so Windows does not
         // lock the replaceable GUI PE.
         server_executable: "agenterm.exe",
         target_server_executable: "agenterm-server.exe",

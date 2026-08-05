@@ -31,7 +31,7 @@ fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io
     }
     // Prefer the sibling image alias so the long-lived authority does not map
     // `agenterm.exe` (Windows locks the running PE; replaceable GUI needs a
-    // distinct path). Preferred user entry remains `agenterm --server`.
+    // distinct path). Preferred user entry remains `agenterm server`.
     let current = std::env::current_exe()?;
     let server = current.with_file_name("agenterm-server.exe");
     if !server.is_file() {
@@ -39,7 +39,7 @@ fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io
             std::io::ErrorKind::NotFound,
             format!(
                 "AgenTerm server executable was not found beside the current client: {} \
-                 (image alias for `agenterm --server`)",
+                 (image alias for `agenterm server`)",
                 server.display()
             ),
         ));
