@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1016">
   <title>AgenTerm™ — Local agent fleet work OS</title>
-  <meta name="description" content="AgenTerm — the verifiable fleet OS for local processes and agents. Tree, viewport, Composer, and one control contract—not another tabbed terminal.">
+  <meta name="description" content="AgenTerm — lightweight, stable, open-source fleet OS for local agents. Rust-native, 4 MiB GUI budget, loopback IPC, verifiable automation on Windows, macOS, and Linux.">
   <link rel="canonical" href="https://agenterm.mega.tech/">
   <link rel="alternate" hreflang="en" href="https://agenterm.mega.tech/?lang=en">
   <link rel="alternate" hreflang="zh-Hant" href="https://agenterm.mega.tech/?lang=zh-Hant">
@@ -16,11 +16,11 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:locale:alternate" content="zh_TW">
   <meta property="og:title" content="AgenTerm™ — Local agent fleet work OS">
-  <meta property="og:description" content="Organize your crew on one machine. Durable tabs, external Composer, verifiable automation.">
+  <meta property="og:description" content="Lightweight Rust-native fleet OS. Open source, loopback-only IPC, checksum-verified releases, and verifiable automation.">
   <meta property="og:image" content="https://agenterm.mega.tech/assets/agenterm-workspace.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="AgenTerm™ — Local agent fleet work OS">
-  <meta name="twitter:description" content="Organize your crew on one machine. Durable tabs, external Composer, verifiable automation.">
+  <meta name="twitter:description" content="Lightweight Rust-native fleet OS. Open source, loopback-only IPC, checksum-verified releases, and verifiable automation.">
   <meta name="twitter:image" content="https://agenterm.mega.tech/assets/agenterm-workspace.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b1016'/%3E%3Cpath d='M3.5 4.5 7 8l-3.5 3.5M8 12h4.5' stroke='%237ee787' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
@@ -677,6 +677,7 @@
       <a class="brand" href="#"><span>&gt;_</span> AgenTerm™</a>
       <nav aria-label="Primary navigation" data-i18n-aria-label="navLabel">
         <a href="#why" data-i18n="navWhy">Why</a>
+        <a href="#advantages" data-i18n="navAdvantages">Trust</a>
         <a href="#install" data-i18n="navInstall">Install</a>
         <a href="#story" data-i18n="navStory">Story</a>
         <a href="#workspace" data-i18n="navWorkspace">Workspace</a>
@@ -720,8 +721,10 @@
         <div class="spec-row" aria-label="Product specs" data-i18n-aria-label="specLabel">
           <span class="spec-pill" data-i18n-html="specPortable"><strong>Portable</strong> dist</span>
           <span class="spec-pill" data-i18n-html="specSize"><strong>4 MiB</strong> GUI budget</span>
+          <span class="spec-pill" data-i18n-html="specOpen"><strong>Open</strong> MIT / Apache-2.0</span>
+          <span class="spec-pill" data-i18n="specLoopback">Loopback IPC only</span>
+          <span class="spec-pill" data-i18n="specSbom">SBOM + provenance</span>
           <span class="spec-pill" data-i18n="specServer">Headless server authority</span>
-          <span class="spec-pill" data-i18n="specMux">tmux/RMUX subset via mux</span>
         </div>
       </div>
     </section>
@@ -741,6 +744,51 @@
           <article class="invariant">
             <span class="rule" data-i18n="invariant3Rule">Verify ≠ sleep</span>
             <p data-i18n="invariant3Body">Automation waits on snapshots, events, and receipts—not arbitrary timers.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="advantages">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 data-i18n="advantagesTitle">Lightweight. Stable. Yours to audit.</h2>
+          <p data-i18n="advantagesLead">
+            AgenTerm is built for long-running local fleets—not demo polish.
+            Small binaries, explicit failure, and a public contract you can
+            inspect before you trust it.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="card">
+            <span class="index" data-i18n="adv1Index">01 / LIGHTWEIGHT</span>
+            <h3 data-i18n="adv1Title">Native, not bloated</h3>
+            <p data-i18n="adv1Body">Rust with platform-native rendering—no Electron shell. Release gates cap the GUI at 4 MiB and control clients at 2 MiB each; heavy runtimes stay optional sidecars.</p>
+          </article>
+          <article class="card">
+            <span class="index" data-i18n="adv2Index">02 / STABLE</span>
+            <h3 data-i18n="adv2Title">Fleet semantics that survive chaos</h3>
+            <p data-i18n="adv2Body">Detach-first close keeps PTYs alive. Exited tabs stay readable. Workspace trees, notes, and drafts restore across normal restarts.</p>
+          </article>
+          <article class="card">
+            <span class="index" data-i18n="adv3Index">03 / OPEN SOURCE</span>
+            <h3 data-i18n="adv3Title">Public code, public review</h3>
+            <p data-i18n="adv3Body">MIT OR Apache-2.0 on GitHub. Read the implementation, run the gates, and verify behavior through the same CLI contract automation uses.</p>
+          </article>
+          <article class="card">
+            <span class="index" data-i18n="adv4Index">04 / SUPPLY CHAIN</span>
+            <h3 data-i18n="adv4Title">Releases you can verify</h3>
+            <p data-i18n="adv4Body">Every public release ships SHA-256 checksums, SPDX SBOM, and provenance metadata. Unix installs verify bytes before extraction.</p>
+          </article>
+          <article class="card">
+            <span class="index" data-i18n="adv5Index">05 / LOCAL-FIRST</span>
+            <h3 data-i18n="adv5Title">Control stays on your machine</h3>
+            <p data-i18n="adv5Body">IPC listens on loopback only. The MCP sidecar is read-only stdio with no network listener in its shipped slice. No hidden remote control plane.</p>
+          </article>
+          <article class="card">
+            <span class="index" data-i18n="adv6Index">06 / VERIFIABLE</span>
+            <h3 data-i18n="adv6Title">Prove it, don't guess it</h3>
+            <p data-i18n="adv6Body">Snapshots, event positions, deterministic waits, and control receipts. Unsupported operations fail explicitly—never false success.</p>
           </article>
         </div>
       </div>
@@ -1061,9 +1109,9 @@
       const copy = {
         en: {
           title: "AgenTerm™ — Local agent fleet work OS",
-          description: "AgenTerm — the verifiable fleet OS for local processes and agents. Tree, viewport, Composer, and one control contract.",
+          description: "AgenTerm — lightweight, stable, open-source fleet OS for local agents. Rust-native, 4 MiB GUI budget, loopback IPC, verifiable automation.",
           skip: "Skip to content", navLabel: "Primary navigation", languageLabel: "Language",
-          navWhy: "Why", navInstall: "Install", navStory: "Story", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
+          navWhy: "Why", navAdvantages: "Trust", navInstall: "Install", navStory: "Story", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
           heroEyebrow: "Fleet work OS · Windows, macOS & Linux · v0.1.14",
           heroTitle: "Organize your <em>crew</em>—not just another shell window.",
           heroEmotion: "Everything under control.",
@@ -1084,7 +1132,15 @@
           installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, <code>agenterm-mux</code>, <code>agenterm-rhai</code>, and <code>agenterm-mcp</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
           installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All seven client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
           downloadWindowsCta: "Download for Windows",
-          specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specServer: "Headless server authority", specMux: "tmux/RMUX subset via mux",
+          specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specOpen: "<strong>Open</strong> MIT / Apache-2.0", specLoopback: "Loopback IPC only", specSbom: "SBOM + provenance", specServer: "Headless server authority",
+          advantagesTitle: "Lightweight. Stable. Yours to audit.",
+          advantagesLead: "AgenTerm is built for long-running local fleets—not demo polish. Small binaries, explicit failure, and a public contract you can inspect before you trust it.",
+          adv1Index: "01 / LIGHTWEIGHT", adv1Title: "Native, not bloated", adv1Body: "Rust with platform-native rendering—no Electron shell. Release gates cap the GUI at 4 MiB and control clients at 2 MiB each; heavy runtimes stay optional sidecars.",
+          adv2Index: "02 / STABLE", adv2Title: "Fleet semantics that survive chaos", adv2Body: "Detach-first close keeps PTYs alive. Exited tabs stay readable. Workspace trees, notes, and drafts restore across normal restarts.",
+          adv3Index: "03 / OPEN SOURCE", adv3Title: "Public code, public review", adv3Body: "MIT OR Apache-2.0 on GitHub. Read the implementation, run the gates, and verify behavior through the same CLI contract automation uses.",
+          adv4Index: "04 / SUPPLY CHAIN", adv4Title: "Releases you can verify", adv4Body: "Every public release ships SHA-256 checksums, SPDX SBOM, and provenance metadata. Unix installs verify bytes before extraction.",
+          adv5Index: "05 / LOCAL-FIRST", adv5Title: "Control stays on your machine", adv5Body: "IPC listens on loopback only. The MCP sidecar is read-only stdio with no network listener in its shipped slice. No hidden remote control plane.",
+          adv6Index: "06 / VERIFIABLE", adv6Title: "Prove it, don't guess it", adv6Body: "Snapshots, event positions, deterministic waits, and control receipts. Unsupported operations fail explicitly—never false success.",
           invariantHeading: "Core invariants",
           invariant1Rule: "Exit ≠ erase", invariant1Body: "A dead process keeps its final screen in a readable tab until you explicitly close it.",
           invariant2Rule: "Close ≠ kill", invariant2Body: "Detach-first window close hides the GUI but preserves the live server, tabs, and PTYs.",
@@ -1135,9 +1191,9 @@
         },
         "zh-Hant": {
           title: "AgenTerm™ — 本機 Agent 艦隊工作 OS",
-          description: "AgenTerm——本機程序與 Agent 的可驗證艦隊 OS。樹、視口、Composer 與同一控制契約。",
+          description: "AgenTerm——輕量、穩定、開源的本機 Agent 艦隊 OS。Rust 原生、4 MiB GUI 預算、loopback IPC、可驗證自動化。",
           skip: "跳至主要內容", navLabel: "主要導覽", languageLabel: "語言",
-          navWhy: "為何不同", navInstall: "安裝", navStory: "場景", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
+          navWhy: "為何不同", navAdvantages: "信任", navInstall: "安裝", navStory: "場景", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
           heroEyebrow: "艦隊工作 OS · Windows、macOS 與 Linux · v0.1.14",
           heroTitle: "組織你的<em>艦隊</em>——不只是又一個 Shell 視窗。",
           heroEmotion: "一切盡在掌控。",
@@ -1158,7 +1214,15 @@
           installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code>、<code>agenterm-mux</code>、<code>agenterm-rhai</code>、<code>agenterm-mcp</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
           installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部七個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
           downloadWindowsCta: "下載 Windows 版",
-          specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specServer: "無頭 server 權威", specMux: "mux 提供 tmux/RMUX 子集",
+          specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specOpen: "<strong>開源</strong> MIT / Apache-2.0", specLoopback: "僅 loopback IPC", specSbom: "SBOM + provenance", specServer: "無頭 server 權威",
+          advantagesTitle: "輕量。穩定。可審計。",
+          advantagesLead: "AgenTerm 為長時間運行的本機艦隊而建——不是 demo 拋光。小體積二進位、明確失敗、公開契約，信任之前先檢查。",
+          adv1Index: "01 / 輕量", adv1Title: "原生，不臃腫", adv1Body: "Rust + 平台原生繪製——無 Electron 殼。發布門禁將 GUI 上限設為 4 MiB、控制客戶端各 2 MiB；重型執行時留在可選 sidecar。",
+          adv2Index: "02 / 穩定", adv2Title: "經得起折騰的艦隊語義", adv2Body: "Detach-first 關窗保留 live PTY。已結束分頁仍可讀。正常重啟還原工作區樹、註記與草稿。",
+          adv3Index: "03 / 開源", adv3Title: "公開程式碼，公開審查", adv3Body: "GitHub 上 MIT OR Apache-2.0。閱讀實作、跑過 gate，並透過與自動化相同的 CLI 契約驗證行為。",
+          adv4Index: "04 / 供應鏈", adv4Title: "可驗證的發布", adv4Body: "每次公開發布附 SHA-256 校驗、SPDX SBOM 與 provenance 中繼資料。Unix 安裝在解壓前驗證位元組。",
+          adv5Index: "05 / 本機優先", adv5Title: "控制權留在你的機器", adv5Body: "IPC 僅監聽 loopback。MCP sidecar 為唯讀 stdio，已交付切片無網路 listener。無隱藏遠端控制面。",
+          adv6Index: "06 / 可驗證", adv6Title: "用證據，不靠猜", adv6Body: "快照、事件位置、確定性等待與控制 receipt。不支援的操作明確失敗——絕不假成功。",
           invariantHeading: "核心不變量",
           invariant1Rule: "結束 ≠ 消失", invariant1Body: "程序結束後，最終畫面仍留在可讀分頁中，直到你明確關閉。",
           invariant2Rule: "關窗 ≠ 殺艦隊", invariant2Body: "Detach-first 關閉會隱藏 GUI，但保留 live server、分頁與 PTY。",

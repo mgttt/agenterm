@@ -7,6 +7,27 @@ client, and a deliberately bounded tmux/RMUX frontend.
 
 ![AgenTerm showing a hierarchical terminal workspace, composer, and working-context status bar](assets/screendump0.png)
 
+## Why AgenTerm
+
+- **Lightweight native core** — Rust with platform-native rendering (Win32/GDI,
+  winit). No Electron shell. Public releases enforce binary budgets: **4 MiB**
+  for the GUI and Control Center, **2 MiB** each for CLI, mux, and MCP.
+- **Stable fleet semantics** — Detach-first close keeps live PTYs running;
+  exited processes stay readable until you explicitly close the tab; normal
+  restarts restore the workspace tree, names, notes, and drafts.
+- **Open and auditable** — Source on GitHub under **MIT OR Apache-2.0**. Read
+  the code, run the gates, and inspect every release artifact yourself.
+- **Supply-chain evidence** — Public releases ship SHA-256 checksums, SPDX SBOM,
+  and provenance metadata. Unix installs verify checksums before extraction.
+- **Local-first control plane** — IPC listens on loopback only
+  (`127.0.0.0/8` / `::1`). The MCP sidecar is read-only stdio with no network
+  listener in its first shipped slice.
+- **Verifiable automation** — Structured snapshots, event positions,
+  deterministic waits, and control receipts. Unsupported operations fail
+  explicitly instead of returning false success.
+- **Portable on six targets** — Windows, macOS, and Linux on `x86_64` and
+  `aarch64`. Portable zip on Windows; one-line user-scope install on Unix.
+
 ## Current highlights
 
 - Native Win32/GDI UI with hierarchical team tabs on the left.
