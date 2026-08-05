@@ -14,8 +14,8 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait`）。
 | **主控** | `bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1` | mobile | 已换防 / 待命 | 勿再当唯一统筹 |
 | **分身1** | `bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f` | api | 待命（旧 Linux platform） | 皮肤任务不复用 |
 | **分身2** | `bc-26005f17-af78-4f63-bded-328cd1356396` | api | 待命（旧 Rhai/CI） | 皮肤任务不复用 |
-| **分身3** | _(spawn 后填写)_ | api | **皮肤设计**：`assets/skins/**` | classic/fancy tokens |
-| **分身4** | _(spawn 后填写)_ | api | **皮肤工程**：theme/settings/snapshot/smoke | 与分身3 文件隔离 |
+| **分身3** | `bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b` | api | **皮肤设计**：`assets/skins/**` | classic/fancy tokens |
+| **分身4** | `bc-c3e01145-b870-4e74-b18c-f3aea06ea800` | api | **皮肤工程**：theme/settings/snapshot/smoke | 与分身3 文件隔离 |
 
 链接：
 
@@ -23,6 +23,8 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait`）。
 - 旧主控：https://cursor.com/agents/bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1
 - 分身1：https://cursor.com/agents/bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f
 - 分身2：https://cursor.com/agents/bc-26005f17-af78-4f63-bded-328cd1356396
+- 分身3：https://cursor.com/agents/bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b
+- 分身4：https://cursor.com/agents/bc-c3e01145-b870-4e74-b18c-f3aea06ea800
 
 ## 命名约定
 

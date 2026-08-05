@@ -45,7 +45,7 @@ Hot shared files (`src/lib.rs`, `Cargo.toml`, `PRD.md`, `AGENTS.md`): only
 
 - [x] PRD_02_06 built-in skins section
 - [x] This plan
-- [ ] Spawn 分身3 / 分身4; update `skills/cursor/session-registry.md` + mailbox
+- [x] Spawn 分身3 / 分身4; update `skills/cursor/session-registry.md` + mailbox
 
 ### Phase 1 — Design freeze (分身3)
 

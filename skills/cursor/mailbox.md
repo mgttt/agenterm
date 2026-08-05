@@ -13,7 +13,7 @@
 | 当前主线任务 | **Built-in skins v1**（classic/fancy × day/night） |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
 | 执行计划 | `plan/plan-skins-v1.md` |
-| `origin/main` | tip 将随契约提交更新；开工前 `git pull --ff-only origin main` |
+| `origin/main` | tip `da5c36e`（skins 契约）；开工前再 `git pull --ff-only origin main` |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 
@@ -45,14 +45,18 @@
 - 下一步: spawn 分身3/4；审设计与工程合流
 - 阻塞: 无
 
-### 分身3 · （spawn 后填）
-- 状态: —
-- 分支: —
-- 下一步: Phase 1 设计冻结
-- 阻塞: —
+### 分身3 · 2026-08-05
+- 状态: ACTIVE（已 spawn）
+- bcId: `bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b`
+- URL: https://cursor.com/agents/bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b
+- 分支: `cursor/skins-design-*`（自建）
+- 下一步: Phase 1 设计冻结 → `assets/skins/**`
+- 阻塞: 无
 
-### 分身4 · （spawn 后填）
-- 状态: —
-- 分支: —
+### 分身4 · 2026-08-05
+- 状态: ACTIVE（已 spawn）
+- bcId: `bc-c3e01145-b870-4e74-b18c-f3aea06ea800`
+- URL: https://cursor.com/agents/bc-c3e01145-b870-4e74-b18c-f3aea06ea800
+- 分支: `cursor/skins-eng-*`（自建）
 - 下一步: Phase 2A 工程脚手架
-- 阻塞: —
+- 阻塞: Phase 2B 等分身3 合 main
