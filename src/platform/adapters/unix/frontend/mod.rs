@@ -51,7 +51,7 @@ use crate::{
         config_path, load_config, save_config,
     },
     terminal_runtime::{TerminalLaunch, TerminalTab},
-    theme::ThemeId,
+    theme::AppearancePreset,
     ui_clipboard::{
         TERMINAL_PASTE_LIMIT_BYTES, normalize_composer_paste, normalize_terminal_paste,
         terminal_paste_bytes,
@@ -731,10 +731,10 @@ impl UnixApp {
     }
 
     fn palette(&self) -> &'static crate::theme::ThemePalette {
-        let configured = self.active_terminal_appearance().color_theme;
+        let configured = self.active_terminal_appearance().appearance_preset;
         effective_palette(
             configured,
-            self.settings_dialog.theme_draft(),
+            self.settings_dialog.preset_draft(),
             self.settings_dialog.is_open(),
         )
     }
@@ -1618,7 +1618,7 @@ impl UnixApp {
             let changes = self.settings_dialog.changes();
             self.config.terminal_font_family = changes.default_appearance.terminal_font_family;
             self.config.terminal_font_size = changes.default_appearance.terminal_font_size;
-            self.config.color_theme = changes.default_appearance.color_theme;
+            self.config.appearance_preset = changes.default_appearance.appearance_preset;
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
         }
         self.settings_dialog.close_without_apply();
@@ -1808,12 +1808,24 @@ impl UnixApp {
 
     fn handle_settings_click(&mut self, hit: SettingsHit) {
         match hit {
-            SettingsHit::Dark => {
-                self.settings_dialog.preview_theme(ThemeId::Dark);
+            SettingsHit::ClassicDay => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::classic_day());
                 self.request_redraw();
             }
-            SettingsHit::Light => {
-                self.settings_dialog.preview_theme(ThemeId::Light);
+            SettingsHit::ClassicNight => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::classic_night());
+                self.request_redraw();
+            }
+            SettingsHit::FancyDay => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::fancy_day());
+                self.request_redraw();
+            }
+            SettingsHit::FancyNight => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::fancy_night());
                 self.request_redraw();
             }
             SettingsHit::SizeDecrease => {
@@ -2284,8 +2296,9 @@ impl UnixApp {
             ),
             "settings": settings_json(
                 &self.config,
+                self.config.locale,
                 self.settings_dialog.is_open(),
-                Some(self.settings_dialog.theme_draft().as_str()),
+                Some(self.settings_dialog.preset_draft().as_str()),
                 &crate::ipc_address(),
                 self.active_position()
                     .map(|position| format!("@{}", self.tabs[position].id))
@@ -2597,7 +2610,8 @@ impl UnixApp {
                 width,
                 height,
                 self.settings_size_draft(),
-                self.settings_dialog.theme_draft(),
+                self.settings_dialog.preset_draft(),
+                self.config.locale,
             );
             if let Some(hit) = modal.hit_test(x, y) {
                 self.handle_settings_click(hit);
@@ -3950,7 +3964,8 @@ impl UnixApp {
                 logical_width,
                 logical_height,
                 self.settings_size_draft(),
-                self.settings_dialog.theme_draft(),
+                self.settings_dialog.preset_draft(),
+                self.config.locale,
             )
         });
         let new_terminal = if self.new_terminal_dialog.is_open() {
@@ -4481,7 +4496,8 @@ impl ControlHost for UnixApp {
         serde_json::to_string_pretty(&serde_json::json!({
             "terminal_font_family": self.config.terminal_font_family,
             "terminal_font_size": self.config.terminal_font_size,
-            "color_theme": self.config.color_theme,
+            "appearance_preset": self.config.appearance_preset.as_str(),
+            "color_theme": self.config.appearance_preset.color_theme().as_str(),
             "tabs_visible": self.config.tabs_visible,
             "tabs_width": self.config.tabs_width,
             "resolved_font_family": resolved_font_name(),
@@ -4613,8 +4629,8 @@ impl ControlHost for UnixApp {
         self.close_settings(apply)
     }
 
-    fn preview_settings_theme(&mut self, theme: ThemeId) {
-        if self.settings_dialog.preview_theme(theme) {
+    fn preview_settings_preset(&mut self, preset: AppearancePreset) {
+        if self.settings_dialog.preview_preset(preset) {
             self.request_redraw();
         }
     }

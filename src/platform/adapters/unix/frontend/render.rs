@@ -1,7 +1,8 @@
 //! Unix software-rendered frontend projection.
 
 use crate::terminal_cursor::TerminalCursorShape;
-use crate::theme::{Rgb, ThemeId, ThemePalette};
+use crate::locale::LocaleId;
+use crate::theme::{AppearancePreset, Rgb, ThemePalette};
 use crate::ui_geometry::{
     PixelRect, TreeRowActionDensity, TreeRowMode, sidebar_tree_row_geometry,
     tree_connector_segments, tree_row_at_y,
@@ -21,7 +22,7 @@ const COMPOSER_VISIBLE_LINES: usize = 2;
 const COMPOSER_LINE_HEIGHT: u32 = 16;
 pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 480;
-pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 330;
+pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 380;
 pub(super) const NEW_TERMINAL_MODAL_MIN_WIDTH: u32 = 480;
 pub(super) const NEW_TERMINAL_MODAL_MAX_WIDTH: u32 = 620;
 pub(super) const NEW_TERMINAL_MODAL_MIN_HEIGHT: u32 = 390;
@@ -375,8 +376,10 @@ pub(super) struct ScrollbarView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SettingsHit {
-    Dark,
-    Light,
+    ClassicDay,
+    ClassicNight,
+    FancyDay,
+    FancyNight,
     SizeDecrease,
     SizeIncrease,
     Cancel,
@@ -386,11 +389,14 @@ pub(super) enum SettingsHit {
 #[derive(Clone, Debug)]
 pub(super) struct SettingsModalView {
     pub(super) font_size: u16,
-    pub(super) theme_draft: ThemeId,
+    pub(super) preset_draft: AppearancePreset,
+    pub(super) locale: LocaleId,
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) font_family_field: (u32, u32, u32, u32),
-    pub(super) dark_button: (u32, u32, u32, u32),
-    pub(super) light_button: (u32, u32, u32, u32),
+    pub(super) classic_day_button: (u32, u32, u32, u32),
+    pub(super) classic_night_button: (u32, u32, u32, u32),
+    pub(super) fancy_day_button: (u32, u32, u32, u32),
+    pub(super) fancy_night_button: (u32, u32, u32, u32),
     pub(super) cancel_button: (u32, u32, u32, u32),
     pub(super) apply_button: (u32, u32, u32, u32),
     pub(super) size_decrease_button: (u32, u32, u32, u32),
@@ -401,11 +407,17 @@ impl SettingsModalView {
     pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<SettingsHit> {
         let x = x as u32;
         let y = y as u32;
-        if rect_contains(self.dark_button, x, y) {
-            return Some(SettingsHit::Dark);
+        if rect_contains(self.classic_day_button, x, y) {
+            return Some(SettingsHit::ClassicDay);
         }
-        if rect_contains(self.light_button, x, y) {
-            return Some(SettingsHit::Light);
+        if rect_contains(self.classic_night_button, x, y) {
+            return Some(SettingsHit::ClassicNight);
+        }
+        if rect_contains(self.fancy_day_button, x, y) {
+            return Some(SettingsHit::FancyDay);
+        }
+        if rect_contains(self.fancy_night_button, x, y) {
+            return Some(SettingsHit::FancyNight);
         }
         if rect_contains(self.size_decrease_button, x, y) {
             return Some(SettingsHit::SizeDecrease);
@@ -426,7 +438,8 @@ impl SettingsModalView {
         client_width: u32,
         client_height: u32,
         font_size: u16,
-        theme_draft: ThemeId,
+        preset_draft: AppearancePreset,
+        locale: LocaleId,
     ) -> SettingsModalView {
         let width = SETTINGS_MODAL_WIDTH.min(client_width.saturating_sub(32).max(1));
         let left = (client_width.saturating_sub(width)) / 2;
@@ -437,14 +450,24 @@ impl SettingsModalView {
         let size_decrease_button = (size_left, size_row_top, 28, 32);
         let size_increase_button = (size_left + 36, size_row_top, 28, 32);
         let theme_row = top + 180;
-        let action_row = top + 266;
+        let theme_row_gap = 42;
+        let button_width = ((width.saturating_sub(64).saturating_sub(8)) / 2).max(120);
+        let action_row = top + 316;
         SettingsModalView {
             font_size,
-            theme_draft,
+            preset_draft,
+            locale,
             bounds: (left, top, width, SETTINGS_MODAL_HEIGHT),
             font_family_field,
-            dark_button: (left + 32, theme_row, 146, 34),
-            light_button: (left + 190, theme_row, 146, 34),
+            classic_day_button: (left + 32, theme_row, button_width, 34),
+            classic_night_button: (left + 32 + button_width + 8, theme_row, button_width, 34),
+            fancy_day_button: (left + 32, theme_row + theme_row_gap, button_width, 34),
+            fancy_night_button: (
+                left + 32 + button_width + 8,
+                theme_row + theme_row_gap,
+                button_width,
+                34,
+            ),
             cancel_button: (left + width.saturating_sub(238), action_row, 94, 36),
             apply_button: (left + width.saturating_sub(126), action_row, 94, 36),
             size_decrease_button,
@@ -2229,37 +2252,40 @@ fn render_settings_modal(
         height,
         mx + 32,
         my + 144,
-        "Color theme · preview is immediate; Apply persists",
+        "Appearance preset · preview is immediate; Apply persists",
         palette.muted_text,
     );
-    render_button(
-        buffer,
-        stride,
-        width,
-        height,
-        palette,
-        settings.dark_button,
-        if settings.theme_draft == ThemeId::Dark {
-            "Dark *"
+    for (preset, button) in [
+        (
+            AppearancePreset::classic_day(),
+            settings.classic_day_button,
+        ),
+        (
+            AppearancePreset::classic_night(),
+            settings.classic_night_button,
+        ),
+        (AppearancePreset::fancy_day(), settings.fancy_day_button),
+        (
+            AppearancePreset::fancy_night(),
+            settings.fancy_night_button,
+        ),
+    ] {
+        let label = if settings.preset_draft == preset {
+            format!("{} *", preset.label(settings.locale))
         } else {
-            "Dark"
-        },
-        settings.theme_draft == ThemeId::Dark,
-    );
-    render_button(
-        buffer,
-        stride,
-        width,
-        height,
-        palette,
-        settings.light_button,
-        if settings.theme_draft == ThemeId::Light {
-            "Light *"
-        } else {
-            "Light"
-        },
-        settings.theme_draft == ThemeId::Light,
-    );
+            preset.label(settings.locale).to_owned()
+        };
+        render_button(
+            buffer,
+            stride,
+            width,
+            height,
+            palette,
+            button,
+            &label,
+            settings.preset_draft == preset,
+        );
+    }
     render_button(
         buffer,
         stride,
@@ -2908,8 +2934,8 @@ fn dim_pixel(base: u32, numerator: u32, denominator: u32) -> u32 {
 }
 
 pub(super) fn effective_palette(
-    configured: ThemeId,
-    draft: ThemeId,
+    configured: AppearancePreset,
+    draft: AppearancePreset,
     settings_open: bool,
 ) -> &'static ThemePalette {
     if settings_open {
@@ -2953,7 +2979,7 @@ mod tests {
 
     #[test]
     fn composer_select_all_highlights_only_editable_text() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let mut buffer = vec![0; 320 * COMPOSER_HEIGHT as usize];
         render_composer(
             &mut buffer,
@@ -2983,7 +3009,7 @@ mod tests {
 
     #[test]
     fn composer_renders_newline_on_a_second_visible_row() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let mut single_line = vec![0; 320 * COMPOSER_HEIGHT as usize];
         let mut multiline = single_line.clone();
         for (buffer, text) in [
@@ -3016,7 +3042,7 @@ mod tests {
 
     #[test]
     fn selected_inline_field_paints_selection_and_hides_the_cursor() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let bounds = PixelRect {
             left: 0,
             top: 0,
@@ -3090,7 +3116,13 @@ mod tests {
 
     #[test]
     fn settings_hit_test_maps_buttons() {
-        let modal = SettingsModalView::for_client(800, 600, 12, ThemeId::Dark);
+        let modal = SettingsModalView::for_client(
+            800,
+            600,
+            12,
+            AppearancePreset::classic_night(),
+            crate::locale::LocaleId::English,
+        );
         assert_eq!(
             modal.hit_test(
                 f64::from(modal.apply_button.0 + 4),
@@ -3159,22 +3191,30 @@ mod tests {
         let blank = TerminalCell::blank();
         assert_eq!(blank.text(), " ");
         assert_eq!(
-            terminal_color(ThemeId::Dark.palette(), blank.fg, false),
-            ThemeId::Dark.palette().terminal_foreground
+            terminal_color(AppearancePreset::classic_night().palette(), blank.fg, false),
+            AppearancePreset::classic_night()
+                .palette()
+                .terminal_foreground
         );
         assert_eq!(
-            terminal_color(ThemeId::Light.palette(), blank.bg, true),
-            ThemeId::Light.palette().terminal_background
+            terminal_color(AppearancePreset::classic_day().palette(), blank.bg, true),
+            AppearancePreset::classic_day()
+                .palette()
+                .terminal_background
         );
         assert_eq!(
-            terminal_color(ThemeId::Light.palette(), TerminalColor::Indexed(0), false),
-            ThemeId::Light.palette().ansi[0]
+            terminal_color(
+                AppearancePreset::classic_day().palette(),
+                TerminalColor::Indexed(0),
+                false
+            ),
+            AppearancePreset::classic_day().palette().ansi[0]
         );
     }
 
     #[test]
     fn terminal_colors_preserve_truecolor_and_xterm_256_palette() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         assert_eq!(
             terminal_color(
                 palette,
@@ -3203,7 +3243,7 @@ mod tests {
 
     #[test]
     fn terminal_grid_keeps_parser_rgb_and_indexed_colors() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let mut parser = vt100::Parser::new(1, 2, 0);
         parser.process(b"\x1b[38;2;12;34;56mR\x1b[48;5;202mX");
         let mut grid = TerminalGrid::new(2, 1, palette);
@@ -3220,7 +3260,7 @@ mod tests {
 
     #[test]
     fn terminal_grid_keeps_parser_text_attributes() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let mut parser = vt100::Parser::new(1, 4, 0);
         parser.process(b"\x1b[1mB\x1b[0m\x1b[2mD\x1b[0m\x1b[3mI\x1b[0m\x1b[4mU\x1b[0m");
         let mut grid = TerminalGrid::new(4, 1, palette);
@@ -3287,7 +3327,7 @@ mod tests {
 
     #[test]
     fn terminal_cell_keeps_vt100_combining_sequences_inline() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let mut parser = vt100::Parser::new(1, 4, 0);
         parser.process("e\u{301} ♥\u{fe0f}".as_bytes());
         let mut grid = TerminalGrid::new(4, 1, palette);
@@ -3433,7 +3473,7 @@ mod tests {
 
     #[test]
     fn sync_marks_only_changed_rows_dirty_and_layer_repaints_them() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let mut parser = vt100::Parser::new(3, 4, 0);
         parser.process(b"aaaa\r\nbbbb\r\ncccc\x1b[?25l");
         let mut grid = TerminalGrid::new(4, 3, palette);
@@ -3506,7 +3546,7 @@ mod tests {
 
     #[test]
     fn hidpi_terminal_grid_rasterizes_at_physical_resolution() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let (cell_width, cell_height) = cell_metrics(14);
         let logical_width = cell_width + SCROLLBAR_WIDTH;
         let logical_height = cell_height;
@@ -3631,7 +3671,7 @@ mod tests {
     fn ime_preedit_draws_visible_composition_and_cursor() {
         let width = 180;
         let height = 80;
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let background = rgb_to_pixel(palette.terminal_background);
         let mut buffer = vec![background; (width * height) as usize];
 
@@ -3658,7 +3698,7 @@ mod tests {
 
     #[test]
     fn terminal_cursor_tracks_parser_position_and_hide_mode() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let (cell_width, cell_height) = cell_metrics(12);
         let cols = 4;
         let rows = 2;
@@ -3738,7 +3778,7 @@ mod tests {
 
     #[test]
     fn terminal_cursor_renders_block_underline_and_bar_shapes() {
-        let palette = ThemeId::Dark.palette();
+        let palette = AppearancePreset::classic_night().palette();
         let (cell_width, cell_height) = cell_metrics(12);
         let width = cell_width + SCROLLBAR_WIDTH;
         let parser = vt100::Parser::new(1, 1, 0);

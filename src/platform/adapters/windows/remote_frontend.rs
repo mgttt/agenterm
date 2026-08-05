@@ -20,7 +20,7 @@ use crate::frontend::interaction::{
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
     SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
-    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID,
+    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID, settings_json,
 };
 use crate::{
     client::{ipc_address, resolved_ipc_endpoint},
@@ -53,7 +53,7 @@ use crate::{
         clamp_tabs_width, config_path, load_config, save_config,
     },
     tab_tree::{TabTreeNode, tree_rows},
-    theme::{Rgb, ThemeId, ThemePalette},
+    theme::{AppearancePreset, Rgb, ThemePalette},
     ui_bridge::{UiCellStyle, UiColor, UiScreenSnapshot, UiTabBootstrap},
     ui_client::{UiClientModel, tab_by_id},
     ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
@@ -125,8 +125,10 @@ const CLOSE_CANCEL_ID: ControlId = ControlId(2111);
 const SETTINGS_ID: ControlId = ControlId(2112);
 const SETTINGS_FONT_ID: ControlId = ControlId(2113);
 const SETTINGS_SIZE_ID: ControlId = ControlId(2114);
-const SETTINGS_DARK_ID: ControlId = ControlId(2115);
-const SETTINGS_LIGHT_ID: ControlId = ControlId(2116);
+const SETTINGS_CLASSIC_NIGHT_ID: ControlId = ControlId(2115);
+const SETTINGS_CLASSIC_DAY_ID: ControlId = ControlId(2116);
+const SETTINGS_FANCY_NIGHT_ID: ControlId = ControlId(2138);
+const SETTINGS_FANCY_DAY_ID: ControlId = ControlId(2139);
 const SETTINGS_APPLY_ID: ControlId = ControlId(2117);
 const SETTINGS_CANCEL_ID: ControlId = ControlId(2118);
 const TAB_CLOSE_CONFIRM_ID: ControlId = ControlId(2119);
@@ -262,8 +264,10 @@ fn remote_control_specs() -> Vec<ControlSpec> {
         button(CLOSE_CANCEL_ID, "Cancel", false),
         edit(SETTINGS_FONT_ID, false, false),
         edit(SETTINGS_SIZE_ID, false, false),
-        button(SETTINGS_DARK_ID, "Dark", false),
-        button(SETTINGS_LIGHT_ID, "Light", false),
+        button(SETTINGS_CLASSIC_NIGHT_ID, "Classic Night", false),
+        button(SETTINGS_CLASSIC_DAY_ID, "Classic Day", false),
+        button(SETTINGS_FANCY_NIGHT_ID, "Fancy Night", false),
+        button(SETTINGS_FANCY_DAY_ID, "Fancy Day", false),
         button(SETTINGS_APPLY_ID, "Apply", false),
         button(SETTINGS_CANCEL_ID, "Cancel", false),
         button(SETTINGS_DEFAULT_SCOPE_ID, "Default values", false),
@@ -355,8 +359,10 @@ struct RemoteControls {
     close_cancel: ControlId,
     settings_font: ControlId,
     settings_size: ControlId,
-    settings_dark: ControlId,
-    settings_light: ControlId,
+    settings_classic_night: ControlId,
+    settings_classic_day: ControlId,
+    settings_fancy_night: ControlId,
+    settings_fancy_day: ControlId,
     settings_apply: ControlId,
     settings_cancel: ControlId,
     settings_default_scope: ControlId,
@@ -398,8 +404,10 @@ impl RemoteControls {
             close_cancel: CLOSE_CANCEL_ID,
             settings_font: SETTINGS_FONT_ID,
             settings_size: SETTINGS_SIZE_ID,
-            settings_dark: SETTINGS_DARK_ID,
-            settings_light: SETTINGS_LIGHT_ID,
+            settings_classic_night: SETTINGS_CLASSIC_NIGHT_ID,
+            settings_classic_day: SETTINGS_CLASSIC_DAY_ID,
+            settings_fancy_night: SETTINGS_FANCY_NIGHT_ID,
+            settings_fancy_day: SETTINGS_FANCY_DAY_ID,
             settings_apply: SETTINGS_APPLY_ID,
             settings_cancel: SETTINGS_CANCEL_ID,
             settings_default_scope: SETTINGS_DEFAULT_SCOPE_ID,
@@ -613,8 +621,10 @@ struct RemoteWindowState {
     close_cancel: ControlId,
     settings_font: ControlId,
     settings_size: ControlId,
-    settings_dark: ControlId,
-    settings_light: ControlId,
+    settings_classic_night: ControlId,
+    settings_classic_day: ControlId,
+    settings_fancy_night: ControlId,
+    settings_fancy_day: ControlId,
     settings_apply: ControlId,
     settings_cancel: ControlId,
     settings_default_scope: ControlId,
@@ -746,8 +756,10 @@ impl RemoteWindowState {
             close_cancel,
             settings_font,
             settings_size,
-            settings_dark,
-            settings_light,
+            settings_classic_night,
+            settings_classic_day,
+            settings_fancy_night,
+            settings_fancy_day,
             settings_apply,
             settings_cancel,
             settings_default_scope,
@@ -801,8 +813,10 @@ impl RemoteWindowState {
             close_cancel,
             settings_font,
             settings_size,
-            settings_dark,
-            settings_light,
+            settings_classic_night,
+            settings_classic_day,
+            settings_fancy_night,
+            settings_fancy_day,
             settings_apply,
             settings_cancel,
             settings_default_scope,
@@ -1221,13 +1235,37 @@ impl RemoteWindowState {
                 if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
-                self.preview_settings_theme(ThemeId::Dark);
+                self.preview_settings_preset(AppearancePreset::classic_night());
             }
             "settings-theme-light" => {
                 if !self.settings_dialog.is_open() {
                     anyhow::bail!("Settings is not open");
                 }
-                self.preview_settings_theme(ThemeId::Light);
+                self.preview_settings_preset(AppearancePreset::classic_day());
+            }
+            "settings-preset-classic-day" => {
+                if !self.settings_dialog.is_open() {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.preview_settings_preset(AppearancePreset::classic_day());
+            }
+            "settings-preset-classic-night" => {
+                if !self.settings_dialog.is_open() {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.preview_settings_preset(AppearancePreset::classic_night());
+            }
+            "settings-preset-fancy-day" => {
+                if !self.settings_dialog.is_open() {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.preview_settings_preset(AppearancePreset::fancy_day());
+            }
+            "settings-preset-fancy-night" => {
+                if !self.settings_dialog.is_open() {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.preview_settings_preset(AppearancePreset::fancy_night());
             }
             "settings-apply" => {
                 if !self.settings_dialog.is_open() {
@@ -1402,33 +1440,40 @@ impl RemoteWindowState {
                     .client
                     .as_ref()
                     .and_then(|client| client.snapshot().active_tab_id.as_deref());
-                let terminal_override = active_tab_id.and_then(|tab_id| {
-                    self.config
-                        .terminal_override_entry(&ipc_address(), tab_id)
-                        .cloned()
-                });
                 let effective = self
                     .config
                     .effective_terminal_appearance(&ipc_address(), active_tab_id);
+                let mut settings = self.settings_snapshot_value(active_tab_id, false);
+                if let Some(object) = settings.as_object_mut() {
+                    object.insert(
+                        "locale".into(),
+                        serde_json::Value::String(self.config.locale.as_str().to_owned()),
+                    );
+                    object.insert(
+                        "active_tab_id".into(),
+                        active_tab_id
+                            .map(|value| serde_json::Value::String(value.to_owned()))
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    object.insert(
+                        "resolved_font_family".into(),
+                        serde_json::Value::String(effective.terminal_font_family.clone()),
+                    );
+                    object.insert(
+                        "config_path".into(),
+                        serde_json::Value::String(config_path().display().to_string()),
+                    );
+                    object.insert(
+                        "recommended_cjk_font".into(),
+                        serde_json::Value::String("Sarasa Fixed SC".to_owned()),
+                    );
+                    object.insert(
+                        "recommended_font_license".into(),
+                        serde_json::Value::String("SIL Open Font License 1.1".to_owned()),
+                    );
+                }
                 output = Some(
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "terminal_font_family": self.config.terminal_font_family,
-                        "terminal_font_size": self.config.terminal_font_size,
-                        "color_theme": self.config.color_theme.as_str(),
-                        "locale": self.config.locale.as_str(),
-                        "active_tab_id": active_tab_id,
-                        "current_terminal_override": terminal_override,
-                        "effective": {
-                            "terminal_font_family": effective.terminal_font_family,
-                            "terminal_font_size": effective.terminal_font_size,
-                            "color_theme": effective.color_theme.as_str(),
-                        },
-                        "resolved_font_family": effective.terminal_font_family,
-                        "config_path": config_path(),
-                        "recommended_cjk_font": "Sarasa Fixed SC",
-                        "recommended_font_license": "SIL Open Font License 1.1",
-                    }))
-                    .context("could not encode Settings")?,
+                    serde_json::to_string_pretty(&settings).context("could not encode Settings")?,
                 );
             }
             "set-setting" => {
@@ -1716,6 +1761,39 @@ impl RemoteWindowState {
         tree_row_at_y(y).map(|position| self.sidebar_offset().saturating_add(position))
     }
 
+    fn settings_snapshot_value(
+        &self,
+        active_tab_id: Option<&str>,
+        include_modal_scope: bool,
+    ) -> serde_json::Value {
+        let mut value = settings_json(
+            &self.config,
+            self.config.locale,
+            self.settings_dialog.is_open(),
+            self.settings_dialog
+                .is_open()
+                .then(|| self.settings_dialog.preset_draft().as_str()),
+            &ipc_address(),
+            active_tab_id,
+        );
+        if include_modal_scope {
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "scope".into(),
+                    serde_json::Value::String(self.settings_dialog.scope().as_str().to_owned()),
+                );
+                object.insert(
+                    "target_tab_id".into(),
+                    self.settings_dialog
+                        .target_tab_id()
+                        .map(|value| serde_json::Value::String(value.to_owned()))
+                        .unwrap_or(serde_json::Value::Null),
+                );
+            }
+        }
+        value
+    }
+
     fn ui_snapshot_json(&mut self) -> Result<String> {
         self.sync_new_terminal_drafts();
         self.sync_settings_drafts();
@@ -1724,14 +1802,6 @@ impl RemoteWindowState {
             .as_ref()
             .context("replaceable UI is disconnected")?;
         let source = client.snapshot();
-        let active_override = source.active_tab_id.as_deref().and_then(|tab_id| {
-            self.config
-                .terminal_override_entry(&ipc_address(), tab_id)
-                .cloned()
-        });
-        let effective = self
-            .config
-            .effective_terminal_appearance(&ipc_address(), source.active_tab_id.as_deref());
         let client_size = self.window.client_size();
         let layout = self.workspace_geometry();
         let pointer_capture_owned = self
@@ -2112,28 +2182,7 @@ impl RemoteWindowState {
             "tabs": tabs,
             "tab_editor": tab_editor,
             "modal": modal,
-            "settings": {
-                "terminal_font_family": self.config.terminal_font_family,
-                "terminal_font_size": self.config.terminal_font_size,
-                "color_theme": self.config.color_theme.as_str(),
-                "scope": self.settings_dialog.scope().as_str(),
-                "target_tab_id": self.settings_dialog.target_tab_id(),
-                "current_terminal_override": active_override,
-                "effective": {
-                    "terminal_font_family": effective.terminal_font_family,
-                    "terminal_font_size": effective.terminal_font_size,
-                    "color_theme": effective.color_theme.as_str(),
-                },
-                "theme_draft": self.settings_dialog.is_open().then(
-                    || self.settings_dialog.theme_draft().as_str()
-                ),
-                "theme_options": ThemeId::ALL.map(|theme| serde_json::json!({
-                    "id": theme.as_str(),
-                    "label": theme.label(),
-                })),
-                "tabs_visible": self.tabs_visible,
-                "tabs_width": self.config.tabs_width,
-            },
+            "settings": self.settings_snapshot_value(source.active_tab_id.as_deref(), true),
             "locale": {
                 "id": self.config.locale.as_str(),
                 "controls": {
@@ -2521,12 +2570,12 @@ impl RemoteWindowState {
         self.show_tab_editor(visible && self.tabs_visible && self.tab_editor_dialog.is_open());
     }
 
-    fn settings_modal_geometry(&self) -> (ProductPixelRect, [ProductPixelRect; 12]) {
+    fn settings_modal_geometry(&self) -> (ProductPixelRect, [ProductPixelRect; 14]) {
         let client = self.window.client_size();
         let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
         let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
         let width = (client_right - 32).clamp(520, 680);
-        let height = (client_bottom - 32).clamp(390, 430);
+        let height = (client_bottom - 32).clamp(430, 470);
         let left = ((client_right - width) / 2).max(0);
         let top = ((client_bottom - height) / 2).max(0);
         let modal = ProductPixelRect {
@@ -2571,23 +2620,38 @@ impl RemoteWindowState {
             right: left + width - 32,
             bottom: size.bottom,
         };
-        let dark = ProductPixelRect {
+        let preset_top = top + 276;
+        let preset_gap = 8;
+        let preset_width = ((width - 64 - preset_gap) / 2).max(120);
+        let classic_day = ProductPixelRect {
             left: left + 32,
-            top: top + 276,
-            right: left + 178,
-            bottom: top + 310,
+            top: preset_top,
+            right: left + 32 + preset_width,
+            bottom: preset_top + 34,
         };
-        let light = ProductPixelRect {
-            left: left + 190,
-            top: dark.top,
-            right: left + 336,
-            bottom: dark.bottom,
+        let classic_night = ProductPixelRect {
+            left: classic_day.right + preset_gap,
+            top: preset_top,
+            right: classic_day.right + preset_gap + preset_width,
+            bottom: preset_top + 34,
+        };
+        let fancy_day = ProductPixelRect {
+            left: left + 32,
+            top: preset_top + 42,
+            right: left + 32 + preset_width,
+            bottom: preset_top + 76,
+        };
+        let fancy_night = ProductPixelRect {
+            left: classic_night.left,
+            top: preset_top + 42,
+            right: classic_night.right,
+            bottom: preset_top + 76,
         };
         let theme_inherit = ProductPixelRect {
             left: left + width - 158,
-            top: dark.top,
+            top: preset_top,
             right: left + width - 32,
-            bottom: dark.bottom,
+            bottom: preset_top + 34,
         };
         let reset = ProductPixelRect {
             left: left + 32,
@@ -2616,8 +2680,10 @@ impl RemoteWindowState {
                 font_inherit,
                 size,
                 size_inherit,
-                dark,
-                light,
+                classic_day,
+                classic_night,
+                fancy_day,
+                fancy_night,
                 theme_inherit,
                 reset,
                 apply,
@@ -2635,12 +2701,14 @@ impl RemoteWindowState {
             (self.settings_font_inherit, controls[3]),
             (self.settings_size, controls[4]),
             (self.settings_size_inherit, controls[5]),
-            (self.settings_dark, controls[6]),
-            (self.settings_light, controls[7]),
-            (self.settings_theme_inherit, controls[8]),
-            (self.settings_reset_overrides, controls[9]),
-            (self.settings_apply, controls[10]),
-            (self.settings_cancel, controls[11]),
+            (self.settings_classic_day, controls[6]),
+            (self.settings_classic_night, controls[7]),
+            (self.settings_fancy_day, controls[8]),
+            (self.settings_fancy_night, controls[9]),
+            (self.settings_theme_inherit, controls[10]),
+            (self.settings_reset_overrides, controls[11]),
+            (self.settings_apply, controls[12]),
+            (self.settings_cancel, controls[13]),
         ] {
             self.set_control_bounds(control, rect);
         }
@@ -2651,8 +2719,10 @@ impl RemoteWindowState {
         for control in [
             self.settings_font,
             self.settings_size,
-            self.settings_dark,
-            self.settings_light,
+            self.settings_classic_day,
+            self.settings_classic_night,
+            self.settings_fancy_day,
+            self.settings_fancy_night,
             self.settings_apply,
             self.settings_cancel,
             self.settings_default_scope,
@@ -3732,9 +3802,15 @@ impl RemoteWindowState {
             self.settings_size,
             !current || override_draft.terminal_font_size.is_some(),
         );
-        let theme_enabled = !current || override_draft.color_theme.is_some();
-        self.set_control_enabled(self.settings_dark, theme_enabled);
-        self.set_control_enabled(self.settings_light, theme_enabled);
+        let theme_enabled = !current || override_draft.appearance_preset.is_some();
+        for control in [
+            self.settings_classic_day,
+            self.settings_classic_night,
+            self.settings_fancy_day,
+            self.settings_fancy_night,
+        ] {
+            self.set_control_enabled(control, theme_enabled);
+        }
         for (control, overridden) in [
             (
                 self.settings_font_inherit,
@@ -3746,7 +3822,7 @@ impl RemoteWindowState {
             ),
             (
                 self.settings_theme_inherit,
-                override_draft.color_theme.is_some(),
+                override_draft.appearance_preset.is_some(),
             ),
         ] {
             self.set_control_text(
@@ -3782,7 +3858,7 @@ impl RemoteWindowState {
                 }
             ),
         );
-        self.refresh_settings_theme_controls();
+        self.refresh_settings_preset_controls();
     }
 
     fn toggle_settings_inheritance(&mut self, field: AppearanceField) {
@@ -3803,32 +3879,29 @@ impl RemoteWindowState {
         }
     }
 
-    fn preview_settings_theme(&mut self, theme: ThemeId) {
-        if self.settings_dialog.preview_theme(theme) {
-            self.refresh_settings_theme_controls();
+    fn preview_settings_preset(&mut self, preset: AppearancePreset) {
+        if self.settings_dialog.preview_preset(preset) {
+            self.refresh_settings_preset_controls();
         }
     }
 
-    fn refresh_settings_theme_controls(&self) {
-        let theme_draft = self.settings_dialog.theme_draft();
-        for (theme, control) in [
-            (ThemeId::Dark, self.settings_dark),
-            (ThemeId::Light, self.settings_light),
+    fn refresh_settings_preset_controls(&self) {
+        let preset_draft = self.settings_dialog.preset_draft();
+        let locale = self.config.locale;
+        for (preset, control) in [
+            (AppearancePreset::classic_day(), self.settings_classic_day),
+            (AppearancePreset::classic_night(), self.settings_classic_night),
+            (AppearancePreset::fancy_day(), self.settings_fancy_day),
+            (AppearancePreset::fancy_night(), self.settings_fancy_night),
         ] {
-            let state = if theme == theme_draft {
-                self.config.locale.text(UiText::Selected)
+            let state = if preset == preset_draft {
+                locale.text(UiText::Selected)
             } else {
-                self.config.locale.text(UiText::Preview)
+                locale.text(UiText::Preview)
             };
             self.set_control_text(
                 control,
-                &format!(
-                    "{} · {state}",
-                    self.config.locale.text(match theme {
-                        ThemeId::Dark => UiText::ThemeDark,
-                        ThemeId::Light => UiText::Light,
-                    })
-                ),
+                &format!("{} · {state}", preset.label(locale)),
             );
         }
     }
@@ -3839,7 +3912,7 @@ impl RemoteWindowState {
         let mut next = self.config.clone();
         next.terminal_font_family = changes.default_appearance.terminal_font_family.clone();
         next.terminal_font_size = changes.default_appearance.terminal_font_size;
-        next.color_theme = changes.default_appearance.color_theme;
+        next.appearance_preset = changes.default_appearance.appearance_preset;
         if let Some(tab_id) = changes.target_tab_id.as_deref() {
             next.set_terminal_override(&ipc_address(), tab_id, changes.override_draft.clone());
         }
@@ -5158,9 +5231,9 @@ impl RemoteWindowState {
 
     fn paint_frame(&self, device: &mut dyn ControlCanvas) {
         let palette = if self.settings_dialog.is_open() {
-            self.settings_dialog.theme_draft().palette()
+            self.settings_dialog.preset_draft().palette()
         } else {
-            self.active_terminal_appearance().color_theme.palette()
+            self.active_terminal_appearance().appearance_preset.palette()
         };
         let (sidebar, terminal, composer, status) = self.layout_rects();
         fill(device, &sidebar, palette.sidebar.canvas_rgb());
@@ -6042,8 +6115,18 @@ impl RemoteWindowApplication {
             CLOSE_KEEP_ID => state.finish_window_close(WindowCloseChoice::KeepServerRunning),
             CLOSE_STOP_ID => state.finish_window_close(WindowCloseChoice::StopServerAndExit),
             CLOSE_CANCEL_ID => state.finish_window_close(WindowCloseChoice::Cancel),
-            SETTINGS_DARK_ID => state.preview_settings_theme(ThemeId::Dark),
-            SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
+            SETTINGS_CLASSIC_NIGHT_ID => {
+                state.preview_settings_preset(AppearancePreset::classic_night())
+            }
+            SETTINGS_CLASSIC_DAY_ID => {
+                state.preview_settings_preset(AppearancePreset::classic_day())
+            }
+            SETTINGS_FANCY_NIGHT_ID => {
+                state.preview_settings_preset(AppearancePreset::fancy_night())
+            }
+            SETTINGS_FANCY_DAY_ID => {
+                state.preview_settings_preset(AppearancePreset::fancy_day())
+            }
             SETTINGS_DEFAULT_SCOPE_ID => state.switch_settings_scope(SettingsScope::Defaults),
             SETTINGS_CURRENT_SCOPE_ID => {
                 state.switch_settings_scope(SettingsScope::CurrentTerminal)
