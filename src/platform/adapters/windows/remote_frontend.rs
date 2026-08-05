@@ -297,10 +297,15 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     );
     let client = crate::frontend_server::connect_or_start_frontend_gui_client(&client_id)
         .map_err(anyhow::Error::msg)?;
-    let title = format!(
-        "AgenTerm-{}:{}",
+    let config = load_config();
+    let instance_label = resolved_ipc_endpoint()
+        .ok()
+        .map(|resolved| resolved.logical_instance.display_name().to_string())
+        .filter(|name| name != "default");
+    let title = window_title_for_preset(
+        config.appearance_preset,
         env!("CARGO_PKG_VERSION"),
-        resolved_ipc_endpoint()?.logical_instance.display_name()
+        instance_label.as_deref(),
     );
     let mut options = ControlWindowOptions::new(title, PixelSize::new(1180, 760));
     options.controls = remote_control_specs();
@@ -2583,7 +2588,7 @@ impl RemoteWindowState {
         let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
         let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
         let width = (client_right - 32).clamp(520, 680);
-        let height = (client_bottom - 32).clamp(430, 470);
+        let height = (client_bottom - 32).clamp(460, 500);
         let left = ((client_right - width) / 2).max(0);
         let top = ((client_bottom - height) / 2).max(0);
         let modal = ProductPixelRect {
@@ -2657,9 +2662,9 @@ impl RemoteWindowState {
         };
         let theme_inherit = ProductPixelRect {
             left: left + width - 158,
-            top: preset_top,
+            top: preset_top + 84,
             right: left + width - 32,
-            bottom: preset_top + 34,
+            bottom: preset_top + 118,
         };
         let reset = ProductPixelRect {
             left: left + 32,

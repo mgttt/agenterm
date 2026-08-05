@@ -56,11 +56,11 @@
 - 阻塞: 无
 
 ### 分身4 · 2026-08-05
-- 状态: IDLE — Phase 2B 完成，待主控2 审合
+- 状态: RUNNING — 主控2 审阅阻断修复中
 - bcId: `bc-c3e01145-b870-4e74-b18c-f3aea06ea800`
 - URL: https://cursor.com/agents/bc-c3e01145-b870-4e74-b18c-f3aea06ea800
-- 分支: `cursor/skins-eng-phase2a` @ `339cf38`
-- 证据 2A: AppearancePreset 四 id；settings 迁移；Win/Unix picker；theme-smoke 四预设
-- 证据 2B: 消费 `assets/skins/**` 四套 hex + manifest title/metrics；fancy 真 palette；Linux window icon；theme-smoke fancy≠classic；`cargo test --lib` 619 passed
-- 下一步: 待命；等主控2 审合分支
-- 阻塞: 无
+- 分支: `cursor/skins-eng-phase2a`
+- 证据 2B: 消费 assets/skins；fancy 真 palette；Linux startup icon；theme-smoke fancy≠classic
+- 延后（见 plan/plan-skins-v1.md Phase 2B deferred）：Apply 后 Linux icon 不刷新；Win exe embed 未切 fancy.ico；metrics 未进 render
+- 下一步: 修 Critical/Major 阻断后 push 新 tip
+- 阻塞: 主控2 审阅项（smoke/geometry/title/migration）

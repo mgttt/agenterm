@@ -84,6 +84,12 @@ optional; 主控2 merges to `main` after review.
 4. Render metrics (radius/border) if the design freeze includes them
 5. PNG/render-parity evidence for luminance pairs; snapshot proves fancy≠classic
 
+**Phase 2B deferred (post-merge leaves):**
+
+- Apply 后 Linux window icon 不刷新（仅 startup 设一次）
+- Windows `build.rs` 仍 embed `assets/agenterm.ico`，未切 fancy skin icon
+- `SkinMetrics` corner radius / border 仅暴露于 `ui-snapshot`，Win/Unix render 仍 rectilinear
+
 ### Phase 3 — Integration (主控2)
 
 1. Rebase/merge both leaves; resolve conflicts serially
