@@ -1,6 +1,8 @@
 # Control Center UX 设计任务书（L-CC · v0.2.0）
 
-状态：**设计开工**（2026-08-05）。本文件是产品设计师角色的执行 SSOT；
+状态：**设计定稿 rev3**（2026-08-05）。本文件是设计**任务书/起点**；
+**实现级 SSOT** 见 [`plan/design-control-center-ux.md`](design-control-center-ux.md)
+（功能与布局设计文档，含 Key Decisions、几何/hit 契约、PR Plan）。
 实现仍归 `prd/PRD_02_21_control_center.md` 与 `src/control_center.rs`。
 
 关联：`plan/plan-v0.1.15.md` §5.3（L-CC 内容成熟）、

@@ -217,6 +217,7 @@ struct ServerState {
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
+    named_buffers: crate::named_buffer::NamedBufferStore,
     control_authority: ControlAuthority,
     ui_lease: UiLeaseAuthority,
     ui_client_snapshot: Option<UiClientSnapshotRecord>,
@@ -265,6 +266,7 @@ impl ServerState {
             session_name,
             started_at: SystemTime::now(),
             event_journal,
+            named_buffers: crate::named_buffer::NamedBufferStore::new(),
             control_authority: ControlAuthority::default(),
             ui_lease: UiLeaseAuthority::default(),
             ui_client_snapshot: None,
@@ -1661,6 +1663,14 @@ impl ControlHost for ServerState {
     fn request_shutdown(&mut self) {
         let _ = mark_intentional_shutdown(self._instance_registration.address());
         self.shutdown_requested = true;
+    }
+
+    fn named_buffers(&self) -> &crate::named_buffer::NamedBufferStore {
+        &self.named_buffers
+    }
+
+    fn named_buffers_mut(&mut self) -> &mut crate::named_buffer::NamedBufferStore {
+        &mut self.named_buffers
     }
 
     fn ui_bridge_facts(&self) -> crate::ui_bridge::UiBridgeFacts {

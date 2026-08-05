@@ -8,6 +8,7 @@ pub(crate) mod control_center;
 mod control_contract;
 mod control_dispatch;
 mod event_journal;
+mod named_buffer;
 mod instances;
 mod ipc_endpoint;
 mod ipc_transport;

@@ -253,6 +253,8 @@ pub(crate) fn resolved_control_target(host: &impl ControlHost, args: &[String]) 
                 | "set-tab-note"
                 | "show-composer"
                 | "show-tab-note"
+                | "paste-buffer"
+                | "pasteb"
         );
     let tab_id = tab_scoped
         .then(|| resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t")))

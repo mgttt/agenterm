@@ -59,14 +59,20 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("send-composer", &[]),
     command("send-mouse", &[]),
     command("server-list", &[]),
+    command("set-buffer", &["setb"]),
     command("set-setting", &[]),
     command("set-composer", &[]),
     command("set-tab-parent", &[]),
     command("set-tab-note", &[]),
+    command("show-buffer", &["showb"]),
     command("show-composer", &[]),
     command("show-tab-parent", &[]),
     command("show-tab-note", &[]),
     command("show-options", &["show"]),
+    command("load-buffer", &["loadb"]),
+    command("list-buffers", &["lsb"]),
+    command("delete-buffer", &["deleteb"]),
+    command("paste-buffer", &["pasteb"]),
     command("shutdown", &[]),
     command("start-server", &[]),
     command("ui-action", &[]),
@@ -261,6 +267,54 @@ pub(crate) const MUX_COMMANDS: &[MuxCommand] = &[
     },
     MuxCommand {
         name: "send-keys",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "set-buffer",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "setb",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "load-buffer",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "loadb",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "show-buffer",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "showb",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "list-buffers",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "lsb",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "delete-buffer",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "deleteb",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "paste-buffer",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "pasteb",
         status: MuxStatus::Supported,
     },
     MuxCommand {
@@ -606,9 +660,42 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "send-keys" | "send" => (
-            "agenterm-cli send-keys [-t target] [-l|--native] key...",
+            "agenterm-cli send-keys [-t target] [-l|--native] key...\n\
+             PowerShell: quote targets as -t '@2' (unquoted @N is a splat).",
             &["-t"][..],
             &["-l", "--native", "-R", "-X"][..],
+            false,
+        ),
+        "set-buffer" | "setb" => (
+            "agenterm-cli set-buffer [-b name] [--] data...",
+            &["-b"][..],
+            &[][..],
+            false,
+        ),
+        "load-buffer" | "loadb" => (
+            "agenterm-cli load-buffer [-b name] path",
+            &["-b"][..],
+            &[][..],
+            false,
+        ),
+        "show-buffer" | "showb" => (
+            "agenterm-cli show-buffer [-b name]",
+            &["-b"][..],
+            &[][..],
+            false,
+        ),
+        "list-buffers" | "lsb" => ("agenterm-cli list-buffers", &[][..], &[][..], false),
+        "delete-buffer" | "deleteb" => (
+            "agenterm-cli delete-buffer [-b name]",
+            &["-b"][..],
+            &[][..],
+            false,
+        ),
+        "paste-buffer" | "pasteb" => (
+            "agenterm-cli paste-buffer [-b name] [-t target]\n\
+             Injects buffer bytes into the target pane PTY (not an agent mailbox).",
+            &["-b", "-t"][..],
+            &[][..],
             false,
         ),
         "send-composer" => (

@@ -581,6 +581,7 @@ struct UnixApp {
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
+    named_buffers: crate::named_buffer::NamedBufferStore,
     window: Option<PixelWindow>,
     grid: Option<TerminalGrid>,
     tabs: Vec<TerminalTab>,
@@ -683,6 +684,7 @@ impl UnixApp {
             session_name,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
+            named_buffers: crate::named_buffer::NamedBufferStore::new(),
             window: None,
             grid: None,
             tabs: Vec::new(),
@@ -4462,6 +4464,14 @@ impl ControlHost for UnixApp {
 
     fn event_journal_mut(&mut self) -> &mut EventJournal {
         &mut self.event_journal
+    }
+
+    fn named_buffers(&self) -> &crate::named_buffer::NamedBufferStore {
+        &self.named_buffers
+    }
+
+    fn named_buffers_mut(&mut self) -> &mut crate::named_buffer::NamedBufferStore {
+        &mut self.named_buffers
     }
 
     fn request_ui_redraw(&mut self) {

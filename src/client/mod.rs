@@ -4871,7 +4871,13 @@ Usage:
   agenterm-cli select-window -t target
   agenterm-cli rename-window [-t target] name
   agenterm-cli kill-window -t target
-  agenterm-cli send-keys [-t target] key...
+  agenterm-cli send-keys [-t target] [-l|--native] key...
+  agenterm-cli set-buffer [-b name] [--] data...
+  agenterm-cli load-buffer [-b name] path
+  agenterm-cli show-buffer [-b name]
+  agenterm-cli list-buffers
+  agenterm-cli delete-buffer [-b name]
+  agenterm-cli paste-buffer [-b name] [-t target]
   agenterm-cli scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
   agenterm-cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
   agenterm-cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]

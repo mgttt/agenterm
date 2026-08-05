@@ -34,6 +34,30 @@ use crate::{
 
 pub(crate) const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
 
+/// Join `set-buffer` payload from argv after flags / optional `--`.
+fn buffer_data_from_args(args: &[String]) -> String {
+    if let Some(dash) = args.iter().position(|arg| arg == "--") {
+        return args[dash + 1..].join(" ");
+    }
+    // Skip command and value options (-b name); remaining positionals are data.
+    let mut index = 1;
+    let mut parts = Vec::new();
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "-b" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        parts.push(args[index].as_str());
+        index += 1;
+    }
+    parts.join(" ")
+}
+
 pub(crate) fn command_name(args: &[String]) -> Option<&str> {
     args.first().map(String::as_str)
 }
@@ -463,6 +487,10 @@ pub(crate) trait ControlHost {
     fn active_id(&self) -> Option<u64>;
     fn set_active_id(&mut self, id: Option<u64>);
     fn request_shutdown(&mut self);
+
+    /// Session-scoped named paste buffers (tmux/rmux control surface).
+    fn named_buffers(&self) -> &crate::named_buffer::NamedBufferStore;
+    fn named_buffers_mut(&mut self) -> &mut crate::named_buffer::NamedBufferStore;
 
     fn ui_bridge_facts(&self) -> crate::ui_bridge::UiBridgeFacts {
         crate::ui_bridge::current_facts()
@@ -1257,6 +1285,137 @@ pub(crate) fn dispatch_shared_command(
                         false,
                     ));
                 }
+            }
+            Some(IpcResponse::success(""))
+        }
+        "set-buffer" | "setb" => {
+            let name = option_value(args, "-b");
+            let data = buffer_data_from_args(args);
+            if data.is_empty() && !args.iter().any(|arg| arg == "--") {
+                return Some(IpcResponse::typed_failure(
+                    "set-buffer requires data (use -- before empty data if intentional)",
+                    "operation_usage",
+                    "usage",
+                    false,
+                ));
+            }
+            match host.named_buffers_mut().set(name, data.into_bytes()) {
+                Ok(()) => Some(IpcResponse::success("")),
+                Err(error) => Some(IpcResponse::typed_failure(
+                    &error,
+                    "buffer_set_failed",
+                    "usage",
+                    false,
+                )),
+            }
+        }
+        "load-buffer" | "loadb" => {
+            let name = option_value(args, "-b");
+            let path = positional_values(args, &["-b", "-t"], &[])
+                .into_iter()
+                .next();
+            let Some(path) = path else {
+                return Some(IpcResponse::typed_failure(
+                    "load-buffer requires a path",
+                    "operation_usage",
+                    "usage",
+                    false,
+                ));
+            };
+            let data = match std::fs::read(path) {
+                Ok(data) => data,
+                Err(error) => {
+                    return Some(IpcResponse::typed_failure(
+                        &format!("load-buffer could not read {path}: {error}"),
+                        "buffer_load_failed",
+                        "io",
+                        false,
+                    ));
+                }
+            };
+            match host.named_buffers_mut().set(name, data) {
+                Ok(()) => Some(IpcResponse::success("")),
+                Err(error) => Some(IpcResponse::typed_failure(
+                    &error,
+                    "buffer_set_failed",
+                    "usage",
+                    false,
+                )),
+            }
+        }
+        "show-buffer" | "showb" => {
+            let name = option_value(args, "-b");
+            match host.named_buffers().get(name) {
+                Ok(data) => {
+                    // Prefer UTF-8 text; binary content is returned lossily so
+                    // scripts still get a stable string channel (load via file).
+                    Some(IpcResponse::success(String::from_utf8_lossy(data).into_owned()))
+                }
+                Err(error) => Some(IpcResponse::typed_failure(
+                    &error,
+                    "buffer_not_found",
+                    "not_found",
+                    false,
+                )),
+            }
+        }
+        "list-buffers" | "lsb" => {
+            Some(IpcResponse::success(host.named_buffers().list_lines()))
+        }
+        "delete-buffer" | "deleteb" => {
+            let name = option_value(args, "-b");
+            match host.named_buffers_mut().delete(name) {
+                Ok(()) => Some(IpcResponse::success("")),
+                Err(error) => Some(IpcResponse::typed_failure(
+                    &error,
+                    "buffer_not_found",
+                    "not_found",
+                    false,
+                )),
+            }
+        }
+        "paste-buffer" | "pasteb" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::typed_failure(
+                    "can't find pane",
+                    "operation_target_not_found",
+                    "not_found",
+                    false,
+                ));
+            };
+            if host.tabs()[position].submission.is_pending() {
+                return Some(IpcResponse::typed_failure(
+                    "composer submission is pending; wait with \
+                     `wait-pane --submit-complete` before paste-buffer",
+                    "operation_conflict",
+                    "conflict",
+                    true,
+                ));
+            }
+            let name = option_value(args, "-b");
+            let data = match host.named_buffers().get(name) {
+                Ok(data) => data.to_vec(),
+                Err(error) => {
+                    return Some(IpcResponse::typed_failure(
+                        &error,
+                        "buffer_not_found",
+                        "not_found",
+                        false,
+                    ));
+                }
+            };
+            if data.is_empty() {
+                return Some(IpcResponse::success(""));
+            }
+            if !host.tabs_mut()[position].send(&data) {
+                return Some(IpcResponse::typed_failure(
+                    "terminal input was not accepted because the pane is no longer writable",
+                    "terminal_not_writable",
+                    "precondition",
+                    false,
+                ));
             }
             Some(IpcResponse::success(""))
         }
