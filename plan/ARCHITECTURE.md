@@ -54,7 +54,7 @@ src/ui_*.rs + control_*      共享产品语义：geometry / snapshot / bridge /
                              clipboard / dispatch（terminal selection 语义已归 src/frontend/selection.rs）
 
 src/platform/adapters/       主机实现（物理目录）
-  windows/                   replaceable remote UI ↔ agenterm-server
+  windows/                   replaceable remote UI ↔ agenterm server
   unix/frontend/             embedded 窗口 + 产品状态机
   linux|macos/               契约/manifest 等（非第二套业务策略）
 ```
@@ -68,8 +68,7 @@ src/platform/adapters/       主机实现（物理目录）
 
 | 二进制 | 路径 | 角色 |
 |--------|------|------|
-| `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；子命令 `server` 进入无窗权威 |
-| `agenterm-server` | `src/bin/agenterm-server.rs` | Windows 镜像隔离别名（同 `agenterm server`）；autostart 仍用此 PE |
+| `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；子命令 `server` = 无窗权威（另进程同 PE） |
 | `agenterm-cli` | `src/bin/agenterm-cli.rs` | 控制平面 CLI |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
 | `agenterm-rhai` | `src/bin/agenterm-rhai.rs` | 本地 Rhai 运行时（无权限策略） |

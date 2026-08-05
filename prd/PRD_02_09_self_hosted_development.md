@@ -34,11 +34,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] the split server/GUI restart path preserves server PID, tab IDs, PTYs
   and scrollback through version handshake, bootstrap, reconnect and rollback
   black-box evidence
-  - [x] v0.1.9 ownership decision: a dedicated internal
-    `agenterm-server.exe` owns session/runtime state and has no GUI surface;
-    `agenterm.exe` is a replaceable client. This separate image is intentional:
-    Windows must not keep the replaceable GUI executable locked merely because
-    the stable server is alive.
+  - [x] v0.1.9 ownership decision: a dedicated headless process owns
+    session/runtime state and has no GUI surface; `agenterm.exe` without
+    `server` is a replaceable client. The former separate `agenterm-server.exe`
+    image alias is removed — authority is `agenterm server` (same PE, new
+    process). Windows may lock that PE while Keep Server is active; stop the
+    authority before replacing the image.
   - [x] renderer-neutral hello/bootstrap/delta DTOs and typed interaction
     adapters drive the ordinary GUI without duplicated PTY truth. Closing and
     replacing the GUI preserves the same server/tab/PTY marker, and the same

@@ -1,3 +1,4 @@
+// AUTHORITY_EXE is the agenterm binary; launched as `AUTHORITY_EXE server ...`.
 // Prove the split headless server's lease, PTY, receipt, event, and workspace authority.
 //
 // Args:
@@ -127,7 +128,7 @@ try {
     let server_command = test_harness::configured_command(
         context,
         server_exe,
-        ["--address", context.address]
+        ["server", "--address", context.address]
     );
     let server = server_command.start();
     owned_children.push(server);
@@ -138,7 +139,7 @@ try {
             && !server_facts.top_level_window_present
             && protocol.pid == server.id
             && protocol.ui_bridge.ownership_mode == "split_server_client"
-            && protocol.ui_bridge.server_executable == "agenterm-server.exe"
+            && protocol.ui_bridge.server_executable == "agenterm.exe"
             && protocol.ui_bridge.replaceable_ui
             && protocol.ui_bridge.interactive_lease
             && protocol.ui_bridge.reconnect

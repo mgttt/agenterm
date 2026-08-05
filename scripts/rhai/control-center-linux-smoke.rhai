@@ -715,7 +715,7 @@ try {
         registry,
         endpoint,
         backend,
-        ["--endpoint", endpoint]
+        ["server", "--endpoint", endpoint]
     );
     let server = server_command.start();
     owned_children.push(server);
@@ -1184,7 +1184,7 @@ try {
         registry,
         endpoint,
         backend,
-        ["--endpoint", endpoint]
+        ["server", "--endpoint", endpoint]
     );
     let replacement_server = replacement_server_command.start();
     owned_children.push(replacement_server);

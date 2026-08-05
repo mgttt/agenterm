@@ -28,10 +28,6 @@ name = "agenterm-rhai"
 path = "src/bin/agenterm-rhai.rs"
 
 [[bin]]
-name = "agenterm-server"
-path = "src/bin/agenterm-server.rs"
-
-[[bin]]
 name = "agenterm-mcp"
 path = "src/bin/agenterm-mcp.rs"
 

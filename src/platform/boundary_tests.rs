@@ -35,16 +35,11 @@ const PRODUCT_COUPLING_MARKERS: &[&str] = &[
     "crate::ui_",
     "agenterm::",
     "AGENTERM_",
-    "agenterm-server",
 ];
 
 const PLATFORM_CRATE: &str = "crates/agenterm-platform";
 
-const SUBSYSTEM_ENTRYPOINTS: &[&str] = &[
-    "src/bin/agenterm.rs",
-    "src/bin/agenterm-server.rs",
-    "src/bin/agenterm-cc.rs",
-];
+const SUBSYSTEM_ENTRYPOINTS: &[&str] = &["src/bin/agenterm.rs", "src/bin/agenterm-cc.rs"];
 const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsystem = \"windows\")]";
 
 #[test]

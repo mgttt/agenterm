@@ -534,7 +534,7 @@ let executable_directory =
     std::path::parent(control_center).display;
 let server_executable = std::path::join(
     executable_directory,
-    "agenterm-server.exe"
+    "agenterm.exe"
 ).display;
 let cli_executable = std::path::join(
     executable_directory,
@@ -699,7 +699,7 @@ try {
     let server_command = test_harness::configured_command(
         context,
         server_executable,
-        ["--address", context.address]
+        ["server", "--address", context.address]
     );
     let server = server_command.start();
     owned_children.push(server);
@@ -1712,7 +1712,7 @@ try {
     let restarted_server_command = test_harness::configured_command(
         context,
         server_executable,
-        ["--address", context.address]
+        ["server", "--address", context.address]
     );
     let restarted_server = restarted_server_command.start();
     owned_children.push(restarted_server);

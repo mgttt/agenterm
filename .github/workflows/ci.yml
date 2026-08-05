@@ -381,7 +381,7 @@ jobs:
           AGENTERM_BOOTSTRAP_TASK: native-ipc-smoke
         run: >-
           ./scripts/bootstrap.sh
-          --server target/x86_64-unknown-linux-gnu/debug/agenterm-server
+          --server target/x86_64-unknown-linux-gnu/debug/agenterm
           --cli target/x86_64-unknown-linux-gnu/debug/agenterm-cli
           --ci-main-dev
       - name: Prove published Linux IPC upgrade and rollback
@@ -396,7 +396,7 @@ jobs:
             target/x86_64-unknown-linux-gnu/debug dev linux x86_64
           target/x86_64-unknown-linux-gnu/debug/agenterm-rhai task run \
             native-ipc-compat-smoke --manifest agenterm.tasks.json -- \
-            --head-server target/x86_64-unknown-linux-gnu/debug/agenterm-server \
+            --head-server target/x86_64-unknown-linux-gnu/debug/agenterm \
             --head-cli target/x86_64-unknown-linux-gnu/debug/agenterm-cli \
             --head-metadata target/x86_64-unknown-linux-gnu/debug/agenterm.json
           end_ms=$(date +%s%3N)
@@ -728,7 +728,7 @@ jobs:
             exit 0
           fi
           ./scripts/bootstrap.sh \
-            --server "target/${{ matrix.target }}/debug/agenterm-server" \
+            --server "target/${{ matrix.target }}/debug/agenterm" \
             --cli "target/${{ matrix.target }}/debug/agenterm-cli" \
             --ci-main-dev
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
@@ -752,7 +752,7 @@ jobs:
             "$binary_dir" dev macos "${{ matrix.arch }}"
           "$binary_dir/agenterm-rhai" task run native-ipc-compat-smoke \
             --manifest agenterm.tasks.json -- \
-            --head-server "$binary_dir/agenterm-server" \
+            --head-server "$binary_dir/agenterm" \
             --head-cli "$binary_dir/agenterm-cli" \
             --head-metadata "$binary_dir/agenterm.json"
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
@@ -776,7 +776,7 @@ jobs:
           control_center_output=$("$binary_dir/agenterm-rhai" task run control-center-macos-smoke \
             --manifest agenterm.tasks.json -- \
             --control-center "$binary_dir/agenterm-cc" \
-            --server "$binary_dir/agenterm-server" \
+            --server "$binary_dir/agenterm" \
             --cli "$binary_dir/agenterm-cli" 2>&1)
           control_center_status=$?
           set -e

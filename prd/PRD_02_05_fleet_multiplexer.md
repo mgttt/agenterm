@@ -6,7 +6,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - Architecture
   - [x] thin console frontend over AgenTerm IPC; internal
-    `agenterm-server.exe` is the PTY/workspace authority, while the replaceable
+    `agenterm server` is the PTY/workspace authority, while the replaceable
     `agenterm.exe` GUI is only a client. Mux consumes the same typed operations
     and does not depend on GUI presence.
   - [x] automatically discovers the live AgenTerm instance from the tab

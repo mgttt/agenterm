@@ -17,7 +17,7 @@
 
 ## Overview
 
-AgenTerm Control Center (`agenterm-cc`) is an **optional, independently replaceable secondary control surface**. It is not a second Fleet authority, not a terminal workspace, and not a package installer. Humans use it as a decision cockpit: which server, which tab, which future workflow/extension/info route—while all durable truth stays on `agenterm-server` and all package transactions stay on `agenterm-softmgr`.
+AgenTerm Control Center (`agenterm-cc`) is an **optional, independently replaceable secondary control surface**. It is not a second Fleet authority, not a terminal workspace, and not a package installer. Humans use it as a decision cockpit: which server, which tab, which future workflow/extension/info route—while all durable truth stays on `agenterm server` and all package transactions stay on `agenterm-softmgr`.
 
 Today only the **Cockpit** view has useful content: a native monospace text shell with a **dual-layer presentation** (diagnostic dump + three-row interactive tab viewport) driven by server `select-window`. Workflows, Extensions, and InfoHub appear only as snapshot-unavailable shells; there is no left navigation chrome, and `selected_view` is hard-coded to `cockpit` in the renderer snapshot.
 
@@ -289,7 +289,7 @@ flowchart LR
     Info["InfoHub"]
     Diag["Diagnostics"]
   end
-  Server["agenterm-server sole Fleet authority"]
+  Server["agenterm server sole Fleet authority"]
   Soft["agenterm-softmgr package tx"]
   Orch["Orchestration module workflows"]
 

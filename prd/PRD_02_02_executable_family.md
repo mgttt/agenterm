@@ -19,14 +19,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   this is now an accepted v0.1.9 requirement rather than an exploratory
   ownership question:
   - [x] preferred authority entry is **`agenterm server`** (subcommand; same
-    process role, separate process from the GUI). The thin sibling
-    `agenterm-server.exe` remains the Windows **image-isolation alias**
-    autostart target so a long-lived authority does not map/lock the
-    replaceable `agenterm.exe` PE (see
+    process role, separate process from the GUI). The former
+    `agenterm-server.exe` PE is **removed**; GUI autostart spawns
+    `agenterm.exe server …` (see
     [`plan/plan-agenterm-server-mode.md`](../plan/plan-agenterm-server-mode.md)).
-    Deleting that sibling PE is deferred until an upgrade story that keeps
-    GUI replaceability is proven. The short-lived `agenterm --server` flag
-    remains a transitional alias.
+    Sharing one PE means Windows may lock `agenterm.exe` while authority
+    lives — stop the server before replacing that image. The short-lived
+    `agenterm --server` flag remains a transitional alias.
   - [x] the headless authority process is the stable owner of workspace/tree
     selection, PTYs and child PIDs, terminal parser/scrollback, composer
     drafts, working-context facts, operation receipts and the event journal;
@@ -36,8 +35,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the shared command surface and ordinary-launch black boxes prove this
       process is the default authority
   - [x] `agenterm.exe` without the `server` subcommand always runs the current
-    on-disk replaceable GUI client; if no compatible server exists it
-    bootstraps the sibling `agenterm-server.exe` image alias, then connects
+    on-disk GUI client; if no compatible server exists it bootstraps
+    `agenterm server` as a separate process of the same PE, then connects
     through the same typed loopback control boundary instead of becoming the
     server itself
     - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
@@ -243,7 +242,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   would regress.
 - [ ] `agenterm-net` is an independent research executable and future optional
   service for libp2p/IPFS transport and content primitives. It is not linked
-  into `agenterm.exe` or `agenterm-server`, is not a stable release asset until
+  into `agenterm.exe` (GUI or `server`), is not a stable release asset until
   its own gates pass, and is owned by
   [Decentralized network foundation](PRD_02_22_decentralized_network.md).
 - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point

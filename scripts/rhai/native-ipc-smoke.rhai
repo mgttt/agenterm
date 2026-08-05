@@ -41,10 +41,15 @@ fn configured(
     instance,
     workspace
 ) {
+    // Authority binary is agenterm; headless mode is the `server` subcommand.
+    let mut server_args = ["server"];
+    for argument in arguments {
+        server_args.push(argument);
+    }
     let command = test_harness::configured_command(
         context,
         program,
-        arguments
+        server_args
     );
     for name in [
         "AGENTERM_IPC_ENDPOINT",

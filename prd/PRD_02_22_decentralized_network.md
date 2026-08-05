@@ -103,7 +103,7 @@ N2-M1
   requester signature binds invite digest, PeerId and request ID. The only
   successful payload is a bounded Fleet summary/event digest; replay,
   wrong-peer and expired requests return typed rejections. It has no terminal
-  input, shell, command, PTY or `agenterm-server` authority path.
+  input, shell, command, PTY or `agenterm server` authority path.
 - [ ] persistent invite/replay state, real-clock expiry, remote peer/session
   reconnect, attach crash recovery, rate exhaustion and three-platform evidence
   remain required. A
@@ -123,7 +123,7 @@ N2-M1
 ## Process and integration boundary
 
 - [x] the first implementation is an independent `agenterm-net` lab process,
-  not a library linked into `agenterm.exe`, `agenterm-server`, or
+  not a library linked into `agenterm.exe`, or
   `agenterm-cc`.
 - [x] process ownership includes peer keys, listeners, connections, streams,
   block-store handles, pins, caches, network tasks, receipts, and cleanup. A
@@ -214,7 +214,7 @@ N2-M1
 - [x] temporary block put/get returns byte-identical content whose hash matches
   its CID; interruption, corruption, and cleanup paths are deterministic.
 - [~] force-killing or hanging the experiment leaves the existing
-  `agenterm-server`, GUI, PTYs, workspace, and public CLI usable.
+  `agenterm server`, GUI, PTYs, workspace, and public CLI usable.
 - [x] tests use isolated identities, ports, stores, and process registries,
   avoid fixed sleeps, and expose bounded structured evidence suitable for CI.
 - [x] until the N2 gate passes, the prototype is not advertised as a stable

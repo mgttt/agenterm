@@ -1,7 +1,7 @@
 //! Frontend-side bootstrap and recovery for the independent AgenTerm server.
 //!
 //! Not a second server and not an IPC proxy. Product GUI/CLI clients use this
-//! module to detect the control endpoint, spawn `agenterm-server` when absent,
+//! module to detect the control endpoint, spawn `agenterm server` when absent,
 //! and apply limited reconnect restart policy. Session truth stays in
 //! `server_app`; live UI I/O stays on the direct client↔server path after connect.
 

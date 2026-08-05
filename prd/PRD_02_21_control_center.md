@@ -66,7 +66,7 @@ Control Center is the product name; the executable family uses
 - [ ] Control Center owns only its window, navigation, focus, renderer
   lifecycle, bounded caches, uncommitted UI drafts, diagnostics, and
   projection state.
-- [ ] `agenterm-server` remains the sole authority for workspace, tab tree,
+- [ ] `agenterm server` remains the sole authority for workspace, tab tree,
   PTYs, Composer state, event epoch/sequence, receipts, and stable Fleet IDs.
   Control Center consumes snapshots, journals, waits, and actions through the
   same typed public control plane as other clients.
@@ -322,7 +322,7 @@ future promotion gates.
   read-only Cockpit page. It is a reusable host experiment for future
   independent applications (optional Control Center views, PluginHub,
   InfoHub, Workflow) and does not replace the existing native `agenterm-cc`.
-  `agenterm.exe` and `agenterm-server` never acquire a WebView dependency. The
+  `agenterm.exe` (GUI and `server`) never acquires a WebView dependency. The
   direct-WRY host and a separately locked minimal Tauri v2 reference load only
   packaged read-only assets and leave the stable renderer native. A standalone
   bridge-v1 core now enforces the exact packaged origin, top frame, fresh

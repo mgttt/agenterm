@@ -626,7 +626,7 @@ try {
         server_executable,
         registry,
         runtime,
-        ["--instance", "dev"]
+        ["server", "--instance", "dev"]
     );
     let server = server_command.start();
     owned_children.push(server);
@@ -1261,7 +1261,7 @@ try {
         server_executable,
         registry,
         runtime,
-        ["--instance", "dev"]
+        ["server", "--instance", "dev"]
     );
     let replacement_server = replacement_server_command.start();
     owned_children.push(replacement_server);

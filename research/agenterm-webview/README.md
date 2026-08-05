@@ -2,8 +2,8 @@
 
 This directory is an isolated Rust workspace for the v0.1.12 system-WebView
 technical spike. It is not part of the root Cargo package or release build. It
-does not replace native `agenterm-cc`, and neither `agenterm.exe` nor
-`agenterm-server` acquires a WebView dependency.
+does not replace native `agenterm-cc`, and `agenterm.exe` (GUI or
+`server`) does not acquire a WebView dependency.
 
 The first vertical slice compares direct-WRY with a minimal Tauri v2 reference
 host over the same packaged, read-only Cockpit placeholder. Its stable outcome

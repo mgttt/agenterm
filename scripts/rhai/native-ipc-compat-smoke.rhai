@@ -184,10 +184,20 @@ fn acquire_release(context, catalog, release, asset, facts) {
         30
     );
     let suffix = if facts.os == "windows" { ".exe" } else { "" };
-    let server = std::path::join(
+    // Historical releases ship agenterm-server; HEAD consolidated to agenterm.
+    let legacy_server = std::path::join(
         extracted,
         "agenterm-server" + suffix
     ).display;
+    let consolidated_server = std::path::join(
+        extracted,
+        "agenterm" + suffix
+    ).display;
+    let server = if std::fs::exists(legacy_server) {
+        legacy_server
+    } else {
+        consolidated_server
+    };
     let cli = std::path::join(
         extracted,
         "agenterm-cli" + suffix
@@ -275,6 +285,18 @@ fn verify_head(context, repo, server, cli, metadata_path) {
     );
 }
 
+fn authority_argv(program, arguments) {
+    let name = std::path::PathBuf::from(program).file_name;
+    if name == "agenterm" || name == "agenterm.exe" {
+        let server_args = ["server"];
+        for argument in arguments {
+            server_args.push(argument);
+        }
+        return server_args;
+    }
+    arguments
+}
+
 fn configured(
     context,
     program,
@@ -287,7 +309,7 @@ fn configured(
     let command = test_harness::configured_command(
         context,
         program,
-        arguments
+        authority_argv(program, arguments)
     );
     for name in [
         "AGENTERM_IPC_ENDPOINT",
@@ -506,7 +528,7 @@ let suffix = if facts.os == "windows" { ".exe" } else { "" };
 if head_server == "" {
     head_server = std::path::join(
         repo,
-        "dist/agenterm-server" + suffix
+        "dist/agenterm" + suffix
     ).display;
 } else {
     head_server = std::path::absolute(head_server).display;

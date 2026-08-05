@@ -861,13 +861,13 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
 
     let mut server = Some(
         configured_command(
-            env!("CARGO_BIN_EXE_agenterm-server"),
+            env!("CARGO_BIN_EXE_agenterm"),
             &address,
             &workspace,
             &settings,
             &instances,
         )
-        .args(["--address", &address])
+        .args(["server", "--address", &address])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

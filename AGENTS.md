@@ -328,10 +328,9 @@ behavior.
   downloadable binaries are published only by exact-Candidate Promotion.
 - Keep `agenterm.exe` as a Windows-subsystem GUI, `agenterm-cli.exe` as the
   native control client, and `agenterm-mux.exe` as the compatibility client.
-  Preferred headless authority entry is `agenterm server`; keep shipping
-  thin `agenterm-server.exe` as the Windows image-isolation autostart alias
-  (do not spawn long-lived authority by remapping the GUI PE). All entry
-  points must reuse the library.
+  Preferred headless authority entry is `agenterm server` (separate process
+  of the same PE; the old `agenterm-server.exe` binary is removed). All
+  entry points must reuse the library.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
  pane, and unsupported commands must fail explicitly.
 
@@ -351,13 +350,12 @@ LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 (`/usr/bin/clang-cl` -> `clang-18`), and Wine.
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
-build commands per cell. `src/bin/` currently holds **seven** binaries
+build commands per cell. `src/bin/` currently holds **six** binaries
 (`agenterm`, `agenterm-cli`, `agenterm-mux`, `agenterm-rhai`,
-`agenterm-server`, `agenterm-mcp`, `agenterm-cc`); native Unix `build` emits
-six of them (see the alias note above). **Prefer building without `--bin`
+`agenterm-mcp`, `agenterm-cc`). **Prefer building without `--bin`
 filters** so new binaries are covered automatically — the explicit lists below
-are historical and skip `agenterm-server`, `agenterm-mcp`, and `agenterm-cc`,
-which means a clippy run using them silently lints only four of seven:
+are historical and skip `agenterm-mcp` and `agenterm-cc`, which means a
+clippy run using them silently lints only four of six:
 
 | Cell | Host | Build |
 |------|------|-------|

@@ -142,7 +142,7 @@ Classify each `server-list` row:
 | `stale`, 0 tabs, dead PID | Delete registration JSON under the instance dir; do not kill random PIDs |
 | Test leftovers (`p0-*`, temp workspace under system temp) | Kill if live, remove registration |
 | **Dual `main`** (two running mains) | Inspect tabs on **both** endpoints before kill. Keep the one with live agent work; stop the other with pinned `kill-server` / `shutdown` |
-| Orphan `agenterm-server` not in `server-list` | Treat as unregistered; confirm no useful tabs via accidental IPC, then stop process |
+| Orphan `agenterm server` process not in `server-list` | Treat as unregistered; confirm no useful tabs via accidental IPC, then stop process |
 | Intentional-shutdown markers for **live** endpoints | Remove wrong markers; they confuse recovery |
 
 Pin before mutate:
@@ -170,7 +170,7 @@ If title-bar close or taskbar close skips Keep/Stop/Cancel:
 
 ## Build note when servers hold file locks
 
-Live `agenterm-server.exe` can lock `dist` / `target` outputs. Prefer:
+Live `agenterm.exe` (including `server`) can lock `dist` / `target` outputs. Prefer:
 
 ```text
 cargo build --bin agenterm --bin agenterm-cli

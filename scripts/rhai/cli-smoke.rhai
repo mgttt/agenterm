@@ -350,7 +350,7 @@ try {
             && protocol.ui_bridge.replaceable_ui
             && protocol.ui_bridge.interactive_lease
             && protocol.ui_bridge.target_server_executable ==
-                "agenterm-server.exe"
+                "agenterm.exe"
             && protocol.ui_bridge.bootstrap_snapshot
             && protocol.ui_bridge.ordered_deltas
             && protocol.ui_bridge.reconnect

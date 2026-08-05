@@ -736,7 +736,7 @@
       "entry": "scripts/rhai/control-center-macos-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cc", "dist/agenterm-server", "dist/agenterm-cli"],
+      "args": [".", "dist/agenterm-cc", "dist/agenterm", "dist/agenterm-cli"],
       "dependencies": [],
       "platforms": ["macos"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
@@ -747,7 +747,7 @@
       "entry": "scripts/rhai/control-center-linux-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "target/x86_64-unknown-linux-gnu/debug/agenterm-cc", "target/x86_64-unknown-linux-gnu/debug/agenterm-server", "target/x86_64-unknown-linux-gnu/debug/agenterm-cli"],
+      "args": [".", "target/x86_64-unknown-linux-gnu/debug/agenterm-cc", "target/x86_64-unknown-linux-gnu/debug/agenterm", "target/x86_64-unknown-linux-gnu/debug/agenterm-cli"],
       "dependencies": [],
       "platforms": ["linux"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
@@ -802,7 +802,7 @@
       "entry": "scripts/rhai/server-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
@@ -813,7 +813,7 @@
       "entry": "scripts/rhai/native-ipc-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
@@ -835,7 +835,7 @@
       "entry": "scripts/rhai/wake-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
@@ -890,7 +890,7 @@
       "entry": "scripts/rhai/remote-ui-upgrade-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm-server.exe"],
+      "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm.exe"],
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]

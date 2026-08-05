@@ -100,11 +100,9 @@ pub const fn current_facts() -> UiBridgeFacts {
         },
         ownership_mode: UiOwnershipMode::CombinedGuiServer,
         replaceable_ui: false,
-        // Combined mode still names the GUI image; split autostart targets the
-        // thin image alias (`agenterm server` equivalent) so Windows does not
-        // lock the replaceable GUI PE.
+        // Authority and GUI share the agenterm PE; headless mode is `server`.
         server_executable: "agenterm.exe",
-        target_server_executable: "agenterm-server.exe",
+        target_server_executable: "agenterm.exe",
         bootstrap_snapshot: true,
         ordered_deltas: true,
         interactive_lease: false,
@@ -136,7 +134,7 @@ pub const fn headless_server_facts() -> UiBridgeFacts {
     let mut facts = current_facts();
     facts.ownership_mode = UiOwnershipMode::SplitServerClient;
     facts.replaceable_ui = true;
-    facts.server_executable = "agenterm-server.exe";
+    facts.server_executable = "agenterm.exe";
     facts.interactive_lease = true;
     facts.reconnect = true;
     facts.rollback_proven = true;
@@ -834,7 +832,7 @@ mod tests {
         assert!(facts.bootstrap_snapshot);
         assert!(facts.ordered_deltas);
         assert_eq!(facts.server_executable, "agenterm.exe");
-        assert_eq!(facts.target_server_executable, "agenterm-server.exe");
+        assert_eq!(facts.target_server_executable, "agenterm.exe");
         assert_eq!(facts.contract_schemas.hello, UI_HELLO_SCHEMA_VERSION);
         assert_eq!(
             facts.contract_schemas.bootstrap,
@@ -858,7 +856,8 @@ mod tests {
     fn headless_server_facts_publish_the_proven_replaceable_client_contract() {
         let facts = headless_server_facts();
         assert_eq!(facts.ownership_mode, UiOwnershipMode::SplitServerClient);
-        assert_eq!(facts.server_executable, "agenterm-server.exe");
+        assert_eq!(facts.server_executable, "agenterm.exe");
+        assert_eq!(facts.target_server_executable, "agenterm.exe");
         assert!(facts.replaceable_ui);
         assert!(facts.interactive_lease);
         assert!(facts.reconnect);

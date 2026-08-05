@@ -214,7 +214,7 @@ try {
     let server_command = test_harness::configured_command(
         context,
         server_exe,
-        ["--address", context.address]
+        ["server", "--address", context.address]
     );
     let server = server_command.start();
     owned_children.push(server);

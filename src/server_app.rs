@@ -141,10 +141,9 @@ pub fn run_server_entry() -> i32 {
     run_server_entry_with_args(env::args().skip(1).collect())
 }
 
-/// Headless authority entry used by `agenterm server` and the thin
-/// `agenterm-server` image alias. `arguments` should be selector flags only
-/// (`--address` / `--endpoint` / `--instance`); a leading `server` / `--server`
-/// token is tolerated for wrappers.
+/// Headless authority entry for `agenterm server`. `arguments` should be
+/// selector flags only (`--address` / `--endpoint` / `--instance`); a leading
+/// `server` / `--server` token is tolerated for wrappers.
 pub fn run_server_entry_with_args(arguments: Vec<String>) -> i32 {
     if let Err(error) = configure_server_launch(&arguments) {
         eprintln!("AgenTerm server argument error: {error:#}");

@@ -6,7 +6,7 @@
 
 产品定位（用户已定，不再讨论）：**移动端 = 桌面端的接入端 + 去中心化链接端**。
 手机上**不跑** agent/terminal 本体（无 PTY、无 workspace 权威、无 server）。
-手机是第三个 host：它连接一个已存在的 `agenterm-server` 权威并投影其状态。
+手机是第三个 host：它连接一个已存在的 `agenterm server` 权威并投影其状态。
 
 ---
 
@@ -16,8 +16,8 @@
 
 桌面端**早已**完成 server ↔ UI 分离，移动端只是复用同一条缝：
 
-- `plan/ARCHITECTURE.md` §2：`agenterm-server` 是「工作区/PTY/事件权威（可替换 UI 的
-  headless）」；`src/platform/adapters/windows/` 明标 “replaceable remote UI ↔ agenterm-server”。
+- `plan/ARCHITECTURE.md` §2：`agenterm server` 是「工作区/PTY/事件权威（可替换 UI 的
+  headless）」；`src/platform/adapters/windows/` 明标 “replaceable remote UI ↔ agenterm server”。
 - `src/ui_bridge.rs` 已是**成文线协议**：`UI_BRIDGE_SCHEMA_VERSION = 7` /
   `UI_BRIDGE_PROTOCOL_VERSION = 1`，`negotiate()` 做 `UiProtocolRange` 协商并返回
   `UiCompatibility::{Compatible, ClientTooOld, ClientTooNew}`；`headless_server_facts()`

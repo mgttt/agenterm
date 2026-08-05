@@ -18,14 +18,6 @@
       "release_budget_bytes": 4194304
     },
     {
-      "name": "agenterm-server.exe",
-      "role": "internal-server",
-      "pe_subsystem": 2,
-      "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-      "offline_probe": [],
-      "release_budget_bytes": 3145728
-    },
-    {
       "name": "agenterm-cli.exe",
       "role": "cli",
       "pe_subsystem": 3,
@@ -81,14 +73,6 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-server.exe",
-          "role": "internal-server",
-          "pe_subsystem": 2,
-          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-          "offline_probe": [],
-          "release_budget_bytes": 3145728
-        },
-        {
           "name": "agenterm-cli.exe",
           "role": "cli",
           "pe_subsystem": 3,
@@ -143,13 +127,6 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-server.exe",
-          "role": "internal-server",
-          "pe_subsystem": 2,
-          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-          "offline_probe": []
-        },
-        {
           "name": "agenterm-cli.exe",
           "role": "cli",
           "pe_subsystem": 3,
@@ -198,12 +175,6 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-server",
-          "role": "internal-server",
-          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-          "offline_probe": []
-        },
-        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -248,12 +219,6 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-server",
-          "role": "internal-server",
-          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-          "offline_probe": []
-        },
-        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -298,12 +263,6 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-server",
-          "role": "internal-server",
-          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-          "offline_probe": []
-        },
-        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -346,12 +305,6 @@
           "documentation_role": "isolated Control Center projection",
           "offline_probe": ["--version"],
           "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-server",
-          "role": "internal-server",
-          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
-          "offline_probe": []
         },
         {
           "name": "agenterm-cli",

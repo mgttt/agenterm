@@ -363,7 +363,7 @@ track remains planned, but every declared dependency must still pass.
     approval after the candidate and rehearsal gates pass
 - [x] M6 / v0.1.9 General Script Runtime
   - [x] deliver the cross-cutting stable-server/replaceable-GUI migration:
-    internal `agenterm-server.exe` owns session/PTY truth, current
+    headless `agenterm server` owns session/PTY truth, current
     `agenterm.exe` reconnects as a versioned UI client, and upgrade/rollback
     evidence preserves server/PTY identity and continuing output
   - [x] establish typed script catalog schema v3 independently of the stable

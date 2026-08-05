@@ -55,7 +55,7 @@ consumer launch.
 - **Tree** = org chart for parallel daily work (programs, agents, chores).
 - **Terminal viewport** = observe output; not the primary typing surface.
 - **Composer** = external input per tab (draft → Send).
-- **`agenterm-server`** = single authority for tree, PTYs, events, persistence.
+- **`agenterm server`** = single authority for tree, PTYs, events, persistence.
 - **Clients** = GUI, CLI, mux, script, MCP, (later) mobile — same contract.
 
 North star:
@@ -330,7 +330,7 @@ Platform enablers (bottom → top)
 P4  Experiences     GUI · Mobile connector · Market UI · Feed cards
 P3  Orchestration   Flow runtime · Cross-tab coordination · Push rules
 P2  Public contract Typed ops · IPC · Journal · Waits · Receipts · MCP
-P1  Fleet authority agenterm-server — tree, PTY, parser, events, persistence
+P1  Fleet authority `agenterm server` — tree, PTY, parser, events, persistence
 P0  Trust & ship    Size budgets · portable dist · qualification · signing
 ```
 
@@ -411,7 +411,7 @@ flowchart TB
   end
 
   subgraph P["Platform authority"]
-    SRV[agenterm-server]
+    SRV["agenterm server"]
     CONTRACT[Typed IPC + journal + waits]
   end
 
@@ -485,7 +485,7 @@ category name, when evaluating inspiration.
 | Workbuddy / AI sidekick | A partner that helps you execute | Composer, `new-agent`, script/MCP bridge | Buddy is **tab-scoped crew**, not a single chat bubble in the PTY |
 | OPC (one-person company) | One human runs many roles/agents | Hierarchical tree, notes, many long-lived tabs | OPC ops desk, not HR/legal/finance suite |
 | Human work partner | Colleague that stays in context | Remain-on-exit, drafts, CWD/provenance, waits | Partner = **verifiable state**, not persona roleplay |
-| pm2 / process supervisor | Daemons stay up on a server | `agenterm-server` headless, detach, stable server PID | Adds **terminal/agent semantics**, tree, and human GUI — not only restart counters |
+| pm2 / process supervisor | Daemons stay up on a server | `agenterm server` headless, detach, stable server PID | Adds **terminal/agent semantics**, tree, and human GUI — not only restart counters |
 | tmux / RMUX | Sessions survive disconnect; remote control | `agenterm-mux`, bounded command surface, server without GUI | **Honest subset** + native extensions; one tab = one pane today |
 | systemd / Windows Service | OS-level service unit | Explicit lifecycle, kill-server vs detach | User-owned **workspace** model, not system service manager |
 
@@ -509,7 +509,7 @@ compatibility and migration frontend — not a second hidden fleet.
 
 Architecture already aligned:
 
-- `agenterm-server` = authority without HWND ([Executable family](PRD_02_02_executable_family.md))
+- `agenterm server` = authority without HWND ([Executable family](PRD_02_02_executable_family.md))
 - `agenterm-mux` = thin console over same IPC ([Fleet multiplexer](PRD_02_05_fleet_multiplexer.md))
 - GUI optional, not required for fleet truth
 
@@ -545,7 +545,7 @@ agenterm-rhai.exe
 
 agenterm-net.exe (sidecar, optional)
   ├─ curl-class HTTP + libp2p + IPFS + dApp primitives
-  ├─ NEVER inside agenterm.exe GUI or agenterm-server PTY path
+  ├─ NEVER inside agenterm.exe GUI or `agenterm server` PTY path
   ├─ on-demand start (not silent always-on node by default)
   └─ Observable Fleet receipts/events for network tasks
 
@@ -560,7 +560,7 @@ Any promoted net work must pass the same product-owner constraints as the core:
 | Constraint | Rule |
 |------------|------|
 | **Binary budget** | `agenterm-net.exe` obeys sidecar **2 MiB** release gate unless an explicit, reviewed budget change with dependency audit |
-| **GUI/server isolation** | No libp2p/IPFS dependency linked into `agenterm.exe` or `agenterm-server.exe` |
+| **GUI/server isolation** | No libp2p/IPFS dependency linked into `agenterm.exe` (GUI or `server`) |
 | **Memory ceiling** | Bounded connections, DHT participation, cache, and pin store; explicit caps in typed protocol |
 | **Stability** | Net sidecar crash/upgrade must not kill tabs, journal, or workspace; kill-on-close job semantics |
 | **Default posture** | **Off until invoked** — no background full node on install |
@@ -684,7 +684,7 @@ Phone as **desktop fleet remote client**, not a standalone mobile terminal.
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| F1 | [idea] | Mobile app connects to desktop `agenterm-server` over authenticated channel | B3, B4 | Agent control plane (+ future Mobile module) |
+| F1 | [idea] | Mobile app connects to desktop `agenterm server` over authenticated channel | B3, B4 | Agent control plane (+ future Mobile module) |
 | F2 | [idea] | Monitor fleet tree, tab status, bounded output summaries | F1 | Human workspace, Agent control plane |
 | F3 | [idea] | Mobile Composer + keyboard; voice-to-text into draft before Send | F1 | Human workspace |
 | F4 | [idea] | **Push notifications** for urgent fleet events (dead, wait timeout, keyword, modal) | B4, predicates | Observable Fleet |

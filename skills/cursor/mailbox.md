@@ -11,10 +11,10 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
-| 当前主线任务 | **`agenterm server` 子命令入口** — 计划 `plan/plan-agenterm-server-mode.md`；`--server` 仅过渡别名 |
-| 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
-| 执行计划 | `plan/plan-skins-v1.md`（含 Phase 2B deferred + post-merge cleanup） |
-| `origin/main` | `30437eb`；skins Phase 2B / palette SSOT / preset grid 已合 |
+| 当前主线任务 | **`agenterm-server` PE 已删** — 权威仅 `agenterm server`；见 `plan/plan-agenterm-server-mode.md` |
+| 产品契约 | `prd/PRD_02_02_executable_family.md` |
+| 执行计划 | `plan/plan-agenterm-server-mode.md` |
+| `origin/main` | tip 含 `agenterm server` 子命令；本席正推 PE 删除 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |

@@ -34,7 +34,7 @@ Control Center（`agenterm-cc`）是**可替换的二级控制面**：人类用�
 | 约束 | 设计含义 |
 |------|----------|
 | 可替换投影 | CC 崩溃/升级不影响 PTY、workspace、server |
-| 单一 Fleet 权威 | 所有事实来自 `agenterm-server` 快照；CC 不编造数据 |
+| 单一 Fleet 权威 | 所有事实来自 `agenterm server` 快照；CC 不编造数据 |
 | 诚实可用性 | 未交付能力显示 `unavailable` + 原因码，不用假数据填充 |
 | 无第二权威 | 不能把 Rhai task 列表伪装成 durable workflow |
 | 显式事务 | 安装/更新必须用户确认；无静默安装入口 |

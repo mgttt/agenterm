@@ -425,7 +425,7 @@ fn run_server_smoke() -> Output {
             "--",
         ])
         .arg(repo)
-        .arg(env!("CARGO_BIN_EXE_agenterm-server"))
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
         .env("AGENTERM_NO_ACTIVATE", "1")
         .output()
@@ -449,7 +449,7 @@ fn run_wake_smoke() -> Output {
             "--",
         ])
         .arg(repo)
-        .arg(env!("CARGO_BIN_EXE_agenterm-server"))
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
         .env("AGENTERM_NO_ACTIVATE", "1")
         .output()
@@ -1003,7 +1003,6 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     for name in [
         "agenterm",
         "agenterm-cc",
-        "agenterm-server",
         "agenterm-cli",
         "agenterm-mux",
         "agenterm-rhai",
@@ -1167,7 +1166,6 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             "agenterm-mux",
             "agenterm-sbom.spdx.json",
             "agenterm-rhai",
-            "agenterm-server",
             "artifacts.json",
         ];
         expected.sort();
@@ -1199,7 +1197,6 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             for executable in [
                 "agenterm",
                 "agenterm-cc",
-                "agenterm-server",
                 "agenterm-cli",
                 "agenterm-mux",
                 "agenterm-rhai",
@@ -1230,7 +1227,6 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
     for name in [
         "agenterm",
         "agenterm-cc",
-        "agenterm-server",
         "agenterm-cli",
         "agenterm-mux",
         "agenterm-rhai",
@@ -1278,7 +1274,6 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
         ".agenterm.bin",
         "agenterm-cc",
         ".agenterm-cc.bin",
-        "agenterm-server",
     ] {
         assert!(
             entries
@@ -1300,7 +1295,7 @@ fn native_ipc_task_uses_a_bounded_runtime_without_bootstrap_environment() {
         .args(["task", "run", "native-ipc-smoke", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
         .arg("--")
-        .args(["--server", env!("CARGO_BIN_EXE_agenterm-server")])
+        .args(["--server", env!("CARGO_BIN_EXE_agenterm")])
         .args(["--cli", env!("CARGO_BIN_EXE_agenterm-cli")])
         .env_remove("AGENTERM_BOOTSTRAP_PLATFORM")
         .env_remove("AGENTERM_HOST_OS")
@@ -3307,7 +3302,7 @@ fn stage_artifact_task_parks_a_running_windows_image() {
 fn clean_locked_artifacts_task_retains_in_use_file_then_retries() {
     let root = fixture_root("clean-locked-in-use");
     fs::create_dir_all(&root).expect("create fixture");
-    let locked = root.join("agenterm-server.locked-789.exe");
+    let locked = root.join("agenterm.locked-789.exe");
     let handle = OpenOptions::new()
         .create(true)
         .truncate(false)

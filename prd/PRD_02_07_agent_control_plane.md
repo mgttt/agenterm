@@ -156,9 +156,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [~] six-target CI retains every manifest artifact and native Linux/macOS
       cells now run the public Rhai IPC journey against isolated settings,
       workspace, registration directory, `main` and `dev` Unix authorities.
-      Linux/macOS manifests include the standalone `agenterm-server` authority
-      consumed by that journey and by transport-neutral clients; it is a
-      product artifact rather than a CI-only server substitute.
+      Linux/macOS manifests include the `agenterm` binary whose `server`
+      subcommand is the authority consumed by that journey and by
+      transport-neutral clients; it is a product artifact rather than a
+      CI-only server substitute.
       The journey proves `0700` runtime-directory and `0600` socket modes,
       typed `server-list` rows, selector separation, bounded duplicate-authority
       rejection, legacy TCP migration, graceful cleanup, and no residual owned
@@ -259,7 +260,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       v0.1.11 native-server interoperability, and state-preserving
       v0.1.11-to-HEAD upgrade then rollback. It never commits historical bytes.
       Unix v0.1.10 is explicitly skipped because that published package lacks
-      `agenterm-server`; v0.1.11 remains the native predecessor there.
+      a headless authority binary; v0.1.11 remains the native predecessor there.
     - [x] exact-SHA `b4f1622` ordinary CI run `30724960474` refreshed the
       matching-host matrix: Windows named-pipe and Linux/macOS Unix-socket
       native authority journeys passed together with every applicable published

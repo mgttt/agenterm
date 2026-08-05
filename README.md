@@ -63,7 +63,7 @@ client, and a deliberately bounded tmux/RMUX frontend.
   v0.1.10 slice serves four metadata-only Fleet resources and one bounded
   `agenterm_wait` tool over stdio; it exposes no mutation tool or network
   listener.
-- An internal, non-default `agenterm-server.exe` now proves the headless
+- `agenterm server` proves the headless
   workspace/PTY/parser/event authority required for replaceable GUI work.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
 - Tab-scoped environment and proxy values apply only to the child process and
@@ -110,7 +110,7 @@ curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
 
 Download the portable zip for your CPU architecture from
 [GitHub Releases](https://github.com/mgttt/agenterm/releases/latest), extract
-it anywhere, and run `agenterm.exe`. All seven client binaries plus build
+it anywhere, and run `agenterm.exe`. All six client binaries plus build
 metadata ship in the same folder — no installer and no admin rights required.
 
 | Architecture | Asset |
@@ -157,18 +157,14 @@ uses parallel code generation, and retains incremental state. Use
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch
 cache while preserving the incremental development `target/`. All modes
-produce seven ignored executables plus
+produce six ignored executables plus
 build metadata under `dist/`:
 
-- `dist/agenterm.exe` — GUI application; double-clicking does not create a
-  temporary console window.
+- `dist/agenterm.exe` — GUI application; `agenterm server` starts the headless
+  authority as a separate process of the same PE.
 - `dist/agenterm-cc.exe` — isolated Control Center projection; informational
   commands include `--help`, `--version`, `capabilities --json`, and
   `snapshot --json`.
-- `dist/agenterm-server.exe` — thin image-isolation alias for
-  `agenterm server` (headless workspace/PTY/event authority). Windows GUI
-  autostart still launches this sibling PE so the replaceable GUI image is
-  not locked; preferred user entry is `agenterm server`.
 - `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
