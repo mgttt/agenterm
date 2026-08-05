@@ -1,0 +1,46 @@
+{
+  "id": "fancy",
+  "display_name": {
+    "en": "Fancy",
+    "zh-Hans": "华丽",
+    "zh-Hant": "華麗"
+  },
+  "brand_short": "AgenTerm",
+  "brand_full": "AgenTerm",
+  "title_template": "{brand} · {version}",
+  "title_template_with_instance": "{brand} · {version} — {instance}",
+  "metrics": {
+    "corner_radius_control_px": 4,
+    "corner_radius_modal_px": 8,
+    "border_width_px": 1,
+    "scrollbar_style": "softened"
+  },
+  "icons": {
+    "png": "icon.png",
+    "ico": "icon.ico",
+    "icns": "icon.icns",
+    "direction": "icon-direction.md"
+  },
+  "presets": {
+    "day": {
+      "id": "fancy-day",
+      "display_name": {
+        "en": "Fancy Day",
+        "zh-Hans": "华丽白",
+        "zh-Hant": "華麗白"
+      },
+      "palette": "palettes/day.json",
+      "legacy_color_theme": "light"
+    },
+    "night": {
+      "id": "fancy-night",
+      "display_name": {
+        "en": "Fancy Night",
+        "zh-Hans": "华丽黑",
+        "zh-Hant": "華麗黑"
+      },
+      "palette": "palettes/night.json",
+      "legacy_color_theme": "dark"
+    }
+  }
+}
