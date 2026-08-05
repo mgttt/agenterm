@@ -1,0 +1,45 @@
+{
+  "id": "classic",
+  "display_name": {
+    "en": "Classic",
+    "zh-Hans": "经典",
+    "zh-Hant": "經典"
+  },
+  "brand_short": "AgenTerm",
+  "brand_full": "AgenTerm",
+  "title_template": "{brand} {version}",
+  "title_template_with_instance": "{brand} {version} — {instance}",
+  "metrics": {
+    "corner_radius_control_px": 0,
+    "corner_radius_modal_px": 0,
+    "border_width_px": 1,
+    "scrollbar_style": "rectilinear"
+  },
+  "icons": {
+    "png": "../../agenterm-icon.png",
+    "ico": "../../agenterm.ico",
+    "icns": "../../agenterm.icns"
+  },
+  "presets": {
+    "day": {
+      "id": "classic-day",
+      "display_name": {
+        "en": "Classic Day",
+        "zh-Hans": "经典白",
+        "zh-Hant": "經典白"
+      },
+      "palette": "palettes/day.json",
+      "legacy_color_theme": "light"
+    },
+    "night": {
+      "id": "classic-night",
+      "display_name": {
+        "en": "Classic Night",
+        "zh-Hans": "经典黑",
+        "zh-Hant": "經典黑"
+      },
+      "palette": "palettes/night.json",
+      "legacy_color_theme": "dark"
+    }
+  }
+}
