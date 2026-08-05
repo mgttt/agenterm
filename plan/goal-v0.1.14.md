@@ -75,7 +75,7 @@
 
 | 文档 | 内容 |
 |------|------|
-| plan/plan-v0.1.13.md §10.2.1 | 发布链原始坑清单 |
+| prd/PRD_02_17_delivery_quality.md §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13 §10.2.1 + v0.1.14 八个缺陷合并去重） |
 | plan/plan-v0.1.14.md §一.5 | 本版发布推进记录（完成后回写处） |
 | plan/plan-v0.1.15.md | 提速路线（夜间彩排/自动派发/门瘦身） |
 

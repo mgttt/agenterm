@@ -120,7 +120,9 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  └─ [ ] E2 定期清理旧 run：moltbaby 侧已有 gh-ci-cleanup.sh
 │        （支持 --hours/--days/--keep-release-runs/--keep-pages-build/
 │        --verify-rounds/--dry-run，删除后全量复核），agenterm 侧
-│        建议 cron 保留 14 天；runbook 素材来自 plan-v0.1.13 §10.2.1
+│        建议 cron 保留 14 天；runbook 素材见 `prd/PRD_02_17_delivery_quality.md`
+│        §Release-chain operating requirements（v0.1.13/v0.1.14 两轮坑
+│        已合并去重为版本无关要求）
 │
 ├─ F. Linux 云桌面实测尾账（2026-08-04 DISPLAY=:1，详见 §七）
 │  ├─ [x] 单测误耦合：child_id_remains_stable_after_wait 把
@@ -246,6 +248,53 @@ v0.1.15  Feedback shift-left & release-lane economics
 │        与 §五 L-EXT / L-PKG 主线互链
 │        非目标：本版**不写任何 Hub 代码**，不建 registry，不动 softmgr
 │
+├─ P. 粘贴失败硬骨头（终端区 + 输入区/composer；2026-08-05 用户实测，详见 §十）
+│  ├─ [ ] P1 **UTF-8 / 异源大段文本**（他终端复制 → 粘贴常失败）
+│  │     症状：从别的 terminal 复制大段（疑含 emoji / OSC 色码 / 混合控制符 /
+│  │     非严格 UTF-8 字节）粘到 AgenTerm **终端区或 composer**，提示失败
+│  │     （用户侧一度归因为「特殊 utf8 字符」）
+│  │     代码锚（现状）：
+│  │       - 读盘：`agenterm-platform` clipboard `String::from_utf8` 失败 →
+│  │         `clipboard_backend_error`（macOS pbpaste / Linux 同类路径）
+│  │       - 归一：`src/ui_clipboard.rs` `normalize_{terminal,composer}_paste`
+│  │         丢弃 `is_control()`（保留 \t 与换行族）；纯控制/转义残片可致空串
+│  │       - 空串：统一 `clipboard text contains no pasteable characters`
+│  │         （`TerminalPasteFailure::Empty` / composer 同文案）
+│  │       - 上限：`TERMINAL_PASTE_LIMIT_BYTES = 256 KiB` → too large
+│  │       - 异步：unix 终端粘贴 worker + focus/tab 变 → StaleTarget 等
+│  │     硬点：异源 clipboard 编码不统一；终端拷贝常夹带 SGR/OSC；
+│  │     emoji 本身非 control，更可能是 **读盘 UTF-8 严校验** 或 **归一后空/过大**
+│  │     或 **异步竞态** 被误述成「特殊字符」——需分类诊断再改策略
+│  │     建议方向（实现时择优，勿一次改三层）：
+│  │       a) 读盘：非法 UTF-8 走 lossy / 替换字符，并区分错误码
+│  │          `clipboard_invalid_utf8` vs backend；记录替换计数
+│  │       b) 归一：可选「终端粘贴保留更多可打印 Unicode + 剥离 CSI/OSC」
+│  │          单测：emoji、CJK、SGR 色码、CRLF、空剪贴板
+│  │       c) UX：失败文案带 **可区分 code**（empty / invalid_utf8 / too_large /
+│  │          stale / focus），禁一律「Paste failed: …」含糊
+│  │       d) 证据：复现夹具（合成非法 UTF-8 字节、带 SGR 的「假终端拷贝」、
+│  │          含 emoji 的合法 UTF-8 大段）进 unit 或 smoke
+│  ├─ [ ] P2 **无文本剪贴板**（截图/图像类 → no pasteable characters）
+│  │     症状：剪贴板是截图/图像（或仅非 Unicode 文本格式）时粘贴，
+│  │     用户见 `clipboard text contains no pasteable characters`
+│  │     代码锚：normalize 后 empty；或 Win `has_unicode_text()==false` /
+│  │     get_text 无文本；macOS `pbpaste` 空/非 UTF-8 再归一空
+│  │     硬点：产品是否要「粘贴图像」？当前契约是 **文本终端**——图像应
+│  │     **明确拒绝**而非伪装成 empty pasteable
+│  │     建议方向：
+│  │       a) 读盘前/后探测：`has_unicode_text` + 若有 image 格式无 text →
+│  │          新 code `clipboard_image_only` / `clipboard_no_text`
+│  │       b) UX：`剪贴板是图像，终端/输入区只接受文本`（中英按 locale）
+│  │       c) 非目标（本版）：六平台图像粘贴进 PTY / 文件落盘（除非 PRD 立项）
+│  ├─ [ ] P3 错误码与反馈统一（P1/P2 共用）
+│  │     终端 vs composer 双路径文案对齐；`last_feedback_error` /
+│  │     status_message 必须带稳定 machine code（已有部分
+│  │     `terminal_paste_*`，empty 仍常落 `terminal_paste_failed`）
+│  │     建议：Empty 细分为 `clipboard_empty` / `clipboard_no_pasteable_text`
+│  │     / `clipboard_image_only` / `clipboard_invalid_utf8`
+│  └─ [ ] P-P1（政策，可选）非法 UTF-8 默认 lossy 还是硬失败；
+│        图像粘贴是否永远拒绝——默认建议：**lossy 可选 + 图像硬拒绝文案**
+│
 └─ S. 结构 SSOT 机读化 + 微重构预备（契约=`plan/ARCHITECTURE.md` §8；**HOLD 待用户通知**）
    ├─ [ ] S0 状态：多 agent 并行中 → **本泳道不写主树**；仅文档预备
    │     复审触发：用户通知「可 review 新一轮再开工」
@@ -275,6 +324,9 @@ v0.1.15  Feedback shift-left & release-lane economics
    macOS channel 政策拍板后再改默认回落行为。
 8. **S 组 HOLD**：多 agent 在途时不抢主树；用户通知后先 **§九 复审** 再 S1→微重构。
    不必等 S3 全文双向；S1（可选 S2）安全带后即可小步刀。S3 不阻塞主主题。
+9. **P 组（粘贴硬骨头）**：用户高频；与发布链正交。建议在 GUI 文件域空闲时
+   先做 **P3 错误码细分 + P2 图像文案**（低风险 UX），再攻 **P1 UTF-8/归一**
+  （跨 platform clipboard + ui_clipboard，需夹具）。详见 §十。
 
 > v0.1.15 是**纯发布链经济学**版本，不与 §五 未来主线（net / CC 内容 /
 > 远程包管理 / computer-use）抢工期；未来主线只做「对齐记录 + 决策项」，
@@ -323,7 +375,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 文档 | 关系 |
 |------|------|
 | `plan/plan-v0.1.14.md` | 上一版执行记录；本文数据与止血项的出处 |
-| `plan/plan-v0.1.13.md` §10.2.1 | 发布链坑清单（runbook 素材，E2 配套） |
+| `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13/v0.1.14 两轮合并去重，版本无关；runbook 素材，E2 配套） |
 | `plan/ARCHITECTURE.md` | 结构 SSOT（含 §8 对齐机制/工具边界）；**S 组**执行叶指针；本文不重画结构树 |
 | `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟（§五 L-CC 的版本归口；原 plan-v0.2.0.md 已并入） |
 | `plan/plan-mobile.md` | 移动端计划（第三个 host：接入端 + 去中心化链接端）；与 L-NET/L-PKG 共享去中心化底座，文件域独立 |
@@ -564,6 +616,64 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 用户确认：升级后「关窗不退 server → 再进仍显示旧版」属真实踩坑；要求更新时**自适应或提示**，否则用户无法知道该选 stop-server；追加 **G7 + G-P2**，升 G7a 为 P0 文案、G7b/c 为体验主路径 |
 | 2026-08-05 | 结构对齐/工具澄清 upsert：`ARCHITECTURE.md` §8 + 债务 L4；本 plan 增 **S 组**（S1 扩闸 / S2 围栏 / S3 manifest）；明确 LSP≠结构契约引擎 |
 | 2026-08-05 | S 泳道 **HOLD**：等其他 agent 完成；用户再通知 → 新一轮 review → 再开工；预备树写入 **§九**（不改代码） |
+| 2026-08-05 | 用户报告终端/输入区粘贴常失败：异源 UTF-8 大段（疑 emoji/控制符）+ 截图类 `no pasteable characters`；写入 **§一 P 组 + §十**（硬骨头，未授权开工） |
+
+---
+
+## 十、粘贴失败问题树（2026-08-05 · 规划，未开工）
+
+> 用户场景：在 **终端区** 或 **composer 输入区** 粘贴时经常失败。  
+> 两类主诉均标 **硬骨头**——跨 OS clipboard + 归一策略 + UX 诊断，忌「顺手改 is_control」无夹具。
+
+### 10.1 用户可见两类
+
+| ID | 用户说法 | 更可能机制（待证） | 今日用户可见文案 |
+|----|----------|-------------------|------------------|
+| **P1** | 从别的 terminal 复制大段文字失败；疑特殊 UTF-8 / emoji | ① `from_utf8` 硬失败（非法字节）→ backend error；② 夹带 CSI/OSC/控制符归一后变空或异常；③ 超 256KiB；④ unix 异步 paste 丢 target；⑤ 焦点/模态拒绝。**Emoji 合法码点应能过 `!is_control()`**——若「只有 emoji 才挂」须另证读盘/截断路径 | `clipboard read failed: …` / `Paste failed: …` / empty 文案 / too large / focus… |
+| **P2** | `clipboard text contains no pasteable characters` | 剪贴板 **无 Unicode 文本**（典型：截图/图像为主格式；或文本归一后长度为 0） | 字面量 **`clipboard text contains no pasteable characters`**（unix `TerminalPasteFailure::Empty`、composer `paste_clipboard_into_composer`、windows remote 同串） |
+
+### 10.2 代码路径（验收时对照，非授权改点清单）
+
+```text
+粘贴入口
+├─ 终端区 paste
+│  ├─ Unix：request_terminal_clipboard_paste → worker get_text_bounded
+│  │         → finish_terminal_clipboard_paste → normalize_terminal_paste
+│  │         → terminal_paste_bytes (± bracketed) → tab.send
+│  └─ Windows remote：paste_terminal_clipboard → clipboard::get_text
+│            → normalize_terminal_paste →（空则 no pasteable…）
+├─ Composer：paste_clipboard_into_composer → get_clipboard_text
+│            → normalize_composer_paste → empty 同上文案
+└─ 共享归一：src/ui_clipboard.rs
+   normalize_*：CRLF 规范化；丢弃 is_control()（除 \t 与换行族）
+```
+
+平台读盘：`crates/agenterm-platform/**/clipboard.rs`（macOS `pbpaste` 字节 → `String::from_utf8` 失败即 Backend）。
+
+### 10.3 为何硬
+
+1. **异源语义**：他终端「复制」≠ 纯文本；常含 SGR/OSC/宽字符/非法序列。  
+2. **错误折叠**：多种根因归一成 empty 或笼统 `terminal_paste_failed`，用户只能猜「emoji」。  
+3. **图像 vs 文本**：产品是文本 PTY；图像应 **显式拒绝**，不是 empty pasteable。  
+4. **跨端双实现**：unix embedded / win remote / composer 三入口，改一漏二。  
+5. **异步与焦点**：unix worker 与 focus 竞态（StaleTarget）易被当成「偶发字符问题」。
+
+### 10.4 建议验收（开工后）
+
+| 夹具 | 期望（建议策略） |
+|------|------------------|
+| 合法 UTF-8 + emoji + CJK 多行 | **成功** 粘贴进 terminal 与 composer |
+| 带 `\x1b[31m` 的「假终端拷贝」 | 成功或剥 SGR 后成功；**不**误报 empty |
+| 非法 UTF-8 字节序列 | 稳定 code：`clipboard_invalid_utf8` 或 lossy 成功且可观测替换 |
+| 仅图像、无 text | code：`clipboard_image_only`（或 `clipboard_no_text`）；文案点明图像 |
+| 真空剪贴板 | `clipboard_empty` |
+| >256KiB 文本 | too_large；文案含上限 |
+
+### 10.5 非目标（本叶）
+
+- 图像粘贴进 PTY / 自动存 png（除非 PRD 单独立项）  
+- 放开任意 C0 控制进 PTY（安全与兼容风险）  
+- 与 S 组微重构绑死——P 可在 GUI 域空闲时独立排期  
 
 ---
 
