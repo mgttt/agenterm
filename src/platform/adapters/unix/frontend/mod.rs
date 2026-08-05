@@ -204,6 +204,24 @@ struct RenderBuffers {
     capture_next: bool,
 }
 
+/// Picks the anchor for a shift-click selection extension: the xterm
+/// convention is to keep whichever endpoint of the existing selection is
+/// farther from the new click, so the click always grows/shrinks the near
+/// edge rather than flipping the whole selection around.
+fn shift_extend_anchor(selection: TerminalSelection, click: TerminalPoint) -> TerminalPoint {
+    let (start, end) = selection.bounds();
+    // Selections are line-major (row, then col), so distance is compared the
+    // same way: row difference dominates, column difference only breaks ties
+    // on the same row.
+    let dist = |point: TerminalPoint| -> (u32, u32) {
+        (
+            u32::from(point.row).abs_diff(u32::from(click.row)),
+            u32::from(point.col).abs_diff(u32::from(click.col)),
+        )
+    };
+    if dist(start) >= dist(end) { start } else { end }
+}
+
 /// FNV-1a over the logical frame outside `exclude` (the terminal viewport,
 /// which the persistent layer owns); cheap relative to the upscale it avoids.
 fn frame_content_hash(pixels: &[u32], width: u32, exclude: Option<(u32, u32, u32, u32)>) -> u64 {
@@ -2736,6 +2754,29 @@ impl UnixApp {
         let (rows, cols) = self.tabs[position].last_size;
         let now = Instant::now();
 
+        // Shift+click extends an existing completed selection instead of
+        // starting a fresh gesture or double-click, matching the xterm
+        // convention that forward_terminal_mouse's doc comment already
+        // claims (shift bypasses mouse reporting so local selection stays
+        // reachable). The anchor becomes whichever endpoint of the current
+        // selection is farther from the click, per that same convention.
+        if self.pointer_modifiers.shift
+            && let Some(selection) = self.terminal_selection
+            && selection.tab_id == tab_id
+        {
+            let anchor = shift_extend_anchor(selection, point);
+            if self.set_completed_terminal_selection(tab_id, anchor, point, rows, cols) {
+                self.terminal_double_click = None;
+                self.recent_terminal_click = None;
+                if let Err(error) = self.copy_terminal_selection() {
+                    self.set_status_message(format!("Copy failed: {error}"));
+                }
+                self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
+                self.request_redraw();
+            }
+            return true;
+        }
+
         if self.terminal_double_click.is_some_and(|click| {
             click.tab_id == tab_id && click.point == point && now <= click.expires_at
         }) {
@@ -2744,8 +2785,9 @@ impl UnixApp {
             if let Some((start, end)) =
                 visible_row_selection(self.tabs[position].parser.screen(), row)
                 && self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
+                && let Err(error) = self.copy_terminal_selection()
             {
-                let _ = self.copy_terminal_selection();
+                self.set_status_message(format!("Copy failed: {error}"));
             }
             self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
             self.request_redraw();
@@ -2759,8 +2801,10 @@ impl UnixApp {
         }) {
             self.recent_terminal_click = None;
             if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point) {
-                if self.set_completed_terminal_selection(tab_id, start, end, rows, cols) {
-                    let _ = self.copy_terminal_selection();
+                if self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
+                    && let Err(error) = self.copy_terminal_selection()
+                {
+                    self.set_status_message(format!("Copy failed: {error}"));
                 }
                 self.terminal_double_click = now
                     .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
@@ -2863,7 +2907,9 @@ impl UnixApp {
         if let Some(selection) = completed.completed_selection() {
             self.terminal_selection = Some(selection);
             self.terminal_selection_gesture = Some(completed);
-            let _ = self.copy_terminal_selection();
+            if let Err(error) = self.copy_terminal_selection() {
+                self.set_status_message(format!("Copy failed: {error}"));
+            }
         } else {
             self.terminal_selection = None;
             self.terminal_selection_gesture = None;
@@ -5134,7 +5180,10 @@ impl UnixApp {
                     has_selection,
                 ) {
                     input::TerminalShortcutAction::Copy => {
-                        let _ = self.copy_terminal_selection();
+                        if let Err(error) = self.copy_terminal_selection() {
+                            self.set_status_message(format!("Copy failed: {error}"));
+                            self.request_redraw();
+                        }
                         return;
                     }
                     input::TerminalShortcutAction::Paste => {
@@ -5534,8 +5583,10 @@ mod system_menu_tests {
         GuiLaunchResult, RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure,
         UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, UnixFocusSurface, compact_cwd_for_status,
         gui_help_result, parse_gui_launch_target, scale_frame_nearest, scale_rect_to_frame,
-        terminal_paste_bytes, terminal_paste_target_is_current, workspace_toolbar_snapshot_json,
+        shift_extend_anchor, terminal_paste_bytes, terminal_paste_target_is_current,
+        workspace_toolbar_snapshot_json,
     };
+    use crate::frontend::selection::{TerminalPoint, TerminalSelection};
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
     use std::{
@@ -5846,6 +5897,65 @@ mod system_menu_tests {
         assert_eq!(
             terminal_paste_bytes("a\rb", true),
             b"\x1b[200~a\rb\x1b[201~"
+        );
+    }
+
+    fn selection(anchor: TerminalPoint, focus: TerminalPoint) -> TerminalSelection {
+        TerminalSelection {
+            tab_id: 1,
+            anchor,
+            focus,
+            dragging: false,
+            moved: true,
+        }
+    }
+
+    #[test]
+    fn shift_extend_anchor_keeps_the_far_endpoint_when_click_is_below_selection() {
+        // Selection spans rows 1..3; a shift-click further down (row 5)
+        // should keep the top of the selection (row 1) as the anchor so the
+        // selection grows downward, xterm-style.
+        let sel = selection(
+            TerminalPoint { row: 1, col: 0 },
+            TerminalPoint { row: 3, col: 4 },
+        );
+        let click = TerminalPoint { row: 5, col: 0 };
+        assert_eq!(
+            shift_extend_anchor(sel, click),
+            TerminalPoint { row: 1, col: 0 }
+        );
+    }
+
+    #[test]
+    fn shift_extend_anchor_flips_when_click_is_above_selection() {
+        // A shift-click above the existing selection is closer to its start,
+        // so the anchor flips to the bottom endpoint (row 3) and the
+        // selection now grows upward from there.
+        let sel = selection(
+            TerminalPoint { row: 1, col: 0 },
+            TerminalPoint { row: 3, col: 4 },
+        );
+        let click = TerminalPoint { row: 0, col: 0 };
+        assert_eq!(
+            shift_extend_anchor(sel, click),
+            TerminalPoint { row: 3, col: 4 }
+        );
+    }
+
+    #[test]
+    fn shift_extend_anchor_breaks_ties_on_same_row_by_column_distance() {
+        // Click lands exactly between start and end rows... use same-row
+        // selection so the tie-break falls to column distance.
+        let sel = selection(
+            TerminalPoint { row: 2, col: 2 },
+            TerminalPoint { row: 2, col: 8 },
+        );
+        // Click closer to the end (col 7) than the start (col 2) keeps start
+        // as the anchor.
+        let click = TerminalPoint { row: 2, col: 7 };
+        assert_eq!(
+            shift_extend_anchor(sel, click),
+            TerminalPoint { row: 2, col: 2 }
         );
     }
 }
