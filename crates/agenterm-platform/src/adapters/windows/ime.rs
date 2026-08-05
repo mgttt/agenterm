@@ -152,7 +152,10 @@ fn composition_text(context: *mut core::ffi::c_void) -> Option<String> {
 fn composition_cursor(context: *mut core::ffi::c_void) -> Option<usize> {
     let units =
         unsafe { ImmGetCompositionStringW(context, GCS_CURSORPOS, std::ptr::null_mut(), 0) };
-    (units > 0).then_some(units as usize)
+    // GCS_CURSORPOS returns 0 when the caret sits at the start of the
+    // composition, which is a valid position; only a negative result means the
+    // call produced no data.
+    (units >= 0).then_some(units.max(0) as usize)
 }
 
 /// Diagnostic trace behind `PLATFORM_IME_DEBUG=1` for candidate-window
