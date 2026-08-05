@@ -18,7 +18,7 @@
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
-| auto-dream | Automations **`主控 造梦`** cron `21 * * * *` UTC；skill=`fleet-duty.md`；`duty.lock` 空闲 |
+| auto-dream | **未成功触发**：Automation 曾绑 `4f22874a-…`，主控2 环境是 `7ef6e5b0-…`；须人类改绑后 Run now |
 
 ## 主控指令（未消化则分身不得另起炉灶）
 

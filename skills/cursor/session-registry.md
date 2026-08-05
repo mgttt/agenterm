@@ -7,12 +7,12 @@ REST API **不能**改 `name`；下面登记表供主控与分身对齐身份与
 动作清单 → [inter-agent-comms.md](inter-agent-comms.md)；换防 → [hand-off-controller.md](hand-off-controller.md)。
 Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`）。
 
-最后更新：2026-08-05（登记 Automations「主控 造梦」）
+最后更新：2026-08-05（造梦未触发：环境 ID 不一致）
 
 | 显示名 | bcId | 来源 | 当前职责 | 注释 |
 |--------|------|------|----------|------|
-| **主控2** | `bc-05b7c357-d712-440d-b140-8774bfa90e2a` | api | **当前主控**：统筹、合流、编排 | 接防自旧主控 |
-| **主控 造梦** | _(每次 Automations 新开 bcId)_ | automation | **auto-dream 值班**：只跑 `fleet-duty` 一轮 | cron `21 * * * *` UTC；非日常主控 |
+| **主控2** | `bc-05b7c357-d712-440d-b140-8774bfa90e2a` | api | **当前主控**：统筹、合流、编排 | env=`7ef6e5b0-8a35-11f1-b532-320a589b8025` |
+| **主控 造梦** | _(每次 Automations 新开 bcId)_ | automation | **auto-dream 值班**：只跑 `fleet-duty` 一轮 | **待修**：勿绑 `4f22874a-…`；须绑主控2 同环境 |
 | **主控** | `bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1` | mobile | 已换防 / 待命 | 勿再当唯一统筹 |
 | **分身1** | `bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f` | api | 待命（旧 Linux platform） | 皮肤任务不复用 |
 | **分身2** | `bc-26005f17-af78-4f63-bded-328cd1356396` | api | 待命（旧 Rhai/CI） | 皮肤任务不复用 |

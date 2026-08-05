@@ -67,10 +67,12 @@ mailbox「共享事实」可临时写：
 | Name | `AgenTerm 舰队梦境` |
 | Trigger | Scheduled · cron 例：`0 */4 * * *`（每 4 小时 UTC）或 `0 2,8,14,20 * * *` |
 | Repository | `mgttt/agenterm` · `main` |
+| Environment | **必须与日常主控同一 Cloud Environment**（当前主控2：`7ef6e5b0-8a35-11f1-b532-320a589b8025`）。绑到另一个 environmentPublicId 时，定时可能看似创建但舰队列表里 `source=automations` 为空 |
 | Tools | 允许改仓库 / 发 Cloud Agent 消息（按你租户权限勾选） |
 | Prompt | 使用下一节**整段**（可按频率改 cron） |
+| Enabled | 必须打开；创建后先 **Run now** 验证，再依赖 cron |
 
-创建后把 automation id 记进 `session-registry.md` 注释行（可选），便于主控核对。
+创建后把 automation id（dashboard URL 里的 UUID）记进 `session-registry.md`，便于主控核对。
 
 ## Automation 提示词（整段粘贴）
 
