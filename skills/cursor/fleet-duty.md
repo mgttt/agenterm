@@ -83,8 +83,8 @@ mailbox「共享事实」可临时写：
 3. 若 mailbox 共享事实里 duty.lock 未过期且持有者不是你 → 写交接日志 duty: skipped-lock 后结束
 4. 否则写入 duty.lock（你=bcId，直到现在+50分钟），跑：
    scripts/cursor_agent_fleet_duty.sh
-   若存在明确可安全催办的对象，再：
-   scripts/cursor_agent_fleet_duty.sh --apply --from 舰队梦境
+   若存在明确可安全催办的对象，再（--from 必须等于本会话 Automations 显示名）：
+   scripts/cursor_agent_fleet_duty.sh --apply --from '主控 造梦'
 5. 小步 commit+push：只允许改 skills/cursor/mailbox.md（席位/交接日志/lock）以及 duty 脚本若你发现显式 bug 的最小修复；勿借机做产品功能
 6. 清掉自己的 duty.lock；席位写 IDLE；交接日志一行：duty: <摘要>
 7. 若有必须人类拍板的项：在 mailbox 请示队列追加，并 chat 当前主控（registry 里「当前主控」）一条短讯

@@ -17,7 +17,7 @@
 | `origin/main` | 含 `cursor/skins-eng-phase2a` @ `669b8de` 合流 |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
-| auto-dream | skill=`fleet-duty.md`；定时器=Cursor Automations（人类创建）；`duty.lock` 空闲 |
+| auto-dream | Automations **`主控 造梦`** cron `21 * * * *` UTC；skill=`fleet-duty.md`；`duty.lock` 空闲 |
 
 ## 主控指令（未消化则分身不得另起炉灶）
 
