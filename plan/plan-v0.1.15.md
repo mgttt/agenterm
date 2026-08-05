@@ -1592,7 +1592,7 @@ pbpaste | head -c 200
 | O1 | [x] **adapter 半叶** `28d6959` | 见 §11.6；**消费侧半叶未做（新发现，见 §11.7）** |
 | O2 | [ ] | |
 | O3 | [ ] | |
-| O4 | [ ] | |
+| O4 | [x] **对照完成，无需改动** | 合成路径实现完好；见 §11.9 |
 | O5 | [ ] | |
 
 ### 11.6 O1 交付记录（2026-08-05 · `28d6959`）
@@ -1677,6 +1677,33 @@ O1b **未擅自开工**：要动 `unix/frontend/render.rs` 状态栏布局（跨
 
 **未擅自开工**：O6b 是行为新增且涉及手势语义（属产品决策）；
 O6a 虽小但会改 4 处调用点的用户可见文案。均先报用户。
+
+### 11.9 O4 合成路径对照（2026-08-05 · 只读核查，**结论：无需改动**）
+
+O4 的原始担心是「winit IME 事件是否有缺洞」。逐条查证后**担心不成立**——
+Unix 侧合成路径是**完整实现**，不是半成品：
+
+| 环节 | 位置 | 状态 |
+|------|------|------|
+| 事件入口 | `unix/frontend/mod.rs:4995` `PixelWindowEvent::Ime → handle_ime` | ✅ |
+| 事件分类 | `mod.rs:964 handle_ime` → 复用**平台中立**的 `ime::classify_event` | ✅ 与 Win 共用同一状态机 |
+| preedit 渲染 | `render.rs:1122 render_ime_preedit` | ✅ 含光标 |
+| 候选框定位 | `mod.rs:3959 set_ime_cursor_area`（每帧） | ✅ |
+| 锚点计算 | `mod.rs:3334 ime_anchor` | ✅ 覆盖 terminal / composer / 新建终端模态 / 侧栏标签编辑器；模态开启时正确返回 `None` |
+| 启用 | `mod.rs:568 with_ime_allowed(true)` | ✅ |
+
+**因此 macOS `composition()` 返回 `None` 是设计正确、不是缺口**：
+preedit 经 winit 事件推送（`ImeEvent::Preedit`），不走轮询；
+契约注释本就写明「winit hosts deliver the same data as ImeEvent::Preedit
+and report None here」。同理 `set_anchor_position` 为 no-op 也正确——
+winit 通过 `set_ime_cursor_area` 代劳，**且已被逐帧调用**。
+
+> **这修正了 N1 的一处隐含误读**：N1 说 macOS IME「只有 30 行 stub」，
+> 容易读成「macOS 输入法整体没做」。实际上**合成/候选框/preedit 全都有**，
+> 缺的**只是状态查询**（O1 已补）。macOS 用户本来就能正常打中文，
+> 缺的是状态栏显示——影响面比 N1 描述的小。
+
+**不抄 Win 的 `WM_IME_*` 进 macOS**（O4 原则），因为 winit 路径已覆盖且更合适。
 
 ### 11.5 激励
 
