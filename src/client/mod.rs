@@ -4934,6 +4934,7 @@ Usage:
   agenterm-cli ui-action open-instance-picker [--mode attach|open-another]
   agenterm-cli ui-action instance-picker-select --name NAME|--pid N
   agenterm-cli ui-action open-instance --name NAME
+  agenterm-cli ui-action select-server-tab --name NAME
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state|--tab-editor-state open|closed] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]

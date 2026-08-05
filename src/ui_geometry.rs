@@ -120,6 +120,8 @@ pub(crate) struct WorkspaceLayoutInput {
     pub(crate) configured_tabs_width: i32,
     pub(crate) composer_height: i32,
     pub(crate) status_height: i32,
+    /// Full-width strip at the top of the window for multi-server tabs (0 = off).
+    pub(crate) server_strip_height: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +166,8 @@ pub(crate) struct WorkspaceLayout {
     pub(crate) tabs_visible: bool,
     pub(crate) configured_tabs_width: i32,
     pub(crate) effective_tabs_width: i32,
+    /// Full-width multi-server tab strip at the top of the client (None if height 0).
+    pub(crate) server_strip: Option<PixelRect>,
     pub(crate) sidebar: PixelRect,
     /// Tree-owned sidebar surface. It spans the full client height and never
     /// extends underneath the resize grip.
@@ -211,29 +215,34 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
         0
     };
 
-    let toolbar_height = WORKSPACE_TOOLBAR_HEIGHT.min(height);
+    let server_strip_height = input.server_strip_height.max(0).min(height);
+    let body_top = server_strip_height;
+    let body_height = height.saturating_sub(server_strip_height);
+    let toolbar_height = WORKSPACE_TOOLBAR_HEIGHT.min(body_height);
     let status_height = input
         .status_height
         .max(0)
-        .min(height.saturating_sub(toolbar_height));
+        .min(body_height.saturating_sub(toolbar_height));
     let status_top = height - status_height;
     let composer_height = input
         .composer_height
         .max(0)
-        .min(status_top.saturating_sub(toolbar_height));
+        .min(status_top.saturating_sub(body_top + toolbar_height));
     let composer_top = status_top - composer_height;
     let content_left = effective_tabs_width;
+    let chrome_top = body_top + toolbar_height;
 
     let client = rect(0, 0, width, height);
-    let sidebar = rect(0, 0, effective_tabs_width, height);
-    let terminal = rect(content_left, toolbar_height, width, composer_top);
+    let server_strip = (server_strip_height > 0).then(|| rect(0, 0, width, server_strip_height));
+    let sidebar = rect(0, body_top, effective_tabs_width, height);
+    let terminal = rect(content_left, chrome_top, width, composer_top);
     let composer = rect(content_left, composer_top, width, status_top);
     let status = rect(content_left, status_top, width, height);
     let resize_grip = input
         .tabs_visible
         .then(|| {
             let left = (effective_tabs_width - TABS_RESIZE_GRIP_WIDTH).clamp(0, width);
-            rect(left, 0, effective_tabs_width.min(width), height)
+            rect(left, body_top, effective_tabs_width.min(width), height)
         })
         .filter(|grip| grip.width() > 0);
     let sidebar_tree = rect(
@@ -243,7 +252,7 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
         sidebar.bottom,
     );
     let workspace_toolbar = workspace_toolbar_region(
-        rect(content_left, 0, width, toolbar_height),
+        rect(content_left, body_top, width, chrome_top),
         toolbar_height > 0,
     );
 
@@ -252,6 +261,7 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
         tabs_visible: input.tabs_visible,
         configured_tabs_width,
         effective_tabs_width,
+        server_strip,
         sidebar,
         sidebar_tree,
         workspace_toolbar,
@@ -989,6 +999,7 @@ mod tests {
             configured_tabs_width: tabs_width,
             composer_height: COMPOSER_HEIGHT,
             status_height: 26,
+            server_strip_height: 0,
         })
     }
 

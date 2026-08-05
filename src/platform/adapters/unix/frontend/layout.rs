@@ -24,6 +24,8 @@ pub(super) fn workspace_layout_for(
         configured_tabs_width: i32::from(config.tabs_width),
         composer_height: UNIX_COMPOSER_HEIGHT,
         status_height: UNIX_STATUS_HEIGHT,
+        // Server strip is Windows-first product chrome (S′ top tabs).
+        server_strip_height: 0,
     })
 }
 

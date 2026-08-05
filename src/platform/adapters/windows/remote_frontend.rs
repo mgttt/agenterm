@@ -42,7 +42,8 @@ use crate::{
         },
         instance_identity::InstanceIdentity,
         instance_picker::{
-            InstancePickerDialog, InstancePickerMode, collect_instance_picker_rows,
+            InstancePickerDialog, InstancePickerMode, InstancePickerRow,
+            collect_instance_picker_rows,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope},
         tab_editor::{TabEditorDialog, TabEditorFocus},
@@ -192,8 +193,13 @@ fn toolbar_action_returns_terminal_focus(action_id: &str) -> bool {
 
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
+const SERVER_STRIP_HEIGHT: i32 = 32;
+const SERVER_TAB_MIN_WIDTH: i32 = 88;
+const SERVER_TAB_MAX_WIDTH: i32 = 160;
+const SERVER_TAB_GAP: i32 = 4;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
+const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
 /// First non-flag token after `ui-action <action>` (for `--name` alternatives).
@@ -753,6 +759,9 @@ struct RemoteWindowState {
     relay_close_after_completion: Option<WindowCloseChoice>,
     /// Rebind after the in-flight UI command is completed on the *current* server.
     relay_attach_after_completion: Option<(String, String)>,
+    /// Live/stale multi-server strip at the top of the window (product chrome).
+    server_tabs: Vec<InstancePickerRow>,
+    server_tabs_refresh_after: Instant,
     no_activate: bool,
 }
 
@@ -958,6 +967,8 @@ impl RemoteWindowState {
             render_activity_sample_sequence: 0,
             relay_close_after_completion: None,
             relay_attach_after_completion: None,
+            server_tabs: collect_instance_picker_rows().unwrap_or_default(),
+            server_tabs_refresh_after: Instant::now() + SERVER_TABS_REFRESH,
             no_activate,
         })
     }
@@ -966,6 +977,7 @@ impl RemoteWindowState {
         let ime_changed = self.refresh_ime_label() | self.refresh_ime_preedit();
         let resize_changed = self.process_terminal_resize_results();
         let paste_changed = self.process_terminal_paste_results();
+        let server_tabs_changed = self.refresh_server_tabs_if_due();
         let result = self
             .client
             .as_mut()
@@ -1021,6 +1033,7 @@ impl RemoteWindowState {
                         ime_changed
                             || resize_changed
                             || paste_changed
+                            || server_tabs_changed
                             || changed
                             || command_changed
                             || autoscroll_changed
@@ -1496,6 +1509,13 @@ impl RemoteWindowState {
                     )?;
                 self.spawn_gui_for_instance(instance)?;
             }
+            "select-server-tab" => {
+                let instance = option_value(&command.args, "--name")
+                    .or_else(|| option_value(&command.args, "--logical-instance"))
+                    .or_else(|| ui_action_trailing_name(&command.args))
+                    .context("select-server-tab requires --name NAME")?;
+                self.select_server_tab(instance)?;
+            }
             "copy-selection" => self.copy_terminal_selection()?,
             "close-window" => {
                 self.request_window_close();
@@ -1846,6 +1866,7 @@ impl RemoteWindowState {
             configured_tabs_width: i32::from(self.config.tabs_width),
             composer_height: COMPOSER_HEIGHT,
             status_height: STATUS_HEIGHT,
+            server_strip_height: SERVER_STRIP_HEIGHT,
         })
     }
 
@@ -2202,6 +2223,35 @@ impl RemoteWindowState {
                 "control_visibility_skips": activity.control_visibility_skips,
             })),
             "layout": {
+                "server_strip": layout.server_strip.map(|strip| {
+                    let current = identity.as_ref().map(|id| id.instance.as_str());
+                    let tabs = self
+                        .server_tab_rects()
+                        .into_iter()
+                        .map(|(rect, row)| {
+                            serde_json::json!({
+                                "instance": row.instance,
+                                "instance_label": row.instance_label,
+                                "pid": row.pid,
+                                "endpoint": row.endpoint,
+                                "classification": row.classification,
+                                "can_attach": row.can_attach,
+                                "active": current == Some(row.instance.as_str()),
+                                "bounds": pixel_rect_json(ProductPixelRect {
+                                    left: rect.left,
+                                    top: rect.top,
+                                    right: rect.right,
+                                    bottom: rect.bottom,
+                                }),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    serde_json::json!({
+                        "bounds": pixel_rect_json(strip),
+                        "selected": current,
+                        "tabs": tabs,
+                    })
+                }),
                 "sidebar": {
                     "x": layout.sidebar.left,
                     "y": layout.sidebar.top,
@@ -4324,6 +4374,156 @@ impl RemoteWindowState {
         self.window.focus();
     }
 
+    fn refresh_server_tabs_if_due(&mut self) -> bool {
+        let now = Instant::now();
+        if now < self.server_tabs_refresh_after && !self.server_tabs.is_empty() {
+            return false;
+        }
+        self.server_tabs_refresh_after = now + SERVER_TABS_REFRESH;
+        let Ok(rows) = collect_instance_picker_rows() else {
+            return false;
+        };
+        // Prefer live rows first; keep stale visible so dual-main debris is obvious.
+        let next: Vec<InstancePickerRow> = rows;
+        if next == self.server_tabs {
+            return false;
+        }
+        self.server_tabs = next;
+        true
+    }
+
+    fn server_tab_rects(&self) -> Vec<(ProductPixelRect, &InstancePickerRow)> {
+        let Some(strip) = self.workspace_geometry().server_strip else {
+            return Vec::new();
+        };
+        let strip = win_rect(strip);
+        let count = self.server_tabs.len().max(1) as i32;
+        let available = (strip.width() - MARGIN * 2).max(SERVER_TAB_MIN_WIDTH);
+        let width = (available / count)
+            .clamp(SERVER_TAB_MIN_WIDTH, SERVER_TAB_MAX_WIDTH)
+            .min(available);
+        let mut left = strip.left + MARGIN;
+        let mut out = Vec::new();
+        for row in &self.server_tabs {
+            let rect = ProductPixelRect {
+                left,
+                top: strip.top + 4,
+                right: left + width,
+                bottom: strip.bottom - 4,
+            };
+            out.push((rect, row));
+            left = rect.right + SERVER_TAB_GAP;
+            if left >= strip.right - MARGIN {
+                break;
+            }
+        }
+        out
+    }
+
+    fn server_tab_instance_at(&self, x: i32, y: i32) -> Option<String> {
+        for (rect, row) in self.server_tab_rects() {
+            if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
+                return Some(row.instance.clone());
+            }
+        }
+        None
+    }
+
+    fn select_server_tab(&mut self, instance: &str) -> Result<()> {
+        self.refresh_server_tabs_if_due();
+        // Match bare names and custom: prefixes.
+        let row = self
+            .server_tabs
+            .iter()
+            .find(|row| {
+                row.instance == instance
+                    || row.instance.strip_prefix("custom:") == Some(instance)
+                    || row.instance_label == instance
+                    || row.instance_label.ends_with(&format!("_{instance}"))
+            })
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("server tab `{instance}` is not listed"))?;
+        if !row.can_attach {
+            anyhow::bail!(
+                "server tab `{}` is {} and cannot be selected",
+                row.instance,
+                row.classification
+            );
+        }
+        let current = InstanceIdentity::from_process(
+            self.client.as_ref().map(UiClientModel::server_pid),
+        );
+        if current
+            .as_ref()
+            .is_some_and(|id| id.instance == row.instance)
+        {
+            self.last_message = Some(format!("Already on `{}`", row.instance));
+            return Ok(());
+        }
+        // Defer rebind so the UI command completes on the current server lease.
+        self.relay_attach_after_completion = Some((row.endpoint, row.instance));
+        Ok(())
+    }
+
+    fn paint_server_strip(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+        let Some(strip) = self.workspace_geometry().server_strip else {
+            return;
+        };
+        let strip = win_rect(strip);
+        fill(device, &strip, palette.sidebar.canvas_rgb());
+        frame(device, &strip, palette.active_border.canvas_rgb());
+        let current = InstanceIdentity::from_process(
+            self.client.as_ref().map(UiClientModel::server_pid),
+        )
+        .map(|id| id.instance);
+        if self.server_tabs.is_empty() {
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: strip.left + MARGIN,
+                    top: strip.top + 8,
+                    right: strip.right - MARGIN,
+                    bottom: strip.bottom - 6,
+                },
+                "Servers: (refreshing…)",
+                palette.muted_text.canvas_rgb(),
+            );
+            return;
+        }
+        for (rect, row) in self.server_tab_rects() {
+            let active = current.as_deref() == Some(row.instance.as_str());
+            let fill_color = if active {
+                palette.accent.canvas_rgb()
+            } else if row.can_attach {
+                palette.composer.canvas_rgb()
+            } else {
+                palette.status.canvas_rgb()
+            };
+            fill(device, &rect, fill_color);
+            frame(device, &rect, palette.active_border.canvas_rgb());
+            let label = if row.can_attach {
+                format!("{} · {}", row.instance, row.pid)
+            } else {
+                format!("{} (stale)", row.instance)
+            };
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: rect.left + 8,
+                    top: rect.top + 6,
+                    right: rect.right - 8,
+                    bottom: rect.bottom - 4,
+                },
+                &label,
+                if active {
+                    palette.modal.canvas_rgb()
+                } else {
+                    palette.text.canvas_rgb()
+                },
+            );
+        }
+    }
+
     fn open_instance_picker(&mut self, mode: InstancePickerMode) -> Result<()> {
         if self
             .focus_gate()
@@ -5356,6 +5556,16 @@ impl RemoteWindowState {
 
     fn handle_left_button_down(&mut self, x: i32, y: i32) -> bool {
         self.recent_sidebar_text_click = None;
+        // Top multi-server strip stays clickable even when a full modal is open
+        // only if no modal is blocking — otherwise modals own the surface.
+        if !self.focus_gate().full_modal_blocked() {
+            if let Some(instance) = self.server_tab_instance_at(x, y) {
+                if let Err(error) = self.select_server_tab(&instance) {
+                    self.last_error = Some(format!("{error:#}"));
+                }
+                return true;
+            }
+        }
         if self.focus_gate().full_modal_blocked() {
             return false;
         }
@@ -5752,6 +5962,7 @@ impl RemoteWindowState {
                 .palette()
         };
         let (sidebar, terminal, composer, status) = self.layout_rects();
+        self.paint_server_strip(device, palette);
         fill(device, &sidebar, palette.sidebar.canvas_rgb());
         if let Some(toolbar) = self.workspace_geometry().workspace_toolbar {
             let toolbar = win_rect(toolbar.bounds);

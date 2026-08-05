@@ -525,11 +525,11 @@ U′. 标签切换假刷新
 > **产品判断（已记入对话，本叶遵从）**：
 > - **需求合理**——多 logical instance / 多 live server 要可发现、可附着、
 >   身份可见；关窗后 server 可能仍 live（keep-server）。
-> - **默认形态不采用**「主终端顶栏横向 server tab」：与 Fleet PTY tab
->   语义撞车、误触换权威代价高、与「一窗一 server 投影」模型别扭，
->   且和 L-CC 顶栏 context 职责重叠。
-> - **推荐路径**：启动/重开 instance 列表附着 → 主窗身份常显 →
->   CC 控制塔切 context；同窗热切换权威后置且须确认。
+> - **2026-08-06 用户拍板**：要的是 **窗口顶部横向 server tab 条**（点选切
+>   当前窗附着的 server）。此前「默认不做顶栏 tab」的判断被用户明确覆盖。
+> - **实现**：顶栏 full-width server strip（与左侧 PTY 树分离）；点选 = 本窗
+>   rebind attach（S1）；`Open instance…` / `open-instance` 仍可新窗（S3）。
+> - **仍不做**：无确认的静默双权威、把 server tab 画进左侧 PTY 树。
 
 ```text
 S′. 多 Server / Instance 可达与选择
@@ -1489,6 +1489,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | **P0 关窗再开重置**：根因=新 server + workspace 假恢复 / 双 main。修 `find_live_endpoint_for_logical_instance` + GUI connect 附着 + `start_frontend_server` 拒双开；黑盒同 instance 仅 1 live、tab note 保留。P0-3 job breakaway 未做 |
 | 2026-08-05 | **关窗确认丢失**：`SC_CLOSE`→`CloseRequested`；`ensure_window_close_dialog_presented` 先 restore 再 layout/show 三按钮；AlreadyOpen 二次 close 重 assert。隔离 instance 黑盒：`ui-action close-window`→`confirm-window-close`；最小化后 close→restore+modal；Keep→重开同 `server_pid`+tab 名保留 |
 | 2026-08-05 | **S′ S1–S3 落地**：`instance_identity` + `instance_picker`；`ui-snapshot.window.instance/server_pid/endpoint`；状态栏 Connected·instance·pid；系统菜单 Open instance…；CLI `open-instance-picker` / `instance-picker-select --name` / `confirm` / `open-instance --name`；Attach 延后 rebind 避免 command 过期；OpenAnother breakaway 新窗。Unix picker 诚实 gap |
+| 2026-08-06 | **用户澄清**：只要窗口**顶栏横向 server tab**。落地 `server_strip` 几何 + 绘制/点击 + `select-server-tab --name` + snapshot `layout.server_strip`；点选 rebind 当前窗（非左侧 PTY 树） |
 | 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
 | 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§一 O 组 + §十一**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
 | 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
