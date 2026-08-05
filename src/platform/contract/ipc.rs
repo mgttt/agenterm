@@ -299,25 +299,24 @@ fn resolve_ipc_endpoint_with_environment(
     legacy_main: Option<IpcEndpoint>,
 ) -> Result<ResolvedIpcEndpoint, EndpointSelectionError> {
     let cli_count = selector_count(cli);
-    if cli_count > 1 {
+    if selector_conflict(cli) {
         return Err(selection_error(
             EndpointSelectionErrorCode::ConflictingCliSelectors,
-            "--endpoint, --address, and --instance are mutually exclusive",
+            "--endpoint and --address are mutually exclusive; --address and --instance are mutually exclusive. --endpoint may pair with --instance for identity (attach/peer pin).",
         ));
     }
 
     // A CLI selector is one complete authority choice.  It must suppress the
     // entire environment selector group, rather than accidentally combining
     // (for example) CLI --instance dev with AGENTERM_IPC_ENDPOINT.
-    let selected = if cli_count == 1 { cli } else { environment };
-    let instance_text = if selected.endpoint.is_none() && selected.address.is_none() {
-        selected
-            .instance
-            .clone()
-            .unwrap_or_else(|| "main".to_owned())
-    } else {
-        "main".to_owned()
-    };
+    let selected = if cli_count >= 1 { cli } else { environment };
+    // Logical identity: explicit instance always wins. Endpoint/address alone
+    // default to main (legacy). Attach paths pass both endpoint + instance so
+    // non-main peers keep correct labels after rebind.
+    let instance_text = selected
+        .instance
+        .clone()
+        .unwrap_or_else(|| "main".to_owned());
     let logical_instance =
         instance_text
             .parse::<LogicalInstance>()
@@ -386,6 +385,15 @@ fn selector_count(selectors: &EndpointSelectorArgs) -> usize {
     .into_iter()
     .filter(|selected| *selected)
     .count()
+}
+
+/// Authority conflicts only. Endpoint may be annotated with instance identity
+/// for attach/display; address remains exclusive with both endpoint and instance.
+fn selector_conflict(selectors: &EndpointSelectorArgs) -> bool {
+    let has_endpoint = selectors.endpoint.is_some();
+    let has_address = selectors.address.is_some();
+    let has_instance = selectors.instance.is_some();
+    (has_endpoint && has_address) || (has_address && has_instance)
 }
 
 fn legacy_default_main_endpoint() -> IpcEndpoint {
@@ -592,15 +600,32 @@ mod tests {
 
     #[test]
     fn selector_rejects_multiple_cli_authorities_and_non_loopback_tcp() {
+        // endpoint + address still conflict
         let conflict = resolve_ipc_endpoint(&EndpointSelectorArgs {
             endpoint: Some("tcp:127.0.0.1:48815".to_owned()),
-            address: None,
-            instance: Some("dev".to_owned()),
+            address: Some("127.0.0.1:48816".to_owned()),
+            instance: None,
         })
         .unwrap_err();
         assert_eq!(
             conflict.code,
             EndpointSelectionErrorCode::ConflictingCliSelectors
+        );
+
+        // endpoint + instance is allowed (identity annotation for attach)
+        let annotated = resolve_ipc_endpoint(&EndpointSelectorArgs {
+            endpoint: Some("tcp:127.0.0.1:48815".to_owned()),
+            address: None,
+            instance: Some("dev".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(annotated.logical_instance, LogicalInstance::Dev);
+        assert_eq!(
+            annotated.endpoint,
+            IpcEndpoint::Tcp {
+                host: "127.0.0.1".to_owned(),
+                port: 48815,
+            }
         );
 
         let remote = resolve_ipc_endpoint(&EndpointSelectorArgs {

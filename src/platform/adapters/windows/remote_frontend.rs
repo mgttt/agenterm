@@ -4387,13 +4387,36 @@ impl RemoteWindowState {
         let parsed = endpoint
             .parse::<IpcEndpoint>()
             .map_err(|error| anyhow::anyhow!("invalid endpoint {endpoint}: {error}"))?;
-        let previous_endpoint = resolved_ipc_endpoint().ok().map(|resolved| resolved.endpoint);
+        let previous = resolved_ipc_endpoint().ok();
+        let restore_previous = |state: &mut Self| {
+            if let Some(prev) = previous.as_ref() {
+                let _ = crate::frontend_server::pin_client_peer_for_gui(
+                    &prev.endpoint,
+                    Some(&prev.logical_instance.canonical_name()),
+                );
+                if let Ok(client) = UiClientModel::connect(state.client_id.clone()) {
+                    state.client = Some(client);
+                }
+            }
+        };
         // Detach replaceable UI lease before rebinding the current window.
         if let Some(client) = self.client.as_mut() {
             let _ = client.detach();
         }
         self.client = None;
-        crate::frontend_server::pin_client_endpoint_for_gui(&parsed);
+        // Must update IPC_SELECTOR_OVERRIDE (launch --instance) + identity.
+        crate::frontend_server::pin_client_peer_for_gui(&parsed, Some(instance))
+            .map_err(anyhow::Error::msg)?;
+        // Prove resolution targets the chosen peer, not the launch instance.
+        if let Ok(resolved) = resolved_ipc_endpoint() {
+            if resolved.endpoint != parsed {
+                restore_previous(self);
+                anyhow::bail!(
+                    "attach selector mismatch: resolved {} but chose {endpoint}",
+                    resolved.endpoint
+                );
+            }
+        }
         match UiClientModel::connect(self.client_id.clone()) {
             Ok(client) => {
                 self.client = Some(client);
@@ -4402,12 +4425,7 @@ impl RemoteWindowState {
                 let message = error.to_string();
                 // Target already has a replaceable UI — focus that window instead of stealing.
                 if message.contains("rejected replaceable UI") || message.contains("rejected") {
-                    if let Some(previous) = previous_endpoint.as_ref() {
-                        crate::frontend_server::pin_client_endpoint_for_gui(previous);
-                        if let Ok(client) = UiClientModel::connect(self.client_id.clone()) {
-                            self.client = Some(client);
-                        }
-                    }
+                    restore_previous(self);
                     self.spawn_gui_for_instance(instance)?;
                     self.last_message = Some(format!(
                         "Instance `{instance}` already has a GUI; focusing that window"
@@ -4417,13 +4435,7 @@ impl RemoteWindowState {
                     self.window.request_redraw();
                     return Ok(());
                 }
-                // Restore previous peer when possible.
-                if let Some(previous) = previous_endpoint.as_ref() {
-                    crate::frontend_server::pin_client_endpoint_for_gui(previous);
-                    if let Ok(client) = UiClientModel::connect(self.client_id.clone()) {
-                        self.client = Some(client);
-                    }
-                }
+                restore_previous(self);
                 anyhow::bail!("attach to {instance} failed: {message}");
             }
         }

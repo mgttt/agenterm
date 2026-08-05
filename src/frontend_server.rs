@@ -127,18 +127,46 @@ fn discover_live_peer_endpoint() -> Result<Option<crate::ipc_endpoint::IpcEndpoi
 
 /// Pin the process IPC selector so subsequent control calls target the live peer.
 fn pin_client_endpoint(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
-    pin_client_endpoint_for_gui(endpoint);
+    // Keep current logical-instance identity when only the endpoint peer changes.
+    let instance = crate::client::resolved_ipc_endpoint()
+        .ok()
+        .map(|resolved| resolved.logical_instance.canonical_name());
+    let _ = pin_client_peer_for_gui(endpoint, instance.as_deref());
 }
 
-/// Public for replaceable GUI re-attach (S1 instance picker).
-pub(crate) fn pin_client_endpoint_for_gui(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
-    // CLI selector env wins over defaults for the rest of this process.
+/// Pin GUI/CLI process selectors to a discovered peer endpoint.
+///
+/// Must update [`crate::client::set_ipc_selectors`] (not only env vars): launch
+/// `--instance` lives in `IPC_SELECTOR_OVERRIDE` and would otherwise win forever.
+/// When `instance` is provided it is kept as logical identity even though the
+/// authority is the explicit endpoint (endpoint-only used to force `main`).
+pub(crate) fn pin_client_peer_for_gui(
+    endpoint: &crate::ipc_endpoint::IpcEndpoint,
+    instance: Option<&str>,
+) -> Result<(), String> {
+    use crate::ipc_endpoint::EndpointSelectorArgs;
+    let selectors = EndpointSelectorArgs {
+        endpoint: Some(endpoint.to_string()),
+        address: None,
+        instance: instance.map(str::to_owned),
+    };
+    crate::client::set_ipc_selectors(selectors).map_err(|error| error.to_string())?;
     // SAFETY: single-threaded at GUI bootstrap / UI-action attach before races.
     unsafe {
         std::env::set_var("AGENTERM_IPC_ENDPOINT", endpoint.to_string());
         std::env::remove_var("AGENTERM_IPC_ADDRESS");
-        std::env::remove_var("AGENTERM_INSTANCE");
+        if let Some(instance) = instance {
+            std::env::set_var("AGENTERM_INSTANCE", instance);
+        } else {
+            std::env::remove_var("AGENTERM_INSTANCE");
+        }
     }
+    Ok(())
+}
+
+/// Back-compat name for peer pin without identity change.
+pub(crate) fn pin_client_endpoint_for_gui(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
+    let _ = pin_client_peer_for_gui(endpoint, None);
 }
 
 pub(crate) fn maybe_recover_frontend_server(
