@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgenTerm Windows GUI ops"
+  short_description: "Durable GUI launch, attach, visibility, server hygiene on Windows"
+  default_prompt: "Use $agenterm-windows-gui-ops for Windows AgenTerm GUI launch/attach, invisible-window diagnosis, or stale/dual server cleanup."
