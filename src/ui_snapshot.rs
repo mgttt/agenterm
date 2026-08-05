@@ -79,8 +79,8 @@ pub(crate) fn settings_json(
             "luminance": effective.appearance_preset.luminance().as_str(),
             "color_theme": effective.color_theme().as_str(),
         },
-        "appearance_preset_draft": settings_open.then(|| draft),
-        "theme_draft": settings_open.then(|| draft),
+        "appearance_preset_draft": settings_open.then_some(draft),
+        "theme_draft": settings_open.then_some(draft),
         "theme_options": AppearancePreset::ALL.map(|preset| {
             let metrics = preset.skin_metrics();
             serde_json::json!({

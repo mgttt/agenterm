@@ -1941,20 +1941,18 @@ impl RemoteWindowState {
             &ipc_address(),
             active_tab_id,
         );
-        if include_modal_scope {
-            if let Some(object) = value.as_object_mut() {
-                object.insert(
-                    "scope".into(),
-                    serde_json::Value::String(self.settings_dialog.scope().as_str().to_owned()),
-                );
-                object.insert(
-                    "target_tab_id".into(),
-                    self.settings_dialog
-                        .target_tab_id()
-                        .map(|value| serde_json::Value::String(value.to_owned()))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
+        if include_modal_scope && let Some(object) = value.as_object_mut() {
+            object.insert(
+                "scope".into(),
+                serde_json::Value::String(self.settings_dialog.scope().as_str().to_owned()),
+            );
+            object.insert(
+                "target_tab_id".into(),
+                self.settings_dialog
+                    .target_tab_id()
+                    .map(|value| serde_json::Value::String(value.to_owned()))
+                    .unwrap_or(serde_json::Value::Null),
+            );
         }
         value
     }
@@ -2195,16 +2193,16 @@ impl RemoteWindowState {
             "minimized": window_state.is_minimized(),
             "state": window_state.as_str(),
         });
-        if let Some(identity) = &identity {
-            if let Some(object) = window_json.as_object_mut() {
-                for (key, value) in identity
-                    .snapshot_window_fields()
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                {
-                    object.insert(key.clone(), value.clone());
-                }
+        if let Some(identity) = &identity
+            && let Some(object) = window_json.as_object_mut()
+        {
+            for (key, value) in identity
+                .snapshot_window_fields()
+                .as_object()
+                .into_iter()
+                .flatten()
+            {
+                object.insert(key.clone(), value.clone());
             }
         }
         serde_json::to_string_pretty(&serde_json::json!({
@@ -4609,14 +4607,14 @@ impl RemoteWindowState {
         crate::frontend_server::pin_client_peer_for_gui(&parsed, Some(instance))
             .map_err(anyhow::Error::msg)?;
         // Prove resolution targets the chosen peer, not the launch instance.
-        if let Ok(resolved) = resolved_ipc_endpoint() {
-            if resolved.endpoint != parsed {
-                restore_previous(self);
-                anyhow::bail!(
-                    "attach selector mismatch: resolved {} but chose {endpoint}",
-                    resolved.endpoint
-                );
-            }
+        if let Ok(resolved) = resolved_ipc_endpoint()
+            && resolved.endpoint != parsed
+        {
+            restore_previous(self);
+            anyhow::bail!(
+                "attach selector mismatch: resolved {} but chose {endpoint}",
+                resolved.endpoint
+            );
         }
         match UiClientModel::connect(self.client_id.clone()) {
             Ok(client) => {
@@ -5559,13 +5557,13 @@ impl RemoteWindowState {
         self.recent_sidebar_text_click = None;
         // Top multi-server strip stays clickable even when a full modal is open
         // only if no modal is blocking — otherwise modals own the surface.
-        if !self.focus_gate().full_modal_blocked() {
-            if let Some(instance) = self.server_tab_instance_at(x, y) {
-                if let Err(error) = self.select_server_tab(&instance) {
-                    self.last_error = Some(format!("{error:#}"));
-                }
-                return true;
+        if !self.focus_gate().full_modal_blocked()
+            && let Some(instance) = self.server_tab_instance_at(x, y)
+        {
+            if let Err(error) = self.select_server_tab(&instance) {
+                self.last_error = Some(format!("{error:#}"));
             }
+            return true;
         }
         if self.focus_gate().full_modal_blocked() {
             return false;

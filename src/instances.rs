@@ -510,7 +510,7 @@ fn find_live_endpoint_for_logical_instance_in(
     {
         return Ok(Some(preferred.clone()));
     }
-    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+    candidates.sort_by_key(|(_, rank)| std::cmp::Reverse(*rank));
     Ok(candidates.into_iter().next().map(|(endpoint, _)| endpoint))
 }
 

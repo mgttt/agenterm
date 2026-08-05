@@ -153,11 +153,6 @@ impl SettingsDialog {
         self.preset_draft
     }
 
-    /// Compatibility alias for callers still named around theme drafts.
-    pub(crate) fn theme_draft(&self) -> AppearancePreset {
-        self.preset_draft
-    }
-
     pub(crate) fn font_family_draft(&self) -> &str {
         &self.font_family_draft
     }

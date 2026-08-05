@@ -15,30 +15,11 @@ pub(crate) enum ThemeId {
 }
 
 impl ThemeId {
-    pub(crate) const ALL: [Self; 2] = [Self::Dark, Self::Light];
-
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Dark => "dark",
             Self::Light => "light",
         }
-    }
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Dark => "Dark",
-            Self::Light => "Light",
-        }
-    }
-
-    /// Legacy Dark/Light mapping onto classic night/day palettes.
-    /// Palette bytes live only in `assets/skins/**/palettes/*.json`.
-    pub(crate) fn palette(self) -> &'static ThemePalette {
-        self.appearance_preset().palette()
-    }
-
-    pub(crate) const fn appearance_preset(self) -> AppearancePreset {
-        AppearancePreset::from_theme_id(self)
     }
 }
 
@@ -51,8 +32,6 @@ pub(crate) enum SkinId {
 }
 
 impl SkinId {
-    pub(crate) const ALL: [Self; 2] = [Self::Classic, Self::Fancy];
-
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Classic => "classic",
@@ -108,8 +87,6 @@ pub(crate) enum Luminance {
 }
 
 impl Luminance {
-    pub(crate) const ALL: [Self; 2] = [Self::Day, Self::Night];
-
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Day => "day",
@@ -229,13 +206,6 @@ impl AppearancePreset {
 
     pub(crate) fn palette(self) -> &'static ThemePalette {
         embedded_palettes().for_preset(self)
-    }
-
-    pub(crate) const fn from_theme_id(theme: ThemeId) -> Self {
-        match theme {
-            ThemeId::Light => Self::classic_day(),
-            ThemeId::Dark => Self::classic_night(),
-        }
     }
 
     pub(crate) const fn ui_text_label(self) -> UiText {
@@ -762,9 +732,9 @@ mod tests {
     }
 
     #[test]
-    fn theme_ids_have_stable_strings_and_labels() {
-        assert_eq!(ThemeId::ALL.map(ThemeId::as_str), ["dark", "light"]);
-        assert_eq!(ThemeId::ALL.map(ThemeId::label), ["Dark", "Light"]);
+    fn theme_ids_have_stable_strings() {
+        assert_eq!(ThemeId::Dark.as_str(), "dark");
+        assert_eq!(ThemeId::Light.as_str(), "light");
         assert_eq!(serde_json::to_string(&ThemeId::Dark).unwrap(), "\"dark\"");
         assert_eq!(
             serde_json::from_str::<ThemeId>("\"light\"").unwrap(),
@@ -789,14 +759,6 @@ mod tests {
         assert_eq!(
             AppearancePreset::classic_day().color_theme(),
             ThemeId::Light
-        );
-        assert_eq!(
-            ThemeId::Light.palette() as *const ThemePalette,
-            AppearancePreset::classic_day().palette() as *const ThemePalette
-        );
-        assert_eq!(
-            ThemeId::Dark.palette() as *const ThemePalette,
-            AppearancePreset::classic_night().palette() as *const ThemePalette
         );
         assert_ne!(
             AppearancePreset::fancy_day().palette().accent,

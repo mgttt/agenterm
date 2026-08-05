@@ -31,6 +31,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Single pane per tab
     - `list-panes|lsp [-t target] [-F format]`
     - `send-keys|send [-t target] [-l] key...`
+    - [x] named buffer commands (tmux/RMUX B′ minimal set; in-process
+      only, bounded byte limits, no cross-server sharing)
+      - `set-buffer|setb [-b name] [--] data...`
+      - `load-buffer|loadb [-b name] path`
+      - `show-buffer|showb [-b name]`
+      - `list-buffers|lsb`
+      - `delete-buffer|deleteb [-b name]`
+      - `paste-buffer|pasteb [-b name] [-t target]`
     - `capture-pane|capturep -p [-t target]`
     - `display-message|display -p [-t target] format`
     - `show-options|show`, `list-commands|lscm`

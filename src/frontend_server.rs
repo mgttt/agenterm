@@ -164,11 +164,6 @@ pub(crate) fn pin_client_peer_for_gui(
     Ok(())
 }
 
-/// Back-compat name for peer pin without identity change.
-pub(crate) fn pin_client_endpoint_for_gui(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
-    let _ = pin_client_peer_for_gui(endpoint, None);
-}
-
 pub(crate) fn maybe_recover_frontend_server(
     now: Instant,
     server_restart_after: Instant,

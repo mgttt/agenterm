@@ -1326,7 +1326,7 @@ pub(crate) fn dispatch_shared_command(
                 Ok(data) => data,
                 Err(error) => {
                     return Some(IpcResponse::typed_failure(
-                        &format!("load-buffer could not read {path}: {error}"),
+                        format!("load-buffer could not read {path}: {error}"),
                         "buffer_load_failed",
                         "io",
                         false,
