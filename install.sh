@@ -358,6 +358,12 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   say "Add $BIN_DIR to PATH to use agenterm-cli, agenterm-mux, and agenterm-rhai"
 fi
 
+if command -v pgrep >/dev/null 2>&1 && pgrep -f '/agenterm( |$)' >/dev/null 2>&1; then
+  say "A running AgenTerm server was detected; it will keep using its already-loaded version"
+  say "To switch a running window to $VERSION: close it choosing \"stop server and exit\" (not \"keep server running\"), then reopen AgenTerm"
+  say "Alternatively run: agenterm-cli shutdown  (then reopen AgenTerm)"
+fi
+
 if [[ "$NO_LAUNCH" != "1" ]]; then
   say "Launching AgenTerm"
   if [[ "$OS" == "macos" ]]; then
