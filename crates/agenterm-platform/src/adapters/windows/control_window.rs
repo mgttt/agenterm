@@ -803,7 +803,7 @@ fn trace_ime_message(
     };
     let path = std::env::temp_dir().join("platform-ime-msg.log");
     let line = format!(
-        "{} wp=0x{wp:x} lp=0x{lp:x} composing={composing} commit_pending={commit_pending} dispatching={}\n",
+        "{} wp=0x{wp:x} lp=0x{lp:x} composing={composing} commit_pending={commit_pending} dispatching={dispatching}\n",
         name,
         dispatching = DISPATCHING.with(Cell::get),
     );
