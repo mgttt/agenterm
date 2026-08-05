@@ -1590,8 +1590,8 @@ pbpaste | head -c 200
 | O0 | [x] | `b15b145`；`current → 0.1.14-macos-aarch64`；`agenterm-cli` 在 `~/.local/bin` |
 | **O6** | [~] **已定因，待授权修** | **疑点 (b) 坐实**：无 Shift-扩展选区分支；详见 §11.8 |
 | O1 | [x] **adapter 半叶** `28d6959` | 见 §11.6；**消费侧半叶未做（新发现，见 §11.7）** |
-| O2 | [ ] | |
-| O3 | [ ] | |
+| O2 | [x] **诊断完成，判定不改码** | 发现 `Ok("")` 三态重叠；须 T2 才能修，等 P-P1；见 §11.11 |
+| O3 | [x] `ee41cc6`（G7a 文案）| G2 无断链（§八 该条已过时）；G1 仅探测，等 G-P1；见 §11.12 |
 | O4 | [x] **对照完成，无需改动** | 合成路径实现完好；见 §11.9 |
 | O5 | [x] **实测后判定无需开工** | 本机 idle 6.0% CPU；见 §11.10 |
 
@@ -1720,6 +1720,83 @@ $ ps -Ao pid,pcpu,pmem,comm | grep agenterm
 
 **physical pointer acceptance**：属 parity 矩阵尾账，无用户诉求驱动，
 优先级低于 O6（用户阻塞）与 O2（复制粘贴刚需），**本版不做**。
+
+### 11.11 O2 粘贴真机诊断（2026-08-05 · **诊断完成，判定不改码**）
+
+本机实测五例（含一例超纲）：
+
+| 用例 | 实测结果 | 分类 |
+|------|---------|------|
+| 大段 CJK/emoji（230,000 B） | `Ok(text)`，往返完整 | ✅ 正常 |
+| SGR 转义序列 | `Ok("\x1b[31m…")`，ESC 是合法单字节 UTF-8 | ✅ 读盘层正常 |
+| **截图独占剪贴板** | `pbpaste` 输出 **0 字节 / exit 0** → `Ok("")` | **C 无投递** |
+| 真空剪贴板 | 同上 `Ok("")` | 基线 |
+| **非法 UTF-8**（`68 69 FF FE 41`） | **`pbpaste` 自己静默降级为空**，非法字节**根本没到进程** | **C**（比预期早一层） |
+
+**核心发现：`Ok("")` 是三态重叠**——真空 / 图像独占 / 非法文本，
+在 `clipboard.rs` 内部**无法区分**。
+
+**已独立复核**（我本人跑，非仅采信 agent）：
+
+```
+$ osascript -e 'clipboard info'
+«class utf8», 5          ← 剪贴板确实有 5 字节 utf8 数据
+$ pbpaste | wc -c
+       0                 ← pbpaste 却给 0 字节
+```
+
+**结论：本叶不改码。** 要区分「有图无文」与「真空」，
+必须查 pasteboard **类型**（`pbpaste` stdout 给不了）——
+那**就是 T2（多 MIME/类型感知）换个说法**,而 T2 被 P-P1 明确门控。
+现有四变体 `ClipboardError` 对**它能观测到的**一切结构上是够的;
+在没有新类型信息前继续打磨文案**不会增加真正的区分力**。
+
+> **升级给用户的政策输入（P-P1）**：
+> - **T2 确有必要**——上面是「结构上不可能」级证据,不是偏好问题;
+> - **T1（图像写临时路径）无证据支持**——本次诊断未产生任何需要它的数据,
+>   两者应**分开拍板**,不要打包。
+
+### 11.12 O3 install/升级 UX（2026-08-05 · `ee41cc6`）
+
+**G7a 已修（仅文案）**。修前完成横幅止于 PATH 提示——
+**不提有 server 在跑、不提会继续用旧版本、不给下一步**。修后：
+
+```
+==> A running AgenTerm server was detected; it will keep using its already-loaded version
+==> To switch a running window to v0.1.14: close it choosing "stop server and exit"
+    (not "keep server running"), then reopen AgenTerm
+==> Alternatively run: agenterm-cli shutdown  (then reopen AgenTerm)
+```
+
+实现是 `install.sh` 末尾 6 行 `pgrep` 判断（已复核 diff）：
+**不杀进程、不改默认安装行为、不预判 G-P2**。
+
+**G2 无事可做**：本机 `current` → `0.1.14-macos-aarch64` 存在，
+五个 bin 软链全部解析到真实文件，**零断链**。
+
+> ⚠️ **§八 有一条已过时**：§八 8.1/8.2 第 3 点称
+> 「旧 `agenterm-script` BIN 链断链残留，需手动 `rm`」——
+> **本机现已不存在该软链**（只在旧 local release 载荷目录里有同名文件，
+> 那是死重量，不是断链）。该条应标注为「已解决/会话特定」。
+> §八 其余条目（G1 命令、G3 `--version`、G7 默认）**复核仍准确**。
+
+**G1 仅探测，未动默认**（G-P1 未拍板）。实测：
+
+- 失败（今日默认 `curl | bash`，无 env）：404 → fail-closed
+  `error: signed macOS asset is unavailable; set AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 …`
+- 可用：`AGENTERM_ALLOW_UNSIGNED_PREVIEW=1` → 下载 unsigned-preview zip，SHA-256 校验通过
+
+**G-P1 三选项（交用户拍板，agent 未替你定）**：
+
+| 选项 | 含义 | 代价 |
+|------|------|------|
+| **A** 保持 fail-closed，只补文档/文案指向 env | 风险最低，不动信任模型 | 首次安装仍需用户读文档 |
+| **B** 无签名资产时 macOS 自动回落 unsigned + 大声警告 | 最方便 | **默认把「跑未签名预览版」正常化** |
+| **C** 保持 fail-closed，但把错误文案本身写成完整政策说明 | 读起来像刻意设计而非 bug | 仍需 env |
+
+**未做**：G7b/G7c（GUI 版本不匹配横幅、关窗对话框感知升级）——
+需动 frontend 且受 G-P2 门控；未对真实运行中的 server（PID 48771）
+执行 `shutdown` 实测——那会打断用户正在用的会话，改用源码+pgrep 推证。
 
 ### 11.5 激励
 
@@ -1968,7 +2045,7 @@ HOLD 多 agent 并行
 | `agenterm-cli --version` → `0.1.14` | PASS |
 | 五元组 BIN 链（agenterm / cli / mux / rhai / mcp） | PASS |
 | 无 env 的 macOS happy path | **未走通**（见 G1；须 `ALLOW_UNSIGNED_PREVIEW=1`） |
-| 旧 `agenterm-script` BIN 链 | **断链残留**（装完后仍在，手动 `rm`） |
+| 旧 `agenterm-script` BIN 链 | ~~**断链残留**（装完后仍在，手动 `rm`）~~ → **2026-08-05 O3 复测：已不存在**。本机五个 bin 软链全部解析到真实文件，零断链；`agenterm-script` 只作为文件残留在旧 local release 载荷目录中（死重量，非断链）。**该条为会话特定状态，勿再当作现存缺陷**（G2 因此无事可做） |
 | 已运行 GUI 是否自动吃新码 | **否**（须重开窗口） |
 
 ### 8.2 问题树（按暴露顺序）
