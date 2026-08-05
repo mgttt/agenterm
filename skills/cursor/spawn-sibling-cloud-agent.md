@@ -108,16 +108,23 @@ Align branch naming with cloud agent policy: `cursor/<descriptive-name>-<suffix>
 
 ## Example handoff text (copy pattern, customize)
 
-```text
-Repo: <org>/<repo>. Base: origin/main (confirm with git log -1).
+Always embed the [fleet-awareness](fleet-awareness.md) skeleton so the sibling
+is not a silo. For 主控换防 use [hand-off-controller.md](hand-off-controller.md).
 
-Done elsewhere: <merged PRs / plans — no secret values>.
+```text
+你是舰队一员【分身N】。遵守 skills/cursor/fleet-awareness.md + inter-agent-comms.md。
+Repo: mgttt/agenterm. Base: origin/main.
+
+每轮：git pull → 读 session-registry + mailbox 全文（感知同伴）→ 更新本席位 → 再干活。
+显示名：分身N。文件所有权：…（独占）。禁止：…。
+
+Done elsewhere: <merged tips / plans — no secrets>.
 
 Your scope:
-1. git pull origin main
-2. <concrete gate or feature>
-3. Small commits on cursor/<branch>-<suffix>; draft PR only if needed
-4. Return: CI matrix, blockers, next step
+1. …
+2. Small commits on cursor/<branch>-*; 合 main 仅主控审合 unless 明确授权
+3. 回报：状态/分支/tip/文件清单/证据/阻塞/下一步；IDLE 写「无新指令不开工」
+4. 唤醒：scripts/cursor_agent_chat.sh --from 分身N --to 主控2 …
 
 Constraints: follow AGENTS.md; <version/tag rules>.
 ```

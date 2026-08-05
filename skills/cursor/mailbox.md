@@ -1,9 +1,10 @@
 # 作战小队邮箱（SSOT）
 
+有机感知：[fleet-awareness.md](fleet-awareness.md)  
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控2**刷新：2026-08-05
+最后由**主控2**刷新：2026-08-05（舰队脉搏技能落地）
 
 ## 共享事实
 
@@ -34,11 +35,12 @@
 ## 席位状态
 
 ### 主控2 · 2026-08-05
-- 状态: RUNNING — 编排皮肤 v1
+- 状态: RUNNING — 编排；落地 fleet-awareness / chat pulse
 - 分支: `main`
-- 下一步: Phase 3 集成验证（Quick / theme-smoke）；PRD 勾选；deferred 排期
+- 下一步: 用户下一指令；皮肤 Phase 3 / deferred 可排
 - 阻塞: 无
 - 已合: 分身3 Phase 1；分身4 Phase 2A/2B（`669b8de`）
+- 舰队: chat 默认注入 `<fleet-pulse>`；见 `scripts/cursor_agent_fleet_pulse.sh`
 
 ### 分身3 · 2026-08-05
 - 状态: IDLE

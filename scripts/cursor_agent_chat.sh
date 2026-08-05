@@ -44,6 +44,16 @@ BACKOFF_INITIAL="${CURSOR_AGENT_CHAT_BACKOFF_INITIAL:-2}"
 BACKOFF_MAX="${CURSOR_AGENT_CHAT_BACKOFF_MAX:-45}"
 RE_RESOLVE_EVERY="${CURSOR_AGENT_CHAT_RE_RESOLVE_EVERY:-3}"
 PRECHECK="${CURSOR_AGENT_CHAT_PRECHECK:-1}"
+# Organic fleet awareness: inject <fleet-pulse> by default (skills/cursor/fleet-awareness.md).
+FLEET_CONTEXT="${CURSOR_AGENT_CHAT_FLEET_CONTEXT:-1}"
+# Prefer runtime dir over /tmp so long --wait loops do not lose payload files.
+if [ -z "${TMPDIR:-}" ]; then
+  if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
+    export TMPDIR="$XDG_RUNTIME_DIR"
+  elif [ -d /var/tmp ]; then
+    export TMPDIR=/var/tmp
+  fi
+fi
 
 # shellcheck disable=SC2034
 EXIT_OK=0
@@ -119,6 +129,9 @@ Options:
   --no-wait            Fail immediately on 409 (exit 1)
   --wait-timeout SEC   Max seconds to wait for recipient (default 600;
                        env CURSOR_AGENT_CHAT_WAIT_TIMEOUT)
+  --fleet-context      Inject <fleet-pulse> peer digest (default; env
+                       CURSOR_AGENT_CHAT_FLEET_CONTEXT=1)
+  --no-fleet-context   Do not inject fleet pulse
   --registry PATH      Fallback name→bcId hints only if live API miss
                        (default: skills/cursor/session-registry.md)
   -h, --help           Show this help
@@ -137,6 +150,7 @@ Busy foresight:
 
 Envelope (prepended silently to the prompt text):
   <from::SENDER><to::RECIPIENT>
+  <fleet-pulse>…</fleet-pulse>   (unless --no-fleet-context)
 
 Exit codes:
   0 ok | 1 busy/timeout | 2 usage | 3 auth | 4 network | 5 api error
@@ -516,17 +530,24 @@ build_envelope_message() {
   printf '<from::%s><to::%s>\n%s' "$from_label" "$to_label" "$body"
 }
 
-# Write JSON payload to file path $1 from text in env/file to avoid ARG_MAX.
+# Write JSON payload to file path $1 from text $2 (via side file — not env —
+# so large/multiline bodies and long --wait loops stay reliable).
 json_payload_to_file() {
   local out="$1"
   local text="$2"
-  PROMPT_TEXT="$text" python3 -c '
-import json, os, sys
-path = sys.argv[1]
-payload = {"prompt": {"text": os.environ["PROMPT_TEXT"]}}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(payload, f, ensure_ascii=False)
-' "$out"
+  local side
+  # Inline mktemp: do not use mktemp_tracked + local nameref (printf -v would
+  # set a global, leaving an empty local path for curl).
+  side=$(mktemp)
+  TMP_FILES+=("$side")
+  printf '%s' "$text" >"$side"
+  python3 -c '
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump({"prompt": {"text": text}}, handle, ensure_ascii=False)
+' "$side" "$out"
+  [ -s "$out" ] || die "failed to materialize JSON payload at $out" "$EXIT_USAGE"
 }
 
 parse_run_id() {
@@ -543,11 +564,21 @@ except Exception:
 }
 
 # POST once. Sets LAST_HTTP_CODE / LAST_CLASS. Returns 0 on success.
+# Rewrites payload_file from ENVELOPED_TEXT immediately before curl so a long
+# --wait cannot race a scavenged /tmp file.
 send_run_once() {
   local to_id="$1"
   local payload_file="$2"
   LAST_HTTP_CODE=""
   LAST_CLASS=""
+  if [ -z "${ENVELOPED_TEXT:-}" ]; then
+    LAST_CLASS=fatal
+    return 1
+  fi
+  json_payload_to_file "$payload_file" "$ENVELOPED_TEXT" || {
+    LAST_CLASS=fatal
+    return 1
+  }
   if ! curl_api POST "${API_BASE}/agents/${to_id}/runs" "$payload_file"; then
     LAST_HTTP_CODE=""
     LAST_CLASS=network
@@ -769,6 +800,14 @@ while [ $# -gt 0 ]; do
       USE_STDIN=1
       shift
       ;;
+    --fleet-context)
+      FLEET_CONTEXT=1
+      shift
+      ;;
+    --no-fleet-context)
+      FLEET_CONTEXT=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -789,6 +828,7 @@ done
 # Validate arithmetic knobs before they reach tests, comparisons, or modulo.
 require_binary_flag "CURSOR_AGENT_CHAT_WAIT" "$WAIT"
 require_binary_flag "CURSOR_AGENT_CHAT_PRECHECK" "$PRECHECK"
+require_binary_flag "CURSOR_AGENT_CHAT_FLEET_CONTEXT" "$FLEET_CONTEXT"
 require_non_negative_integer "--wait-timeout" "$WAIT_TIMEOUT"
 require_non_negative_integer "CURSOR_AGENT_CHAT_MAX_BYTES" "$MAX_BYTES"
 require_positive_integer "CURSOR_AGENT_CHAT_BACKOFF_INITIAL" "$BACKOFF_INITIAL"
@@ -817,8 +857,21 @@ fi
 
 [ -n "${MESSAGE//[[:space:]]/}" ] || die "message body is empty"
 
-ENVELOPED=$(build_envelope_message "$FROM_NAME" "$TO_NAME" "$MESSAGE")
-BYTE_LEN=$(printf '%s' "$ENVELOPED" | wc -c | tr -d ' ')
+if [ "$FLEET_CONTEXT" -eq 1 ]; then
+  SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+  PULSE=""
+  if [ -x "$SCRIPT_DIR/cursor_agent_fleet_pulse.sh" ]; then
+    # Prefer live merge; degrade quietly to git-only.
+    PULSE=$("$SCRIPT_DIR/cursor_agent_fleet_pulse.sh" 2>/dev/null || \
+      "$SCRIPT_DIR/cursor_agent_fleet_pulse.sh" --no-live 2>/dev/null || true)
+  fi
+  if [ -n "${PULSE//[[:space:]]/}" ]; then
+    MESSAGE=$(printf '%s\n\n%s' "$PULSE" "$MESSAGE")
+  fi
+fi
+
+ENVELOPED_TEXT=$(build_envelope_message "$FROM_NAME" "$TO_NAME" "$MESSAGE")
+BYTE_LEN=$(printf '%s' "$ENVELOPED_TEXT" | wc -c | tr -d ' ')
 if [ "$BYTE_LEN" -gt "$MAX_BYTES" ]; then
   die "message too large: ${BYTE_LEN} bytes (budget ${MAX_BYTES}; set CURSOR_AGENT_CHAT_MAX_BYTES to raise)" "$EXIT_USAGE"
 fi
@@ -827,20 +880,21 @@ FROM_ID=$(resolve_agent "$FROM_NAME" from)
 TO_ID=$(resolve_agent "$TO_NAME" to)
 
 mktemp_tracked PAYLOAD_FILE
-json_payload_to_file "$PAYLOAD_FILE" "$ENVELOPED"
+json_payload_to_file "$PAYLOAD_FILE" "$ENVELOPED_TEXT"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  printf 'dry-run from=%s(%s) to=%s(%s) bytes=%s wait=%s wait_timeout=%s\n' \
+  printf 'dry-run from=%s(%s) to=%s(%s) bytes=%s wait=%s wait_timeout=%s fleet_context=%s\n' \
     "$FROM_NAME" "$(bc_prefix "$FROM_ID")" \
     "$TO_NAME" "$(bc_prefix "$TO_ID")" \
     "$BYTE_LEN" \
     "$WAIT" \
-    "$WAIT_TIMEOUT"
+    "$WAIT_TIMEOUT" \
+    "$FLEET_CONTEXT"
   printf 'envelope:\n'
-  printf '%s\n' "$ENVELOPED" | head -n 2
-  if [ "$(printf '%s' "$ENVELOPED" | wc -l | tr -d ' ')" -gt 2 ]; then
+  printf '%s\n' "$ENVELOPED_TEXT" | head -n 12
+  if [ "$(printf '%s' "$ENVELOPED_TEXT" | wc -l | tr -d ' ')" -gt 12 ]; then
     printf '… (%s more lines omitted)\n' \
-      "$(( $(printf '%s' "$ENVELOPED" | wc -l | tr -d ' ') - 2 ))"
+      "$(( $(printf '%s' "$ENVELOPED_TEXT" | wc -l | tr -d ' ') - 12 ))"
   fi
   exit 0
 fi

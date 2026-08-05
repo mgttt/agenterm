@@ -3,8 +3,9 @@
 **显示名**在 [cursor.com/agents](https://cursor.com/agents) 里改（与「主控」相同操作）。
 REST API **不能**改 `name`；下面登记表供主控与分身对齐身份与职责。
 
-**互通**：状态 / 请示 / 共享事实 → [mailbox.md](mailbox.md)；协议 → [inter-agent-comms.md](inter-agent-comms.md)。
-Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait`）。
+**互通**：有机感知 → [fleet-awareness.md](fleet-awareness.md)；状态 / 请示 → [mailbox.md](mailbox.md)；
+动作清单 → [inter-agent-comms.md](inter-agent-comms.md)；换防 → [hand-off-controller.md](hand-off-controller.md)。
+Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`）。
 
 最后更新：2026-08-05（皮肤 v1：分身3 设计 / 分身4 工程）
 
