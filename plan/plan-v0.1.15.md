@@ -1588,7 +1588,7 @@ pbpaste | head -c 200
 | 叶 | 状态 | HEAD/笔记 |
 |----|------|-----------|
 | O0 | [x] | `b15b145`；`current → 0.1.14-macos-aarch64`；`agenterm-cli` 在 `~/.local/bin` |
-| **O6** | [~] **已定因，待授权修** | **疑点 (b) 坐实**：无 Shift-扩展选区分支；详见 §11.8 |
+| **O6** | [x] **已修** `fb573f9` | O6a 止血 + O6b shift-extend；定因见 §11.8，交付见 §11.13 |
 | O1 | [x] **adapter 半叶** `28d6959` | 见 §11.6；**消费侧半叶未做（新发现，见 §11.7）** |
 | O2 | [x] **诊断完成，判定不改码** | 发现 `Ok("")` 三态重叠；须 T2 才能修，等 P-P1；见 §11.11 |
 | O3 | [x] `ee41cc6`（G7a 文案）| G2 无断链（§八 该条已过时）；G1 仅探测，等 G-P1；见 §11.12 |
@@ -1797,6 +1797,61 @@ $ pbpaste | wc -c
 **未做**：G7b/G7c（GUI 版本不匹配横幅、关窗对话框感知升级）——
 需动 frontend 且受 G-P2 门控；未对真实运行中的 server（PID 48771）
 执行 `shutdown` 实测——那会打断用户正在用的会话，改用源码+pgrep 推证。
+
+### 11.13 O6 交付（2026-08-05 · `fb573f9` · **用户阻塞项已解**）
+
+**O6a 止血**：四处 `let _ = copy_terminal_selection()` 全部改为
+`Err` 时 `set_status_message("Copy failed: {error}")`，
+Cmd+C 那处另加 `request_redraw()`（对齐紧邻 `Paste` 分支的写法）。
+**四处无一是「合法静默」**——每处都在「选区刚刚赋值成功」的分支内，
+此时复制失败是真错误，不是空操作。
+
+**O6b shift-extend**：在 `begin_terminal_selection` 顶部新增分支
+（先于双击/选词判断）。锚点按 xterm 惯例取**离点击较远的那个端点**
+（行距优先，同行时列距决胜），抽成纯函数 `shift_extend_anchor`，
+配 3 个单测（`shift_extend_anchor_flips_when_click_is_above_selection` /
+`_keeps_the_far_endpoint_when_click_is_below_selection` /
+`_breaks_ties_on_same_row_by_column_distance`，实测全绿）。
+
+> **修饰键无需新增管线**：`self.pointer_modifiers` 早已由
+> `PointerButton::Pressed` 处理器在调进本函数前更新——
+> **事件循环一直把 shift 状态送到了门口，只是没人读**。
+> 这也解释了为什么 §11.8 的「文档与实现不一致」成立得如此彻底。
+
+**§11.8 定因全部成立**，无一条被推翻。
+
+#### ⚠️ 一处需要更正的测试归因（我复核后修正）
+
+接手 agent 报告称全量 `cargo test` 有两个集成测试失败，属
+「pre-existing / 与本改动无关的并行污染 flake」。**该归因不准确**，
+我实测如下：
+
+| 条件 | `tests/performance_summary.rs` | `tests/rhai_migration.rs` |
+|------|-------------------------------|--------------------------|
+| `fb573f9~1` 全量 `cargo test` | ✅ 全绿（625 passed） | ✅ 全绿 |
+| `fb573f9` 全量 `cargo test` | ✅ 绿 | ❌ 2 failed |
+| `fb573f9~1` **单独**跑 rhai_migration | — | ❌ **同样失败** |
+
+**结论：确实不是 O6 造成的**（单独跑基线也失败，故与 O6 无因果），
+**但也不是「并行 flake」**——它是**稳定失败**，真实根因是：
+
+```
+prd_alignment_public_command_missing:delete-buffer
+```
+
+`delete-buffer` 命令已存在于 `src/commands.rs:74,305,688` 与
+`control_dispatch.rs:1365`，但 **PRD 公开命令目录里没有它**
+（`grep -rn "delete-buffer" prd/` 零命中）。经 `git log` 追溯，
+该命令随合并 `b15b145` 进入 main，**早于本次 O 泳道**。
+
+> **归属：非 O 泳道，属他人未完成工作**（新增公开命令未同步 PRD 目录）。
+> 此处只记录、不擅自改 PRD——PRD 公开命令面属产品契约，
+> 且该命令的归属 agent 可能正在处理中。**但它现在是 main 上的红灯，
+> 需要有人认领**。
+>
+> 教训：agent 报「pre-existing flake」时要核——
+> 「不是我造成的」与「是随机 flake」是两个不同结论，
+> 后者会让一个**稳定的真失败**被当噪音放过去。
 
 ### 11.5 激励
 
