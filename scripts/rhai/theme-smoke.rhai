@@ -156,6 +156,15 @@ fn derived_color_theme(preset_id) {
     }
 }
 
+fn theme_option_field(snapshot, id, field) {
+    for option in snapshot.settings.theme_options {
+        if option.id == id {
+            return option[field];
+        }
+    }
+    throw "theme_option_missing:" + id;
+}
+
 fn assert_theme_options(snapshot) {
     let expected = [
         "classic-day",
@@ -176,6 +185,16 @@ fn assert_theme_options(snapshot) {
         }
         require(found, "theme_option_missing:" + id);
     }
+    require(
+        theme_option_field(snapshot, "classic-day", "accent")
+            != theme_option_field(snapshot, "fancy-day", "accent"),
+        "fancy_classic_accent_not_distinct"
+    );
+    require(
+        theme_option_field(snapshot, "fancy-day", "metrics")
+            .corner_radius_control_px > 0,
+        "fancy_metrics_missing"
+    );
 }
 
 fn assert_theme(snapshot, saved_preset, draft, open) {
@@ -248,7 +267,10 @@ let day_png = std::path::join(
     context.run_directory,
     "evidence/theme-classic-day.png"
 ).display;
-let owned_children = [];
+let fancy_day_png = std::path::join(
+    context.run_directory,
+    "evidence/theme-fancy-day.png"
+).display;
 let succeeded = false;
 let failure = "";
 
@@ -385,10 +407,42 @@ try {
         ["ui-action", "settings-apply"]
     );
     assert_theme(snapshot, "classic-day", (), false);
+    let persisted = rhai::json::parse_file(context.settings_path);
     require(
         persisted.appearance_preset == "classic-day",
         "theme_apply_not_persisted"
     );
+
+    print("STEP fancy-day palette differs from classic-day in snapshot and rendering");
+    text_cli(context, cli, ["ui-action", "open-settings"]);
+    text_cli(context, cli, ["ui-action", "settings-preset-fancy-day"]);
+    text_cli(context, cli, ["screenshot", "-o", fancy_day_png]);
+    let fancy_preview = json_cli(context, cli, ["ui-snapshot"]);
+    assert_theme(fancy_preview, "classic-day", "fancy-day", true);
+    require(
+        theme_option_field(fancy_preview, "fancy-day", "accent")
+            != theme_option_field(fancy_preview, "classic-day", "accent"),
+        "fancy_preview_accent_not_distinct"
+    );
+    text_cli(context, cli, ["ui-action", "settings-apply"]);
+    let fancy_applied = json_cli(context, cli, ["ui-snapshot"]);
+    assert_theme(fancy_applied, "fancy-day", (), false);
+    require(
+        rhai::json::parse_file(context.settings_path).appearance_preset == "fancy-day",
+        "fancy_apply_not_persisted"
+    );
+    let classic_shot = rhai::image::inspect_png(day_png);
+    let fancy_shot = rhai::image::inspect_png(fancy_day_png);
+    require(
+        classic_shot.width == fancy_shot.width
+            && classic_shot.height == fancy_shot.height,
+        "fancy_screenshot_geometry_mismatch"
+    );
+    let fancy_delta = classic_shot.luminance - fancy_shot.luminance;
+    if fancy_delta < 0.0 {
+        fancy_delta = -fancy_delta;
+    }
+    require(fancy_delta >= 1.0, "fancy_render_not_visibly_distinct");
     let token_after =
         "AGENTERM_THEME_AFTER_" + std::process::id();
     text_cli(
@@ -444,7 +498,7 @@ try {
         ", luminance " + light.luminance
     );
 
-    print("STEP saved classic-day survives shutdown and restart");
+    print("STEP saved fancy-day survives shutdown and restart");
     text_cli(context, cli, ["ui-action", "close-window"]);
     text_cli(
         context,
@@ -465,7 +519,7 @@ try {
     );
     assert_theme(
         json_cli(context, cli, ["ui-snapshot"]),
-        "classic-day",
+        "fancy-day",
         (),
         false
     );

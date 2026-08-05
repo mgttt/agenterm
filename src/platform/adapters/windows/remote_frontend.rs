@@ -53,7 +53,7 @@ use crate::{
         clamp_tabs_width, config_path, load_config, save_config,
     },
     tab_tree::{TabTreeNode, tree_rows},
-    theme::{AppearancePreset, Rgb, ThemePalette},
+    theme::{AppearancePreset, Rgb, ThemePalette, window_title_for_preset},
     ui_bridge::{UiCellStyle, UiColor, UiScreenSnapshot, UiTabBootstrap},
     ui_client::{UiClientModel, tab_by_id},
     ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
@@ -2011,6 +2011,10 @@ impl RemoteWindowState {
             native_window_state.maximized,
         );
         let workspace_controls_visible = self.focus_gate().workspace_controls_visible();
+        let instance_label = resolved_ipc_endpoint()
+            .ok()
+            .map(|resolved| resolved.logical_instance.display_name().to_string())
+            .filter(|name| name != "default");
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
@@ -2022,7 +2026,11 @@ impl RemoteWindowState {
                 "sequence": source.position.sequence,
             },
             "window": {
-                "title": format!("AgenTerm-{}:{}", env!("CARGO_PKG_VERSION"), resolved_ipc_endpoint()?.logical_instance.display_name()),
+                "title": window_title_for_preset(
+                    self.config.appearance_preset,
+                    env!("CARGO_PKG_VERSION"),
+                    instance_label.as_deref(),
+                ),
                 "client_width": client_size.width,
                 "client_height": client_size.height,
                 "visible": native_window_state.visible,
@@ -3931,8 +3939,22 @@ impl RemoteWindowState {
         self.cell_width = cell_width;
         self.cell_height = cell_height;
         self.config = next;
+        self.refresh_window_title();
         self.last_error = None;
         Ok(())
+    }
+
+    fn refresh_window_title(&self) {
+        let instance_label = resolved_ipc_endpoint()
+            .ok()
+            .map(|resolved| resolved.logical_instance.display_name().to_string())
+            .filter(|name| name != "default");
+        let title = window_title_for_preset(
+            self.config.appearance_preset,
+            env!("CARGO_PKG_VERSION"),
+            instance_label.as_deref(),
+        );
+        let _ = self.window.set_title(&title);
     }
 
     fn finish_settings(&mut self, apply: bool) {
