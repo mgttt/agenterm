@@ -172,11 +172,88 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   active terminal's size override. Overrides are client-owned and keyed by
   server address plus stable tab ID so the server remains UI-neutral. Windows
   UI and the shared settings model are complete; Unix/macOS modal parity
-  remains.
+  remains. Built-in skins extend this contract below; they do not replace
+  Apply/Cancel, inheritance, or PTY continuity.
 - [ ] the local-IPC migration replaces server-address-derived appearance
   override keys with the stable server scope defined by the
   [Agent control plane](PRD_02_07_agent_control_plane.md), so changing a
   socket path or transport does not orphan terminal UI preferences
+
+## Built-in skins (v1)
+
+Owns the product contract for built-in appearance presets. Execution map:
+[`plan/plan-skins-v1.md`](../plan/plan-skins-v1.md). External SkinHub packages
+remain a later roadmap leaf (`prd/PRD_02_18_roadmap.md` M14) and must reuse
+this theme contract rather than invent a second system.
+
+### Product outcome
+
+- [ ] Users can choose among four built-in presets without interrupting PTYs:
+  `classic-day`, `classic-night`, `fancy-day`, `fancy-night`.
+- [ ] Skin and luminance are orthogonal: `skin` ∈ {`classic`,`fancy`},
+  `luminance` ∈ {`day`,`night`}; the composite id is `{skin}-{luminance}`.
+- [ ] Classic inherits today's industrial Dark/Light spirit (migration
+  defaults below). Fancy is a more branded refinement (metrics, accent weight,
+  optional icon/title branding) — never a second product identity or toy UI.
+- [ ] Shared product constitution stays skin-invariant: integer-grid spacing,
+  tab-tree semantics, `ui-snapshot` truthfulness, ANSI readability, and
+  diagnosable failures.
+
+### Identity and persistence
+
+- [ ] Stable composite ids: `classic-day`, `classic-night`, `fancy-day`,
+  `fancy-night`. Display names (en / zh-Hant): Classic Day / 經典白,
+  Classic Night / 經典黑, Fancy Day / 華麗白, Fancy Night / 華麗黑.
+- [ ] Persist `appearance_preset` (or equivalent `skin` + `luminance`) in
+  client settings; keep palette bytes out of settings so built-ins can evolve.
+- [ ] Migration: legacy `color_theme: "dark"` → `classic-night`; `"light"` →
+  `classic-day`. Unknown ids fall back to `classic-night` (same spirit as
+  today's Dark default). Forward-compatible deserialize must not reject
+  settings written by a newer build.
+- [ ] Per-terminal appearance overrides may select a preset or inherit the
+  workspace default, matching today's theme-override model.
+- [ ] `ui-snapshot` exposes `appearance_preset`, `skin`, `luminance`, and
+  `theme_options` entries with `id`, `label`, and short `description`.
+  Legacy `color_theme` may remain as a derived compatibility field
+  (`night`→`dark`, `day`→`light`) until consumers migrate.
+
+### Skinable tokens (v1)
+
+| Token | Classic | Fancy | Notes |
+|-------|---------|-------|-------|
+| Full `ThemePalette` | Current Dark/Light spirit | Distinct accent/surfaces; same struct | Host chrome + terminal defaults + ANSI-16 |
+| Brand short name | `AgenTerm` | Same base; optional light ornament only in fancy chrome | Data dirs stay `agenterm` / `AgenTerm` — not skinable |
+| Window title template | `{brand} {version}` (+ optional ` — {instance}`) | `{brand} · {version}` (+ instance) | Unify Win/Unix title construction through the template |
+| Application icon | Existing `assets/agenterm.*` | `assets/skins/fancy/icon.*` | Linux runtime window icon is part of this leaf |
+| Corner radius / border metrics | `0` (right angles) | Small radii (e.g. 4/8) on controls/modals | Metrics live beside palette, not as ad-hoc render magic |
+| Scrollbar / selection chrome | Rectilinear, restrained | Softened thumb + stronger hover | Still integer-grid aligned |
+
+Explicit non-goals for v1: user-authored skin packages, hot-reload market,
+per-skin full locale catalogs, sound, wallpaper, animated chrome, changing
+tab OSC titles, or renaming on-disk config/data roots.
+
+### Settings UX
+
+- [ ] Appearance settings offer a 2×2 preset picker (or skin × luminance) with
+  live whole-window preview; Apply persists atomically; Cancel/Esc restores
+  the previous preset without PTY disruption.
+- [ ] Labels come from the locale source; Unix must not hardcode English-only
+  Dark/Light button text once presets ship.
+- [ ] Evidence: extend `theme-smoke` / theme render-parity so all four presets
+  are selectable, persisted, restart-stable, and PNG-differentiable where
+  luminance differs; classic vs fancy must also be distinguishable in chrome
+  or snapshot fields.
+
+### Acceptance
+
+- [ ] Choosing any preset updates host chrome and terminal defaults through
+  the same palette path used today (no second paint path).
+- [ ] Restart restores the persisted preset; unknown/legacy values migrate as
+  specified.
+- [ ] Window title and icon follow the active skin's branding tokens on each
+  host that can set them.
+- [ ] Snapshot + PNG evidence agree; typed failures remain diagnosable.
+- [ ] SkinHub packaging is out of scope until this built-in contract is green.
 - [x] `AGENTERM_SETTINGS_PATH` provides explicit settings isolation; Windows
   retains `%LOCALAPPDATA%\AgenTerm\settings.json`, while Unix uses the stable
   `XDG_CONFIG_HOME/agenterm/settings.json` (or `HOME/.config`) user path

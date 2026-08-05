@@ -608,7 +608,11 @@ track remains planned, but every declared dependency must still pass.
   - [ ] PluginHub, SkinHub, AppHub and InfoHub are product-class views over a
     single softmgr catalog / source / install / update / rollback substrate
     keyed by a `kind` field; skins are `kind: skin` packages over the existing
-    theme contract and never become a second extension system
+    theme contract and never become a second extension system. Built-in
+    classic/fancy × day/night presets ship first under
+    [Human workspace](PRD_02_06_human_workspace.md) /
+    [`plan/plan-skins-v1.md`](../plan/plan-skins-v1.md) before any external
+    SkinHub package format is frozen.
   - [ ] discovery is cross-kind and renders one signed registry index that both
     the web surface and Control Center consume; the index is a static signed
     document before it is ever a service
