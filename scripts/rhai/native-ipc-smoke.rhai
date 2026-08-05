@@ -32,6 +32,19 @@ fn bounded_diagnostic(value) {
     value.sub_string(0, 512) + "<truncated>"
 }
 
+fn authority_argv(program, arguments) {
+    // Only the agenterm PE uses the `server` subcommand; CLI/mux must not.
+    let name = std::path::PathBuf::from(program).file_name;
+    if name == "agenterm" || name == "agenterm.exe" {
+        let server_args = ["server"];
+        for argument in arguments {
+            server_args.push(argument);
+        }
+        return server_args;
+    }
+    arguments
+}
+
 fn configured(
     context,
     program,
@@ -41,15 +54,10 @@ fn configured(
     instance,
     workspace
 ) {
-    // Authority binary is agenterm; headless mode is the `server` subcommand.
-    let server_args = ["server"];
-    for argument in arguments {
-        server_args.push(argument);
-    }
     let command = test_harness::configured_command(
         context,
         program,
-        server_args
+        authority_argv(program, arguments)
     );
     for name in [
         "AGENTERM_IPC_ENDPOINT",
