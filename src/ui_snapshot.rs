@@ -80,14 +80,34 @@ pub(crate) fn settings_json(
         },
         "appearance_preset_draft": settings_open.then(|| draft),
         "theme_draft": settings_open.then(|| draft),
-        "theme_options": AppearancePreset::ALL.map(|preset| serde_json::json!({
+        "theme_options": AppearancePreset::ALL.map(|preset| {
+            let metrics = preset.skin_metrics();
+            serde_json::json!({
             "id": preset.as_str(),
             "label": preset.label(locale),
             "description": preset.description(locale),
             "skin": preset.skin().as_str(),
             "luminance": preset.luminance().as_str(),
             "color_theme": preset.color_theme().as_str(),
-        })),
+            "accent": format!(
+                "#{:02X}{:02X}{:02X}",
+                preset.palette().accent.red,
+                preset.palette().accent.green,
+                preset.palette().accent.blue
+            ),
+            "metrics": {
+                "corner_radius_control_px": metrics.corner_radius_control_px,
+                "corner_radius_modal_px": metrics.corner_radius_modal_px,
+                "border_width_px": metrics.border_width_px,
+                "scrollbar_style": metrics.scrollbar_style,
+            },
+        })}),
+        "appearance_metrics": {
+            "corner_radius_control_px": config.appearance_preset.skin_metrics().corner_radius_control_px,
+            "corner_radius_modal_px": config.appearance_preset.skin_metrics().corner_radius_modal_px,
+            "border_width_px": config.appearance_preset.skin_metrics().border_width_px,
+            "scrollbar_style": config.appearance_preset.skin_metrics().scrollbar_style,
+        },
         "tabs_visible": config.tabs_visible,
         "tabs_width": config.tabs_width,
     })
