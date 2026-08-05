@@ -19,6 +19,64 @@ Use `target/release-fast` after `./build.sh release-fast`. The installer
 validates every required executable and derives the version from
 `agenterm-cli --version`.
 
+## Install before claiming a GUI fix works
+
+`cargo build` alone changes nothing the user can run. `~/Applications/AgenTerm.app`
+is a symlink shell pointing at `~/.local/share/agenterm/current`, so until the
+installer moves that link the Dock icon, `open`, and every `~/.local/bin`
+command still launch the previously installed build.
+
+A fix verified only by `cargo test` and by running `target/release/agenterm`
+directly is **not** verified for the user. Reporting it as fixed will be wrong
+in the most confusing possible way: the user runs their normal launch path,
+sees the old behaviour, and the code looks correct when you re-read it.
+
+Install, then prove the binary actually carries the change:
+
+```bash
+cargo build --release --bin agenterm --bin agenterm-cli \
+            --bin agenterm-mux --bin agenterm-rhai --bin agenterm-mcp
+./install.sh --local-build target/release
+readlink ~/.local/share/agenterm/current          # must be the new release dir
+stat -f "%Sm" ~/Applications/AgenTerm.app/Contents/MacOS/AgenTerm
+strings ~/.local/share/agenterm/current/agenterm | grep -c "<a new string literal>"
+```
+
+The `strings` check is the one that cannot be fooled by a stale symlink: pick a
+message the fix introduced and confirm it is present in the installed bytes.
+
+`--local-build` requires **all five** executables; building only `agenterm`
+fails the installer's validation.
+
+An already-running server keeps its loaded version. After installing, close the
+window with **stop server and exit** (not *keep server running*), or run
+`agenterm-cli shutdown`, before testing.
+
+## Know what you cannot verify from the CLI
+
+GUI text selection is mouse-driven. `agenterm-cli ui-interact select` selects a
+*window*, not terminal text, and `send-mouse` targets the application's xterm
+mouse protocol rather than the frontend's selection layer. There is no CLI path
+that reproduces a drag- or shift-select gesture.
+
+So a selection or clipboard fix can be verified up to the seam — clipboard
+round-trip, selection-text extraction, anchor math — but the final gesture needs
+a human. Say that plainly instead of implying the whole path was tested.
+
+Useful seam-level checks that *are* scriptable:
+
+```bash
+# Clipboard layer round-trip, including CJK and emoji
+printf '' | pbcopy; <drive set_text>; pbpaste
+
+# What the pasteboard really holds (pbpaste lies by omission)
+osascript -e 'clipboard info'
+```
+
+`osascript -e 'clipboard info'` reporting bytes while `pbpaste | wc -c` reports
+`0` is the signature of content that is not plain text, or of `pbpaste` silently
+degrading — not of an empty clipboard.
+
 ## Diagnose Dock launches
 
 If reopening AgenTerm shows Terminal text such as `Last login` and an executable
