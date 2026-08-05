@@ -47,7 +47,7 @@ Hot shared files (`src/lib.rs`, `Cargo.toml`, `PRD.md`, `AGENTS.md`): only
 - [x] This plan
 - [x] Spawn 分身3 / 分身4; update `skills/cursor/session-registry.md` + mailbox
 
-### Phase 1 — Design freeze (分身3)
+### Phase 1 — Design freeze (分身3) ✅ 已合 main
 
 Deliver under `assets/skins/`:
 
