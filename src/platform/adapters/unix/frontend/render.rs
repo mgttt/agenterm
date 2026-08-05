@@ -1,5 +1,6 @@
 //! Unix software-rendered frontend projection.
 
+use crate::frontend::settings::appearance_preset_grid;
 use crate::locale::LocaleId;
 use crate::terminal_cursor::TerminalCursorShape;
 use crate::theme::{AppearancePreset, Rgb, ThemePalette};
@@ -450,24 +451,22 @@ impl SettingsModalView {
         let size_decrease_button = (size_left, size_row_top, 28, 32);
         let size_increase_button = (size_left + 36, size_row_top, 28, 32);
         let theme_row = top + 180;
-        let theme_row_gap = 42;
-        let button_width = ((width.saturating_sub(64).saturating_sub(8)) / 2).max(120);
         let action_row = top + 316;
+        let preset_cells = appearance_preset_grid(
+            i32::try_from(left + 32).unwrap_or(i32::MAX),
+            i32::try_from(theme_row).unwrap_or(i32::MAX),
+            i32::try_from(width.saturating_sub(64)).unwrap_or(0),
+        );
         SettingsModalView {
             font_size,
             preset_draft,
             locale,
             bounds: (left, top, width, SETTINGS_MODAL_HEIGHT),
             font_family_field,
-            classic_day_button: (left + 32, theme_row, button_width, 34),
-            classic_night_button: (left + 32 + button_width + 8, theme_row, button_width, 34),
-            fancy_day_button: (left + 32, theme_row + theme_row_gap, button_width, 34),
-            fancy_night_button: (
-                left + 32 + button_width + 8,
-                theme_row + theme_row_gap,
-                button_width,
-                34,
-            ),
+            classic_day_button: preset_cells[0].as_xywh_u32(),
+            classic_night_button: preset_cells[1].as_xywh_u32(),
+            fancy_day_button: preset_cells[2].as_xywh_u32(),
+            fancy_night_button: preset_cells[3].as_xywh_u32(),
             cancel_button: (left + width.saturating_sub(238), action_row, 94, 36),
             apply_button: (left + width.saturating_sub(126), action_row, 94, 36),
             size_decrease_button,
@@ -2255,15 +2254,12 @@ fn render_settings_modal(
         "Appearance preset · preview is immediate; Apply persists",
         palette.muted_text,
     );
-    for (preset, button) in [
-        (AppearancePreset::classic_day(), settings.classic_day_button),
-        (
-            AppearancePreset::classic_night(),
-            settings.classic_night_button,
-        ),
-        (AppearancePreset::fancy_day(), settings.fancy_day_button),
-        (AppearancePreset::fancy_night(), settings.fancy_night_button),
-    ] {
+    for (preset, button) in AppearancePreset::ALL.into_iter().zip([
+        settings.classic_day_button,
+        settings.classic_night_button,
+        settings.fancy_day_button,
+        settings.fancy_night_button,
+    ]) {
         let label = if settings.preset_draft == preset {
             format!("{} *", preset.label(settings.locale))
         } else {

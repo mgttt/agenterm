@@ -4,14 +4,14 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控2**刷新：2026-08-05（palette SSOT 收口）
+最后由**主控2**刷新：2026-08-05（抽象复用两叶已合）
 
 ## 共享事实
 
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
-| 当前主线任务 | **抽象复用推进** — fleet Python 库已合；skins palette 单一真相源已收口 |
+| 当前主线任务 | **抽象复用推进** — palette SSOT + shared preset 2×2 grid 已合 |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
 | 执行计划 | `plan/plan-skins-v1.md`（含 Phase 2B deferred + post-merge cleanup） |
 | `origin/main` | skins Phase 2B 已合；`bb5ef28` cursor_agent.py |
@@ -39,7 +39,7 @@
 ### 主控2 · 2026-08-05
 - 状态: RUNNING — 自主推进抽象复用
 - 分支: `main`
-- 下一步: 可选 Win/Unix shared preset picker；deferred skins 叶按需再派
+- 下一步: shared `appearance_preset_grid` 合入后 IDLE/下一叶；deferred skins 按需再派
 - 阻塞: 无
 - 已合: 分身3 Phase 1；分身4 Phase 2A/2B；`bb5ef28` cursor_agent.py
 - 舰队: pulse/duty；Automations `主控 造梦` 已挂

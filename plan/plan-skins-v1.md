@@ -95,6 +95,8 @@ optional; 主控2 merges to `main` after review.
 - [x] Remove dual palette SSOT: delete `DARK`/`LIGHT` consts; `ThemeId::palette`
   and all presets read only `assets/skins/**/palettes/*.json` via
   `embedded_palettes()`
+- [x] Shared `appearance_preset_grid` in `src/frontend/settings.rs`; Win/Unix
+  settings chrome consume it (paint/native controls stay host-local)
 
 ### Phase 3 — Integration (主控2)
 

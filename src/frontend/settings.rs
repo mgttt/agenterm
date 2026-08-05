@@ -10,6 +10,78 @@ use crate::{
     theme::AppearancePreset,
 };
 
+/// Horizontal gap between the two columns of the appearance preset picker.
+pub(crate) const APPEARANCE_PRESET_GRID_GAP: i32 = 8;
+/// Vertical stride from one preset row top to the next (includes button height).
+pub(crate) const APPEARANCE_PRESET_GRID_ROW_STRIDE: i32 = 42;
+/// Preset button height shared by Win and Unix settings chrome.
+pub(crate) const APPEARANCE_PRESET_BUTTON_HEIGHT: i32 = 34;
+
+/// One cell in the shared 2×2 appearance-preset picker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AppearancePresetGridCell {
+    pub(crate) preset: AppearancePreset,
+    pub(crate) left: i32,
+    pub(crate) top: i32,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+}
+
+impl AppearancePresetGridCell {
+    pub(crate) const fn right(self) -> i32 {
+        self.left + self.width
+    }
+
+    pub(crate) const fn bottom(self) -> i32 {
+        self.top + self.height
+    }
+
+    /// Unix paint/hit-test shape `(x, y, w, h)`. Negative origins clamp to zero.
+    pub(crate) fn as_xywh_u32(self) -> (u32, u32, u32, u32) {
+        (
+            u32::try_from(self.left.max(0)).unwrap_or(0),
+            u32::try_from(self.top.max(0)).unwrap_or(0),
+            u32::try_from(self.width.max(0)).unwrap_or(0),
+            u32::try_from(self.height.max(0)).unwrap_or(0),
+        )
+    }
+}
+
+/// Lay out built-in presets in `AppearancePreset::ALL` reading order:
+/// classic-day | classic-night / fancy-day | fancy-night.
+///
+/// `content_left` / `content_width` are the inner picker band (modal inset already
+/// applied). Hosts keep paint and native controls; only geometry+order is shared.
+pub(crate) fn appearance_preset_grid(
+    content_left: i32,
+    grid_top: i32,
+    content_width: i32,
+) -> [AppearancePresetGridCell; 4] {
+    let gap = APPEARANCE_PRESET_GRID_GAP;
+    let button_width = ((content_width - gap) / 2).max(120);
+    let height = APPEARANCE_PRESET_BUTTON_HEIGHT;
+    let row_stride = APPEARANCE_PRESET_GRID_ROW_STRIDE;
+    let mut cells = [AppearancePresetGridCell {
+        preset: AppearancePreset::classic_day(),
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+    }; 4];
+    for (index, preset) in AppearancePreset::ALL.into_iter().enumerate() {
+        let col = i32::try_from(index % 2).unwrap_or(0);
+        let row = i32::try_from(index / 2).unwrap_or(0);
+        cells[index] = AppearancePresetGridCell {
+            preset,
+            left: content_left + col * (button_width + gap),
+            top: grid_top + row * row_stride,
+            width: button_width,
+            height,
+        };
+    }
+    cells
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SettingsScope {
     Defaults,
@@ -438,6 +510,27 @@ mod tests {
         assert_eq!(dialog.font_family_draft(), "Consolas");
         assert_eq!(dialog.font_size_draft(), "14");
         assert_eq!(dialog.preset_draft(), AppearancePreset::classic_night());
+    }
+
+    #[test]
+    fn appearance_preset_grid_matches_all_order_and_2x2_geometry() {
+        let cells = appearance_preset_grid(40, 200, 280);
+        assert_eq!(cells.map(|cell| cell.preset), AppearancePreset::ALL);
+        let button_width = ((280 - APPEARANCE_PRESET_GRID_GAP) / 2).max(120);
+        assert_eq!(cells[0].left, 40);
+        assert_eq!(cells[0].top, 200);
+        assert_eq!(cells[0].width, button_width);
+        assert_eq!(cells[0].height, APPEARANCE_PRESET_BUTTON_HEIGHT);
+        assert_eq!(
+            cells[1].left,
+            40 + button_width + APPEARANCE_PRESET_GRID_GAP
+        );
+        assert_eq!(cells[1].top, 200);
+        assert_eq!(cells[2].left, 40);
+        assert_eq!(cells[2].top, 200 + APPEARANCE_PRESET_GRID_ROW_STRIDE);
+        assert_eq!(cells[3].left, cells[1].left);
+        assert_eq!(cells[3].top, cells[2].top);
+        assert_eq!(cells[0].as_xywh_u32(), (40, 200, button_width as u32, 34));
     }
 
     #[test]

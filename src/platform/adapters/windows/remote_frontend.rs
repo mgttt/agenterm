@@ -34,18 +34,18 @@ use crate::{
         close_confirmation::CloseConfirmation,
         composer::ComposerWriteMode,
         cwd_editor::CwdEditorDialog,
+        instance_identity::InstanceIdentity,
+        instance_picker::{
+            InstancePickerDialog, InstancePickerMode, InstancePickerRow,
+            collect_instance_picker_rows,
+        },
         new_terminal::{self, NewShellChoice, NewTerminalDialog},
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
             remote_word_selection,
         },
-        instance_identity::InstanceIdentity,
-        instance_picker::{
-            InstancePickerDialog, InstancePickerMode, InstancePickerRow,
-            collect_instance_picker_rows,
-        },
-        settings::{self, AppearanceField, SettingsDialog, SettingsScope},
+        settings::{self, AppearanceField, SettingsDialog, SettingsScope, appearance_preset_grid},
         tab_editor::{TabEditorDialog, TabEditorFocus},
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
@@ -1480,8 +1480,8 @@ impl RemoteWindowState {
                     self.instance_picker_dialog
                         .select_by_instance(instance)
                         .map_err(anyhow::Error::msg)?;
-                } else if let Some(pid) = option_value(&command.args, "--pid")
-                    .and_then(|value| value.parse::<u32>().ok())
+                } else if let Some(pid) =
+                    option_value(&command.args, "--pid").and_then(|value| value.parse::<u32>().ok())
                 {
                     self.instance_picker_dialog
                         .select_by_pid(pid)
@@ -2197,7 +2197,12 @@ impl RemoteWindowState {
         });
         if let Some(identity) = &identity {
             if let Some(object) = window_json.as_object_mut() {
-                for (key, value) in identity.snapshot_window_fields().as_object().into_iter().flatten() {
+                for (key, value) in identity
+                    .snapshot_window_fields()
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                {
                     object.insert(key.clone(), value.clone());
                 }
             }
@@ -2878,31 +2883,30 @@ impl RemoteWindowState {
             bottom: size.bottom,
         };
         let preset_top = top + 276;
-        let preset_gap = 8;
-        let preset_width = ((width - 64 - preset_gap) / 2).max(120);
+        let preset_cells = appearance_preset_grid(left + 32, preset_top, width - 64);
         let classic_day = ProductPixelRect {
-            left: left + 32,
-            top: preset_top,
-            right: left + 32 + preset_width,
-            bottom: preset_top + 34,
+            left: preset_cells[0].left,
+            top: preset_cells[0].top,
+            right: preset_cells[0].right(),
+            bottom: preset_cells[0].bottom(),
         };
         let classic_night = ProductPixelRect {
-            left: classic_day.right + preset_gap,
-            top: preset_top,
-            right: classic_day.right + preset_gap + preset_width,
-            bottom: preset_top + 34,
+            left: preset_cells[1].left,
+            top: preset_cells[1].top,
+            right: preset_cells[1].right(),
+            bottom: preset_cells[1].bottom(),
         };
         let fancy_day = ProductPixelRect {
-            left: left + 32,
-            top: preset_top + 42,
-            right: left + 32 + preset_width,
-            bottom: preset_top + 76,
+            left: preset_cells[2].left,
+            top: preset_cells[2].top,
+            right: preset_cells[2].right(),
+            bottom: preset_cells[2].bottom(),
         };
         let fancy_night = ProductPixelRect {
-            left: classic_night.left,
-            top: preset_top + 42,
-            right: classic_night.right,
-            bottom: preset_top + 76,
+            left: preset_cells[3].left,
+            top: preset_cells[3].top,
+            right: preset_cells[3].right(),
+            bottom: preset_cells[3].bottom(),
         };
         let theme_inherit = ProductPixelRect {
             left: left + width - 158,
@@ -4230,15 +4234,12 @@ impl RemoteWindowState {
     fn refresh_settings_preset_controls(&self) {
         let preset_draft = self.settings_dialog.preset_draft();
         let locale = self.config.locale;
-        for (preset, control) in [
-            (AppearancePreset::classic_day(), self.settings_classic_day),
-            (
-                AppearancePreset::classic_night(),
-                self.settings_classic_night,
-            ),
-            (AppearancePreset::fancy_day(), self.settings_fancy_day),
-            (AppearancePreset::fancy_night(), self.settings_fancy_night),
-        ] {
+        for (preset, control) in AppearancePreset::ALL.into_iter().zip([
+            self.settings_classic_day,
+            self.settings_classic_night,
+            self.settings_fancy_day,
+            self.settings_fancy_night,
+        ]) {
             let state = if preset == preset_draft {
                 locale.text(UiText::Selected)
             } else {
@@ -4450,9 +4451,8 @@ impl RemoteWindowState {
                 row.classification
             );
         }
-        let current = InstanceIdentity::from_process(
-            self.client.as_ref().map(UiClientModel::server_pid),
-        );
+        let current =
+            InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
         if current
             .as_ref()
             .is_some_and(|id| id.instance == row.instance)
@@ -4472,10 +4472,9 @@ impl RemoteWindowState {
         let strip = win_rect(strip);
         fill(device, &strip, palette.sidebar.canvas_rgb());
         frame(device, &strip, palette.active_border.canvas_rgb());
-        let current = InstanceIdentity::from_process(
-            self.client.as_ref().map(UiClientModel::server_pid),
-        )
-        .map(|id| id.instance);
+        let current =
+            InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid))
+                .map(|id| id.instance);
         if self.server_tabs.is_empty() {
             draw_text(
                 device,
@@ -4557,8 +4556,10 @@ impl RemoteWindowState {
             anyhow::bail!("instance picker has no rows");
         };
         if !row.can_attach {
-            self.instance_picker_dialog
-                .set_error(format!("instance `{}` is {} and cannot attach", row.instance, row.classification));
+            self.instance_picker_dialog.set_error(format!(
+                "instance `{}` is {} and cannot attach",
+                row.instance, row.classification
+            ));
             self.window.request_redraw();
             anyhow::bail!(
                 "refusing to attach stale/non-live instance `{}` ({})",
