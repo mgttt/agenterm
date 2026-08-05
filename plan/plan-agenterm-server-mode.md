@@ -1,6 +1,6 @@
 # Plan: `agenterm --server` authority entry
 
-Status: **authorized one-shot** (2026-08-05).  
+Status: **implemented on main** (2026-08-05).  
 Product contract: [`prd/PRD_02_02_executable_family.md`](../prd/PRD_02_02_executable_family.md).  
 Does not create a tag/Candidate/Release by itself.
 
