@@ -31,11 +31,10 @@ impl ThemeId {
         }
     }
 
-    pub(crate) const fn palette(self) -> &'static ThemePalette {
-        match self {
-            Self::Dark => &DARK,
-            Self::Light => &LIGHT,
-        }
+    /// Legacy Dark/Light mapping onto classic night/day palettes.
+    /// Palette bytes live only in `assets/skins/**/palettes/*.json`.
+    pub(crate) fn palette(self) -> &'static ThemePalette {
+        self.appearance_preset().palette()
     }
 
     pub(crate) const fn appearance_preset(self) -> AppearancePreset {
@@ -417,102 +416,6 @@ pub(crate) struct ThemePalette {
     pub(crate) ansi: [Rgb; 16],
 }
 
-const fn rgb(red: u8, green: u8, blue: u8) -> Rgb {
-    Rgb::new(red, green, blue)
-}
-
-// Every existing host color and ANSI entry is retained exactly. Newly explicit
-// interaction fields alias the colors used for those states before theming.
-pub(crate) const DARK: ThemePalette = ThemePalette {
-    sidebar: rgb(24, 27, 34),
-    terminal_background: rgb(12, 14, 18),
-    composer: rgb(31, 35, 44),
-    modal: rgb(38, 43, 54),
-    status: rgb(19, 22, 28),
-    text: rgb(214, 220, 230),
-    muted_text: rgb(145, 153, 168),
-    divider: rgb(82, 94, 112),
-    control: rgb(31, 35, 44),
-    control_hover: rgb(42, 49, 61),
-    control_pressed: rgb(38, 43, 54),
-    active: rgb(42, 49, 61),
-    active_border: rgb(76, 94, 122),
-    focus_ring: rgb(245, 190, 100),
-    success: rgb(121, 215, 135),
-    warning: rgb(245, 190, 100),
-    danger: rgb(240, 100, 95),
-    accent: rgb(100, 155, 235),
-    terminal_foreground: rgb(214, 220, 230),
-    selection_background: rgb(100, 155, 235),
-    selection_foreground: rgb(12, 14, 18),
-    scrollbar_track: rgb(19, 22, 28),
-    scrollbar_thumb: rgb(82, 94, 112),
-    scrollbar_thumb_active: rgb(42, 49, 61),
-    ansi: [
-        rgb(12, 14, 18),
-        rgb(205, 73, 69),
-        rgb(91, 184, 104),
-        rgb(220, 184, 87),
-        rgb(84, 132, 214),
-        rgb(176, 101, 193),
-        rgb(69, 179, 184),
-        rgb(214, 220, 230),
-        rgb(100, 108, 123),
-        rgb(240, 100, 95),
-        rgb(121, 215, 135),
-        rgb(245, 210, 112),
-        rgb(112, 159, 236),
-        rgb(205, 132, 222),
-        rgb(97, 211, 216),
-        rgb(255, 255, 255),
-    ],
-};
-
-pub(crate) const LIGHT: ThemePalette = ThemePalette {
-    sidebar: rgb(238, 241, 246),
-    terminal_background: rgb(250, 251, 253),
-    composer: rgb(245, 247, 250),
-    modal: rgb(255, 255, 255),
-    status: rgb(229, 233, 240),
-    text: rgb(31, 38, 49),
-    muted_text: rgb(88, 98, 113),
-    divider: rgb(174, 183, 197),
-    control: rgb(245, 247, 250),
-    control_hover: rgb(224, 230, 239),
-    control_pressed: rgb(210, 218, 230),
-    active: rgb(218, 227, 241),
-    active_border: rgb(91, 112, 143),
-    focus_ring: rgb(137, 79, 0),
-    success: rgb(25, 116, 55),
-    warning: rgb(137, 79, 0),
-    danger: rgb(176, 42, 42),
-    accent: rgb(35, 94, 168),
-    terminal_foreground: rgb(31, 38, 49),
-    selection_background: rgb(35, 94, 168),
-    selection_foreground: rgb(255, 255, 255),
-    scrollbar_track: rgb(229, 233, 240),
-    scrollbar_thumb: rgb(145, 156, 173),
-    scrollbar_thumb_active: rgb(91, 112, 143),
-    ansi: [
-        rgb(31, 38, 49),
-        rgb(176, 42, 42),
-        rgb(25, 116, 55),
-        rgb(137, 79, 0),
-        rgb(35, 94, 168),
-        rgb(130, 67, 152),
-        rgb(0, 112, 117),
-        rgb(222, 226, 232),
-        rgb(88, 98, 113),
-        rgb(211, 61, 61),
-        rgb(38, 139, 69),
-        rgb(166, 99, 0),
-        rgb(57, 116, 193),
-        rgb(155, 87, 178),
-        rgb(0, 137, 143),
-        rgb(255, 255, 255),
-    ],
-};
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SkinMetrics {
     pub(crate) corner_radius_control_px: u8,
@@ -854,6 +757,10 @@ pub(crate) fn decode_window_icon_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)
 mod tests {
     use super::*;
 
+    const fn rgb(red: u8, green: u8, blue: u8) -> Rgb {
+        Rgb::new(red, green, blue)
+    }
+
     #[test]
     fn theme_ids_have_stable_strings_and_labels() {
         assert_eq!(ThemeId::ALL.map(ThemeId::as_str), ["dark", "light"]);
@@ -883,8 +790,14 @@ mod tests {
             AppearancePreset::classic_day().color_theme(),
             ThemeId::Light
         );
-        assert_eq!(*AppearancePreset::classic_day().palette(), LIGHT);
-        assert_eq!(*AppearancePreset::classic_night().palette(), DARK);
+        assert_eq!(
+            ThemeId::Light.palette() as *const ThemePalette,
+            AppearancePreset::classic_day().palette() as *const ThemePalette
+        );
+        assert_eq!(
+            ThemeId::Dark.palette() as *const ThemePalette,
+            AppearancePreset::classic_night().palette() as *const ThemePalette
+        );
         assert_ne!(
             AppearancePreset::fancy_day().palette().accent,
             AppearancePreset::classic_day().palette().accent
@@ -926,20 +839,21 @@ mod tests {
     }
 
     #[test]
-    fn dark_palette_retains_the_pre_theme_colors() {
-        assert_eq!(DARK.sidebar, rgb(24, 27, 34));
-        assert_eq!(DARK.terminal_background, rgb(12, 14, 18));
-        assert_eq!(DARK.composer, rgb(31, 35, 44));
-        assert_eq!(DARK.text, rgb(214, 220, 230));
-        assert_eq!(DARK.selection_background, rgb(100, 155, 235));
-        assert_eq!(DARK.ansi[0], rgb(12, 14, 18));
-        assert_eq!(DARK.ansi[15], rgb(255, 255, 255));
+    fn classic_night_palette_retains_the_pre_theme_colors() {
+        let dark = AppearancePreset::classic_night().palette();
+        assert_eq!(dark.sidebar, rgb(24, 27, 34));
+        assert_eq!(dark.terminal_background, rgb(12, 14, 18));
+        assert_eq!(dark.composer, rgb(31, 35, 44));
+        assert_eq!(dark.text, rgb(214, 220, 230));
+        assert_eq!(dark.selection_background, rgb(100, 155, 235));
+        assert_eq!(dark.ansi[0], rgb(12, 14, 18));
+        assert_eq!(dark.ansi[15], rgb(255, 255, 255));
     }
 
     #[test]
     fn palettes_expose_terminal_and_interaction_colors() {
-        for theme in ThemeId::ALL {
-            let palette = theme.palette();
+        for preset in AppearancePreset::ALL {
+            let palette = preset.palette();
             assert_ne!(palette.terminal_foreground, palette.terminal_background);
             assert_ne!(palette.selection_foreground, palette.selection_background);
             assert_ne!(palette.focus_ring, palette.sidebar);
@@ -949,20 +863,21 @@ mod tests {
     }
 
     #[test]
-    fn light_palette_is_fixed_and_keeps_key_text_pairs_readable() {
-        assert_eq!(LIGHT.sidebar, rgb(238, 241, 246));
-        assert_eq!(LIGHT.terminal_background, rgb(250, 251, 253));
-        assert_eq!(LIGHT.text, rgb(31, 38, 49));
-        assert_eq!(LIGHT.accent, rgb(35, 94, 168));
-        assert_eq!(LIGHT.ansi[0], rgb(31, 38, 49));
-        assert_eq!(LIGHT.ansi[15], rgb(255, 255, 255));
+    fn classic_day_palette_is_fixed_and_keeps_key_text_pairs_readable() {
+        let light = AppearancePreset::classic_day().palette();
+        assert_eq!(light.sidebar, rgb(238, 241, 246));
+        assert_eq!(light.terminal_background, rgb(250, 251, 253));
+        assert_eq!(light.text, rgb(31, 38, 49));
+        assert_eq!(light.accent, rgb(35, 94, 168));
+        assert_eq!(light.ansi[0], rgb(31, 38, 49));
+        assert_eq!(light.ansi[15], rgb(255, 255, 255));
 
-        assert!(contrast(LIGHT.text, LIGHT.sidebar) >= 4.5);
-        assert!(contrast(LIGHT.text, LIGHT.composer) >= 4.5);
-        assert!(contrast(LIGHT.terminal_foreground, LIGHT.terminal_background) >= 4.5);
-        assert!(contrast(LIGHT.muted_text, LIGHT.sidebar) >= 4.5);
-        assert!(contrast(LIGHT.selection_foreground, LIGHT.selection_background) >= 4.5);
-        assert!(contrast(LIGHT.focus_ring, LIGHT.sidebar) >= 4.5);
+        assert!(contrast(light.text, light.sidebar) >= 4.5);
+        assert!(contrast(light.text, light.composer) >= 4.5);
+        assert!(contrast(light.terminal_foreground, light.terminal_background) >= 4.5);
+        assert!(contrast(light.muted_text, light.sidebar) >= 4.5);
+        assert!(contrast(light.selection_foreground, light.selection_background) >= 4.5);
+        assert!(contrast(light.focus_ring, light.sidebar) >= 4.5);
     }
 
     fn contrast(left: Rgb, right: Rgb) -> f64 {

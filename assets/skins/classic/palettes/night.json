@@ -2,7 +2,7 @@
   "id": "classic-night",
   "skin": "classic",
   "luminance": "night",
-  "source": "maps to src/theme.rs DARK (today's Dark default)",
+  "source": "SSOT for classic-night / legacy ThemeId::Dark",
   "colors": {
     "sidebar": "#181B22",
     "terminal_background": "#0C0E12",

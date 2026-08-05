@@ -2,7 +2,7 @@
   "id": "classic-day",
   "skin": "classic",
   "luminance": "day",
-  "source": "maps to src/theme.rs LIGHT (today's Light default)",
+  "source": "SSOT for classic-day / legacy ThemeId::Light",
   "colors": {
     "sidebar": "#EEF1F6",
     "terminal_background": "#FAFBFD",

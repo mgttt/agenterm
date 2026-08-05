@@ -4,19 +4,20 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控2**刷新：2026-08-05（舰队脉搏技能落地）
+最后由**主控2**刷新：2026-08-05（palette SSOT 收口）
 
 ## 共享事实
 
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
-| 当前主线任务 | **Built-in skins v1** — Phase 2A/2B **已合 main** |
+| 当前主线任务 | **抽象复用推进** — fleet Python 库已合；skins palette 单一真相源已收口 |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
-| 执行计划 | `plan/plan-skins-v1.md`（含 Phase 2B deferred） |
-| `origin/main` | 含 `cursor/skins-eng-phase2a` @ `669b8de` 合流 |
+| 执行计划 | `plan/plan-skins-v1.md`（含 Phase 2B deferred + post-merge cleanup） |
+| `origin/main` | skins Phase 2B 已合；`bb5ef28` cursor_agent.py |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
+| palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 删除中 |
 | auto-dream | Automations **`主控 造梦`** cron `21 * * * *` UTC；skill=`fleet-duty.md`；`duty.lock` 空闲 |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -36,12 +37,12 @@
 ## 席位状态
 
 ### 主控2 · 2026-08-05
-- 状态: RUNNING — 编排；落地 fleet-awareness / chat pulse
+- 状态: RUNNING — 自主推进抽象复用
 - 分支: `main`
-- 下一步: 用户下一指令；皮肤 Phase 3 / deferred 可排
+- 下一步: skins palette SSOT（去 DARK/LIGHT）→ 可选 shared preset picker
 - 阻塞: 无
-- 已合: 分身3 Phase 1；分身4 Phase 2A/2B（`669b8de`）
-- 舰队: pulse=`fleet_pulse.sh`；duty/dream=`fleet_duty.sh` + `fleet-duty.md`（Automations 待人类挂 cron）
+- 已合: 分身3 Phase 1；分身4 Phase 2A/2B；`bb5ef28` cursor_agent.py
+- 舰队: pulse/duty；Automations `主控 造梦` 已挂
 
 ### 分身3 · 2026-08-05
 - 状态: IDLE — fleet-pulse 已感知；无新指令不开工

@@ -90,6 +90,12 @@ optional; 主控2 merges to `main` after review.
 - Windows `build.rs` 仍 embed `assets/agenterm.ico`，未切 fancy skin icon
 - `SkinMetrics` corner radius / border 仅暴露于 `ui-snapshot`，Win/Unix render 仍 rectilinear
 
+**Post-merge cleanup (主控2):**
+
+- [x] Remove dual palette SSOT: delete `DARK`/`LIGHT` consts; `ThemeId::palette`
+  and all presets read only `assets/skins/**/palettes/*.json` via
+  `embedded_palettes()`
+
 ### Phase 3 — Integration (主控2)
 
 1. Rebase/merge both leaves; resolve conflicts serially
