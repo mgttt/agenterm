@@ -2633,6 +2633,32 @@ fn ui_text_width(text: &str) -> u32 {
     x as u32
 }
 
+/// Character offset nearest to `x` pixels from the start of `text`.
+///
+/// The UI font is proportional and CJK glyphs are roughly twice the width of
+/// latin ones, so a click cannot be divided by a fixed cell width the way the
+/// terminal grid does it. Advances are accumulated instead, and the caret snaps
+/// to whichever character boundary is closer — clicking the left half of a
+/// glyph puts the caret before it, the right half after it, which is what every
+/// native text field does.
+pub(super) fn char_offset_at_width(text: &str, x: u32) -> usize {
+    let mut accumulated = 0u32;
+    for (index, ch) in text.chars().enumerate() {
+        let advance = ui_text_width(ch.encode_utf8(&mut [0u8; 4]));
+        if x < accumulated + advance / 2 {
+            return index;
+        }
+        accumulated += advance;
+    }
+    text.chars().count()
+}
+
+/// Pixel width of the first `chars` characters, for placing a caret or the
+/// left edge of a selection highlight.
+pub(super) fn width_of_first_chars(text: &str, chars: usize) -> u32 {
+    ui_text_width(&text.chars().take(chars).collect::<String>())
+}
+
 /// Keeps the tail of `text` whose rendered width fits `max_width` pixels,
 /// prefixing an ellipsis when anything was cut. Pixel-accurate so long lines
 /// never overrun their field into neighbouring controls.
@@ -2965,6 +2991,41 @@ mod tests {
             label: "",
             send_button: (240, 7, 72, COMPOSER_HEIGHT - 14),
         }
+    }
+
+    #[test]
+    fn click_offset_snaps_to_the_nearer_character_boundary() {
+        let text = "abc";
+        let advance = ui_text_width("a");
+        // Left of the first glyph's midpoint lands before it.
+        assert_eq!(char_offset_at_width(text, 0), 0);
+        // Past the midpoint lands after it.
+        assert_eq!(char_offset_at_width(text, advance - 1), 1);
+        // Beyond the end clamps to the end rather than wrapping.
+        assert_eq!(char_offset_at_width(text, 10_000), 3);
+    }
+
+    /// A fixed cell width would mis-place every caret in CJK text, since those
+    /// glyphs are about twice as wide as latin ones.
+    #[test]
+    fn click_offset_accounts_for_wide_glyph_advances() {
+        let text = "中文ab";
+        let wide = ui_text_width("中");
+        let narrow = ui_text_width("a");
+        assert!(wide > narrow, "CJK glyphs must be wider than latin ones");
+
+        assert_eq!(char_offset_at_width(text, 0), 0);
+        assert_eq!(char_offset_at_width(text, wide), 1);
+        assert_eq!(char_offset_at_width(text, wide * 2), 2);
+        assert_eq!(char_offset_at_width(text, 10_000), 4);
+    }
+
+    #[test]
+    fn width_of_first_chars_matches_full_width_at_the_end() {
+        let text = "中文ab";
+        assert_eq!(width_of_first_chars(text, 0), 0);
+        assert_eq!(width_of_first_chars(text, 4), ui_text_width(text));
+        assert_eq!(width_of_first_chars(text, 99), ui_text_width(text));
     }
 
     #[test]
