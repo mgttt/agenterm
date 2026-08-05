@@ -4,23 +4,27 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
-- [x] `agenterm.exe`: Windows-subsystem replaceable GUI client; it owns HWND,
-  renderer, layout, focus, clipboard and menus but never PTYs or workspace
-  truth
+- [x] `agenterm.exe`: Windows-subsystem main program. Default launch is the
+  replaceable GUI client (HWND, renderer, layout, focus, clipboard, menus —
+  never PTY/workspace truth). Headless Fleet authority is the same PE via the
+  **`server` subcommand** (`agenterm server …`); there is no separate
+  `agenterm-server` product binary.
 - [~] `agenterm` on Linux/macOS: GUI + POSIX PTY + software-raster window;
   shared `control_dispatch` covers observe/input/tab lifecycle/kill
   (`protocol-info`, `list-*`, `new/select/kill-window`, `send-keys`,
   `capture-pane`, `inspect`, `rename-session`, `kill-server`); Win32
   `execute_command` routes the same arms through `ControlHost`; remaining
   UI-only commands (`ui-snapshot`, screenshots, composer HWND, settings)
-  stay host-specific
+  stay host-specific. Headless authority is likewise `agenterm server`
+  (same binary, separate process), not a second executable.
 - [x] the shipped architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory
   ownership question:
-  - [x] preferred authority entry is **`agenterm server`** (subcommand; same
-    process role, separate process from the GUI). The former
-    `agenterm-server.exe` PE is **removed**; GUI autostart spawns
+  - [x] authority is **merged into the main `agenterm` program** as the
+    **`server` subcommand** (same process role as the old headless server,
+    still a separate OS process from the GUI — not in-process with the window).
+    The former `agenterm-server.exe` PE is **removed**; GUI autostart spawns
     `agenterm.exe server …` (see
     [`plan/plan-agenterm-server-mode.md`](../plan/plan-agenterm-server-mode.md)).
     Sharing one PE means Windows may lock `agenterm.exe` while authority

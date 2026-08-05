@@ -35,9 +35,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and scrollback through version handshake, bootstrap, reconnect and rollback
   black-box evidence
   - [x] v0.1.9 ownership decision: a dedicated headless process owns
-    session/runtime state and has no GUI surface; `agenterm.exe` without
-    `server` is a replaceable client. The former separate `agenterm-server.exe`
-    image alias is removed — authority is `agenterm server` (same PE, new
+    session/runtime state and has no GUI surface. That authority is now the
+    main program's **`server` subcommand** (`agenterm server`), not a second
+    product binary; `agenterm.exe` without `server` remains the replaceable
+    GUI client. The former `agenterm-server.exe` PE is removed (same PE, new
     process). Windows may lock that PE while Keep Server is active; stop the
     authority before replacing the image.
   - [x] renderer-neutral hello/bootstrap/delta DTOs and typed interaction

@@ -11,10 +11,10 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
-| 当前主线任务 | **空闲** — `agenterm-server` PE 已删（`78357dd`）；权威仅 `agenterm server` |
+| 当前主线任务 | **空闲** — server 并入主程序子命令；PRD 已写清 |
 | 产品契约 | `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | `plan/plan-agenterm-server-mode.md`（done） |
-| `origin/main` | `78357dd` |
+| `origin/main` | tip；CI follow-up `0bcd978` |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
