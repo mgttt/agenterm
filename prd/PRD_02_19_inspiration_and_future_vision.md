@@ -41,7 +41,7 @@ Public pitch (reviewed 2026-07-29):
 
 Emotional north star (human user, 2026-07-29):
 
-> **Everything on this machine, under your control** — visible in one tree,
+> **Everything under control** — 一切盡在掌控；visible in one tree,
 > intervenable through Composer and CLI, nothing silently erased, provable when
 > it matters.
 
