@@ -31,7 +31,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     drafts, working-context facts, operation receipts and the event journal;
     it has no user-facing HWND and does not own layout, theme, focus,
     clipboard, menus or rendering
-    - [x] the first internal headless server is a real process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal, shared replay/receipt authority outside Win32 `AppState`, and a single live interactive UI lease; public server smoke proves hello/bootstrap/delta, lease attach/idempotent renewal/live-owner conflict/heartbeat/detach, lease-gated stable-ID selection/bounded binary input/PTY resize, terminal output, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
+    - [x] the first internal headless `agenterm server` process is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal, shared replay/receipt authority outside Win32 `AppState`, and a single live interactive UI lease; public server smoke proves hello/bootstrap/delta, lease attach/idempotent renewal/live-owner conflict/heartbeat/detach, lease-gated stable-ID selection/bounded binary input/PTY resize, terminal output, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
     - [x] the shared command surface and ordinary-launch black boxes prove this
       process is the default authority
   - [x] `agenterm.exe` without the `server` subcommand always runs the current

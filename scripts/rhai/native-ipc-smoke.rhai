@@ -42,7 +42,7 @@ fn configured(
     workspace
 ) {
     // Authority binary is agenterm; headless mode is the `server` subcommand.
-    let mut server_args = ["server"];
+    let server_args = ["server"];
     for argument in arguments {
         server_args.push(argument);
     }
