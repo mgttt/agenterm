@@ -259,6 +259,7 @@ require(std::fs::exists(cli), "theme_cli_missing");
 let internal_failure_probe = args.len == 4;
 
 let context = test_harness::new_context(repo, "theme");
+let owned_children = [];
 let night_png = std::path::join(
     context.run_directory,
     "evidence/theme-classic-night.png"
@@ -291,6 +292,7 @@ try {
         (),
         false
     );
+    text_cli(context, cli, ["ui-action", "close-window"]);
     text_cli(context, cli, ["ui-action", "stop-server-and-exit"]);
     wait_for_exit(migration_gui, "theme_migration_gui_exit_timeout");
     wait_for_server_stop(context, cli);
