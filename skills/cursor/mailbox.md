@@ -17,6 +17,7 @@
 | `origin/main` | 含 `cursor/skins-eng-phase2a` @ `669b8de` 合流 |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
+| auto-dream | skill=`fleet-duty.md`；定时器=Cursor Automations（人类创建）；`duty.lock` 空闲 |
 
 ## 主控指令（未消化则分身不得另起炉灶）
 
@@ -40,7 +41,7 @@
 - 下一步: 用户下一指令；皮肤 Phase 3 / deferred 可排
 - 阻塞: 无
 - 已合: 分身3 Phase 1；分身4 Phase 2A/2B（`669b8de`）
-- 舰队: chat 默认注入 `<fleet-pulse>`；见 `scripts/cursor_agent_fleet_pulse.sh`
+- 舰队: pulse=`fleet_pulse.sh`；duty/dream=`fleet_duty.sh` + `fleet-duty.md`（Automations 待人类挂 cron）
 
 ### 分身3 · 2026-08-05
 - 状态: IDLE — fleet-pulse 已感知；无新指令不开工

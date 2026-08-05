@@ -71,6 +71,8 @@ IDLE 也要写「无新指令不开工」。
 | `scripts/cursor_agent_chat.sh --from … --to …` | 唤醒；默认注入 fleet-pulse；默认等 409 |
 | `scripts/cursor_agent_chat.sh --list` | 直播名册 |
 | `scripts/cursor_agent_fleet_pulse.sh` | 打印/刷新本地可见的舰队脉搏（不发 API） |
+| `scripts/cursor_agent_fleet_duty.sh` | 值班扫描；`--apply` 催办（见 [fleet-duty.md](fleet-duty.md)） |
+| Cursor Automations cron | **auto-dream 定时器**（人类在 UI 创建；agent 不能自挂 cron） |
 | MCP `list-cloud-agents` | 主控巡检 |
 
 ## 用户体验验收（有机感）
