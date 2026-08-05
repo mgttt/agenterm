@@ -218,15 +218,33 @@ fn scoped_settings_path_from(
 }
 
 pub(crate) fn load_config() -> AppConfig {
-    let mut config: AppConfig = std::fs::read_to_string(config_path())
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok())
+    let path = config_path();
+    let raw = std::fs::read_to_string(&path).ok();
+    let mut config: AppConfig = raw
+        .as_deref()
+        .and_then(|content| serde_json::from_str(content).ok())
         .unwrap_or_default();
     // save_config() always normalizes before writing, but settings.json is
     // human-editable and could predate a range change, so a value read back
     // must not bypass the same bounds a freshly-saved config would enforce.
     config.normalize();
+    if raw
+        .as_deref()
+        .is_some_and(settings_json_needs_appearance_migration)
+        && let Err(error) = save_config(&config)
+    {
+        eprintln!("AgenTerm could not migrate legacy settings: {error:#}");
+    }
     config
+}
+
+fn settings_json_needs_appearance_migration(raw: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    value.as_object().is_some_and(|object| {
+        object.contains_key("color_theme") && !object.contains_key("appearance_preset")
+    })
 }
 
 pub(crate) fn save_config(config: &AppConfig) -> Result<()> {
@@ -310,6 +328,35 @@ mod tests {
         assert_eq!(dark.appearance_preset, AppearancePreset::classic_night());
         let light: AppConfig = serde_json::from_str(r#"{"color_theme":"light"}"#).unwrap();
         assert_eq!(light.appearance_preset, AppearancePreset::classic_day());
+    }
+
+    #[test]
+    fn legacy_color_theme_is_rewritten_on_load() {
+        let path = env::temp_dir().join(format!(
+            "agenterm-settings-migrate-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n")
+            .expect("write legacy settings");
+        let previous = env::var_os("AGENTERM_SETTINGS_PATH");
+        // SAFETY: test-only; no other threads read this env var concurrently.
+        unsafe { env::set_var("AGENTERM_SETTINGS_PATH", &path) };
+        let config = load_config();
+        if let Some(value) = previous {
+            unsafe { env::set_var("AGENTERM_SETTINGS_PATH", value) };
+        } else {
+            unsafe { env::remove_var("AGENTERM_SETTINGS_PATH") };
+        }
+        assert_eq!(config.appearance_preset, AppearancePreset::classic_day());
+        assert_eq!(config.terminal_font_size, 14);
+        let persisted: AppConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read migrated"))
+                .expect("parse migrated settings");
+        assert_eq!(persisted.appearance_preset, AppearancePreset::classic_day());
+        let raw = std::fs::read_to_string(&path).expect("read migrated raw");
+        assert!(raw.contains("appearance_preset") && raw.contains("classic-day"));
+        assert!(!raw.contains("\"color_theme\""));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
