@@ -135,6 +135,11 @@ Control Center is the product name; the executable family uses
 
 ## Information architecture
 
+UX layout and tab design workstreams are tracked in
+[`plan/plan-control-center-ux.md`](../plan/plan-control-center-ux.md)
+(L-CC · v0.2.0). The view IDs below are stable API identifiers; visual chrome
+is designer-owned within the constraints in that plan.
+
 ### Cockpit
 
 - [~] Cockpit is the first useful read-only slice: it shows the selected server
