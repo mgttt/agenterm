@@ -43,10 +43,11 @@
 - 舰队: chat 默认注入 `<fleet-pulse>`；见 `scripts/cursor_agent_fleet_pulse.sh`
 
 ### 分身3 · 2026-08-05
-- 状态: IDLE
+- 状态: IDLE — fleet-pulse 已感知；无新指令不开工
 - bcId: `bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b`
 - URL: https://cursor.com/agents/bc-f2d5f6f1-41c0-44b1-bd74-1b80f036013b
-- 下一步: 待命；终稿 icon 叶
+- main基准: `0f6948e`
+- 下一步: 终稿 icon → `cursor/skins-design-icon`（仅 `assets/skins/fancy/icon.*` + `icon-direction.md`）
 - 阻塞: 无
 
 ### 分身4 · 2026-08-05
