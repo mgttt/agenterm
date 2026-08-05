@@ -4571,6 +4571,12 @@ impl ControlHost for UnixApp {
             self.request_redraw();
             return Ok(());
         }
+        // Same no-op rule as ControlHost default / Windows remote: tab switches
+        // flush composer; unchanged text must not emit ComposerDraft + full
+        // screen deltas that look like a workspace refresh.
+        if self.tabs[position].composer == text {
+            return Ok(());
+        }
         self.tabs_mut()[position].composer = text.clone();
         self.event_journal_mut().commit(
             EventKind::ComposerDraft,

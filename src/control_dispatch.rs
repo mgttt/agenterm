@@ -498,6 +498,12 @@ pub(crate) trait ControlHost {
     /// Win: note-editor `set-composer` override; default writes tab composer draft.
     fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
         let id = self.tabs()[position].id;
+        // Tab switches call set-composer to flush the edit box. A no-op write
+        // still used to commit ComposerDraft and force a full ui-delta screen
+        // for that tab — visible as a full terminal refresh on every click.
+        if self.tabs()[position].composer == text {
+            return Ok(());
+        }
         self.tabs_mut()[position].composer = text.clone();
         self.event_journal_mut().commit(
             EventKind::ComposerDraft,

@@ -664,6 +664,11 @@ struct RemoteWindowState {
     cell_height: i32,
     terminal_text_decoder: input::Utf16TextDecoder,
     last_active_id: Option<String>,
+    /// Last font metrics applied via `apply_effective_terminal_font`. Used to
+    /// skip HWND layout + font recreation when switching tabs that share the
+    /// same effective family/size (the common case).
+    applied_terminal_font_family: String,
+    applied_terminal_font_size: u16,
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
     pending_terminal_resize: Option<RemoteTerminalResize>,
     terminal_resize_worker: RemoteTerminalResizeWorker,
@@ -860,6 +865,8 @@ impl RemoteWindowState {
             cell_height,
             terminal_text_decoder: input::Utf16TextDecoder::default(),
             last_active_id,
+            applied_terminal_font_family: appearance.terminal_font_family.clone(),
+            applied_terminal_font_size: appearance.terminal_font_size,
             last_composer_identity,
             pending_terminal_resize: None,
             terminal_resize_worker,
@@ -2334,6 +2341,14 @@ impl RemoteWindowState {
 
     fn apply_effective_terminal_font(&mut self) -> Result<()> {
         let appearance = self.active_terminal_appearance();
+        if appearance.terminal_font_family == self.applied_terminal_font_family
+            && appearance.terminal_font_size == self.applied_terminal_font_size
+        {
+            // Same metrics: do not recreate the HFONT or re-layout every HWND.
+            // Tab switches used to take this path unconditionally and felt like
+            // a full workspace refresh even when only the active highlight changed.
+            return Ok(());
+        }
         let (font, cell_width, cell_height) = create_terminal_font(
             &self.window,
             &appearance.terminal_font_family,
@@ -2342,6 +2357,8 @@ impl RemoteWindowState {
         self.font = font;
         self.cell_width = cell_width;
         self.cell_height = cell_height;
+        self.applied_terminal_font_family = appearance.terminal_font_family;
+        self.applied_terminal_font_size = appearance.terminal_font_size;
         self.layout();
         self.resize_active_terminal();
         Ok(())
@@ -3101,6 +3118,11 @@ impl RemoteWindowState {
             .active_tab()
             .and_then(|tab| tab.composer.text.as_deref())
             .unwrap_or_default();
+        // Avoid SetWindowText when unchanged — native edit controls flash caret
+        // and repaint on every assignment, which stacks with tab-switch paints.
+        if self.control_text(self.edit) == text {
+            return;
+        }
         self.set_control_text(self.edit, text);
     }
 
@@ -3116,6 +3138,22 @@ impl RemoteWindowState {
             return Ok(());
         };
         let text = self.control_text(self.edit);
+        let current = self
+            .client
+            .as_ref()
+            .and_then(|client| {
+                client
+                    .snapshot()
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.id == tab_id)
+                    .map(|tab| tab.composer.text.clone())
+            })
+            .flatten()
+            .unwrap_or_default();
+        if current == text {
+            return Ok(());
+        }
         self.client
             .as_mut()
             .context("UI is disconnected")?
