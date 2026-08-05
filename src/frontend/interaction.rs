@@ -116,9 +116,9 @@ impl FocusTransitionGate {
     pub(crate) const fn modal_entry_blocked(self, surface: ModalSurface) -> bool {
         match surface {
             ModalSurface::WindowClose => self.window_close_pending,
-            ModalSurface::Settings
-            | ModalSurface::NewTerminal
-            | ModalSurface::InstancePicker => self.full_modal_blocked(),
+            ModalSurface::Settings | ModalSurface::NewTerminal | ModalSurface::InstancePicker => {
+                self.full_modal_blocked()
+            }
             ModalSurface::TabClose => self.full_modal_blocked(),
             ModalSurface::CwdEditor => self.blocked(),
         }

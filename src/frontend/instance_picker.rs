@@ -4,7 +4,7 @@
 //! Stale rows are listed but cannot attach.
 
 use crate::instances::{
-    discover_instances, instance_process_is_alive, registration_owner_state, RegistrationOwnerState,
+    RegistrationOwnerState, discover_instances, instance_process_is_alive, registration_owner_state,
 };
 use crate::ipc_endpoint::IpcEndpoint;
 use serde_json::json;
@@ -88,15 +88,15 @@ impl InstancePickerDialog {
         self.last_error.as_deref()
     }
 
-    pub(crate) fn open_with_rows(&mut self, mode: InstancePickerMode, rows: Vec<InstancePickerRow>) {
+    pub(crate) fn open_with_rows(
+        &mut self,
+        mode: InstancePickerMode,
+        rows: Vec<InstancePickerRow>,
+    ) {
         self.open = true;
         self.mode = mode;
         self.rows = rows;
-        self.selected = self
-            .rows
-            .iter()
-            .position(|row| row.can_attach)
-            .unwrap_or(0);
+        self.selected = self.rows.iter().position(|row| row.can_attach).unwrap_or(0);
         self.last_error = None;
     }
 
@@ -190,8 +190,7 @@ pub(crate) fn collect_instance_picker_rows() -> Result<Vec<InstancePickerRow>, S
         let owner = registration_owner_state(&instance.record);
         let (classification, can_attach) = match owner {
             RegistrationOwnerState::ConfirmedLive { .. }
-                if instance_process_is_alive(instance.record.pid)
-                    && protocol_live(&endpoint) =>
+                if instance_process_is_alive(instance.record.pid) && protocol_live(&endpoint) =>
             {
                 ("live".to_owned(), true)
             }

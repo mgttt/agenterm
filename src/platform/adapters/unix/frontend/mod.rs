@@ -5603,9 +5603,9 @@ mod system_menu_tests {
         shift_extend_anchor, terminal_paste_bytes, terminal_paste_target_is_current,
         workspace_toolbar_snapshot_json,
     };
-    use crate::frontend::selection::{TerminalPoint, TerminalSelection};
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
+    use crate::frontend::selection::{TerminalPoint, TerminalSelection};
     use std::{
         path::Path,
         time::{Duration, Instant},

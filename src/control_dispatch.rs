@@ -1349,7 +1349,9 @@ pub(crate) fn dispatch_shared_command(
                 Ok(data) => {
                     // Prefer UTF-8 text; binary content is returned lossily so
                     // scripts still get a stable string channel (load via file).
-                    Some(IpcResponse::success(String::from_utf8_lossy(data).into_owned()))
+                    Some(IpcResponse::success(
+                        String::from_utf8_lossy(data).into_owned(),
+                    ))
                 }
                 Err(error) => Some(IpcResponse::typed_failure(
                     &error,
@@ -1359,9 +1361,7 @@ pub(crate) fn dispatch_shared_command(
                 )),
             }
         }
-        "list-buffers" | "lsb" => {
-            Some(IpcResponse::success(host.named_buffers().list_lines()))
-        }
+        "list-buffers" | "lsb" => Some(IpcResponse::success(host.named_buffers().list_lines())),
         "delete-buffer" | "deleteb" => {
             let name = option_value(args, "-b");
             match host.named_buffers_mut().delete(name) {

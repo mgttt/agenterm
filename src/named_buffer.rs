@@ -40,8 +40,13 @@ impl NamedBufferStore {
                 "buffer name must be at most {MAX_BUFFER_NAME_BYTES} bytes"
             ));
         }
-        if name.chars().any(|ch| ch.is_control() || ch == '/' || ch == '\\') {
-            return Err("buffer name must not contain control characters or path separators".to_owned());
+        if name
+            .chars()
+            .any(|ch| ch.is_control() || ch == '/' || ch == '\\')
+        {
+            return Err(
+                "buffer name must not contain control characters or path separators".to_owned(),
+            );
         }
         Ok(name.to_owned())
     }
