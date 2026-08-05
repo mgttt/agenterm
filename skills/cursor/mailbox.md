@@ -38,12 +38,12 @@
 ## 席位状态
 
 ### 主控2 · 2026-08-05
-- 状态: IDLE（直播）— mailbox 先前写 RUNNING；duty 见 API=IDLE
+- 状态: RUNNING — 与用户对话中（造梦误标 IDLE 已更正）
 - 分支: `main` / 代理分支 `cursor/2-c843`
 - 下一步: 等用户；deferred skins（Linux Apply icon / Win fancy.ico / metrics paint）按需再派
 - 阻塞: 无
 - 已合: skins Phase 1–2B；`bb5ef28` cursor_agent.py；palette SSOT；`appearance_preset_grid`
-- 舰队: duty findings=0；auto-dream 本轮已通
+- 舰队: duty findings=0；auto-dream 已通（Automation `f2326638-…`）
 
 ### 主控 造梦 / 舰队值班会话 · 2026-08-05T23:06Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
