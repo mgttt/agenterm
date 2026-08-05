@@ -37,8 +37,9 @@ use windows_sys::Win32::{
             SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SendMessageW,
             SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW,
             ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
-            WM_COPY, WM_DESTROY, WM_ERASEBKGND, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-            WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
+            WM_COPY, WM_DESTROY, WM_ERASEBKGND, WM_IME_CHAR, WM_IME_COMPOSITION,
+            WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INITMENUPOPUP,
+            WM_KEYDOWN, WM_KEYUP,
             WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
             WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
             WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
@@ -478,6 +479,8 @@ struct State {
     application: Box<dyn ControlWindowApplication>,
     system_menu_commands: HashMap<usize, MenuCommandId>,
     text_decoder: Utf16TextDecoder,
+    ime_composing: bool,
+    ime_commit_pending: u32,
     deferred_error: Option<ControlWindowError>,
     destroying: bool,
 }
@@ -629,6 +632,8 @@ pub(crate) fn run_control_window(
         application,
         system_menu_commands: HashMap::new(),
         text_decoder: Utf16TextDecoder::default(),
+        ime_composing: false,
+        ime_commit_pending: 0,
         deferred_error: None,
         destroying: false,
     });
@@ -765,6 +770,53 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
+// Diagnostic aid for IME message-sequence investigations. The platform
+// crate is product-neutral, so the gate and log file carry no product
+// branding (mirroring PLATFORM_IME_DEBUG in the IME adapter). Set
+// PLATFORM_IME_MSG_TRACE=1 to append one line per keyboard/IME message to
+// %TEMP%\platform-ime-msg.log. No effect when unset beyond one OnceLock
+// read per message.
+fn ime_message_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("PLATFORM_IME_MSG_TRACE").is_some())
+}
+
+fn trace_ime_message(
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+    composing: bool,
+    commit_pending: u32,
+) {
+    if !ime_message_trace_enabled() {
+        return;
+    }
+    let name = match msg {
+        WM_KEYDOWN => "WM_KEYDOWN",
+        WM_KEYUP => "WM_KEYUP",
+        WM_CHAR => "WM_CHAR",
+        WM_IME_STARTCOMPOSITION => "WM_IME_STARTCOMPOSITION",
+        WM_IME_COMPOSITION => "WM_IME_COMPOSITION",
+        WM_IME_ENDCOMPOSITION => "WM_IME_ENDCOMPOSITION",
+        WM_IME_CHAR => "WM_IME_CHAR",
+        _ => "other",
+    };
+    let path = std::env::temp_dir().join("platform-ime-msg.log");
+    let line = format!(
+        "{} wp=0x{wp:x} lp=0x{lp:x} composing={composing} commit_pending={commit_pending} dispatching={}\n",
+        name,
+        dispatching = DISPATCHING.with(Cell::get),
+    );
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| {
+            use std::io::Write as _;
+            file.write_all(line.as_bytes())
+        });
+}
+
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut State;
     if state_ptr.is_null() {
@@ -817,6 +869,7 @@ fn dispatch_window_message(
     state: &mut State,
     default_process: bool,
 ) -> LRESULT {
+    trace_ime_message(msg, wp, lp, state.ime_composing, state.ime_commit_pending);
     let event = match msg {
         WM_TIMER => Some(ControlWindowEvent::Poll {
             now: Instant::now(),
@@ -827,7 +880,14 @@ fn dispatch_window_message(
         }),
         WM_CLOSE => Some(ControlWindowEvent::CloseRequested),
         WM_SETFOCUS => Some(ControlWindowEvent::FocusChanged(true)),
-        WM_KILLFOCUS => Some(ControlWindowEvent::FocusChanged(false)),
+        WM_KILLFOCUS => {
+            // Focus left the window; any in-flight composition is
+            // abandoned. Reset the bookkeeping so stale state cannot
+            // suppress or mis-route later input.
+            state.ime_composing = false;
+            state.ime_commit_pending = 0;
+            Some(ControlWindowEvent::FocusChanged(false))
+        }
         WM_CAPTURECHANGED => Some(ControlWindowEvent::CaptureChanged(false)),
         WM_KEYDOWN | WM_KEYUP if unsafe { InSendMessageEx(ptr::null()) } != ISMEX_NOSEND => {
             Some(ControlWindowEvent::KeyPreview {
@@ -835,10 +895,34 @@ fn dispatch_window_message(
                 event: key_event(wp as u32, msg == WM_KEYDOWN, lp),
             })
         }
-        WM_CHAR => match state.text_decoder.push(wp as u16) {
-            KeyClassification::TextCommit(text) => Some(ControlWindowEvent::TextInput(text)),
-            _ => None,
-        },
+        WM_CHAR => {
+            if state.ime_commit_pending > 0 {
+                // This WM_CHAR is the committed text DefWindowProcW
+                // generated from a WM_IME_CHAR; let it through.
+                state.ime_commit_pending -= 1;
+            } else if state.ime_composing {
+                // The IME is composing. TranslateMessage echoes each
+                // composing keystroke as WM_CHAR; forwarding those leaks
+                // raw pinyin/ASCII into the terminal next to the committed
+                // text, so drop every non-commit WM_CHAR until the
+                // composition ends.
+                return 0;
+            }
+            match state.text_decoder.push(wp as u16) {
+                KeyClassification::TextCommit(text) => Some(ControlWindowEvent::TextInput(text)),
+                _ => None,
+            }
+        }
+        // Committed text from the IME. DefWindowProcW converts each
+        // WM_IME_CHAR into one WM_CHAR; count those so the WM_CHAR arm can
+        // distinguish committed text from composing-key echoes. On the
+        // reentrant replay path the WM_CHAR was already generated
+        // synchronously, so default processing must not run a second time.
+        #[cfg(feature = "ime")]
+        WM_IME_CHAR => {
+            state.ime_commit_pending = state.ime_commit_pending.saturating_add(1);
+            None
+        }
         // The terminal grid renders its own inline composition, so suppress
         // the IME's floating composition window while keeping candidate
         // windows and the committed-text path (WM_IME_CHAR -> WM_CHAR)
@@ -856,11 +940,17 @@ fn dispatch_window_message(
                 return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
             }
         }
-        // Cache the composition state for the paint path. Default processing
-        // still runs so composed text keeps flowing as WM_IME_CHAR/WM_CHAR.
+        // Cache the composition state for the paint path and track whether
+        // a composition is in progress so WM_CHAR echoes of composing keys
+        // can be suppressed. Default processing still runs so committed
+        // text keeps flowing as WM_IME_CHAR/WM_CHAR.
         #[cfg(feature = "ime")]
         WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
             crate::selected::ime::refresh_from_message(hwnd, msg);
+            state.ime_composing = crate::selected::ime::composition().is_some();
+            if !state.ime_composing {
+                state.ime_commit_pending = 0;
+            }
             None
         }
         WM_MOUSEMOVE => Some(ControlWindowEvent::PointerMoved {
