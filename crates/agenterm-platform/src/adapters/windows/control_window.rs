@@ -574,10 +574,19 @@ pub(crate) fn run_control_window(
             }
             return Err(error);
         }
+        if controls.insert(spec.id, child).is_some() {
+            let error = ControlWindowError::failed(
+                "control_window_duplicate_control_id",
+                format!("duplicate control id {}", spec.id.0),
+            );
+            unsafe {
+                DestroyWindow(hwnd);
+            }
+            return Err(error);
+        }
         unsafe {
             EnableWindow(child, spec.enabled as i32);
         }
-        controls.insert(spec.id, child);
     }
     let mut system_menu = HashMap::new();
     for item in &options.system_menu {
