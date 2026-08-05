@@ -417,6 +417,254 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **验收**：装新版后旧目录按策略修剪，且不删仍被非 current 链引用者
   - **成本**：小；**依赖**：无
 
+### U′. 标签切换假刷新（**用户 2026-08-05 现场**；观察见 §三·五 3.5.2a）
+
+> 标签区选不同 tab 时「基本会触发重新刷新渲染」，打断工作。根因是切 tab
+> 路径上叠了 **no-op composer 写、无条件 font/layout、整屏 delta**，不是
+> 「换 active screen 画一帧」本身。本子树把假刷新与真内容替换拆开排期。
+
+```text
+U′. 标签切换假刷新
+├─ [x] U1 no-op composer / 同 metrics 跳过 font·layout / 同文案跳过 SetWindowText
+├─ [ ] U2 真机回归 + 可选黑盒（空 composer 连点 tab 无 ComposerDraft 风暴）
+├─ [ ] U3 显示后再 debounce PTY resize（网格落后 tab，TS2）
+└─ [ ] U4 纯 TabSelected 不重推整屏 cells（协议/delta 优化，可选）
+```
+
+- [x] **U1 假刷新热路径止血**（代码已落工作区，待合 main）
+  - **动机**：见 §三·五 TS1
+  - **做法（已实现）**：
+    1. `ControlHost::apply_set_composer`（default）与 Unix 覆盖：文本相同 →
+       no-op，不 `ComposerDraft`；
+    2. Win `remote_frontend`：`sync_composer` / `load_composer` 相同则跳过
+       IPC / `SetWindowText`；
+    3. Win `apply_effective_terminal_font`：family/size 未变 → 不重建 HFONT、
+       不 `layout()`、不 resize。
+  - **涉及文件**：`src/control_dispatch.rs`、
+    `src/platform/adapters/windows/remote_frontend.rs`、
+    `src/platform/adapters/unix/frontend/mod.rs`
+  - **验收**：同字体预设、空/未改 composer 下连点 tab，journal 无成对
+    无意义 `ComposerDraft`；工具栏 HWND 不因切 tab 整组 `SetWindowPos`
+  - **成本**：小；**依赖**：无
+
+- [ ] **U2 真机回归与可选证据**
+  - **动机**：U1 仅 `cargo check`；用户体感与事件风暴需 GUI 真机确认
+  - **做法**：本机/冒烟连点 tab；可选：对 headless+UI 路径断言
+    「select 且 composer 未变 → 不出现 ComposerDraft」
+  - **验收**：用户确认假刷新明显减轻；若加黑盒则一条路径全绿
+  - **成本**：极小–小；**依赖**：U1 合入
+
+- [ ] **U3 显示后再 debounce PTY resize**（§三·五 TS2）
+  - **动机**：切到「网格仍停留在旧窗口尺寸」的 tab 时，立即
+    `resize_active_terminal` → ConPTY/应用整屏重排（vim 等），体感仍重
+  - **做法**：仅当 active 且（聚焦终端 / 短 debounce 到期）再发 resize；
+    快速连点多个 tab 只 resize **最终** active
+  - **验收**：快速扫过 N 个落后网格 tab，只对最后停留的 tab 发一次
+    resize；最终网格仍对齐当前 layout
+  - **成本**：中；**依赖**：U1；**工期紧可砍**
+  - **非目标**：取消 resize（尺寸必须最终正确）
+
+- [ ] **U4 纯 `TabSelected` 不重推整屏 cells**（可选协议优化）
+  - **动机**：`TabSelected` 事件仍使 `ui-delta` 携带该 tab 全量
+    `ui_tab_bootstrap`（含 cells）；客户端已有完整 screen 时属冗余 IPC/CPU
+  - **做法**：delta 在「仅 active 变更 + 无 output 事件」时只推
+    `active_tab_id`（或 screen generation 未变则省略 cells）；客户端
+    paint 换 active 即可
+  - **验收**：select 路径 payload 显著小于全屏 bootstrap；错代
+    （generation 落后）仍 fail-closed 拉全量
+  - **成本**：中–大（协议/兼容）；**依赖**：U1；**默认推 v0.2.x 若 U1+U3 已够**
+  - **非目标**：脏矩形增量 cell 协议（另立）
+
+> **砍叶**：U4 最先砍；其次 U3；**U1/U2 保留**（用户直接痛点）。
+> 与 R 组正交，可后置并行，**不**用 U 去挤 R1/R2。
+
+### S′. 多 Server / Instance 可达与选择（**用户 2026-08-05**；关窗后找得回来）
+
+> **触发**：用户现场 GUI 窗口全部关闭（可能与构建替换二进制有关），不深究
+> 单次根因，但提出：窗口顶部要有**横向 tab 用来选 server**。
+>
+> **产品判断（已记入对话，本叶遵从）**：
+> - **需求合理**——多 logical instance / 多 live server 要可发现、可附着、
+>   身份可见；关窗后 server 可能仍 live（keep-server）。
+> - **默认形态不采用**「主终端顶栏横向 server tab」：与 Fleet PTY tab
+>   语义撞车、误触换权威代价高、与「一窗一 server 投影」模型别扭，
+>   且和 L-CC 顶栏 context 职责重叠。
+> - **推荐路径**：启动/重开 instance 列表附着 → 主窗身份常显 →
+>   CC 控制塔切 context；同窗热切换权威后置且须确认。
+
+```text
+S′. 多 Server / Instance 可达与选择
+├─ [ ] S1 启动/重开：live instance 列表 + 一键附着
+├─ [ ] S2 主窗身份常显（标题/状态栏：instance · pid · 简短 endpoint）
+├─ [ ] S3 主窗「打开另一 instance…」（新窗附着，非同窗热切）
+└─ [ ] S4（后置）同窗热切换权威 + 确认；明确不做无确认横向 server tab
+```
+
+**硬约束**
+
+| 约束 | 含义 |
+|------|------|
+| 单一 Fleet 权威 / 窗 | Phase A：**一 GUI 窗绑定一 server**；S3 开新窗，不在本窗静默换 endpoint |
+| 不发明第二权威 | 列表事实来自 `list-instances` / `server-list` 同类注册表，不另造目录 |
+| 与 PTY tab 分离 | Server/instance 选择器**不得**画成与左侧树同级的「又一套 tab 条」冒充终端标签 |
+| 关窗 ≠ 本叶范围 | 构建杀窗、崩溃根因另案；本叶只保证**找得回、切得对** |
+| L-CC 分工 | 多 server 控制塔投影归 CC（见 `plan/design-control-center-ux.md`）；主终端只做轻量入口 |
+
+- [ ] **S1 启动/重开：live instance 列表 + 一键附着**
+  - **动机**：窗全关后用户不知道谁还活着、该 `--instance` 哪个；
+    CLI 有 `server-list`/`list-instances`，GUI 启动路径几乎不消费
+  - **做法**：
+    1. GUI 冷启动或「无已附着 server」时：展示 live/stale 列表
+       （label、pid、endpoint 摘要、version、window 是否仍在）；
+    2. 选一项 → 附着该 endpoint/instance 并开窗（或聚焦已有窗）；
+    3. 无 live 时诚实空状态 +「启动新 server / 本机默认 instance」；
+    4. 复用现有注册表与解析器，不新造发现协议。
+  - **验收**：杀掉所有 GUI 但保留 live server 后，再开 `agenterm` 能从
+    列表点选回到同一 instance，且 `server-list` 与列表一致；stale 项
+    不可当 live 附着或明确标 stale
+  - **成本**：中；**依赖**：无（可读现有 instance 注册）
+  - **非目标**：跨机器发现、托盘常驻（可另叶）
+
+- [ ] **S2 主窗身份常显**
+  - **动机**：多开 main/work 时「我连的是谁」靠猜；标题 profile 噪音
+    （§三·五 W1）与身份信息不足并存
+  - **做法**：状态栏或标题稳定展示 `instance_label`（或 logical name）+
+    可选短 pid；**发布构建**避免把内部 profile 噪音盖过身份
+    （可与 W1 合并处理）
+  - **验收**：两窗分挂 main/work 时，截图/ui-snapshot 可区分 instance，
+    无需看 CLI
+  - **成本**：小；**依赖**：无；可与 S1 并行
+  - **非目标**：在状态栏做完整 server 切换器
+
+- [ ] **S3 主窗入口：打开另一 instance（新窗）**
+  - **动机**：日常在多 server 间作业；横向 tab 热切过重，**新窗附着**
+    符合现模型且安全
+  - **做法**：工具栏/菜单 `Open instance…` → 同 S1 列表 → **新进程/新窗**
+    附着所选 instance；可选「若该 instance 已有 GUI 则聚焦」
+    （与 process 复用策略对齐，不第二权威）
+  - **验收**：从 main 窗打开 work，得到第二窗且两窗 server 身份不同；
+    不替换原窗的 lease/PTY
+  - **成本**：中；**依赖**：S1 列表组件可复用
+  - **非目标**：同窗热切换（见 S4）
+
+- [ ] **S4 同窗热切换权威（后置；默认不进本版 must-ship）**
+  - **动机**：若产品坚持「单窗内换 server」，须完整状态机，不是顶栏装饰
+  - **做法（仅当拍板要做时）**：确认对话框 → detach 当前 UI lease 语义
+    明确 → 换 endpoint → 新 bootstrap；composer/未决交互 fail-closed；
+    **禁止**无确认的横向 server tab 作为唯一入口
+  - **验收**：切换有确认；失败可回到原 context 或诚实断开；无 PTY 串台
+  - **成本**：大；**依赖**：S1/S2；**默认推 v0.2.x** 除非用户改拍板
+  - **明确不做（本版）**：主终端顶栏横向 server tab 作为默认导航
+    （与 Fleet tab 混淆；误触贵）
+
+> **砍叶**：S4 默认不排期；工期紧时 **S3 → S2 细节** 可砍，**S1 保留**
+> （关窗后找得回是触发原话）。不与 R1/R2 抢优先级。
+> **与 X3/L-CC**：CC 顶栏 current context / 未来 discovery 可消费同一
+> 列表数据源；主终端 S1/S3 是轻量入口，不替代 CC。
+
+### B′. tmux/rmux 兼容：`send-keys` + buffer 族（**用户 2026-08-05 排期**）
+
+> **触发**：多 agent / 脚本要「先能发信息」时，用户提出应**先兼容**
+> tmux/rmux 的 `send-keys` 与 `buffer-paste` / `buffer-copy` 一类命令，
+> 以便沿既有自动化习惯往 pane 投递。
+>
+> **产品判断（已定）**：
+> - **B′ 要做**：补齐控制面与 rmux 用户脚本能力；`send-keys` 已有但 buffer
+>   族基本缺失；夯实后可脚本化「往 shell 打字 / 粘贴」。
+> - **B′ 不替代 M 组发消息**：`send-keys` / `paste-buffer` 注入的是
+>   **PTY 输入流**，不是 agent 收件箱——会打断 Codex/TUI、无回执、无已读。
+>   **短协作消息 / 状态**仍走 **M1 note + M3 handoff**；需要对方 shell
+>   执行时再桥到 B′。
+> - **与 PRD**：`PRD_02_15` 已列 `send-keys`；buffer 族为兼容扩展，落地后
+>   回写 PRD 命令表与「unsupported 显式失败」清单。
+
+```text
+B′. tmux/rmux send-keys + buffer
+├─ [x] B1 盘点与契约：现有 send-keys 行为 / 缺 buffer 命令 / 非目标（实现时落代码）
+├─ [x] B2 夯实 send-keys（-l 已有；usage 补 PS `@N` 引号）
+├─ [x] B3 命名 buffer 最小集：set/load/show/list/delete-buffer
+├─ [x] B4 paste-buffer（→ 目标 pane 的 PTY，含 -t）
+├─ [~] B5 与 M 的桥接文档：本叶摘要 + plan 选用表（PRD 回写可后补）
+└─ [ ] B6（可选）copy 路径：从 pane/选区 → buffer（tmux copy-mode 子集）
+```
+
+**硬约束**
+
+| 约束 | 含义 |
+|------|------|
+| 一 tab 一 pane | 不假装多 pane；`-t` 解析与现有 window/tab 目标一致 |
+| 显式不支持 | 做不到的 tmux 旗标/子命令 **typed fail**，不静默 ignore |
+| 不进 GUI 焦点 | CLI buffer/send **默认不** `window-activate` / 抢前台 |
+| 有界 | buffer 字节上限 + paste 有界；超限失败不截断装成成功 |
+| 非 agent 邮箱 | 文档与验收禁止把 B′ 描述成「agent 消息总线」 |
+| 权限不进 Rhai | 与 AGENTS.md 一致：不把「能否 send」做成 Script 授权沙箱 |
+
+- [ ] **B1 盘点与契约表**
+  - **动机**：避免「以为兼容了全 tmux buffer」；先列 shipped / 本版做 /
+    显式 unsupported
+  - **做法**：对照 tmux 3.x 常用：`send-keys`、`set-buffer`、`load-buffer`、
+    `paste-buffer`、`show-buffer`、`list-buffers`、`delete-buffer`、
+    `save-buffer`；写一页矩阵进 `PRD_02_15` 或 `plan/` 附录
+  - **验收**：矩阵合并前可审；与 `list-commands` 最终集合一致
+  - **成本**：极小；**依赖**：无
+
+- [ ] **B2 夯实 `send-keys`**
+  - **动机**：命令已存在，但跨 agent 实测暴露：PowerShell `@N` 须引号、
+    目标名截断、双 `main` 须 `--endpoint`；行为旗标需可脚本依赖
+  - **做法**：
+    1. 文档：` -t '@2'`、`-l` 字面量、与 `send-composer` 的差异；
+    2. 核对 `-l` / 特殊键 / 失败码；补黑盒：headless 建 tab → send-keys →
+       capture-pane 含期望串；
+    3. 不在本叶做完整 readline 模拟。
+  - **验收**：公共或本地 smoke：`send-keys -t @N -l 'hello\n'` 后
+    capture/inspect 可见；错误目标 typed fail
+  - **成本**：小；**依赖**：B1（可并行开工文档）
+
+- [ ] **B3 命名 buffer 最小集**
+  - **动机**：rmux/tmux 脚本常用命名 buffer；AgenTerm 现无对等 API
+  - **做法**（server 侧有界存储 + CLI）：
+    - `set-buffer [-b name] data` / `load-buffer [-b name] path`
+    - `show-buffer [-b name]` / `list-buffers` / `delete-buffer [-b name]`
+    - 默认 buffer 名与 tmux 兼容策略写进 B1 矩阵
+  - **验收**：set → show 字节一致；list 含 name/size；超上限失败；
+    进程内跨 CLI 调用可见（同 server）
+  - **成本**：中；**依赖**：B1
+  - **非目标**：跨 server 共享 buffer、持久化到磁盘 workspace（可后置）
+
+- [ ] **B4 `paste-buffer`**
+  - **动机**：大段投递比多次 `send-keys` 稳；脚本「buffer 然后 paste 到 pane」
+  - **做法**：`paste-buffer [-b name] [-t target]` → 写入目标 tab PTY
+    （尊重 bracketed paste 若应用已开——与现 terminal paste 策略对齐）；
+    空 buffer / 无目标 typed fail
+  - **验收**：load/set 后 paste 到 fixture shell，capture 见内容；
+    不强制激活 GUI 窗
+  - **成本**：中；**依赖**：B3
+  - **非目标**：保证 Codex/TUI 语义正确（那是应用层；文档写明风险）
+
+- [ ] **B5 与 M 的桥接说明（文档叶，可与 B2 同 PR）**
+  - **动机**：避免实现者把 paste 当 handoff
+  - **做法**：一小节写入 Agents 或 PRD/plan：
+    | 意图 | 用 |
+    |------|-----|
+    | 状态/协作短消息 | M1 note / M3 handoff |
+    | 控制 shell、模拟键入 | B2 send-keys / B4 paste-buffer |
+    | 先写意图再可选注入 PTY | M3 落盘 → 人工或脚本再 B4 |
+  - **验收**：B′ 任一命令帮助或 `protocol-info`/docs 链到该表
+  - **成本**：极小；**依赖**：无
+
+- [ ] **B6（可选）copy → buffer**
+  - **动机**：tmux `copy-mode` / 选区进 buffer；完整 copy-mode 大
+  - **做法（本版若做则最小）**：从 **已有** GUI 选区或
+    `capture-pane` 结果写入命名 buffer（`set-buffer` 包装），
+    **不做**全套 copy-mode 状态机
+  - **验收**：一条路径：有选区或 capture → buffer → show-buffer 一致
+  - **成本**：中；**依赖**：B3；**工期紧砍**
+
+> **砍叶**：B6 → B5 可并入文档 PR；**B1–B4 为本组核心**。
+> 与 R 正交；**不**用 B′ 挤 R1/R2。与 **M** 并行时文件面：
+> B′ 偏 `control_dispatch` / CLI / server buffer；M 偏 note/handoff 约定与
+> observe——避免同 PR 混「邮箱」与「键入」。
+
 ### H′. 分发面地基（只做**纯派生 + 补值**，不建服务；详见 §一 H 组）
 
 - [ ] **H4 补齐 Linux/Windows 的 `provenance.sbom_sha256`** ★先做
@@ -493,6 +741,135 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **若工期紧**：可只做 macOS 档（Linux 留 stub 并注明），仍然兑现
     「三平台平权」的一半，且我方能真机验证
 
+### M. 多 Agent 观察与交接（**Fleet 控制面地基**；2026-08-05 实测驱动）
+
+> **不是**「用 PTY 当总线互相敲终端」；**是**把已经点亮的
+> `agenterm-cli` 旁路观察做成可复用契约，并把真正的 handoff 放在
+> **控制面权威**（tab note / workspace 文件 / 事件·receipt），为后续
+> Control Center 投影与跨 server 协作铺路。
+>
+> **触发与实证（2026-08-05，本机 live Fleet）**：
+> - Grok 会话经 `agenterm-cli --instance main` 成功读到 tab `@2`
+>   标题 `ds4@c`（显示截断，语义为 `ds4@codex`）的视口：对方在
+>   `deepseek-v4-auto` / `D:\dev\moltbaby` 下对 `agenterm` 做 `/review`。
+> - **顺利**：`list-instances` → `list-windows` → `inspect -t '@2'` /
+>   `capture-pane -p` 一次成型；不抢焦点。
+> - **不顺**：PowerShell 未加引号时 `@2` 被当 splat；标题截断无稳定
+>   agent 身份；内容是 TUI 投影非 structured transcript；`scroll-pane`
+>   会动对方视口（观察与干扰同线）。
+> - **架构判断**：跨 instance **只读观察**可包装成顺利路径；跨 server
+>   **通讯**若继续靠 capture/send-keys **不会顺利**——须 handoff 契约。
+
+**硬约束（本组全部叶）**
+
+| 约束 | 含义 |
+|------|------|
+| 单一 Fleet 权威 | handoff 不另立第二 workspace/PTY 权威；事实仍来自 server |
+| 观察默认无副作用 | 只读路径不得隐式 `select-window` / focus / scroll / send-keys |
+| PTY ≠ 总线 | 禁止把对方 agent 的终端输入流当作可靠消息通道 |
+| 有界与诚实 | 视口/字节有上限；读不到就 typed failure，不编造 transcript |
+| 本版不绑 L-CC 实现 | CC 投影可登记指针；UI 成熟仍归 v0.2.0 / X3 |
+
+```text
+M. 多 Agent 观察与交接
+├─ [ ] M1 稳定 agent 身份（命名 + note 约定）
+├─ [ ] M2 只读 observe 面（CLI 契约 + 无副作用）
+├─ [ ] M3 handoff 契约（控制面，非 PTY）
+└─ [ ] M4 跨 instance 观察证据（黑盒夹具）
+```
+
+- [ ] **M1 稳定 agent 身份**
+  - **动机**：live 标题显示为 `ds4@c` 而非完整 `ds4@codex`；仅靠窗口名
+    无法做跨 agent 寻址。`new-agent -n`、rename、tab-note 已存在，但
+    **缺产品约定 + 不被截断的身份字段**。
+  - **做法（约定优先，代码最小）**：
+    1. 文档约定：crew tab 名 = 稳定 slug（如 `ds4@codex`），禁止仅靠
+       显示截断猜测；
+    2. `set-tab-note` / `show-tab-note` 约定一行可解析前缀
+       （例：`agent-id=ds4@codex;role=impl|review;status=…`）或
+       短 JSON（有长度上限时截断 status 不截断 id）；
+    3. 若 inspect/list 格式串已截断 `window_name`，**另暴露完整 name
+       字段**（inspect JSON 已有 `name`——以 JSON/`-F` 全字段为准，
+       文档写清「UI 芯片可截断，API 不得丢 id」）。
+  - **验收**：同 instance 内两个 crew tab 可用完整 id 互相定位；
+    `inspect` JSON 的 `name` 与 note 中 `agent-id` 一致可核对；
+    文档给出 `new-agent -n` + `set-tab-note` 最小样例。
+  - **成本**：小；**依赖**：无
+  - **非目标**：全局目录服务、跨用户认证
+
+- [ ] **M2 只读 observe 面**
+  - **动机**：今天「能读」依赖操作者记得 PS 引号、记得别 scroll、
+    自己拼 `list-instances` 过滤。要变成 **agent 默认可依赖的观察 API**。
+  - **做法**：
+    1. **文档 + 推荐调用序列**（本叶可先交付）：
+       `server-list|list-instances` → `--instance|--endpoint` →
+       `list-windows` → `inspect|capture-pane`（目标一律稳定 `@N` 或
+       经 M1 解析出的 id）；
+    2. **Shell 陷阱**：PowerShell / bash 示例统一 ` -t '@2'`；
+    3. **无副作用声明**：observe 包装**禁止**调用
+       `select-window` / `scroll-pane` / `send-keys` / `focus` /
+       `ui-action window-activate`；需要更多历史时用
+       `capture-pane` 有界字节或未来 journal，不滚动对方视口；
+    4. **输出契约**：优先 `inspect` JSON 与 `capture-pane --json`
+       （若已有）+ `--max-bytes`；UTF-8；失败 typed。
+    5. 可选极薄 CLI 子命令（工期允许）：
+       `agenterm-cli observe tab --instance X --tab @N|--name slug`
+       只读聚合（identity + note + viewport snippet + dead 标志）。
+  - **验收**：另一 agent（或脚本）在不激活对方窗口的前提下读到
+    viewport 摘要；故意省略引号的失败有文档说明；包装路径下
+    对方 `input_writes` / 视口 scroll 偏移不被 observe 改变
+    （黑盒：observe 前后 inspect 对比）。
+  - **成本**：小–中（仅文档+约定为小；新增 `observe` 子命令为中）
+  - **依赖**：M1（身份）；可先 M2 文档、后补 M1 字段
+  - **非目标**：完整 Codex/Claude transcript 导出；替换对方 harness 日志
+
+- [ ] **M3 handoff 契约（控制面，非 PTY）**
+  - **动机**：观察地基已亮；**通讯**不能靠互相 `send-keys`。
+    需要「A 写意图 → B 可靠读到 → 可选回执」且不打断对方 TUI。
+  - **做法（v0.1.15 最小切片）**：
+    1. **Handoff 载体二选一（可并存）**：
+       - **Tab note**：短状态/指针（受 `UI_TAB_NOTE_MAX_BYTES` 约束）；
+       - **Workspace 旁路文件**：如
+         `{workspace_dir}/handoff/{agent-id}.json` 或 repo 内约定路径
+         （agent 协作时用 git-visible 路径更利于审计）；
+    2. **最小 JSON schema**（字段可增不可偷换语义）：
+       `schema`, `from`, `to`, `kind`（`status|request|result`）,
+       `summary`, `refs[]`（path/PR/commit）, `updated_at`,
+       可选 `receipt_id`；
+    3. **写路径**：仅 `set-tab-note` / 文件写 + 既有 Fleet 突变 receipt
+       （若走 note）；**禁止**把 handoff body 注入对方 PTY；
+    4. **读路径**：`show-tab-note` / 读文件 + M2 observe 可附带 note；
+    5. **文档**：一页「多 agent 礼仪」——谁可写谁的 note、冲突时
+       last-writer-wins 或显式 generation 字段。
+  - **验收**：Agent A 写入 handoff 后，Agent B **只读 API** 取到同一
+    `summary`/`refs`，全程无 `send-keys` 到对方 tab；note 超长失败
+    诚实（不截断到语义损坏而不报错——至少 id/kind 完整或整体失败）。
+  - **成本**：中；**依赖**：M1；与 M2 可并行文档，实现上 M3 可后于 M2
+  - **非目标**：分布式共识、跨机器加密频道、Agent 权限/审批引擎
+    （仍属未来 harness，不进 Script Runtime）
+  - **与 L-CC**：handoff 事实可被未来 Cockpit/Diagnostics **投影**；
+    本叶不要求 `agenterm-cc` 新 UI（见 X3 / `plan/design-control-center-ux.md`）
+
+- [ ] **M4 跨 instance 观察证据**
+  - **动机**：跨 server「观察」产品上说得通（`--instance` /
+    `--endpoint` 已存在），但缺**黑盒证明**「同一用户域两个 live
+    instance 上，observer 读 peer 不串台、不踩对方」。
+  - **做法**：Rhai/脚本黑盒：起（或选用）两个隔离 instance/endpoint，
+    各一 tab；从 CLI 分别 list + inspect；断言 name/note/viewport
+    归属正确；可选：一端写 M3 handoff 文件，另一端只读看到。
+  - **验收**：公共或本地 smoke 一条路径全绿；失败码区分
+    `instance_not_found` / `tab_not_found` / `observe_bounded`；
+    **不**要求跨机器网络、不要求第二台物理 host。
+  - **成本**：中；**依赖**：M2（及若测 handoff 则 M3）
+  - **若工期紧**：可降为「文档写明跨 instance 调用序列 + 手工收据」
+    而不进 CI，但须在本叶注明证据等级
+
+> **规模与砍叶**：M 组是用户 2026-08-05 追加的「agents 互动地基」，
+> **不是**发布链主题的核心，但比 L-NET 更贴「每天多 agent 同屏」的
+> 实测痛点。工期紧时砍叶顺序（在原有 H1/H3 → R4 → N1 Linux 之后）：
+> **M4 → M3 → M2 子命令形态**；保留 M1 约定 + M2 文档作为最小切片。
+> **绝不**为 M 组去砍 R1/R2。
+
 ### X. 已在途/已落地（**并发 agent 泳道**——非本次规划产出，登记以免范围失真）
 
 定稿时（2026-08-05）本工作区尚未看到；`fe51c7c` 合并后补记。
@@ -515,26 +892,35 @@ v0.1.15  Feedback shift-left & release-lane economics
     MessageBox，新增 platform `alert` 能力）
   - 证据：607 lib tests 绿 + `incompatible_ui_contract_names_the_stale_side`
   - 待办：两项均**待真机回归**（中文输入、MessageBox 路径）
-- [ ] **X3 Control Center UX 设计** — 设计中，**明确归 v0.2.0**
-  - [`plan/plan-control-center-ux.md`](plan-control-center-ux.md) 标题即
-    「L-CC · v0.2.0」，不占本版工期；本条仅登记指针
+- [ ] **X3 Control Center UX 设计** — 设计定稿 rev3，**实现归 v0.2.0**
+  - 任务书：[`plan/plan-control-center-ux.md`](plan-control-center-ux.md)
+  - 实现级 SSOT：[`plan/design-control-center-ux.md`](design-control-center-ux.md)
+  - 不占本版工程工期；本条仅登记指针。与 **M 组**关系：M 的 handoff/
+    observe 事实可被未来 Cockpit 投影，但 M **不依赖** CC UI 先落地
 
 > **规模影响**：X1+X2 已消耗的工期不小（约 2900 行入 main）。若把它们计入，
 > v0.1.15 实际范围已**超过**我在 §二 主张的「窄」。这不改变 R 组的排序理由
 > （cache 仍是最便宜的杠杆），但**应当据此更保守地对待 H1/H3**——
 > 见 §二·二 序 7 的「工期紧则优先砍」已预留该出口。
+> 2026-08-05 再补 **M 组 4 叶**（多 agent 观察/交接）与 **N1**：宽度继续
+> 上升，砍叶出口见上表与 M 组附注。
 
-**规模自查（2026-08-05 补记后）**：
+**规模自查（2026-08-05 补记后，含 M 组）**：
 
 | 泳道 | 叶数 | 性质 | 状态 |
 |------|-----|------|------|
 | R / A′ / G′ / H′ | 13 | 修补 · 降本 · 地基 | 待授权开工 |
-| **N** | **1** | **新功能** | 待授权开工 |
-| X（并发 agent） | 2 已完成 + 1 归 v0.2.0 | 功能 | 约 2900 行已入 main |
+| **U′** | **4**（U1 代码已落） | **UX 假刷新止血** | U1 待合；U2–U4 待授权 |
+| **S′** | **4**（S4 默认后置） | **多 instance 可达/选择** | 待授权；S4 非 must-ship |
+| **B′** | **6**（B6 可选） | **tmux send-keys + buffer 兼容** | 待授权；不替代 M 发消息 |
+| **N** | **1** | **新功能（平台 facade）** | 待授权开工 |
+| **M** | **4** | **新功能（多 agent 控制面地基）** | 待授权开工 |
+| X（并发 agent） | 2 已完成 + 1 设计归 v0.2.0 | 功能 / 设计 | 约 2900 行已入 main |
 
-对照 v0.1.14 的教训（发布日 5–6 小时耗在从未跑过的车道上），14 叶宽度本身
-可控；但**加上 X 组已落地部分，本版实际范围已不算窄**。因此若工期吃紧，
-砍叶顺序：**H1/H3 → R4 → N1 的 Linux 档**，绝不砍 R1/R2。
+对照 v0.1.14 的教训（发布日 5–6 小时耗在从未跑过的车道上），规划叶宽度
+已明显大于「13 叶窄版」。**R 组仍第一优先**。工期吃紧时砍叶顺序：
+**H1/H3 → R4 → S4/U4/B6 → U3/S3 → M4 → M3 → N1 Linux → M2 子命令**；
+保留 **R1/R2、U1/U2、S1、B1–B4、M1 约定 + M2 文档**；**绝不砍 R1/R2**。
 
 ### 为什么 v0.1.15 不推进 L-NET（ipfs/libp2p）
 
@@ -584,6 +970,12 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 5 | **G3 → G7a、G2、G6** | 安装卫生泳道，与发布链正交，可与 1–4 并行 |
 | 6 | **R4** | 中等成本，且**自身就是没跑过的车道**，放在链路稳定后做 |
 | 7 | **H1 → H3** | 本版最大的两叶；若工期紧，这两叶优先砍 |
+| 8 | **U1 合入 → U2 真机回归** | 标签假刷新止血；用户现场痛点，与 R 正交、宜早合 |
+| 9 | **S1 → S2** | 关窗后找得回 + 身份常显；对症「窗没了不知道连谁」 |
+| 10 | **B1 → B2 → B3 → B4** | tmux send-keys 夯实 + buffer 最小集 + paste；脚本投递 pane |
+| 11 | **B5 + M1/M2 文档** | 划清 note/handoff vs send/paste；可与 B2 同 PR |
+| 12 | **S3** | 新窗打开另一 instance；复用 S1 列表 |
+| 13 | **M3 → M4 / U3 / N1** | 后置并行池；S4/U4/B6 默认可砍或 v0.2.x |
 
 ### 二·三 明确不做速度优化的部分
 
@@ -729,6 +1121,28 @@ windows x86_64  （无该字段）                             ← 缺字段
 | SB2 | 状态栏 cwd 260px 显示全路径 | 窗口窄时挤压其它段 | 紧凑模式（home 缩写 + 省略号） | v0.2.0+ |
 | W1 | 窗口标题带 profile 后缀（如 custom:uiux-review） | 用户可见噪音 | 发布构建隐藏 profile 后缀 | v0.1.15 顺手 |
 
+### 3.5.2a 标签切换整窗刷新（2026-08-05 用户报告）
+
+**执行清单**：**§一·五 U′**（U1–U4）。本节保留现场观察与根因，不重复排期。
+
+| # | 观察（证据） | 问题 | 映射 | 状态 |
+|---|--------------|------|------|------|
+| TS1 | 标签区点选不同 tab「基本会触发重新刷新渲染」，打断工作 | ① 无变更 `set-composer`→`ComposerDraft`+旧 tab 全量 delta；② 无条件 font/`layout()`；③ 无条件 `SetWindowText` | **U1**（止血）+ **U2**（回归） | U1 代码已落工作区 |
+| TS2 | 切到网格落后于当前窗口的 tab → 立即 resize → 应用整屏重排 | 正确性需要最终 resize；连点时过早 resize 仍重 | **U3** debounce | 未开工 |
+| TS3 | 切 tab 须画新 active screen（fill + cells） | 内容替换的一帧，不是假刷新 | 非叶 | 保持 |
+| TS4 | 纯 `TabSelected` 仍推全量 cells | 客户端已有 screen 时冗余 | **U4** 可选协议 | 默认可推 v0.2.x |
+
+根因摘要（Win remote GUI，U1 前）：
+
+```text
+click tab row
+  → sync_composer (was always set-composer)  → ComposerDraft + full tab_update
+  → ui-interact select → TabSelected + full tab_update
+  → poll_deltas → apply_delta replaces tab objects
+  → load_composer / resize_active_terminal
+  → tick: if active changed → apply_effective_terminal_font (was always layout)
+  → paint: fill terminal + paint_screen(active)
+```
 
 ### 3.5.3 Windows IME 与协议兼容 UX（2026-08-05 落地，随 v0.1.15 开发）
 
@@ -740,6 +1154,7 @@ windows x86_64  （无该字段）                             ← 缺字段
 |---|------|----------|
 | I1 | Windows 平台适配器在 WM_IME_START/COMPOSITION/ENDCOMPOSITION 时缓存合成串（GCS_COMPSTR + GCS_CURSORPOS）；GUI 在光标处内联渲染合成面板（镜像 Unix frontend preedit），并抑制 IME 自带浮动合成窗（WM_IME_SETCONTEXT 清除 IS_SHOWUICOMPOSITIONWINDOW），候选条锚点保持在光标 | cargo check / clippy -D warnings / 607 lib tests 绿；待真机中文输入回归（AGENTERM_IME_DEBUG=1 + PLATFORM_IME_DEBUG=1 落盘 %TEMP%） |
 | I2 | `ui-hello` 拒绝时按 ClientTooOld/ClientTooNew 分类并带双方版本号生成可操作错误；GUI 启动失败与 launcher handoff 被拒时弹原生 MessageBox（新增 agenterm-platform `alert` 能力，走 selected/adapters 边界，product-neutral） | `incompatible_ui_contract_names_the_stale_side` 单测 + 607 lib 全绿；MessageBox 路径待真机验证 |
+| I3 | 修复 IME 合成期间拼音按键回显透传进终端：合成中（`ime_composing`）丢弃非提交文本的 `WM_CHAR`（`TranslateMessage` 对合成键的回显），以 `WM_IME_CHAR` 计数放行提交文本（`WM_IME_CHAR`→`WM_CHAR` 1:1），合成结束/失焦重置状态；新增 product-neutral 诊断 `PLATFORM_IME_MSG_TRACE=1` 逐条落盘 `%TEMP%\platform-ime-msg.log` | cargo check / clippy -D warnings / 612 lib tests 绿；用户真机 vim 中文输入通过（`vim set encoding=utf8` 下；提交 `77358bb`+`c71ffd5` 入 main） |
 
 非目标：不改变 ui-bridge 协议版本（仍为 1）；不自动杀旧 server（保留用户
 终端会话），错误文案明确指引用户重启/退出旧版。
@@ -849,10 +1264,28 @@ windows x86_64  （无该字段）                             ← 缺字段
 > 下一步真正的门槛不是再加协议能力，而是 §5.2 表里的 **N3 产品消费者**
 > ——决定它以什么形态（Script API / InfoHub / CC 诊断）被产品调用。
 
+### 5.2a 旁路：多 Agent 观察与交接（**v0.1.15 M 组**，非 L-NET）
+
+与 L-NET 无关的控制面地基：同屏多 agent（Codex / Grok / …）经
+`agenterm-cli` **只读观察**彼此 tab，handoff 走 note/文件/事件而非 PTY。
+执行清单见 **§一·五 M**；实证触发见该节头部。L-CC 未来可投影这些事实，
+但不作为 M 的开工前置。
+
+### 5.2b 旁路：多 Server / Instance 选择（**v0.1.15 S′**）
+
+关窗后找得回、多 instance 作业入口。执行清单见 **§一·五 S′**。
+**不做**主终端顶栏横向 server tab 作默认导航；CC 仍是控制塔投影面。
+
+### 5.2c 旁路：tmux/rmux `send-keys` + buffer（**v0.1.15 B′**）
+
+控制面兼容与脚本往 pane 投递。执行清单见 **§一·五 B′**。
+**不**当作 agent 消息总线；协作短消息仍 **§一·五 M**。
+
 ### 5.3 主线 L-CC：Control Center 内容成熟（PRD_02_21 → v0.2.0）
 
-- **UX 设计 SSOT**：[`plan/plan-control-center-ux.md`](plan-control-center-ux.md)
-  （Tab/布局线框、分阶段交付、设计师清单；2026-08-05 开工）。
+- **UX 任务书**：[`plan/plan-control-center-ux.md`](plan-control-center-ux.md)
+- **实现级设计 SSOT（rev3）**：[`plan/design-control-center-ux.md`](design-control-center-ux.md)
+  （IA / 几何 hit 契约 / PR Plan；2026-08-05 定稿，**实现仍归 v0.2.0**）。
 - v0.1.11 壳层已 shipped（进程边界/typed bridge/Cockpit read-only）；
   v0.2.0（PRD_02_18 M12，原 plan-v0.2.0.md 已并入）做内容成熟。
 - 用户点名内容：**workflow/pipeline 工作台**（C1 promoted →
@@ -999,7 +1432,15 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 定稿产出 §一·五 收敛工作树（13 叶，含动机/可证伪验收/成本/依赖）、§二 排序理由、§二·五 决策阻塞关系、§二·六 推迟表（含理由）、§二·七 PRD 一致性核对 |
 | 2026-08-05 | **PRD 核对纠错**：H4 原称「sbom_sha256 空串违反声明」不成立——逐平台实测 macOS 两档已填、Linux/Windows 未填，而 `PRD_02_17:237-240` 只要求 macOS 双档，故当前实现合规。H4 改为「把该保证扩展到六平台」；PRD 侧待 H4 落地后再升级为六平台描述（先实现后改契约） |
 | 2026-08-05 | **定稿后补记**：`fe51c7c` 合并带入并发 agent 的内置皮肤 v1（四预设，约 1600 行，`prd/PRD_02_06` §Built-in skins 已立契约）与 Windows IME/协议兼容 UX（见 §三·五 3.5.3）。二者已入 main 但**不在本次规划的 13 叶内** → 新增 §一·五 X 组登记，并据此调整规模自查：实际范围已不算窄，工期紧时的砍叶顺序定为 H1/H3 → R4，绝不砍 R1/R2。Control Center UX 明确归 v0.2.0，不占本版工期 |
-| 2026-08-05 | 用户指出两点：(1) Windows agent 在修其 IME，osx 侧「要有自己的思路，这才是封装的意义」；(2) 工作树全是补丁，问「哪些是新开工的功能」。自查属实——13 叶无一新功能。实证核查发现 `ImeStatus` 契约仅 Windows 实现（286 行），macOS/Linux 各 30 行 stub 恒返回 None，状态栏在 Unix 侧永远 `IME: off` → 新增 **N 组 / N1** 补齐，并本机实测 TIS API 可行（`TISCopyCurrentKeyboardInputSource` 读到「微信输入法」/ zh-Hans）；同时诚实标注 macOS 无法获取 `open`/`full_shape`，按契约规定留空不猜 |\n| 2026-08-05 | 用户认同「先把底子弄好」优先于督促 ipfs/libp2p → 新增 §一·五「为什么 v0.1.15 不推进 L-NET」：L-NET 卡点是 N3 产品消费者**形态未定（拍板题）**而非工程量，形态未定前投工程会返工；底子欠账（IME 契约失衡、install 四处硬伤、cache 恶化）是用户每天碰得到的。L-NET 保持 research 车道，R3 只换车道不减验证 |\n
+| 2026-08-05 | 用户指出两点：(1) Windows agent 在修其 IME，osx 侧「要有自己的思路，这才是封装的意义」；(2) 工作树全是补丁，问「哪些是新开工的功能」。自查属实——13 叶无一新功能。实证核查发现 `ImeStatus` 契约仅 Windows 实现（286 行），macOS/Linux 各 30 行 stub 恒返回 None，状态栏在 Unix 侧永远 `IME: off` → 新增 **N 组 / N1** 补齐，并本机实测 TIS API 可行（`TISCopyCurrentKeyboardInputSource` 读到「微信输入法」/ zh-Hans）；同时诚实标注 macOS 无法获取 `open`/`full_shape`，按契约规定留空不猜 |
+| 2026-08-05 | 用户认同「先把底子弄好」优先于督促 ipfs/libp2p → 新增 §一·五「为什么 v0.1.15 不推进 L-NET」：L-NET 卡点是 N3 产品消费者**形态未定（拍板题）**而非工程量，形态未定前投工程会返工；底子欠账（IME 契约失衡、install 四处硬伤、cache 恶化）是用户每天碰得到的。L-NET 保持 research 车道，R3 只换车道不减验证 |
+| 2026-08-05 | 用户确认：`agenterm-cli` 可读 live tab `ds4@codex`（`@2`/`ds4@c`），并问跨 server 通讯前景 → 结论写入对话结论与 **§一·五 M 组**：观察地基已亮；通讯不得以 PTY 为总线。追加 **M1 身份 / M2 只读 observe / M3 handoff 契约 / M4 跨 instance 证据**；硬约束含无副作用观察、单一 Fleet 权威；CC UI 不阻塞 M；砍叶 M4→M3→M2 子命令，保留 M1+M2 文档；绝不砍 R1/R2。X3 指针同步到 `plan/design-control-center-ux.md` |
+| 2026-08-05 | 用户报告标签区切换 tab 几乎总触发整窗刷新 → §三·五 **TS1–TS4** 观察 + **§一·五 U′** 可执行子树：U1 假刷新止血（代码已落）、U2 真机回归、U3 debounce PTY resize、U4 纯 TabSelected 不重推 cells（可选/可推 v0.2.x）；砍叶 U4→U3，保留 U1/U2 |
+| 2026-08-05 | 用户 GUI 窗全关后提出「顶栏横向 tab 选 server」→ 判断**需求合理、默认形态不采用主窗横向 server tab**。新增 **§一·五 S′**：S1 启动/重开 live instance 列表附着、S2 身份常显、S3 新窗打开另一 instance、S4 同窗热切后置且须确认；硬约束一窗一权威、与 PTY tab 分离、列表复用 server-list；与 L-CC 分工写明；砍叶保 S1 |
+| 2026-08-05 | 用户要求排期兼容 tmux/rmux **send-keys + buffer-paste/copy** 以便「先能发信息」→ 判断 **B′ 控制面兼容要做，但不替代 M handoff**。新增 **§一·五 B′**：B1 契约盘点、B2 夯实 send-keys、B3 命名 buffer 最小集、B4 paste-buffer、B5 与 M 选用表、B6 可选 copy→buffer；硬约束一 pane/tab、有界、不抢焦点、显式 unsupported；排序 B1→B4 为核心 |
+| 2026-08-05 | **B′ 落地（工作区）**：`named_buffer` store + CLI `set/load/show/list/delete/paste-buffer`（别名 setb/loadb/…）；`send-keys` usage 补 PS `@N`；隔离 instance 黑盒：`set-buffer`→`paste-buffer`→capture 见 `BUFFER_PROBE_OK`。live main 须换新 `agenterm-server` 后才有命令。agent 协作仍优先 note；paste 进 Codex TUI 会打断 |
+| 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
+
 ---
 
 ## 十、粘贴失败问题树（2026-08-05 · 规划，未开工）
@@ -1322,4 +1763,3 @@ agenterm-cli --version
 ls -la ~/.local/bin/agenterm*
 # 期望：无断链；version=0.1.14；已开 GUI 需手动重开
 ```
-
