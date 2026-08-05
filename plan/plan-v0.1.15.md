@@ -131,7 +131,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  └─ [ ] F2 云桌面默认 Xft.dpi=96（VNC 0mm + DPI=-1 → scale≈0.99，
 │        触发 control_center_linux_renderer_evidence）
 │
-└─ G. 安装/更新体验（2026-08-05 macOS aarch64 真机：0.1.12-local → v0.1.14，详见 §八）
+├─ G. 安装/更新体验（2026-08-05 macOS aarch64 真机：0.1.12-local → v0.1.14，详见 §八）
    ├─ [ ] G1 macOS 默认 `curl | bash` 失败面：无 signed asset 时
    │     必须 AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 才装得上
    │     动机：现网 v0.1.14 只有 `*-macos-*-unsigned-preview.zip`；
@@ -204,47 +204,59 @@ v0.1.15  Feedback shift-left & release-lane economics
          用户已要求「自适应或提示，否则用户不知道该怎么做」；
          agent 不自主改 keep-server 默认语义，须人工拍板后再改 default_action
 
-└─ H. 分发面地基（Hub 前置，只做地基不做 Hub；对应 PRD 未来树 M13/M14）
-   ├─ [ ] H1 生成 `releases.json` 发布索引（CI 静态产物）
-   │     动机：install.sh 现在靠字符串拼 artifact 名 + `releases/latest`
-   │     重定向猜版本；未来 `agenterm-cli update`、agenterm.work 下载页、
-   │     Hub 客户端会各自再 scrape 一遍 GitHub → 四个真相源
-   │     现状（已核）：v0.1.14 资产共 23 项，每包已带 `.sha256` +
-   │     `.provenance.json`，另有 sbom.spdx.json / qualification-receipt.json /
-   │     candidate-manifest.json；字段齐全，索引可**纯派生**不新造事实
-   │     建议：release.yml 成功后由 provenance 派生 `releases.json`
-   │     （channels{stable,preview} + releases[].artifacts[]{os,arch,
-   │     variant,name,sha256,provenance,signed,notarized}）发到 Pages；
-   │     `variant` 字段直接解掉 macOS `-unsigned-preview` 后缀猜测
-   ├─ [ ] H2 install.sh 改为消费 `releases.json`（与 G1/G5 合并落地）
-   │     动机：G1 的 macOS happy path 断裂本质是「后缀靠 env 变量猜」；
-   │     有索引后它退化成读一个 `variant` 字段
-   │     建议：与 G5（old→new 摘要 / already-latest no-op）同批改，
-   │     避免两次动同一段 resolve 逻辑
-   ├─ [ ] H3 provenance 用户可见化（把 CI 证据交到用户手上）
-   │     动机：`.provenance.json` 每包都发但**用户端零消费**——install.sh
-   │     只校 sha256，从不下载 provenance
-   │     建议：下载并校验 provenance 的 sha256/version/source_tag 与实测
-   │     一致，收尾打印 commit / tag / build_log / signed / notarized；
-   │     与 G3 的 `installed.json`（version/channel/variant/source_commit/
-   │     sha256/installed_at/provenance 原文）同一批写入
-   ├─ [ ] H4 修 `provenance.sbom_sha256` 空串
-   │     动机：**已实测核实** v0.1.14 linux-x86_64 的 provenance
-   │     `sbom_sha256` 确为空字符串——声明了字段却未填，是真实证据缺口，
-   │     且 Hub 信任分级（M14）要复用这个字段
-   │     建议：打包步骤把 `dist/agenterm-<version>-sbom.spdx.json` 的
-   │     摘要写进各平台 provenance；低风险，纯补值
-   ├─ [ ] H5 agenterm.work 接通（**依赖决策项 P1**，本版只做别名不改内容）
-   │     现状（已核）：根 CNAME 与 docs/CNAME 均为 agenterm.mega.tech，
-   │     docs/index.html 的 canonical/og:url 同；agenterm.work 未接任何内容
-   │     建议：agenterm.work 设为 canonical，mega.tech 301 过去；
-   │     README 的 raw.githubusercontent 安装命令换成
-   │     `https://agenterm.work/install.sh`（技术债短链化，不改脚本实现）
-   │     联动：与 E1（pages-build 噪音）取向绑定——走 Pages 则 Pages 保留
-   └─ [ ] H6 PRD 未来树落文：M13（分发面）/ M14（Hub 底座）
-         **已落地**（本轮已写入 `prd/PRD_02_18_roadmap.md`），
-         与 §五 L-EXT / L-PKG 主线互链
-         非目标：本版**不写任何 Hub 代码**，不建 registry，不动 softmgr
+├─ H. 分发面地基（Hub 前置，只做地基不做 Hub；对应 PRD 未来树 M13/M14）
+│  ├─ [ ] H1 生成 `releases.json` 发布索引（CI 静态产物）
+│  │     动机：install.sh 现在靠字符串拼 artifact 名 + `releases/latest`
+│  │     重定向猜版本；未来 `agenterm-cli update`、agenterm.work 下载页、
+│  │     Hub 客户端会各自再 scrape 一遍 GitHub → 四个真相源
+│  │     现状（已核）：v0.1.14 资产共 23 项，每包已带 `.sha256` +
+│  │     `.provenance.json`，另有 sbom.spdx.json / qualification-receipt.json /
+│  │     candidate-manifest.json；字段齐全，索引可**纯派生**不新造事实
+│  │     建议：release.yml 成功后由 provenance 派生 `releases.json`
+│  │     （channels{stable,preview} + releases[].artifacts[]{os,arch,
+│  │     variant,name,sha256,provenance,signed,notarized}）发到 Pages；
+│  │     `variant` 字段直接解掉 macOS `-unsigned-preview` 后缀猜测
+│  ├─ [ ] H2 install.sh 改为消费 `releases.json`（与 G1/G5 合并落地）
+│  │     动机：G1 的 macOS happy path 断裂本质是「后缀靠 env 变量猜」；
+│  │     有索引后它退化成读一个 `variant` 字段
+│  │     建议：与 G5（old→new 摘要 / already-latest no-op）同批改，
+│  │     避免两次动同一段 resolve 逻辑
+│  ├─ [ ] H3 provenance 用户可见化（把 CI 证据交到用户手上）
+│  │     动机：`.provenance.json` 每包都发但**用户端零消费**——install.sh
+│  │     只校 sha256，从不下载 provenance
+│  │     建议：下载并校验 provenance 的 sha256/version/source_tag 与实测
+│  │     一致，收尾打印 commit / tag / build_log / signed / notarized；
+│  │     与 G3 的 `installed.json`（version/channel/variant/source_commit/
+│  │     sha256/installed_at/provenance 原文）同一批写入
+│  ├─ [ ] H4 修 `provenance.sbom_sha256` 空串
+│  │     动机：**已实测核实** v0.1.14 linux-x86_64 的 provenance
+│  │     `sbom_sha256` 确为空字符串——声明了字段却未填，是真实证据缺口，
+│  │     且 Hub 信任分级（M14）要复用这个字段
+│  │     建议：打包步骤把 `dist/agenterm-<version>-sbom.spdx.json` 的
+│  │     摘要写进各平台 provenance；低风险，纯补值
+│  ├─ [ ] H5 agenterm.work 接通（**依赖决策项 P1**，本版只做别名不改内容）
+│  │     现状（已核）：根 CNAME 与 docs/CNAME 均为 agenterm.mega.tech，
+│  │     docs/index.html 的 canonical/og:url 同；agenterm.work 未接任何内容
+│  │     建议：agenterm.work 设为 canonical，mega.tech 301 过去；
+│  │     README 的 raw.githubusercontent 安装命令换成
+│  │     `https://agenterm.work/install.sh`（技术债短链化，不改脚本实现）
+│  │     联动：与 E1（pages-build 噪音）取向绑定——走 Pages 则 Pages 保留
+│  └─ [ ] H6 PRD 未来树落文：M13（分发面）/ M14（Hub 底座）
+│        **已落地**（本轮已写入 `prd/PRD_02_18_roadmap.md`），
+│        与 §五 L-EXT / L-PKG 主线互链
+│        非目标：本版**不写任何 Hub 代码**，不建 registry，不动 softmgr
+│
+└─ S. 结构 SSOT 机读化 + 微重构预备（契约=`plan/ARCHITECTURE.md` §8；**HOLD 待用户通知**）
+   ├─ [ ] S0 状态：多 agent 并行中 → **本泳道不写主树**；仅文档预备
+   │     复审触发：用户通知「可 review 新一轮再开工」
+   ├─ [ ] S1 扩 `boundary_tests`（单向 A 档）：必存在 bins/关键目录、
+   │     禁复活路径（如已删 services/frontend）、可选 adapter 行数软预算
+   ├─ [ ] S2 代码→文档围栏（B 档）：扫描 `src`/`crates`/`src/bin` 生成
+   │     structure 块；CI 与 ARCHITECTURE 围栏 diff（失败=结构漂）
+   ├─ [ ] S3（可选，长期）`architecture.manifest` 真源（C 档）：
+   │     清单驱动生成 md 块 + 同一清单喂测试；**不**新开第二份现行结构 md
+   └─ [ ] S-prep 预备树（§九）：复审清单 + 微重构刀序 + 文件域互斥
+         债务钩 L2/L3/L4 在 ARCHITECTURE §4；落地须同批回写 §1/§3
 ```
 
 ## 二、排序建议（起稿人观点）
@@ -261,6 +273,8 @@ v0.1.15  Feedback shift-left & release-lane economics
    不碰发布链语义，可与 A 组并行。G7b/c（GUI/关窗对话框）为体验主路径，
    建议紧随 G7a；G7d / 改 default_action 依赖 **G-P2**；G1/G-P1 等
    macOS channel 政策拍板后再改默认回落行为。
+8. **S 组 HOLD**：多 agent 在途时不抢主树；用户通知后先 **§九 复审** 再 S1→微重构。
+   不必等 S3 全文双向；S1（可选 S2）安全带后即可小步刀。S3 不阻塞主主题。
 
 > v0.1.15 是**纯发布链经济学**版本，不与 §五 未来主线（net / CC 内容 /
 > 远程包管理 / computer-use）抢工期；未来主线只做「对齐记录 + 决策项」，
@@ -310,7 +324,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 |------|------|
 | `plan/plan-v0.1.14.md` | 上一版执行记录；本文数据与止血项的出处 |
 | `plan/plan-v0.1.13.md` §10.2.1 | 发布链坑清单（runbook 素材，E2 配套） |
-| `plan/ARCHITECTURE.md` | 结构 SSOT；本文不重画结构树 |
+| `plan/ARCHITECTURE.md` | 结构 SSOT（含 §8 对齐机制/工具边界）；**S 组**执行叶指针；本文不重画结构树 |
 | `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟（§五 L-CC 的版本归口；原 plan-v0.2.0.md 已并入） |
 | `plan/plan-mobile.md` | 移动端计划（第三个 host：接入端 + 去中心化链接端）；与 L-NET/L-PKG 共享去中心化底座，文件域独立 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同；D1 若通过需回写 |
@@ -548,6 +562,79 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-04 | Linux 云桌面（DISPLAY=:1 XFCE）实测意见写入 §七 / F 组；单测误耦合已修进 main；F1/F2 为环境快照尾账，不走 PR |
 | 2026-08-05 | macOS aarch64 真机 0.1.12-local→v0.1.14 安装更新实测写入 §八 / G 组；G1–G6 + G-P1 为改进需求，未授权开工 |
 | 2026-08-05 | 用户确认：升级后「关窗不退 server → 再进仍显示旧版」属真实踩坑；要求更新时**自适应或提示**，否则用户无法知道该选 stop-server；追加 **G7 + G-P2**，升 G7a 为 P0 文案、G7b/c 为体验主路径 |
+| 2026-08-05 | 结构对齐/工具澄清 upsert：`ARCHITECTURE.md` §8 + 债务 L4；本 plan 增 **S 组**（S1 扩闸 / S2 围栏 / S3 manifest）；明确 LSP≠结构契约引擎 |
+| 2026-08-05 | S 泳道 **HOLD**：等其他 agent 完成；用户再通知 → 新一轮 review → 再开工；预备树写入 **§九**（不改代码） |
+
+---
+
+## 九、结构微重构预备树（HOLD · 2026-08-05）
+
+> 状态：**等待**。多 agent 开工期间本泳道只读/只更本文档，**不写** `src/**` / `crates/**` / `install.sh`。  
+> 触发：用户说「可以 review 新一轮再开工」。  
+> 契约：`plan/ARCHITECTURE.md` §8；债务 L2/L3/L4。  
+> 原则：**不必等 S3 全文双向**；有 S1（+可选 S2）+ 同批回写 ARCHITECTURE 即可小步微重构。
+
+```text
+HOLD 多 agent 并行
+│
+├─ W0 静默纪律
+│  ├─ 不抢主树单写者；不 git commit 结构债「半成品」
+│  ├─ 不改 boundary_tests 行为（除非开工后 S1 授权）
+│  └─ 发现他方已动热文件 → 记入 W1 冲突表，不并行硬改
+│
+├─ W1 开工前复审闸（用户通知后第一动作 · 只读）
+│  ├─ git status / log --oneline -20 / 他方 pathspec 热区
+│  ├─ 重读 ARCHITECTURE §1§4§8 与 boundary_tests 现状
+│  ├─ 跑 quick（或至少 boundary 相关 test）取基线绿
+│  ├─ 对照下表「候选刀」是否被他方占用 → 重排刀序
+│  └─ 产出：一页「可开 / 让路 / 延后」三列（聊天或 §九 补记）
+│
+├─ W2 安全带（结构文档↔代码 · 最小集，开工第一刀可选）
+│  ├─ S1 boundary_tests 扩：bins 必存在、禁复活路径、（可选）行数软预算
+│  ├─ （可选）S2 structure 围栏生成 + diff
+│  ├─ 明确不做：S3 manifest 本轮非阻塞
+│  └─ 验收：闸红=结构漂；闸绿 ≠ 全文 prose 已对齐（人仍回写 §1）
+│
+├─ W3 微重构刀序（行为不变优先 · 单写者串行）
+│  ├─ 刀1  client/mod.rs 切分
+│  │      域：src/client/** 新子模；禁碰 adapters
+│  │      验收：cli/script/mux 入口行为不变 + quick
+│  ├─ 刀2  services/policy 半迁移收口（L3）
+│  │      域：src/platform/{services,policy,mod}.rs
+│  │      验收：无新增 dead_code 门面；或删未接线 facade
+│  ├─ 刀3  unix/frontend 子模切分（仅拆文件，不改语义）
+│  │      域：src/platform/adapters/unix/frontend/**
+│  │      验收：unix smoke / 既有 gui 测路径
+│  ├─ 刀4  windows remote_frontend 对称切分（刀3 后或文件域空闲时）
+│  │      域：…/windows/remote_frontend.rs → 子模
+│  │      验收：remote/windows 相关测
+│  ├─ 刀5  ui-action 表驱动（R6，需 ActionId 完备性测）
+│  │      域：src/frontend/* + 两端 adapter match 收敛
+│  │      风险中：宜 S1/S2 后、双端文件无他人在途
+│  └─ 延后  G7/G-P2 升级 UX、H 分发面、发布链 A/B —— 非本预备树
+│
+├─ W4 每刀闭环清单（开工后强制）
+│  ├─ 改前：pathspec 声明 + 与 W1 冲突表核对
+│  ├─ 改中：禁止顺手「改进」相邻语义
+│  ├─ 改后：quick 绿 + ARCHITECTURE §1/§3/§4 同批一句
+│  └─ 提交：pathspec 精确；message 带刀号（刀1/刀2…）
+│
+└─ W5 明确非目标（本预备树）
+   ├─ 不等 S3 才开工
+   ├─ 不把 LSP 当对齐完成证据
+   ├─ 不重画第二棵现行结构 md
+   └─ 不在 HOLD 期写主树「抢跑」
+```
+
+### 9.1 热文件互斥备忘（复审时更新）
+
+| 域 | 代表路径 | 与谁易撞 |
+|----|----------|----------|
+| 发布链 | `.github/workflows/*`, `scripts/rhai/check*.rhai` | A/B/E 组 |
+| 安装更新 | `install.sh`, CLI update 相关 | G/H 组 |
+| 结构闸 | `src/platform/boundary_tests.rs`, `plan/ARCHITECTURE.md` | **S 组自有** |
+| 双主机 GUI | `unix/frontend/**`, `windows/remote_frontend.rs` | UX/parity 他方 |
+| client | `src/client/**` | script/mcp 他方 |
 
 ---
 

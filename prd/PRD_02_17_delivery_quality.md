@@ -180,15 +180,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     then correctly failed closed during aggregate because Windows and Unix had
     hashed line-ending-dependent source bytes. Release-identity inputs are now
     pinned to LF with field-specific provenance diagnostics; a fully sealed
-    rerun remains to be recorded
+    rerun was recorded by v0.1.14 candidate run `30942173420` at source
+    `8ff2b5a`, which sealed all six platform archives with hashes, SBOM and
+    provenance
   - [~] after explicit approval, the promotion workflow verifies
     tag/version/commit,
     downloads the exact candidate artifacts, revalidates every receipt and
     hash, and promotes those bytes without Cargo compilation, packaging or a
     second full GUI/stress suite. Static policy rejects any `cargo` invocation,
     root `build`/`check`/`release` alias, or Script build/check/package task—not
-    only today's known command spellings; its focused regression passes. The first
-    non-publishing remote rehearsal remains to be recorded
+    only today's known command spellings; its focused regression passes. A
+    non-publishing rehearsal was never recorded: `release.yml` first executed
+    on 2026-08-05 as the real v0.1.14 promotion (run `30944087372`), and that
+    first execution exposed four defects in the previously unexercised
+    promotion lane — the run-identity file being deleted by the checkout that
+    follows it, an assertion on a `manifest.kind` field the sealer never wrote,
+    and two GitHub read-after-write races (tag ref, releases list). See
+    `plan/plan-v0.1.14.md`. The dry-run capability that would have caught these
+    in seconds is proposed as a v0.1.15 item
   - [x] Promotion is recoverable after a tag-only or partially uploaded draft
     interruption: an existing tag is accepted only when it resolves to the
     exact Candidate SHA, only an unpublished matching draft may resume, every
@@ -466,3 +475,31 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     `16/17-restart` JSON/PNG pairs
 - [ ] automated terminal input/resize/ANSI/CJK/long-output matrix
 - [ ] installer, updater, stable PATH location, and signed releases
+
+## Release-cut documentation checklist
+
+Every stale-documentation finding in the 2026-08-05 audit shared one cause: a
+statement that was true when written and was never revisited at a version
+boundary. Treat the following as part of cutting a release, not as cleanup:
+
+- [ ] `prd/PRD_02_18_roadmap.md`: the newest milestone reflects the version
+  that actually shipped. A milestone naming a version whose candidate was
+  abandoned must be relabelled rather than left `[~]`; v0.1.12 and v0.1.13
+  were built but never released, so the public sequence runs v0.1.11 →
+  v0.1.14.
+- [ ] `PRD.md` "Current acceptance gate": describes the gate in force now, and
+  is not pinned to a specific version number.
+- [ ] `prd/` release-chain leaves that the release just exercised are moved off
+  `[~]`, with the run id and source SHA recorded as evidence.
+- [ ] `README.md` install pins name the released version; capability bullets
+  carry no version qualifier, so they cannot go stale.
+- [ ] `AGENTS.md` binary lists, script names, and file references still match
+  the tree. Prefer `--all-targets` over enumerated `--bin` flags, and never
+  pin a test count.
+- [ ] any `/goal` handoff brief for the finished release is banner-marked as
+  archived, and any claim it made that the release disproved is corrected in
+  place rather than left for the next agent to inherit.
+
+Standing lesson from the v0.1.14 promotion: **a lane that has never executed is
+unverified, no matter how carefully it was written.** `release.yml` was
+authored long before it first ran, and its first run held four defects.
