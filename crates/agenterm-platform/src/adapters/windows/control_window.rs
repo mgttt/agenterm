@@ -39,12 +39,11 @@ use windows_sys::Win32::{
             ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
             WM_COPY, WM_DESTROY, WM_ERASEBKGND, WM_IME_CHAR, WM_IME_COMPOSITION,
             WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INITMENUPOPUP,
-            WM_KEYDOWN, WM_KEYUP,
-            WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-            WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
-            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
-            WS_CHILD, WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-            WS_VISIBLE, WS_VSCROLL,
+            WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+            WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
+            WM_PASTE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER,
+            WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW,
+            WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -242,6 +241,16 @@ impl ControlWindowBackend for Backend {
         Ok(String::from_utf16_lossy(
             &value[..usize::try_from(copied).unwrap_or(0)],
         ))
+    }
+    fn set_control_max_length(&self, id: ControlId, chars: u32) -> Result<(), ControlWindowError> {
+        // EM_SETLIMITTEXT caps the UTF-16 code units a native EDIT control
+        // accepts. The product layer still validates byte budgets on save;
+        // this only stops unbounded typing well past the advertised limit.
+        const EM_SETLIMITTEXT: u32 = 0x00E1;
+        unsafe {
+            SendMessageW(self.control(id)?, EM_SETLIMITTEXT, chars as usize, 0);
+        }
+        Ok(())
     }
     fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {
         unsafe {
@@ -781,13 +790,7 @@ fn ime_message_trace_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("PLATFORM_IME_MSG_TRACE").is_some())
 }
 
-fn trace_ime_message(
-    msg: u32,
-    wp: WPARAM,
-    lp: LPARAM,
-    composing: bool,
-    commit_pending: u32,
-) {
+fn trace_ime_message(msg: u32, wp: WPARAM, lp: LPARAM, composing: bool, commit_pending: u32) {
     if !ime_message_trace_enabled() {
         return;
     }
@@ -878,6 +881,13 @@ fn dispatch_window_message(
             size: client_size(hwnd),
             minimized: u32::try_from(wp).ok() == Some(SIZE_MINIMIZED),
         }),
+        // Title-bar X / Alt+F4 arrive as SC_CLOSE first. DefWindowProc would
+        // post WM_CLOSE, but some hosts (and automated close paths) can tear
+        // down without a second chance if SC_CLOSE is left to the default
+        // procedure while the product is still presenting a confirm modal.
+        // Always route both SC_CLOSE and WM_CLOSE through CloseRequested so
+        // the app can show Keep/Stop/Cancel instead of vanishing.
+        WM_SYSCOMMAND if (wp & 0xFFF0) == 0xF060 => Some(ControlWindowEvent::CloseRequested),
         WM_CLOSE => Some(ControlWindowEvent::CloseRequested),
         WM_SETFOCUS => Some(ControlWindowEvent::FocusChanged(true)),
         WM_KILLFOCUS => {

@@ -448,6 +448,76 @@ pub(crate) fn discover_instances() -> Result<Vec<DiscoveredInstance>> {
     discover_instances_in(&instances_dir())
 }
 
+/// Find a live, protocol-responsive server for the given logical instance.
+///
+/// Used when the client's resolved default endpoint is down but another
+/// registration for the same logical name (e.g. `main`) is still alive —
+/// reopening the GUI must **attach** instead of spawning a second authority
+/// that only "restores" empty shells from workspace.json.
+///
+/// Preference order:
+/// 1. `preferred` endpoint if it is among healthy candidates
+/// 2. newest `started_at_unix_ms` among healthy candidates
+pub(crate) fn find_live_endpoint_for_logical_instance(
+    logical_instance: &LogicalInstance,
+    preferred: Option<&IpcEndpoint>,
+    probe_timeout: Duration,
+) -> Result<Option<IpcEndpoint>> {
+    find_live_endpoint_for_logical_instance_in(
+        &instances_dir(),
+        logical_instance,
+        preferred,
+        probe_timeout,
+    )
+}
+
+fn find_live_endpoint_for_logical_instance_in(
+    directory: &Path,
+    logical_instance: &LogicalInstance,
+    preferred: Option<&IpcEndpoint>,
+    probe_timeout: Duration,
+) -> Result<Option<IpcEndpoint>> {
+    let desired = logical_instance.canonical_name();
+    let mut candidates: Vec<(IpcEndpoint, u128)> = Vec::new();
+    for instance in discover_instances_in(directory)? {
+        let record = &instance.record;
+        if record.resolved_logical_instance().canonical_name() != desired {
+            continue;
+        }
+        match registration_owner_state(record) {
+            RegistrationOwnerState::ConfirmedLive { .. }
+            | RegistrationOwnerState::OwnerUnknown { .. } => {}
+            RegistrationOwnerState::Dead { .. } | RegistrationOwnerState::PidReused { .. } => {
+                continue;
+            }
+        }
+        if !instance_process_is_alive(record.pid) {
+            continue;
+        }
+        let Some(endpoint) = record.resolved_endpoint() else {
+            continue;
+        };
+        if !protocol_probe_ok(&endpoint, probe_timeout) {
+            continue;
+        }
+        candidates.push((endpoint, record.started_at_unix_ms));
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    if let Some(preferred) = preferred
+        && candidates.iter().any(|(endpoint, _)| endpoint == preferred)
+    {
+        return Ok(Some(preferred.clone()));
+    }
+    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+    Ok(candidates.into_iter().next().map(|(endpoint, _)| endpoint))
+}
+
+fn protocol_probe_ok(endpoint: &IpcEndpoint, timeout: Duration) -> bool {
+    legacy_protocol_probe(endpoint, timeout)
+}
+
 /// Return the one legacy authority that is safe to reuse for implicit main.
 ///
 /// A schema-v1 record has no logical-instance identity, so matching the exact
@@ -1103,6 +1173,51 @@ mod tests {
     fn process_liveness_only_rejects_a_definitively_dead_pid() {
         assert!(instance_process_is_alive(std::process::id()));
         assert!(!instance_process_is_alive(u32::MAX));
+    }
+
+    #[test]
+    fn live_logical_instance_lookup_skips_dead_registrations() {
+        let directory = env::temp_dir().join(format!(
+            "agenterm-live-peer-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let main_scope = ServerScopeId::current(&LogicalInstance::Main).unwrap();
+        let dead = InstanceRecord {
+            schema_version: INSTANCE_SCHEMA_VERSION,
+            pid: u32::MAX,
+            address: "pipe:dead".to_owned(),
+            endpoint: Some(IpcEndpoint::NamedPipe("agenterm-dead-peer".to_owned())),
+            logical_instance: Some(LogicalInstance::Main),
+            server_scope_id: Some(main_scope),
+            version: "0.0.0".to_owned(),
+            session: "agenterm".to_owned(),
+            workspace_path: directory.display().to_string(),
+            started_at_unix_ms: 1,
+            process_start_identity: Some("dead".to_owned()),
+            lease_nonce: Some("n".to_owned()),
+            server_epoch: Some("e".to_owned()),
+            test_fixture: true,
+            upgrade_identity: None,
+        };
+        fs::write(
+            directory.join("dead.json"),
+            serde_json::to_vec(&dead).unwrap(),
+        )
+        .unwrap();
+        let found = find_live_endpoint_for_logical_instance_in(
+            &directory,
+            &LogicalInstance::Main,
+            None,
+            Duration::from_millis(50),
+        )
+        .unwrap();
+        assert!(found.is_none());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

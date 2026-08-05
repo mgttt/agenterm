@@ -54,7 +54,10 @@ use crate::{
     },
     tab_tree::{TabTreeNode, tree_rows},
     theme::{AppearancePreset, Rgb, ThemePalette, window_title_for_preset},
-    ui_bridge::{UiCellStyle, UiColor, UiScreenSnapshot, UiTabBootstrap},
+    ui_bridge::{
+        UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,
+        UiTabBootstrap,
+    },
     ui_client::{UiClientModel, tab_by_id},
     ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
     ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE, UiClientCommand},
@@ -3354,7 +3357,7 @@ impl RemoteWindowState {
         true
     }
 
-    fn handle_tab_editor_keydown(&mut self, key: u32, modifiers: input::ModifierState) -> bool {
+    fn handle_tab_editor_keydown(&mut self, key: u32, _modifiers: input::ModifierState) -> bool {
         if !self.tab_editor_dialog.is_open() {
             return false;
         }
@@ -3368,7 +3371,9 @@ impl RemoteWindowState {
             self.finish_tab_edit(false);
             return true;
         }
-        if key == 0x0d && modifiers.control {
+        // Enter submits the rename (plain and Ctrl+Enter). The note field is
+        // single-line, so there is no newline to steal.
+        if key == 0x0d {
             self.finish_tab_edit(true);
             return true;
         }
@@ -3801,6 +3806,15 @@ impl RemoteWindowState {
         let note = tab.note.clone();
         self.tab_editor_dialog
             .open(tab_id, title.clone(), note.clone());
+        // Mirror the byte budgets in the native edit controls so typing stops
+        // at the advertised limit instead of failing only on Save. The byte
+        // check in `TabEditorDialog::capture` remains the final gate.
+        let _ = self
+            .window
+            .set_control_max_length(self.tab_title_edit, UI_TAB_TITLE_MAX_BYTES as u32);
+        let _ = self
+            .window
+            .set_control_max_length(self.tab_note_edit, UI_TAB_NOTE_MAX_BYTES as u32);
         self.set_control_text(self.tab_title_edit, &title);
         self.set_control_text(self.tab_note_edit, &note);
         self.layout_tab_editor();
@@ -4110,7 +4124,13 @@ impl RemoteWindowState {
 
     fn request_window_close(&mut self) {
         match window_close_request(self.focus_gate()) {
-            WindowCloseRequest::AlreadyOpen => return,
+            WindowCloseRequest::AlreadyOpen => {
+                // Re-assert geometry/visibility: a second close click (or
+                // taskbar close while the modal is already open) must not look
+                // like "confirm is gone".
+                self.ensure_window_close_dialog_presented();
+                return;
+            }
             WindowCloseRequest::CancelLiveClose => {
                 self.finish_close_tab(false);
                 return;
@@ -4135,14 +4155,35 @@ impl RemoteWindowState {
         self.finish_tab_edit(false);
         self.window_close_dialog.open();
         self.show_workspace_controls(false);
-        self.layout_close_controls();
-        // A close request can arrive from the taskbar while this window is
-        // minimized.  The confirmation choices are native child controls, so
-        // leaving the parent iconic would make the required decision
-        // unreachable and look like a failed close.
+        // Taskbar close of a minimized window must restore *before* laying out
+        // the native confirmation buttons. Laying out against the iconic client
+        // rect parks the Keep/Stop/Cancel children off the restored surface so
+        // the confirm dialog appears missing.
+        self.ensure_window_close_dialog_presented();
+    }
+
+    /// Restore (if needed), place native close buttons, paint the modal, focus.
+    fn ensure_window_close_dialog_presented(&mut self) {
+        if !self.window_close_dialog.is_open() {
+            return;
+        }
         if self.window.state().minimized {
+            // ShowWindow(SW_RESTORE) updates the client rect before returning
+            // (reentrant WM_SIZE falls back to DefWindowProc under DISPATCHING).
+            // Layout *must* run against the restored client, not the iconic one.
             self.window.set_presentation(WindowPresentation::Restored);
         }
+        // Re-assert label + geometry every present: second close / taskbar close
+        // while already open must not leave invisible or off-surface buttons.
+        let locale = self.config.locale;
+        self.set_control_text(self.close_keep, locale.text(UiText::KeepServerRunning));
+        // Win32 BUTTON treats single '&' as accelerator; locale strings use one
+        // '&' for "Stop Server & Exit" which is the intended product label.
+        self.set_control_text(self.close_stop, locale.text(UiText::StopServerAndExit));
+        self.set_control_text(self.close_cancel, locale.text(UiText::Cancel));
+        self.layout_close_controls();
+        self.show_close_controls(true);
+        self.window.request_redraw();
         self.window.focus();
     }
 
@@ -5549,7 +5590,10 @@ impl RemoteWindowState {
                     right: cursor_segment.right - MARGIN,
                     bottom: cursor_segment.bottom,
                 },
-                &format!("CURSOR({},{})", tab.screen.cursor.column, tab.screen.cursor.row),
+                &format!(
+                    "CURSOR({},{})",
+                    tab.screen.cursor.column, tab.screen.cursor.row
+                ),
                 palette.muted_text.canvas_rgb(),
             );
         }
@@ -6405,7 +6449,17 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 consumed = true;
             }
             ControlWindowEvent::FocusChanged(true) => {
-                if state.window.focused_target() != FocusTarget::Control(EDIT_ID) {
+                // Keep focus on any native edit control (composer, inline tab
+                // editor, settings, new-terminal, cwd editor). Without this,
+                // re-activating the window after opening the tab editor yanks
+                // focus back to the main window and typed characters — e.g.
+                // the `@` in `ds4@codex` — fall into the terminal instead of
+                // the title field.
+                let keeps_edit_focus = matches!(
+                    state.window.focused_target(),
+                    FocusTarget::Control(control) if state.is_edit_control(control)
+                );
+                if !keeps_edit_focus {
                     state.window.focus();
                 }
             }

@@ -311,6 +311,7 @@ pub(crate) trait ControlWindowBackend {
     fn set_title(&self, title: &str) -> Result<(), ControlWindowError>;
     fn set_control_text(&self, id: ControlId, text: &str) -> Result<(), ControlWindowError>;
     fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError>;
+    fn set_control_max_length(&self, id: ControlId, chars: u32) -> Result<(), ControlWindowError>;
     fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn paste_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn select_all_control_text(&self, id: ControlId) -> Result<(), ControlWindowError>;
@@ -403,6 +404,16 @@ impl ControlWindow {
     }
     pub fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError> {
         self.0.control_text(id)
+    }
+    /// Caps how many UTF-16 code units a native text control accepts from the
+    /// user. Backends that do not expose native edit limits treat this as a
+    /// no-op. The product layer keeps validating byte budgets on save.
+    pub fn set_control_max_length(
+        &self,
+        id: ControlId,
+        chars: u32,
+    ) -> Result<(), ControlWindowError> {
+        self.0.set_control_max_length(id, chars)
     }
     /// Copies the current native text-control selection to the platform clipboard.
     pub fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {

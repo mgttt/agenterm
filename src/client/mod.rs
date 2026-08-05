@@ -2293,6 +2293,24 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         }
     };
     let mut response = send_control_request(arguments.clone(), control.clone());
+    if response.is_err() && may_start_server {
+        // Prefer attaching a live peer for this logical instance over minting a
+        // second server (workspace re-spawn would look like a session reset).
+        if let Ok(resolved) = resolved_ipc_endpoint()
+            && let Ok(Some(endpoint)) = crate::instances::find_live_endpoint_for_logical_instance(
+                &resolved.logical_instance,
+                Some(&resolved.endpoint),
+                Duration::from_millis(250),
+            )
+        {
+            // SAFETY: process-wide IPC pin before the retry loop; same pattern as GUI bootstrap.
+            unsafe {
+                std::env::set_var("AGENTERM_IPC_ENDPOINT", endpoint.to_string());
+                std::env::remove_var("AGENTERM_IPC_ADDRESS");
+            }
+            response = send_control_request(arguments.clone(), control.clone());
+        }
+    }
     if response.is_err()
         && may_start_server
         && let Err(error) = start_server_process()

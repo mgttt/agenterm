@@ -76,11 +76,29 @@ pub(crate) fn connect_or_start_frontend_gui_client(
     match UiClientModel::connect(client_id.to_owned()) {
         Ok(client) => return Ok(client),
         Err(error) => {
+            // Endpoint is up but rejected this UI client — do not spawn a twin.
             if is_frontend_server_endpoint_listening() {
                 return Err(format!("running server rejected replaceable UI: {error}"));
             }
         }
     }
+
+    // Resolved default pipe/socket is down. Before spawning a second authority
+    // (which would re-spawn empty shells from workspace.json and look like a
+    // full session reset), attach any live registration for this logical
+    // instance (e.g. another `main` still holding agent tabs after Keep Server).
+    if let Some(endpoint) = discover_live_peer_endpoint()? {
+        pin_client_endpoint(&endpoint);
+        match UiClientModel::connect(client_id.to_owned()) {
+            Ok(client) => return Ok(client),
+            Err(error) => {
+                return Err(format!(
+                    "live AgenTerm server for this instance is reachable at {endpoint} but UI connect failed: {error}"
+                ));
+            }
+        }
+    }
+
     start_frontend_server_process()?;
     let deadline = Instant::now() + GUI_FRONTEND_SERVER_START_TIMEOUT;
     let mut last_error = None;
@@ -97,6 +115,26 @@ pub(crate) fn connect_or_start_frontend_gui_client(
     ))
 }
 
+fn discover_live_peer_endpoint() -> Result<Option<crate::ipc_endpoint::IpcEndpoint>, String> {
+    let resolved = crate::client::resolved_ipc_endpoint().map_err(|error| error.to_string())?;
+    crate::instances::find_live_endpoint_for_logical_instance(
+        &resolved.logical_instance,
+        Some(&resolved.endpoint),
+        Duration::from_millis(250),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Pin the process IPC selector so subsequent control calls target the live peer.
+fn pin_client_endpoint(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
+    // CLI selector env wins over defaults for the rest of this process.
+    // SAFETY: single-threaded at GUI bootstrap before the UI loop races env.
+    unsafe {
+        std::env::set_var("AGENTERM_IPC_ENDPOINT", endpoint.to_string());
+        std::env::remove_var("AGENTERM_IPC_ADDRESS");
+    }
+}
+
 pub(crate) fn maybe_recover_frontend_server(
     now: Instant,
     server_restart_after: Instant,
@@ -107,6 +145,15 @@ pub(crate) fn maybe_recover_frontend_server(
         || is_frontend_server_endpoint_listening()
     {
         return FrontendServerRecovery::NoAction;
+    }
+
+    // A peer under the same logical instance may still be live on another
+    // endpoint (historical dual-main). Prefer pinning to it over spawning.
+    if let Ok(Some(endpoint)) = discover_live_peer_endpoint() {
+        pin_client_endpoint(&endpoint);
+        if is_frontend_server_endpoint_listening() {
+            return FrontendServerRecovery::NoAction;
+        }
     }
 
     match start_frontend_server_process() {
@@ -127,6 +174,23 @@ pub(crate) fn is_frontend_server_endpoint_listening() -> bool {
 
 pub(crate) fn start_frontend_server_process() -> Result<(), String> {
     let resolved = crate::client::resolved_ipc_endpoint().map_err(|error| error.to_string())?;
+    // Never mint a second Fleet authority while one already answers protocol
+    // for this logical instance — that path is what wipes agent tabs via
+    // workspace re-spawn of empty shells.
+    if let Some(endpoint) = crate::instances::find_live_endpoint_for_logical_instance(
+        &resolved.logical_instance,
+        Some(&resolved.endpoint),
+        Duration::from_millis(250),
+    )
+    .map_err(|error| error.to_string())?
+    {
+        pin_client_endpoint(&endpoint);
+        return Err(format!(
+            "refusing to start a second AgenTerm server: live instance `{}` already at {endpoint}. \
+             Reopen attaches to that server; stop it explicitly if you need a clean slate.",
+            resolved.logical_instance.canonical_name()
+        ));
+    }
     let parameter = frontend_server_spawn_parameter(&resolved);
     let started = crate::platform::process::autostart_server(parameter.0, &parameter.1)
         .map_err(|error| error.to_string())?;

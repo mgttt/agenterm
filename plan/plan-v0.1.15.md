@@ -536,6 +536,26 @@ U′. 标签切换假刷新
 > **砍叶**：U4 最先砍；其次 U3；**U1/U2 保留**（用户直接痛点）。
 > 与 R 组正交，可后置并行，**不**用 U 去挤 R1/R2。
 
+### P0′. 关窗再开保会话（**用户 2026-08-05 严重事故** · 在修）
+
+> **事故**：关 GUI 再开并选 `main` 后，窗口内容像全重置、agent「全退出」。
+> 实测常为：**起了第二个 main server**，用 workspace.json **假恢复**
+> （`restore_tab` = 重新 `spawn cmd.exe`，只恢复 title/note，**不**接回原 PTY）。
+>
+> **已修（工作区）**：
+> - GUI `connect_or_start`：默认 endpoint 连不上时，先
+>   `find_live_endpoint_for_logical_instance` **附着**同逻辑 instance 的 live peer；
+> - `start_frontend_server_process`：**拒绝**在已有 live 同名 instance 时再 spawn；
+> - recovery 路径同样优先 pin 到 live peer。
+>
+> **仍未解决（诚实边界）**：若 Keep-server 的 server **已随 GUI job 被杀**，
+> 只能假恢复；需平台侧 breakaway 加固（另叶）。Workspace 不保存 agent 进程句柄。
+
+- [x] **P0-1 附着 live peer，禁止静默第二 main**（代码已落）
+- [x] **P0-2 黑盒**：同 instance 第二 server 进程退出；`start_frontend` 拒绝双开；
+  tab 名/note 在单 server 存活时保持（隔离 instance 实测）
+- [ ] **P0-3 server 脱离 GUI job（Windows breakaway）** 防关窗误杀 server
+
 ### S′. 多 Server / Instance 可达与选择（**用户 2026-08-05**；关窗后找得回来）
 
 > **触发**：用户现场 GUI 窗口全部关闭（可能与构建替换二进制有关），不深究
@@ -1501,6 +1521,8 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 用户 GUI 窗全关后提出「顶栏横向 tab 选 server」→ 判断**需求合理、默认形态不采用主窗横向 server tab**。新增 **§一·五 S′**：S1 启动/重开 live instance 列表附着、S2 身份常显、S3 新窗打开另一 instance、S4 同窗热切后置且须确认；硬约束一窗一权威、与 PTY tab 分离、列表复用 server-list；与 L-CC 分工写明；砍叶保 S1 |
 | 2026-08-05 | 用户要求排期兼容 tmux/rmux **send-keys + buffer-paste/copy** 以便「先能发信息」→ 判断 **B′ 控制面兼容要做，但不替代 M handoff**。新增 **§一·五 B′**：B1 契约盘点、B2 夯实 send-keys、B3 命名 buffer 最小集、B4 paste-buffer、B5 与 M 选用表、B6 可选 copy→buffer；硬约束一 pane/tab、有界、不抢焦点、显式 unsupported；排序 B1→B4 为核心 |
 | 2026-08-05 | **B′ 落地（工作区）**：`named_buffer` store + CLI `set/load/show/list/delete/paste-buffer`（别名 setb/loadb/…）；`send-keys` usage 补 PS `@N`；隔离 instance 黑盒：`set-buffer`→`paste-buffer`→capture 见 `BUFFER_PROBE_OK`。live main 须换新 `agenterm-server` 后才有命令。agent 协作仍优先 note；paste 进 Codex TUI 会打断 |
+| 2026-08-05 | **P0 关窗再开重置**：根因=新 server + workspace 假恢复 / 双 main。修 `find_live_endpoint_for_logical_instance` + GUI connect 附着 + `start_frontend_server` 拒双开；黑盒同 instance 仅 1 live、tab note 保留。P0-3 job breakaway 未做 |
+| 2026-08-05 | **关窗确认丢失**：`SC_CLOSE`→`CloseRequested`；`ensure_window_close_dialog_presented` 先 restore 再 layout/show 三按钮；AlreadyOpen 二次 close 重 assert。隔离 instance 黑盒：`ui-action close-window`→`confirm-window-close`；最小化后 close→restore+modal；Keep→重开同 `server_pid`+tab 名保留 |
 | 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
 | 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§一 O 组 + §十一**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
 | 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |

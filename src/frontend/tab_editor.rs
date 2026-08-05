@@ -129,12 +129,14 @@ impl TabEditorDialog {
         }
         if name.len() > UI_TAB_TITLE_MAX_BYTES {
             return Err(format!(
-                "Tab title exceeds the {UI_TAB_TITLE_MAX_BYTES}-byte UI limit"
+                "Tab title is {} bytes; the UI limit is {UI_TAB_TITLE_MAX_BYTES} bytes",
+                name.len()
             ));
         }
         if note.len() > UI_TAB_NOTE_MAX_BYTES {
             return Err(format!(
-                "Tab note exceeds the {UI_TAB_NOTE_MAX_BYTES}-byte UI limit"
+                "Tab note is {} bytes; the UI limit is {UI_TAB_NOTE_MAX_BYTES} bytes",
+                note.len()
             ));
         }
         Ok(Some(TabEditorChanges { name, note }))
@@ -146,6 +148,8 @@ impl TabEditorDialog {
             "target": self.target.as_deref().unwrap_or(""),
             "name_length": self.name_draft.chars().count(),
             "note_length": self.note_draft.chars().count(),
+            "name_bytes": self.name_draft.len(),
+            "note_bytes": self.note_draft.len(),
             "focus": self.focus.as_str(),
         })
     }
@@ -225,7 +229,45 @@ mod tests {
             "x".repeat(UI_TAB_NOTE_MAX_BYTES + 1),
         );
         let error = dialog.capture(true).expect_err("oversized note");
-        assert!(error.contains("Tab note exceeds"));
+        assert!(error.contains("Tab note is"));
+    }
+
+    #[test]
+    fn capture_accepts_at_sign_in_title() {
+        let mut dialog = TabEditorDialog::new();
+        dialog.open("@9".to_owned(), "ds4@codex".to_owned(), String::new());
+        let changes = dialog.capture(true).expect("valid").expect("changes");
+        assert_eq!(changes.name, "ds4@codex");
+    }
+
+    #[test]
+    fn capture_keeps_at_number_target_ids() {
+        let mut dialog = TabEditorDialog::new();
+        dialog.open("@9".to_owned(), "ds4@codex".to_owned(), String::new());
+        assert_eq!(dialog.target(), Some("@9"));
+        let changes = dialog.capture(true).expect("valid").expect("changes");
+        assert_eq!(changes.name, "ds4@codex");
+    }
+
+    #[test]
+    fn capture_reports_byte_length_in_error() {
+        let mut dialog = TabEditorDialog::new();
+        let oversized = "x".repeat(UI_TAB_TITLE_MAX_BYTES + 1);
+        dialog.open("@9".to_owned(), oversized, String::new());
+        let error = dialog.capture(true).expect_err("oversized title");
+        assert!(error.contains("bytes"));
+        assert!(error.contains(&format!("{}", UI_TAB_TITLE_MAX_BYTES + 1)));
+    }
+
+    #[test]
+    fn snapshot_reports_byte_and_char_lengths() {
+        let mut dialog = TabEditorDialog::new();
+        dialog.open("@9".to_owned(), "中ab".to_owned(), "x".to_owned());
+        let snapshot = dialog.snapshot_modal();
+        assert_eq!(snapshot["name_length"], 3);
+        assert_eq!(snapshot["name_bytes"], 5);
+        assert_eq!(snapshot["note_length"], 1);
+        assert_eq!(snapshot["note_bytes"], 1);
     }
 
     #[test]
@@ -238,6 +280,8 @@ mod tests {
         assert_eq!(snapshot["target"], "@9");
         assert_eq!(snapshot["name_length"], 4);
         assert_eq!(snapshot["note_length"], 4);
+        assert_eq!(snapshot["name_bytes"], 4);
+        assert_eq!(snapshot["note_bytes"], 4);
         assert_eq!(snapshot["focus"], "note");
     }
 }
