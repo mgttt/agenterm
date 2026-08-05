@@ -733,6 +733,8 @@ windows x86_64  （无该字段）                             ← 缺字段
 
 ### 5.3 主线 L-CC：Control Center 内容成熟（PRD_02_21 → v0.2.0）
 
+- **UX 设计 SSOT**：[`plan/plan-control-center-ux.md`](plan-control-center-ux.md)
+  （Tab/布局线框、分阶段交付、设计师清单；2026-08-05 开工）。
 - v0.1.11 壳层已 shipped（进程边界/typed bridge/Cockpit read-only）；
   v0.2.0（PRD_02_18 M12，原 plan-v0.2.0.md 已并入）做内容成熟。
 - 用户点名内容：**workflow/pipeline 工作台**（C1 promoted →
