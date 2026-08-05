@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控2**刷新：2026-08-05（抽象复用两叶已合）
+最后由**舰队值班会话**刷新：2026-08-05T23:06Z（duty 一轮）
 
 ## 共享事实
 
@@ -14,11 +14,12 @@
 | 当前主线任务 | **抽象复用推进** — palette SSOT + shared preset 2×2 grid 已合 |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
 | 执行计划 | `plan/plan-skins-v1.md`（含 Phase 2B deferred + post-merge cleanup） |
-| `origin/main` | skins Phase 2B 已合；`bb5ef28` cursor_agent.py |
-| 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
+| `origin/main` | `478e131`；skins Phase 2B / palette SSOT / preset grid 已合 |
+| 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
-| auto-dream | **未成功触发**：Automation 曾绑 `4f22874a-…`，主控2 环境是 `7ef6e5b0-…`；须人类改绑后 Run now |
+| auto-dream | **绿**：Automation `f2326638-…` 已绑主控2 同环境；本轮 `bc-0958a47a-…`（显示名「舰队值班会话」）完整跑通 |
+| `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
 
@@ -37,12 +38,20 @@
 ## 席位状态
 
 ### 主控2 · 2026-08-05
-- 状态: RUNNING — 自主推进抽象复用（本轮 palette SSOT + preset grid）
-- 分支: `main`
-- 下一步: 等用户/duty；deferred skins（Linux Apply icon / Win fancy.ico / metrics paint）按需再派
+- 状态: IDLE（直播）— mailbox 先前写 RUNNING；duty 见 API=IDLE
+- 分支: `main` / 代理分支 `cursor/2-c843`
+- 下一步: 等用户；deferred skins（Linux Apply icon / Win fancy.ico / metrics paint）按需再派
 - 阻塞: 无
 - 已合: skins Phase 1–2B；`bb5ef28` cursor_agent.py；palette SSOT；`appearance_preset_grid`
-- 舰队: pulse/duty 绿（`--json --no-live` findings=0）；Automations `主控 造梦` 已挂
+- 舰队: duty findings=0；auto-dream 本轮已通
+
+### 主控 造梦 / 舰队值班会话 · 2026-08-05T23:06Z
+- 状态: IDLE — 本轮 duty 结束；无新指令不开工
+- bcId: `bc-0958a47a-6276-413e-8053-046fdba854d8`
+- URL: https://cursor.com/agents/bc-0958a47a-6276-413e-8053-046fdba854d8
+- 分支: `main`（duty 工作区）
+- 下一步: cron 下一轮再起
+- 阻塞: 无
 
 ### 分身3 · 2026-08-05
 - 状态: IDLE — fleet-pulse 已感知；无新指令不开工
@@ -61,3 +70,7 @@
 - 延后: Apply 后 Linux icon；Win fancy.ico embed；metrics 绘制
 - 下一步: 待命
 - 阻塞: 无
+
+## 交接日志
+
+- 2026-08-05T23:06Z · 舰队值班会话(`bc-0958a47a-…`) · duty: noop findings=0 main=478e131；env=`7ef6e5b0` 已对齐；未 apply；lock 已清
