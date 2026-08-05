@@ -37,12 +37,12 @@
 ## 席位状态
 
 ### 主控2 · 2026-08-05
-- 状态: RUNNING — 自主推进抽象复用
+- 状态: RUNNING — 自主推进抽象复用（本轮 palette SSOT + preset grid）
 - 分支: `main`
-- 下一步: shared `appearance_preset_grid` 合入后 IDLE/下一叶；deferred skins 按需再派
+- 下一步: 等用户/duty；deferred skins（Linux Apply icon / Win fancy.ico / metrics paint）按需再派
 - 阻塞: 无
-- 已合: 分身3 Phase 1；分身4 Phase 2A/2B；`bb5ef28` cursor_agent.py
-- 舰队: pulse/duty；Automations `主控 造梦` 已挂
+- 已合: skins Phase 1–2B；`bb5ef28` cursor_agent.py；palette SSOT；`appearance_preset_grid`
+- 舰队: pulse/duty 绿（`--json --no-live` findings=0）；Automations `主控 造梦` 已挂
 
 ### 分身3 · 2026-08-05
 - 状态: IDLE — fleet-pulse 已感知；无新指令不开工
