@@ -8,7 +8,6 @@ pub(crate) mod control_center;
 mod control_contract;
 mod control_dispatch;
 mod event_journal;
-mod named_buffer;
 mod instances;
 mod ipc_endpoint;
 mod ipc_transport;
@@ -16,6 +15,7 @@ mod locale;
 pub mod mcp_catalog;
 mod mcp_fleet;
 pub mod mcp_stdio;
+mod named_buffer;
 pub mod operations;
 mod protocol;
 pub mod script_api_view;
@@ -84,7 +84,7 @@ pub use platform::{
 #[allow(unused_imports)]
 pub use frontend::run_gui_entry;
 
-pub use server_app::run_server_entry;
+pub use server_app::{run_server_entry, run_server_entry_with_args};
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;

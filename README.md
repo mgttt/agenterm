@@ -165,8 +165,10 @@ build metadata under `dist/`:
 - `dist/agenterm-cc.exe` — isolated Control Center projection; informational
   commands include `--help`, `--version`, `capabilities --json`, and
   `snapshot --json`.
-- `dist/agenterm-server.exe` — internal headless workspace, PTY, parser, and
-  event authority; not yet the default GUI backend.
+- `dist/agenterm-server.exe` — thin image-isolation alias for
+  `agenterm --server` (headless workspace/PTY/event authority). Windows GUI
+  autostart still launches this sibling PE so the replaceable GUI image is
+  not locked; preferred user entry is `agenterm --server`.
 - `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.

@@ -68,13 +68,15 @@ src/platform/adapters/       主机实现（物理目录）
 
 | 二进制 | 路径 | 角色 |
 |--------|------|------|
-| `agenterm` | `src/bin/agenterm.rs` | GUI 启动器 |
-| `agenterm-server` | `src/bin/agenterm-server.rs` | 工作区/PTY/事件权威（可替换 UI 的头less） |
+| `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；加 `--server` 进入无窗权威 |
+| `agenterm-server` | `src/bin/agenterm-server.rs` | Windows 镜像隔离别名（同 `agenterm --server`）；autostart 仍用此 PE |
 | `agenterm-cli` | `src/bin/agenterm-cli.rs` | 控制平面 CLI |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
 | `agenterm-rhai` | `src/bin/agenterm-rhai.rs` | 本地 Rhai 运行时（无权限策略） |
 | `agenterm-mcp` | `src/bin/agenterm-mcp.rs` | 只读 MCP sidecar |
 | `agenterm-mux` | `src/bin/agenterm-mux.rs` | Fleet multiplexer 前端 |
+
+Authority entry plan: [`plan/plan-agenterm-server-mode.md`](plan-agenterm-server-mode.md)。
 
 Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发版以 Candidate/Release 链为准）。
 

@@ -328,7 +328,10 @@ behavior.
   downloadable binaries are published only by exact-Candidate Promotion.
 - Keep `agenterm.exe` as a Windows-subsystem GUI, `agenterm-cli.exe` as the
   native control client, and `agenterm-mux.exe` as the compatibility client.
-  All entry points must reuse the library.
+  Preferred headless authority entry is `agenterm --server`; keep shipping
+  thin `agenterm-server.exe` as the Windows image-isolation autostart alias
+  (do not spawn long-lived authority by remapping the GUI PE). All entry
+  points must reuse the library.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
  pane, and unsupported commands must fail explicitly.
 

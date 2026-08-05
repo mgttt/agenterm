@@ -11,7 +11,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
-| 当前主线任务 | **抽象复用推进** — palette SSOT + shared preset 2×2 grid 已合 |
+| 当前主线任务 | **`agenterm --server` 入口** — 计划 `plan/plan-agenterm-server-mode.md`；保留 server PE 作 Win 镜像别名 |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
 | 执行计划 | `plan/plan-skins-v1.md`（含 Phase 2B deferred + post-merge cleanup） |
 | `origin/main` | `30437eb`；skins Phase 2B / palette SSOT / preset grid 已合 |

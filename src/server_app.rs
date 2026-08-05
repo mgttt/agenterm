@@ -138,7 +138,12 @@ struct UiClientSnapshotRecord {
 }
 
 pub fn run_server_entry() -> i32 {
-    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    run_server_entry_with_args(env::args().skip(1).collect())
+}
+
+/// Headless authority entry used by `agenterm --server` and the thin
+/// `agenterm-server` image alias. `arguments` must not include `--server`.
+pub fn run_server_entry_with_args(arguments: Vec<String>) -> i32 {
     if let Err(error) = configure_server_launch(&arguments) {
         eprintln!("AgenTerm server argument error: {error:#}");
         return 2;
@@ -157,37 +162,41 @@ fn configure_server_launch(arguments: &[String]) -> Result<()> {
     let mut position = 0;
     while position < arguments.len() {
         match arguments[position].as_str() {
+            "--server" => {
+                // Tolerated when the thin alias or wrappers forward raw argv.
+                position += 1;
+            }
             "--address" => {
                 if selectors.address.is_some() {
-                    anyhow::bail!("agenterm-server.exe --address may be specified only once");
+                    anyhow::bail!("agenterm --server --address may be specified only once");
                 }
                 let value = arguments
                     .get(position + 1)
-                    .context("agenterm-server.exe --address requires HOST:PORT")?;
+                    .context("agenterm --server --address requires HOST:PORT")?;
                 crate::client::parse_loopback_ipc_address(value)?;
                 selectors.address = Some(value.clone());
                 position += 2;
             }
             "--endpoint" => {
                 if selectors.endpoint.is_some() {
-                    anyhow::bail!("agenterm-server.exe --endpoint may be specified only once");
+                    anyhow::bail!("agenterm --server --endpoint may be specified only once");
                 }
                 selectors.endpoint = Some(
                     arguments
                         .get(position + 1)
-                        .context("agenterm-server.exe --endpoint requires ENDPOINT")?
+                        .context("agenterm --server --endpoint requires ENDPOINT")?
                         .clone(),
                 );
                 position += 2;
             }
             "--instance" => {
                 if selectors.instance.is_some() {
-                    anyhow::bail!("agenterm-server.exe --instance may be specified only once");
+                    anyhow::bail!("agenterm --server --instance may be specified only once");
                 }
                 selectors.instance = Some(
                     arguments
                         .get(position + 1)
-                        .context("agenterm-server.exe --instance requires NAME")?
+                        .context("agenterm --server --instance requires NAME")?
                         .clone(),
                 );
                 position += 2;
@@ -1976,6 +1985,34 @@ mod tests {
             configure_server_launch(&["--address".to_owned(), "0.0.0.0:48815".to_owned()]).is_err()
         );
         assert!(configure_server_launch(&["--unknown".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn server_mode_flag_is_tolerated_and_selectors_remain_loopback_only() {
+        assert!(configure_server_launch(&["--server".to_owned()]).is_ok());
+        assert!(
+            configure_server_launch(&[
+                "--server".to_owned(),
+                "--instance".to_owned(),
+                "main".to_owned()
+            ])
+            .is_ok()
+        );
+        let error = configure_server_launch(&[
+            "--server".to_owned(),
+            "--address".to_owned(),
+            "8.8.8.8:1".to_owned(),
+        ])
+        .expect_err("non-loopback");
+        assert!(error.to_string().contains("loopback") || error.to_string().contains("127."));
+        let dup = configure_server_launch(&[
+            "--address".to_owned(),
+            "127.0.0.1:1".to_owned(),
+            "--address".to_owned(),
+            "127.0.0.1:2".to_owned(),
+        ])
+        .expect_err("duplicate address");
+        assert!(dup.to_string().contains("agenterm --server"));
     }
 
     #[test]
