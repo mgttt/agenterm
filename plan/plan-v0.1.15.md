@@ -326,17 +326,75 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  └─ [ ] P-P1（政策，可选）非法 UTF-8 默认 lossy 还是硬失败；
 │        图像粘贴是否永远拒绝——默认建议：**lossy 可选 + 图像硬拒绝文案**
 │
-└─ S. 结构 SSOT 机读化 + 微重构预备（契约=`plan/ARCHITECTURE.md` §8；**HOLD 待用户通知**）
-   ├─ [ ] S0 状态：多 agent 并行中 → **本泳道不写主树**；仅文档预备
-   │     复审触发：用户通知「可 review 新一轮再开工」
-   ├─ [ ] S1 扩 `boundary_tests`（单向 A 档）：必存在 bins/关键目录、
-   │     禁复活路径（如已删 services/frontend）、可选 adapter 行数软预算
-   ├─ [ ] S2 代码→文档围栏（B 档）：扫描 `src`/`crates`/`src/bin` 生成
-   │     structure 块；CI 与 ARCHITECTURE 围栏 diff（失败=结构漂）
-   ├─ [ ] S3（可选，长期）`architecture.manifest` 真源（C 档）：
-   │     清单驱动生成 md 块 + 同一清单喂测试；**不**新开第二份现行结构 md
-   └─ [ ] S-prep 预备树（§九）：复审清单 + 微重构刀序 + 文件域互斥
-         债务钩 L2/L3/L4 在 ARCHITECTURE §4；落地须同批回写 §1/§3
+├─ S. 结构 SSOT 机读化 + 微重构预备（契约=`plan/ARCHITECTURE.md` §8；**HOLD 待用户通知**）
+│  ├─ [ ] S0 状态：多 agent 并行中 → **本泳道不写主树**；仅文档预备
+│  │     复审触发：用户通知「可 review 新一轮再开工」
+│  ├─ [ ] S1 扩 `boundary_tests`（单向 A 档）：必存在 bins/关键目录、
+│  │     禁复活路径（如已删 services/frontend）、可选 adapter 行数软预算
+│  ├─ [ ] S2 代码→文档围栏（B 档）：扫描 `src`/`crates`/`src/bin` 生成
+│  │     structure 块；CI 与 ARCHITECTURE 围栏 diff（失败=结构漂）
+│  ├─ [ ] S3（可选，长期）`architecture.manifest` 真源（C 档）：
+│  │     清单驱动生成 md 块 + 同一清单喂测试；**不**新开第二份现行结构 md
+│  └─ [ ] S-prep 预备树（§九）：复审清单 + 微重构刀序 + 文件域互斥
+│        债务钩 L2/L3/L4 在 ARCHITECTURE §4；落地须同批回写 §1/§3
+│
+└─ O. **macOS / OSX 本机跟进泳道**（2026-08-05 派发 · 见 **§十一** 完整作业规格）
+   ├─ [ ] O0 接手基线（先做，只读）
+   │     HEAD 与 `origin/main` 对齐；`agenterm-cli --version`；本机 0.1.14+
+   │     二进制路径；`ImeStatus`/粘贴各跑一次对照；记基线绿
+   ├─ [ ] O1 **ImeStatus macOS 真实现**（= N1 的 osx 半叶 · 首选开工）
+   │     域：`crates/agenterm-platform/src/adapters/macos/ime.rs` +
+   │     必要 link（Carbon/HIToolbox TIS）；**禁** `windows/ime.rs` /
+   │     `windows/control_window.rs`
+   │     验收：中文输入法显示名 + ABC latin；`open`/`full_shape` 不伪造
+   │     细节与 TIS 实测见 §一·五 N1 / §十一 O1
+   ├─ [ ] O2 **粘贴 macOS 真机诊断 → T0 文案/错误码**（P 组本机半叶）
+   │     复现：emoji/CJK 大段、SGR 假终端拷贝、截图-only、真空剪贴板
+   │     产出：根因表（A 读盘 / B 归一 / C 无投递）+ 最小 T0 修复或报告
+   │     域：`macos/clipboard.rs`、`ui_clipboard.rs`、unix frontend paste
+   │     **禁** 擅自做 T1 图→路径 / T2 多 MIME（须 P-P1 / PRD）
+   ├─ [ ] O3 **install / 升级 UX 本机**（G 组可真机叶）
+   │     G7a 类：磁盘版 vs 运行 server 版提示；stop-server 文案
+   │     G2 孤儿 symlink 清理（若本机仍有）
+   │     G1 **仅文档/探测** 除非 G-P1 已拍板（勿擅自默认 unsigned 回落）
+   ├─ [ ] O4 **Unix/macOS IME 合成路径对照**（不碰 Win I1–I3）
+   │     真机：vim/中文 preedit、状态栏 IME 读数与 O1 联动
+   │     若 winit IME 事件缺洞：记诊断，**不**抄 Win WM_IME 进 macos
+   ├─ [ ] O5 可选尾账（低优先）
+   │     macOS physical pointer acceptance（parity 矩阵）
+   │     `plan/osx-cpu-improve.md` 标 shipped——仅当用户仍报高 CPU 再回归测
+   ├─ [ ] O6 **Shift+鼠标选区无法复制**（用户 2026-08-05 真机痛点 · **阻塞工作**）
+   │     症状：在 AgenTerm 终端区用 **Shift + 鼠标**（或拖选）选出文字后，
+   │     **复制不成功**（无法粘到别处 / 无「Copied N characters」反馈）
+   │     代码锚（unix embedded / macOS 路径，待证）：
+   │       - 拖选松手：`complete_terminal_selection` → `copy_terminal_selection`
+   │         但 `let _ = …` **吞掉** clipboard 写失败，状态栏可无声失败
+   │       - 快捷键：`Cmd+C` 走 `terminal_shortcut_action`（macOS primary=meta）；
+   │         仅当 `has_selection && !empty` 才 Copy，否则 Suppress/Forward
+   │       - 写盘：`clipboard::set_clipboard_text` → platform `pbcopy` 路径
+   │       - 选区：`frontend/selection` + `begin_terminal_selection`；
+   │         **未见** 明确的 Shift-扩展选区分支（若用户依赖 shift-click 扩展，
+   │         可能根本没进 completed selection）
+   │     疑点（接手 agent 须分类，勿一次乱改）：
+   │       a) 选区视觉有、松手 auto-copy 写盘失败被吞
+   │       b) 选区空/未 complete（shift 手势未建 gesture）
+   │       c) Cmd+C 未识别为 primary 或 has_selection 假
+   │       d) 与 O2 同源：clipboard 写路径（pbcopy）失败
+   │     验收（可证伪，本机）：
+   │       1) 左键拖选多行 → 松手后 `pbpaste` 含所选正文；或状态栏 Copied N
+   │       2) 拖选后 **Cmd+C** → 同上
+   │       3) 用户原手势 **Shift+鼠标** 若产品应支持扩展选区：文档化或实现；
+   │          若不应支持：UI 不暗示成功、文案说明「用拖选或 Cmd+C」
+   │       4) 写盘失败时**禁止静默**：status/feedback 带 code（勿 `let _ =`）
+   │     域：`unix/frontend/mod.rs`（选区/complete/copy）、
+   │     `frontend/selection.rs`、`frontend/input.rs`（Cmd+C）、
+   │     `macos/clipboard.rs` set_text；**禁** windows remote 除非共享叶
+   │     优先级：**≥ O2**（同属复制粘贴刚需）；建议 O0 基线后 **O6 与 O1 可并行**
+   │     （文件域：O6 偏 frontend/clipboard 写，O1 偏 ime.rs）
+   └─ [ ] O-禁 文件域 / 协作
+         禁：`adapters/windows/**`、Win-only smoke 改绿、改 Candidate 政策
+         单写者：O1/O2/O6 注意 clipboard 写路径共享；O6 与 O2 可同 agent 串行
+         回写：每叶绿后 pathspec 提交 + 更新本节 checkbox + §十一 进度
 ```
 
 ## 一·五、v0.1.15 收敛工作树（**这是可执行清单**；上面 §一 是素材全集）
@@ -740,6 +798,7 @@ B′. tmux/rmux send-keys + buffer
     **Unix 侧的状态读取**。两者在 facade 的不同侧，互不触碰对方文件。
   - **若工期紧**：可只做 macOS 档（Linux 留 stub 并注明），仍然兑现
     「三平台平权」的一半，且我方能真机验证
+  - **派工**：macOS 半叶由 **§一 O / §十一 O1** 本机 agent 执行；Linux 半叶另派
 
 ### M. 多 Agent 观察与交接（**Fleet 控制面地基**；2026-08-05 实测驱动）
 
@@ -976,6 +1035,7 @@ M. 多 Agent 观察与交接
 | 11 | **B5 + M1/M2 文档** | 划清 note/handoff vs send/paste；可与 B2 同 PR |
 | 12 | **S3** | 新窗打开另一 instance；复用 S1 列表 |
 | 13 | **M3 → M4 / U3 / N1** | 后置并行池；S4/U4/B6 默认可砍或 v0.2.x |
+| **OSX 机** | **O0 → O6（复制阻塞）→ O1 → O2 → O3**（§一 O / §十一） | 另一 agent 本机跟进；O6 用户真机痛点优先；O1=N1 macOS 半叶 |
 
 ### 二·三 明确不做速度优化的部分
 
@@ -1031,8 +1091,9 @@ M. 多 Agent 观察与交接
 | G7b/c/d | 等 G-P2 | 碰 keep-server 默认语义，须人工拍板 |
 | H2 install.sh 消费 releases.json | v0.2.x | 依赖 H1 落地并稳定一版后再改消费端 |
 | H5 agenterm.work 接通 | 等 P1/P5 | 政策未定 |
-| P 组（粘贴） | v0.2.x | 用户高频但与本版主题正交；且 P1 需跨平台夹具，工作量不小 |
+| P 组（粘贴）全量跨平台 | v0.2.x 全量；**O2=本机 T0 诊断可先做** | 全量夹具重；macOS 真机半叶归 O 泳道 |
 | S 组（结构 SSOT） | **HOLD** | 多 agent 在途，用户通知后先复审再开工（见 §九） |
+| O 组 Linux 半叶 / Win IME | 他泳道 | O 只 macOS；N1 Linux、Win I1–I3 不归本机 agent |
 | §三·五 UI/UX 观察 | 分散 | T2/SB1/W1 标「顺手做」，其余归 v0.2.0+；本版不单独排期 |
 | §五 五条主线 | 各自版本 | L-NET/L-CC/L-EXT/L-PKG/L-CU 只做对齐记录与决策项 |
 
@@ -1176,6 +1237,7 @@ click tab row
 | `prd/PRD_02_20_native_platform.md` | Platform Facade 收口证据（§五 前置判断） |
 | `plan/precision-audit.md` | C 组竞态根因复核的记录处 |
 | `install.sh` | 安装/更新实现 SSOT；§八 / G 组改进入口 |
+| `plan/plan-v0.1.15.md` §一 **O** + **§十一** | macOS 本机 agent 作业规格（ImeStatus / 粘贴 T0 / install UX） |
 
 ---
 
@@ -1440,6 +1502,185 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 用户要求排期兼容 tmux/rmux **send-keys + buffer-paste/copy** 以便「先能发信息」→ 判断 **B′ 控制面兼容要做，但不替代 M handoff**。新增 **§一·五 B′**：B1 契约盘点、B2 夯实 send-keys、B3 命名 buffer 最小集、B4 paste-buffer、B5 与 M 选用表、B6 可选 copy→buffer；硬约束一 pane/tab、有界、不抢焦点、显式 unsupported；排序 B1→B4 为核心 |
 | 2026-08-05 | **B′ 落地（工作区）**：`named_buffer` store + CLI `set/load/show/list/delete/paste-buffer`（别名 setb/loadb/…）；`send-keys` usage 补 PS `@N`；隔离 instance 黑盒：`set-buffer`→`paste-buffer`→capture 见 `BUFFER_PROBE_OK`。live main 须换新 `agenterm-server` 后才有命令。agent 协作仍优先 note；paste 进 Codex TUI 会打断 |
 | 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
+| 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§一 O 组 + §十一**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
+| 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
+
+---
+
+## 十一、macOS / OSX 本机 agent 作业规格（2026-08-05 派发）
+
+> **给接手 agent 的完整上下文。** 用户本机：macOS aarch64（曾验证 macOS 26.5 + 微信输入法 TIS）。  
+> 仓库：`agenterm`，分支 `main`（派发时 HEAD 约 `b15b145`，开工前务必 `git pull`）。  
+> 目标树入口：**§一 O 组**；契约 SSOT：`plan/ARCHITECTURE.md`。  
+> **不做**：Windows IME 文件、发布链 R/H 核心、S 组结构大重构（HOLD）、T2 粘贴。
+
+### 11.1 分工（避免撞车）
+
+| 泳道 | 谁 | 文件域 |
+|------|-----|--------|
+| **O（本规格）** | **本 macOS 机 agent** | `adapters/macos/**`、unix frontend 粘贴/IME 消费侧、`install.sh` 文案级、本机证据 |
+| Win IME I1–I3 | 已入 main / Win agent | `adapters/windows/**` — **O 禁写** |
+| 发布链 R/A/H | 他 agent | workflows / check.rhai — O 勿抢 |
+| N1 Linux 半叶 | 另派 | `adapters/linux/ime.rs` — O 默认可只留 stub 注释 |
+
+### 11.2 作业树（执行序）
+
+```text
+O  macOS 本机泳道
+│
+├─ O0 基线（30min 内）
+│  ├─ git pull --ff-only；记录 HEAD
+│  ├─ agenterm-cli --version；readlink ~/.local/share/agenterm/current
+│  ├─ 状态栏 IME 读数截图/笔记（预期常为 off / 空，因 stub）
+│  ├─ **必做**：终端区 左键拖选 + Shift+鼠标选 + Cmd+C → 能否 `pbpaste` 见文
+│  ├─ 粘贴四例各一次：纯中文、emoji 行、截图、他终端大段 → 记成败文案
+│  └─ 产出：§十一 进度表「基线」行（含 O6 复现结果）
+│
+├─ O6 Shift/拖选无法复制（**优先修复 · 阻塞工作**）
+│  ├─ 复现并分类 a–d（§一 O6 疑点）
+│  ├─ 修：静默 `let _ = copy` → 可见失败；gesture complete；Cmd+C has_selection
+│  ├─ 真机验收四条见 §一 O6
+│  └─ 与 O2 共享 clipboard 写路径时串行，先 O6 后 O2
+│
+├─ O1 ImeStatus macOS（主交付 · 对齐 N1）
+│  ├─ 改 adapters/macos/ime.rs：TISCopyCurrentKeyboardInputSource + 属性
+│  ├─ link Carbon/HIToolbox（按 crate 现有 FFI 风格）
+│  ├─ 单测：能报则报、不能报不猜
+│  ├─ 真机：微信输入法 / ABC 切换，状态栏或 label() 符合 N1 验收
+│  └─ 提交 pathspec 精确；回写 N1 checkbox（macOS 半叶）+ O1
+│
+├─ O2 粘贴 T0（真机诊断优先，小修可选）
+│  ├─ 按 §十 夹具复现；定位断裂点 A/B/C（§10.3）
+│  ├─ 最小可交：错误码/文案细分（image_only / empty / invalid_utf8）
+│  │     或书面报告「须跨平台改 ui_clipboard，本机只证」
+│  └─ 禁止：未批 T1 写 temp 图路径；禁止改 Win clipboard
+│
+├─ O3 install/升级 UX（本机可证）
+│  ├─ G7a：有旧 server 时升级/重开提示是否可理解
+│  ├─ G2：BIN 断链扫描
+│  └─ G1：无 G-P1 只写探测笔记，不改默认回落策略
+│
+├─ O4 合成路径（观察+小修）
+│  ├─ vim + 中文 preedit 是否完整；与 O1 状态是否一致
+│  └─ 问题记 plan；大改走新叶，不抄 Win control_window
+│
+└─ O5 可选
+   ├─ physical pointer acceptance
+   └─ CPU：仅用户仍报卡时对照 osx-cpu-improve.md
+```
+
+### 11.3 验收命令（亲测，示例）
+
+```bash
+git pull --ff-only
+cargo test -p agenterm-platform --all-features   # 含 ime 单测时
+# 或仓库惯用 quick：
+# ./check.sh --quick
+
+agenterm-cli --version
+# GUI O6：拖选/Shift+选 → 松手或 Cmd+C → pbpaste 应含正文
+# GUI：切换输入法看状态栏；粘贴四例；升级场景若需要再跑 install 文案
+pbpaste | head -c 200
+```
+
+### 11.4 进度表（接手 agent 更新）
+
+| 叶 | 状态 | HEAD/笔记 |
+|----|------|-----------|
+| O0 | [x] | `b15b145`；`current → 0.1.14-macos-aarch64`；`agenterm-cli` 在 `~/.local/bin` |
+| **O6** | [~] **已定因，待授权修** | **疑点 (b) 坐实**：无 Shift-扩展选区分支；详见 §11.8 |
+| O1 | [x] **adapter 半叶** `28d6959` | 见 §11.6；**消费侧半叶未做（新发现，见 §11.7）** |
+| O2 | [ ] | |
+| O3 | [ ] | |
+| O4 | [ ] | |
+| O5 | [ ] | |
+
+### 11.6 O1 交付记录（2026-08-05 · `28d6959`）
+
+**改动**：`crates/agenterm-platform/src/adapters/macos/ime.rs` 30 行 stub → 真实现，
+走 HIToolbox Text Input Sources（`TISCopyCurrentKeyboardInputSource` +
+`kTISPropertyInputSourceType` / `kTISPropertyLocalizedName`）。
+**未新增依赖**——Carbon/CoreFoundation 符号手写声明，签名对齐仓内既有的
+`adapters/macos/process_window.rs`（`*mut i8` / `bool` / `*const c_void`），
+避免 `clashing_extern_declarations`。
+
+**本机实测**（macOS 26.5 + 微信输入法）：
+
+```
+STATUS name="微信输入法" available=true open=true native=true full=false
+LABEL=IME: 微信输入法 · native
+```
+
+`cargo test -p agenterm-platform --features ime` → 50 passed；
+`cargo clippy --all-targets` 零告警。
+
+**一处判断修正（值得记）**：初版按「macOS 观测不到就留空」把 `open` 恒置 false，
+实测 label 输出 `IME: 微信输入法 · latin`——**用户正打中文，状态栏却说 latin**。
+复核契约语义：`open` 是「拦截合成 vs 键击直通」。macOS 没有 IMM 的开/关开关，
+**选中 keyboard input mode 本身就是拦截态**；报 false 不是「谦虚留空」，
+而是**断言了一件假事**。故 `open`/`native_mode` 均随 input-mode 选中态。
+`full_shape` 才是真不可观测（在输入法自身进程内，无公开 API），保持默认。
+
+> 教训：契约说「不能报的字段留空」≠「拿不到就填 false」——
+> 先看该字段的**默认值本身是否在断言某种状态**。
+
+### 11.7 新发现：O1 只完成了一半（消费侧缺口）
+
+实证核查（`grep -rn "ime::status"` 全仓）：**`ImeStatus` 只有一个消费者**——
+`src/platform/adapters/windows/remote_frontend.rs:2285`（`refresh_ime_label`）。
+
+Unix frontend（`src/platform/adapters/unix/frontend/`）**没有 IME 状态段**：
+只处理 preedit（`render.rs:1122 render_ime_preedit`，走 winit 事件），
+`StatusBarView` 无 ime 字段，也无 `last_ime_label`。
+
+**含义**：adapter 现在会如实报数，但 **macOS GUI 上仍看不到**。
+N1 原叙述「Unix 状态栏永远 `IME: off`」**不够准确**——真实情况是
+**状态栏压根没有这个段**。故 O1 拆为：
+
+- **O1a adapter 半叶** — 已交付（`28d6959`），单测与任意消费者可用；
+- **O1b 消费侧半叶** — 未做：Unix `StatusBarView` 加 ime 段 + 布局 + poll 刷新。
+  须先对齐 Win 侧 `status_segments` 约定，否则两端 UI 不一致
+  ——**这属于 §一「多平台 UI/UX 对齐」主题，不是纯 macOS 私事**。
+
+O1b **未擅自开工**：要动 `unix/frontend/render.rs` 状态栏布局（跨平台 UI 决策面），
+且 Win agent 正在同 crate 活动——先报用户再定。
+
+### 11.8 O6 代码级定因（2026-08-05 · 未改代码）
+
+按 §一 O6 的 a–d 分类逐条查证：
+
+| 疑点 | 结论 | 证据 |
+|------|------|------|
+| **b) shift 手势未建选区** | ✅ **坐实，即主因** | 全文件 `grep -i shift.*select` → **零命中**。`begin_terminal_selection`（`unix/frontend/mod.rs:2727`）只有 **双击选词** 与 **普通拖选** 两条分支，**没有任何 shift-extend 分支** |
+| a) 松手 auto-copy 被吞 | 存在但非本例主因 | `complete_terminal_selection:2866` 确为 `let _ = self.copy_terminal_selection()`，**四处 `let _ =`**（2748 / 2763 / 2866 / 5137）会静默吞掉写盘失败——但 (b) 下根本走不到这里 |
+| c) Cmd+C 未识别 | 未证伪，次要 | `copy_terminal_selection:2943` 要求 `terminal_selection` 有值；(b) 下它恒为 `None`，直接返回 `Err("no terminal text is selected")` |
+| d) pbcopy 写失败 | **排除** | `macos/clipboard.rs:41` 走 `pbcopy`，本机 `pbcopy`/`pbpaste` 正常 |
+
+**因果链**：Shift+点击 → 无 shift-extend 分支 →
+`terminal_selection` 未建立 → `copy_terminal_selection` 早退 `Err` →
+调用点 `let _ =` **吞掉错误** → **状态栏无任何反馈**，用户看到「按了没反应」。
+
+> 注意 `forward_terminal_mouse`（`mod.rs:3180`）的注释说
+> 「Shift bypasses reporting so local **selection** stays reachable（xterm 惯例）」
+> ——即产品**自称**支持 shift 走本地选区，但本地选区侧没实现 shift 扩展。
+> **文档与实现不一致**，不只是缺功能。
+
+**建议修法（两叶，须用户拍板范围）**：
+
+- **O6a 止血（小、纯收益、建议先做）**：把四处 `let _ = copy_terminal_selection()`
+  改为失败时 `set_status_message`/feedback 带错误码。
+  即使不实现 shift 扩展，用户至少能看到「no terminal text is selected」
+  而不是**静默无反应**。符合 §一 O6 验收第 4 条「禁止静默」。
+- **O6b 实现 shift-extend**：在 `begin_terminal_selection` 加分支——
+  按住 Shift 且已有 `terminal_selection` 时，**扩展**锚点到当前 cell 而非新建手势。
+  需先定：锚点取上次选区的 start 还是 end（xterm 取「较远端」）。
+
+**未擅自开工**：O6b 是行为新增且涉及手势语义（属产品决策）；
+O6a 虽小但会改 4 处调用点的用户可见文案。均先报用户。
+
+### 11.5 激励
+
+每一步都在把 macOS 从「stub 假平权」拉回 facade 真契约；本机验证是 Win 侧无法替代的价值。
 
 ---
 
