@@ -21,12 +21,14 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`�
 
 ### Automations
 
-| Name | cron (UTC) | environmentPublicId | 备注 |
-|------|------------|---------------------|------|
-| `主控 造梦` | `21 * * * *` | **必须** `7ef6e5b0-8a35-11f1-b532-320a589b8025` | 旧登记 `4f22874a-8a90-…` 与主控2 环境不一致；2026-08-05 查：本环境 `source=automations` agent **0** 个（含 archived）。改绑后点 Run now 验证；把 automation UUID URL 回填本表 |
+| Name | automationId | cron (UTC) | environmentPublicId | 备注 |
+|------|--------------|------------|---------------------|------|
+| `主控 造梦` | `f2326638-90f1-11f1-ba66-0e7d0216e441` | `21 * * * *` | `7ef6e5b0-8a35-11f1-b532-320a589b8025` | enabled；repo=`mgttt/agenterm` `main`；首轮 `bc-0958a47a` → `968056a`；spawn 显示名=`舰队值班会话` |
 
 链接：
 
+- Automations：https://cursor.com/automations/f2326638-90f1-11f1-ba66-0e7d0216e441
+- 最近造梦：https://cursor.com/agents/bc-0958a47a-6276-413e-8053-046fdba854d8
 - 主控2：https://cursor.com/agents/bc-05b7c357-d712-440d-b140-8774bfa90e2a
 - 旧主控：https://cursor.com/agents/bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1
 - 分身1：https://cursor.com/agents/bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f
