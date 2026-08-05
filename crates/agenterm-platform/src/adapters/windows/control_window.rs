@@ -37,7 +37,8 @@ use windows_sys::Win32::{
             SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SendMessageW,
             SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW,
             ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
-            WM_COPY, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
+            WM_COPY, WM_DESTROY, WM_ERASEBKGND, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+            WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
             WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
             WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
             WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
@@ -819,6 +820,30 @@ fn dispatch_window_message(
             KeyClassification::TextCommit(text) => Some(ControlWindowEvent::TextInput(text)),
             _ => None,
         },
+        // The terminal grid renders its own inline composition, so suppress
+        // the IME's floating composition window while keeping candidate
+        // windows and the committed-text path (WM_IME_CHAR -> WM_CHAR)
+        // intact. The flags live in lParam; clear IS_SHOWUICOMPOSITIONWINDOW
+        // before the default window procedure sees it.
+        WM_IME_SETCONTEXT if default_process => {
+            #[cfg(feature = "ime")]
+            {
+                const IS_SHOWUICOMPOSITIONWINDOW: isize = 0x0002;
+                let hidden = lp & !IS_SHOWUICOMPOSITIONWINDOW;
+                return unsafe { DefWindowProcW(hwnd, msg, wp, hidden) };
+            }
+            #[cfg(not(feature = "ime"))]
+            {
+                return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+            }
+        }
+        // Cache the composition state for the paint path. Default processing
+        // still runs so composed text keeps flowing as WM_IME_CHAR/WM_CHAR.
+        #[cfg(feature = "ime")]
+        WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
+            crate::selected::ime::refresh_from_message(hwnd, msg);
+            None
+        }
         WM_MOUSEMOVE => Some(ControlWindowEvent::PointerMoved {
             position: point_from_lparam(lp),
             modifiers: current_modifiers(),

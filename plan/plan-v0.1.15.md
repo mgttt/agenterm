@@ -227,6 +227,20 @@ v0.1.15  Feedback shift-left & release-lane economics
 | SB2 | 状态栏 cwd 260px 显示全路径 | 窗口窄时挤压其它段 | 紧凑模式（home 缩写 + 省略号） | v0.2.0+ |
 | W1 | 窗口标题带 profile 后缀（如 custom:uiux-review） | 用户可见噪音 | 发布构建隐藏 profile 后缀 | v0.1.15 顺手 |
 
+### 3.5.3 Windows IME 与协议兼容 UX（2026-08-05 落地，随 v0.1.15 开发）
+
+用户实测缺陷（2026-08-04/05）：终端区中文输入法候选条跟随光标但有
+恒定偏移（约 3-4 个汉字，即合成串宽度）；且担心「新版 GUI 连旧版 server」
+时只有 cryptic 报错。本轮两处落地：
+
+| # | 改动 | 证据/验证 |
+|---|------|----------|
+| I1 | Windows 平台适配器在 WM_IME_START/COMPOSITION/ENDCOMPOSITION 时缓存合成串（GCS_COMPSTR + GCS_CURSORPOS）；GUI 在光标处内联渲染合成面板（镜像 Unix frontend preedit），并抑制 IME 自带浮动合成窗（WM_IME_SETCONTEXT 清除 IS_SHOWUICOMPOSITIONWINDOW），候选条锚点保持在光标 | cargo check / clippy -D warnings / 607 lib tests 绿；待真机中文输入回归（AGENTERM_IME_DEBUG=1 + PLATFORM_IME_DEBUG=1 落盘 %TEMP%） |
+| I2 | `ui-hello` 拒绝时按 ClientTooOld/ClientTooNew 分类并带双方版本号生成可操作错误；GUI 启动失败与 launcher handoff 被拒时弹原生 MessageBox（新增 agenterm-platform `alert` 能力，走 selected/adapters 边界，product-neutral） | `incompatible_ui_contract_names_the_stale_side` 单测 + 607 lib 全绿；MessageBox 路径待真机验证 |
+
+非目标：不改变 ui-bridge 协议版本（仍为 1）；不自动杀旧 server（保留用户
+终端会话），错误文案明确指引用户重启/退出旧版。
+
 
 ## 四、与其它文档的关系
 

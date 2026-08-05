@@ -9,17 +9,31 @@ use windows_sys::Win32::{
         HiDpi::GetDpiForWindow,
         Input::{
             Ime::{
-                CANDIDATEFORM, CFS_POINT, COMPOSITIONFORM, IME_CMODE_FULLSHAPE, IME_CMODE_NATIVE,
-                ImmGetContext, ImmGetConversionStatus, ImmGetDescriptionW, ImmGetOpenStatus,
-                ImmReleaseContext, ImmSetCandidateWindow, ImmSetCompositionWindow,
+                CANDIDATEFORM, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR, GCS_CURSORPOS,
+                IME_CMODE_FULLSHAPE, IME_CMODE_NATIVE, ImmGetCompositionStringW, ImmGetContext,
+                ImmGetConversionStatus, ImmGetDescriptionW, ImmGetOpenStatus, ImmReleaseContext,
+                ImmSetCandidateWindow, ImmSetCompositionWindow,
             },
             KeyboardAndMouse::{GetFocus, GetKeyboardLayout},
         },
-        WindowsAndMessaging::{GetClientRect, GetForegroundWindow, GetWindowRect},
+        WindowsAndMessaging::{
+            GetClientRect, GetForegroundWindow, GetWindowRect, WM_IME_COMPOSITION,
+            WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION,
+        },
     },
 };
 
-use crate::{CapabilityStatus, contract::ime::ImeStatus};
+use crate::{
+    CapabilityStatus,
+    contract::ime::{ImeComposition, ImeStatus},
+};
+
+use std::sync::Mutex;
+
+/// Latest composition read while WM_IME_* messages were processed. The GUI
+/// polls this from the paint path so the terminal can render the in-progress
+/// pinyin inline and anchor the candidate window next to it.
+static COMPOSITION: Mutex<Option<ImeComposition>> = Mutex::new(None);
 
 pub(crate) fn capability_status(_display_available: bool) -> CapabilityStatus {
     CapabilityStatus::Unsupported {
@@ -72,6 +86,73 @@ pub(crate) fn set_anchor_position(x: i32, y: i32) {
         ImmSetCandidateWindow(context, &candidate);
         ImmReleaseContext(focus, context);
     }
+}
+
+/// Refresh the cached composition state from the window message being
+/// processed. The composition text is only readable while the input context
+/// is live on this window, so the adapter caches it here and lets callers
+/// poll it later from the paint path.
+pub(crate) fn refresh_from_message(hwnd: HWND, message: u32) {
+    let next = match message {
+        WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION => read_composition(hwnd),
+        WM_IME_ENDCOMPOSITION => None,
+        _ => return,
+    };
+    if let Ok(mut slot) = COMPOSITION.lock() {
+        *slot = next;
+    }
+}
+
+/// The composition currently being typed on this window, if any.
+pub(crate) fn composition() -> Option<ImeComposition> {
+    COMPOSITION.lock().ok().and_then(|slot| slot.clone())
+}
+
+fn read_composition(hwnd: HWND) -> Option<ImeComposition> {
+    let context = unsafe { ImmGetContext(hwnd) };
+    if context.is_null() {
+        return None;
+    }
+    let text = composition_text(context);
+    let cursor = composition_cursor(context);
+    unsafe {
+        ImmReleaseContext(hwnd, context);
+    }
+    text.map(|text| {
+        let char_count = text.chars().count();
+        ImeComposition {
+            text,
+            cursor: cursor.unwrap_or(char_count),
+        }
+    })
+}
+
+fn composition_text(context: *mut core::ffi::c_void) -> Option<String> {
+    let needed = unsafe { ImmGetCompositionStringW(context, GCS_COMPSTR, std::ptr::null_mut(), 0) };
+    if needed <= 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; needed as usize / 2 + 1];
+    let copied = unsafe {
+        ImmGetCompositionStringW(
+            context,
+            GCS_COMPSTR,
+            buffer.as_mut_ptr() as *mut _,
+            (buffer.len() * 2) as u32,
+        )
+    };
+    if copied <= 0 {
+        return None;
+    }
+    let units = (copied as usize / 2).min(buffer.len());
+    let text = String::from_utf16_lossy(&buffer[..units]);
+    (!text.is_empty()).then_some(text)
+}
+
+fn composition_cursor(context: *mut core::ffi::c_void) -> Option<usize> {
+    let units =
+        unsafe { ImmGetCompositionStringW(context, GCS_CURSORPOS, std::ptr::null_mut(), 0) };
+    (units > 0).then_some(units as usize)
 }
 
 /// Diagnostic trace behind `PLATFORM_IME_DEBUG=1` for candidate-window

@@ -129,3 +129,15 @@ mod tests {
         assert_eq!(status.label(), "IME: 微软拼音 · native · full-width");
     }
 }
+
+/// Current in-progress composition on the focused surface, when the host can
+/// report one. Windows reports this from the IMM composition state that is
+/// refreshed while WM_IME_* messages are being processed; winit hosts
+/// deliver the same data as ImeEvent::Preedit instead and report None here.
+/// cursor is a char index into text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ImeComposition {
+    pub text: String,
+    pub cursor: usize,
+}

@@ -1,6 +1,6 @@
 //! Selected IME capability and platform-neutral composition state machine.
 
-pub use crate::contract::ime::{ImeAction, ImeEvent, ImeStatus};
+pub use crate::contract::ime::{ImeAction, ImeComposition, ImeEvent, ImeStatus};
 use crate::{CapabilityStatus, input::KeyClassification, selected};
 
 pub fn capability_status(display_available: bool) -> CapabilityStatus {
@@ -13,6 +13,15 @@ pub fn capability_status(display_available: bool) -> CapabilityStatus {
 #[must_use]
 pub fn status() -> Option<ImeStatus> {
     selected::ime::status()
+}
+
+/// Current in-progress composition reported by the host, when one is active.
+/// Windows adapters maintain this while WM_IME_* messages are processed;
+/// winit hosts report the same data as ImeEvent::Preedit and answer
+/// None here.
+#[must_use]
+pub fn composition() -> Option<ImeComposition> {
+    selected::ime::composition()
 }
 
 /// Anchor the IME composition and candidate windows to a client-area point.

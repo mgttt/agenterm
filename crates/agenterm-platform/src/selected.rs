@@ -41,6 +41,14 @@ pub(crate) const fn app_container_profile_supported() -> bool {
 #[path = "adapters/windows/console_interrupt.rs"]
 pub(crate) mod console_interrupt;
 
+#[cfg(all(feature = "window", windows))]
+#[path = "adapters/windows/alert.rs"]
+pub(crate) mod alert;
+
+#[cfg(all(feature = "window", not(windows)))]
+#[path = "adapters/unix/alert.rs"]
+pub(crate) mod alert;
+
 #[cfg(all(feature = "console-interrupt", target_os = "linux"))]
 #[path = "adapters/linux/console_interrupt.rs"]
 pub(crate) mod console_interrupt;

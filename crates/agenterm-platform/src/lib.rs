@@ -154,6 +154,9 @@ pub mod contract;
 #[cfg(feature = "activation")]
 pub mod activation;
 
+#[cfg(feature = "window")]
+pub mod alert;
+
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 

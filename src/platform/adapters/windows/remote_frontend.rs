@@ -640,6 +640,8 @@ struct RemoteWindowState {
     last_message: Option<String>,
     last_error: Option<String>,
     last_ime_label: String,
+    ime_preedit: String,
+    ime_preedit_cursor: usize,
     tabs_visible: bool,
     config: AppConfig,
     font: agenterm_platform::font::NativeFont,
@@ -830,6 +832,8 @@ impl RemoteWindowState {
             last_message: None,
             last_error: None,
             last_ime_label: String::new(),
+            ime_preedit: String::new(),
+            ime_preedit_cursor: 0,
             tabs_visible: config.tabs_visible,
             config,
             font,
@@ -874,7 +878,7 @@ impl RemoteWindowState {
     }
 
     fn tick(&mut self) -> bool {
-        let ime_changed = self.refresh_ime_label();
+        let ime_changed = self.refresh_ime_label() | self.refresh_ime_preedit();
         let resize_changed = self.process_terminal_resize_results();
         let paste_changed = self.process_terminal_paste_results();
         let result = self
@@ -2205,6 +2209,27 @@ impl RemoteWindowState {
             return false;
         }
         self.last_ime_label = label;
+        true
+    }
+
+    /// Mirror the host composition state into the render fields, reporting
+    /// whether the terminal's inline preedit needs a repaint. The host cache
+    /// is refreshed while WM_IME_* messages are processed and is read here on
+    /// the poll tick, keeping the platform adapter free of product state.
+    fn refresh_ime_preedit(&mut self) -> bool {
+        let Some(composition) = agenterm_platform::ime::composition() else {
+            if self.ime_preedit.is_empty() {
+                return false;
+            }
+            self.ime_preedit.clear();
+            self.ime_preedit_cursor = 0;
+            return true;
+        };
+        if composition.text == self.ime_preedit && composition.cursor == self.ime_preedit_cursor {
+            return false;
+        }
+        self.ime_preedit = composition.text;
+        self.ime_preedit_cursor = composition.cursor;
         true
     }
 
@@ -5191,7 +5216,28 @@ impl RemoteWindowState {
                         && cursor.top < terminal.bottom
                 })
             {
+                trace_ime_anchor(
+                    terminal,
+                    cursor,
+                    self.cell_width,
+                    self.cell_height,
+                    self.focus_surface,
+                );
                 agenterm_platform::ime::set_anchor_position(cursor.left, cursor.top);
+                if !self.ime_preedit.is_empty() {
+                    paint_ime_preedit(
+                        device,
+                        terminal,
+                        cursor,
+                        palette,
+                        ImePreeditView {
+                            text: &self.ime_preedit,
+                            caret: self.ime_preedit_cursor,
+                            cell_width: self.cell_width,
+                            cell_height: self.cell_height,
+                        },
+                    );
+                }
             }
             self.paint_terminal_selection(device, terminal, &tab.screen, palette);
             self.paint_terminal_scrollbar(device, palette);
@@ -6379,6 +6425,118 @@ fn create_terminal_font(
         metrics.cell_width.round().max(1.0) as i32,
         metrics.cell_height.round().max(1.0) as i32,
     ))
+}
+
+fn trace_ime_anchor(
+    terminal: ProductPixelRect,
+    cursor: ProductPixelRect,
+    cell_width: i32,
+    cell_height: i32,
+    focus_surface: RemoteFocusSurface,
+) {
+    if std::env::var_os("AGENTERM_IME_DEBUG").is_none() {
+        return;
+    }
+    let line = format!(
+        "app: terminal=({},{},{},{}) cursor=({},{}) cell=({},{}) focus={:?}\n",
+        terminal.left,
+        terminal.top,
+        terminal.right,
+        terminal.bottom,
+        cursor.left,
+        cursor.top,
+        cell_width,
+        cell_height,
+        focus_surface,
+    );
+    let path = std::env::temp_dir().join("agenterm-ime-debug.log");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()));
+}
+
+/// Draw the in-progress IME composition as an inline panel below the terminal
+/// cursor, mirroring the Unix frontend's preedit view. The composition text
+/// lives only in the input method's private window, so without this panel the
+/// candidate bar appears to float detached from the cursor while the user
+/// types pinyin.
+fn paint_ime_preedit(
+    device: &mut dyn ControlCanvas,
+    terminal: ProductPixelRect,
+    cursor: ProductPixelRect,
+    palette: &ThemePalette,
+    view: ImePreeditView<'_>,
+) {
+    let ImePreeditView {
+        text,
+        caret,
+        cell_width,
+        cell_height,
+    } = view;
+    let pad = 4;
+    let columns = text
+        .chars()
+        .map(|ch| ch.width().unwrap_or(1).max(1) as i32)
+        .sum::<i32>()
+        .max(1);
+    let box_width = columns * cell_width + pad * 2;
+    let box_height = cell_height + pad * 2;
+    let left = cursor.left.clamp(
+        terminal.left,
+        terminal.right.saturating_sub(box_width).max(terminal.left),
+    );
+    let top = (cursor.top + cell_height).clamp(
+        terminal.top,
+        terminal.bottom.saturating_sub(box_height).max(terminal.top),
+    );
+    let rect = ProductPixelRect {
+        left,
+        top,
+        right: left + box_width,
+        bottom: top + box_height,
+    };
+    fill(device, &rect, palette.modal.canvas_rgb());
+    fill(
+        device,
+        &ProductPixelRect {
+            left: rect.left,
+            top: rect.bottom - 2,
+            right: rect.right,
+            bottom: rect.bottom,
+        },
+        palette.focus_ring.canvas_rgb(),
+    );
+    device.text(
+        PixelPoint::new(left + pad, top + pad),
+        text,
+        palette.text.canvas_rgb(),
+    );
+    let caret_columns = text
+        .chars()
+        .take(caret.min(text.chars().count()))
+        .map(|ch| ch.width().unwrap_or(1).max(1) as i32)
+        .sum::<i32>();
+    let caret_x = (left + pad + caret_columns * cell_width).min(rect.right - 2);
+    fill(
+        device,
+        &ProductPixelRect {
+            left: caret_x,
+            top: top + pad,
+            right: caret_x + 1,
+            bottom: rect.bottom - 2,
+        },
+        palette.focus_ring.canvas_rgb(),
+    );
+}
+
+/// Render input for the inline composition panel.
+struct ImePreeditView<'a> {
+    text: &'a str,
+    caret: usize,
+    cell_width: i32,
+    cell_height: i32,
 }
 
 fn paint_screen(

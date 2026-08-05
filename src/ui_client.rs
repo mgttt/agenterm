@@ -7,8 +7,8 @@ use crate::{
     protocol::IpcResponse,
     ui_bridge::{
         UI_BRIDGE_PROTOCOL_VERSION, UI_CLIENT_STATE_SCHEMA_VERSION, UI_DELTA_MAX_EVENTS,
-        UI_HELLO_SCHEMA_VERSION, UiBootstrapSnapshot, UiDeltaBatch, UiHelloRequest,
-        UiHelloResponse, UiLeaseGrant, UiProtocolRange, UiTabBootstrap,
+        UI_HELLO_SCHEMA_VERSION, UiBootstrapSnapshot, UiCompatibility, UiDeltaBatch,
+        UiHelloRequest, UiHelloResponse, UiLeaseGrant, UiProtocolRange, UiTabBootstrap,
     },
     ui_command::UiClientCommand,
     upgrade_identity::UpgradeIdentity,
@@ -55,6 +55,41 @@ impl UiResizeRequest {
     }
 }
 
+/// Human-readable explanation for a rejected ui-hello, including both sides'
+/// product versions and protocols so the user can tell which binary is stale.
+/// The transport already negotiated compatibility; this message is the
+/// actionable UX half of that negotiation.
+fn incompatible_ui_contract(hello: &UiHelloResponse, client_build: &UpgradeIdentity) -> String {
+    let client_version = client_build.version.as_deref().unwrap_or("unknown");
+    let server_version = hello
+        .server_build
+        .as_ref()
+        .and_then(|identity| identity.version.as_deref())
+        .unwrap_or("unknown");
+    let range = format!(
+        "protocol [{}..{}]",
+        UI_BRIDGE_PROTOCOL_VERSION, UI_BRIDGE_PROTOCOL_VERSION
+    );
+    match hello.compatibility {
+        UiCompatibility::Compatible => format!(
+            "server v{server_version} rejected the compatible UI contract (protocol {})",
+            hello.protocol_version
+        ),
+        UiCompatibility::ClientTooNew => format!(
+            "the running server is too old: server v{server_version} speaks UI protocol {}, \
+             but this GUI v{client_version} requires {range}. Fully quit the older AgenTerm \
+             (and its server) before reopening so a matching server starts",
+            hello.protocol_version
+        ),
+        UiCompatibility::ClientTooOld => format!(
+            "this GUI is too old: GUI v{client_version} speaks UI protocol {}, but the running \
+             server v{server_version} requires a newer client ({range}). Upgrade the GUI or \
+             stop the newer server before reopening",
+            hello.protocol_version
+        ),
+    }
+}
+
 impl UiClientModel {
     pub(crate) fn connect(client_id: String) -> Result<Self> {
         let client_pid = std::process::id();
@@ -97,7 +132,7 @@ impl UiClientModel {
                 .iter()
                 .any(|capability| capability == "lease_gated_interaction")
         {
-            anyhow::bail!("server does not expose the compatible interactive UI contract");
+            anyhow::bail!("{}", incompatible_ui_contract(&hello, &client_build));
         }
 
         let lease: UiLeaseGrant = request_json(vec![
@@ -526,8 +561,8 @@ mod tests {
     use super::*;
     use crate::ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_DELTA_SCHEMA_VERSION, UI_SCREEN_SCHEMA_VERSION,
-        UiComposerSnapshot, UiCursorSnapshot, UiEventPosition, UiScreenSnapshot,
-        UiWorkingContextSnapshot,
+        UiCompatibility, UiComposerSnapshot, UiCursorSnapshot, UiEventPosition, UiHelloResponse,
+        UiScreenSnapshot, UiWorkingContextSnapshot,
     };
 
     fn tab(id: &str, index: u32) -> UiTabBootstrap {
@@ -648,5 +683,40 @@ mod tests {
     #[test]
     fn binary_input_encoding_is_exact_and_allocation_bounded() {
         assert_eq!(encode_hex(&[0, b'A', 0xff]), "0041ff");
+    }
+
+    #[test]
+    fn incompatible_ui_contract_names_the_stale_side() {
+        let client_build = UpgradeIdentity {
+            protocol_version: Some(1),
+            version: Some("0.1.15".to_owned()),
+            ..UpgradeIdentity::default()
+        };
+        let server_build = UpgradeIdentity {
+            protocol_version: Some(1),
+            version: Some("0.1.13".to_owned()),
+            ..UpgradeIdentity::default()
+        };
+        let hello = UiHelloResponse {
+            schema_version: UI_HELLO_SCHEMA_VERSION,
+            accepted: false,
+            compatibility: UiCompatibility::ClientTooNew,
+            client_id: "c".to_owned(),
+            protocol_version: 1,
+            server_pid: 1,
+            position: UiEventPosition {
+                server_epoch: "e".to_owned(),
+                sequence: 0,
+            },
+            bootstrap_schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
+            delta_schema_version: UI_DELTA_SCHEMA_VERSION,
+            capabilities: vec!["interactive_lease".to_owned()],
+            client_build: None,
+            server_build: Some(server_build),
+        };
+        let message = incompatible_ui_contract(&hello, &client_build);
+        assert!(message.contains("0.1.13"), "{message}");
+        assert!(message.contains("0.1.15"), "{message}");
+        assert!(message.contains("too old"), "{message}");
     }
 }

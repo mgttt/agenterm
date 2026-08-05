@@ -59,6 +59,14 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
                      Restart that server to use this launcher capability.",
                     error
                 ));
+                agenterm_platform::alert::show_error(
+                    "AgenTerm",
+                    &format!(
+                        "The running AgenTerm server rejected the launcher handoff:\n\n{}\n\n\
+                         Restart that server to use this launcher capability.",
+                        error
+                    ),
+                );
                 return GuiLaunchResult::BlockedByServer(error);
             }
         }
@@ -86,7 +94,9 @@ fn write_best_effort_stderr(message: &str) {
 }
 
 fn show_startup_error(error: &anyhow::Error) {
-    write_best_effort_stderr(&format!("AgenTerm failed to start:\n\n{error:#}"));
+    let message = format!("AgenTerm failed to start:\n\n{error:#}");
+    write_best_effort_stderr(&message);
+    agenterm_platform::alert::show_error("AgenTerm", &message);
 }
 
 #[cfg(test)]
