@@ -156,11 +156,39 @@ v0.1.15  Feedback shift-left & release-lane economics
    │     建议：`agenterm --version` 打印即退（不启 GUI）；install 写
    │     `current/VERSION` 或 `INSTALL_ROOT/installed.json`
    │     （version/channel/source_tag/installed_at）
-   ├─ [ ] G4 升级后运行态提示：装完未告知「已开窗口仍旧码」
-   │     动机：install 成功后 symlink 已指 0.1.14，但既有 GUI/server
-   │     进程仍跑旧映像；本机实测窗口仍 0.1.12 直至重开
-   │     建议：收尾 say「若 GUI 已在运行请完全退出后重开」；可选探测
-   │     本机 agenterm/agenterm-server 进程并提示 pid（不强制杀）
+   ├─ [ ] G4 升级后运行态提示（install 收尾）：装完未告知「已开窗口仍旧码」
+   │     动机：install 成功后 symlink 已指新版，但既有 GUI/server 仍旧映像
+   │     建议：收尾 say 明确步骤；探测 live server/GUI 时打印 pid+旧 version
+   ├─ [ ] G7 **升级后自适应 / 用户可理解提示**（产品需求，2026-08-05 用户点名）
+   │     动机（真机复现路径）：
+   │       1) 磁盘已升到 0.1.14，旧 0.1.12 server 仍在跑
+   │       2) 关窗对话框默认 = `keep-server-running`（保留 server）
+   │       3) 用户选默认/不关 server 再进 → 仍 attach 旧权威 → 标题/行为仍 0.1.12
+   │       4) 用户无法从文案得知「升级生效 = 必须 stop-server-and-exit 再开」
+   │     非目标：不强制静默杀会话；不削弱 keep-server 的会话保留语义
+   │     验收（可证伪）：
+   │       - 装盘 version ≠ live server version 时，用户**无需读文档**即可知道下一步
+   │       - 走 keep-server 再 attach 旧 server 时，不会被误以为「安装失败」
+   │     建议形态（可组合，实现时择优；政策见 G-P2）：
+   │       a) **install 收尾自适应文案**（最低成本）：
+   │          若探测到 live server/GUI 且 version < installed：
+   │          打印「磁盘已是 X，运行中仍是 Y(pid=…)。要启用 X：关窗时选
+   │          *退出 server*（stop-server-and-exit），或执行
+   │          `agenterm-cli shutdown` 后重开。选 *保留 server* 将继续跑 Y。」
+   │       b) **GUI/attach 运行时提示**（体验主路径）：
+   │          client 二进制 version ≠ attached server version 时：
+   │          启动条/模态一次性提示「会话 server 仍是 Y，本机已装 X；
+   │          要切换到 X 请 stop-server 后重开」+ 显式按钮
+   │          [继续用 Y] / [停止 server 并重开为 X]
+   │       c) **关窗对话框升级感知**（减少误选默认）：
+   │          当本机 installed/current version > 本进程/server version 时，
+   │          将 default_action 改为 `stop-server-and-exit`，或在
+   │          keep-server 选项旁标注「将继续使用旧版 Y，不会启用已装 X」
+   │       d) **可选自动切换**（须 G-P2 批准）：
+   │          install 结束或 attach 发现版本落后时提供
+   │          `agenterm-cli update --apply-running`：优雅 shutdown → 起新 server
+   │          → 恢复 workspace（restore_behavior 已有 restart-processes）；
+   │          默认 off 或仅 CLI 显式 flag，避免 silent 丢交互态
    ├─ [ ] G5 无 first-class 更新入口 / 无 old→new 摘要
    │     动机：无 `agenterm-cli update` / `install.sh --check`；不打印
    │     当前已装版本、channel（unsigned-preview vs signed）、是否已最新
@@ -168,9 +196,13 @@ v0.1.15  Feedback shift-left & release-lane economics
    │     `0.1.12-local → 0.1.14 (macos-unsigned-preview)` 再下载
    ├─ [ ] G6 releases 目录不修剪：0.1.11-local / 0.1.12-local 永久堆积
    │     建议：保留 current + N 个历史（默认 2）或 `AGENTERM_KEEP_RELEASES`
-   └─ [ ] G-P1（政策）macOS 长期 channel：unsigned-preview 是否为默认
-         公开通道，还是必须等 Developer ID 签名 asset 才算 stable
-         （影响 G1 默认行为与 Promotion 文案）
+   ├─ [ ] G-P1（政策）macOS 长期 channel：unsigned-preview 是否为默认
+   │     公开通道，还是必须等 Developer ID 签名 asset 才算 stable
+   │     （影响 G1 默认行为与 Promotion 文案）
+   └─ [ ] G-P2（政策）升级时对 running server 的默认策略：
+         仅提示 / 关窗改 default / 提供一键 apply（G7 a–d）——
+         用户已要求「自适应或提示，否则用户不知道该怎么做」；
+         agent 不自主改 keep-server 默认语义，须人工拍板后再改 default_action
 ```
 
 ## 二、排序建议（起稿人观点）
@@ -183,8 +215,10 @@ v0.1.15  Feedback shift-left & release-lane economics
 5. C 组按复发率排优先级；D 组等人工。
 6. **F1 + F2**：云快照一改即永久消除桌面 smoke 首轮噪音（见 §七）；
    单测误耦合已修，不必再排期。
-7. **G2 + G4 + G3（文档级）**：安装卫生三件套，不碰发布链语义，可与
-   A 组并行；G1/G-P1 等 macOS channel 政策拍板后再改默认回落行为。
+7. **G2 + G4 + G7a（提示文案）**：安装卫生 + 升级后「该怎么做」可理解性；
+   不碰发布链语义，可与 A 组并行。G7b/c（GUI/关窗对话框）为体验主路径，
+   建议紧随 G7a；G7d / 改 default_action 依赖 **G-P2**；G1/G-P1 等
+   macOS channel 政策拍板后再改默认回落行为。
 
 > v0.1.15 是**纯发布链经济学**版本，不与 §五 未来主线（net / CC 内容 /
 > 远程包管理 / computer-use）抢工期；未来主线只做「对齐记录 + 决策项」，
@@ -292,6 +326,47 @@ v0.1.15  Feedback shift-left & release-lane economics
 **与 v0.1.15 的关系**：B1（net-research 移出 release 门）**不**削弱
   net 资格——research 验证仍每晚在 CI/夜间车道跑，只是不再占发布门。
 
+#### 5.2.1 进度实查（2026-08-05，回答"做到哪个 exe 了"）
+
+用户问"不太记得之前做到什么进度、做到哪个 exe"。**实查结论**：
+
+**没有产品 exe，全部在 `research/agenterm-net/` 这个隔离 workspace 里。**
+
+| 核查项 | 结果 |
+|--------|------|
+| 主 workspace 是否含 libp2p/ipfs | **否**——`Cargo.toml` members 仅 `[".", "crates/agenterm-platform"]`；根 `Cargo.toml` 与 `crates/*/Cargo.toml` 全无 libp2p/ipfs 依赖 |
+| 是否有 `agenterm-net` 可执行体 | **否**——`src/bin/` 下七个 bin（`agenterm` / `-cli` / `-mux` / `-rhai` / `-server` / `-mcp` / `-cc`），无 net |
+| 代码在哪 | `research/agenterm-net/`，**自带 `[workspace]`**（刻意脱离主构建图），`version = "0.0.1"`，`publish = false`，描述自称 *"Disposable ... research spike"* |
+| 代码量 | 7 个模块约 **177 KB**：`main.rs` 49KB / `attach.rs` 31KB / `mesh.rs` 26KB / `store.rs` 11KB / `identity.rs` 21KB / `node.rs` 22KB / `tcp_fixture.rs` 17KB |
+| 依赖面 | libp2p 0.56（gossipsub / kad / noise / ping / relay / request-response / tcp / yamux / cbor）+ `cid` 0.11 + `multihash-codetable` + sha2 |
+| CLI 子命令 | `capabilities` / `peer-id` / `self-test` / `mesh-self-test` / `attach-self-test` / `tcp-self-test`（均 `--json`），另有十余个 `--json` 分支 |
+
+**已被 CI 证明跑通的能力**（`scripts/rhai/agenterm-net-research.rhai`
+在每次 release 门里真跑，本轮实测 142.2s，receipt schema
+`agenterm-net/result/v1`，断言逐条列在脚本里）：
+
+- 进程隔离：listener/connector 双进程，**PID 与 PeerId 均不同**、
+  握手成功、bounded ping 往返、listener 生命周期可观测、
+  子进程干净退出 + 孤儿清理武装 + 强制清理可 reap。
+- 资源度量：peak child RSS > 0、最大子线程数 > 0、两次采样完整。
+- 块存储：**round-trip 校验通过、损坏块被拒、store 可删除**。
+- 静态质量：`clippy --locked --all-targets -D warnings` + `cargo test --locked` 全绿。
+
+**对照 §5.2 的状态表**：N1（独立本地证明 identity/connect/CID/block）
+确实 `[x]`——上面这些就是它的证据。N2-M1 标 `[~] 进行中` 也吻合：
+`mesh.rs` / `attach.rs` / `node.rs` 已有实体且有各自 self-test 子命令，
+但**尚未产出产品可消费的 typed facade**，也没有任何 `src/` 代码 import 它。
+
+近期提交（`git log -- research/agenterm-net/`）显示最后动作集中在
+"证明一次 bounded ping 往返 / 校准 self-test 阶段预算 / 收敛 listener
+阶段 deadline / 显式恢复崩溃本地节点 / 保持 durable peer 身份生命周期"
+——即**在补 N2 的鲁棒性证据**，方向与状态表一致。
+
+> 结论一句话：**进度在 N1 完成、N2 进行中；产物是一个隔离的 research
+> spike 二进制（非产品 exe），通过独立 self-test + JSON receipt 自证。**
+> 下一步真正的门槛不是再加协议能力，而是 §5.2 表里的 **N3 产品消费者**
+> ——决定它以什么形态（Script API / InfoHub / CC 诊断）被产品调用。
+
 ### 5.3 主线 L-CC：Control Center 内容成熟（PRD_02_21 → v0.2.0）
 
 - v0.1.11 壳层已 shipped（进程边界/typed bridge/Cockpit read-only）；
@@ -336,6 +411,60 @@ v0.1.15  Feedback shift-left & release-lane economics
   框架；与 M8/M9（可选智能/LLM 网关）独立，证据门先行。
 - 见决策项 P4：是否立项、归口哪个 PRD、首发平台与证据门。
 
+#### 5.6.1 用户补充方向（2026-08-05）：`agenterm-remote.exe` 远程控制协议族
+
+用户诉求原文要点：**控制远程资源**，规划 `agenterm-remote.exe` 逐步支持
+`current` / `ssh` / `rdp` / `vnc` 等协议，做成 computer-use 的控制工具；
+**`current` 最急**；参考 moltbaby 的 `my-computer-use` / `computer-use`。
+
+**已核实的可复用资产**（`/Users/wjc/repos/moltbaby/skills/computer-use/`）：
+
+| 资产 | 内容 | 对本仓的价值 |
+|------|------|-------------|
+| `SKILL.md` 的**洋葱分层**方法论 | native primitive → 通用 CLI → profile selector → workflow → 壳命令，**只允许外层依赖内层** | 直接可搬的分层契约，天然匹配本仓 Platform Facade 边界纪律 |
+| `macos/`（原 my-computer-use，已合并） | Swift native AX + CGEvent + TS wrapper，含 helper daemon/client 拆分 | macOS 后端参考；daemon/client 拆分与本仓 process-reference 思路一致 |
+| `windows/` | Python UIA/CDP/ctypes + C FFI；**已含 `_rdp.py` / `_freerdp.py`** | Windows 后端参考；**RDP 已有实作经验**，非从零 |
+| `linux/` | AT-SPI2 桥接（框架就绪） | Linux 后端参考 |
+| `shared/cu.md`、`computer-use.mindmap.md` | 操控 API 文档与认知地图 | 抽象命令集设计的起点 |
+
+**关键设计判断（起稿人观点，待 P4 拍板）**：
+
+1. **`current` 不是"一种远程协议"，而是协议族的 local 退化档**。
+   把 `current`（控制本机）与 ssh/rdp/vnc 放进**同一套抽象命令集**
+   （截图 / 枚举窗口与控件树 / 点击 / 输入 / 剪贴板 / 文件传输），
+   `current` 只是 transport = in-process 的那一档。这样先做 `current`
+   不是"临时方案"，而是**把接口钉死的最省事路径**——后续加 ssh/rdp/vnc
+   只换 transport，不动上层 workflow。
+2. **`current` 档应尽量复用本仓已有能力**，而不是移植 moltbaby 的 TS/Python：
+   Platform Facade 已有 screenshot / process-window / input /
+   process-reference，`workbench-smoke` / `platform-ux-parity-smoke`
+   已在三平台证明这些原语可用（本轮发布亲测：`gui_child.window_pointer` /
+   `window_message` / `window_control` 均在 CI 真机跑通）。
+   moltbaby 的价值是**分层方法论与命令集设计**，不是具体实现语言。
+3. **独立可执行体、默认 off**，与 `agenterm-net` 同一纪律：
+   不 link 进 terminal/server 热路径，不默认监听，二进制体积设门。
+   远程控制是高权限能力，**默认关闭 + 显式授权**是底线。
+4. **协议优先级**：`current` → `ssh`（无 GUI，纯命令/文件，最易做证据门）
+   → `rdp`（可复用 moltbaby `_freerdp.py` 经验）→ `vnc`。
+   ssh 排第二不是因为需求急，而是因为它的证据门最好写，能先把
+   "transport 可换"这个架构假设证伪或证实。
+
+**给 v0.1.15 的准备工作（不实现，只钉接口与证据）**：
+
+- [ ] CU0 立项判定（P4）：是否进 PRD、归口哪个 owning module。
+- [ ] CU1 抽象命令集草案：把上表 6 类操作写成 typed 契约，标注
+      `current`/`ssh`/`rdp`/`vnc` 各档的**可支持性矩阵**（哪些操作在
+      哪些 transport 下无意义，例如 ssh 无窗口树）。
+- [ ] CU2 复用清单：逐条核对 Platform Facade 现有原语能覆盖 `current`
+      档的哪几条命令，缺口列出来（这一步只读代码，零风险）。
+- [ ] CU3 证据门形态：参考 `agenterm-net-research` 的做法——
+      **独立 workspace + 自证 self-test + JSON receipt**，
+      先不进 release 门（见 §5.2 B1 教训）。
+
+> 风险提示：远程控制 + computer-use 是**高危能力面**（可被用于横向移动）。
+> 建议 CU0 拍板时一并确定授权模型（每会话显式授权？密钥绑定？审计日志？），
+> 而不是留到实现阶段补。
+
 ### 5.7 决策项（需人工拍板，agent 不自主执行）
 
 | ID | 决策 | 影响 |
@@ -346,6 +475,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 | P4 | computer-use 是否立项、归口 PRD、首发平台与证据门 | 决定 L-CU 是否进 v0.2.0 或更后 |
 | D1–D3 | 见 §一 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
 | G-P1 | macOS unsigned-preview 是否为默认公开通道（无 signed 时自动回落 vs 强制 opt-in） | 决定 G1 默认行为与 install/README 首屏命令 |
+| G-P2 | 升级遇到 running server：仅文案提示 / 关窗改 default 为 stop-server / 一键 apply 热切换 | 决定 G7 落 a–d 哪几档；用户已要求自适应或提示 |
 
 ---
 
@@ -361,6 +491,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 
 | 2026-08-04 | Linux 云桌面（DISPLAY=:1 XFCE）实测意见写入 §七 / F 组；单测误耦合已修进 main；F1/F2 为环境快照尾账，不走 PR |
 | 2026-08-05 | macOS aarch64 真机 0.1.12-local→v0.1.14 安装更新实测写入 §八 / G 组；G1–G6 + G-P1 为改进需求，未授权开工 |
+| 2026-08-05 | 用户确认：升级后「关窗不退 server → 再进仍显示旧版」属真实踩坑；要求更新时**自适应或提示**，否则用户无法知道该选 stop-server；追加 **G7 + G-P2**，升 G7a 为 P0 文案、G7b/c 为体验主路径 |
 
 ---
 
@@ -460,7 +591,14 @@ v0.1.15  Feedback shift-left & release-lane economics
    升级成功后用户窗口仍显示/行为旧版本直至退出重开；
    install 收尾无 say。→ **G4**
 
-6. **无 update 语义**  
+6. **关窗默认 keep-server → 再进仍旧版（用户主诉，产品缺口）**  
+   关窗 `default_action = keep-server-running`；用户若按默认保留
+   server，再开窗 attach 旧权威进程，标题/行为仍为旧 version（例：
+   磁盘 0.1.14、运行 0.1.12）。用户无法从 UI 得知「启用新版 =
+   必须 stop-server-and-exit 或 `agenterm-cli shutdown` 后重开」，
+   易误判为安装失败。→ **G7**（自适应/提示；政策 **G-P2**）
+
+7. **无 update 语义**  
    不比较已装版本；不打印 channel；已最新仍会重下重装（本轮因
    显式 `AGENTERM_VERSION` 未踩，但 `resolve_version=latest` 路径
    同样缺 no-op）。releases 下旧 local 目录永留。→ **G5 / G6**
@@ -470,9 +608,11 @@ v0.1.15  Feedback shift-left & release-lane economics
 | 优先级 | 项 | 改动面 | 风险 |
 |--------|----|--------|------|
 | P0 | G2 孤儿 symlink 清理 | `install.sh` 收尾 | 低：仅删指向 current 且 target 缺失的 agenterm* 链 |
-| P0 | G4 重启提示 | `install.sh` say 一行 | 低 |
+| P0 | G4 + **G7a** 升级后可理解步骤 | `install.sh` say + live version 探测 | 低：不杀进程，只文案 |
+| P1 | **G7b** attach 版本不一致提示 / **G7c** 关窗对话框升级感知 | GUI + window_close | 中：文案/默认项需 UX 拍板（G-P2） |
 | P1 | G3 VERSION 文件 + `agenterm --version` | install + GUI launcher 早退 | 中：launcher 参数解析需测 |
 | P1 | G5 old→new / already-latest | `install.sh` | 低 |
+| P2 | G7d 一键 apply 热切换 | cli + shutdown/restore | 中高：会话/交互态；**须 G-P2** |
 | P2 | G1 自动回落 unsigned | `install.sh` + 文案 | **政策依赖 G-P1** |
 | P2 | G6 keep-N releases | `install.sh` | 低；勿删仍被非 current 链引用的目录 |
 
