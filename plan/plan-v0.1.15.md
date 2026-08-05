@@ -1593,7 +1593,7 @@ pbpaste | head -c 200
 | O2 | [ ] | |
 | O3 | [ ] | |
 | O4 | [x] **对照完成，无需改动** | 合成路径实现完好；见 §11.9 |
-| O5 | [ ] | |
+| O5 | [x] **实测后判定无需开工** | 本机 idle 6.0% CPU；见 §11.10 |
 
 ### 11.6 O1 交付记录（2026-08-05 · `28d6959`）
 
@@ -1704,6 +1704,22 @@ winit 通过 `set_ime_cursor_area` 代劳，**且已被逐帧调用**。
 > 缺的是状态栏显示——影响面比 N1 描述的小。
 
 **不抄 Win 的 `WM_IME_*` 进 macOS**（O4 原则），因为 winit 路径已覆盖且更合适。
+
+### 11.10 O5 尾账实测（2026-08-05）
+
+**CPU**：O5 的触发条件是「仅当用户仍报高 CPU 再回归测」。
+`plan/osx-cpu-improve.md:3` 记 `P0–P3 all shipped`，本机实测现网 v0.1.14：
+
+```
+$ ps -Ao pid,pcpu,pmem,comm | grep agenterm
+48771   6.0  0.9  .../releases/0.1.14-macos-aarch64/agenterm
+```
+
+**6.0% CPU（空闲态）**——不是该计划针对的病态占用，触发条件不成立，
+**本版不开工**。若用户后续再报卡顿，回归入口仍是 `plan/osx-cpu-improve.md`。
+
+**physical pointer acceptance**：属 parity 矩阵尾账，无用户诉求驱动，
+优先级低于 O6（用户阻塞）与 O2（复制粘贴刚需），**本版不做**。
 
 ### 11.5 激励
 
