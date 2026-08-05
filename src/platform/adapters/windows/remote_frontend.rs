@@ -19,6 +19,7 @@ use crate::frontend::interaction::{
 };
 use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
+    SYSTEM_MENU_OPEN_INSTANCE_ID as SHARED_SYSTEM_MENU_OPEN_INSTANCE_ID,
     SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
     SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID, settings_json,
 };
@@ -38,6 +39,10 @@ use crate::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
             remote_word_selection,
+        },
+        instance_identity::InstanceIdentity,
+        instance_picker::{
+            InstancePickerDialog, InstancePickerMode, collect_instance_picker_rows,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope},
         tab_editor::{TabEditorDialog, TabEditorFocus},
@@ -154,10 +159,14 @@ const SETTINGS_SIZE_INHERIT_ID: ControlId = ControlId(2135);
 const SETTINGS_THEME_INHERIT_ID: ControlId = ControlId(2136);
 const SETTINGS_RESET_OVERRIDES_ID: ControlId = ControlId(2137);
 const CONTROL_CENTER_ID: ControlId = ControlId(2138);
+const INSTANCE_PICKER_CONFIRM_ID: ControlId = ControlId(2142);
+const INSTANCE_PICKER_CANCEL_ID: ControlId = ControlId(2143);
 const SYSTEM_MENU_COPY_ID: MenuCommandId = MenuCommandId(SHARED_SYSTEM_MENU_COPY_ID as u16);
 const SYSTEM_MENU_PASTE_ID: MenuCommandId = MenuCommandId(SHARED_SYSTEM_MENU_PASTE_ID as u16);
 const SYSTEM_MENU_TOGGLE_TABS_ID: MenuCommandId =
     MenuCommandId(SHARED_SYSTEM_MENU_TOGGLE_TABS_ID as u16);
+const SYSTEM_MENU_OPEN_INSTANCE_ID: MenuCommandId =
+    MenuCommandId(SHARED_SYSTEM_MENU_OPEN_INSTANCE_ID as u16);
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
 
@@ -186,6 +195,25 @@ const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
+
+/// First non-flag token after `ui-action <action>` (for `--name` alternatives).
+fn ui_action_trailing_name(args: &[String]) -> Option<&str> {
+    // args[0] is the action id when dispatched from execute_client_command.
+    let mut index = 1;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "--name" || arg == "--logical-instance" || arg == "--pid" || arg == "--mode" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return Some(arg);
+    }
+    None
+}
 
 trait CanvasRgb {
     fn canvas_rgb(self) -> Rgb8;
@@ -289,6 +317,8 @@ fn remote_control_specs() -> Vec<ControlSpec> {
         edit(NEW_HTTPS_PROXY_ID, false, false),
         button(NEW_CREATE_ID, "Create", false),
         button(NEW_CANCEL_ID, "Cancel", false),
+        button(INSTANCE_PICKER_CONFIRM_ID, "Confirm", false),
+        button(INSTANCE_PICKER_CANCEL_ID, "Cancel", false),
     ]
 }
 
@@ -318,6 +348,13 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             text: "Toggle Tabs".to_owned(),
             enabled: true,
             checked: true,
+            separator_before: true,
+        },
+        SystemMenuItem {
+            id: SYSTEM_MENU_OPEN_INSTANCE_ID,
+            text: "Open instance…".to_owned(),
+            enabled: true,
+            checked: false,
             separator_before: true,
         },
         SystemMenuItem {
@@ -389,6 +426,8 @@ struct RemoteControls {
     new_https_proxy: ControlId,
     new_create: ControlId,
     new_cancel: ControlId,
+    instance_picker_confirm: ControlId,
+    instance_picker_cancel: ControlId,
 }
 
 impl RemoteControls {
@@ -434,6 +473,8 @@ impl RemoteControls {
             new_https_proxy: NEW_HTTPS_PROXY_ID,
             new_create: NEW_CREATE_ID,
             new_cancel: NEW_CANCEL_ID,
+            instance_picker_confirm: INSTANCE_PICKER_CONFIRM_ID,
+            instance_picker_cancel: INSTANCE_PICKER_CANCEL_ID,
         }
     }
 }
@@ -651,6 +692,8 @@ struct RemoteWindowState {
     new_https_proxy: ControlId,
     new_create: ControlId,
     new_cancel: ControlId,
+    instance_picker_confirm: ControlId,
+    instance_picker_cancel: ControlId,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -703,10 +746,13 @@ struct RemoteWindowState {
     focus_state: FocusState,
     close_confirmation: CloseConfirmation,
     cwd_editor_dialog: CwdEditorDialog,
+    instance_picker_dialog: InstancePickerDialog,
     last_published_snapshot: Option<String>,
     render_activity_sample: Option<ControlWindowRenderActivity>,
     render_activity_sample_sequence: u64,
     relay_close_after_completion: Option<WindowCloseChoice>,
+    /// Rebind after the in-flight UI command is completed on the *current* server.
+    relay_attach_after_completion: Option<(String, String)>,
     no_activate: bool,
 }
 
@@ -796,6 +842,8 @@ impl RemoteWindowState {
             new_https_proxy,
             new_create,
             new_cancel,
+            instance_picker_confirm,
+            instance_picker_cancel,
         } = controls;
         let config = load_config();
         let settings_default_draft = config.effective_terminal_appearance(&ipc_address(), None);
@@ -853,6 +901,8 @@ impl RemoteWindowState {
             new_https_proxy,
             new_create,
             new_cancel,
+            instance_picker_confirm,
+            instance_picker_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -902,10 +952,12 @@ impl RemoteWindowState {
             focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             close_confirmation: CloseConfirmation::new(),
             cwd_editor_dialog: CwdEditorDialog::new(),
+            instance_picker_dialog: InstancePickerDialog::new(),
             last_published_snapshot: None,
             render_activity_sample: None,
             render_activity_sample_sequence: 0,
             relay_close_after_completion: None,
+            relay_attach_after_completion: None,
             no_activate,
         })
     }
@@ -1088,6 +1140,12 @@ impl RemoteWindowState {
                     Some(WindowCloseChoice::StopServerAndExit)
                 ),
             )?;
+        if let Some((endpoint, instance)) = self.relay_attach_after_completion.take() {
+            if let Err(error) = self.attach_current_window_to_endpoint(&endpoint, &instance) {
+                self.last_error = Some(format!("instance attach failed: {error:#}"));
+            }
+            return Ok(true);
+        }
         if let Some(choice) = close_after_completion {
             self.window_close_dialog.close();
             match choice {
@@ -1362,6 +1420,7 @@ impl RemoteWindowState {
                 ConfirmTarget::LiveTabClose => {
                     self.finish_close_tab(true);
                 }
+                ConfirmTarget::InstancePicker => self.confirm_instance_picker()?,
                 ConfirmTarget::None => anyhow::bail!("no confirmation is pending"),
             },
             "cancel" => match cancel_target(self.focus_gate()) {
@@ -1373,8 +1432,70 @@ impl RemoteWindowState {
                     self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly)
                 }
                 CancelTarget::TabEditor => self.finish_tab_edit(false),
+                CancelTarget::InstancePicker => self.close_instance_picker(),
                 CancelTarget::None => anyhow::bail!("no modal is pending"),
             },
+            "open-instance-picker" => {
+                let mode = option_value(&command.args, "--mode")
+                    .and_then(InstancePickerMode::parse)
+                    .unwrap_or(InstancePickerMode::Attach);
+                self.open_instance_picker(mode)?;
+            }
+            "instance-picker-next" => {
+                if !self.instance_picker_dialog.is_open() {
+                    anyhow::bail!("instance picker is not open");
+                }
+                self.instance_picker_dialog.select_next();
+                self.layout_instance_picker_controls();
+            }
+            "instance-picker-prev" => {
+                if !self.instance_picker_dialog.is_open() {
+                    anyhow::bail!("instance picker is not open");
+                }
+                self.instance_picker_dialog.select_prev();
+                self.layout_instance_picker_controls();
+            }
+            "instance-picker-select" => {
+                if !self.instance_picker_dialog.is_open() {
+                    anyhow::bail!("instance picker is not open");
+                }
+                // Use --name (not global CLI --instance, which selects the control endpoint).
+                if let Some(instance) = option_value(&command.args, "--name")
+                    .or_else(|| option_value(&command.args, "--logical-instance"))
+                    .or_else(|| ui_action_trailing_name(&command.args))
+                {
+                    self.instance_picker_dialog
+                        .select_by_instance(instance)
+                        .map_err(anyhow::Error::msg)?;
+                } else if let Some(pid) = option_value(&command.args, "--pid")
+                    .and_then(|value| value.parse::<u32>().ok())
+                {
+                    self.instance_picker_dialog
+                        .select_by_pid(pid)
+                        .map_err(anyhow::Error::msg)?;
+                } else {
+                    anyhow::bail!(
+                        "instance-picker-select requires --name NAME or --pid N (not global --instance)"
+                    );
+                }
+                self.layout_instance_picker_controls();
+            }
+            "instance-picker-confirm" => self.confirm_instance_picker()?,
+            "instance-picker-cancel" => {
+                if !self.instance_picker_dialog.is_open() {
+                    anyhow::bail!("instance picker is not open");
+                }
+                self.close_instance_picker();
+            }
+            "open-instance" => {
+                let instance = option_value(&command.args, "--name")
+                    .or_else(|| option_value(&command.args, "--logical-instance"))
+                    .or_else(|| ui_action_trailing_name(&command.args))
+                    .context(
+                        "open-instance requires --name NAME (global --instance selects the CLI endpoint)",
+                    )?;
+                self.spawn_gui_for_instance(instance)?;
+            }
             "copy-selection" => self.copy_terminal_selection()?,
             "close-window" => {
                 self.request_window_close();
@@ -2017,6 +2138,7 @@ impl RemoteWindowState {
             ModalSurface::NewTerminal => self.new_terminal_dialog.snapshot_modal(),
             ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
             ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
+            ModalSurface::InstancePicker => self.instance_picker_dialog.snapshot_modal(),
         });
         let (copy_enabled, paste_enabled) = self.system_menu_state();
         let composer_geometry = composer_geometry(layout.composer);
@@ -2034,10 +2156,31 @@ impl RemoteWindowState {
             native_window_state.maximized,
         );
         let workspace_controls_visible = self.focus_gate().workspace_controls_visible();
-        let instance_label = resolved_ipc_endpoint()
-            .ok()
-            .map(|resolved| resolved.logical_instance.display_name().to_string())
+        let identity = InstanceIdentity::from_process(Some(source.server_pid));
+        let instance_label = identity
+            .as_ref()
+            .map(|id| id.instance.clone())
             .filter(|name| name != "default");
+        let mut window_json = serde_json::json!({
+            "title": window_title_for_preset(
+                self.config.appearance_preset,
+                env!("CARGO_PKG_VERSION"),
+                instance_label.as_deref(),
+            ),
+            "client_width": client_size.width,
+            "client_height": client_size.height,
+            "visible": native_window_state.visible,
+            "detached": false,
+            "minimized": window_state.is_minimized(),
+            "state": window_state.as_str(),
+        });
+        if let Some(identity) = &identity {
+            if let Some(object) = window_json.as_object_mut() {
+                for (key, value) in identity.snapshot_window_fields().as_object().into_iter().flatten() {
+                    object.insert(key.clone(), value.clone());
+                }
+            }
+        }
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
@@ -2048,19 +2191,7 @@ impl RemoteWindowState {
                 "epoch": source.server_epoch,
                 "sequence": source.position.sequence,
             },
-            "window": {
-                "title": window_title_for_preset(
-                    self.config.appearance_preset,
-                    env!("CARGO_PKG_VERSION"),
-                    instance_label.as_deref(),
-                ),
-                "client_width": client_size.width,
-                "client_height": client_size.height,
-                "visible": native_window_state.visible,
-                "detached": false,
-                "minimized": window_state.is_minimized(),
-                "state": window_state.as_str(),
-            },
+            "window": window_json,
             "render_activity": self.render_activity_sample.map(|activity| serde_json::json!({
                 "sequence": self.render_activity_sample_sequence,
                 "redraw_requests": activity.redraw_requests,
@@ -2164,6 +2295,11 @@ impl RemoteWindowState {
                     "id": SYSTEM_MENU_TOGGLE_TABS_ID.0,
                     "label": self.config.locale.text(UiText::ToggleTabs),
                     "checked": self.tabs_visible,
+                },
+                "open_instance": {
+                    "id": SYSTEM_MENU_OPEN_INSTANCE_ID.0,
+                    "label": "Open instance…",
+                    "enabled": true,
                 },
                 "copy": {
                     "id": SYSTEM_MENU_COPY_ID.0,
@@ -2507,6 +2643,7 @@ impl RemoteWindowState {
         self.layout_settings_controls();
         self.layout_tab_close_controls();
         self.layout_new_terminal_controls();
+        self.layout_instance_picker_controls();
     }
 
     fn layout_tab_editor(&self) {
@@ -4187,6 +4324,154 @@ impl RemoteWindowState {
         self.window.focus();
     }
 
+    fn open_instance_picker(&mut self, mode: InstancePickerMode) -> Result<()> {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::InstancePicker)
+            && !self.instance_picker_dialog.is_open()
+        {
+            anyhow::bail!("another modal is open");
+        }
+        let rows = collect_instance_picker_rows().map_err(anyhow::Error::msg)?;
+        self.instance_picker_dialog.open_with_rows(mode, rows);
+        self.show_workspace_controls(false);
+        self.layout_instance_picker_controls();
+        self.window.request_redraw();
+        self.window.focus();
+        Ok(())
+    }
+
+    fn close_instance_picker(&mut self) {
+        self.instance_picker_dialog.close();
+        self.layout_instance_picker_controls();
+        self.show_workspace_controls(true);
+        self.window.request_redraw();
+        self.window.focus();
+    }
+
+    fn confirm_instance_picker(&mut self) -> Result<()> {
+        if !self.instance_picker_dialog.is_open() {
+            anyhow::bail!("instance picker is not open");
+        }
+        let Some(row) = self.instance_picker_dialog.selected_row().cloned() else {
+            anyhow::bail!("instance picker has no rows");
+        };
+        if !row.can_attach {
+            self.instance_picker_dialog
+                .set_error(format!("instance `{}` is {} and cannot attach", row.instance, row.classification));
+            self.window.request_redraw();
+            anyhow::bail!(
+                "refusing to attach stale/non-live instance `{}` ({})",
+                row.instance,
+                row.classification
+            );
+        }
+        match self.instance_picker_dialog.mode() {
+            InstancePickerMode::OpenAnother => {
+                self.spawn_gui_for_instance(&row.instance)?;
+                self.close_instance_picker();
+            }
+            InstancePickerMode::Attach => {
+                // Defer rebind until after this UI command is completed against the
+                // *current* server lease (completing on the new peer expires the id).
+                self.relay_attach_after_completion =
+                    Some((row.endpoint.clone(), row.instance.clone()));
+                self.close_instance_picker();
+            }
+        }
+        Ok(())
+    }
+
+    fn attach_current_window_to_endpoint(&mut self, endpoint: &str, instance: &str) -> Result<()> {
+        use crate::ipc_endpoint::IpcEndpoint;
+        let parsed = endpoint
+            .parse::<IpcEndpoint>()
+            .map_err(|error| anyhow::anyhow!("invalid endpoint {endpoint}: {error}"))?;
+        let previous_endpoint = resolved_ipc_endpoint().ok().map(|resolved| resolved.endpoint);
+        // Detach replaceable UI lease before rebinding the current window.
+        if let Some(client) = self.client.as_mut() {
+            let _ = client.detach();
+        }
+        self.client = None;
+        crate::frontend_server::pin_client_endpoint_for_gui(&parsed);
+        match UiClientModel::connect(self.client_id.clone()) {
+            Ok(client) => {
+                self.client = Some(client);
+            }
+            Err(error) => {
+                let message = error.to_string();
+                // Target already has a replaceable UI — focus that window instead of stealing.
+                if message.contains("rejected replaceable UI") || message.contains("rejected") {
+                    if let Some(previous) = previous_endpoint.as_ref() {
+                        crate::frontend_server::pin_client_endpoint_for_gui(previous);
+                        if let Ok(client) = UiClientModel::connect(self.client_id.clone()) {
+                            self.client = Some(client);
+                        }
+                    }
+                    self.spawn_gui_for_instance(instance)?;
+                    self.last_message = Some(format!(
+                        "Instance `{instance}` already has a GUI; focusing that window"
+                    ));
+                    self.server_recovery.on_reconnected(Instant::now());
+                    self.refresh_window_title();
+                    self.window.request_redraw();
+                    return Ok(());
+                }
+                // Restore previous peer when possible.
+                if let Some(previous) = previous_endpoint.as_ref() {
+                    crate::frontend_server::pin_client_endpoint_for_gui(previous);
+                    if let Ok(client) = UiClientModel::connect(self.client_id.clone()) {
+                        self.client = Some(client);
+                    }
+                }
+                anyhow::bail!("attach to {instance} failed: {message}");
+            }
+        }
+        self.server_recovery.on_reconnected(Instant::now());
+        self.last_published_snapshot = None;
+        self.last_active_id = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone());
+        self.last_composer_identity = self.client.as_ref().and_then(remote_composer_identity);
+        self.last_error = None;
+        self.apply_locale();
+        self.show_workspace_controls(true);
+        if let Err(error) = self.apply_effective_terminal_font() {
+            self.last_error = Some(format!("Terminal font update failed: {error:#}"));
+        }
+        self.load_composer();
+        self.resize_active_terminal();
+        self.refresh_window_title();
+        self.window.request_redraw();
+        Ok(())
+    }
+
+    fn spawn_gui_for_instance(&mut self, instance: &str) -> Result<()> {
+        let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
+        let mut command = std::process::Command::new(exe);
+        command
+            .arg("--instance")
+            .arg(instance)
+            .arg("--no-activate")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        // Escape the agent Job so the new window survives the launcher.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP);
+        }
+        command
+            .spawn()
+            .map_err(|error| anyhow::anyhow!("could not open instance `{instance}`: {error}"))?;
+        self.last_message = Some(format!("Opening instance `{instance}` in a new window"));
+        Ok(())
+    }
+
     fn finish_window_close(&mut self, choice: WindowCloseChoice) {
         if !self.window_close_dialog.is_open() {
             return;
@@ -4531,6 +4816,7 @@ impl RemoteWindowState {
             tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_editor_dialog.is_open(),
+            instance_picker_open: self.instance_picker_dialog.is_open(),
         }
     }
 
@@ -5306,8 +5592,28 @@ impl RemoteWindowState {
                     0x1b => self.finish_close_tab(false),
                     _ => {}
                 },
+                ConfirmTarget::InstancePicker => match key {
+                    0x0d => {
+                        let _ = self.confirm_instance_picker();
+                    }
+                    0x1b => self.close_instance_picker(),
+                    _ => {}
+                },
                 ConfirmTarget::None => {}
             }
+            return true;
+        }
+        if self.instance_picker_dialog.is_open() {
+            match key {
+                0x26 => self.instance_picker_dialog.select_prev(), // up
+                0x28 => self.instance_picker_dialog.select_next(), // down
+                0x0d => {
+                    let _ = self.confirm_instance_picker();
+                }
+                0x1b => self.close_instance_picker(),
+                _ => {}
+            }
+            self.layout_instance_picker_controls();
             return true;
         }
         if self.settings_dialog.is_open() {
@@ -5511,11 +5817,15 @@ impl RemoteWindowState {
         let status_text = if let Some(error) = &self.last_error {
             error.clone()
         } else if let Some(client) = &self.client {
-            format!(
-                "Connected · server PID {} · {}",
-                client.server_pid(),
-                client.client_id()
-            )
+            InstanceIdentity::from_process(Some(client.server_pid()))
+                .map(|identity| identity.status_line())
+                .unwrap_or_else(|| {
+                    format!(
+                        "Connected · server PID {} · {}",
+                        client.server_pid(),
+                        client.client_id()
+                    )
+                })
         } else {
             "Disconnected · reconnecting".to_owned()
         };
@@ -5619,6 +5929,9 @@ impl RemoteWindowState {
             };
             frame(device, &focus, palette.focus_ring.canvas_rgb());
         }
+        if self.instance_picker_dialog.is_open() {
+            self.paint_instance_picker(device, palette);
+        }
         if self.window_close_dialog.is_open() {
             self.paint_window_close(device, palette);
         } else if self.settings_dialog.is_open() {
@@ -5715,6 +6028,137 @@ impl RemoteWindowState {
                 palette.scrollbar_thumb.canvas_rgb()
             },
         );
+    }
+
+    fn instance_picker_geometry(&self) -> (ProductPixelRect, [ProductPixelRect; 2]) {
+        let client = self.window.client_size();
+        let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
+        let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
+        let width = (client_right - 48).clamp(420, 720);
+        let height = (client_bottom - 48).clamp(280, 520);
+        let left = ((client_right - width) / 2).max(0);
+        let top = ((client_bottom - height) / 2).max(0);
+        let modal = ProductPixelRect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let button_width = 140;
+        let button_top = modal.bottom - 56;
+        let confirm = ProductPixelRect {
+            left: modal.right - 20 - button_width * 2 - 12,
+            top: button_top,
+            right: modal.right - 20 - button_width - 12,
+            bottom: button_top + 36,
+        };
+        let cancel = ProductPixelRect {
+            left: modal.right - 20 - button_width,
+            top: button_top,
+            right: modal.right - 20,
+            bottom: button_top + 36,
+        };
+        (modal, [confirm, cancel])
+    }
+
+    fn layout_instance_picker_controls(&self) {
+        let open = self.instance_picker_dialog.is_open();
+        let (_, buttons) = self.instance_picker_geometry();
+        for (control, rect) in [
+            (self.instance_picker_confirm, buttons[0]),
+            (self.instance_picker_cancel, buttons[1]),
+        ] {
+            self.set_control_bounds(control, rect);
+            self.set_control_visible(control, open);
+        }
+        if open {
+            let confirm_label = match self.instance_picker_dialog.mode() {
+                InstancePickerMode::Attach => "Attach",
+                InstancePickerMode::OpenAnother => "Open window",
+            };
+            self.set_control_text(self.instance_picker_confirm, confirm_label);
+            self.set_control_text(self.instance_picker_cancel, "Cancel");
+        }
+    }
+
+    fn paint_instance_picker(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+        let (modal, _) = self.instance_picker_geometry();
+        fill(device, &modal, palette.modal.canvas_rgb());
+        frame(device, &modal, palette.accent.canvas_rgb());
+        let title = match self.instance_picker_dialog.mode() {
+            InstancePickerMode::Attach => "Attach to instance",
+            InstancePickerMode::OpenAnother => "Open another instance",
+        };
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: modal.left + 20,
+                top: modal.top + 16,
+                right: modal.right - 20,
+                bottom: modal.top + 44,
+            },
+            title,
+            palette.text.canvas_rgb(),
+        );
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: modal.left + 20,
+                top: modal.top + 48,
+                right: modal.right - 20,
+                bottom: modal.top + 72,
+            },
+            "Live rows can attach. Stale rows are listed but refused.",
+            palette.muted_text.canvas_rgb(),
+        );
+        let mut y = modal.top + 86;
+        for (index, row) in self.instance_picker_dialog.rows().iter().enumerate() {
+            let row_rect = ProductPixelRect {
+                left: modal.left + 16,
+                top: y,
+                right: modal.right - 16,
+                bottom: y + 36,
+            };
+            if index == self.instance_picker_dialog.selected_index() {
+                fill(device, &row_rect, palette.accent.canvas_rgb());
+            }
+            let mark = if row.can_attach { "live" } else { "stale" };
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: row_rect.left + 10,
+                    top: row_rect.top + 8,
+                    right: row_rect.right - 10,
+                    bottom: row_rect.bottom - 6,
+                },
+                &format!(
+                    "[{mark}] {}  pid={}  tabs≈{}  {}",
+                    row.instance, row.pid, row.tab_count, row.endpoint
+                ),
+                if index == self.instance_picker_dialog.selected_index() {
+                    palette.modal.canvas_rgb()
+                } else {
+                    palette.text.canvas_rgb()
+                },
+            );
+            y += 40;
+            if y > modal.bottom - 80 {
+                break;
+            }
+        }
+        if let Some(error) = self.instance_picker_dialog.last_error() {
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: modal.left + 20,
+                    top: modal.bottom - 90,
+                    right: modal.right - 20,
+                    bottom: modal.bottom - 64,
+                },
+                error,
+                palette.muted_text.canvas_rgb(),
+            );
+        }
     }
 
     fn paint_window_close(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
@@ -6365,6 +6809,12 @@ impl RemoteWindowApplication {
             CLOSE_KEEP_ID => state.finish_window_close(WindowCloseChoice::KeepServerRunning),
             CLOSE_STOP_ID => state.finish_window_close(WindowCloseChoice::StopServerAndExit),
             CLOSE_CANCEL_ID => state.finish_window_close(WindowCloseChoice::Cancel),
+            INSTANCE_PICKER_CONFIRM_ID => {
+                if let Err(error) = state.confirm_instance_picker() {
+                    state.last_error = Some(format!("{error:#}"));
+                }
+            }
+            INSTANCE_PICKER_CANCEL_ID => state.close_instance_picker(),
             SETTINGS_CLASSIC_NIGHT_ID => {
                 state.preview_settings_preset(AppearancePreset::classic_night())
             }
@@ -6588,6 +7038,13 @@ impl ControlWindowApplication for RemoteWindowApplication {
             ControlWindowEvent::SystemMenu(command) => {
                 match command {
                     SYSTEM_MENU_TOGGLE_TABS_ID => state.toggle_tabs(),
+                    SYSTEM_MENU_OPEN_INSTANCE_ID => {
+                        if let Err(error) =
+                            state.open_instance_picker(InstancePickerMode::OpenAnother)
+                        {
+                            state.last_error = Some(format!("{error:#}"));
+                        }
+                    }
                     SYSTEM_MENU_COPY_ID => state.system_menu_copy(),
                     SYSTEM_MENU_PASTE_ID => state.system_menu_paste(),
                     _ => {}

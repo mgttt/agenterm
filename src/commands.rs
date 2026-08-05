@@ -765,11 +765,15 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "start-server" => ("agenterm-cli start-server", &[][..], &[][..], false),
         "ui-action" => (
             "agenterm-cli ui-action ACTION [-t target] [--path PATH] \
-             [--mode empty|append|replace] [--stdin] [--width PX --height PX]",
+             [--mode empty|append|replace|attach|open-another] [--name NAME] [--pid N] \
+             [--stdin] [--width PX --height PX]",
             &[
                 "-t",
                 "--path",
                 "--mode",
+                "--name",
+                "--logical-instance",
+                "--pid",
                 "--proxy-input",
                 "--width",
                 "--height",

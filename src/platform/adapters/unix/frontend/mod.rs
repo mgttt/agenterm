@@ -1087,6 +1087,7 @@ impl UnixApp {
             tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_editor_dialog.is_open(),
+            instance_picker_open: false,
         }
     }
 
@@ -2330,6 +2331,13 @@ impl UnixApp {
                 ModalSurface::NewTerminal => self.new_terminal_dialog.snapshot_modal(),
                 ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
                 ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
+                ModalSurface::InstancePicker => serde_json::json!({
+                    "kind": "instance-picker",
+                    "mode": "attach",
+                    "rows": [],
+                    "selected": 0,
+                    "error": "instance picker is Windows-first in this build",
+                }),
             }),
             "system_menu": system_menu_json(
                 self.config.tabs_visible,
@@ -4762,6 +4770,9 @@ impl ControlHost for UnixApp {
                 self.complete_tab_editor(false)?;
                 return Ok(true);
             }
+            CancelTarget::InstancePicker => {
+                return Err("instance picker is Windows-first in this build".to_owned());
+            }
             CancelTarget::None => {}
         }
         if self.cancel_terminal_selection(true) {
@@ -4779,6 +4790,9 @@ impl ControlHost for UnixApp {
             ConfirmTarget::LiveTabClose => {
                 self.finish_close_confirmation(true);
                 Ok(true)
+            }
+            ConfirmTarget::InstancePicker => {
+                Err("instance picker is Windows-first in this build".to_owned())
             }
             ConfirmTarget::None => Ok(false),
         }

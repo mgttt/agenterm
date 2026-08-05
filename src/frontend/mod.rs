@@ -18,6 +18,8 @@ pub(crate) mod composer;
 pub(crate) mod control_center;
 pub(crate) mod cwd_editor;
 pub(crate) mod input;
+pub(crate) mod instance_identity;
+pub(crate) mod instance_picker;
 pub(crate) mod interaction;
 pub(crate) mod new_terminal;
 pub(crate) mod selection;

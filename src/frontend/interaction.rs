@@ -93,6 +93,7 @@ pub(crate) struct FocusTransitionGate {
     pub(crate) tab_editor_open: bool,
     pub(crate) close_confirmation_open: bool,
     pub(crate) cwd_editor_open: bool,
+    pub(crate) instance_picker_open: bool,
 }
 
 impl FocusTransitionGate {
@@ -109,12 +110,15 @@ impl FocusTransitionGate {
             || self.settings_open
             || self.new_terminal_open
             || self.close_confirmation_open
+            || self.instance_picker_open
     }
 
     pub(crate) const fn modal_entry_blocked(self, surface: ModalSurface) -> bool {
         match surface {
             ModalSurface::WindowClose => self.window_close_pending,
-            ModalSurface::Settings | ModalSurface::NewTerminal => self.full_modal_blocked(),
+            ModalSurface::Settings
+            | ModalSurface::NewTerminal
+            | ModalSurface::InstancePicker => self.full_modal_blocked(),
             ModalSurface::TabClose => self.full_modal_blocked(),
             ModalSurface::CwdEditor => self.blocked(),
         }
@@ -125,6 +129,7 @@ impl FocusTransitionGate {
             && !self.settings_open
             && !self.new_terminal_open
             && !self.close_confirmation_open
+            && !self.instance_picker_open
     }
 }
 
@@ -135,6 +140,7 @@ pub(crate) enum ModalSurface {
     NewTerminal,
     CwdEditor,
     TabClose,
+    InstancePicker,
 }
 
 impl ModalSurface {
@@ -145,6 +151,7 @@ impl ModalSurface {
             Self::NewTerminal => "new-terminal",
             Self::CwdEditor => "cwd-editor",
             Self::TabClose => "tab-close",
+            Self::InstancePicker => "instance-picker",
         }
     }
 }
@@ -152,6 +159,8 @@ impl ModalSurface {
 pub(crate) fn modal_surface_from_gate(gate: FocusTransitionGate) -> Option<ModalSurface> {
     if gate.window_close_pending {
         Some(ModalSurface::WindowClose)
+    } else if gate.instance_picker_open {
+        Some(ModalSurface::InstancePicker)
     } else if gate.settings_open {
         Some(ModalSurface::Settings)
     } else if gate.new_terminal_open {
@@ -190,12 +199,15 @@ pub(crate) enum CancelTarget {
     NewTerminal,
     CwdEditor,
     TabEditor,
+    InstancePicker,
     None,
 }
 
 pub(crate) const fn cancel_target(gate: FocusTransitionGate) -> CancelTarget {
     if gate.window_close_pending {
         CancelTarget::WindowClose
+    } else if gate.instance_picker_open {
+        CancelTarget::InstancePicker
     } else if gate.close_confirmation_open {
         CancelTarget::LiveTabClose
     } else if gate.settings_open {
@@ -215,12 +227,15 @@ pub(crate) const fn cancel_target(gate: FocusTransitionGate) -> CancelTarget {
 pub(crate) enum ConfirmTarget {
     WindowClose,
     LiveTabClose,
+    InstancePicker,
     None,
 }
 
 pub(crate) const fn confirm_target(gate: FocusTransitionGate) -> ConfirmTarget {
     if gate.window_close_pending {
         ConfirmTarget::WindowClose
+    } else if gate.instance_picker_open {
+        ConfirmTarget::InstancePicker
     } else if gate.close_confirmation_open {
         ConfirmTarget::LiveTabClose
     } else {
@@ -677,6 +692,7 @@ mod tests {
                 new_terminal_open: true,
                 cwd_editor_open: true,
                 tab_editor_open: true,
+                instance_picker_open: false,
             }),
             CancelTarget::WindowClose
         );
@@ -791,6 +807,7 @@ mod tests {
             cwd_editor_open: true,
             close_confirmation_open: true,
             tab_editor_open: true,
+            instance_picker_open: true,
         };
         assert_eq!(
             modal_surface_from_gate(gate),

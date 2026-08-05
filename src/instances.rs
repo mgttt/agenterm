@@ -518,6 +518,11 @@ fn protocol_probe_ok(endpoint: &IpcEndpoint, timeout: Duration) -> bool {
     legacy_protocol_probe(endpoint, timeout)
 }
 
+/// Bounded protocol probe for UI instance picker rows (same gate as live peer lookup).
+pub(crate) fn protocol_probe_ok_for_picker(endpoint: &IpcEndpoint) -> bool {
+    protocol_probe_ok(endpoint, Duration::from_millis(250))
+}
+
 /// Return the one legacy authority that is safe to reuse for implicit main.
 ///
 /// A schema-v1 record has no logical-instance identity, so matching the exact

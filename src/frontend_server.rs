@@ -127,11 +127,17 @@ fn discover_live_peer_endpoint() -> Result<Option<crate::ipc_endpoint::IpcEndpoi
 
 /// Pin the process IPC selector so subsequent control calls target the live peer.
 fn pin_client_endpoint(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
+    pin_client_endpoint_for_gui(endpoint);
+}
+
+/// Public for replaceable GUI re-attach (S1 instance picker).
+pub(crate) fn pin_client_endpoint_for_gui(endpoint: &crate::ipc_endpoint::IpcEndpoint) {
     // CLI selector env wins over defaults for the rest of this process.
-    // SAFETY: single-threaded at GUI bootstrap before the UI loop races env.
+    // SAFETY: single-threaded at GUI bootstrap / UI-action attach before races.
     unsafe {
         std::env::set_var("AGENTERM_IPC_ENDPOINT", endpoint.to_string());
         std::env::remove_var("AGENTERM_IPC_ADDRESS");
+        std::env::remove_var("AGENTERM_INSTANCE");
     }
 }
 

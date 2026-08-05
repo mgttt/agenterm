@@ -4929,8 +4929,11 @@ Usage:
   agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
   agenterm-cli ui-bootstrap
   agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|window-activate|terminal-paste|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|window-activate|terminal-paste|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-instance-picker|instance-picker-next|instance-picker-prev|instance-picker-select|instance-picker-confirm|instance-picker-cancel|open-instance
   agenterm-cli ui-action tabs-set-width --width 180..480
+  agenterm-cli ui-action open-instance-picker [--mode attach|open-another]
+  agenterm-cli ui-action instance-picker-select --name NAME|--pid N
+  agenterm-cli ui-action open-instance --name NAME
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state|--tab-editor-state open|closed] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]

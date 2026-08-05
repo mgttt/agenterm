@@ -14,6 +14,7 @@ pub(crate) const PROJECTION_REPLACEABLE_UI_CLIENT: &str = "replaceable_ui_client
 pub(crate) const SYSTEM_MENU_COPY_ID: u32 = 0x1f00;
 pub(crate) const SYSTEM_MENU_PASTE_ID: u32 = 0x1f10;
 pub(crate) const SYSTEM_MENU_TOGGLE_TABS_ID: u32 = 0x1f20;
+pub(crate) const SYSTEM_MENU_OPEN_INSTANCE_ID: u32 = 0x1f30;
 
 pub(crate) fn event_position_json(epoch: &str, sequence: u64) -> serde_json::Value {
     serde_json::json!({

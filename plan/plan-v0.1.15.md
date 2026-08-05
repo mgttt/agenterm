@@ -533,9 +533,9 @@ U′. 标签切换假刷新
 
 ```text
 S′. 多 Server / Instance 可达与选择
-├─ [ ] S1 启动/重开：live instance 列表 + 一键附着
-├─ [ ] S2 主窗身份常显（标题/状态栏：instance · pid · 简短 endpoint）
-├─ [ ] S3 主窗「打开另一 instance…」（新窗附着，非同窗热切）
+├─ [x] S1 启动/重开：live instance 列表 + 一键附着
+├─ [x] S2 主窗身份常显（标题/状态栏：instance · pid · 简短 endpoint）
+├─ [x] S3 主窗「打开另一 instance…」（新窗附着，非同窗热切）
 └─ [ ] S4（后置）同窗热切换权威 + 确认；明确不做无确认横向 server tab
 ```
 
@@ -549,7 +549,7 @@ S′. 多 Server / Instance 可达与选择
 | 关窗 ≠ 本叶范围 | 构建杀窗、崩溃根因另案；本叶只保证**找得回、切得对** |
 | L-CC 分工 | 多 server 控制塔投影归 CC（见 `plan/design-control-center-ux.md`）；主终端只做轻量入口 |
 
-- [ ] **S1 启动/重开：live instance 列表 + 一键附着**
+- [x] **S1 启动/重开：live instance 列表 + 一键附着**
   - **动机**：窗全关后用户不知道谁还活着、该 `--instance` 哪个；
     CLI 有 `server-list`/`list-instances`，GUI 启动路径几乎不消费
   - **做法**：
@@ -564,7 +564,7 @@ S′. 多 Server / Instance 可达与选择
   - **成本**：中；**依赖**：无（可读现有 instance 注册）
   - **非目标**：跨机器发现、托盘常驻（可另叶）
 
-- [ ] **S2 主窗身份常显**
+- [x] **S2 主窗身份常显**
   - **动机**：多开 main/work 时「我连的是谁」靠猜；标题 profile 噪音
     （§三·五 W1）与身份信息不足并存
   - **做法**：状态栏或标题稳定展示 `instance_label`（或 logical name）+
@@ -575,7 +575,7 @@ S′. 多 Server / Instance 可达与选择
   - **成本**：小；**依赖**：无；可与 S1 并行
   - **非目标**：在状态栏做完整 server 切换器
 
-- [ ] **S3 主窗入口：打开另一 instance（新窗）**
+- [x] **S3 主窗入口：打开另一 instance（新窗）**
   - **动机**：日常在多 server 间作业；横向 tab 热切过重，**新窗附着**
     符合现模型且安全
   - **做法**：工具栏/菜单 `Open instance…` → 同 S1 列表 → **新进程/新窗**
@@ -1488,6 +1488,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | **B′ 落地（工作区）**：`named_buffer` store + CLI `set/load/show/list/delete/paste-buffer`（别名 setb/loadb/…）；`send-keys` usage 补 PS `@N`；隔离 instance 黑盒：`set-buffer`→`paste-buffer`→capture 见 `BUFFER_PROBE_OK`。live main 须换新 `agenterm-server` 后才有命令。agent 协作仍优先 note；paste 进 Codex TUI 会打断 |
 | 2026-08-05 | **P0 关窗再开重置**：根因=新 server + workspace 假恢复 / 双 main。修 `find_live_endpoint_for_logical_instance` + GUI connect 附着 + `start_frontend_server` 拒双开；黑盒同 instance 仅 1 live、tab note 保留。P0-3 job breakaway 未做 |
 | 2026-08-05 | **关窗确认丢失**：`SC_CLOSE`→`CloseRequested`；`ensure_window_close_dialog_presented` 先 restore 再 layout/show 三按钮；AlreadyOpen 二次 close 重 assert。隔离 instance 黑盒：`ui-action close-window`→`confirm-window-close`；最小化后 close→restore+modal；Keep→重开同 `server_pid`+tab 名保留 |
+| 2026-08-05 | **S′ S1–S3 落地**：`instance_identity` + `instance_picker`；`ui-snapshot.window.instance/server_pid/endpoint`；状态栏 Connected·instance·pid；系统菜单 Open instance…；CLI `open-instance-picker` / `instance-picker-select --name` / `confirm` / `open-instance --name`；Attach 延后 rebind 避免 command 过期；OpenAnother breakaway 新窗。Unix picker 诚实 gap |
 | 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
 | 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§一 O 组 + §十一**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
 | 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
