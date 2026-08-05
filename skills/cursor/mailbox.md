@@ -13,7 +13,7 @@
 | 当前主线任务 | **Built-in skins v1**（classic/fancy × day/night） |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
 | 执行计划 | `plan/plan-skins-v1.md` |
-| `origin/main` | tip 含分身3 设计冻结（`assets/skins/**`）；工程可开 Phase 2B |
+| `origin/main` | tip 含设计冻结；分身4 Phase 2A 在 `cursor/skins-eng-phase2a` @ `0f4e4b6`，已唤醒做 2B |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 
@@ -42,7 +42,7 @@
 ### 主控2 · 2026-08-05
 - 状态: RUNNING — 编排皮肤 v1
 - 分支: `main`
-- 下一步: 审合分身4 Phase 2A；授权 Phase 2B 消费 `assets/skins/**`
+- 下一步: 等分身4 Phase 2B 回报后一并审合 `cursor/skins-eng-phase2a`
 - 阻塞: 无
 - 已合: 分身3 Phase 1（`cursor/skins-design-v1` → main）
 
@@ -56,9 +56,10 @@
 - 阻塞: 无
 
 ### 分身4 · 2026-08-05
-- 状态: ACTIVE
+- 状态: IDLE→已唤醒做 Phase 2B
 - bcId: `bc-c3e01145-b870-4e74-b18c-f3aea06ea800`
 - URL: https://cursor.com/agents/bc-c3e01145-b870-4e74-b18c-f3aea06ea800
-- 分支: `cursor/skins-eng-*`（自建）
-- 下一步: 完成 Phase 2A 后立刻 Phase 2B（消费 main 上 `assets/skins/**`）
-- 阻塞: 无（设计已合 main）
+- 分支: `cursor/skins-eng-phase2a` tip `0f4e4b6`（Phase 2A 待合；先做 2B 再一并审）
+- 证据 2A: AppearancePreset 四 id；settings 迁移；Win/Unix picker；theme-smoke；`cargo test --lib` 618 passed（自称）
+- 下一步: rebase main → Phase 2B 消费 `assets/skins/**`
+- 阻塞: 无
