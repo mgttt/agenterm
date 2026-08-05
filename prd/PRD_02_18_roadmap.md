@@ -453,7 +453,16 @@ track remains planned, but every declared dependency must still pass.
     boundaries in [Control Center](PRD_02_21_control_center.md),
     [Agent control plane](PRD_02_07_agent_control_plane.md), and
     [Decentralized network foundation](PRD_02_22_decentralized_network.md)
-- [~] M11 / v0.1.12 Convergence and fast candidate promotion
+- [~] M11 / v0.1.12 planned, delivered in v0.1.14 — Convergence and fast
+  candidate promotion
+
+  > ⚠️ Version attribution corrected 2026-08-05. The v0.1.12 and v0.1.13
+  > candidates were built but never publicly released, so the public sequence
+  > runs v0.1.11 → v0.1.14. The evidence lines below are unchanged and remain
+  > authoritative for the SHAs and runs they name; only the milestone's version
+  > label was wrong. Current delivery history is owned by
+  > [the v0.1.14 public plan](../plan/plan-v0.1.14.md), and the in-flight
+  > version is v0.1.15.
   - [x] converge the v0.1.11 native IPC foundation across Windows named pipes
     and Linux/macOS Unix sockets: logical main/dev isolation, stale authority
     recovery, mixed-schema discovery and one shared resolver remain truthful
@@ -486,21 +495,32 @@ track remains planned, but every declared dependency must still pass.
     lifecycle/renderer/caller-instance journeys are integrated and have matching-
     host receipts; macOS physical pointer acceptance remains open, and richer
     Workflow, Extensions or InfoHub content is not promoted by this slice
-  - [~] split fast feedback, exact-SHA candidate qualification and release
+  - [x] split fast feedback, exact-SHA candidate qualification and release
     promotion so a complete stress-inclusive qualification executes once per
     eligible candidate; tag publication verifies and promotes the previously
     qualified six-platform bytes without rebuilding or rerunning the complete
-    desktop suite
-  - [~] bind promotion to an exact commit, receipt, platform matrix, artifact
+    desktop suite. Delivered by v0.1.14: candidate run `30942173420` at source
+    `8ff2b5a` sealed all six platforms, and promotion run `30944087372`
+    published without recompiling
+  - [x] bind promotion to an exact commit, receipt, platform matrix, artifact
     hashes, SBOM and provenance; missing, stale or tampered candidate artifacts
-    fail closed before a GitHub Release exists
+    fail closed before a GitHub Release exists. Delivered by v0.1.14, which
+    published 23 assets bound to `8ff2b5a`. The fail-closed behaviour was
+    exercised for real: the first promotion attempts stopped before publication
+    on a provenance SBOM mismatch and on manifest identity checks. See
+    [Delivery and quality](PRD_02_17_delivery_quality.md) and
+    [the v0.1.14 public plan](../plan/plan-v0.1.14.md) for the eight
+    release-chain defects this first end-to-end execution exposed
   - [ ] measure queue, cache, compile, test, package, upload and promotion
     stages; correctly keyed Cargo/sccache experiments and optional paid runners
     may change latency but never eligibility, evidence or artifact identity
   - [ ] sequencing, runner experiments, release SLOs, risks and delivery
-    history are owned by
-    [the v0.1.12 public plan](../plan/plan-v0.1.12.md), with canonical delivery
-    requirements in [Delivery and quality](PRD_02_17_delivery_quality.md)
+    history are owned by the current version plan —
+    [v0.1.14](../plan/plan-v0.1.14.md) for what shipped and the measured CI
+    analysis, [v0.1.15](../plan/plan-v0.1.15.md) for in-flight work; the
+    superseded [v0.1.12 plan](../plan/plan-v0.1.12.md) remains the record for
+    that candidate. Canonical delivery requirements stay in
+    [Delivery and quality](PRD_02_17_delivery_quality.md)
 - [ ] M12 / v0.2.0 Control Center content maturity
   - [ ] deepen the independent Control Center beyond its v0.1.11 shell:
     Cockpit operational views, versioned Workflow definitions/runs,
