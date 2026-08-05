@@ -4,7 +4,7 @@ Tracks a targeted second-pass review running alongside the ongoing
 frontend-parity refactor. Scope is deliberately narrow: real correctness/
 safety bugs and untested trust boundaries with limited, well-understood
 blast radius — not architecture or style cleanup (that's covered by the
-existing `plan-v0.1.13.md`/`ARCHITECTURE.md` tracks).
+existing `plan/archive/plan-v0.1.13.md`/`ARCHITECTURE.md` tracks).
 
 Process: investigate one item at a time, avoid files another agent has open
 (check `git status` first), verify with `cargo check`/`clippy -D warnings`

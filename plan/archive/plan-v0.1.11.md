@@ -1,5 +1,17 @@
 # AgenTerm v0.1.11 公开计划
 
+> ## ⚠️ 已归档（2026-08-05）
+>
+> **本文是 v0.1.11 时期的历史执行记录，保留仅为追溯，不要作为执行依据。**
+> 其里程碑证据仍被 `prd/PRD_02_18_roadmap.md` 引用，故整档保留原文未改。
+>
+> - 当前发布状态与 CI 实测分析：`plan/plan-v0.1.14.md`
+> - 在制版本：`plan/plan-v0.1.15.md`
+> - 发布链要求（版本无关权威处）：
+>   `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements
+> - 结构 SSOT：`plan/ARCHITECTURE.md`
+
+
 状态：实现收敛与发布候选验证中（不授权 tag / GitHub Release）
 工作主题：**Control Center 基础、本地 IPC 原生化、安静工作台微调与
 去中心化基建首个独立闭环**

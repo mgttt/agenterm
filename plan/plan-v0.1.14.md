@@ -1,7 +1,7 @@
 # AgenTerm v0.1.14 公开计划
 
 状态：**开工**（2026-08-04 由占位稿升级；升级时修正了占位稿中已过时的
-v0.1.13 Wave B 快照——该三项在 `plan/plan-v0.1.13.md` §10.2 已全部 `[x]`）。
+v0.1.13 Wave B 快照——该三项在 `plan/archive/plan-v0.1.13.md` §10.2 已全部 `[x]`）。
 本文件**不**改变 v0.1.12/v0.1.13 的授权状态，**不**创建 tag/Candidate/Release。
 v0.1.13 发布链（Candidate → Promotion）独立推进，不受本 plan 影响。
 
@@ -344,7 +344,7 @@ commit 的 `Cargo.lock`/`Cargo.toml`/`scripts/artifacts.json` 哈希，**完全�
 |------|------|
 | `plan/ARCHITECTURE.md` | 现行结构 SSOT；本文不重画结构树 |
 | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13 §10.2.1 + 本轮八个缺陷，已合并去重为版本无关要求） |
-| `plan/plan-v0.1.13.md` | 上一版执行记录（叙事原文；要求已提炼至上行） |
+| `plan/archive/plan-v0.1.13.md` | 上一版执行记录（叙事原文；要求已提炼至上行） |
 | `prd/PRD_02_18_roadmap.md` M12 | 大重构去向（原 plan-v0.2.0.md 已并入） |
 | `plan/precision-audit.md` | 持续审查权威记录；B 组决策后回写该文件 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同 |

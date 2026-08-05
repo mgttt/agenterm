@@ -2,7 +2,7 @@
 
 状态：执行中  
 主题：**嵌入式 Unix GUI（`unix_app`）与 Windows 可替换 UI 客户端（`remote_win_app`）在可见行为与 `ui-snapshot` 上对齐**  
-本文是执行地图，不是产品宪法；已交付能力同步进 [`prd/PRD_02_06_human_workspace.md`](prd/PRD_02_06_human_workspace.md)。
+本文是执行地图，不是产品宪法；已交付能力同步进 [`prd/PRD_02_06_human_workspace.md`](../prd/PRD_02_06_human_workspace.md)。
 
 对照基准：Windows `remote_win_app` + 共享 `ui_geometry` / `control_dispatch` / `ui_bridge` 契约。
 

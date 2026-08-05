@@ -17,7 +17,7 @@ Product authority:
 [Rust host and Rhai scripting PRD](../prd/PRD_02_10_rhai_scripting.md)
 
 Delivery plan:
-[AgenTerm v0.1.9 public plan](../plan/plan-v0.1.9.md)
+[AgenTerm v0.1.9 public plan](../plan/archive/plan-v0.1.9.md)
 
 This document defines the stable AgenTerm Rhai object and interface model for
 script authors, runtime implementers, tests, documentation generators, and

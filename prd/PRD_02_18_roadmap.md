@@ -396,7 +396,7 @@ track remains planned, but every declared dependency must still pass.
     journeys prove one complete local automation task; the former low-risk
     PowerShell/Rhai dual-run has completed its caller cutover and source removal
   - [x] implementation sequencing, budgets, risks and release evidence are
-    owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
+    owned by [the v0.1.9 public plan](../plan/archive/plan-v0.1.9.md)
 - [x] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge
   - [x] complete the evidence-gated replacement of all repository-owned
     PowerShell automation: no tracked `.ps1`, no hidden PowerShell business
@@ -426,7 +426,7 @@ track remains planned, but every declared dependency must still pass.
     autonomous scheduling remain later independently approved integration
     gates; these gates never reduce standalone `agenterm-rhai.exe` APIs
   - [x] implementation sequencing, budgets, risks and release evidence are
-    owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
+    owned by [the v0.1.10 public plan](../plan/archive/plan-v0.1.10.md)
 - [x] M10 / v0.1.11 Control Center and native local-IPC foundation
   - [x] simplify ordinary tab rows by removing the visible Edit action;
     double-clicking the row text enters the existing stable-ID inline editor,
@@ -449,7 +449,7 @@ track remains planned, but every declared dependency must still pass.
     native Control Center fallback and no WebView dependency in the terminal
     GUI/server hot path
   - [x] sequencing, parallel waves, risks and acceptance evidence are owned by
-    [the v0.1.11 public plan](../plan/plan-v0.1.11.md), with canonical product
+    [the v0.1.11 public plan](../plan/archive/plan-v0.1.11.md), with canonical product
     boundaries in [Control Center](PRD_02_21_control_center.md),
     [Agent control plane](PRD_02_07_agent_control_plane.md), and
     [Decentralized network foundation](PRD_02_22_decentralized_network.md)
@@ -518,7 +518,7 @@ track remains planned, but every declared dependency must still pass.
     history are owned by the current version plan —
     [v0.1.14](../plan/plan-v0.1.14.md) for what shipped and the measured CI
     analysis, [v0.1.15](../plan/plan-v0.1.15.md) for in-flight work; the
-    superseded [v0.1.12 plan](../plan/plan-v0.1.12.md) remains the record for
+    superseded [v0.1.12 plan](../plan/archive/plan-v0.1.12.md) remains the record for
     that candidate. Canonical delivery requirements stay in
     [Delivery and quality](PRD_02_17_delivery_quality.md)
 - [ ] M12 / v0.2.0 Control Center content maturity

@@ -96,7 +96,7 @@ O3 回合后汇聚
 
 - 仅保留本次执行结果，逐行覆盖对应 `evidence_id`。
 - 任何 `Failed` 记录会阻断对应分支，若为 `Unsupported` 仅阻断该平台能力缺口。
-- 与 [plan/plan-unix-gui-win-parity.md](plan/plan-unix-gui-win-parity.md) 的 O3 结果页同步。
+- 与 [plan/plan-unix-gui-win-parity.md](plan-unix-gui-win-parity.md) 的 O3 结果页同步。
 
 ## 可直接复制的当前轮次实例（JSON）
 

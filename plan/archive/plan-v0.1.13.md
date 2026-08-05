@@ -1,5 +1,20 @@
 # AgenTerm v0.1.13 公开计划
 
+> ## ⚠️ 已归档（2026-08-05）
+>
+> **本文是 v0.1.13 时期的历史执行记录，保留仅为追溯，不要作为执行依据。**
+> v0.1.13 **从未公开发布**——Candidate 被放弃，发布目标移至 v0.1.14，
+> 公开序列为 v0.1.11 → v0.1.14。
+>
+> §10.2.1 的发布坑清单**已提炼为版本无关要求**，权威处改为
+> `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements
+> （已与 v0.1.14 新发现的八个缺陷合并去重）。本文保留叙事原文。
+>
+> - 当前发布状态与 CI 实测分析：`plan/plan-v0.1.14.md`
+> - 在制版本：`plan/plan-v0.1.15.md`
+> - 结构 SSOT：`plan/ARCHITECTURE.md`
+
+
 状态：布点草案（2026-08-02，持续增补）；**不改变 v0.1.12 发布状态**，
 不触发 Candidate、tag 或 Release。本文记录：为何对 v0.1.12 仍不满意、
 跨平台封装分层审查、平台/产品待收敛项、以及本机基线测试中新暴露的问题。
@@ -40,7 +55,7 @@
 | 尚无 `v0.1.12` tag / 公开 Release | `git tag` 最新公开族至 `v0.1.11`；Cargo 已是 `0.1.12` | 版本号与用户可见发布脱节 |
 | exact-SHA Candidate 未记录「fully sealed 成功重跑」 | `prd/PRD_02_17_delivery_quality.md`：六 runner 曾因 Windows/Unix 行尾哈希 fail closed；LF 已钉，**成功封印仍待** | Promotion 无合法输入 |
 | 非发布 Promotion 彩排未记录 | 同 PRD `[~]` | 真发布前 blind |
-| Wave D 入口要求 clean main + 普通 CI 六 cell | `plan/plan-v0.1.12.md` 完成定义 | 任何未收口微重构都会推迟冻结 |
+| Wave D 入口要求 clean main + 普通 CI 六 cell | `plan/archive/plan-v0.1.12.md` 完成定义 | 任何未收口微重构都会推迟冻结 |
 
 **结论**：v0.1.12 若「再发」，最短路径是冻结 SHA → 成功 Candidate →
 Promotion 彩排 → 人工批准；**不是**再开大功能波次。
@@ -348,7 +363,7 @@ Wave 4（可选体验）
 | 文档 | 关系 |
 |------|------|
 | **`plan/ARCHITECTURE.md`** | **现行结构 SSOT**（分层/bins/热文件/禁令/已知债务）；版本 plan 不重画全树 |
-| `plan/plan-v0.1.12.md` | 0.1.12 收口与 Wave D；发布闭环权威执行记录 |
+| `plan/archive/plan-v0.1.12.md` | 0.1.12 收口与 Wave D；发布闭环权威执行记录 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同 |
 | `prd/PRD_02_18_roadmap.md` | M11/M12 路线状态 |
 | `plan/platform-ui-ux-boundary-tree.md` | **历史过程文**（superseded）；只作叙事，不权威 |

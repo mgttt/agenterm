@@ -31,7 +31,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   cleanup. Together with both macOS cells in the same run, this closes the
   matching-host receipt gap; the broader workspace remains partial for the
   explicitly listed follow-up product leaves. Win alignment execution map:
-  [`plan/plan-unix-gui-win-parity.md`](plan/plan-unix-gui-win-parity.md)
+  [`plan/plan-unix-gui-win-parity.md`](../plan/plan-unix-gui-win-parity.md)
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane
 - [x] tree starts at the top without a redundant logo/header strip

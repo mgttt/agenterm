@@ -279,13 +279,13 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  │     用户见 `clipboard text contains no pasteable characters`
 │  │     代码锚：normalize 后 empty；或 Win `has_unicode_text()==false` /
 │  │     get_text 无文本；macOS `pbpaste` 空/非 UTF-8 再归一空
-│  │     硬点：产品是否要「粘贴图像」？当前契约是 **文本终端**——图像应
-│  │     **明确拒绝**而非伪装成 empty pasteable
+│  │     硬点：platform clipboard **仅 get_text**——图像在 API 层已不可见
+│  │     （§10.3 断裂点 A）；子 harness 会粘图也收不到父终端未投递的字节
 │  │     建议方向：
-│  │       a) 读盘前/后探测：`has_unicode_text` + 若有 image 格式无 text →
-│  │          新 code `clipboard_image_only` / `clipboard_no_text`
-│  │       b) UX：`剪贴板是图像，终端/输入区只接受文本`（中英按 locale）
-│  │       c) 非目标（本版）：六平台图像粘贴进 PTY / 文件落盘（除非 PRD 立项）
+│  │       a) T0：探测无 text / 有 image → code `clipboard_image_only`，
+│  │          文案点明「未透传，非 harness 不支持」
+│  │       b) T1（可选）：image → temp 路径字符串注入 PTY/composer
+│  │       c) T2 非本版：多 MIME 真透传（须 PRD）
 │  ├─ [ ] P3 错误码与反馈统一（P1/P2 共用）
 │  │     终端 vs composer 双路径文案对齐；`last_feedback_error` /
 │  │     status_message 必须带稳定 machine code（已有部分
@@ -596,6 +596,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | D1–D3 | 见 §一 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
 | G-P1 | macOS unsigned-preview 是否为默认公开通道（无 signed 时自动回落 vs 强制 opt-in） | 决定 G1 默认行为与 install/README 首屏命令 |
 | G-P2 | 升级遇到 running server：仅文案提示 / 关窗改 default 为 stop-server / 一键 apply 热切换 | 决定 G7 落 a–d 哪几档；用户已要求自适应或提示 |
+| P-P1 | 非法 UTF-8：lossy 还是硬失败；图像粘贴是否永远拒绝（建议 hard-deny 文案） | 决定 P1/P2 默认策略与错误码集合 |
 | P5 | 分发面归属：agenterm.work 作单一入口（含 releases.json 索引）还是仅 docs 别名 | 决定 H1/H5 形态与 E1 走向；P1 的具体化 |
 | P6 | Hub 是否统一为单一 `kind` 底座（plugin/skin/app/info 共用 catalog+验签+事务）还是分立系统 | 决定 P3 皮肤边界的答案与 M14 的范围 |
 
@@ -617,6 +618,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 结构对齐/工具澄清 upsert：`ARCHITECTURE.md` §8 + 债务 L4；本 plan 增 **S 组**（S1 扩闸 / S2 围栏 / S3 manifest）；明确 LSP≠结构契约引擎 |
 | 2026-08-05 | S 泳道 **HOLD**：等其他 agent 完成；用户再通知 → 新一轮 review → 再开工；预备树写入 **§九**（不改代码） |
 | 2026-08-05 | 用户报告终端/输入区粘贴常失败：异源 UTF-8 大段（疑 emoji/控制符）+ 截图类 `no pasteable characters`；写入 **§一 P 组 + §十**（硬骨头，未授权开工） |
+| 2026-08-05 | 用户补：多 harness 已支持图/复杂文本却透传不过 → §10.3 断裂点 A/B/C（text-only API + 归一 + 无投递协议）；T0/T1/T2 选项 |
 
 ---
 
@@ -650,30 +652,77 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 
 平台读盘：`crates/agenterm-platform/**/clipboard.rs`（macOS `pbpaste` 字节 → `String::from_utf8` 失败即 Backend）。
 
-### 10.3 为何硬
+### 10.3 为何「别的 harness 能粘、AgenTerm 透传不过」（2026-08-05 补）
+
+用户观察：若干 agent/终端 harness **本身**已支持图片粘贴与复杂文本，但进 AgenTerm 后失败。  
+**不是** OS 剪贴板能力不够，而是 **AgenTerm 链路只认 Unicode 纯文本**，中间被掐断：
+
+```text
+系统剪贴板（可同时有 text + html + rtf + png + …）
+        │
+        ▼
+agenterm-platform clipboard API
+  仅有：get_text / set_text / has_unicode_text
+  无：get_image / 枚举 MIME / HTML·RTF
+        │  ← 【断裂点 A】图像/非 text 在此不可见
+        ▼
+产品 normalize_*_paste（ui_clipboard.rs）
+  只处理 str；丢 is_control()（除 \t/换行）
+        │  ← 【断裂点 B】复杂文本控制/转义被剥；剥光 → empty
+        ▼
+PTY send / composer（字节或 String）
+  终端：bracketed paste + UTF-8；无路径注入、OSC 图、临时文件
+        │  ← 【断裂点 C】无「交给子 harness 的投递协议」
+        ▼
+tab 内进程（claude/codex/…）
+  只吃得到父终端喂进 PTY 的字节
+  父没喂图/富文本 ⇒ 子进程「会粘图」也收不到
+```
+
+| 层 | 别家 harness 常见做法 | AgenTerm 今日 |
+|----|----------------------|---------------|
+| 剪贴板读 | 按 UTI/MIME 取 png/html 等 | **只 get_text** |
+| 图像粘贴 | temp 路径 / base64 / OSC / 内嵌 | **无通路** → empty |
+| 复杂文本 | 保留或智能剥 SGR；lossy UTF-8 | 严 from_utf8 + 剥 control |
+| 透传语义 | 完整用户意图给子进程 | 有界 Unicode 文本进 PTY/composer |
+
+**推论**：子 harness 支持粘图 **≠** AgenTerm 已透传。要透传须在 A/C 增格式探测与投递；复杂文本失败多在 A+B。
+
+| 产品选项（未拍板） | 含义 | 工作量 |
+|--------------------|------|--------|
+| **T0** 现状强化 | 仍只文本；图像/无文本 **显式文案**（P2/P3） | 小 |
+| **T1** 图→路径 | image → temp → 插入路径字符串 | 中 |
+| **T2** 真透传 | 多 MIME + 子进程协商 | 大，须 PRD |
+
+本版 P 组默认 **T0→（可选）T1 调研**；T2 不进 v0.1.15。
+
+### 10.4 为何硬（补充）
 
 1. **异源语义**：他终端「复制」≠ 纯文本；常含 SGR/OSC/宽字符/非法序列。  
 2. **错误折叠**：多种根因归一成 empty 或笼统 `terminal_paste_failed`，用户只能猜「emoji」。  
-3. **图像 vs 文本**：产品是文本 PTY；图像应 **显式拒绝**，不是 empty pasteable。  
+3. **图像 vs 文本**：图像在断裂点 A 静默不可见；应显式拒绝或走 T1。  
 4. **跨端双实现**：unix embedded / win remote / composer 三入口，改一漏二。  
-5. **异步与焦点**：unix worker 与 focus 竞态（StaleTarget）易被当成「偶发字符问题」。
+5. **异步与焦点**：unix worker 与 focus 竞态（StaleTarget）易被当成「偶发字符问题」。  
+6. **能力错位**：子 harness 会粘图 ≠ 父终端已投递（§10.3）。
 
-### 10.4 建议验收（开工后）
+### 10.5 建议验收（开工后）
 
 | 夹具 | 期望（建议策略） |
 |------|------------------|
 | 合法 UTF-8 + emoji + CJK 多行 | **成功** 粘贴进 terminal 与 composer |
 | 带 `\x1b[31m` 的「假终端拷贝」 | 成功或剥 SGR 后成功；**不**误报 empty |
 | 非法 UTF-8 字节序列 | 稳定 code：`clipboard_invalid_utf8` 或 lossy 成功且可观测替换 |
-| 仅图像、无 text | code：`clipboard_image_only`（或 `clipboard_no_text`）；文案点明图像 |
+| 仅图像、无 text | code：`clipboard_image_only`（或 `clipboard_no_text`）；文案点明图像；**不得**静默 empty |
 | 真空剪贴板 | `clipboard_empty` |
 | >256KiB 文本 | too_large；文案含上限 |
+| （若 T1）剪贴板 png | PTY/composer 出现可解析路径或约定标记；子进程可读该文件 |
 
-### 10.5 非目标（本叶）
+### 10.6 非目标（本叶）
 
-- 图像粘贴进 PTY / 自动存 png（除非 PRD 单独立项）  
-- 放开任意 C0 控制进 PTY（安全与兼容风险）  
+- **T2 真富文本/多 MIME 透传**（须 PRD；非 v0.1.15）  
+- 默认放开任意 C0 控制进 PTY（安全与兼容风险）  
 - 与 S 组微重构绑死——P 可在 GUI 域空闲时独立排期  
+- 假设「子 harness 支持 ⇒ AgenTerm 已透传」（反例见 §10.3）
 
 ---
 
