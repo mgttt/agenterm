@@ -31,7 +31,7 @@ use agenterm_platform::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    client::no_activate_from_environment,
+    client::{no_activate_from_environment, resolved_ipc_endpoint},
     commands::{alternate_screen_wheel_bytes, option_value, screenshot_output_path},
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
@@ -51,7 +51,7 @@ use crate::{
         config_path, load_config, save_config,
     },
     terminal_runtime::{TerminalLaunch, TerminalTab},
-    theme::ThemeId,
+    theme::{AppearancePreset, decode_window_icon_png, window_title_for_preset},
     ui_clipboard::{
         TERMINAL_PASTE_LIMIT_BYTES, normalize_composer_paste, normalize_terminal_paste,
         terminal_paste_bytes,
@@ -537,7 +537,16 @@ fn display_available() -> bool {
 }
 
 fn run_gui(no_activate: bool) -> anyhow::Result<()> {
-    let title = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
+    let config = load_config();
+    let instance_label = resolved_ipc_endpoint()
+        .ok()
+        .map(|resolved| resolved.logical_instance.display_name().to_string())
+        .filter(|name| name != "default");
+    let title = window_title_for_preset(
+        config.appearance_preset,
+        env!("CARGO_PKG_VERSION"),
+        instance_label.as_deref(),
+    );
     let wake_signal = Arc::new(WakeSignal::new());
 
     let ipc_server = start_ipc_server(0, Arc::clone(&wake_signal))?;
@@ -556,7 +565,10 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
         LogicalSize::new(f64::from(INITIAL_WIDTH), f64::from(INITIAL_HEIGHT)),
     )
     .with_no_activate(no_activate)
-    .with_ime_allowed(true);
+    .with_ime_allowed(true)
+    .with_window_icon_rgba(decode_window_icon_png(
+        config.appearance_preset.window_icon_png(),
+    ));
     agenterm_platform::window_host::run_pixel_window(options, Box::new(app))
         .map_err(anyhow::Error::new)
 }
@@ -731,10 +743,10 @@ impl UnixApp {
     }
 
     fn palette(&self) -> &'static crate::theme::ThemePalette {
-        let configured = self.active_terminal_appearance().color_theme;
+        let configured = self.active_terminal_appearance().appearance_preset;
         effective_palette(
             configured,
-            self.settings_dialog.theme_draft(),
+            self.settings_dialog.preset_draft(),
             self.settings_dialog.is_open(),
         )
     }
@@ -1618,8 +1630,9 @@ impl UnixApp {
             let changes = self.settings_dialog.changes();
             self.config.terminal_font_family = changes.default_appearance.terminal_font_family;
             self.config.terminal_font_size = changes.default_appearance.terminal_font_size;
-            self.config.color_theme = changes.default_appearance.color_theme;
+            self.config.appearance_preset = changes.default_appearance.appearance_preset;
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
+            self.refresh_window_title();
         }
         self.settings_dialog.close_without_apply();
         self.set_focus_surface_internal(UnixFocusSurface::Terminal, "settings-close");
@@ -1632,6 +1645,21 @@ impl UnixApp {
             .trim()
             .parse::<u16>()
             .unwrap_or(self.config.terminal_font_size)
+    }
+
+    fn refresh_window_title(&mut self) {
+        let instance_label = resolved_ipc_endpoint()
+            .ok()
+            .map(|resolved| resolved.logical_instance.display_name().to_string())
+            .filter(|name| name != "default");
+        self.title = window_title_for_preset(
+            self.config.appearance_preset,
+            env!("CARGO_PKG_VERSION"),
+            instance_label.as_deref(),
+        );
+        if let Some(window) = self.window.as_ref() {
+            window.set_title(&self.title);
+        }
     }
 
     fn tab_editor_target_id(&self) -> Option<u64> {
@@ -1808,12 +1836,24 @@ impl UnixApp {
 
     fn handle_settings_click(&mut self, hit: SettingsHit) {
         match hit {
-            SettingsHit::Dark => {
-                self.settings_dialog.preview_theme(ThemeId::Dark);
+            SettingsHit::ClassicDay => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::classic_day());
                 self.request_redraw();
             }
-            SettingsHit::Light => {
-                self.settings_dialog.preview_theme(ThemeId::Light);
+            SettingsHit::ClassicNight => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::classic_night());
+                self.request_redraw();
+            }
+            SettingsHit::FancyDay => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::fancy_day());
+                self.request_redraw();
+            }
+            SettingsHit::FancyNight => {
+                self.settings_dialog
+                    .preview_preset(AppearancePreset::fancy_night());
                 self.request_redraw();
             }
             SettingsHit::SizeDecrease => {
@@ -2284,8 +2324,9 @@ impl UnixApp {
             ),
             "settings": settings_json(
                 &self.config,
+                self.config.locale,
                 self.settings_dialog.is_open(),
-                Some(self.settings_dialog.theme_draft().as_str()),
+                Some(self.settings_dialog.preset_draft().as_str()),
                 &crate::ipc_address(),
                 self.active_position()
                     .map(|position| format!("@{}", self.tabs[position].id))
@@ -2597,7 +2638,8 @@ impl UnixApp {
                 width,
                 height,
                 self.settings_size_draft(),
-                self.settings_dialog.theme_draft(),
+                self.settings_dialog.preset_draft(),
+                self.config.locale,
             );
             if let Some(hit) = modal.hit_test(x, y) {
                 self.handle_settings_click(hit);
@@ -3950,7 +3992,8 @@ impl UnixApp {
                 logical_width,
                 logical_height,
                 self.settings_size_draft(),
-                self.settings_dialog.theme_draft(),
+                self.settings_dialog.preset_draft(),
+                self.config.locale,
             )
         });
         let new_terminal = if self.new_terminal_dialog.is_open() {
@@ -4481,7 +4524,8 @@ impl ControlHost for UnixApp {
         serde_json::to_string_pretty(&serde_json::json!({
             "terminal_font_family": self.config.terminal_font_family,
             "terminal_font_size": self.config.terminal_font_size,
-            "color_theme": self.config.color_theme,
+            "appearance_preset": self.config.appearance_preset.as_str(),
+            "color_theme": self.config.appearance_preset.color_theme().as_str(),
             "tabs_visible": self.config.tabs_visible,
             "tabs_width": self.config.tabs_width,
             "resolved_font_family": resolved_font_name(),
@@ -4613,8 +4657,8 @@ impl ControlHost for UnixApp {
         self.close_settings(apply)
     }
 
-    fn preview_settings_theme(&mut self, theme: ThemeId) {
-        if self.settings_dialog.preview_theme(theme) {
+    fn preview_settings_preset(&mut self, preset: AppearancePreset) {
+        if self.settings_dialog.preview_preset(preset) {
             self.request_redraw();
         }
     }

@@ -123,7 +123,7 @@ templates — one binary, not four products.
 
 | You edit (product vision) | Engineering edits (version execution) |
 |---------------------------|----------------------------------------|
-| `PRD.md`, `prd/PRD_*.md`, this file | `plan/plan-v0.1.10.md` (active track) |
+| `PRD.md`, `prd/PRD_*.md`, this file | the current `plan/plan-v0.1.*.md` (active track) |
 | Inspiration, mind tree, lanes | Build order, gates, delivery evidence |
 
 ### What we refuse to become

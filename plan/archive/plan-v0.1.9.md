@@ -1,5 +1,17 @@
 # AgenTerm v0.1.9 公开计划
 
+> ## ⚠️ 已归档（2026-08-05）
+>
+> **本文是 v0.1.9 时期的历史执行记录，保留仅为追溯，不要作为执行依据。**
+> 其里程碑证据仍被 `prd/PRD_02_18_roadmap.md` 引用，故整档保留原文未改。
+>
+> - 当前发布状态与 CI 实测分析：`plan/plan-v0.1.14.md`
+> - 在制版本：`plan/plan-v0.1.15.md`
+> - 发布链要求（版本无关权威处）：
+>   `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements
+> - 结构 SSOT：`plan/ARCHITECTURE.md`
+
+
 状态：讨论稿  
 工作主题：**通用 Script Runtime 成型**  
 版本定位：把已经可靠但能力有限的 `agenterm-rhai.exe` 从 pure/observe
@@ -1344,7 +1356,7 @@ agenterm-rhai.exe
 - clean candidate 仍只构建一次，package 消费同一批字节。
 
 README 增加一个简短 script task 示例；稳定运行时合同由
-[`docs/agenterm-rhai-runtime.md`](../docs/agenterm-rhai-runtime.md)
+[`docs/agenterm-rhai-runtime.md`](../../docs/agenterm-rhai-runtime.md)
 承载，机器事实由 `agenterm-rhai.exe api --json` 承载，PRD 拥有产品
 状态，避免 README 或计划变成第二份手写手册。
 

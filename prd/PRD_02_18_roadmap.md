@@ -396,7 +396,7 @@ track remains planned, but every declared dependency must still pass.
     journeys prove one complete local automation task; the former low-risk
     PowerShell/Rhai dual-run has completed its caller cutover and source removal
   - [x] implementation sequencing, budgets, risks and release evidence are
-    owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
+    owned by [the v0.1.9 public plan](../plan/archive/plan-v0.1.9.md)
 - [x] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge
   - [x] complete the evidence-gated replacement of all repository-owned
     PowerShell automation: no tracked `.ps1`, no hidden PowerShell business
@@ -426,7 +426,7 @@ track remains planned, but every declared dependency must still pass.
     autonomous scheduling remain later independently approved integration
     gates; these gates never reduce standalone `agenterm-rhai.exe` APIs
   - [x] implementation sequencing, budgets, risks and release evidence are
-    owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
+    owned by [the v0.1.10 public plan](../plan/archive/plan-v0.1.10.md)
 - [x] M10 / v0.1.11 Control Center and native local-IPC foundation
   - [x] simplify ordinary tab rows by removing the visible Edit action;
     double-clicking the row text enters the existing stable-ID inline editor,
@@ -449,11 +449,20 @@ track remains planned, but every declared dependency must still pass.
     native Control Center fallback and no WebView dependency in the terminal
     GUI/server hot path
   - [x] sequencing, parallel waves, risks and acceptance evidence are owned by
-    [the v0.1.11 public plan](../plan/plan-v0.1.11.md), with canonical product
+    [the v0.1.11 public plan](../plan/archive/plan-v0.1.11.md), with canonical product
     boundaries in [Control Center](PRD_02_21_control_center.md),
     [Agent control plane](PRD_02_07_agent_control_plane.md), and
     [Decentralized network foundation](PRD_02_22_decentralized_network.md)
-- [~] M11 / v0.1.12 Convergence and fast candidate promotion
+- [~] M11 / v0.1.12 planned, delivered in v0.1.14 — Convergence and fast
+  candidate promotion
+
+  > ⚠️ Version attribution corrected 2026-08-05. The v0.1.12 and v0.1.13
+  > candidates were built but never publicly released, so the public sequence
+  > runs v0.1.11 → v0.1.14. The evidence lines below are unchanged and remain
+  > authoritative for the SHAs and runs they name; only the milestone's version
+  > label was wrong. Current delivery history is owned by
+  > [the v0.1.14 public plan](../plan/plan-v0.1.14.md), and the in-flight
+  > version is v0.1.15.
   - [x] converge the v0.1.11 native IPC foundation across Windows named pipes
     and Linux/macOS Unix sockets: logical main/dev isolation, stale authority
     recovery, mixed-schema discovery and one shared resolver remain truthful
@@ -486,21 +495,32 @@ track remains planned, but every declared dependency must still pass.
     lifecycle/renderer/caller-instance journeys are integrated and have matching-
     host receipts; macOS physical pointer acceptance remains open, and richer
     Workflow, Extensions or InfoHub content is not promoted by this slice
-  - [~] split fast feedback, exact-SHA candidate qualification and release
+  - [x] split fast feedback, exact-SHA candidate qualification and release
     promotion so a complete stress-inclusive qualification executes once per
     eligible candidate; tag publication verifies and promotes the previously
     qualified six-platform bytes without rebuilding or rerunning the complete
-    desktop suite
-  - [~] bind promotion to an exact commit, receipt, platform matrix, artifact
+    desktop suite. Delivered by v0.1.14: candidate run `30942173420` at source
+    `8ff2b5a` sealed all six platforms, and promotion run `30944087372`
+    published without recompiling
+  - [x] bind promotion to an exact commit, receipt, platform matrix, artifact
     hashes, SBOM and provenance; missing, stale or tampered candidate artifacts
-    fail closed before a GitHub Release exists
+    fail closed before a GitHub Release exists. Delivered by v0.1.14, which
+    published 23 assets bound to `8ff2b5a`. The fail-closed behaviour was
+    exercised for real: the first promotion attempts stopped before publication
+    on a provenance SBOM mismatch and on manifest identity checks. See
+    [Delivery and quality](PRD_02_17_delivery_quality.md) and
+    [the v0.1.14 public plan](../plan/plan-v0.1.14.md) for the eight
+    release-chain defects this first end-to-end execution exposed
   - [ ] measure queue, cache, compile, test, package, upload and promotion
     stages; correctly keyed Cargo/sccache experiments and optional paid runners
     may change latency but never eligibility, evidence or artifact identity
   - [ ] sequencing, runner experiments, release SLOs, risks and delivery
-    history are owned by
-    [the v0.1.12 public plan](../plan/plan-v0.1.12.md), with canonical delivery
-    requirements in [Delivery and quality](PRD_02_17_delivery_quality.md)
+    history are owned by the current version plan —
+    [v0.1.14](../plan/plan-v0.1.14.md) for what shipped and the measured CI
+    analysis, [v0.1.15](../plan/plan-v0.1.15.md) for in-flight work; the
+    superseded [v0.1.12 plan](../plan/archive/plan-v0.1.12.md) remains the record for
+    that candidate. Canonical delivery requirements stay in
+    [Delivery and quality](PRD_02_17_delivery_quality.md)
 - [ ] M12 / v0.2.0 Control Center content maturity
   - [ ] deepen the independent Control Center beyond its v0.1.11 shell:
     Cockpit operational views, versioned Workflow definitions/runs,
@@ -557,6 +577,65 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M9 governed LLM gateway hypothesis: local forwarding, routing, quota,
   audit, cost, credential isolation, and redaction remain unassigned until
   scripting, MCP, and event-core gates produce a concrete product need
+- [ ] M13 / v0.2.x Distribution surface and one package substrate
+  - [ ] `agenterm.work` becomes the single public distribution entry point:
+    OS/architecture detection, one copyable install command per platform, a
+    `302` artifact redirect to the Release bytes, and a machine-readable
+    `releases.json` index derived from the existing per-artifact
+    `.provenance.json` and the sealed candidate manifest; no second source of
+    release truth and no proxying of Release bytes
+  - [ ] the installer surface reaches platform parity: `install.sh` and a new
+    `install.ps1` share one channel model (`stable` / `preview`), one
+    versioned `releases/<version>` + `current` layout, one SHA-256 gate and
+    one `installed.json` record; Windows stays a portable no-admin payload and
+    does not acquire an MSI or registry footprint
+  - [ ] supply-chain evidence becomes user-visible rather than CI-only: the
+    installer verifies the artifact `.provenance.json` against the requested
+    version and measured digest, prints commit / tag / build log / signed /
+    notarized state, and stores it locally; `provenance.sbom_sha256` is
+    populated rather than the empty string it ships as today
+  - [ ] macOS publishing is data-driven, not documentation-driven: while the
+    Apple Developer enrollment is incomplete, `variant: unsigned-preview` is a
+    labeled public preview channel that requires one explicit acknowledgement
+    and never installs silently; once `ENABLE_SIGNED_MACOS_RELEASE` is true the
+    same clients prefer the signed and notarized artifact with no copy change
+  - [ ] `agenterm-cli update` owns check / apply / rollback / retention over
+    the same verification path as first install; delta updates are an explicit
+    non-goal, and applying an update to a running server keeps the existing
+    keep-server session semantics while making the disk-versus-live version
+    difference understandable without reading documentation
+- [ ] M14 / v0.2.x–v0.3.x Hub ecosystem over one substrate
+  - [ ] PluginHub, SkinHub, AppHub and InfoHub are product-class views over a
+    single softmgr catalog / source / install / update / rollback substrate
+    keyed by a `kind` field; skins are `kind: skin` packages over the existing
+    theme contract and never become a second extension system. Built-in
+    classic/fancy × day/night presets ship first under
+    [Human workspace](PRD_02_06_human_workspace.md) /
+    [`plan/plan-skins-v1.md`](../plan/plan-skins-v1.md) before any external
+    SkinHub package format is frozen.
+  - [ ] discovery is cross-kind and renders one signed registry index that both
+    the web surface and Control Center consume; the index is a static signed
+    document before it is ever a service
+  - [ ] trust is tiered and visible: `first-party` / `verified` / `community` /
+    `unverified` derive from provenance, SBOM and digest evidence equivalent to
+    the product's own release chain; executing kinds (`plugin`, `app`) default
+    to `verified` or better and declare a permission manifest, while
+    non-executing kinds may relax to `community`
+  - [ ] host compatibility is declared per package and pre-checked before a
+    host upgrade disables installed content; the plugin API revision reuses the
+    Script Runtime and MCP contracts rather than defining a third surface
+  - [ ] offline is a first-class state: a stale-labeled local index, fully
+    offline operation of installed packages, offline export/import over the
+    same verification path, and a self-hosted index URL for restricted networks
+  - [ ] curation starts closed and opens on evidence: repository-reviewed
+    manifests first, self-service submission with automated provenance and
+    permission gates second, and content-addressed distribution over
+    `agenterm-net` only after N3; the trust index and its signing key remain
+    centrally owned even when hosting is decentralized
+  - [ ] non-goals: no public marketplace transactions, no silent installs, no
+    privileged bridge for remote pages, and no distribution-native packages
+    (deb / rpm / Homebrew / MSI / Store) until one channel is proven worth its
+    standing maintenance cost
 - [ ] Unscheduled optional-application ecosystem
   - [ ] treat the independently versioned `agenterm-{role}.exe` family as
     future software-distribution units backed by signed inventory,

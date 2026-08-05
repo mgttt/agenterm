@@ -161,7 +161,7 @@ artifact generation, CLI smoke, and semantic UX smoke all pass. Rendering
 changes additionally require
 `screenshot` or `screenshot-pane` inspection.
 
-An unpublished v0.1.12 release candidate uses
+An unpublished release candidate uses
 `.\check.cmd --release --include-stress` on a clean commit and must emit one
 complete qualification receipt bound to the exact candidate bytes. The
 independent `agenterm-rhai task run package-qualified` step may only copy
@@ -174,4 +174,8 @@ immutable tag must not be overwritten; the historical server-loss hotfix uses Se
 `0.1.9+hotfix.1` and tag `v0.1.9+hotfix.1`, with public release title
 “AgenTerm v0.1.9.1 Hotfix”. Versions 0.1.7 and 0.1.8 remain historical
 baselines; v0.1.7 is internal-only and must never produce a tag or public
-GitHub Release.
+GitHub Release. Versions 0.1.12 and 0.1.13 were planned and worked on but
+never publicly released: their candidates were abandoned and superseded, so
+the public sequence runs v0.1.11 → v0.1.14. Their `plan/plan-v0.1.1{2,3}.md`
+records remain authoritative for what was built and why, but neither version
+has a tag or GitHub Release, and neither should be treated as shippable.

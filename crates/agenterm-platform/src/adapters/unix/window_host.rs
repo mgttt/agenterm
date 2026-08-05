@@ -334,6 +334,14 @@ impl ApplicationHandler<()> for PixelWindowRunner {
             // Keeps the terminal viewport at a usable size; a shorter window
             // leaves fewer grid rows than the terminal contract supports.
             .with_min_inner_size(NativeLogicalSize::new(320.0, 240.0));
+        let attributes = if let Some((width, height, rgba)) = &self.options.window_icon_rgba {
+            match winit::window::Icon::from_rgba(rgba.clone(), *width, *height) {
+                Ok(icon) => attributes.with_window_icon(Some(icon)),
+                Err(_) => attributes,
+            }
+        } else {
+            attributes
+        };
         let attributes = configure_window_attributes(attributes, self.options.no_activate);
         let native_window = match event_loop.create_window(attributes) {
             Ok(window) => Rc::new(window),

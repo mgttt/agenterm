@@ -148,39 +148,81 @@ fn only_pane(context, cli, target) {
     snapshot.windows[0]
 }
 
-fn assert_theme(snapshot, saved, draft, open) {
+fn derived_color_theme(preset_id) {
+    if preset_id.ends_with("-day") {
+        "light"
+    } else {
+        "dark"
+    }
+}
+
+fn theme_option_field(snapshot, id, field) {
+    for option in snapshot.settings.theme_options {
+        if option.id == id {
+            return option[field];
+        }
+    }
+    throw "theme_option_missing:" + id;
+}
+
+fn assert_theme_options(snapshot) {
+    let expected = [
+        "classic-day",
+        "classic-night",
+        "fancy-day",
+        "fancy-night",
+    ];
     require(
-        snapshot.settings.color_theme == saved,
-        "theme_saved_mismatch"
+        snapshot.settings.theme_options.len == 4,
+        "theme_options_count_mismatch"
     );
+    for id in expected {
+        let found = false;
+        for option in snapshot.settings.theme_options {
+            if option.id == id && option.label != "" && option.description != "" {
+                found = true;
+            }
+        }
+        require(found, "theme_option_missing:" + id);
+    }
+    require(
+        theme_option_field(snapshot, "classic-day", "accent")
+            != theme_option_field(snapshot, "fancy-day", "accent"),
+        "fancy_classic_accent_not_distinct"
+    );
+    require(
+        theme_option_field(snapshot, "fancy-day", "metrics")
+            .corner_radius_control_px > 0,
+        "fancy_metrics_missing"
+    );
+}
+
+fn assert_theme(snapshot, saved_preset, draft, open) {
+    require(
+        snapshot.settings.appearance_preset == saved_preset,
+        "appearance_preset_saved_mismatch"
+    );
+    require(
+        snapshot.settings.color_theme == derived_color_theme(saved_preset),
+        "color_theme_saved_mismatch"
+    );
+    assert_theme_options(snapshot);
     if open {
         require(
             snapshot.modal != ()
                 && snapshot.modal.kind == "settings"
-                && snapshot.settings.theme_draft == draft,
+                && snapshot.settings.theme_draft == draft
+                && snapshot.settings.appearance_preset_draft == draft,
             "theme_open_draft_mismatch"
         );
     } else {
         require(
             snapshot.modal == ()
-                && snapshot.settings.theme_draft == (),
+                && snapshot.settings.theme_draft == ()
+                && snapshot.settings.appearance_preset_draft == (),
             "theme_expected_closed"
         );
     }
-    let dark = false;
-    let light = false;
-    for option in snapshot.settings.theme_options {
-        if option.id == "dark" && option.label == "Dark" {
-            dark = true;
-        }
-        if option.id == "light" && option.label == "Light" {
-            light = true;
-        }
-    }
-    require(
-        snapshot.settings.theme_options.len == 2 && dark && light,
-        "theme_options_mismatch"
-    );
 }
 
 fn retain_failure_snapshot(context, cli) {
@@ -217,20 +259,54 @@ require(std::fs::exists(cli), "theme_cli_missing");
 let internal_failure_probe = args.len == 4;
 
 let context = test_harness::new_context(repo, "theme");
-let dark_png = std::path::join(
-    context.run_directory,
-    "evidence/theme-dark.png"
-).display;
-let light_png = std::path::join(
-    context.run_directory,
-    "evidence/theme-light.png"
-).display;
 let owned_children = [];
+let night_png = std::path::join(
+    context.run_directory,
+    "evidence/theme-classic-night.png"
+).display;
+let day_png = std::path::join(
+    context.run_directory,
+    "evidence/theme-classic-day.png"
+).display;
+let fancy_day_png = std::path::join(
+    context.run_directory,
+    "evidence/theme-fancy-day.png"
+).display;
 let succeeded = false;
 let failure = "";
 
 try {
-    print("STEP launch isolated Dark workspace and keep a PTY active");
+    print("STEP legacy color_theme migrates to classic-day on restart");
+    std::fs::create_dir_all(
+        std::path::parent(context.settings_path).display
+    );
+    rhai::runtime::atomic_write(
+        context.settings_path,
+        "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n"
+    );
+    let migration_gui = start_gui(context, gui, cli);
+    owned_children.push(migration_gui);
+    assert_theme(
+        json_cli(context, cli, ["ui-snapshot"]),
+        "classic-day",
+        (),
+        false
+    );
+    text_cli(context, cli, ["ui-action", "close-window"]);
+    text_cli(context, cli, ["ui-action", "stop-server-and-exit"]);
+    wait_for_exit(migration_gui, "theme_migration_gui_exit_timeout");
+    wait_for_server_stop(context, cli);
+    let migrated = rhai::json::parse_file(context.settings_path);
+    require(
+        migrated.appearance_preset == "classic-day",
+        "legacy_light_migration_failed"
+    );
+
+    print("STEP launch isolated classic-night workspace and keep a PTY active");
+    rhai::runtime::atomic_write(
+        context.settings_path,
+        "{\"appearance_preset\":\"classic-night\"}\n"
+    );
     let first_gui = start_gui(context, gui, cli);
     owned_children.push(first_gui);
     let tab = only_tab(context, cli);
@@ -258,36 +334,63 @@ try {
          "--submit-complete", "--timeout-ms", "30000"]
     );
 
-    print("STEP native Light preview and Cancel rollback");
+    print("STEP preview all four presets through public ui-actions");
+    text_cli(context, cli, ["ui-action", "open-settings"]);
+    assert_theme(
+        json_cli(context, cli, ["ui-snapshot"]),
+        "classic-night",
+        "classic-night",
+        true
+    );
+    for action in [
+        "settings-preset-classic-day",
+        "settings-preset-classic-night",
+        "settings-preset-fancy-day",
+        "settings-preset-fancy-night",
+        "settings-theme-light",
+        "settings-theme-dark",
+    ] {
+        text_cli(context, cli, ["ui-action", action]);
+    }
+    let fancy_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    assert_theme(
+        fancy_snapshot,
+        "classic-night",
+        "classic-night",
+        true
+    );
+
+    print("STEP native classic-day preview and Cancel rollback");
+    text_cli(context, cli, ["ui-action", "open-settings"]);
+    assert_theme(
+        json_cli(context, cli, ["ui-snapshot"]),
+        "classic-night",
+        "classic-night",
+        true
+    );
+    text_cli(context, cli, ["screenshot", "-o", night_png]);
     let snapshot = json_cli(
         context,
         cli,
-        ["ui-action", "open-settings"]
+        ["ui-action", "settings-preset-classic-day"]
     );
-    assert_theme(snapshot, "dark", "dark", true);
-    text_cli(context, cli, ["screenshot", "-o", dark_png]);
-    let snapshot = json_cli(
-        context,
-        cli,
-        ["ui-action", "settings-theme-light"]
-    );
-    assert_theme(snapshot, "dark", "light", true);
-    text_cli(context, cli, ["screenshot", "-o", light_png]);
+    assert_theme(snapshot, "classic-night", "classic-day", true);
+    text_cli(context, cli, ["screenshot", "-o", day_png]);
     let snapshot = json_cli(
         context,
         cli,
         ["ui-action", "cancel"]
     );
-    assert_theme(snapshot, "dark", (), false);
+    assert_theme(snapshot, "classic-night", (), false);
 
-    print("STEP Escape rolls a second Light preview back");
+    print("STEP Escape rolls a second classic-day preview back");
     text_cli(context, cli, ["ui-action", "open-settings"]);
     let snapshot = json_cli(
         context,
         cli,
-        ["ui-action", "settings-theme-light"]
+        ["ui-action", "settings-preset-classic-day"]
     );
-    assert_theme(snapshot, "dark", "light", true);
+    assert_theme(snapshot, "classic-night", "classic-day", true);
     first_gui.window_key("Escape");
     let snapshot = json_cli(
         context,
@@ -295,24 +398,53 @@ try {
         ["wait-ui", "--window-state", "restored",
          "--modal-kind", "none", "--timeout-ms", "30000"]
     );
-    assert_theme(snapshot, "dark", (), false);
+    assert_theme(snapshot, "classic-night", (), false);
 
-    print("STEP native Apply persists Light without interrupting the PTY");
+    print("STEP native Apply persists classic-day without interrupting the PTY");
     text_cli(context, cli, ["ui-action", "open-settings"]);
-    text_cli(context, cli, ["ui-action", "settings-theme-light"]);
+    text_cli(context, cli, ["ui-action", "settings-preset-classic-day"]);
     let snapshot = json_cli(
         context,
         cli,
         ["ui-action", "settings-apply"]
     );
-    assert_theme(snapshot, "light", (), false);
+    assert_theme(snapshot, "classic-day", (), false);
+    let persisted = rhai::json::parse_file(context.settings_path);
     require(
-        std::fs::exists(context.settings_path)
-            && rhai::json::parse_file(
-                context.settings_path
-            ).color_theme == "light",
+        persisted.appearance_preset == "classic-day",
         "theme_apply_not_persisted"
     );
+
+    print("STEP fancy-day palette differs from classic-day in snapshot and rendering");
+    text_cli(context, cli, ["ui-action", "open-settings"]);
+    text_cli(context, cli, ["ui-action", "settings-preset-fancy-day"]);
+    text_cli(context, cli, ["screenshot", "-o", fancy_day_png]);
+    let fancy_preview = json_cli(context, cli, ["ui-snapshot"]);
+    assert_theme(fancy_preview, "classic-day", "fancy-day", true);
+    require(
+        theme_option_field(fancy_preview, "fancy-day", "accent")
+            != theme_option_field(fancy_preview, "classic-day", "accent"),
+        "fancy_preview_accent_not_distinct"
+    );
+    text_cli(context, cli, ["ui-action", "settings-apply"]);
+    let fancy_applied = json_cli(context, cli, ["ui-snapshot"]);
+    assert_theme(fancy_applied, "fancy-day", (), false);
+    require(
+        rhai::json::parse_file(context.settings_path).appearance_preset == "fancy-day",
+        "fancy_apply_not_persisted"
+    );
+    let classic_shot = rhai::image::inspect_png(day_png);
+    let fancy_shot = rhai::image::inspect_png(fancy_day_png);
+    require(
+        classic_shot.width == fancy_shot.width
+            && classic_shot.height == fancy_shot.height,
+        "fancy_screenshot_geometry_mismatch"
+    );
+    let fancy_delta = classic_shot.luminance - fancy_shot.luminance;
+    if fancy_delta < 0.0 {
+        fancy_delta = -fancy_delta;
+    }
+    require(fancy_delta >= 1.0, "fancy_render_not_visibly_distinct");
     let token_after =
         "AGENTERM_THEME_AFTER_" + std::process::id();
     text_cli(
@@ -341,14 +473,14 @@ try {
         "theme_pty_interrupted"
     );
 
-    print("STEP Dark and Light previews have distinct rendered pixels");
+    print("STEP classic-day and classic-night previews have distinct rendered pixels");
     require(
-        std::fs::metadata(dark_png).len >= 1000
-            && std::fs::metadata(light_png).len >= 1000,
+        std::fs::metadata(night_png).len >= 1000
+            && std::fs::metadata(day_png).len >= 1000,
         "theme_screenshot_too_small"
     );
-    let dark = rhai::image::inspect_png(dark_png);
-    let light = rhai::image::inspect_png(light_png);
+    let dark = rhai::image::inspect_png(night_png);
+    let light = rhai::image::inspect_png(day_png);
     let luminance_delta = dark.luminance - light.luminance;
     if luminance_delta < 0.0 {
         luminance_delta = -luminance_delta;
@@ -368,7 +500,7 @@ try {
         ", luminance " + light.luminance
     );
 
-    print("STEP saved Light theme survives shutdown and restart");
+    print("STEP saved fancy-day survives shutdown and restart");
     text_cli(context, cli, ["ui-action", "close-window"]);
     text_cli(
         context,
@@ -389,7 +521,7 @@ try {
     );
     assert_theme(
         json_cli(context, cli, ["ui-snapshot"]),
-        "light",
+        "fancy-day",
         (),
         false
     );
@@ -401,7 +533,7 @@ try {
     );
     print(
         "PASS: theme preview, rollback, persistence, PTY continuity, " +
-        "and rendering"
+        "migration, and rendering"
     );
     succeeded = true;
 } catch (error) {

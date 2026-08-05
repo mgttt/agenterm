@@ -18,7 +18,7 @@ use crate::{
     settings::clamp_tabs_width,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
-    theme::ThemeId,
+    theme::AppearancePreset,
     ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
         UI_DELTA_SCHEMA_VERSION, UI_HELLO_SCHEMA_VERSION, UI_SCREEN_MAX_COLUMNS,
@@ -575,7 +575,7 @@ pub(crate) trait ControlHost {
     }
 
     #[allow(dead_code)]
-    fn preview_settings_theme(&mut self, _theme: ThemeId) {}
+    fn preview_settings_preset(&mut self, _preset: AppearancePreset) {}
 
     fn open_tab_editor(&mut self, _tab_id: u64) -> Result<(), String> {
         Err("tab editor is not supported on this host".to_owned())
@@ -919,11 +919,27 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
             Err(error) => Some(IpcResponse::failure(error)),
         },
         "settings-theme-dark" => {
-            host.preview_settings_theme(ThemeId::Dark);
+            host.preview_settings_preset(AppearancePreset::classic_night());
             Some(ui_snapshot_response(host))
         }
         "settings-theme-light" => {
-            host.preview_settings_theme(ThemeId::Light);
+            host.preview_settings_preset(AppearancePreset::classic_day());
+            Some(ui_snapshot_response(host))
+        }
+        "settings-preset-classic-day" => {
+            host.preview_settings_preset(AppearancePreset::classic_day());
+            Some(ui_snapshot_response(host))
+        }
+        "settings-preset-classic-night" => {
+            host.preview_settings_preset(AppearancePreset::classic_night());
+            Some(ui_snapshot_response(host))
+        }
+        "settings-preset-fancy-day" => {
+            host.preview_settings_preset(AppearancePreset::fancy_day());
+            Some(ui_snapshot_response(host))
+        }
+        "settings-preset-fancy-night" => {
+            host.preview_settings_preset(AppearancePreset::fancy_night());
             Some(ui_snapshot_response(host))
         }
         "settings-apply" => match host.close_settings_modal(true) {

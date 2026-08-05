@@ -1,5 +1,20 @@
 # AgenTerm v0.1.12 公开计划
 
+> ## ⚠️ 已归档（2026-08-05）
+>
+> **本文是 v0.1.12 时期的历史执行记录，保留仅为追溯，不要作为执行依据。**
+> 其里程碑证据仍被 `prd/PRD_02_18_roadmap.md` 引用，故整档保留原文未改。
+>
+> 注意：v0.1.12 与 v0.1.13 虽有完整 plan，但**从未公开发布**——
+> 其 Candidate 被放弃/取代，公开序列为 v0.1.11 → v0.1.14。
+>
+> - 当前发布状态与 CI 实测分析：`plan/plan-v0.1.14.md`
+> - 在制版本：`plan/plan-v0.1.15.md`
+> - 发布链要求（版本无关权威处）：
+>   `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements
+> - 结构 SSOT：`plan/ARCHITECTURE.md`
+
+
 状态：v0.1.12 产品收口（2026-08-02）；进入最终 qualification 前的版本冻结。
 Candidate/Promotion 仍是独立授权门，不因本状态自动触发。
 工作主题：**收敛 v0.1.11 基础、折叠候选到发布的等待时间，并让三平台

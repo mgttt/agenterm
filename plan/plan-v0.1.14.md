@@ -1,7 +1,7 @@
 # AgenTerm v0.1.14 公开计划
 
 状态：**开工**（2026-08-04 由占位稿升级；升级时修正了占位稿中已过时的
-v0.1.13 Wave B 快照——该三项在 `plan/plan-v0.1.13.md` §10.2 已全部 `[x]`）。
+v0.1.13 Wave B 快照——该三项在 `plan/archive/plan-v0.1.13.md` §10.2 已全部 `[x]`）。
 本文件**不**改变 v0.1.12/v0.1.13 的授权状态，**不**创建 tag/Candidate/Release。
 v0.1.13 发布链（Candidate → Promotion）独立推进，不受本 plan 影响。
 
@@ -63,9 +63,11 @@ v0.1.14  Identity correctness & trust tail
 └─ D. CI/发布纪律（发布链复盘产物）
    ├─ [x] ci.yml workflow_dispatch 手动重跑通道（bcb7ec0，已落地；
    │     解决「exact-SHA 绿 CI 被取消/删除后 push 无法重触发」死角）
-   ├─ [ ] 发布 runbook 固化：把 plan-v0.1.13 §10.2.1 坑清单提炼为
-   │     prd/PRD_02_17 或 docs 稳定条目（短 SHA、HEAD==source_sha、
-   │     exact-SHA 绿 CI、并发 agent 推 main 的窗口风险）
+   ├─ [x] 发布 runbook 固化（2026-08-05 完成）：v0.1.13 §10.2.1 与本轮
+   │     八个缺陷已合并去重，落为版本无关要求
+   │     `prd/PRD_02_17_delivery_quality.md` §Release-chain operating
+   │     requirements（含短 SHA、exact-SHA 绿 CI、哪些修复需重跑 Candidate、
+   │     离线预演、诊断纪律、并发 checkout 纪律、GitHub API 最终一致性）
    ├─ [ ] 多文件/新文件改动前置 cargo fmt --check 清单化
    │     （占位稿 §二 记录的两次 rustfmt fail-closed 教训）
    └─ [ ] flaky 复核：script_process::child_wait_timeout_reaps_descendants
@@ -341,7 +343,8 @@ commit 的 `Cargo.lock`/`Cargo.toml`/`scripts/artifacts.json` 哈希，**完全�
 | 文档 | 关系 |
 |------|------|
 | `plan/ARCHITECTURE.md` | 现行结构 SSOT；本文不重画结构树 |
-| `plan/plan-v0.1.13.md` | 上一版权威执行记录（§10.2.1 发布坑清单来源） |
+| `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13 §10.2.1 + 本轮八个缺陷，已合并去重为版本无关要求） |
+| `plan/archive/plan-v0.1.13.md` | 上一版执行记录（叙事原文；要求已提炼至上行） |
 | `prd/PRD_02_18_roadmap.md` M12 | 大重构去向（原 plan-v0.2.0.md 已并入） |
 | `plan/precision-audit.md` | 持续审查权威记录；B 组决策后回写该文件 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同 |

@@ -180,15 +180,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     then correctly failed closed during aggregate because Windows and Unix had
     hashed line-ending-dependent source bytes. Release-identity inputs are now
     pinned to LF with field-specific provenance diagnostics; a fully sealed
-    rerun remains to be recorded
+    rerun was recorded by v0.1.14 candidate run `30942173420` at source
+    `8ff2b5a`, which sealed all six platform archives with hashes, SBOM and
+    provenance
   - [~] after explicit approval, the promotion workflow verifies
     tag/version/commit,
     downloads the exact candidate artifacts, revalidates every receipt and
     hash, and promotes those bytes without Cargo compilation, packaging or a
     second full GUI/stress suite. Static policy rejects any `cargo` invocation,
     root `build`/`check`/`release` alias, or Script build/check/package task—not
-    only today's known command spellings; its focused regression passes. The first
-    non-publishing remote rehearsal remains to be recorded
+    only today's known command spellings; its focused regression passes. A
+    non-publishing rehearsal was never recorded: `release.yml` first executed
+    on 2026-08-05 as the real v0.1.14 promotion (run `30944087372`), and that
+    first execution exposed four defects in the previously unexercised
+    promotion lane — the run-identity file being deleted by the checkout that
+    follows it, an assertion on a `manifest.kind` field the sealer never wrote,
+    and two GitHub read-after-write races (tag ref, releases list). See
+    `plan/plan-v0.1.14.md`. The dry-run capability that would have caught these
+    in seconds is proposed as a v0.1.15 item
   - [x] Promotion is recoverable after a tag-only or partially uploaded draft
     interruption: an existing tag is accepted only when it resolves to the
     exact Candidate SHA, only an unpublished matching draft may resume, every
@@ -466,3 +475,142 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     `16/17-restart` JSON/PNG pairs
 - [ ] automated terminal input/resize/ANSI/CJK/long-output matrix
 - [ ] installer, updater, stable PATH location, and signed releases
+
+## Release-cut documentation checklist
+
+Every stale-documentation finding in the 2026-08-05 audit shared one cause: a
+statement that was true when written and was never revisited at a version
+boundary. Treat the following as part of cutting a release, not as cleanup:
+
+- [ ] `prd/PRD_02_18_roadmap.md`: the newest milestone reflects the version
+  that actually shipped. A milestone naming a version whose candidate was
+  abandoned must be relabelled rather than left `[~]`; v0.1.12 and v0.1.13
+  were built but never released, so the public sequence runs v0.1.11 →
+  v0.1.14.
+- [ ] `PRD.md` "Current acceptance gate": describes the gate in force now, and
+  is not pinned to a specific version number.
+- [ ] `prd/` release-chain leaves that the release just exercised are moved off
+  `[~]`, with the run id and source SHA recorded as evidence.
+- [ ] `README.md` install pins name the released version; capability bullets
+  carry no version qualifier, so they cannot go stale.
+- [ ] `AGENTS.md` binary lists, script names, and file references still match
+  the tree. Prefer `--all-targets` over enumerated `--bin` flags, and never
+  pin a test count.
+- [ ] any `/goal` handoff brief for the finished release is banner-marked as
+  archived, and any claim it made that the release disproved is corrected in
+  place rather than left for the next agent to inherit.
+
+Standing lesson from the v0.1.14 promotion: **a lane that has never executed is
+unverified, no matter how carefully it was written.** `release.yml` was
+authored long before it first ran, and its first run held four defects.
+
+## Release-chain operating requirements
+
+Version-free requirements distilled from every release chain run to date: the
+v0.1.13 candidate attempts that were abandoned, and the v0.1.14 promotion that
+published. Both rounds are merged and de-duplicated here so no version plan has
+to be read as a live reference. The narrative records remain in the version
+plans for anyone who wants the story.
+
+### The governing principle
+
+**A lane that has never executed is unverified, no matter how carefully it was
+written.** This is the single most expensive lesson from both rounds. Gates
+that had never run under a release build failed on first exposure in v0.1.13;
+`release.yml` had never run at all in this repository's history and held four
+defects on its first execution in v0.1.14. Never infer that an unexercised path
+is sound because it was written carefully or reviewed. Treat "has not run" as
+"is known broken until proven otherwise," and prefer any cheap way to execute a
+lane early over any amount of static reasoning about it.
+
+### Dispatch and authorization
+
+- [ ] Candidate dispatch takes a full 40-character SHA. A short SHA makes the
+  preflight checkout fail with "a branch or tag with the name … could not be
+  found".
+- [ ] Preflight requires a successful CI run for that exact SHA. Dispatching
+  before CI is green fails in seconds — cheap, but it is a wasted round trip and
+  it is entirely avoidable by checking first.
+- [ ] Re-verify `HEAD` immediately before dispatch. A concurrent push between
+  the check and the dispatch invalidates the source SHA; the guard catches it in
+  about fifteen seconds, so treat a rejection as normal rather than exceptional.
+
+### Which fix requires a new candidate
+
+The decisive question is which ref executes the file, and getting it wrong
+costs a full candidate cycle:
+
+- [ ] `.github/workflows/release.yml` runs from `--ref main`. Fixing it does
+  **not** require a new candidate; re-dispatch promotion against the existing
+  one.
+- [ ] `scripts/rhai/promotion-identity.rhai` and
+  `scripts/rhai/candidate-verify.rhai` are checked out at the candidate's
+  `source_sha`. Fixing them **requires a new candidate** — reusing the old one
+  reproduces the identical failure no matter how correct `main` is.
+- [ ] Anything the candidate build itself runs — gate scripts, smoke scripts,
+  `scripts/rhai/lib/release_candidate.rhai` — likewise requires a new candidate.
+
+### Cost structure
+
+- [ ] Candidate failures cost roughly fifteen to thirty minutes; promotion
+  failures cost well under a minute. Optimize for each candidate succeeding, not
+  for fewer promotion attempts.
+- [ ] The Windows job is the only long pole. The remaining five platforms finish
+  in a fraction of its wall clock and idle waiting for it.
+
+### Verify locally before spending a candidate
+
+- [ ] Download the sealed bundle and replay the promotion scripts offline
+  before dispatching promotion. `candidate-verify.rhai` and
+  `promotion-identity.rhai` both run against a downloaded bundle and reproduce
+  CI's result exactly, and the publish job's assertions — body digest, marker
+  reconstruction, channel uniqueness — can be recomputed with `jq` and
+  `sha256sum`. This surfaces in seconds what otherwise costs a full cycle.
+
+### Diagnosis
+
+- [ ] Download the failure artifacts before changing anything. The
+  `candidate-quality-timing-<run>` artifact names the first failing gate
+  directly; a null first-failure means every gate passed and the fault is
+  elsewhere in the job.
+- [ ] Distinguish "same step" from "same cause". Two failures at the same step
+  routinely have unrelated mechanisms, and a repeated symptom does not confirm a
+  repeated diagnosis.
+- [ ] Read the mechanism out of the log rather than inferring it from documented
+  defaults. A fix derived from what a tool "should" do by default can be wrong
+  while looking right.
+- [ ] The release lane retries smoke once. Failing both attempts indicates a
+  real regression rather than a transient race.
+- [ ] Find a script's test fixture before editing the script. A hand-written
+  fixture can encode a schema production never implemented, which both hides the
+  real defect and breaks when the script is corrected.
+- [ ] Make the verification reproduce the defect's actual cause. Re-running a
+  reproducible build twice in the same directory proves nothing about a
+  path-dependence bug; generate from two different absolute paths instead.
+
+### Environment and evidence
+
+- [ ] A local release-build GUI smoke may hang on a developer machine while
+  passing in CI. Do not treat a local release-lane result as gate evidence; CI
+  failure artifacts are the source of truth. Local debug-build smoke results are
+  trustworthy.
+- [ ] Cross-built artifacts are not natively executed artifacts. Keep that
+  provenance distinction explicit in release evidence.
+
+### Shared-checkout discipline
+
+- [ ] Commit with exact pathspecs. Never `git add -A` or `git add -u`:
+  concurrent agents work in the same checkout and their staged work will
+  otherwise be swept into an unrelated commit.
+- [ ] When a push is rejected, inspect what landed before rebasing. A concurrent
+  agent may have fixed the same defect; taking whichever landed first and
+  dropping the duplicate is cleaner than merging two equivalent fixes.
+- [ ] A concurrent fix may be more complete than your own, or verified more
+  weakly. Adopt the better code and keep the stronger evidence in the commit
+  message.
+
+### Known external races
+
+- [ ] GitHub's ref API and releases list are read-after-write eventually
+  consistent. Any read immediately following a create must poll rather than
+  assume visibility.

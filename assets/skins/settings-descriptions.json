@@ -1,0 +1,22 @@
+{
+  "classic-day": {
+    "en": "Industrial light chrome; rectilinear controls and today's default brightness.",
+    "zh-Hans": "工业风浅色界面；直角控件，沿用现有明亮默认。",
+    "zh-Hant": "工業風淺色介面；直角控件，沿用現有明亮預設。"
+  },
+  "classic-night": {
+    "en": "Industrial dark chrome; rectilinear controls and today's default darkness.",
+    "zh-Hans": "工业风深色界面；直角控件，沿用现有暗色默认。",
+    "zh-Hant": "工業風深色介面；直角控件，沿用現有暗色預設。"
+  },
+  "fancy-day": {
+    "en": "Refined light chrome with teal accent, soft corners, and branded title mark.",
+    "zh-Hans": "精致浅色界面；青绿强调色、柔和圆角与品牌化标题。",
+    "zh-Hant": "精緻淺色介面；青綠強調色、柔和圓角與品牌化標題。"
+  },
+  "fancy-night": {
+    "en": "Refined dark chrome with teal accent, soft corners, and branded title mark.",
+    "zh-Hans": "精致深色界面；青绿强调色、柔和圆角与品牌化标题。",
+    "zh-Hant": "精緻深色介面；青綠強調色、柔和圓角與品牌化標題。"
+  }
+}

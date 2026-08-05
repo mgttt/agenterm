@@ -85,6 +85,7 @@ pub struct PixelWindowOptions {
     pub initial_logical_size: LogicalSize,
     pub no_activate: bool,
     pub ime_allowed: bool,
+    pub window_icon_rgba: Option<(u32, u32, Vec<u8>)>,
 }
 
 impl PixelWindowOptions {
@@ -94,6 +95,7 @@ impl PixelWindowOptions {
             initial_logical_size,
             no_activate: false,
             ime_allowed: false,
+            window_icon_rgba: None,
         }
     }
 
@@ -104,6 +106,14 @@ impl PixelWindowOptions {
 
     pub const fn with_ime_allowed(mut self, ime_allowed: bool) -> Self {
         self.ime_allowed = ime_allowed;
+        self
+    }
+
+    pub fn with_window_icon_rgba(
+        mut self,
+        icon: Option<(u32, u32, Vec<u8>)>,
+    ) -> Self {
+        self.window_icon_rgba = icon;
         self
     }
 }

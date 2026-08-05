@@ -217,8 +217,11 @@ result for each input, while bounding the manifest, file count, source bytes,
 and aggregate deadline. Keep the direct single-file `check` command as the
 diagnostic and black-box parity baseline.
 
-The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
-slower. Do not restore a global job limit. Keep the default dev path
+`.cargo/config.toml` once forced `jobs = 1` and made clean builds much
+slower; that setting was removed. Do not restore a global job limit. The file
+itself still exists and is load-bearing — it carries the
+`aarch64-unknown-linux-gnu` linker setting the `lnx × aarch64` cell below
+depends on. Do not delete it. Keep the default dev path
 incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
 for repeated optimized local testing: it disables LTO, uses parallel codegen,
 and retains incremental state. A final `release` build uses the dedicated
@@ -305,8 +308,10 @@ behavior.
 
 ## Change rules
 
-- All agents and subagents work in the single shared `D:\dev\agenterm`
-  checkout on `main`. Do not create Git worktrees, task branches, or hidden
+- All agents and subagents work in one shared checkout on `main` (the
+  repository root, wherever it is cloned — `D:\dev\agenterm` on the Windows
+  host, but macOS and Linux hosts are also in active use). Do not create Git
+  worktrees, task branches, or hidden
   planning copies. Material planning progress must be written incrementally to
   the applicable `PRD.md`/`prd/PRD_*.md` product node so it is immediately
   visible in the repository; the primary agent reviews, commits, and pushes
@@ -343,8 +348,13 @@ LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 (`/usr/bin/clang-cl` -> `clang-18`), and Wine.
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
-build commands per cell (all four binaries: `agenterm` GUI plus
-`agenterm-cli`, `agenterm-mux`, `agenterm-rhai`):
+build commands per cell. `src/bin/` currently holds **seven** binaries
+(`agenterm`, `agenterm-cli`, `agenterm-mux`, `agenterm-rhai`,
+`agenterm-server`, `agenterm-mcp`, `agenterm-cc`); native Unix `build` emits
+six of them (see the alias note above). **Prefer building without `--bin`
+filters** so new binaries are covered automatically — the explicit lists below
+are historical and skip `agenterm-server`, `agenterm-mcp`, and `agenterm-cc`,
+which means a clippy run using them silently lints only four of seven:
 
 | Cell | Host | Build |
 |------|------|-------|
@@ -355,9 +365,10 @@ build commands per cell (all four binaries: `agenterm` GUI plus
 | **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
 | **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
 
-Clippy (all four bins unless noted): append `-- -D warnings` to the matching
-`cargo clippy` or `cargo xwin clippy` invocation with the same `--target` and
-`--bin` flags. On Linux, `cargo fmt --check` runs natively.
+Clippy: append `-- -D warnings` to the matching `cargo clippy` or
+`cargo xwin clippy` invocation with the same `--target`. Use
+`--all-targets` rather than repeating `--bin` filters, so every binary and
+test target is linted. On Linux, `cargo fmt --check` runs natively.
 
 **Windows x86_64 on Linux** (primary cloud loop):
 
@@ -365,7 +376,8 @@ Clippy (all four bins unless noted): append `-- -D warnings` to the matching
 - Build: `cargo xwin build --target x86_64-pc-windows-msvc` →
   `target/x86_64-pc-windows-msvc/debug/`
 - Unit tests: `cargo xwin test --target x86_64-pc-windows-msvc` compiles for
-  Windows and runs the test exes under Wine (137 lib + 16 script tests pass).
+  Windows and runs the test exes under Wine. Do not treat any pass count as an
+  expected value — the suite grows; read the command's own output.
   Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
 - Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm-cli.exe --help`.
   Launching `agenterm.exe` on `DISPLAY=:1` starts a working IPC server:
@@ -391,7 +403,8 @@ Clippy (all four bins unless noted): append `-- -D warnings` to the matching
 
 **Wine / ConPTY limits**: Wine cannot sustain an interactive ConPTY shell — a
 tab's `cmd.exe` starts and immediately exits `dead`, so live terminal I/O,
-`capture-pane` output, and the `tests/*.ps1` smoke suites cannot pass on Linux.
+`capture-pane` output, and the GUI smoke suites (`scripts/rhai/*-smoke.rhai`)
+cannot pass on Linux.
 Interactive-terminal and rendering work must be validated on a real Windows host
 (that is what CI on `windows-latest` covers). Treat Linux Wine here as a fast
 Windows-target lint/build/unit-test and control-plane sanity loop; native Linux
