@@ -1,31 +1,62 @@
-# AgenTerm v0.1.15 公开计划（占位稿 / 思维工作树）
+# AgenTerm v0.1.15 公开计划
 
-状态：**占位草案**（2026-08-04 起草，基于 v0.1.14 发布日全天真实遥测；
-2026-08-04 晚外部 review 逐条对照最新代码核验并补充「现状（review）」行；
-2026-08-04 深夜二次复核全部 review 行与 PRD 未来主线对齐，见 §五；
-2026-08-05 补 macOS 真机安装/更新实测 → §一 G 组 + §八）。
+状态：**已定稿，待授权开工**（2026-08-05 定版；此前为占位稿/思维工作树，
+素材保留在 §三·五 / §五 / §七 / §八 / §九 / §十）。
 不改变任何已发布/在途版本的授权状态；不创建 tag/Candidate/Release。
-主题预定：**反馈左移 + 发布链降本**（附带交付后 install 卫生）——把「问题在
-离引入点最远、最贵的车道才暴露」这一根因打掉。开工前需人工确认范围与
-§一 D/G-P1 组、§五 5.7 的政策决策项。
 
-数据来源：v0.1.14 发布日 ~10 轮 gate 级迭代的 timing 遥测
-（candidate-quality-timing artifacts + job/step API 计时），关键事实：
+**主题：发布链降本（cache 优先）+ 交付后 install 卫生。**
+比占位稿的「反馈左移 + 发布链降本」**更窄**：反馈左移只保留最便宜的两叶，
+夜间彩排与自动派发推 v0.2.x——理由基于实测数字，见 §二。
+
+开工前需人工拍板 §五 5.7 的政策决策项（阻塞关系见 §二·五）。
+
+## 数据来源与关键事实（全部实测，可复现）
+
+v0.1.14 发布日 ~10 轮 gate 级遥测，加 2026-08-05 对成功 Candidate
+`30942173420` 的逐门/逐 job 分析（详见 `plan/plan-v0.1.14.md` §七）：
 
 ```text
-单轮全绿路径 ≈ 30min：CI ~5min → Candidate ~15-18min → Promotion ~5min
-Candidate 唯一长杆 = windows 门（13-16min）：
-  release 双构建 3.8-5.3min ＋ net-research 2.8min ＋ clippy/单测/mcp ~3min
-  ＋ 14 个 GUI smoke 仅 ~90s ＋ 杂项 ~1min
+单轮全绿路径 ≈ 30min：CI ~5min → Candidate ~15-18min → Promotion ~1min
+关键路径 = windows-x86_64 单个 job 16.6min（次慢 job 5.5min，3 倍差）
+  拆解：bootstrap（worker 重建）80.9s ＋ 39 门串行 869.1s ≈ 950s（与实测吻合）
+  门耗时前三占 55%：artifact-build 211.3s / net-research 142.2s /
+                    artifact-build-fast 127.5s
+  14 个 smoke 合计仅 124.4s（14.3%）——「smoke 慢」是错觉
+Candidate 失败 15–32min（贵）；Promotion 失败 13–36s、成功 ~59s（近乎免费）
 失败构成（10 轮）：6 次确定性测试腐化（从未在 CI 车道执行过的断言）
-  ＋ 4 次共享 runner 负载竞态 —— 单轮速度不是主要矛盾，反馈延迟才是
-v0.1.14 已落地的止血：失败也保存构建缓存（always()）；remote-ui/fleet
-  smoke 左移进 push CI；release 车道 smoke retry-once；wake pump 余量
+  ＋ 4 次共享 runner 负载竞态
 ```
+
+> ⚠️ 占位稿曾写「net-research 2.8min / smoke ~90s」，与上表不符。
+> 以本节为准（142.2s / 124.4s），差异来自不同轮次与冷热缓存。
+
+**2026-08-05 新增实测（占位稿完全没有，且是最便宜的杠杆）**：
+
+```text
+仓库 Actions cache = 9.9 GB / 10 GB 上限，19 个 entry
+  （gh api 实测；2026-08-05 二次复验仍 9.9GB —— 是常态不是瞬时）
+CI 的 debug target cache 独占 8.7GB，同一家族存 2–3 份陈旧世代
+后果：撞顶后 LRU 驱逐 → Candidate 自己的 cache（target 0.22GB +
+  home 0.06GB）在下次 Candidate 用到前就被 CI 挤掉
+证据：四次 Candidate 的 bootstrap 全是 worker.state="rebuilt"，
+  且成本单调上涨 47.1s → 49.7s → 59.4s → 80.9s
+已排除 key 漂移：538ec73/bffb7b8/ac068ff/8ff2b5a 四个 commit 的
+  Cargo.lock / Cargo.toml / scripts/artifacts.json 哈希完全相同
+另核：cargo-home-candidate-v2 只有 key、**无 restore-keys**
+  （对照 cargo-target-v2 有），hashFiles 一变即彻底 miss、无近似回退
+复现：gh api repos/mgttt/agenterm/actions/caches
+```
+
+v0.1.14 已落地的止血（不再重复投入）：失败也保存构建缓存（`always()`）；
+remote-ui/fleet smoke 左移进 push CI；release 车道 smoke retry-once；
+wake pump 余量。
 
 ---
 
-## 一、目标树（占位，未定版）
+## 一、目标树素材全集（**非执行清单**——执行看 §一·五）
+
+> 本节保留占位稿的 A–H + P + S 全部原始条目与 review 行，作为**素材与依据**。
+> 取舍结果见 §一·五；未纳入本版者的推迟理由见 §二·六。
 
 ```text
 v0.1.15  Feedback shift-left & release-lane economics
@@ -308,29 +339,254 @@ v0.1.15  Feedback shift-left & release-lane economics
          债务钩 L2/L3/L4 在 ARCHITECTURE §4；落地须同批回写 §1/§3
 ```
 
-## 二、排序建议（起稿人观点）
+## 一·五、v0.1.15 收敛工作树（**这是可执行清单**；上面 §一 是素材全集）
 
-1. **A1 + A3 + A4**：一晚可落地，直接消灭 v0.1.14 发布日最大痛苦源。
-2. **A2**：随后落地，发布全链自动化闭环（人只拍 Promotion 前的最终板，
-   或连 Promotion 也自动 —— 后者是政策问题，归 D 组讨论）。
-3. **B1**：独立叶，收益确定（每轮 -2.8min）。
-4. **B2**：版本发布日专项收益；实现前先在分支验证 key 稳定性。
-5. C 组按复发率排优先级；D 组等人工。
-6. **F1 + F2**：云快照一改即永久消除桌面 smoke 首轮噪音（见 §七）；
-   单测误耦合已修，不必再排期。
-7. **G2 + G4 + G7a（提示文案）**：安装卫生 + 升级后「该怎么做」可理解性；
-   不碰发布链语义，可与 A 组并行。G7b/c（GUI/关窗对话框）为体验主路径，
-   建议紧随 G7a；G7d / 改 default_action 依赖 **G-P2**；G1/G-P1 等
-   macOS channel 政策拍板后再改默认回落行为。
-8. **S 组 HOLD**：多 agent 在途时不抢主树；用户通知后先 **§九 复审** 再 S1→微重构。
-   不必等 S3 全文双向；S1（可选 S2）安全带后即可小步刀。S3 不阻塞主主题。
-9. **P 组（粘贴硬骨头）**：用户高频；与发布链正交。建议在 GUI 文件域空闲时
-   先做 **P3 错误码细分 + P2 图像文案**（低风险 UX），再攻 **P1 UTF-8/归一**
-  （跨 platform clipboard + ui_clipboard，需夹具）。详见 §十。
+§一 的 A–H + P + S 共约 30 叶，是多轮追加堆出来的，含大量「观察」而非
+「可执行」。本节是取舍后的定稿：**只列进入 v0.1.15 的叶**，每叶带动机、
+可证伪验收、成本、依赖。未列入者一律见 §二·六（推迟表，含推迟理由）。
 
-> v0.1.15 是**纯发布链经济学**版本，不与 §五 未来主线（net / CC 内容 /
-> 远程包管理 / computer-use）抢工期；未来主线只做「对齐记录 + 决策项」，
-> 实际开工各自归口 v0.2.0 及后续版本 plan。
+选择原则（v0.1.14 教训）：**宁可少而全绿，不要多而半途**——发布日 5–6 小时
+耗在从未跑过的车道上，根因不是做得少，是同时开了太多没验证的面。
+
+### R. 发布链降本（本版第一优先；全部有实测收益）
+
+- [ ] **R1 cache 配额治理** ★最高性价比
+  - **动机**：9.9/10GB 撞顶 → LRU 驱逐 → Candidate cache 每轮全 miss，
+    bootstrap 47s→81s **单调恶化**（见头部实测块）
+  - **做法**：CI 的 debug target cache 限制保留份数或缩小缓存路径；
+    必要时给 candidate 车道独立前缀，确保关键路径不被挤掉
+  - **验收（可证伪）**：连续两次 Candidate 的 timing artifact 中
+    `bootstrap.worker.state == "reused"`（当前恒为 `"rebuilt"`）；
+    且 `gh api .../actions/caches` 总量 < 8GB
+  - **成本**：小（改 workflow cache 配置 + 一次清理）
+  - **收益**：≈3min/次 Candidate；**依赖**：无
+- [ ] **R2 `cargo-home-candidate-v2` 补 `restore-keys`**
+  - **动机**：它只有 `key` 无 `restore-keys`（对照 `cargo-target-v2` 有），
+    hashFiles 一变即彻底 miss、无近似回退
+  - **验收**：版本冻结提交后首轮 Candidate 日志出现前缀命中，
+    而非 `Cache not found`
+  - **成本**：极小（一行）；**依赖**：R1 先腾配额，否则命中也会被驱逐
+- [ ] **R3 net-research 移出 release 门**（原 B1）
+  - **动机**：142.2s／16.4%，耗时第二名，却与发布产物正确性关系最弱
+  - **做法**：改为 push CI 跑一次；**不是删除**——保留验证，只换车道
+  - **验收**：release 门不再含该 gate 且 push CI 含之；
+    `qualification-gates.json` 声明同步（fail-closed 不破）
+  - **成本**：小；**依赖**：无
+  - **PRD 核对**：已 grep，无任何 PRD 要求它必须在 release 门（见 §二·七）
+- [ ] **R4 promotion dry-run**（新增叶，v0.1.14 直接教训）
+  - **动机**：`release.yml` 首跑即藏 4 个缺陷；dry-run 可在几十秒内
+    暴露其中 4/8
+  - **做法**：加 `-f dry_run=true`，跑完 verify 全部断言但不建 tag/release
+  - **验收**：`dry_run=true` 跑完 verify 且仓库无新 tag、无新 draft
+  - **成本**：中；**依赖**：无
+  - ⚠️ **本叶自身就是「没跑过的车道」**，必须先自证，别重蹈覆辙
+
+### A′. 反馈左移（只保留最便宜的两叶；A1/A2 推迟见 §二·六）
+
+- [ ] **A3 script-smoke 左移进 push CI**（debug 版，实测 ~7s）
+  - **动机**：v0.1.14 发布日它贡献 2 次腐化；左移后 6 分钟内暴露
+  - **做法**：并入 `94c3227` 已建的 windows CI release-lane-smokes 步骤
+  - **验收**：push CI 含 script-smoke 且 CI 总时长增幅 < 30s
+  - **成本**：极小；**依赖**：无
+- [ ] **A4 per-gate timing 写进 `GITHUB_STEP_SUMMARY`**
+  - **动机**：现在要下载 artifact 才能看每门耗时；R1 的验收也依赖它可读
+  - **验收**：Candidate 运行页直接可见逐门耗时表，无需下载 artifact
+  - **成本**：小；**依赖**：无（但先于 R1 做更好验证）
+
+### G′. 安装/更新卫生（用户真机踩坑，详见 §八；与发布链正交，可并行）
+
+- [ ] **G3 版本可观测性**：`agenterm --version` 打印即退 + 写 `installed.json`
+  - **动机**：用户/agent 无法确认「窗口是不是旧版」；G7a 的判断也依赖它
+  - **验收**：GUI 二进制 `--version` 不启窗口即输出版本；
+    `current/installed.json` 含 version/channel/variant/source_commit/
+    sha256/installed_at
+  - **成本**：小；**依赖**：无（是 G7a/H3 的前置）
+- [ ] **G2 升级后孤儿 symlink 清理**
+  - **动机**：实测 `~/.local/bin/agenterm-script` 断链残留（改名后遗留）
+  - **验收**：装完后 BIN 下无「指向 current/releases 但目标不存在」的链
+  - **成本**：小；**依赖**：无
+- [ ] **G7a 升级后自适应文案**（install 收尾）
+  - **动机**：用户点名——磁盘已 0.1.14、running server 仍 0.1.12，
+    关窗默认 keep-server → 再进仍旧版，用户无从得知该怎么做
+  - **验收**：探测到 live server 且版本低于已装时，收尾文案明确给出
+    「要启用新版该做什么」；**用户无需读文档**
+  - **成本**：小；**依赖**：G3
+  - **注**：纯文案，**不受 G-P2 阻塞**（G7b/c/d 才受）
+- [ ] **G6 releases 目录保留策略**（current + N，默认 2）
+  - **动机**：`0.1.11-local` / `0.1.12-local` 永久堆积
+  - **验收**：装新版后旧目录按策略修剪，且不删仍被非 current 链引用者
+  - **成本**：小；**依赖**：无
+
+### H′. 分发面地基（只做**纯派生 + 补值**，不建服务；详见 §一 H 组）
+
+- [ ] **H4 补齐 Linux/Windows 的 `provenance.sbom_sha256`** ★先做
+  - **动机（已修正，见 §二·七）**：实测六平台——**macOS 两个 arch 已正确填入**
+    `65c32add…`，**Linux 两个为空串、Windows x86_64 缺字段、
+    windows-aarch64 为空串**。`PRD_02_17:237-240` 只要求「macOS 双档
+    provenance 携带同一 SBOM 摘要」，故**当前实现并未违反 PRD**；
+    本叶是**把该保证扩展到全部六平台**，因为 M14 Hub 信任分级要对
+    所有平台复用这个字段
+  - **验收**：新 Candidate 六平台 provenance 的 `sbom_sha256` 均 ==
+    实际 SBOM 摘要（windows-x86_64 从「无此字段」变为有值）
+  - **成本**：极小（纯补值）；**依赖**：无
+  - **PRD 联动**：落地后应同步把 `PRD_02_17:237-240` 的 macOS 限定
+    升级为六平台（见 §二·七 建议 2）
+- [ ] **H1 生成 `releases.json`**（CI 静态产物，纯派生）
+  - **动机**：install.sh 靠字符串拼 artifact 名 + latest 重定向猜版本；
+    未来 update/下载页/Hub 会各自再 scrape 一遍 → 四个真相源
+  - **验收**：release 成功后 Pages 上有 `releases.json`，字段全部可由
+    现有 provenance/candidate-manifest 派生（**不新造事实**）
+  - **成本**：中；**依赖**：H4（sbom 摘要要能写进索引）
+- [ ] **H3 provenance 用户可见化 + `installed.json`**
+  - **动机**：`.provenance.json` 每包都发但用户端零消费（install.sh 只校 sha256）
+  - **验收**：install 收尾打印 commit/tag/build_log/signed/notarized，
+    且校验 provenance 与实测摘要一致；写入 `installed.json`
+  - **成本**：中；**依赖**：G3（共用 installed.json）、H1（读索引取 variant）
+
+
+**规模自查**：13 叶，其中 8 叶「极小/小」。对照 v0.1.14 的教训，这个宽度
+应当一个工作周期内可全绿；如果开工后发现超出，**优先砍 H1/H3 而不是砍 R 组**
+（R 组是本版主题，H 组是下版地基）。
+
+## 二、排序与理由（**基于实测数字，非直觉**）
+
+### 二·一 为什么主题从「反馈左移」改为「发布链降本（cache 优先）」
+
+占位稿把 A1（夜间彩排）排第一，理由是「腐化攒到发布日爆雷」。这个判断
+**方向对但排序错**，因为当时还没有 §七 的逐门/cache 实测。三点修正：
+
+1. **A1 成本远高于收益密度**。夜间 release-stress 每晚 ~1 runner-hour，
+   且 win-full-gate 的 concurrency group 是 `win-full-gate-{ref}` +
+   `cancel-in-progress: true`——同 ref 连跑会互相 cancel，落地前还得先改
+   并发语义（§一 A1 已核）。**投入是本版最大的一项，收益是概率性的**。
+2. **R1（cache）投入最小、收益确定且可证伪**。9.9/10GB 撞顶是**已复验的
+   常态**，bootstrap 47s→81s 是**单调恶化**的实测曲线。改 cache 配置属
+   配置级改动，收益 ≈3min/次 Candidate，按 v0.1.14 的 6 次 Candidate 计
+   约省 18min ——**且它同时止住恶化趋势**，不做的话下一版更贵。
+3. **A3/A4 才是「反馈左移」里真正便宜的部分**。A3 实测 ~7s、A4 是纯输出改动，
+   两者合计成本远低于 A1，却覆盖了「腐化早暴露」的主要价值。
+
+> 结论：反馈左移的**思想**保留（A3/A4 + R4 dry-run 都是它的实现），
+> 但**最贵的实现方式（A1 夜间彩排）推迟**。主题相应改为「发布链降本」。
+
+### 二·二 执行顺序（建议）
+
+| 序 | 叶 | 理由 |
+|----|-----|------|
+| 1 | **R1 → R2** | 最便宜、收益确定、且在恶化；R2 依赖 R1 腾出的配额 |
+| 2 | **A4** | 让 R1 的收益可直接在运行页读出（验收工具先于验收对象） |
+| 3 | **R3、A3** | 各自独立、成本小，可并行 |
+| 4 | **H4** | 纯补值、零依赖，且是 H1 的前置 |
+| 5 | **G3 → G7a、G2、G6** | 安装卫生泳道，与发布链正交，可与 1–4 并行 |
+| 6 | **R4** | 中等成本，且**自身就是没跑过的车道**，放在链路稳定后做 |
+| 7 | **H1 → H3** | 本版最大的两叶；若工期紧，这两叶优先砍 |
+
+### 二·三 明确不做速度优化的部分
+
+- **gate 分片**（39 门串行 869s，理论可压到 7–9min）：收益最大，但要重排
+  windows job 结构，属结构性改动，**推 v0.2.x**——本版不碰关键路径结构。
+- **artifact-build / artifact-build-fast 合并**（合计 339s / 39%）：
+  已核 release-fast = release + lto=false + codegen-units=16 + incremental，
+  产物不可互换；真省法是共享增量缓存，而那正是 R1 的副产品——
+  **先做 R1 再测命中率**，不单独立叶。
+- **smoke 并行分片**（原 D2）：14 门合计仅 124.4s，现值低，维持不做。
+
+## 二·四 与 v0.1.14 教训的对应
+
+| v0.1.14 教训 | 本版对应叶 |
+|--------------|-----------|
+| release.yml 首跑藏 4 个缺陷（「没跑过」≠「没问题」） | **R4** dry-run |
+| 腐化在最贵车道才暴露 | **A3**（左移）+ **A4**（可见） |
+| bootstrap 恒 rebuilt、cache 全 miss | **R1 + R2** |
+| provenance 有字段没填、用户端零消费 | **H4 + H3** |
+| 升级后不知道要 stop-server | **G3 + G7a** |
+
+## 二·五 决策项阻塞关系（**需人工拍板，agent 不自主执行**）
+
+政策项全文见 §五 5.7；此处只列**它阻塞了本版哪些叶**：
+
+| 决策项 | 阻塞的叶 | 不拍板的后果 |
+|--------|---------|-------------|
+| **P1 / P5**（agenterm.work 归属） | H5（本版未纳入）、间接影响 H1 的托管位置 | H1 仍可做（产物发到现有 Pages），但落地 URL 待定 |
+| **G-P1**（macOS unsigned 是否默认通道） | G1（本版未纳入） | 不阻塞已纳入的 G2/G3/G6/G7a |
+| **G-P2**（升级遇 running server 的默认策略） | G7b/c/d；**G7a 不受阻**（纯文案） | 只做 G7a 即可交付主要价值 |
+| **D1**（preflight 放宽 HEAD 约束） | 本版无叶依赖 | 不阻塞；但若拍板通过会弱化 D3 |
+| **P6**（Hub 是否单一 kind 底座） | 本版无叶依赖（H 组只做地基） | 不阻塞 v0.1.15 |
+| **P-P1**（粘贴 lossy vs 硬失败） | P 组全部（本版未纳入） | 不阻塞 |
+
+> **本版可在零决策拍板的情况下启动**：R 组 + A3/A4 + H4 + G2/G3/G6/G7a
+> 全部不依赖任何政策项。这是刻意的——不让计划卡在等拍板上。
+
+## 二·六 推迟表（**明确不进 v0.1.15，含理由**）
+
+| 叶 | 推去 | 理由 |
+|----|------|------|
+| A1 夜间彩排 | v0.2.x | 本版最贵一项（~1 runner-hour/晚）且需先改 concurrency 语义；收益概率性 |
+| A2 Candidate 自动派发 | v0.2.x | 触发器分钟级延迟 + 授权链敏感；D1 未拍板前不动 |
+| B2 cache key 版本行归一化 | v0.2.x | 需六 workflow 共享算 key 脚本，一致性维护成本高；R1 已拿走大部分收益 |
+| B3 双构建复用审计 | 合入 R1 | 已核产物不可互换；真省法是 R1 的增量缓存副产品 |
+| C1–C4 竞态收口 | v0.2.x | 均已止血，剩根因排查；C4 明确说了要先观察复发率 |
+| D1–D3 政策 | 等拍板 | 见 §二·五 |
+| E1 Pages 噪音 | 等 P1 | 与域名归属绑定，先拍板再动 |
+| E2 旧 run 清理 | v0.2.x | 纯卫生，无阻塞；moltbaby 已有脚本可随时搬 |
+| F1/F2 云桌面快照 | 环境维护 | **不走 PR**——是环境快照尾账，不是代码叶（见 §七） |
+| G1 macOS 默认回落 | 等 G-P1 | 政策未定 |
+| G4/G5 | v0.2.x | G7a 已覆盖主要价值；G5 是 G7a 的锦上添花 |
+| G7b/c/d | 等 G-P2 | 碰 keep-server 默认语义，须人工拍板 |
+| H2 install.sh 消费 releases.json | v0.2.x | 依赖 H1 落地并稳定一版后再改消费端 |
+| H5 agenterm.work 接通 | 等 P1/P5 | 政策未定 |
+| P 组（粘贴） | v0.2.x | 用户高频但与本版主题正交；且 P1 需跨平台夹具，工作量不小 |
+| S 组（结构 SSOT） | **HOLD** | 多 agent 在途，用户通知后先复审再开工（见 §九） |
+| §三·五 UI/UX 观察 | 分散 | T2/SB1/W1 标「顺手做」，其余归 v0.2.0+；本版不单独排期 |
+| §五 五条主线 | 各自版本 | L-NET/L-CC/L-EXT/L-PKG/L-CU 只做对齐记录与决策项 |
+
+## 二·七 PRD 一致性核对（2026-08-05，逐叶 grep 实测）
+
+对本版每一叶反查 `PRD.md` 与 `prd/*.md`，找**契约冲突**而非措辞差异。
+结论：**一处需修正的是 plan 侧（已改），一处建议反向升级 PRD**。
+
+| 叶 | PRD 侧相关条款 | 判定 |
+|----|---------------|------|
+| R1/R2 cache | `PRD_02_17:241-243`「Cache miss/corruption 只影响速度，不影响资格」 | ✅ **一致**。R1 纯提速，不碰资格语义 |
+| R3 net-research 移出 | 全仓 grep：**无任何 PRD 要求它在 release 门**；唯一提及是 `PRD_02_19:562` 的二进制预算 | ✅ **无冲突**。且符合 §三「门的迁移要说明验证去哪了」 |
+| R4 dry-run | `PRD_02_17:193-199` 已写「非发布彩排从未记录…dry-run 能力提为 v0.1.15 项」 | ✅ **PRD 已预留**，本叶正是它的落地 |
+| A3/A4 | 无相关契约 | ✅ 无冲突 |
+| G3 `--version` | `README:144` 记载 `agenterm-cc.exe` 已有 `--version` 信息命令；无 PRD 禁止 GUI 同样支持 | ✅ **有先例**，不冲突 |
+| G2/G6/G7a | 无相关契约（属 install 脚本行为） | ✅ 无冲突 |
+| H1 releases.json | `PRD_02_18` M13 已写入「machine-readable `releases.json` derived from existing provenance」 | ✅ **PRD 已归口**，本叶是其第一步 |
+| H3 provenance 可见化 | `PRD_02_18` M13「supply-chain evidence becomes user-visible rather than CI-only」 | ✅ 一致 |
+| **H4 sbom_sha256** | **`PRD_02_17:237-240`：Candidate aggregation 独立校验「两个 macOS archive provenance 携带同一 SBOM SHA-256」** | ⚠️ **曾误判，已修正** |
+
+### 唯一的实质分歧：H4
+
+**起初的写法有误**。占位稿与本 plan 早期版本称「`sbom_sha256` 空串是
+违反声明的证据缺口」。逐平台实测后**这个说法不成立**：
+
+```text
+macos  aarch64  sbom_sha256='65c32add1e44e5d96b846…'   ← 已填
+macos  x86_64   sbom_sha256='65c32add1e44e5d96b846…'   ← 已填
+linux  aarch64  sbom_sha256=''                          ← 空串
+linux  x86_64   sbom_sha256=''                          ← 空串
+windows aarch64 sbom_sha256=''                          ← 空串
+windows x86_64  （无该字段）                             ← 缺字段
+```
+
+`PRD_02_17:237-240` **只要求 macOS 双档**携带同一 SBOM 摘要——而 macOS
+两档确实都填了。**所以当前实现符合 PRD，没有违约。**
+
+**解决哪一边**：两边都动，但方向不同——
+
+1. **plan 侧（已改）**：H4 的动机从「修违约缺口」改为
+   「**把 macOS 已有的保证扩展到六平台**」，因为 M14 Hub 信任分级要对
+   所有平台复用该字段。这是**能力扩展**，不是 bug 修复。
+2. **PRD 侧（建议，落地后再改）**：H4 完成后，把 `PRD_02_17:237-240` 的
+   macOS 限定升级为六平台描述。**顺序很重要**——先有实现再改契约，
+   不要先把 PRD 改成尚未成立的样子（否则就是制造一条新的「没跑过」声明，
+   正是 §Release-chain operating requirements 警告的反模式）。
+
+> 方法论备注：这次分歧是**我方读得过宽**而不是 PRD 过窄。教训与 v0.1.14
+> 的 `manifest.kind` 缺陷同源——**断言一个字段「应该有值」之前，先确认
+> 契约到底要求了哪些平台**。
 
 ## 三、明确非目标
 
@@ -619,6 +875,9 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | S 泳道 **HOLD**：等其他 agent 完成；用户再通知 → 新一轮 review → 再开工；预备树写入 **§九**（不改代码） |
 | 2026-08-05 | 用户报告终端/输入区粘贴常失败：异源 UTF-8 大段（疑 emoji/控制符）+ 截图类 `no pasteable characters`；写入 **§一 P 组 + §十**（硬骨头，未授权开工） |
 | 2026-08-05 | 用户补：多 harness 已支持图/复杂文本却透传不过 → §10.3 断裂点 A/B/C（text-only API + 归一 + 无投递协议）；T0/T1/T2 选项 |
+| 2026-08-05 | **定稿**：主题由「反馈左移 + 发布链降本」收窄为「发布链降本（cache 优先）+ install 卫生」；依据 §七 实测——cache 撞 10GB 顶致 bootstrap 47s→81s 单调恶化，治理成本最小收益确定（≈3min/次 Candidate），而 A1 夜间彩排是本版最贵项且收益概率性 → A1/A2 推 v0.2.x，保留 A3/A4 |
+| 2026-08-05 | 定稿产出 §一·五 收敛工作树（13 叶，含动机/可证伪验收/成本/依赖）、§二 排序理由、§二·五 决策阻塞关系、§二·六 推迟表（含理由）、§二·七 PRD 一致性核对 |
+| 2026-08-05 | **PRD 核对纠错**：H4 原称「sbom_sha256 空串违反声明」不成立——逐平台实测 macOS 两档已填、Linux/Windows 未填，而 `PRD_02_17:237-240` 只要求 macOS 双档，故当前实现合规。H4 改为「把该保证扩展到六平台」；PRD 侧待 H4 落地后再升级为六平台描述（先实现后改契约） |
 
 ---
 
