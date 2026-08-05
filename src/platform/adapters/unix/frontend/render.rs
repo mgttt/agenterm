@@ -359,6 +359,11 @@ pub(super) struct ComposerView<'a> {
     pub(super) text: &'a str,
     pub(super) focused: bool,
     pub(super) selected_all: bool,
+    /// Selected character range and caret offset within `text`. Drives the
+    /// partial highlight and caret placement; `selected_all` remains for the
+    /// whole-buffer case so existing callers and tests keep working.
+    pub(super) selection: Option<(usize, usize)>,
+    pub(super) caret: usize,
     pub(super) top: u32,
     pub(super) label: &'a str,
     pub(super) send_button: (u32, u32, u32, u32),
@@ -1306,6 +1311,19 @@ fn render_composer(
             palette.text,
         );
         let visible_text_width = ui_text_width(&visible_text);
+        // Character offset of this row's first visible character within the
+        // whole draft, so a buffer-wide selection range can be intersected
+        // with what is actually on screen.
+        let row_line_start = if row == 0 && previous_line.is_some() {
+            composer.text.chars().count()
+                - (last_line.chars().count() + 1 + visible_lines[0].chars().count())
+        } else {
+            composer.text.chars().count() - last_line.chars().count()
+        };
+        let hidden_in_row = line.chars().count() - visible_text.chars().count();
+        let visible_start = row_line_start + hidden_in_row;
+        let visible_end = visible_start + visible_text.chars().count();
+
         if composer.selected_all && visible_text_width > 0 {
             fill_rect(
                 buffer,
@@ -1316,6 +1334,26 @@ fn render_composer(
                 COMPOSER_LINE_HEIGHT.min(height.saturating_sub(row_y.saturating_sub(2))),
                 rgb_to_pixel(palette.selection_background),
             );
+        } else if let Some((start, end)) = composer.selection {
+            // Clip the selection to this row before converting to pixels;
+            // a multi-line selection lights up each row's own share.
+            let clipped_start = start.max(visible_start);
+            let clipped_end = end.min(visible_end);
+            if clipped_start < clipped_end {
+                let lead = width_of_first_chars(&visible_text, clipped_start - visible_start);
+                let span = width_of_first_chars(&visible_text, clipped_end - visible_start) - lead;
+                if span > 0 {
+                    fill_rect(
+                        buffer,
+                        stride,
+                        text_x + lead,
+                        row_y.saturating_sub(2),
+                        span,
+                        COMPOSER_LINE_HEIGHT.min(height.saturating_sub(row_y.saturating_sub(2))),
+                        rgb_to_pixel(palette.selection_background),
+                    );
+                }
+            }
         }
         draw_text(
             buffer,
@@ -1331,10 +1369,23 @@ fn render_composer(
                 palette.text
             },
         );
-        caret = Some((text_x + ui_text_width(&visible_text), row_y));
+        // The caret sits at the focus offset when it falls on this row, so it
+        // tracks a click or drag instead of being pinned to the end of the
+        // draft the way an append-only composer could get away with.
+        caret = if composer.caret >= visible_start && composer.caret <= visible_end {
+            Some((
+                text_x + width_of_first_chars(&visible_text, composer.caret - visible_start),
+                row_y,
+            ))
+        } else {
+            caret.or(Some((text_x + ui_text_width(&visible_text), row_y)))
+        };
     }
     // The composer edits at the end of the draft, so the caret marks exactly
     // that insertion point; without it the strip gives no editing feedback.
+    // A ranged selection still shows its caret, at the focus edge, so the user
+    // can see which end a shift+click or drag will grow from. Only the
+    // whole-buffer highlight hides it, where a caret would add nothing.
     if composer.focused
         && !composer.selected_all
         && let Some((caret_x, caret_y)) = caret
@@ -2633,6 +2684,75 @@ fn ui_text_width(text: &str) -> u32 {
     x as u32
 }
 
+/// Character offset in `text` for a click at client pixel `(x, y)`.
+///
+/// Deliberately lives beside `render_composer` and reuses its constants: the
+/// renderer shows only the last two logical lines and prefixes them, so any
+/// hit-test that recomputed that layout independently would drift out of
+/// agreement with what is on screen the first time either side changed.
+///
+/// Returns `None` when the click is above the text rows (the "Composer" label
+/// strip), so callers can leave the caret alone rather than snapping it.
+pub(super) fn composer_offset_at_client(
+    text: &str,
+    label: &str,
+    composer_top: u32,
+    sidebar_width: u32,
+    send_button_left: u32,
+    x: f64,
+    y: f64,
+) -> Option<usize> {
+    let first_row_y = composer_top + 20;
+    if (y as u32) < first_row_y.saturating_sub(4) {
+        return None;
+    }
+    let text_right = send_button_left.saturating_sub(8);
+
+    // Mirror render_composer's choice of visible lines.
+    let mut reverse_lines = text.rsplit('\n');
+    let last_line = reverse_lines.next().unwrap_or_default();
+    let previous_line = reverse_lines.next();
+    let earlier_lines_hidden = reverse_lines.next().is_some();
+    let prefix = if label.is_empty() { "> " } else { label };
+
+    let clicked_row = usize::from(
+        previous_line.is_some()
+            && (y as u32) >= first_row_y + COMPOSER_LINE_HEIGHT.saturating_sub(4),
+    );
+    let (line, row_index) = match (previous_line, clicked_row) {
+        (Some(previous), 0) => (previous, 0usize),
+        (Some(_), _) => (last_line, 1usize),
+        (None, _) => (last_line, 0usize),
+    };
+
+    let max_chars = ((text_right.saturating_sub(sidebar_width + 8)) / (GLYPH_WIDTH + 1)).max(1);
+    let row_prefix = if row_index == 0 {
+        if earlier_lines_hidden { "… " } else { prefix }
+    } else {
+        "  "
+    };
+    let visible_prefix = truncate_chars(row_prefix, max_chars as usize);
+    let text_x = sidebar_width + 8 + ui_text_width(&visible_prefix);
+    let visible_text = truncate_tail_to_width(line, text_right.saturating_sub(text_x));
+
+    let relative_x = (x as u32).saturating_sub(text_x);
+    let within_visible = char_offset_at_width(&visible_text, relative_x);
+
+    // The visible text may be a truncated tail; map back to the whole line.
+    let hidden = line.chars().count().saturating_sub(visible_text.chars().count());
+    let offset_in_line = (hidden + within_visible).min(line.chars().count());
+
+    // Convert the line-local offset into a buffer-wide one.
+    let line_start = match (previous_line, row_index) {
+        (Some(previous), 0) => text
+            .chars()
+            .count()
+            .saturating_sub(last_line.chars().count() + 1 + previous.chars().count()),
+        (Some(_), _) | (None, _) => text.chars().count().saturating_sub(last_line.chars().count()),
+    };
+    Some((line_start + offset_in_line).min(text.chars().count()))
+}
+
 /// Character offset nearest to `x` pixels from the start of `text`.
 ///
 /// The UI font is proportional and CJK glyphs are roughly twice the width of
@@ -2987,10 +3107,86 @@ mod tests {
             text,
             focused: true,
             selected_all,
+            selection: None,
+            caret: text.chars().count(),
             top: 0,
             label: "",
             send_button: (240, 7, 72, COMPOSER_HEIGHT - 14),
         }
+    }
+
+    fn composer_test_view_with_selection(text: &str, start: usize, end: usize) -> ComposerView<'_> {
+        ComposerView {
+            selection: Some((start, end)),
+            caret: end,
+            ..composer_test_view(text, false)
+        }
+    }
+
+    /// The whole point of the new model: a partial range must highlight less
+    /// than the whole draft, which `selected_all` alone could never express.
+    #[test]
+    fn partial_composer_selection_highlights_only_its_own_span() {
+        let palette = AppearancePreset::classic_night().palette();
+        let selection_pixel = rgb_to_pixel(palette.selection_background);
+        let width = 400u32;
+        let height = COMPOSER_HEIGHT;
+
+        // Count only the text rows: the Send button uses the same accent
+        // colour, so a whole-strip count would never reach zero.
+        let count_highlight = |view: ComposerView<'_>| {
+            let mut buffer = vec![0u32; (width * height) as usize];
+            render_composer(&mut buffer, width, width, height, &palette, 0, view);
+            let text_left = 8usize;
+            let text_right = 200usize;
+            (18..(18 + COMPOSER_LINE_HEIGHT * 2) as usize)
+                .flat_map(|row| {
+                    let base = row * width as usize;
+                    buffer[base + text_left..base + text_right].iter()
+                })
+                .filter(|pixel| **pixel == selection_pixel)
+                .count()
+        };
+
+        let none = count_highlight(composer_test_view("hello world", false));
+        let partial = count_highlight(composer_test_view_with_selection("hello world", 0, 5));
+        let all = count_highlight(composer_test_view("hello world", true));
+
+        assert_eq!(none, 0, "an unselected composer highlights nothing");
+        assert!(partial > 0, "a partial selection must be visible");
+        assert!(
+            partial < all,
+            "a five-character selection must highlight less than the whole draft"
+        );
+    }
+
+    #[test]
+    fn composer_selection_highlight_scales_with_cjk_glyph_width() {
+        let palette = AppearancePreset::classic_night().palette();
+        let selection_pixel = rgb_to_pixel(palette.selection_background);
+        let width = 400u32;
+        let height = COMPOSER_HEIGHT;
+
+        let count_highlight = |view: ComposerView<'_>| {
+            let mut buffer = vec![0u32; (width * height) as usize];
+            render_composer(&mut buffer, width, width, height, &palette, 0, view);
+            let text_left = 8usize;
+            let text_right = 200usize;
+            (18..(18 + COMPOSER_LINE_HEIGHT * 2) as usize)
+                .flat_map(|row| {
+                    let base = row * width as usize;
+                    buffer[base + text_left..base + text_right].iter()
+                })
+                .filter(|pixel| **pixel == selection_pixel)
+                .count()
+        };
+
+        let latin = count_highlight(composer_test_view_with_selection("abcd", 0, 2));
+        let wide = count_highlight(composer_test_view_with_selection("中文", 0, 2));
+        assert!(
+            wide > latin,
+            "two CJK characters must highlight wider than two latin ones"
+        );
     }
 
     #[test]
