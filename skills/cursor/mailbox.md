@@ -13,7 +13,7 @@
 | 当前主线任务 | **Built-in skins v1**（classic/fancy × day/night） |
 | 产品契约 | `prd/PRD_02_06_human_workspace.md` § Built-in skins (v1) |
 | 执行计划 | `plan/plan-skins-v1.md` |
-| `origin/main` | tip 含设计冻结 @ 09b275a+；分身4 Phase 2B 在 `cursor/skins-eng-phase2a` 待审 |
+| `origin/main` | tip 含设计冻结 @ 09b275a+；分身4 Phase 2B 审阅阻断已修，待再审 |
 | 云环境 | Personal `mgttt/agenterm`；x86_64 Linux + DISPLAY=:1 |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 
@@ -42,7 +42,7 @@
 ### 主控2 · 2026-08-05
 - 状态: RUNNING — 编排皮肤 v1
 - 分支: `main`
-- 下一步: 审合 `cursor/skins-eng-phase2a` Phase 2B（分身4 已回报）
+- 下一步: 再审 `cursor/skins-eng-phase2a` Phase 2B 阻断修复
 - 阻塞: 无
 - 已合: 分身3 Phase 1（`cursor/skins-design-v1` → main）
 
@@ -56,11 +56,12 @@
 - 阻塞: 无
 
 ### 分身4 · 2026-08-05
-- 状态: RUNNING — 主控2 审阅阻断修复中
+- 状态: IDLE — 审阅阻断已修，待主控2 再审
 - bcId: `bc-c3e01145-b870-4e74-b18c-f3aea06ea800`
 - URL: https://cursor.com/agents/bc-c3e01145-b870-4e74-b18c-f3aea06ea800
-- 分支: `cursor/skins-eng-phase2a`
-- 证据 2B: 消费 assets/skins；fancy 真 palette；Linux startup icon；theme-smoke fancy≠classic
-- 延后（见 plan/plan-skins-v1.md Phase 2B deferred）：Apply 后 Linux icon 不刷新；Win exe embed 未切 fancy.ico；metrics 未进 render
-- 下一步: 修 Critical/Major 阻断后 push 新 tip
-- 阻塞: 主控2 审阅项（smoke/geometry/title/migration）
+- 分支: `cursor/skins-eng-phase2a` @ `f3cd0f4`
+- 修复: smoke owned_children + migration close-window；load 落盘 appearance_preset；Win inherit 几何 + 创建标题；startup-smoke 标题对齐
+- 延后: Apply 后 Linux icon 不刷新；Win exe embed 未切 fancy.ico；metrics 未进 render（见 plan）
+- 证据: `cargo test --lib` 620 passed
+- 下一步: 待命
+- 阻塞: 无
