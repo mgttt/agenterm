@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
 
+use crate::locale::{LocaleId, UiText};
+
 /// The stable identifier persisted in settings. Palette details are deliberately
 /// not part of the settings file so built-in palettes can evolve independently.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -33,6 +35,281 @@ impl ThemeId {
             Self::Dark => &DARK,
             Self::Light => &LIGHT,
         }
+    }
+
+    pub(crate) const fn appearance_preset(self) -> AppearancePreset {
+        AppearancePreset::from_theme_id(self)
+    }
+}
+
+/// Built-in skin family. Orthogonal to [`Luminance`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum SkinId {
+    #[default]
+    Classic,
+    Fancy,
+}
+
+impl SkinId {
+    pub(crate) const ALL: [Self; 2] = [Self::Classic, Self::Fancy];
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Fancy => "fancy",
+        }
+    }
+}
+
+impl Serialize for SkinId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SkinId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SkinIdVisitor;
+
+        impl Visitor<'_> for SkinIdVisitor {
+            type Value = SkinId;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a built-in skin ID string")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(match value {
+                    "fancy" => SkinId::Fancy,
+                    _ => SkinId::Classic,
+                })
+            }
+        }
+
+        deserializer.deserialize_str(SkinIdVisitor)
+    }
+}
+
+/// Day/night luminance paired with [`SkinId`] for composite appearance presets.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum Luminance {
+    Day,
+    #[default]
+    Night,
+}
+
+impl Luminance {
+    pub(crate) const ALL: [Self; 2] = [Self::Day, Self::Night];
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Night => "night",
+        }
+    }
+
+    pub(crate) const fn color_theme(self) -> ThemeId {
+        match self {
+            Self::Day => ThemeId::Light,
+            Self::Night => ThemeId::Dark,
+        }
+    }
+}
+
+impl Serialize for Luminance {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Luminance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct LuminanceVisitor;
+
+        impl Visitor<'_> for LuminanceVisitor {
+            type Value = Luminance;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a built-in luminance ID string")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(match value {
+                    "day" | "light" => Luminance::Day,
+                    _ => Luminance::Night,
+                })
+            }
+        }
+
+        deserializer.deserialize_str(LuminanceVisitor)
+    }
+}
+
+/// Composite built-in appearance preset `{skin}-{luminance}`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct AppearancePreset {
+    skin: SkinId,
+    luminance: Luminance,
+}
+
+impl AppearancePreset {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::classic_day(),
+        Self::classic_night(),
+        Self::fancy_day(),
+        Self::fancy_night(),
+    ];
+
+    pub(crate) const fn classic_day() -> Self {
+        Self {
+            skin: SkinId::Classic,
+            luminance: Luminance::Day,
+        }
+    }
+
+    pub(crate) const fn classic_night() -> Self {
+        Self {
+            skin: SkinId::Classic,
+            luminance: Luminance::Night,
+        }
+    }
+
+    pub(crate) const fn fancy_day() -> Self {
+        Self {
+            skin: SkinId::Fancy,
+            luminance: Luminance::Day,
+        }
+    }
+
+    pub(crate) const fn fancy_night() -> Self {
+        Self {
+            skin: SkinId::Fancy,
+            luminance: Luminance::Night,
+        }
+    }
+
+    pub(crate) const fn skin(self) -> SkinId {
+        self.skin
+    }
+
+    pub(crate) const fn luminance(self) -> Luminance {
+        self.luminance
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match (self.skin, self.luminance) {
+            (SkinId::Classic, Luminance::Day) => "classic-day",
+            (SkinId::Classic, Luminance::Night) => "classic-night",
+            (SkinId::Fancy, Luminance::Day) => "fancy-day",
+            (SkinId::Fancy, Luminance::Night) => "fancy-night",
+        }
+    }
+
+    pub(crate) const fn color_theme(self) -> ThemeId {
+        self.luminance.color_theme()
+    }
+
+    pub(crate) const fn palette(self) -> &'static ThemePalette {
+        match self.luminance {
+            Luminance::Day => &LIGHT,
+            Luminance::Night => &DARK,
+        }
+    }
+
+    pub(crate) const fn from_theme_id(theme: ThemeId) -> Self {
+        match theme {
+            ThemeId::Light => Self::classic_day(),
+            ThemeId::Dark => Self::classic_night(),
+        }
+    }
+
+    pub(crate) const fn ui_text_label(self) -> UiText {
+        match (self.skin, self.luminance) {
+            (SkinId::Classic, Luminance::Day) => UiText::PresetClassicDay,
+            (SkinId::Classic, Luminance::Night) => UiText::PresetClassicNight,
+            (SkinId::Fancy, Luminance::Day) => UiText::PresetFancyDay,
+            (SkinId::Fancy, Luminance::Night) => UiText::PresetFancyNight,
+        }
+    }
+
+    pub(crate) const fn ui_text_description(self) -> UiText {
+        match (self.skin, self.luminance) {
+            (SkinId::Classic, Luminance::Day) => UiText::PresetClassicDayDesc,
+            (SkinId::Classic, Luminance::Night) => UiText::PresetClassicNightDesc,
+            (SkinId::Fancy, Luminance::Day) => UiText::PresetFancyDayDesc,
+            (SkinId::Fancy, Luminance::Night) => UiText::PresetFancyNightDesc,
+        }
+    }
+
+    pub(crate) const fn label(self, locale: LocaleId) -> &'static str {
+        locale.text(self.ui_text_label())
+    }
+
+    pub(crate) const fn description(self, locale: LocaleId) -> &'static str {
+        locale.text(self.ui_text_description())
+    }
+
+    pub(crate) fn parse(value: &str) -> Self {
+        match value {
+            "classic-day" | "light" => Self::classic_day(),
+            "classic-night" | "dark" => Self::classic_night(),
+            "fancy-day" => Self::fancy_day(),
+            "fancy-night" => Self::fancy_night(),
+            _ => Self::classic_night(),
+        }
+    }
+}
+
+impl Serialize for AppearancePreset {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AppearancePreset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AppearancePresetVisitor;
+
+        impl Visitor<'_> for AppearancePresetVisitor {
+            type Value = AppearancePreset;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a built-in appearance preset ID string")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(AppearancePreset::parse(value))
+            }
+        }
+
+        deserializer.deserialize_str(AppearancePresetVisitor)
     }
 }
 
@@ -233,6 +510,39 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ThemeId>("\"light\"").unwrap(),
             ThemeId::Light
+        );
+    }
+
+    #[test]
+    fn appearance_presets_have_stable_ids_and_migration() {
+        assert_eq!(
+            AppearancePreset::ALL.map(AppearancePreset::as_str),
+            [
+                "classic-day",
+                "classic-night",
+                "fancy-day",
+                "fancy-night"
+            ]
+        );
+        assert_eq!(
+            AppearancePreset::parse("dark"),
+            AppearancePreset::classic_night()
+        );
+        assert_eq!(
+            AppearancePreset::parse("light"),
+            AppearancePreset::classic_day()
+        );
+        assert_eq!(
+            AppearancePreset::classic_day().color_theme(),
+            ThemeId::Light
+        );
+        assert_eq!(
+            AppearancePreset::fancy_night().palette(),
+            AppearancePreset::classic_night().palette()
+        );
+        assert_eq!(
+            serde_json::to_string(&AppearancePreset::fancy_day()).unwrap(),
+            "\"fancy-day\""
         );
     }
 

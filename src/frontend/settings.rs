@@ -7,7 +7,7 @@ use crate::{
         EffectiveTerminalAppearance, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,
         TerminalAppearanceOverride,
     },
-    theme::ThemeId,
+    theme::AppearancePreset,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,7 +46,7 @@ pub(crate) struct SettingsDialog {
     default_draft: EffectiveTerminalAppearance,
     override_draft: TerminalAppearanceOverride,
     target_tab_id: Option<String>,
-    theme_draft: ThemeId,
+    preset_draft: AppearancePreset,
     font_family_draft: String,
     font_size_draft: String,
 }
@@ -59,7 +59,7 @@ impl SettingsDialog {
             default_draft: default_draft.clone(),
             override_draft: TerminalAppearanceOverride::default(),
             target_tab_id: None,
-            theme_draft: default_draft.color_theme,
+            preset_draft: default_draft.appearance_preset,
             font_family_draft: default_draft.terminal_font_family.clone(),
             font_size_draft: default_draft.terminal_font_size.to_string(),
         }
@@ -77,8 +77,13 @@ impl SettingsDialog {
         self.target_tab_id.as_deref()
     }
 
-    pub(crate) fn theme_draft(&self) -> ThemeId {
-        self.theme_draft
+    pub(crate) fn preset_draft(&self) -> AppearancePreset {
+        self.preset_draft
+    }
+
+    /// Compatibility alias for callers still named around theme drafts.
+    pub(crate) fn theme_draft(&self) -> AppearancePreset {
+        self.preset_draft
     }
 
     pub(crate) fn font_family_draft(&self) -> &str {
@@ -145,7 +150,7 @@ impl SettingsDialog {
             SettingsScope::Defaults => {
                 self.default_draft.terminal_font_family = family;
                 self.default_draft.terminal_font_size = size;
-                self.default_draft.color_theme = self.theme_draft;
+                self.default_draft.appearance_preset = self.preset_draft;
             }
             SettingsScope::CurrentTerminal => {
                 if self.override_draft.terminal_font_family.is_some() {
@@ -154,8 +159,8 @@ impl SettingsDialog {
                 if self.override_draft.terminal_font_size.is_some() {
                     self.override_draft.terminal_font_size = Some(size);
                 }
-                if self.override_draft.color_theme.is_some() {
-                    self.override_draft.color_theme = Some(self.theme_draft);
+                if self.override_draft.appearance_preset.is_some() {
+                    self.override_draft.appearance_preset = Some(self.preset_draft);
                 }
             }
         }
@@ -170,12 +175,12 @@ impl SettingsDialog {
         }
     }
 
-    pub(crate) fn effective_drafts(&self) -> (String, u16, ThemeId) {
+    pub(crate) fn effective_drafts(&self) -> (String, u16, AppearancePreset) {
         match self.scope {
             SettingsScope::Defaults => (
                 self.default_draft.terminal_font_family.clone(),
                 self.default_draft.terminal_font_size,
-                self.default_draft.color_theme,
+                self.default_draft.appearance_preset,
             ),
             SettingsScope::CurrentTerminal => (
                 self.override_draft
@@ -186,17 +191,17 @@ impl SettingsDialog {
                     .terminal_font_size
                     .unwrap_or(self.default_draft.terminal_font_size),
                 self.override_draft
-                    .color_theme
-                    .unwrap_or(self.default_draft.color_theme),
+                    .appearance_preset
+                    .unwrap_or(self.default_draft.appearance_preset),
             ),
         }
     }
 
     pub(crate) fn load_effective_drafts(&mut self) {
-        let (family, size, theme) = self.effective_drafts();
+        let (family, size, preset) = self.effective_drafts();
         self.font_family_draft = family;
         self.font_size_draft = size.to_string();
-        self.theme_draft = theme;
+        self.preset_draft = preset;
     }
 
     pub(crate) fn switch_scope(&mut self, scope: SettingsScope) -> Result<bool, String> {
@@ -212,14 +217,14 @@ impl SettingsDialog {
         Ok(true)
     }
 
-    pub(crate) fn preview_theme(&mut self, theme: ThemeId) -> bool {
+    pub(crate) fn preview_preset(&mut self, preset: AppearancePreset) -> bool {
         if !self.open
             || (self.scope == SettingsScope::CurrentTerminal
-                && self.override_draft.color_theme.is_none())
+                && self.override_draft.appearance_preset.is_none())
         {
             return false;
         }
-        self.theme_draft = theme;
+        self.preset_draft = preset;
         true
     }
 
@@ -246,12 +251,12 @@ impl SettingsDialog {
                     .then_some(self.default_draft.terminal_font_size);
             }
             AppearanceField::Theme => {
-                self.override_draft.color_theme = self
+                self.override_draft.appearance_preset = self
                     .override_draft
-                    .color_theme
+                    .appearance_preset
                     .take()
                     .is_none()
-                    .then_some(self.default_draft.color_theme);
+                    .then_some(self.default_draft.appearance_preset);
             }
         }
         self.load_effective_drafts();
@@ -272,7 +277,8 @@ impl SettingsDialog {
             "kind": "settings",
             "scope": self.scope.as_str(),
             "target_tab_id": self.target_tab_id,
-            "theme_draft": self.theme_draft.as_str(),
+            "appearance_preset_draft": self.preset_draft.as_str(),
+            "theme_draft": self.preset_draft.as_str(),
             "font_family_configured": !self.font_family_draft.trim().is_empty(),
             "font_size_configured": !self.font_size_draft.trim().is_empty(),
             "default_action": "settings-apply",
@@ -297,12 +303,13 @@ pub(crate) fn ui_action_open(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::AppearancePreset;
 
     fn appearance() -> EffectiveTerminalAppearance {
         EffectiveTerminalAppearance {
             terminal_font_family: "Consolas".to_owned(),
             terminal_font_size: 14,
-            color_theme: ThemeId::Dark,
+            appearance_preset: AppearancePreset::classic_night(),
         }
     }
 
@@ -315,18 +322,18 @@ mod tests {
             TerminalAppearanceOverride {
                 terminal_font_family: Some("Cascadia Mono".to_owned()),
                 terminal_font_size: Some(18),
-                color_theme: Some(ThemeId::Light),
+                appearance_preset: Some(AppearancePreset::classic_day()),
             },
         );
         dialog.set_font_family_draft("Edited".to_owned());
         dialog.set_font_size_draft("20".to_owned());
-        dialog.preview_theme(ThemeId::Light);
+        dialog.preview_preset(AppearancePreset::classic_day());
         dialog.open(appearance(), None, TerminalAppearanceOverride::default());
         assert!(dialog.is_open());
         assert_eq!(dialog.scope(), SettingsScope::Defaults);
         assert_eq!(dialog.font_family_draft(), "Consolas");
         assert_eq!(dialog.font_size_draft(), "14");
-        assert_eq!(dialog.theme_draft(), ThemeId::Dark);
+        assert_eq!(dialog.preset_draft(), AppearancePreset::classic_night());
     }
 
     #[test]
@@ -345,7 +352,7 @@ mod tests {
         dialog.open(appearance(), None, TerminalAppearanceOverride::default());
         dialog.set_font_family_draft("Cascadia Mono".to_owned());
         dialog.set_font_size_draft("18".to_owned());
-        dialog.preview_theme(ThemeId::Light);
+        dialog.preview_preset(AppearancePreset::classic_day());
         dialog.capture().expect("valid draft");
         let changes = dialog.changes();
         assert_eq!(
@@ -353,7 +360,10 @@ mod tests {
             "Cascadia Mono"
         );
         assert_eq!(changes.default_appearance.terminal_font_size, 18);
-        assert_eq!(changes.default_appearance.color_theme, ThemeId::Light);
+        assert_eq!(
+            changes.default_appearance.appearance_preset,
+            AppearancePreset::classic_day()
+        );
     }
 
     #[test]
@@ -366,7 +376,7 @@ mod tests {
             TerminalAppearanceOverride {
                 terminal_font_family: Some("Consolas".to_owned()),
                 terminal_font_size: None,
-                color_theme: Some(ThemeId::Dark),
+                appearance_preset: Some(AppearancePreset::classic_night()),
             },
         );
         dialog
@@ -417,7 +427,7 @@ mod tests {
             TerminalAppearanceOverride {
                 terminal_font_family: Some("Cascadia Mono".to_owned()),
                 terminal_font_size: Some(18),
-                color_theme: Some(ThemeId::Light),
+                appearance_preset: Some(AppearancePreset::classic_day()),
             },
         );
         dialog
@@ -427,7 +437,7 @@ mod tests {
         assert!(dialog.reset_overrides());
         assert_eq!(dialog.font_family_draft(), "Consolas");
         assert_eq!(dialog.font_size_draft(), "14");
-        assert_eq!(dialog.theme_draft(), ThemeId::Dark);
+        assert_eq!(dialog.preset_draft(), AppearancePreset::classic_night());
     }
 
     #[test]
@@ -439,7 +449,7 @@ mod tests {
             TerminalAppearanceOverride {
                 terminal_font_family: Some("Cascadia Mono".to_owned()),
                 terminal_font_size: Some(18),
-                color_theme: Some(ThemeId::Light),
+                appearance_preset: Some(AppearancePreset::classic_day()),
             },
         );
         dialog
@@ -449,7 +459,8 @@ mod tests {
         assert_eq!(snapshot["kind"], "settings");
         assert_eq!(snapshot["scope"], "current-terminal");
         assert_eq!(snapshot["target_tab_id"], "@1");
-        assert_eq!(snapshot["theme_draft"], "light");
+        assert_eq!(snapshot["appearance_preset_draft"], "classic-day");
+        assert_eq!(snapshot["theme_draft"], "classic-day");
         assert!(snapshot["font_family_configured"].as_bool() == Some(true));
         assert!(snapshot["font_size_configured"].as_bool() == Some(true));
     }

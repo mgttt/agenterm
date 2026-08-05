@@ -12,7 +12,7 @@ use crate::{
     ipc_endpoint::{LogicalInstance, ResolvedIpcEndpoint, ServerScopeId},
     locale::LocaleId,
     platform::paths,
-    theme::ThemeId,
+    theme::{AppearancePreset, ThemeId},
     ui_geometry::{TABS_DEFAULT_WIDTH, clamp_configured_tabs_width},
 };
 
@@ -28,14 +28,15 @@ pub(crate) fn default_terminal_font_size() -> u16 {
 pub(crate) struct TerminalAppearanceOverride {
     pub(crate) terminal_font_family: Option<String>,
     pub(crate) terminal_font_size: Option<u16>,
-    pub(crate) color_theme: Option<ThemeId>,
+    #[serde(default, alias = "color_theme")]
+    pub(crate) appearance_preset: Option<AppearancePreset>,
 }
 
 impl TerminalAppearanceOverride {
     pub(crate) fn is_empty(&self) -> bool {
         self.terminal_font_family.is_none()
             && self.terminal_font_size.is_none()
-            && self.color_theme.is_none()
+            && self.appearance_preset.is_none()
     }
 
     fn normalize(&mut self) {
@@ -54,7 +55,13 @@ impl TerminalAppearanceOverride {
 pub(crate) struct EffectiveTerminalAppearance {
     pub(crate) terminal_font_family: String,
     pub(crate) terminal_font_size: u16,
-    pub(crate) color_theme: ThemeId,
+    pub(crate) appearance_preset: AppearancePreset,
+}
+
+impl EffectiveTerminalAppearance {
+    pub(crate) fn color_theme(&self) -> ThemeId {
+        self.appearance_preset.color_theme()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -62,7 +69,8 @@ pub(crate) struct EffectiveTerminalAppearance {
 pub(crate) struct AppConfig {
     pub(crate) terminal_font_family: String,
     pub(crate) terminal_font_size: u16,
-    pub(crate) color_theme: ThemeId,
+    #[serde(default, alias = "color_theme")]
+    pub(crate) appearance_preset: AppearancePreset,
     pub(crate) locale: LocaleId,
     pub(crate) terminal_overrides: BTreeMap<String, TerminalAppearanceOverride>,
     pub(crate) tabs_visible: bool,
@@ -75,7 +83,7 @@ impl Default for AppConfig {
         Self {
             terminal_font_family: "Consolas".to_owned(),
             terminal_font_size: default_terminal_font_size(),
-            color_theme: ThemeId::Dark,
+            appearance_preset: AppearancePreset::classic_night(),
             locale: LocaleId::English,
             terminal_overrides: BTreeMap::new(),
             tabs_visible: true,
@@ -153,7 +161,9 @@ impl AppConfig {
             terminal_font_size: terminal_override
                 .terminal_font_size
                 .unwrap_or(self.terminal_font_size),
-            color_theme: terminal_override.color_theme.unwrap_or(self.color_theme),
+            appearance_preset: terminal_override
+                .appearance_preset
+                .unwrap_or(self.appearance_preset),
         }
     }
 }
@@ -256,7 +266,7 @@ mod tests {
         let config: AppConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.terminal_font_family, "Consolas");
         assert_eq!(config.terminal_font_size, default_terminal_font_size());
-        assert_eq!(config.color_theme, ThemeId::Dark);
+        assert_eq!(config.appearance_preset, AppearancePreset::classic_night());
         assert_eq!(config.locale, LocaleId::English);
         assert!(config.terminal_overrides.is_empty());
         assert!(config.tabs_visible);
@@ -271,7 +281,7 @@ mod tests {
         .unwrap();
         assert_eq!(config.terminal_font_family, "Cascadia Mono");
         assert_eq!(config.terminal_font_size, 15);
-        assert_eq!(config.color_theme, ThemeId::Dark);
+        assert_eq!(config.appearance_preset, AppearancePreset::classic_night());
         assert_eq!(config.locale, LocaleId::English);
         assert!(config.tabs_visible);
         assert_eq!(config.tabs_width, DEFAULT_TABS_WIDTH);
@@ -282,26 +292,45 @@ mod tests {
         let config = AppConfig {
             terminal_font_family: "Consolas".to_owned(),
             terminal_font_size: 13,
-            color_theme: ThemeId::Light,
+            appearance_preset: AppearancePreset::classic_day(),
             locale: LocaleId::TraditionalChinese,
             terminal_overrides: BTreeMap::new(),
             tabs_visible: false,
             tabs_width: 333,
         };
         let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains(r#""color_theme":"light""#));
+        assert!(json.contains(r#""appearance_preset":"classic-day""#));
         assert!(json.contains(r#""locale":"zh-Hant""#));
         assert_eq!(serde_json::from_str::<AppConfig>(&json).unwrap(), config);
     }
 
     #[test]
-    fn unknown_theme_falls_back_without_discarding_other_settings() {
+    fn legacy_color_theme_migrates_to_appearance_preset() {
+        let dark: AppConfig = serde_json::from_str(r#"{"color_theme":"dark"}"#).unwrap();
+        assert_eq!(dark.appearance_preset, AppearancePreset::classic_night());
+        let light: AppConfig = serde_json::from_str(r#"{"color_theme":"light"}"#).unwrap();
+        assert_eq!(light.appearance_preset, AppearancePreset::classic_day());
+    }
+
+    #[test]
+    fn unknown_appearance_preset_falls_back_without_discarding_other_settings() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{"terminal_font_size":17,"appearance_preset":"from-the-future","tabs_width":300}"#,
+        )
+        .unwrap();
+        assert_eq!(config.terminal_font_size, 17);
+        assert_eq!(config.appearance_preset, AppearancePreset::classic_night());
+        assert_eq!(config.tabs_width, 300);
+    }
+
+    #[test]
+    fn unknown_legacy_color_theme_falls_back_without_discarding_other_settings() {
         let config: AppConfig = serde_json::from_str(
             r#"{"terminal_font_size":17,"color_theme":"from-the-future","tabs_width":300}"#,
         )
         .unwrap();
         assert_eq!(config.terminal_font_size, 17);
-        assert_eq!(config.color_theme, ThemeId::Dark);
+        assert_eq!(config.appearance_preset, AppearancePreset::classic_night());
         assert_eq!(config.tabs_width, 300);
     }
 
@@ -332,7 +361,7 @@ mod tests {
         let mut config = AppConfig {
             terminal_font_family: "Consolas".to_owned(),
             terminal_font_size: 12,
-            color_theme: ThemeId::Dark,
+            appearance_preset: AppearancePreset::classic_night(),
             ..AppConfig::default()
         };
         config.set_terminal_override(
@@ -341,14 +370,14 @@ mod tests {
             TerminalAppearanceOverride {
                 terminal_font_family: None,
                 terminal_font_size: Some(18),
-                color_theme: Some(ThemeId::Light),
+                appearance_preset: Some(AppearancePreset::classic_day()),
             },
         );
 
         let effective = config.effective_terminal_appearance("127.0.0.1:48815", Some("@7"));
         assert_eq!(effective.terminal_font_family, "Consolas");
         assert_eq!(effective.terminal_font_size, 18);
-        assert_eq!(effective.color_theme, ThemeId::Light);
+        assert_eq!(effective.appearance_preset, AppearancePreset::classic_day());
         assert_eq!(
             config
                 .effective_terminal_appearance("127.0.0.1:48815", Some("@8"))
@@ -371,7 +400,7 @@ mod tests {
 
     #[test]
     fn invalid_field_types_are_rejected() {
-        assert!(serde_json::from_str::<AppConfig>(r#"{"color_theme":false}"#).is_err());
+        assert!(serde_json::from_str::<AppConfig>(r#"{"appearance_preset":false}"#).is_err());
         assert!(serde_json::from_str::<AppConfig>(r#"{"tabs_width":"wide"}"#).is_err());
         assert!(serde_json::from_str::<AppConfig>(r#"{"tabs_width":250.5}"#).is_err());
         assert!(serde_json::from_str::<AppConfig>(r#"{"tabs_visible":"yes"}"#).is_err());

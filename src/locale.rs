@@ -43,6 +43,14 @@ pub(crate) enum UiText {
     TerminateAndClose,
     ThemeDark,
     ToggleTabs,
+    PresetClassicDay,
+    PresetClassicNight,
+    PresetFancyDay,
+    PresetFancyNight,
+    PresetClassicDayDesc,
+    PresetClassicNightDesc,
+    PresetFancyDayDesc,
+    PresetFancyNightDesc,
 }
 
 impl LocaleId {
@@ -105,6 +113,14 @@ impl LocaleId {
                 UiText::TerminateAndClose => "Terminate & Close",
                 UiText::ThemeDark => "Dark",
                 UiText::ToggleTabs => "Toggle Tabs",
+                UiText::PresetClassicDay => "Classic Day",
+                UiText::PresetClassicNight => "Classic Night",
+                UiText::PresetFancyDay => "Fancy Day",
+                UiText::PresetFancyNight => "Fancy Night",
+                UiText::PresetClassicDayDesc => "Industrial light palette",
+                UiText::PresetClassicNightDesc => "Industrial dark palette",
+                UiText::PresetFancyDayDesc => "Branded light palette",
+                UiText::PresetFancyNightDesc => "Branded dark palette",
             },
             Self::TraditionalChinese => match key {
                 UiText::Add => "新增",
@@ -139,6 +155,14 @@ impl LocaleId {
                 UiText::TerminateAndClose => "終止並關閉",
                 UiText::ThemeDark => "深色",
                 UiText::ToggleTabs => "切換標籤區",
+                UiText::PresetClassicDay => "經典白",
+                UiText::PresetClassicNight => "經典黑",
+                UiText::PresetFancyDay => "華麗白",
+                UiText::PresetFancyNight => "華麗黑",
+                UiText::PresetClassicDayDesc => "工業風淺色調色盤",
+                UiText::PresetClassicNightDesc => "工業風深色調色盤",
+                UiText::PresetFancyDayDesc => "品牌感淺色調色盤",
+                UiText::PresetFancyNightDesc => "品牌感深色調色盤",
             },
         }
     }
