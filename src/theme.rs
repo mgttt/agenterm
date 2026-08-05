@@ -670,9 +670,7 @@ fn embedded_palettes() -> &'static EmbeddedPalettes {
             classic_night: palette_from_json(include_str!(
                 "../assets/skins/classic/palettes/night.json"
             )),
-            fancy_day: palette_from_json(include_str!(
-                "../assets/skins/fancy/palettes/day.json"
-            )),
+            fancy_day: palette_from_json(include_str!("../assets/skins/fancy/palettes/day.json")),
             fancy_night: palette_from_json(include_str!(
                 "../assets/skins/fancy/palettes/night.json"
             )),
@@ -689,9 +687,11 @@ fn embedded_manifest(skin: SkinId) -> &'static EmbeddedManifest {
 
 fn embedded_classic_manifest() -> &'static EmbeddedManifest {
     static MANIFEST: OnceLock<&'static EmbeddedManifest> = OnceLock::new();
-    MANIFEST.get_or_init(|| Box::leak(Box::new(manifest_from_json(include_str!(
-        "../assets/skins/classic/manifest.json"
-    )))))
+    MANIFEST.get_or_init(|| {
+        Box::leak(Box::new(manifest_from_json(include_str!(
+            "../assets/skins/classic/manifest.json"
+        ))))
+    })
 }
 
 fn embedded_fancy_manifest() -> &'static EmbeddedManifest {
@@ -869,12 +869,7 @@ mod tests {
     fn appearance_presets_have_stable_ids_and_migration() {
         assert_eq!(
             AppearancePreset::ALL.map(AppearancePreset::as_str),
-            [
-                "classic-day",
-                "classic-night",
-                "fancy-day",
-                "fancy-night"
-            ]
+            ["classic-day", "classic-night", "fancy-day", "fancy-night"]
         );
         assert_eq!(
             AppearancePreset::parse("dark"),

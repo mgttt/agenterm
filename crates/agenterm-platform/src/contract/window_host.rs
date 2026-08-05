@@ -109,10 +109,7 @@ impl PixelWindowOptions {
         self
     }
 
-    pub fn with_window_icon_rgba(
-        mut self,
-        icon: Option<(u32, u32, Vec<u8>)>,
-    ) -> Self {
+    pub fn with_window_icon_rgba(mut self, icon: Option<(u32, u32, Vec<u8>)>) -> Self {
         self.window_icon_rgba = icon;
         self
     }

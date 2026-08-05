@@ -3928,7 +3928,10 @@ impl RemoteWindowState {
         let locale = self.config.locale;
         for (preset, control) in [
             (AppearancePreset::classic_day(), self.settings_classic_day),
-            (AppearancePreset::classic_night(), self.settings_classic_night),
+            (
+                AppearancePreset::classic_night(),
+                self.settings_classic_night,
+            ),
             (AppearancePreset::fancy_day(), self.settings_fancy_day),
             (AppearancePreset::fancy_night(), self.settings_fancy_night),
         ] {
@@ -3937,10 +3940,7 @@ impl RemoteWindowState {
             } else {
                 locale.text(UiText::Preview)
             };
-            self.set_control_text(
-                control,
-                &format!("{} · {state}", preset.label(locale)),
-            );
+            self.set_control_text(control, &format!("{} · {state}", preset.label(locale)));
         }
     }
 
@@ -5285,7 +5285,9 @@ impl RemoteWindowState {
         let palette = if self.settings_dialog.is_open() {
             self.settings_dialog.preset_draft().palette()
         } else {
-            self.active_terminal_appearance().appearance_preset.palette()
+            self.active_terminal_appearance()
+                .appearance_preset
+                .palette()
         };
         let (sidebar, terminal, composer, status) = self.layout_rects();
         fill(device, &sidebar, palette.sidebar.canvas_rgb());
@@ -6197,9 +6199,7 @@ impl RemoteWindowApplication {
             SETTINGS_FANCY_NIGHT_ID => {
                 state.preview_settings_preset(AppearancePreset::fancy_night())
             }
-            SETTINGS_FANCY_DAY_ID => {
-                state.preview_settings_preset(AppearancePreset::fancy_day())
-            }
+            SETTINGS_FANCY_DAY_ID => state.preview_settings_preset(AppearancePreset::fancy_day()),
             SETTINGS_DEFAULT_SCOPE_ID => state.switch_settings_scope(SettingsScope::Defaults),
             SETTINGS_CURRENT_SCOPE_ID => {
                 state.switch_settings_scope(SettingsScope::CurrentTerminal)

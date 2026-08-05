@@ -336,8 +336,11 @@ mod tests {
             "agenterm-settings-migrate-{}.json",
             std::process::id()
         ));
-        std::fs::write(&path, "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n")
-            .expect("write legacy settings");
+        std::fs::write(
+            &path,
+            "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n",
+        )
+        .expect("write legacy settings");
         let previous = env::var_os("AGENTERM_SETTINGS_PATH");
         // SAFETY: test-only; no other threads read this env var concurrently.
         unsafe { env::set_var("AGENTERM_SETTINGS_PATH", &path) };

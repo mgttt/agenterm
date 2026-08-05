@@ -1,7 +1,7 @@
 //! Unix software-rendered frontend projection.
 
-use crate::terminal_cursor::TerminalCursorShape;
 use crate::locale::LocaleId;
+use crate::terminal_cursor::TerminalCursorShape;
 use crate::theme::{AppearancePreset, Rgb, ThemePalette};
 use crate::ui_geometry::{
     PixelRect, TreeRowActionDensity, TreeRowMode, sidebar_tree_row_geometry,
@@ -2256,19 +2256,13 @@ fn render_settings_modal(
         palette.muted_text,
     );
     for (preset, button) in [
-        (
-            AppearancePreset::classic_day(),
-            settings.classic_day_button,
-        ),
+        (AppearancePreset::classic_day(), settings.classic_day_button),
         (
             AppearancePreset::classic_night(),
             settings.classic_night_button,
         ),
         (AppearancePreset::fancy_day(), settings.fancy_day_button),
-        (
-            AppearancePreset::fancy_night(),
-            settings.fancy_night_button,
-        ),
+        (AppearancePreset::fancy_night(), settings.fancy_night_button),
     ] {
         let label = if settings.preset_draft == preset {
             format!("{} *", preset.label(settings.locale))
