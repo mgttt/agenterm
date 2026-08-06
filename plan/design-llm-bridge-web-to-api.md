@@ -5,7 +5,7 @@
 | **文档** | 受管 LLM 网关的 Web 会话适配层 + 用户 BYOK 产品设计 |
 | **日期** | 2026-08-06 |
 | **状态** | 设计稿 rev1 |
-| **SSOT 关联** | `prd/PRD_02_13_llm_gateway.md`、`plan/design-cc-hyper-control-agent.md`、`prd/PRD_02_19_inspiration_and_future_vision.md` §INF |
+| **SSOT 关联** | `prd/PRD_02_13_llm_gateway.md`、`plan/design-llm-bridge-web-to-api.md`（同级：**Rhai 逻辑包** → `plan/design-llm-gateway-rhai-logic-pack.md`）、`plan/design-cc-hyper-control-agent.md`、`prd/PRD_02_19_inspiration_and_future_vision.md` §INF |
 | **非目标** | 在 `agenterm-cc` / `agenterm-rhai` 内嵌 Playwright；Script 权限策略；把 LLM 文本当作 Fleet 操作成功证明 |
 
 ---
@@ -69,9 +69,11 @@ Consumers (同一契约)
 
 | 组件 | 进程 | 备注 |
 |------|------|------|
-| `agenterm-llm-gateway` | 可选 sidecar | 4 MiB 级专用 PE；**不**链入 `agenterm-cc` |
-| Browser worker | gateway 子进程或 `agenterm-llm-browser` | Playwright/Camoufox 体积大 → **独立**；崩溃不拖 GUI/server |
+| `agenterm-llm-gateway` | 可选 sidecar | 4 MiB 级专用 PE；**Native Shell**；内嵌 Rhai 加载 **Logic Pack**（见 `design-llm-gateway-rhai-logic-pack.md`） |
+| Browser worker | gateway 子进程或 `agenterm-llm-browser` | Playwright/Camoufox 体积大 → **独立**；SiteAdapter **编排**在 Rhai pack，不每次改 PE |
 | CC / Composer | 仅 HTTP 客户端 | 只连 loopback；不 import Playwright |
+
+**Logic Pack 更新：** 站点 DOM/路由变更 → 更新 `packs/llm-gateway-builtin/` 或 user channel → `agenterm-cli llm-gateway reload`；**无需**重发 gateway PE（除非 `gateway_shell` / host API 版本变）。
 
 ---
 

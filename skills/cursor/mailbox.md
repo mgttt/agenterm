@@ -14,7 +14,7 @@
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | CC → `plan/design-cc-hyper-control-agent.md`；LLM → `plan/design-llm-bridge-web-to-api.md` |
-| LLM | 免费 Web 会话桥（Playwright/Camoufox）+ BYOK；统一 `agenterm-llm-gateway` loopback；LQ-1–7 待裁决 |
+| LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
 | `origin/main` | tip `26dae49`；含 CC 超控设计稿 + mailbox 登记 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |

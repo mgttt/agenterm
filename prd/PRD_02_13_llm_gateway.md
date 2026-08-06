@@ -10,6 +10,8 @@ not commit the gateway executable or a release version.
 Product design for **Web session providers** (Playwright/Camoufox → OpenAI-compatible)
 and **user BYOK** routing lives in
 [`plan/design-llm-bridge-web-to-api.md`](../plan/design-llm-bridge-web-to-api.md).
+**Rhai Logic Pack** split (frequent adapter updates without PE releases) lives in
+[`plan/design-llm-gateway-rhai-logic-pack.md`](../plan/design-llm-gateway-rhai-logic-pack.md).
 Those adapters must terminate at this gateway, not bypass it.
 
 - Dependency and isolation
