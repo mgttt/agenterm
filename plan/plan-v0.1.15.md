@@ -1680,7 +1680,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **三端并发派工写入本文 §2.2.1**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§1.5 与 §11 指针回链 |
 | 2026-08-06 | **章节编号改为阿拉伯数字** `x.y.z`（废止「一、二·二-b」等中文章节号）；交叉引用同步为 `§2.2.1` 等形式；原 CLI 专节与结构 §9 撞号 → CLI 改为 **§12** |
 | 2026-08-06 | **Win CI-R 主波落地**：R1 CI target **v3-slim**；R2 Candidate cargo-home **restore-keys**；R3 net-research 出 release 门（gates.json + check.rhai），push CI linux 仍跑；A3 script-smoke 进 windows release-lane-smokes；A4 Candidate summary 强化 bootstrap 行。R4 未做。OSX/Lnx 接手见 **§2.2.2** |
-| 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 genterm-cli mux / genterm-cli mcp。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
+| 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 `agenterm-cli mux` / `agenterm-cli mcp`。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
 | 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
 
 ---
