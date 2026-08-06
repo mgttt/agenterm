@@ -74,7 +74,9 @@ use crate::frontend::close_confirmation::CloseConfirmation;
 use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
-use crate::frontend::instance_picker::{InstancePickerRow, collect_instance_picker_rows};
+use crate::frontend::instance_picker::{
+    InstancePickerDialog, InstancePickerMode, InstancePickerRow, collect_instance_picker_rows,
+};
 use crate::frontend::server_strip_ui::{
     SERVER_TABS_REFRESH, ServerCloseConfirm, ServerContextAction, ServerTabContextMenu, StripRect,
     layout_server_add_chip, layout_server_context_menu, layout_server_tab_chips,
@@ -689,6 +691,8 @@ struct UnixApp {
     server_tab_context_menu: Option<ServerTabContextMenu>,
     /// Pending destructive close, awaiting confirmation.
     pending_server_close: Option<ServerCloseConfirm>,
+    /// Modal list of running instances to enter or open.
+    instance_picker_dialog: InstancePickerDialog,
     /// Set while the pointer is down inside the composer text, so pointer
     /// motion extends the selection instead of being forwarded to the
     /// terminal's mouse protocol.
@@ -804,6 +808,7 @@ impl UnixApp {
             server_tabs_refresh_after: Instant::now(),
             server_tab_context_menu: None,
             pending_server_close: None,
+            instance_picker_dialog: InstancePickerDialog::default(),
             composer_selection_dragging: false,
             composer_click: None,
             text_field_select_all: false,
@@ -1326,6 +1331,57 @@ impl UnixApp {
             .collect()
     }
 
+    /// Opens the instance picker over the live registry rows.
+    fn open_instance_picker(&mut self, mode: InstancePickerMode) -> Result<(), String> {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::InstancePicker)
+            && !self.instance_picker_dialog.is_open()
+        {
+            return Err("another modal is open".to_owned());
+        }
+        let rows = collect_instance_picker_rows()?;
+        self.instance_picker_dialog.open_with_rows(mode, rows);
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn close_instance_picker(&mut self) {
+        self.instance_picker_dialog.close();
+        self.request_redraw();
+    }
+
+    /// Enters the highlighted instance.
+    ///
+    /// Like the strip chips, this opens a window on the target rather than
+    /// rebinding this window's lease, which the embedded frontend cannot do.
+    /// The dialog keeps its error visible on failure instead of closing, so a
+    /// dead row does not silently dismiss the picker.
+    fn confirm_instance_picker(&mut self) -> Result<(), String> {
+        let Some(row) = self.instance_picker_dialog.selected_row().cloned() else {
+            return Err("no instance is selected".to_owned());
+        };
+        let short = row
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(row.instance.as_str());
+        match spawn_gui_for_instance(short, Some(row.endpoint.as_str())) {
+            Ok(pid) => {
+                self.close_instance_picker();
+                self.set_status_message(format!(
+                    "Opened `{}` in a new window (PID {pid})",
+                    row.instance
+                ));
+                Ok(())
+            }
+            Err(error) => {
+                self.instance_picker_dialog.set_error(error.clone());
+                self.request_redraw();
+                Err(error)
+            }
+        }
+    }
+
     /// Opens the chip context menu at the pointer, anchored under the chip.
     fn open_server_tab_context_menu(&mut self, x: i32, y: i32, row: &InstancePickerRow) {
         if self.focus_gate().full_modal_blocked() {
@@ -1660,7 +1716,7 @@ impl UnixApp {
             tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_editor_dialog.is_open(),
-            instance_picker_open: false,
+            instance_picker_open: self.instance_picker_dialog.is_open(),
             server_new_open: false,
             server_close_pending: false,
         }
@@ -2986,13 +3042,7 @@ impl UnixApp {
                 ModalSurface::NewTerminal => self.new_terminal_dialog.snapshot_modal(),
                 ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
                 ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
-                ModalSurface::InstancePicker => serde_json::json!({
-                    "kind": "instance-picker",
-                    "mode": "attach",
-                    "rows": [],
-                    "selected": 0,
-                    "error": "instance picker is Windows-first in this build",
-                }),
+                ModalSurface::InstancePicker => self.instance_picker_dialog.snapshot_modal(),
                 ModalSurface::ServerNew | ModalSurface::ServerClose => serde_json::json!({
                     "kind": "server-strip",
                     "error": "server strip dialogs are Windows-first in this build",
@@ -4769,6 +4819,39 @@ impl UnixApp {
         };
 
         let modal_active = self.modal_surface_active();
+        // Rows carry their own geometry so the painted list and any future
+        // hit-test agree; keyboard and ui-action drive it today.
+        let instance_picker_view = self.instance_picker_dialog.is_open().then(|| {
+            let (client_width, client_height) = self.client_size();
+            let width = render::INSTANCE_PICKER_WIDTH.min(client_width.saturating_sub(32).max(1));
+            let rows: Vec<_> = self
+                .instance_picker_dialog
+                .rows()
+                .iter()
+                .enumerate()
+                .map(|(index, row)| render::InstancePickerRowView {
+                    label: row.instance_label.clone(),
+                    detail: format!("pid {} · {}", row.pid, row.classification),
+                    selected: index == self.instance_picker_dialog.selected_index(),
+                    can_attach: row.can_attach,
+                })
+                .collect();
+            let body = 56 + rows.len().max(1) as u32 * render::INSTANCE_PICKER_ROW_HEIGHT + 40;
+            let height = body.min(client_height.saturating_sub(32).max(1));
+            let left = client_width.saturating_sub(width) / 2;
+            let top = client_height.saturating_sub(height) / 2;
+            render::InstancePickerView {
+                bounds: (left, top, width, height),
+                rows,
+                row_height: render::INSTANCE_PICKER_ROW_HEIGHT,
+                first_row_top: top + 48,
+                error: self
+                    .instance_picker_dialog
+                    .last_error()
+                    .map(ToOwned::to_owned),
+            }
+        });
+
         // Chip geometry comes from the shared strip layout, so the painted
         // chips and the snapshot bounds an agent clicks are the same rects.
         let active_instance = crate::client::ipc_address();
@@ -4939,6 +5022,7 @@ impl UnixApp {
                 sidebar_scrollbar,
                 settings,
                 confirm_close,
+                instance_picker: instance_picker_view,
                 window_close,
                 new_terminal,
                 status: Some(status_view),
@@ -5472,6 +5556,48 @@ impl ControlHost for UnixApp {
         }
     }
 
+    fn open_instance_picker_modal(&mut self, mode: &str) -> Result<(), String> {
+        let mode = InstancePickerMode::parse(mode).unwrap_or(InstancePickerMode::Attach);
+        self.open_instance_picker(mode)
+    }
+
+    fn instance_picker_select(
+        &mut self,
+        target: crate::control_dispatch::InstancePickerTarget,
+    ) -> Result<(), String> {
+        use crate::control_dispatch::InstancePickerTarget;
+        if !self.instance_picker_dialog.is_open() {
+            return Err("instance picker is not open".to_owned());
+        }
+        match target {
+            InstancePickerTarget::Next => self.instance_picker_dialog.select_next(),
+            InstancePickerTarget::Prev => self.instance_picker_dialog.select_prev(),
+            InstancePickerTarget::Name(name) => {
+                self.instance_picker_dialog.select_by_instance(&name)?;
+            }
+            InstancePickerTarget::Pid(pid) => {
+                self.instance_picker_dialog.select_by_pid(pid)?;
+            }
+        }
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn instance_picker_confirm(&mut self) -> Result<(), String> {
+        if !self.instance_picker_dialog.is_open() {
+            return Err("instance picker is not open".to_owned());
+        }
+        self.confirm_instance_picker()
+    }
+
+    fn instance_picker_cancel(&mut self) -> Result<(), String> {
+        if !self.instance_picker_dialog.is_open() {
+            return Err("instance picker is not open".to_owned());
+        }
+        self.close_instance_picker();
+        Ok(())
+    }
+
     fn select_server_tab(&mut self, instance: &str) -> Result<(), String> {
         // Always re-read on an explicit select: the 2s cache otherwise makes a
         // click look dead right after a second server starts.
@@ -5553,7 +5679,8 @@ impl ControlHost for UnixApp {
                 return Ok(true);
             }
             CancelTarget::InstancePicker => {
-                return Err("instance picker is Windows-first in this build".to_owned());
+                self.close_instance_picker();
+                return Ok(true);
             }
             CancelTarget::None => {}
         }
@@ -5574,7 +5701,8 @@ impl ControlHost for UnixApp {
                 Ok(true)
             }
             ConfirmTarget::InstancePicker => {
-                Err("instance picker is Windows-first in this build".to_owned())
+                self.confirm_instance_picker()?;
+                Ok(true)
             }
             ConfirmTarget::None => Ok(false),
         }

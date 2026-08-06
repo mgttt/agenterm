@@ -40,12 +40,18 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
     "edit-tab",
     "font-decrease",
     "font-increase",
+    "instance-picker-cancel",
+    "instance-picker-confirm",
+    "instance-picker-next",
+    "instance-picker-prev",
+    "instance-picker-select",
     "keep-server-running",
     "new-child",
     "new-tab",
     "open-control-center",
     "open-cwd-editor",
     "open-instance",
+    "open-instance-picker",
     "open-new-terminal",
     "open-settings",
     "select-server-tab",
@@ -91,12 +97,6 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
 ///   shared preset/apply path already in SHARED.
 pub const WINDOWS_ONLY_UI_ACTIONS: &[&str] = &[
     // parity-gap: instance picker + strip (S′); Unix product surface incomplete.
-    "instance-picker-cancel",
-    "instance-picker-confirm",
-    "instance-picker-next",
-    "instance-picker-prev",
-    "instance-picker-select",
-    "open-instance-picker",
     // parity-gap: settings scope/inheritance chrome beyond shared presets/apply.
 ];
 
