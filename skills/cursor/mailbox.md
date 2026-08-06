@@ -15,7 +15,7 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `f40b32e` |
+| `origin/main` | tip `8ec024f` |
 | 待审合 | `cursor/1-0e37` @ `befca96` ahead=4（tip 16:27Z，新鲜未催） |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
@@ -23,8 +23,8 @@
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 @ `f40b32e`（待审合未催） |
-| `duty.lock` | （无） |
+| auto-dream | **绿**：Automation `f2326638-…`；duty 进行中 `bc-c07eedad-…` |
+| `duty.lock` | `bc-c07eedad-0e0b-49ca-a01d-6a452670ca7f` / 直到 `2026-08-06T21:16Z` |
 
 ## 主控指令（未消化则分身不得另起炉灶）
 
@@ -63,11 +63,11 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T19:24Z
-- 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-cd10ed9c-4c1d-4921-866c-ecf07551c1a1`
-- URL: https://cursor.com/agents/bc-cd10ed9c-4c1d-4921-866c-ecf07551c1a1
-- 下一步: cron 下一轮再起
+### 舰队值班会话 · 2026-08-06T20:26Z
+- 状态: RUNNING — 本轮 duty 进行中
+- bcId: `bc-c07eedad-0e0b-49ca-a01d-6a452670ca7f`
+- URL: https://cursor.com/agents/bc-c07eedad-0e0b-49ca-a01d-6a452670ca7f
+- 下一步: 跑 fleet-duty 扫描
 - 阻塞: 无
 
 ### 分身3 · 2026-08-05
