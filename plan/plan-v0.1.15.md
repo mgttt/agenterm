@@ -2449,3 +2449,68 @@ perceive→act 闭环成立。
    `composer.visible:false`、`focus.surface:null` 且不带几何；macOS/Linux 的
    `screenshot` 还需要活着的渲染进程。所以 9.3 那套验证目前**只能在有窗口的会话里跑，
    CI headless 跑不了**。要不要让 headless 也供几何，是架构取舍。
+
+## 10. 整体 review（2026-08-06 下午）
+
+### 10.1 集成测试首次全绿
+
+`cargo test --test rhai_migration` 从长期 2 红变成 **22/22 全绿**。这两盏灯挂了
+很多轮没人认领，查下来**都不是 bug，是断言过期**：
+
+| 测试 | 真因 |
+|---|---|
+| `artifact_manifest_...` | `78357dd` 删掉了 `agenterm-server.exe`（authority 改成 `agenterm server` 子命令），`scripts/artifacts.json` 从 7 个可执行文件变 6 个，但测试里 pin 的 "defines 7" 没跟着改 |
+| `child_id_remains_public_...` | 断言 `window_supported == cfg!(windows)`，但 macOS 现在**真的实现了** process-window 自动化（`adapters/macos/process_window.rs` 返回 `supported: true`），是断言在描述一个已经过时的平台切分 |
+
+第二条改成 `cfg!(any(windows, target_os = "macos"))` 而不是直接删检查 ——
+Linux 还没有 adapter，这个缺口应该继续可见。
+
+### 10.2 输入区「选中后打字不替换」——已修
+
+**发现路径值得记一下**：clippy 报 `text_selection::insert` 从 `c5b31ee` 起就是
+死代码。追下去发现这个函数本来就是为「打字替换选区」写的，只是从没接上。
+拿真机验证确认了缺陷：选中 `hello` 打 `X`，草稿纹丝不动。
+
+**为什么不是简单接一下**：共享 key 路径只有 `select_all: bool`，表达不了 range，
+而且总是往草稿**末尾**追加。所以第一版「先删选区再交给共享路径」的做法，把
+`hello world` 选中 `hello` 打 X 变成了 `" worldX"` —— 字符跑到末尾去了。
+正解是在 frontend 里用 `text_selection::insert` **原地替换并吃掉整个按键**。
+
+只有文本 / Space / Backspace / Delete 触发替换；方向键、Escape、
+primary-shortcut 组合键（复制、全选）必须移动或执行而不毁草稿。
+
+### 10.3 新增 `ui-input key`
+
+上面那个缺陷**当时无法从 CLI 验证** —— `send-keys` 打的是 pane，往 PTY 写字节，
+永远到不了 composer 的按键处理。所以补了：
+
+```
+ui-input key --key NAME [--mods shift,ctrl,alt,meta]
+```
+
+命名键大小写不敏感（`Enter`/`esc`/`ArrowDown`…），其余按字面文本处理。
+同样走 `handle_pixel_event`，合成 press+release 一对完整按键。
+
+至此「人类能做的 CLI 都能做」这条线上，**鼠标和键盘都通了**。
+
+### 10.4 Win agent 的 ui-action catalog：问题已闭环
+
+我上轮报的「24 个 action 被误标成 WINDOWS_ONLY」，对方在 `531032c` / `6b3e80d`
+里修完了：SHARED 从 16 → **44**，WINDOWS_ONLY 从 41 → **14**，
+重新量过**误标数为 0**。这个协作回路是有效的。
+
+### 10.5 仍未决 / 待认领
+
+1. **`install.sh:157` 仍硬性要求 5 个可执行文件**。mux/mcp 子命令已经能用且
+   输出逐字节一致，但要真省下 1.6 MB 得允许不装那两个二进制 —— 这会破坏现有
+   `agenterm-mux` 调用方，**是产品决定，等你拍板**。
+2. **Windows 侧 `ui-input` 未实现**（pointer 和 key 都是）。解析层平台中立可直接
+   复用；难点是 Windows 的 composer 是原生 `EDIT` 控件，合成 press 送到窗口不会
+   像 Unix 自绘 composer 那样落进输入框。已在 `remote_frontend.rs` 留
+   `REVIEW(macos → windows owner)`。
+3. **headless 跑不了闭环**（`server_app.rs:1908` 不带几何）。要不要让 headless
+   供几何是架构取舍。
+4. **Linux 缺口**：`process_window` 无 adapter；`linux/font.rs` 硬编码 Debian 路径
+   无 fontconfig，非 Debian 系发行版会静默掉到 8x8 点阵字体。
+5. 去中心化网络选型见 `plan/research-decentralized-network.md`（**建议等 CC
+   产品形态清楚再动**）。
