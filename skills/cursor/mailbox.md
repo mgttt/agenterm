@@ -13,7 +13,7 @@
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
-| 执行计划 | CC → `plan/design-cc-hyper-control-agent.md`；LLM → `plan/design-llm-bridge-web-to-api.md` |
+| 执行计划 | CC → `design-cc-hyper-control-agent.md`；LLM → `design-llm-bridge-web-to-api.md`；**发布分轨** → `design-release-base-vs-apps.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
 | `origin/main` | tip `26dae49`；含 CC 超控设计稿 + mailbox 登记 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
@@ -21,7 +21,7 @@
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
-| CC 远景 | Tab1 **超控智能体**（view `hyper_control`）；Cockpit 降为 Tab2；OQ-1–8 待用户裁决 |
+| CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
 | auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 |
 | `duty.lock` | （无） |
 
@@ -36,10 +36,9 @@
 2. 无新指令勿另起炉灶；deferred 叶等新主控再派。
 
 ### → 主控1（当前）
-1. 观察 CI `31060999962` 结论；Windows quality gate 若再挂/超时则查 hang。
-2. 近程只推进 **server/CLI**；CC nav-chrome / WebView 产品化降级。
-3. 若 WebView：优先 direct-WRY，Tauri 仅 research 对照。
-4. 分身3/4 IDLE；暂不派活除非用户要求。
+1. 近程 **server/CLI**（Base）；CC/LLM 按 App 线 P1–P2，不拖 Base 发布。
+2. **产品设计跟进**：`plan/design-release-base-vs-apps.md` §8（Release & Apps 角色、RQ-*）。
+3. CC/LLM 设计 OQ/LQ/GP/RQ 待用户裁决；分身3/4 IDLE。
 
 ## 请示队列
 

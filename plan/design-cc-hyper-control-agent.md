@@ -7,7 +7,7 @@
 | **日期** | 2026-08-06 |
 | **状态** | 设计稿 rev1 |
 | **目标版本** | L-CC · v0.2.0+（可视化/布局先行；数据契约分阶段落地） |
-| **SSOT 起点** | `prd/PRD_02_21_control_center.md`、`plan/plan-control-center-ux.md`、`plan/design-control-center-ux.md`、`plan/plan-cc-automation-cli.md`、`research/agenterm-webview/assets/` |
+| **SSOT 起点** | `prd/PRD_02_21_control_center.md`、`plan/plan-control-center-ux.md`、`plan/design-control-center-ux.md`、`plan/plan-cc-automation-cli.md`、`plan/design-release-base-vs-apps.md`（**CC 为上层 App**）、`research/agenterm-webview/assets/` |
 | **关联 view ID** | 新增 `hyper_control`；保留 `cockpit` · `workflows` · `extensions` · `info_hub` · `diagnostics`（chrome） |
 | **LLM 供给** | `plan/design-llm-bridge-web-to-api.md`（免费 Web 会话桥 + BYOK；统一 OpenAI 兼容 loopback） |
 
