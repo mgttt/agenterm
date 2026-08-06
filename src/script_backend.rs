@@ -1,10 +1,12 @@
 //! Script execution backend selection.
 //!
-//! Today every live invocation uses Rhai. The parallel `rh` track (`crates/agenterm-rh`)
-//! validates pack subsets, AOT-compiles to native libraries, and loads them with dlopen;
-//! flip `AGENTERM_SCRIPT_BACKEND=rh` once pack loading ships in-process.
+//! Today every live invocation uses Rhai unless `AGENTERM_SCRIPT_BACKEND=rh`.
+//! The parallel `rh` track (`crates/agenterm-rh`) validates pack subsets,
+//! AOT-compiles to native libraries, and loads them with dlopen.
 
 use std::path::Path;
+
+use crate::script_protocol::ScriptOperation;
 
 /// Active script backend for pack execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +36,58 @@ impl ScriptBackend {
     }
 }
 
+pub fn rh_backend_enabled() -> bool {
+    matches!(ScriptBackend::from_env(), ScriptBackend::Rh)
+}
+
+pub struct RhInvocationResult {
+    pub stdout: String,
+    pub value: Option<serde_json::Value>,
+}
+
+pub fn try_execute_rh_invocation(
+    operation: ScriptOperation,
+    source: &str,
+) -> Result<Option<RhInvocationResult>, agenterm_rh::RhError> {
+    if !rh_backend_enabled() {
+        return Ok(None);
+    }
+
+    match operation {
+        ScriptOperation::Api => Ok(None),
+        ScriptOperation::Check => {
+            if !source.is_empty() {
+                rh_check(source)?;
+            } else if crate::script_rh_pack::cached_rh_pack().is_none() {
+                return Err(agenterm_rh::RhError::Compile(
+                    "AGENTERM_SCRIPT_BACKEND=rh requires AGENTERM_RH_PACK or non-empty source"
+                        .into(),
+                ));
+            }
+            Ok(Some(RhInvocationResult {
+                stdout: String::new(),
+                value: None,
+            }))
+        }
+        ScriptOperation::Run | ScriptOperation::Eval => {
+            let pack = crate::script_rh_pack::cached_rh_pack().ok_or_else(|| {
+                agenterm_rh::RhError::Compile(
+                    "AGENTERM_SCRIPT_BACKEND=rh requires AGENTERM_RH_PACK for run/eval".into(),
+                )
+            })?;
+            let mut stdout = String::new();
+            for line in &pack.cc_lines {
+                stdout.push_str(line);
+                stdout.push('\n');
+            }
+            Ok(Some(RhInvocationResult {
+                stdout,
+                value: Some(serde_json::Value::from(pack.entry_value)),
+            }))
+        }
+    }
+}
+
 pub fn rh_check(source: &str) -> Result<(), agenterm_rh::RhError> {
     agenterm_rh::check(source)
 }
@@ -56,10 +110,17 @@ pub fn rh_load_pack(path: &Path) -> Result<crate::script_rh_pack::LoadedRhPack, 
 
 #[cfg(test)]
 mod tests {
-    use super::ScriptBackend;
+    use super::{rh_backend_enabled, try_execute_rh_invocation, ScriptBackend};
+    use crate::script_protocol::ScriptOperation;
 
     #[test]
     fn default_backend_is_rhai() {
         assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
+        assert!(!rh_backend_enabled());
+        assert!(
+            try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }")
+                .expect("probe")
+                .is_none()
+        );
     }
 }

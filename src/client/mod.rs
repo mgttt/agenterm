@@ -2302,6 +2302,9 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         println!("{}", protocol_info_json("client_binary"));
         return 0;
     }
+    if command == "rh-pack" {
+        return crate::script_rh_pack::run_rh_pack_cli(&arguments);
+    }
     if matches!(command, "list-instances" | "server-list") {
         return run_list_instances(&arguments);
     }
@@ -5077,7 +5080,7 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
             "planned": ["split-window", "layouts"]
         },
         "extensions": [
-            "ui-snapshot", "ui-action", "focus", "protocol-info", "control-center",
+            "ui-snapshot", "ui-action", "focus", "protocol-info", "control-center", "rh-pack",
             "inspect", "screenshot", "screenshot-pane", "dump-cells",
             "wait-pane", "send-mouse", "show-composer",
             "set-composer", "send-composer", "get-settings",

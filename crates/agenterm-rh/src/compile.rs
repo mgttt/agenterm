@@ -19,6 +19,14 @@ pub struct CompileOutput {
 }
 
 pub fn compile_native(source: &str, output_path: &Path) -> Result<CompileOutput, RhError> {
+    compile_native_for_target(source, output_path, None)
+}
+
+pub fn compile_native_for_target(
+    source: &str,
+    output_path: &Path,
+    target: Option<&str>,
+) -> Result<CompileOutput, RhError> {
     let rust = transpile_cdylib(source)?;
     let source_hash = hash_bytes(source.as_bytes());
 
@@ -38,11 +46,16 @@ pub fn compile_native(source: &str, output_path: &Path) -> Result<CompileOutput,
     )
     .map_err(|err| RhError::Compile(err.to_string()))?;
 
-    let status = cargo_command()
+    let mut command = cargo_command();
+    command
         .arg("build")
         .arg("--release")
         .arg("--target-dir")
-        .arg(&target_dir)
+        .arg(&target_dir);
+    if let Some(triple) = target {
+        command.arg("--target").arg(triple);
+    }
+    let status = command
         .current_dir(&crate_root)
         .status()
         .map_err(|err| RhError::Compile(format!("failed to spawn cargo: {err}")))?;
@@ -52,10 +65,12 @@ pub fn compile_native(source: &str, output_path: &Path) -> Result<CompileOutput,
         )));
     }
 
-    let extension = native_extension();
-    let artifact = target_dir
-        .join("release")
-        .join(format!("lib{GENERATED_CRATE}.{extension}"));
+    let extension = native_extension_for_target(target);
+    let release_dir = match target {
+        Some(triple) => target_dir.join(triple).join("release"),
+        None => target_dir.join("release"),
+    };
+    let artifact = release_dir.join(format!("lib{GENERATED_CRATE}.{extension}"));
     if !artifact.is_file() {
         return Err(RhError::Compile(format!(
             "expected native artifact at {}",
@@ -133,9 +148,14 @@ fn generated_cargo_toml() -> String {
 }
 
 pub fn native_extension() -> &'static str {
-    if cfg!(target_os = "windows") {
+    native_extension_for_target(None)
+}
+
+pub fn native_extension_for_target(target: Option<&str>) -> &'static str {
+    let triple = target.unwrap_or("");
+    if triple.contains("windows") || (target.is_none() && cfg!(target_os = "windows")) {
         "dll"
-    } else if cfg!(target_os = "macos") {
+    } else if triple.contains("apple") || triple.contains("darwin") || (target.is_none() && cfg!(target_os = "macos")) {
         "dylib"
     } else {
         "so"
@@ -144,7 +164,7 @@ pub fn native_extension() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_native, hash_bytes};
+    use super::{compile_native, compile_native_for_target, hash_bytes, native_extension_for_target};
 
     #[test]
     fn source_hash_is_stable() {
@@ -170,5 +190,27 @@ mod tests {
         assert!(output.manifest_path.is_file());
         assert_eq!(output.native_hash, super::hash_file(&out).expect("hash"));
         assert_eq!(output.native_path, out);
+    }
+
+    #[test]
+    fn cross_compiles_reference_pack_when_target_env_set() {
+        let Some(target) = std::env::var("AGENTERM_RH_QUALIFY_TARGET")
+            .ok()
+            .filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        let out = std::env::temp_dir().join(format!(
+            "agenterm-rh-cross-{}.{}",
+            std::process::id(),
+            native_extension_for_target(Some(target.as_str()))
+        ));
+        let _ = std::fs::remove_file(&out);
+        let output = compile_native_for_target("fn entry() { 11 }", &out, Some(target.as_str()))
+            .expect("cross compile");
+        assert!(out.is_file());
+        assert_eq!(output.native_hash, super::hash_file(&out).expect("hash"));
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(output.manifest_path);
     }
 }

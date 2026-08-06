@@ -66,6 +66,62 @@ pub fn rh_pack_document(pack: &LoadedRhPack) -> serde_json::Value {
     })
 }
 
+pub fn print_rh_pack(path: &Path, json: bool) -> Result<(), agenterm_rh::RhError> {
+    let pack = load_rh_pack(path)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&rh_pack_document(&pack)).map_err(|err| {
+                agenterm_rh::RhError::Compile(err.to_string())
+            })?
+        );
+    } else {
+        println!("rh pack loaded: {}", path.display());
+        println!("native_hash={}", pack.native_hash);
+        println!("entry={}", pack.entry_value);
+        for line in &pack.cc_lines {
+            println!("cc: {line}");
+        }
+    }
+    Ok(())
+}
+
+pub fn run_rh_pack_cli(args: &[String]) -> i32 {
+    let mut json = false;
+    let mut path = None;
+    let mut position = 1;
+    while position < args.len() {
+        match args[position].as_str() {
+            "--json" => json = true,
+            "--path" => {
+                position += 1;
+                if position >= args.len() {
+                    eprintln!("rh-pack: --path requires a value");
+                    return 2;
+                }
+                path = Some(args[position].clone());
+            }
+            value if path.is_none() && !value.starts_with('-') => path = Some(value.to_owned()),
+            unknown => {
+                eprintln!("rh-pack: unknown argument `{unknown}`");
+                return 2;
+            }
+        }
+        position += 1;
+    }
+    let Some(path) = path else {
+        eprintln!("usage: agenterm-cli rh-pack --path PATH [--json]");
+        return 2;
+    };
+    match print_rh_pack(Path::new(path.as_str()), json) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{append_cc_lines, load_rh_pack, LoadedRhPack};

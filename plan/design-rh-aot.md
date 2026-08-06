@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | 在制小项 rh-0（并行，不挡 server/CLI 主轨） |
+| 状态 | rh-0 闭环（并行轨，不挡 server/CLI 主轨） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -48,8 +48,10 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M0 | `agenterm-rh check` — 子集校验 | [x] |
 | M1 | `agenterm-rh transpile` — AST → Rust 源 | [x] 纯函数子集 |
 | M2 | `script_backend` + `AGENTERM_SCRIPT_BACKEND` | [x] |
+| M3 | AOT compile → `.so` + manifest + dlopen smoke | [x] |
 | M5 | CC in-process `dlopen` + `cc_lines` 原生呈现 | [x] |
-| M6 | 六 cell CI + qualification hash | [ ] |
+| M6 | 六 cell CI + qualification hash | [x] |
+| M7 | `AGENTERM_SCRIPT_BACKEND=rh` worker 原生 entry 派发 | [x] |
 
 ---
 
@@ -87,7 +89,25 @@ pack/*.rh  →  parse (Rhai AST, 临时)
 
 ---
 
-## 7. 非目标（rh-0）
+## 7. rh-0 闭环验收
+
+| 能力 | 证据 |
+|------|------|
+| 子集校验 | `agenterm-rh check` |
+| AOT 编译 | `agenterm-rh compile` / `pack build` |
+| native_hash | manifest + `verify_native_hash` on load |
+| dlopen entry | `rh_entry()` + `run-smoke` |
+| cc_lines C ABI | `rh_cc_line_*` 静态导出 |
+| CC / gateway 观测 | `AGENTERM_RH_PACK` + `protocol-info.script` |
+| CLI 诊断 | `agenterm-cli rh-pack --path` |
+| 六 cell | CI: host `cargo test -p agenterm-rh` + cross `AGENTERM_RH_QUALIFY_TARGET` |
+| worker 切换 | `execute_inner` → `try_execute_rh_invocation` when backend=rh |
+
+**未纳入 rh-0（后续轨）：** fleet native shim、gateway Logic Pack `llm.*`、签名 OTA、Cranelift 直出。
+
+---
+
+## 8. 非目标（rh-0）
 
 - 不替换 `agenterm-rhai` 自动化/task manifest 路径
 - 不在 rh-0 实现 parser/grid/server 内嵌

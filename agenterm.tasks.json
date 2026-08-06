@@ -494,6 +494,13 @@
       "network": [],
       "evidence": ["task.client-smoke"]
     },
+    "rh-aot-smoke": {
+      "inputs": ["target-client-binaries", "rh-fixture"],
+      "outputs": ["rh-aot-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.rh-aot-smoke"]
+    },
     "package-client-release": {
       "inputs": ["target-client-binaries", "artifact-manifest", "platform-adapters"],
       "outputs": ["platform-release-archive", "archive-provenance", "archive-checksum"],
@@ -1139,6 +1146,17 @@
       "dependencies": ["client-build"],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["process_spawn"]
+    },
+    {
+      "id": "rh-aot-smoke",
+      "description": "Prove rh-0 check, AOT pack build, native_hash receipt, and dlopen entry smoke",
+      "entry": "scripts/rhai/rh-aot-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": ["client-build"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-client-release",

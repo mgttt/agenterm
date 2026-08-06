@@ -1,0 +1,5 @@
+fn entry() { 42 }
+
+fn cc_lines() {
+    ["rh-aot fixture", "machine-native"]
+}

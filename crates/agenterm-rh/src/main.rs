@@ -1,8 +1,8 @@
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
-    build_pack_dir, check, compile_native, hash_file, load_and_call_entry, transpile, RhError,
-    RH_VERSION,
+    build_pack_dir, check, compile_native, hash_file, load_and_call_entry, qualify_pack_dir,
+    transpile, write_receipt, RhError, RH_VERSION,
 };
 
 fn main() -> ExitCode {
@@ -64,6 +64,23 @@ fn run() -> Result<(), RhError> {
             let digest = hash_file(&path)?;
             println!("{digest}  {}", path.display());
         }
+        "qualify" => {
+            let path = require_path(&mut args, "qualify")?;
+            let mut subargs = args;
+            let dir = pack_dir_flag(&mut subargs)?;
+            let output = parse_output_flag(&mut subargs)?.unwrap_or_else(|| dir.join("qualification.json"));
+            let source = read_source(&path)?;
+            let receipt = qualify_pack_dir(&source, &dir)?;
+            write_receipt(&output, &receipt)?;
+            println!(
+                "rh qualify ok: {} -> {}\n  target={}\n  native_hash={}\n  entry={}",
+                path.display(),
+                output.display(),
+                receipt.target,
+                receipt.native_hash,
+                receipt.entry_value
+            );
+        }
         "pack" => {
             let mut subargs = args;
             let Some(subcommand) = subargs.next() else {
@@ -92,7 +109,7 @@ fn run() -> Result<(), RhError> {
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | transpile | compile | run-smoke | pack | hash | version"
+                "unknown command `{other}`; try check | transpile | compile | run-smoke | pack | qualify | hash | version"
             )));
         }
     }
@@ -169,6 +186,7 @@ fn print_usage() {
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
            run-smoke <native>                  dlopen and call rh_entry()\n\
            pack build <file> --dir PATH        build pack dir (native + manifest + entry.rh)\n\
+           qualify <file> --dir PATH [-o json] build + load + write qualification receipt\n\
            hash <file>                         sha256 receipt\n\
            version\n"
     );
