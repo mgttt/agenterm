@@ -1829,12 +1829,22 @@ impl UnixApp {
             let _ = self.complete_tab_editor(false);
         }
         self.sync_composer_buffer_to_tab();
+        // Carry the active tab and its current override in, so the dialog can
+        // offer the Current Terminal scope. Opening with `None` here is what
+        // made `switch_scope` silently refuse on Unix: it declines whenever
+        // there is no target tab, so the whole per-terminal appearance surface
+        // was unreachable even though the shared state machine supports it.
+        let address = crate::client::ipc_address();
+        let target_tab_id = self.active_id().map(|id| format!("@{id}"));
+        let override_draft = target_tab_id
+            .as_deref()
+            .map(|tab_id| self.config.terminal_override(&address, tab_id))
+            .unwrap_or_default();
         settings::ui_action_open(
             &mut self.settings_dialog,
-            self.config
-                .effective_terminal_appearance(&crate::client::ipc_address(), None),
-            None,
-            TerminalAppearanceOverride::default(),
+            self.config.effective_terminal_appearance(&address, None),
+            target_tab_id,
+            override_draft,
         );
         self.set_focus_surface_internal(UnixFocusSurface::Settings, "semantic");
     }
@@ -1849,6 +1859,17 @@ impl UnixApp {
             self.config.terminal_font_family = changes.default_appearance.terminal_font_family;
             self.config.terminal_font_size = changes.default_appearance.terminal_font_size;
             self.config.appearance_preset = changes.default_appearance.appearance_preset;
+            // Persist the per-terminal override too. Applying only the default
+            // appearance silently discarded everything the Current Terminal
+            // scope had just edited, so the scope switch would appear to work
+            // and then lose the user's change on apply.
+            if let Some(tab_id) = changes.target_tab_id.as_deref() {
+                self.config.set_terminal_override(
+                    &crate::client::ipc_address(),
+                    tab_id,
+                    changes.override_draft.clone(),
+                );
+            }
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
             self.refresh_window_title();
         }
@@ -4981,6 +5002,42 @@ impl ControlHost for UnixApp {
         if self.settings_dialog.preview_preset(preset) {
             self.request_redraw();
         }
+    }
+
+    fn switch_settings_scope(&mut self, scope: settings::SettingsScope) -> Result<(), String> {
+        if !self.settings_dialog.is_open() {
+            return Err("Settings is not open".to_owned());
+        }
+        // `switch_scope` reports `false` when the move is a no-op (already in
+        // that scope, or no target terminal to override). Redraw only when it
+        // actually changed something.
+        if self.settings_dialog.switch_scope(scope)? {
+            self.request_redraw();
+        }
+        Ok(())
+    }
+
+    fn toggle_settings_inheritance(
+        &mut self,
+        field: settings::AppearanceField,
+    ) -> Result<(), String> {
+        if !self.settings_dialog.is_open() {
+            return Err("Settings is not open".to_owned());
+        }
+        if self.settings_dialog.toggle_inheritance(field)? {
+            self.request_redraw();
+        }
+        Ok(())
+    }
+
+    fn reset_settings_overrides(&mut self) -> Result<(), String> {
+        if !self.settings_dialog.is_open() {
+            return Err("Settings is not open".to_owned());
+        }
+        if self.settings_dialog.reset_overrides() {
+            self.request_redraw();
+        }
+        Ok(())
     }
 
     fn open_tab_editor(&mut self, tab_id: u64) -> Result<(), String> {

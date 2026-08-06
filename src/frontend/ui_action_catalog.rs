@@ -49,12 +49,18 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
     "open-settings",
     "select-tab",
     "settings-apply",
+    "settings-current",
+    "settings-defaults",
+    "settings-font-toggle",
     "settings-preset-classic-day",
     "settings-preset-classic-night",
     "settings-preset-fancy-day",
     "settings-preset-fancy-night",
+    "settings-reset-overrides",
+    "settings-size-toggle",
     "settings-theme-dark",
     "settings-theme-light",
+    "settings-theme-toggle",
     "stop-server-and-exit",
     "tab-editor-cancel",
     "tab-editor-save",
@@ -92,12 +98,6 @@ pub const WINDOWS_ONLY_UI_ACTIONS: &[&str] = &[
     "open-instance-picker",
     "select-server-tab",
     // parity-gap: settings scope/inheritance chrome beyond shared presets/apply.
-    "settings-current",
-    "settings-defaults",
-    "settings-font-toggle",
-    "settings-reset-overrides",
-    "settings-size-toggle",
-    "settings-theme-toggle",
 ];
 
 /// Unix embedded frontend only (`unix/frontend` + `new_terminal::dispatch_ui_action`).

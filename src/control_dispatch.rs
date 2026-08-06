@@ -18,6 +18,7 @@ use crate::{
     settings::clamp_tabs_width,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
+    frontend::settings::{AppearanceField, SettingsScope},
     theme::AppearancePreset,
     ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
@@ -643,6 +644,23 @@ pub(crate) trait ControlHost {
     #[allow(dead_code)]
     fn preview_settings_preset(&mut self, _preset: AppearancePreset) {}
 
+    /// Switches the open settings dialog between global defaults and the
+    /// active terminal's own overrides.
+    fn switch_settings_scope(&mut self, _scope: SettingsScope) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
+    /// Toggles one appearance field between inheriting the default and
+    /// carrying a per-terminal override.
+    fn toggle_settings_inheritance(&mut self, _field: AppearanceField) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
+    /// Drops every per-terminal appearance override in one step.
+    fn reset_settings_overrides(&mut self) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
     fn open_tab_editor(&mut self, _tab_id: u64) -> Result<(), String> {
         Err("tab editor is not supported on this host".to_owned())
     }
@@ -1008,6 +1026,38 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
             host.preview_settings_preset(AppearancePreset::fancy_night());
             Some(ui_snapshot_response(host))
         }
+        // Scope and inheritance were Windows-only ui-actions even though the
+        // state machine has always lived in the shared settings dialog. Placing
+        // them here rather than in one adapter gives both hosts the same
+        // behaviour and keeps a third implementation from appearing later.
+        "settings-defaults" => match host.switch_settings_scope(SettingsScope::Defaults) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-current" => match host.switch_settings_scope(SettingsScope::CurrentTerminal) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-font-toggle" => {
+            match host.toggle_settings_inheritance(AppearanceField::FontFamily) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "settings-size-toggle" => {
+            match host.toggle_settings_inheritance(AppearanceField::FontSize) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "settings-theme-toggle" => match host.toggle_settings_inheritance(AppearanceField::Theme) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-reset-overrides" => match host.reset_settings_overrides() {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
         "settings-apply" => match host.close_settings_modal(true) {
             Ok(()) => Some(ui_snapshot_response(host)),
             Err(error) => Some(IpcResponse::failure(error)),
