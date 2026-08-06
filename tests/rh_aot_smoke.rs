@@ -28,3 +28,33 @@ fn fixture_source_hash_is_stable() {
     assert_eq!(a, b);
     assert!(!a.is_empty());
 }
+
+#[test]
+fn fleet_fixture_qualifies_and_calls_host_shim() {
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-fleet-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let source = include_str!("../fixtures/rh/fleet.rh");
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    assert_eq!(receipt.entry_value, 11);
+    assert_eq!(receipt.cc_line_count, 2);
+    let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let calls_for_bridge = std::sync::Arc::clone(&calls);
+    let value = agenterm::script_rh_host::call_pack_entry_with_fleet(
+        &native,
+        Box::new(move |operation_id, params| {
+            calls_for_bridge
+                .lock()
+                .expect("calls")
+                .push((operation_id.to_owned(), params.to_owned()));
+            Ok("{\"operation_id\":\"protocol.info\"}".to_owned())
+        }),
+    )
+    .expect("entry");
+    assert_eq!(value, 11);
+    let recorded = calls.lock().expect("calls");
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].0, "protocol.info");
+    agenterm::script_rh_host::clear_fleet_bridge();
+    let _ = std::fs::remove_dir_all(&dir);
+}

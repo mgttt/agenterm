@@ -48,6 +48,7 @@ pub struct RhInvocationResult {
 pub fn try_execute_rh_invocation(
     operation: ScriptOperation,
     source: &str,
+    fleet_bridge: Option<Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>>,
 ) -> Result<Option<RhInvocationResult>, agenterm_rh::RhError> {
     if !rh_backend_enabled() {
         return Ok(None);
@@ -75,6 +76,11 @@ pub fn try_execute_rh_invocation(
                     "AGENTERM_SCRIPT_BACKEND=rh requires AGENTERM_RH_PACK for run/eval".into(),
                 )
             })?;
+            let entry_value = if let Some(bridge) = fleet_bridge {
+                crate::script_rh_host::call_cached_pack_entry_with_fleet(bridge)?
+            } else {
+                pack.entry_value
+            };
             let mut stdout = String::new();
             for line in &pack.cc_lines {
                 stdout.push_str(line);
@@ -82,7 +88,7 @@ pub fn try_execute_rh_invocation(
             }
             Ok(Some(RhInvocationResult {
                 stdout,
-                value: Some(serde_json::Value::from(pack.entry_value)),
+                value: Some(serde_json::Value::from(entry_value)),
             }))
         }
     }
@@ -96,7 +102,10 @@ pub fn rh_transpile(source: &str) -> Result<String, agenterm_rh::RhError> {
     agenterm_rh::transpile(source)
 }
 
-pub fn rh_compile(source: &str, output: &Path) -> Result<agenterm_rh::CompileOutput, agenterm_rh::RhError> {
+pub fn rh_compile(
+    source: &str,
+    output: &Path,
+) -> Result<agenterm_rh::CompileOutput, agenterm_rh::RhError> {
     agenterm_rh::compile_native(source, output)
 }
 
@@ -104,13 +113,15 @@ pub fn rh_run_smoke(native: &Path) -> Result<i64, agenterm_rh::RhError> {
     agenterm_rh::load_and_call_entry(native)
 }
 
-pub fn rh_load_pack(path: &Path) -> Result<crate::script_rh_pack::LoadedRhPack, agenterm_rh::RhError> {
+pub fn rh_load_pack(
+    path: &Path,
+) -> Result<crate::script_rh_pack::LoadedRhPack, agenterm_rh::RhError> {
     crate::script_rh_pack::load_rh_pack(path)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{rh_backend_enabled, try_execute_rh_invocation, ScriptBackend};
+    use super::{ScriptBackend, rh_backend_enabled, try_execute_rh_invocation};
     use crate::script_protocol::ScriptOperation;
 
     #[test]
@@ -118,7 +129,7 @@ mod tests {
         assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
         assert!(!rh_backend_enabled());
         assert!(
-            try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }")
+            try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }", None)
                 .expect("probe")
                 .is_none()
         );

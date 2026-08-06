@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | rh-0 闭环（并行轨，不挡 server/CLI 主轨） |
+| 状态 | rh-1 闭环完成（AOT + 宿主回调 + fleet shim + broker 派发） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -52,10 +52,20 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M5 | CC in-process `dlopen` + `cc_lines` 原生呈现 | [x] |
 | M6 | 六 cell CI + qualification hash | [x] |
 | M7 | `AGENTERM_SCRIPT_BACKEND=rh` worker 原生 entry 派发 | [x] |
+| M8 | Fleet native shim：`rh_register_host` + `fleet.*` transpile | [x] |
+| M9 | worker broker 派发 + fleet fixture 验收 | [x] |
 
 ---
 
-## 4. rh-0 语言子集
+## 4. rh-1 语言扩展（fleet）
+
+**允许：** rh-0 全部 + `fleet.protocol.info()` 等 **零参/单整数** fleet 查询/变更。  
+**实现：** transpile → `rh_fleet_call("protocol.info", "{}")` → 宿主 C ABI → 同一 `fleet.call` broker。  
+**fixture：** `fixtures/rh/fleet.rh`；`rh_aot_smoke` + `script_rh_host` 黑盒。
+
+---
+
+## 5. rh-0 语言子集
 
 **允许：** `fn`、 `let`/`const`、 `if`/`else`、 `return`、字面量、二元运算、`()` block。  
 **禁止（rh-0）：** `eval`、`import`/`export`、循环、`try/catch`、闭包捕获、动态模块。
@@ -64,7 +74,7 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 
 ---
 
-## 5. 编译管线（目标）
+## 6. 编译管线（目标）
 
 ```text
 pack/*.rh  →  parse (Rhai AST, 临时)
@@ -79,7 +89,7 @@ pack/*.rh  →  parse (Rhai AST, 临时)
 
 ---
 
-## 6. 开放项（RH-*）
+## 7. 开放项（RH-*）
 
 | ID | 问题 |
 |----|------|
@@ -89,7 +99,7 @@ pack/*.rh  →  parse (Rhai AST, 临时)
 
 ---
 
-## 7. rh-0 闭环验收
+## 8. rh-0 闭环验收
 
 | 能力 | 证据 |
 |------|------|
@@ -102,12 +112,13 @@ pack/*.rh  →  parse (Rhai AST, 临时)
 | CLI 诊断 | `agenterm-cli rh-pack --path` |
 | 六 cell | CI: host `cargo test -p agenterm-rh` + cross `AGENTERM_RH_QUALIFY_TARGET` |
 | worker 切换 | `execute_inner` → `try_execute_rh_invocation` when backend=rh |
+| fleet shim | native `rh_fleet_call` → host → `fleet.call` broker |
 
-**未纳入 rh-0（后续轨）：** fleet native shim、gateway Logic Pack `llm.*`、签名 OTA、Cranelift 直出。
+**未纳入 rh-1（后续轨）：** 全 fleet 表覆盖、gateway 独立 PE、`llm.*` Logic Pack、签名 OTA、Cranelift 直出。
 
 ---
 
-## 8. 非目标（rh-0）
+## 9. 非目标（rh-0）
 
 - 不替换 `agenterm-rhai` 自动化/task manifest 路径
 - 不在 rh-0 实现 parser/grid/server 内嵌

@@ -2255,6 +2255,12 @@ fn execute_inner(
     if let Some(result) = agenterm::script_backend::try_execute_rh_invocation(
         invocation.operation,
         &invocation.source,
+        broker.as_ref().map(|broker| {
+            let broker = broker.clone();
+            agenterm::script_rh_host::broker_fleet_bridge(move |operation, arguments| {
+                broker.call_json(operation, arguments)
+            })
+        }),
     )
     .map_err(|error| configuration_error("rh_backend", error.to_string()))?
     {

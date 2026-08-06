@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use libloading::Library;
+use libloading::{Library, Symbol};
 
-use crate::{compile::hash_file, RhError};
+use crate::{RhError, compile::hash_file, host_api::RhHostFleetCall};
 
 pub struct RhNativeModule {
     library: Library,
@@ -13,6 +13,26 @@ impl RhNativeModule {
         let library =
             unsafe { Library::new(path) }.map_err(|err| RhError::Compile(err.to_string()))?;
         Ok(Self { library })
+    }
+
+    pub fn register_host(&self, fleet_call: RhHostFleetCall) -> Result<(), RhError> {
+        unsafe {
+            let register = self
+                .library
+                .get::<Symbol<extern "C" fn(RhHostFleetCall)>>(b"rh_register_host")
+                .map_err(|err| RhError::Compile(err.to_string()))?;
+            register(fleet_call);
+        }
+        Ok(())
+    }
+
+    pub fn host_api_version(&self) -> u32 {
+        unsafe {
+            self.library
+                .get::<extern "C" fn() -> u32>(b"rh_host_api_version")
+                .map(|version| version())
+                .unwrap_or(0)
+        }
     }
 
     pub fn call_entry(&self) -> i64 {

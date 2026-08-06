@@ -1,6 +1,7 @@
 //! In-process rh pack loader for native hosts (Control Center, gateways).
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
@@ -11,6 +12,7 @@ pub struct LoadedRhPack {
 }
 
 static RH_PACK: OnceLock<Option<LoadedRhPack>> = OnceLock::new();
+static NATIVE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 pub fn load_rh_pack(path: &Path) -> Result<LoadedRhPack, agenterm_rh::RhError> {
     let pack = agenterm_rh::RhPack::load(path)?;
@@ -33,6 +35,27 @@ pub fn try_load_rh_pack_from_env() -> Option<LoadedRhPack> {
 /// Process-wide cached pack from `AGENTERM_RH_PACK` (dlopen once per process).
 pub fn cached_rh_pack() -> Option<&'static LoadedRhPack> {
     RH_PACK.get_or_init(try_load_rh_pack_from_env).as_ref()
+}
+
+pub fn cached_native_path() -> Option<&'static Path> {
+    NATIVE_PATH
+        .get_or_init(|| {
+            let path = std::env::var("AGENTERM_RH_PACK").ok()?;
+            let path = path.trim();
+            if path.is_empty() {
+                return None;
+            }
+            let path = Path::new(path);
+            if path.is_dir() {
+                let manifest =
+                    agenterm_rh::RhPackManifest::read(&path.join("manifest.json")).ok()?;
+                Some(path.join(manifest.native_file))
+            } else {
+                Some(path.to_path_buf())
+            }
+        })
+        .as_ref()
+        .map(std::path::PathBuf::as_path)
 }
 
 pub fn rh_pack_observability() -> serde_json::Value {
@@ -71,9 +94,8 @@ pub fn print_rh_pack(path: &Path, json: bool) -> Result<(), agenterm_rh::RhError
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&rh_pack_document(&pack)).map_err(|err| {
-                agenterm_rh::RhError::Compile(err.to_string())
-            })?
+            serde_json::to_string_pretty(&rh_pack_document(&pack))
+                .map_err(|err| { agenterm_rh::RhError::Compile(err.to_string()) })?
         );
     } else {
         println!("rh pack loaded: {}", path.display());
@@ -124,7 +146,7 @@ pub fn run_rh_pack_cli(args: &[String]) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_cc_lines, load_rh_pack, LoadedRhPack};
+    use super::{LoadedRhPack, append_cc_lines, load_rh_pack};
 
     #[test]
     fn rh_pack_observability_without_env() {
@@ -149,10 +171,8 @@ mod tests {
 
     #[test]
     fn load_pack_dir_round_trips_cc_lines() {
-        let dir = std::env::temp_dir().join(format!(
-            "agenterm-script-rh-pack-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("agenterm-script-rh-pack-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         agenterm_rh::build_pack_dir(
             "fn entry() { 7 }\nfn cc_lines() { [\"from native\", \"machine code\"] }",

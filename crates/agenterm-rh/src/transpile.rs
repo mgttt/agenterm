@@ -1,6 +1,11 @@
 use rhai::{AST, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
-use crate::{subset::validate_ast, RhError};
+use crate::{
+    RhError,
+    fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
+    host_api::emit_host_runtime,
+    subset::validate_ast,
+};
 
 #[derive(Clone, Copy)]
 struct EmitCtx {
@@ -9,11 +14,7 @@ struct EmitCtx {
 
 impl EmitCtx {
     fn value_type(self) -> &'static str {
-        if self.cdylib {
-            "INT"
-        } else {
-            "Dynamic"
-        }
+        if self.cdylib { "INT" } else { "Dynamic" }
     }
 
     fn unit_expr(self) -> &'static str {
@@ -46,6 +47,7 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
     );
     if ctx.cdylib {
         out.push_str("use rhai::INT;\n\n");
+        emit_host_runtime(&mut out);
     } else {
         out.push_str("use rhai::Dynamic;\n\n");
     }
@@ -82,7 +84,9 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
             out.push_str("    0\n");
         }
         out.push_str("}\n\n");
-        out.push_str("#[no_mangle]\npub extern \"C\" fn rh_pack_api_version() -> u32 {\n    1\n}\n\n");
+        out.push_str(
+            "#[no_mangle]\npub extern \"C\" fn rh_pack_api_version() -> u32 {\n    1\n}\n\n",
+        );
         out.push_str("#[no_mangle]\npub extern \"C\" fn rh_entry() -> i64 {\n");
         out.push_str("    rh_entry_internal() as i64\n");
         out.push_str("}\n");
@@ -109,10 +113,7 @@ fn extract_cc_lines(def: &ScriptFuncDef) -> Result<Vec<String>, RhError> {
 
 fn extract_string_array_expr(expr: &Expr) -> Result<Vec<String>, RhError> {
     match expr {
-        Expr::Array(items, ..) => items
-            .iter()
-            .map(string_literal_expr)
-            .collect(),
+        Expr::Array(items, ..) => items.iter().map(string_literal_expr).collect(),
         Expr::DynamicConstant(value, ..) => {
             if !value.is_array() {
                 return Err(RhError::Transpile(
@@ -149,7 +150,9 @@ fn dynamic_string(value: &rhai::Dynamic) -> Result<String, RhError> {
 pub(crate) fn single_expression(body: &StmtBlock) -> Result<&Expr, RhError> {
     let mut iter = body.iter();
     let Some(stmt) = iter.next() else {
-        return Err(RhError::Transpile("cc_lines must return a string array literal".into()));
+        return Err(RhError::Transpile(
+            "cc_lines must return a string array literal".into(),
+        ));
     };
     if iter.next().is_some() {
         return Err(RhError::Transpile(
@@ -186,7 +189,9 @@ fn emit_cc_lines_exports(out: &mut String, def: &ScriptFuncDef) -> Result<(), Rh
     out.push_str("    if (i as usize) >= RH_CC_LINES.len() {\n        return 0;\n    }\n");
     out.push_str("    RH_CC_LINES[i as usize].len() as u32\n}\n\n");
     out.push_str("#[no_mangle]\npub extern \"C\" fn rh_cc_line_ptr(i: u32) -> *const u8 {\n");
-    out.push_str("    if (i as usize) >= RH_CC_LINES.len() {\n        return std::ptr::null();\n    }\n");
+    out.push_str(
+        "    if (i as usize) >= RH_CC_LINES.len() {\n        return std::ptr::null();\n    }\n",
+    );
     out.push_str("    RH_CC_LINES[i as usize].as_ptr()\n}\n\n");
     Ok(())
 }
@@ -310,6 +315,16 @@ fn emit_stmt(
 }
 
 fn emit_expr(out: &mut String, expr: &Expr, ctx: EmitCtx) -> Result<(), RhError> {
+    if ctx.cdylib {
+        if let Some(call) = parse_fleet_call(expr) {
+            validate_fleet_call(&call)?;
+            let params = fleet_params_json(&call)?;
+            out.push_str("rh_fleet_call(");
+            out.push_str(&format!("{:?}, {:?}", call.operation_id, params));
+            out.push(')');
+            return Ok(());
+        }
+    }
     match expr {
         Expr::IntegerConstant(value, ..) => {
             if ctx.cdylib {
@@ -377,12 +392,7 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: EmitCtx) -> Result<
     )))
 }
 
-fn emit_op(
-    out: &mut String,
-    op: &Token,
-    args: &[Expr],
-    ctx: EmitCtx,
-) -> Result<(), RhError> {
+fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: EmitCtx) -> Result<(), RhError> {
     match (op, args.len()) {
         (Token::Plus, 2) => binary(out, "+", &args[0], &args[1], ctx),
         (Token::Minus, 2) => binary(out, "-", &args[0], &args[1], ctx),
@@ -415,13 +425,7 @@ fn emit_op(
     }
 }
 
-fn binary(
-    out: &mut String,
-    op: &str,
-    lhs: &Expr,
-    rhs: &Expr,
-    ctx: EmitCtx,
-) -> Result<(), RhError> {
+fn binary(out: &mut String, op: &str, lhs: &Expr, rhs: &Expr, ctx: EmitCtx) -> Result<(), RhError> {
     out.push('(');
     emit_expr(out, lhs, ctx)?;
     out.push(' ');
@@ -434,6 +438,8 @@ fn binary(
 
 #[cfg(test)]
 mod tests {
+    use rhai::Stmt;
+
     use super::{transpile, transpile_cdylib};
 
     #[test]
@@ -451,9 +457,23 @@ mod tests {
     }
 
     #[test]
-    fn cc_lines_exports_compile() {
-        let rust = transpile_cdylib("fn cc_lines() { [\"alpha\", \"beta\"] }").expect("transpile");
-        assert!(rust.contains("rh_cc_line_count"));
-        assert!(rust.contains("alpha"));
+    fn fleet_ast_is_dot_method_chain() {
+        let ast = super::parse("fn entry() { fleet.protocol.info() }").expect("parse");
+        let def = ast.iter_fn_def().next().expect("fn");
+        let stmt = def.body.iter().next().expect("stmt");
+        let call = match stmt {
+            Stmt::Expr(expr) => {
+                super::super::fleet::parse_fleet_call(expr.as_ref()).expect("fleet")
+            }
+            other => panic!("unexpected stmt: {other:?}"),
+        };
+        assert_eq!(call.operation_id, "protocol.info");
+    }
+
+    #[test]
+    fn transpiles_fleet_protocol_info_for_cdylib() {
+        let rust = transpile_cdylib("fn entry() { fleet.protocol.info(); 9 }").expect("transpile");
+        assert!(rust.contains("rh_fleet_call"));
+        assert!(rust.contains("protocol.info"));
     }
 }
