@@ -62,10 +62,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T02:23Z
+### 舰队值班会话 · 2026-08-06T03:22Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-07d1aea6-3a1b-4a97-b3e9-4943dbd4ae4b`
-- URL: https://cursor.com/agents/bc-07d1aea6-3a1b-4a97-b3e9-4943dbd4ae4b
+- bcId: `bc-8af14925-9cd7-499c-92fe-77d68b934928`
+- URL: https://cursor.com/agents/bc-8af14925-9cd7-499c-92fe-77d68b934928
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -81,6 +81,7 @@
 
 ## 交接日志
 
+- 2026-08-06T03:22Z · 舰队值班会话(`bc-8af14925-…`) · duty: noop findings=0 main=195103a；未 apply；lock 已清
 - 2026-08-06T02:23Z · 舰队值班会话(`bc-07d1aea6-…`) · duty: noop findings=0 main=0ae2c2f；未 apply；lock 已清
 - 2026-08-06T01:26Z · 舰队值班会话(`bc-98ea34bf-…`) · duty: noop findings=0 main=06c76b2；未 apply；lock 已清
 - 2026-08-06T00:52Z · 主控1(`bc-a4df769a-…`) · 换防完成；主控2 待命；CI=`31060999962` 观察中
