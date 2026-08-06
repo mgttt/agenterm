@@ -9,6 +9,7 @@ import "scripts/rhai/lib/test_harness" as test_harness;
 
 let declared_evidence = [
     "cli.backspace-del-one",
+    "cli.named-buffer-paste",
     "cli.remain-on-exit",
     "cli.stable-create-id",
     "cli.observable-events",
@@ -302,7 +303,8 @@ try {
     let commands = text(context, cli, ["list-commands"]);
     for expected in [
         "new-window (neww)", "list-windows (lsw)",
-        "send-keys (send)", "scroll-pane", "read-events",
+        "send-keys (send)", "set-buffer (setb)", "paste-buffer (pasteb)",
+        "scroll-pane", "read-events",
         "wait-events", "new-agent", "list-instances",
         "wait-pane (expect-pane)", "set-composer", "ui-bootstrap",
         "ui-deltas", "ui-hello", "ui-snapshot"
@@ -312,6 +314,12 @@ try {
             "cli_smoke_command_missing:" + expected
         );
     }
+    let save_buffer_fail = failure_text(context, cli, ["save-buffer"]);
+    require(
+        save_buffer_fail.contains("unsupported")
+            || save_buffer_fail.contains("not implemented"),
+        "cli_smoke_save_buffer_explicit_unsupported"
+    );
     let offline_unknown = direct(
         context,
         cli,
@@ -963,6 +971,75 @@ try {
         context,
         declared_evidence,
         "cli.backspace-del-one"
+    );
+
+    print("STEP named buffer set/show/list/paste/delete journey");
+    let buffer_probe = "BUFFER_PROBE_OK_" + context.run_id;
+    text(
+        context,
+        cli,
+        ["set-buffer", "-b", "probe", "--", buffer_probe]
+    );
+    require(
+        text(context, cli, ["show-buffer", "-b", "probe"])
+            .contains(buffer_probe),
+        "cli_smoke_show_buffer_roundtrip"
+    );
+    require(
+        text(context, cli, ["list-buffers"]).contains("probe:"),
+        "cli_smoke_list_buffers_named"
+    );
+    text(
+        context,
+        cli,
+        ["send-keys", "-t", name, "-l", "echo "]
+    );
+    text(
+        context,
+        cli,
+        ["paste-buffer", "-b", "probe", "-t", name]
+    );
+    text(context, cli, ["send-keys", "-t", name, "Enter"]);
+    text(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", name,
+            "--contains", buffer_probe,
+            "--timeout-ms", "30000"
+        ]
+    );
+    require(
+        text(context, cli, ["capture-pane", "-p", "-t", name])
+            .contains(buffer_probe),
+        "cli_smoke_paste_buffer_capture"
+    );
+    text(context, cli, ["delete-buffer", "-b", "probe"]);
+    let missing_buffer = failure_text(
+        context,
+        cli,
+        ["show-buffer", "-b", "probe"]
+    );
+    require(
+        missing_buffer.contains("can't find buffer")
+            || missing_buffer.contains("buffer"),
+        "cli_smoke_delete_buffer_missing"
+    );
+    text(context, cli, ["set-buffer", "-b", "empty", "--"]);
+    let empty_paste = failure_text(
+        context,
+        cli,
+        ["paste-buffer", "-b", "empty", "-t", name]
+    );
+    require(
+        empty_paste.contains("empty"),
+        "cli_smoke_empty_buffer_paste_fails"
+    );
+    text(context, cli, ["delete-buffer", "-b", "empty"]);
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "cli.named-buffer-paste"
     );
 
     let scroll_prefix = "AGENTERM_SCROLL_" + context.run_id;

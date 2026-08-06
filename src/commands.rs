@@ -125,6 +125,8 @@ pub(crate) struct MuxCommand {
 }
 
 const SPLIT_UNSUPPORTED: &str = "AgenTerm currently maps one ConPTY pane per tab";
+const SAVE_BUFFER_UNSUPPORTED: &str =
+    "save-buffer is not implemented; use show-buffer and redirect or load-buffer from a file";
 
 pub(crate) const MUX_COMMANDS: &[MuxCommand] = &[
     MuxCommand {
@@ -318,6 +320,14 @@ pub(crate) const MUX_COMMANDS: &[MuxCommand] = &[
     MuxCommand {
         name: "pasteb",
         status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "save-buffer",
+        status: MuxStatus::Unsupported(SAVE_BUFFER_UNSUPPORTED),
+    },
+    MuxCommand {
+        name: "saveb",
+        status: MuxStatus::Unsupported(SAVE_BUFFER_UNSUPPORTED),
     },
     MuxCommand {
         name: "show",
@@ -702,9 +712,16 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "paste-buffer" | "pasteb" => (
             "agenterm-cli paste-buffer [-b name] [-t target]\n\
              Injects buffer bytes into the target pane PTY (not an agent mailbox).\n\
+             Empty buffers fail; UTF-8 text is normalized and respects bracketed-paste.\n\
              Collab/status → note/handoff; shell typing → send-keys/paste-buffer \
              (see PRD_02_15 B′ vs agent messaging).",
             &["-b", "-t"][..],
+            &[][..],
+            false,
+        ),
+        "save-buffer" | "saveb" => (
+            "agenterm-cli save-buffer is unsupported: use show-buffer or load-buffer",
+            &[][..],
             &[][..],
             false,
         ),
@@ -1297,6 +1314,22 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn save_buffer_is_explicitly_unsupported_on_mux_surface() {
+        let save = mux_command("save-buffer").expect("save-buffer registered");
+        let alias = mux_command("saveb").expect("saveb registered");
+        assert!(matches!(
+            save.status,
+            MuxStatus::Unsupported(reason) if reason.contains("save-buffer is not implemented")
+        ));
+        assert_eq!(save.status, alias.status);
+        assert!(
+            control_command_usage("save-buffer")
+                .is_some_and(|usage| usage.contains("unsupported")),
+            "CLI help should document save-buffer as unsupported"
+        );
     }
 
     #[test]

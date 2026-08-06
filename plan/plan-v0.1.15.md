@@ -658,11 +658,11 @@ S′. 多 Server / Instance 可达与选择
 
 ```text
 B′. tmux/rmux send-keys + buffer
-├─ [x] B1 盘点与契约：现有 send-keys 行为 / 缺 buffer 命令 / 非目标（实现时落代码）
+├─ [x] B1 盘点与契约：现有 send-keys 行为 / buffer 族 / save-buffer 显式 unsupported
 ├─ [x] B2 夯实 send-keys（-l 已有；usage 补 PS `@N` 引号）
 ├─ [x] B3 命名 buffer 最小集：set/load/show/list/delete-buffer
-├─ [x] B4 paste-buffer（→ 目标 pane 的 PTY，含 -t）
-├─ [x] B5 与 M 的桥接文档：本叶摘要 + plan 选用表（PRD 命令面已列 buffer 族）
+├─ [x] B4 paste-buffer（空 buffer 失败；UTF-8 规范化 + bracketed-paste；cli-smoke）
+├─ [x] B5 与 M 的桥接文档：PRD_02_15 + paste-buffer help
 └─ [ ] B6（可选）copy 路径：从 pane/选区 → buffer（tmux copy-mode 子集）
 ```
 
@@ -680,9 +680,11 @@ B′. tmux/rmux send-keys + buffer
 - [x] **B1 盘点与契约表**
   - **动机**：避免「以为兼容了全 tmux buffer」；先列 shipped / 本版做 /
     显式 unsupported
-  - **落地**：`PRD_02_15` 命令面 + `src/commands.rs` / `control_dispatch`
-    已登记 send-keys 与 buffer 族；B6 copy-mode 仍非目标
-  - **验收**：矩阵与 `list-commands` 一致（已 shipped）
+  - **落地**：`PRD_02_15` + `commands.rs` / `control_dispatch` 登记
+    send-keys 与 buffer 族；`save-buffer|saveb` **typed unsupported**
+    （mux 面 + CLI dispatch）；B6 copy-mode 仍非目标
+  - **验收**：`list-commands` 含 buffer 族；`save-buffer` 显式 fail；
+    单测 `save_buffer_is_explicitly_unsupported_on_mux_surface`
   - **成本**：极小；**依赖**：无
 
 - [x] **B2 夯实 `send-keys`**
@@ -698,23 +700,26 @@ B′. tmux/rmux send-keys + buffer
   - **动机**：rmux/tmux 脚本常用命名 buffer；AgenTerm 现无对等 API
   - **落地**（server 有界存储 + CLI）：`set-buffer` / `load-buffer` /
     `show-buffer` / `list-buffers` / `delete-buffer`（及短别名）
-  - **验收**：set → show 字节一致；list 含 name/size；超上限失败
+  - **验收**：set → show 字节一致；list 含 name/size；超上限失败；
+    `cli-smoke` `cli.named-buffer-paste` 证据
   - **成本**：中；**依赖**：B1
   - **非目标**：跨 server 共享 buffer、持久化到磁盘 workspace（可后置）
 
 - [x] **B4 `paste-buffer`**
   - **动机**：大段投递比多次 `send-keys` 稳；脚本「buffer 然后 paste 到 pane」
   - **落地**：`paste-buffer [-b name] [-t target]` → 目标 tab PTY；空 buffer /
-    无目标 typed fail
-  - **验收**：load/set 后 paste 到 fixture shell，capture 见内容
+    无目标 typed fail；UTF-8 走 `normalize_terminal_paste` + 应用
+    bracketed-paste 成帧（与 GUI 剪贴板粘贴同源）
+  - **验收**：`cli-smoke` set→paste→capture 见 `BUFFER_PROBE_OK_*`；
+    空 buffer paste 失败
   - **成本**：中；**依赖**：B3
   - **非目标**：保证 Codex/TUI 语义正确（那是应用层；文档写明风险）
 
 - [x] **B5 与 M 的桥接说明（文档叶）**
   - **动机**：避免实现者把 paste 当 handoff
-  - **落地**：本 plan 硬约束表 + 选用表（状态→M1/M3；键入→send-keys/
-    paste-buffer）；`PRD_02_15` 公开命令面；**非** agent 邮箱
-  - **验收**：B′ 帮助/plan 链到该表
+  - **落地**：`PRD_02_15` B′ vs messaging 表 + `paste-buffer` usage 链到
+    该表；**非** agent 邮箱
+  - **验收**：帮助/PRD 可发现
   - **成本**：极小；**依赖**：无
 
 - [ ] **B6（可选）copy → buffer**
@@ -1687,6 +1692,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
 | 2026-08-06 | **续推 2**：G6 `prune_old_releases`（`AGENTERM_RELEASES_KEEP`）；U3 Win tab PTY resize debounce 100ms；P0-3 文档/单测锁 breakaway autostart。U2 真机/H1 releases.json/B′/M 仍开 |
 | 2026-08-06 | **H1+H3+B′ 勾选对齐**：`build-releases-index.rhai` + release.yml 派生/上传 `releases.json`；install.sh 下载并校验 `.provenance.json` 写入 `installed.json`；B1–B5 与已 shipped buffer/send-keys 对齐。H2（install 消费索引）仍 v0.2.x；B6/U2/M/N 仍开 |
+| 2026-08-06 | **B′ 尾巴**：`save-buffer` 显式 unsupported；`paste-buffer` 空失败 + UTF-8 规范化/bracketed-paste；`cli-smoke` `cli.named-buffer-paste`（set→paste→capture）。B6 仍开 |
 
 ---
 

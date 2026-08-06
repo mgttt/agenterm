@@ -38,7 +38,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - `show-buffer|showb [-b name]`
       - `list-buffers|lsb`
       - `delete-buffer|deleteb [-b name]`
-      - `paste-buffer|pasteb [-b name] [-t target]`
+      - `paste-buffer|pasteb [-b name] [-t target]` (empty buffer fails;
+        UTF-8 text is normalized and honors application bracketed-paste)
+      - [x] `save-buffer|saveb` is **explicitly unsupported** (typed fail /
+        mux unsupported); use `show-buffer` redirect or `load-buffer`
       - **B′ vs agent messaging (B5):** PTY inject is not a mailbox.
         Short collab/status → note/handoff (M1/M3). Drive shell / type
         keys → `send-keys` / `paste-buffer`. Intent then optional PTY

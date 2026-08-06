@@ -19,6 +19,9 @@ use crate::{
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
     theme::AppearancePreset,
+    ui_clipboard::{
+        TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes,
+    },
     ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
         UI_DELTA_SCHEMA_VERSION, UI_HELLO_SCHEMA_VERSION, UI_SCREEN_MAX_COLUMNS,
@@ -33,6 +36,37 @@ use crate::{
 };
 
 pub(crate) const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
+
+/// Prepare named-buffer bytes for PTY inject: empty fails; UTF-8 uses the
+/// shared terminal paste normalizer + optional bracketed-paste framing; binary
+/// buffers are sent raw (still length-bounded).
+fn prepare_paste_buffer_bytes(data: &[u8], bracketed: bool) -> Result<Vec<u8>, String> {
+    if data.is_empty() {
+        return Err("buffer is empty".to_owned());
+    }
+    match std::str::from_utf8(data) {
+        Ok(text) => {
+            let normalized = normalize_terminal_paste(text);
+            if normalized.is_empty() {
+                return Err("buffer is empty after paste normalization".to_owned());
+            }
+            if normalized.len() > TERMINAL_PASTE_LIMIT_BYTES {
+                return Err(format!(
+                    "paste payload must be at most {TERMINAL_PASTE_LIMIT_BYTES} bytes after normalization"
+                ));
+            }
+            Ok(terminal_paste_bytes(&normalized, bracketed))
+        }
+        Err(_) => {
+            if data.len() > TERMINAL_PASTE_LIMIT_BYTES {
+                return Err(format!(
+                    "paste payload must be at most {TERMINAL_PASTE_LIMIT_BYTES} bytes"
+                ));
+            }
+            Ok(data.to_vec())
+        }
+    }
+}
 
 /// Join `set-buffer` payload from argv after flags / optional `--`.
 fn buffer_data_from_args(args: &[String]) -> String {
@@ -1406,10 +1440,19 @@ pub(crate) fn dispatch_shared_command(
                     ));
                 }
             };
-            if data.is_empty() {
-                return Some(IpcResponse::success(""));
-            }
-            if !host.tabs_mut()[position].send(&data) {
+            let bracketed = host.tabs()[position].parser.screen().bracketed_paste();
+            let bytes = match prepare_paste_buffer_bytes(&data, bracketed) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return Some(IpcResponse::typed_failure(
+                        &error,
+                        "buffer_paste_failed",
+                        "usage",
+                        false,
+                    ));
+                }
+            };
+            if !host.tabs_mut()[position].send(&bytes) {
                 return Some(IpcResponse::typed_failure(
                     "terminal input was not accepted because the pane is no longer writable",
                     "terminal_not_writable",
@@ -1419,6 +1462,12 @@ pub(crate) fn dispatch_shared_command(
             }
             Some(IpcResponse::success(""))
         }
+        "save-buffer" | "saveb" => Some(IpcResponse::typed_failure(
+            "save-buffer is not implemented; use show-buffer and redirect or load-buffer from a file",
+            "operation_unsupported",
+            "unsupported",
+            false,
+        )),
         "capturep" | "capture-pane" => {
             let Some(position) =
                 resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
@@ -2170,5 +2219,25 @@ mod tests {
         assert_eq!(resolve_target_position(&tabs, Some(1), None), None);
         assert_eq!(resolve_target_position(&tabs, None, Some("@1")), None);
         assert_eq!(resolve_target_position(&tabs, None, Some("title")), None);
+    }
+
+    #[test]
+    fn prepare_paste_buffer_rejects_empty_and_frames_utf8() {
+        assert!(prepare_paste_buffer_bytes(b"", false)
+            .unwrap_err()
+            .contains("empty"));
+        assert_eq!(
+            prepare_paste_buffer_bytes(b"hello\n", false).unwrap(),
+            b"hello\r"
+        );
+        assert_eq!(
+            prepare_paste_buffer_bytes(b"x", true).unwrap(),
+            b"\x1b[200~x\x1b[201~"
+        );
+        // Binary body stays raw (no framing).
+        assert_eq!(
+            prepare_paste_buffer_bytes(&[0xff, 0x00, 0x41], false).unwrap(),
+            vec![0xff, 0x00, 0x41]
+        );
     }
 }
