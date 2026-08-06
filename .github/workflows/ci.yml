@@ -191,7 +191,7 @@ jobs:
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
-          cargo test -p agenterm-rh --locked
+          ./rh-check.sh
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -378,8 +378,7 @@ jobs:
         id: rh-aot
         run: |
           start_ms=$(date +%s%3N)
-          cargo test -p agenterm-rh --locked
-          cargo test --locked --test rh_aot_smoke
+          ./rh-check.sh
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"

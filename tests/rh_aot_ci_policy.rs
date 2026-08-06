@@ -18,14 +18,14 @@ fn job_span(name: &str, next_job: Option<&str>) -> &'static str {
 #[test]
 fn linux_x86_64_ci_proves_rh_aot_pipeline() {
     let job = job_span("linux-x86_64", Some("linux-aarch64"));
-    assert!(job.contains("cargo test -p agenterm-rh --locked"));
-    assert!(job.contains("cargo test --locked --test rh_aot_smoke"));
+    assert!(job.contains("./rh-check.sh"));
+    assert!(job.contains("rh_regression") || job.contains("rh-check"));
 }
 
 #[test]
 fn windows_ci_proves_rh_aot_pipeline() {
     let job = job_span("windows", Some("linux-x86_64"));
-    assert!(job.contains("cargo test -p agenterm-rh --locked"));
+    assert!(job.contains("./rh-check.sh"));
     assert!(job.contains("rh-aot-smoke"));
 }
 

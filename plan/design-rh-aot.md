@@ -107,12 +107,14 @@ pack/*.rh  →  parse (Rhai AST)
 
 | 能力 | 证据 |
 |------|------|
-| rh-0/1 | `cargo test -p agenterm-rh`、`rh_aot_smoke` |
-| host eval | `script_rh_host::host_eval_runs_std_fs_exists` |
-| stdlib pack | `fixtures/rh/stdlib.rh` qualify + native entry 42 |
-| 源码缓存 | `script_rh_cache::source_cache_is_stable` |
-| worker 切换 | `execute_inner` + source-only rh backend |
-| fleet shim | `fixtures/rh/fleet.rh` |
+| **rh 专用测试套件** | `./rh-check.sh`（或 `scripts/rh-check.cmd`） |
+| rh crate 单元 | `cargo test -p agenterm-rh` |
+| AOT 集成 | `tests/rh_aot_smoke` |
+| 回归/子集 | `tests/rh_regression` |
+| 后端试切换 | `tests/rh_backend`（`AGENTERM_SCRIPT_BACKEND=rh`） |
+| CI 策略 | `tests/rh_aot_ci_policy` |
+| host eval | `script_rh_host` lib tests |
+| 源码缓存 | `script_rh_cache` lib tests |
 
 **后续轨：** 全 task `.rhai`→`.rh` 迁移、gateway Logic Pack、`llm.*`、Cranelift、签名 OTA。
 
