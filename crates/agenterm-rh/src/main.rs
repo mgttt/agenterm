@@ -58,6 +58,27 @@ fn run() -> Result<(), RhError> {
                 result.manifest_path.display()
             );
         }
+        "eval" => {
+            let path = require_path(&mut args, "eval")?;
+            let source = read_source(&path)?;
+            check(&source)?;
+            let scratch =
+                tempfile::tempdir().map_err(|err| RhError::Compile(err.to_string()))?;
+            let receipt = qualify_pack_dir(&source, scratch.path())?;
+            let native = scratch.path().join(format!(
+                "pack.{}",
+                agenterm_rh::compile::native_extension()
+            ));
+            let value = load_and_call_entry(&native)?;
+            println!(
+                "rh eval ok: {} -> {}\n  source_hash={}\n  native_hash={}\n  cc_lines={}",
+                path.display(),
+                value,
+                receipt.source_hash,
+                receipt.native_hash,
+                receipt.cc_line_count
+            );
+        }
         "run-smoke" => {
             let path = require_path(&mut args, "run-smoke")?;
             let value = load_and_call_entry(&path)?;
@@ -117,7 +138,7 @@ fn run() -> Result<(), RhError> {
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | transpile | compile | run-smoke | pack | qualify | hash | version"
+                "unknown command `{other}`; try check | transpile | compile | eval | run-smoke | pack | qualify | hash | version"
             )));
         }
     }
@@ -194,6 +215,7 @@ fn print_usage() {
            check <file>                      validate rh-0 subset\n\
            transpile <file> [-o rs]            emit Rust source for AOT\n\
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
+           eval <file>                         check + AOT pack + dlopen entry (dev loop)\n\
            run-smoke <native>                  dlopen and call rh_entry()\n\
            pack build <file> --dir PATH        build pack dir (native + manifest + entry.rh)\n\
            qualify <file> --dir PATH [-o json] build + load + write qualification receipt\n\

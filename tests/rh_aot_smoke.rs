@@ -60,6 +60,19 @@ fn fleet_fixture_qualifies_and_calls_host_shim() {
 }
 
 #[test]
+fn while_fixture_qualifies_with_native_loop() {
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-while-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let source = include_str!("../fixtures/rh/while.rh");
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    assert_eq!(receipt.entry_value, 42);
+    assert_eq!(receipt.cc_line_count, 2);
+    let loaded = agenterm_rh::RhPack::load(&dir).expect("load");
+    assert_eq!(loaded.entry_value(), 42);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn stdlib_fixture_qualifies_with_host_eval() {
     let dir = std::env::temp_dir().join(format!("agenterm-rh-stdlib-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
