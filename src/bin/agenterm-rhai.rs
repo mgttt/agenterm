@@ -703,6 +703,11 @@ fn main() -> ExitCode {
 
 fn run() -> anyhow::Result<u8> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Some(status) = agenterm::script_rh_cli::try_forward_dev_cli(&arguments) {
+        let status = status?;
+        return u8::try_from(status.code().unwrap_or(1))
+            .map_err(|_| anyhow::anyhow!("agenterm-rh returned an invalid exit code"));
+    }
     match arguments.as_slice() {
         [mode, rest @ ..] if mode == "--internal-incremental-finalize" => {
             finalize_incremental_manifest(rest)
@@ -2255,6 +2260,14 @@ fn execute_inner(
     if let Some(result) = agenterm::script_backend::try_execute_rh_invocation(
         invocation.operation,
         &invocation.source,
+        agenterm::script_backend::RhInvocationOptions {
+            project_root: invocation
+                .project_root
+                .as_ref()
+                .map(std::path::PathBuf::from),
+            arguments: serde_json::to_value(&invocation.arguments).ok(),
+            budgets: Some(invocation.budgets.clone()),
+        },
         broker.as_ref().map(|broker| {
             let broker = broker.clone();
             agenterm::script_rh_host::broker_fleet_bridge(move |operation, arguments| {

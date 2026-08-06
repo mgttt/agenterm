@@ -135,6 +135,11 @@ fi
 # macOS uses BSD chmod, whose option parser does not accept a standalone `--`.
 # WORKER is rooted under target/ and cannot begin with an option.
 chmod +x "$WORKER"
+RH_SOURCE="$TARGET_ROOT/debug/agenterm-rh"
+if [ -f "$RH_SOURCE" ]; then
+    cp -- "$RH_SOURCE" "$BOOTSTRAP_DIR/agenterm-rh"
+    chmod +x "$BOOTSTRAP_DIR/agenterm-rh"
+fi
 AGENTERM_BOOTSTRAP_COPY_END_MS=$(clock_ms)
 AGENTERM_BOOTSTRAP_WORKER_COPY_MS=$((
     AGENTERM_BOOTSTRAP_COPY_END_MS - AGENTERM_BOOTSTRAP_COPY_START_MS

@@ -37,29 +37,35 @@ pub fn clear_fleet_bridge() {
 pub fn call_cached_pack_entry_with_fleet(bridge: FleetBridgeFn) -> Result<i64, RhError> {
     let native_path = crate::script_rh_pack::cached_native_path()
         .ok_or_else(|| RhError::Compile("AGENTERM_RH_PACK native path is unavailable".into()))?;
-    call_pack_entry_with_fleet(native_path, bridge)
+    call_pack_entry_with_fleet(native_path, bridge, crate::script_rh_run::RhRunContext::default())
 }
 
 pub fn call_pack_entry_with_fleet(
     native_path: &Path,
     bridge: FleetBridgeFn,
+    context: crate::script_rh_run::RhRunContext,
 ) -> Result<i64, RhError> {
-    set_fleet_bridge(bridge);
-    let module = RhNativeModule::load(native_path)?;
-    register_native_module(&module)?;
-    Ok(module.call_entry())
+    crate::script_rh_run::with_run_context(context, || {
+        set_fleet_bridge(bridge);
+        let module = RhNativeModule::load(native_path)?;
+        register_native_module(&module)?;
+        Ok(module.call_entry())
+    })
 }
 
 pub fn call_pack_entry_with_host(
     native_path: &Path,
     fleet_bridge: Option<FleetBridgeFn>,
+    context: crate::script_rh_run::RhRunContext,
 ) -> Result<i64, RhError> {
-    if let Some(bridge) = fleet_bridge {
-        set_fleet_bridge(bridge);
-    }
-    let module = RhNativeModule::load(native_path)?;
-    register_native_module(&module)?;
-    Ok(module.call_entry())
+    crate::script_rh_run::with_run_context(context, || {
+        if let Some(bridge) = fleet_bridge {
+            set_fleet_bridge(bridge);
+        }
+        let module = RhNativeModule::load(native_path)?;
+        register_native_module(&module)?;
+        Ok(module.call_entry())
+    })
 }
 
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
@@ -99,26 +105,46 @@ extern "C" fn host_run_script_call(
 fn host_run_script_source(source: &str) -> Result<String, String> {
     use rhai::{Dynamic, Engine, Scope};
 
-    let project_root = std::env::var("AGENTERM_WORKSPACE_PATH")
-        .ok()
-        .map(std::path::PathBuf::from)
+    let context = crate::script_rh_run::current_run_context().unwrap_or_default();
+    let project_root = context
+        .project_root
+        .or_else(|| {
+            std::env::var("AGENTERM_WORKSPACE_PATH")
+                .ok()
+                .map(std::path::PathBuf::from)
+        })
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| "project root unavailable".to_owned())?;
+    let budgets = context
+        .budgets
+        .clone()
+        .unwrap_or_default();
     let mut engine = Engine::new();
-    crate::script_runtime::configure_engine(
-        &mut engine,
-        &crate::script_protocol::ScriptBudgets::default(),
-    );
+    crate::script_runtime::configure_engine(&mut engine, &budgets);
     let resolver = crate::script_project::ProjectModuleResolver::new(&project_root)
         .map_err(|error| error.to_string())?;
     engine.set_module_resolver(resolver);
     let mut scope = Scope::new();
+    if let Some(arguments) = context.arguments {
+        let dynamic = rhai::serde::to_dynamic(&arguments)
+            .map_err(|error| error.to_string())?;
+        scope.push_dynamic("args", dynamic);
+    }
     let ast = engine
         .compile_into_self_contained(&scope, source)
         .map_err(|error| error.to_string())?;
-    let value = engine
-        .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
-        .map_err(|error| error.to_string())?;
+    let has_entry = ast
+        .iter_functions()
+        .any(|meta| meta.name == "entry");
+    let value = if has_entry {
+        engine
+            .call_fn::<Dynamic>(&mut scope, &ast, "entry", ())
+            .map_err(|error| error.to_string())?
+    } else {
+        engine
+            .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
+            .map_err(|error| error.to_string())?
+    };
     encode_host_result(&value)
 }
 
@@ -177,14 +203,31 @@ extern "C" fn host_eval_call(
 fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> {
     use rhai::{Dynamic, Engine, Scope};
 
+    let context = crate::script_rh_run::current_run_context().unwrap_or_default();
     let scope_value: serde_json::Value =
         serde_json::from_str(scope_json).unwrap_or_else(|_| serde_json::json!({}));
     let mut engine = Engine::new();
-    crate::script_runtime::configure_engine(
-        &mut engine,
-        &crate::script_protocol::ScriptBudgets::default(),
-    );
+    let budgets = context.budgets.clone().unwrap_or_default();
+    crate::script_runtime::configure_engine(&mut engine, &budgets);
+    if let Some(project_root) = context
+        .project_root
+        .or_else(|| {
+            std::env::var("AGENTERM_WORKSPACE_PATH")
+                .ok()
+                .map(std::path::PathBuf::from)
+        })
+        .or_else(|| std::env::current_dir().ok())
+    {
+        if let Ok(resolver) = crate::script_project::ProjectModuleResolver::new(&project_root) {
+            engine.set_module_resolver(resolver);
+        }
+    }
     let mut scope = Scope::new();
+    if let Some(arguments) = context.arguments {
+        let dynamic = rhai::serde::to_dynamic(&arguments)
+            .map_err(|error| error.to_string())?;
+        scope.push_dynamic("args", dynamic);
+    }
     if let Some(vars) = scope_value.get("vars").and_then(|value| value.as_object()) {
         for (name, binding) in vars {
             if let Some(value) = binding.get("value") {
@@ -293,6 +336,7 @@ mod tests {
                     .push((operation_id.to_owned(), params.to_owned()));
                 Ok("{\"operation_id\":\"protocol.info\"}".to_owned())
             })),
+            crate::script_rh_run::RhRunContext::default(),
         )
         .expect("entry");
         assert_eq!(value, 7);
@@ -312,8 +356,128 @@ mod tests {
 fn entry() { 42 }"#;
         agenterm_rh::build_pack_dir(source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-        let value = call_pack_entry_with_host(&native, None).expect("entry");
+        let value = call_pack_entry_with_host(
+            &native,
+            None,
+            crate::script_rh_run::RhRunContext::default(),
+        )
+        .expect("entry");
         assert_eq!(value, 42);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rhai_self_contained_entry_returns_entry_value() {
+        use rhai::{Dynamic, Engine, Scope};
+        let engine = Engine::new();
+        let source = "fn entry() { 42 }";
+        let ast = engine
+            .compile_into_self_contained(&Scope::new(), source)
+            .expect("compile");
+        let mut scope = Scope::new();
+        let value = engine
+            .call_fn::<Dynamic>(&mut scope, &ast, "entry", ())
+            .expect("call entry");
+        assert_eq!(value.as_int().ok(), Some(42));
+    }
+
+    #[test]
+    fn rhai_self_contained_entry_sees_args() {
+        use rhai::{Dynamic, Engine, Scope};
+        let engine = Engine::new();
+        let mut scope = Scope::new();
+        scope.push_dynamic(
+            "args",
+            rhai::serde::to_dynamic(&vec!["alpha".to_owned(), "beta".to_owned()])
+                .expect("args"),
+        );
+        let source = "fn entry() { args.len() }";
+        let ast = engine
+            .compile_into_self_contained(&scope, source)
+            .expect("compile");
+        let value = engine
+            .call_fn::<Dynamic>(&mut scope, &ast, "entry", ())
+            .expect("call entry");
+        assert_eq!(value.as_int().ok(), Some(2));
+    }
+
+    #[test]
+    fn host_run_script_call_ffi_honors_args() {
+        let context = crate::script_rh_run::RhRunContext {
+            arguments: Some(serde_json::json!(["alpha", "beta"])),
+            project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+            ..Default::default()
+        };
+        let source = "fn entry() { args.len() }";
+        crate::script_rh_run::with_run_context(context, || {
+            let mut out = vec![0u8; 256];
+            let wrote = super::host_run_script_call(
+                source.as_ptr(),
+                source.len() as u32,
+                out.as_mut_ptr(),
+                out.len() as u32,
+            );
+            assert!(wrote > 0, "host_run_script_call failed with {wrote}");
+            let json = std::str::from_utf8(&out[..wrote as usize]).expect("utf8");
+            assert_eq!(json, "{\"kind\":\"int\",\"value\":2}");
+        });
+    }
+
+    #[test]
+    fn host_eval_snippet_honors_args() {
+        let context = crate::script_rh_run::RhRunContext {
+            arguments: Some(serde_json::json!(["alpha", "beta"])),
+            ..Default::default()
+        };
+        let json = crate::script_rh_run::with_run_context(context, || {
+            super::host_eval_snippet("args.len()", "{}").expect("eval")
+        });
+        let value: serde_json::Value = serde_json::from_str(&json).expect("json");
+        assert_eq!(value["kind"], "int");
+        assert_eq!(value["value"], 2);
+    }
+
+    #[test]
+    fn host_run_script_source_honors_args() {
+        let context = crate::script_rh_run::RhRunContext {
+            arguments: Some(serde_json::json!(["alpha", "beta"])),
+            project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+            ..Default::default()
+        };
+        let source = "fn entry() { args.len() }";
+        let err = crate::script_rh_run::with_run_context(context, || {
+            super::host_run_script_source(source).map_err(|error| error.to_string())
+        });
+        assert_eq!(err.as_deref(), Ok("{\"kind\":\"int\",\"value\":2}"));
+    }
+
+    #[test]
+    fn native_pack_honors_run_context_arguments() {
+        let dir = std::env::temp_dir().join(format!(
+            "agenterm-rh-host-args-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let source = "fn entry() { args.len() }";
+        agenterm_rh::build_pack_dir(source, &dir).expect("build");
+        let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
+        let module = agenterm_rh::RhNativeModule::load(&native).expect("load");
+        assert!(
+            module.host_api_version() >= agenterm_rh::RH_HOST_API_VERSION,
+            "pack host api {}",
+            module.host_api_version()
+        );
+        let value = call_pack_entry_with_host(
+            &native,
+            None,
+            crate::script_rh_run::RhRunContext {
+                arguments: Some(serde_json::json!(["alpha", "beta"])),
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                ..Default::default()
+            },
+        )
+        .expect("entry");
+        assert_eq!(value, 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -328,7 +492,12 @@ fn entry() { 42 }"#;
         );
         agenterm_rh::build_pack_dir(&source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-        let value = call_pack_entry_with_host(&native, None).expect("entry");
+        let value = call_pack_entry_with_host(
+            &native,
+            None,
+            crate::script_rh_run::RhRunContext::default(),
+        )
+        .expect("entry");
         assert_eq!(value, 42);
         let _ = std::fs::remove_dir_all(&dir);
     }

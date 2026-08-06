@@ -908,6 +908,15 @@ mod tests {
     }
 
     #[test]
+    fn cdylib_compat_delegates_args_len() {
+        let rust = transpile_cdylib("fn entry() { args.len() }").expect("transpile");
+        assert!(
+            rust.contains("rh_host_eval_int") || rust.contains("rh_host_run_script"),
+            "expected host fallback in:\n{rust}"
+        );
+    }
+
+    #[test]
     fn transpiles_fleet_protocol_info_for_cdylib() {
         let rust = transpile_cdylib("fn entry() { fleet.protocol.info(); 9 }").expect("transpile");
         assert!(rust.contains("rh_fleet_call"));

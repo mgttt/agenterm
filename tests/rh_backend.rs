@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use agenterm::script_backend::{ScriptBackend, try_execute_rh_invocation};
+use agenterm::script_backend::{RhInvocationOptions, ScriptBackend, try_execute_rh_invocation};
 use agenterm::script_protocol::ScriptOperation;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -39,7 +39,12 @@ fn rh_backend_enabled_only_when_env_set() {
 fn rh_backend_check_accepts_entry_fixture() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/entry.rh");
-        let result = try_execute_rh_invocation(ScriptOperation::Check, source, None)
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Check,
+            source,
+            RhInvocationOptions::default(),
+            None,
+        )
             .expect("check")
             .expect("rh handled");
         assert!(result.value.is_none());
@@ -50,7 +55,12 @@ fn rh_backend_check_accepts_entry_fixture() {
 fn rh_backend_eval_runs_source_without_prebuilt_pack() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/entry.rh");
-        let result = try_execute_rh_invocation(ScriptOperation::Eval, source, None)
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Eval,
+            source,
+            RhInvocationOptions::default(),
+            None,
+        )
             .expect("eval")
             .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(42)));
@@ -62,7 +72,12 @@ fn rh_backend_eval_runs_source_without_prebuilt_pack() {
 fn rh_backend_eval_stdlib_fixture_via_host_eval() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/stdlib.rh");
-        let result = try_execute_rh_invocation(ScriptOperation::Eval, source, None)
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Eval,
+            source,
+            RhInvocationOptions::default(),
+            None,
+        )
             .expect("eval")
             .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(42)));
@@ -73,10 +88,20 @@ fn rh_backend_eval_stdlib_fixture_via_host_eval() {
 fn rh_backend_run_matches_eval_for_entry_fixture() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/entry.rh");
-        let eval = try_execute_rh_invocation(ScriptOperation::Eval, source, None)
+        let eval = try_execute_rh_invocation(
+            ScriptOperation::Eval,
+            source,
+            RhInvocationOptions::default(),
+            None,
+        )
             .expect("eval")
             .expect("rh handled");
-        let run = try_execute_rh_invocation(ScriptOperation::Run, source, None)
+        let run = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            source,
+            RhInvocationOptions::default(),
+            None,
+        )
             .expect("run")
             .expect("rh handled");
         assert_eq!(run.value, eval.value);
@@ -88,7 +113,12 @@ fn rh_backend_run_matches_eval_for_entry_fixture() {
 fn rh_backend_run_while_count_fixture() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/while-count.rh");
-        let result = try_execute_rh_invocation(ScriptOperation::Run, source, None)
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            source,
+            RhInvocationOptions::default(),
+            None,
+        )
             .expect("run")
             .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(0)));
@@ -101,7 +131,32 @@ fn rhai_backend_returns_none_for_check() {
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
     }
-    let probe =
-        try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }", None).expect("probe");
+    let probe = try_execute_rh_invocation(
+        ScriptOperation::Check,
+        "fn entry() { 1 }",
+        RhInvocationOptions::default(),
+        None,
+    )
+    .expect("probe");
     assert!(probe.is_none());
+}
+
+#[test]
+fn rh_backend_run_honors_task_arguments() {
+    with_rh_backend(|| {
+        let source = "fn entry() { args.len() }";
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            source,
+            RhInvocationOptions {
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                arguments: Some(serde_json::json!(["alpha", "beta"])),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        )
+        .expect("run")
+        .expect("rh handled");
+        assert_eq!(result.value, Some(serde_json::json!(2)));
+    });
 }
