@@ -45,6 +45,9 @@ use crate::{
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
             remote_word_selection,
         },
+        server_strip_ui::{
+            ServerCloseConfirm, ServerContextAction, ServerNewDialog, ServerTabContextMenu,
+        },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope, appearance_preset_grid},
         tab_editor::{TabEditorDialog, TabEditorFocus},
         toolbar::NativeToolbarHit as WindowsToolbarHit,
@@ -176,6 +179,11 @@ const SETTINGS_RESET_OVERRIDES_ID: ControlId = ControlId(2137);
 const CONTROL_CENTER_ID: ControlId = ControlId(2138);
 const INSTANCE_PICKER_CONFIRM_ID: ControlId = ControlId(2142);
 const INSTANCE_PICKER_CANCEL_ID: ControlId = ControlId(2143);
+const SERVER_NAME_EDIT_ID: ControlId = ControlId(2144);
+const SERVER_CREATE_OK_ID: ControlId = ControlId(2145);
+const SERVER_CREATE_CANCEL_ID: ControlId = ControlId(2146);
+const SERVER_CLOSE_CONFIRM_ID: ControlId = ControlId(2147);
+const SERVER_CLOSE_CANCEL_ID: ControlId = ControlId(2148);
 const SYSTEM_MENU_COPY_ID: MenuCommandId = MenuCommandId(SHARED_SYSTEM_MENU_COPY_ID as u16);
 const SYSTEM_MENU_PASTE_ID: MenuCommandId = MenuCommandId(SHARED_SYSTEM_MENU_PASTE_ID as u16);
 const SYSTEM_MENU_TOGGLE_TABS_ID: MenuCommandId =
@@ -211,12 +219,16 @@ const SERVER_STRIP_HEIGHT: i32 = 32;
 const SERVER_TAB_MIN_WIDTH: i32 = 88;
 const SERVER_TAB_MAX_WIDTH: i32 = 160;
 const SERVER_TAB_GAP: i32 = 4;
+/// Trailing `[+]` chip width reserved on the right of the server strip.
+const SERVER_ADD_WIDTH: i32 = 28;
+const SERVER_CONTEXT_MENU_WIDTH: i32 = 148;
+const SERVER_CONTEXT_MENU_ITEM_HEIGHT: i32 = 28;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
-/// Local HH:MM:SS for the top-left clock placeholder (Tabs column exclusive).
+/// Full sidebar clock chrome string (`YY-MM-DD Ddd\nHH:MM:SS`) for redraw ticks.
 ///
 /// REVIEW(macos → windows owner): this was an inline `GetLocalTime` behind
 /// `#[link(name = "kernel32")]`. Because `src/platform/adapters/mod.rs` declares
@@ -228,13 +240,11 @@ const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 /// `platform::boundary_tests` also forbids `#[cfg(windows)]` here, so gating it
 /// in place is not the fix either: native boundaries belong in
 /// `crates/agenterm-platform/**`. The call now goes through
-/// `agenterm_platform::local_clock`, which all three hosts share.
-///
-/// That facade currently renders UTC and carries a `TODO(windows)` to restore
-/// the real local offset via `GetTimeZoneInformation` — please claim it, since
-/// the Windows strip is the only UI that shows this clock today.
+/// `agenterm_platform::local_clock`, which all three hosts share (Windows uses
+/// `GetLocalTime` inside that crate).
 fn sidebar_local_clock_text() -> String {
-    agenterm_platform::local_clock::local_clock_hms()
+    let (date, time) = agenterm_platform::local_clock::local_clock_chrome_lines();
+    format!("{date}\n{time}")
 }
 
 /// First non-flag token after `ui-action <action>` (for `--name` alternatives).
@@ -374,6 +384,11 @@ fn remote_control_specs() -> Vec<ControlSpec> {
         button(NEW_CANCEL_ID, "Cancel", false),
         button(INSTANCE_PICKER_CONFIRM_ID, "Confirm", false),
         button(INSTANCE_PICKER_CANCEL_ID, "Cancel", false),
+        edit(SERVER_NAME_EDIT_ID, false, false),
+        button(SERVER_CREATE_OK_ID, "Create", false),
+        button(SERVER_CREATE_CANCEL_ID, "Cancel", false),
+        button(SERVER_CLOSE_CONFIRM_ID, "Close Server", false),
+        button(SERVER_CLOSE_CANCEL_ID, "Cancel", false),
     ]
 }
 
@@ -483,6 +498,11 @@ struct RemoteControls {
     new_cancel: ControlId,
     instance_picker_confirm: ControlId,
     instance_picker_cancel: ControlId,
+    server_name_edit: ControlId,
+    server_create_ok: ControlId,
+    server_create_cancel: ControlId,
+    server_close_confirm: ControlId,
+    server_close_cancel: ControlId,
 }
 
 impl RemoteControls {
@@ -530,6 +550,11 @@ impl RemoteControls {
             new_cancel: NEW_CANCEL_ID,
             instance_picker_confirm: INSTANCE_PICKER_CONFIRM_ID,
             instance_picker_cancel: INSTANCE_PICKER_CANCEL_ID,
+            server_name_edit: SERVER_NAME_EDIT_ID,
+            server_create_ok: SERVER_CREATE_OK_ID,
+            server_create_cancel: SERVER_CREATE_CANCEL_ID,
+            server_close_confirm: SERVER_CLOSE_CONFIRM_ID,
+            server_close_cancel: SERVER_CLOSE_CANCEL_ID,
         }
     }
 }
@@ -749,6 +774,11 @@ struct RemoteWindowState {
     new_cancel: ControlId,
     instance_picker_confirm: ControlId,
     instance_picker_cancel: ControlId,
+    server_name_edit: ControlId,
+    server_create_ok: ControlId,
+    server_create_cancel: ControlId,
+    server_close_confirm: ControlId,
+    server_close_cancel: ControlId,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -813,6 +843,9 @@ struct RemoteWindowState {
     server_tabs_refresh_after: Instant,
     /// Last painted sidebar clock label; tick redraws when the second changes.
     last_sidebar_clock_text: String,
+    server_new_dialog: ServerNewDialog,
+    server_tab_context_menu: Option<ServerTabContextMenu>,
+    pending_server_close: Option<ServerCloseConfirm>,
     no_activate: bool,
 }
 
@@ -904,6 +937,11 @@ impl RemoteWindowState {
             new_cancel,
             instance_picker_confirm,
             instance_picker_cancel,
+            server_name_edit,
+            server_create_ok,
+            server_create_cancel,
+            server_close_confirm,
+            server_close_cancel,
         } = controls;
         let config = load_config();
         let settings_default_draft = config.effective_terminal_appearance(&ipc_address(), None);
@@ -963,6 +1001,11 @@ impl RemoteWindowState {
             new_cancel,
             instance_picker_confirm,
             instance_picker_cancel,
+            server_name_edit,
+            server_create_ok,
+            server_create_cancel,
+            server_close_confirm,
+            server_close_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -1021,6 +1064,9 @@ impl RemoteWindowState {
             server_tabs: collect_instance_picker_rows().unwrap_or_default(),
             server_tabs_refresh_after: Instant::now() + SERVER_TABS_REFRESH,
             last_sidebar_clock_text: sidebar_local_clock_text(),
+            server_new_dialog: ServerNewDialog::new(),
+            server_tab_context_menu: None,
+            pending_server_close: None,
             no_activate,
         })
     }
@@ -2220,6 +2266,19 @@ impl RemoteWindowState {
             ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
             ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
             ModalSurface::InstancePicker => self.instance_picker_dialog.snapshot_modal(),
+            ModalSurface::ServerNew => serde_json::json!({
+                "kind": "server-new",
+                "name": self.server_new_dialog.name(),
+                "error": self.server_new_dialog.error(),
+                "actions": ["create", "cancel"],
+            }),
+            ModalSurface::ServerClose => serde_json::json!({
+                "kind": "server-close",
+                "instance": self.pending_server_close.as_ref().map(|c| c.instance.as_str()).unwrap_or(""),
+                "endpoint": self.pending_server_close.as_ref().map(|c| c.endpoint.as_str()).unwrap_or(""),
+                "can_attach": self.pending_server_close.as_ref().is_some_and(|c| c.can_attach),
+                "actions": ["close-server", "cancel"],
+            }),
         });
         let (copy_enabled, paste_enabled) = self.system_menu_state();
         let composer_geometry = composer_geometry(layout.composer);
@@ -2311,16 +2370,29 @@ impl RemoteWindowState {
                             })
                         })
                         .collect::<Vec<_>>();
-                    serde_json::json!({
-                        "bounds": pixel_rect_json(strip),
-                        "selected": current,
-                        "tabs": tabs,
-                    })
+                    {
+                        let mut strip_json = serde_json::json!({
+                            "bounds": pixel_rect_json(strip),
+                            "selected": current,
+                            "tabs": tabs,
+                        });
+                        if let Some(add) = self.server_add_rect() {
+                            strip_json["add"] = serde_json::json!({
+                                "bounds": pixel_rect_json(add),
+                                "label": "+",
+                            });
+                        }
+                        strip_json
+                    }
                 }),
                 "sidebar_clock": layout.sidebar_clock.map(|clock| {
+                    let (date, time) =
+                        agenterm_platform::local_clock::local_clock_chrome_lines();
                     serde_json::json!({
                         "bounds": pixel_rect_json(clock),
                         "text": self.sidebar_clock_text(),
+                        "date": date,
+                        "time": time,
                         "placeholder": true,
                     })
                 }),
@@ -2766,6 +2838,7 @@ impl RemoteWindowState {
         self.layout_tab_close_controls();
         self.layout_new_terminal_controls();
         self.layout_instance_picker_controls();
+        self.layout_server_strip_dialogs();
     }
 
     fn layout_tab_editor(&self) {
@@ -4468,17 +4541,22 @@ impl RemoteWindowState {
         let count = self.server_tabs.len().max(1) as i32;
         // Fit *all* chips: shrink below the preferred min rather than dropping
         // trailing servers (user must be able to click every listed instance).
+        // Reserve trailing [+] so chips never cover the add control.
         let gaps = SERVER_TAB_GAP * (count - 1).max(0);
-        let available = (strip.width() - MARGIN * 2 - gaps).max(count);
+        let chips_right = (strip.right - MARGIN - SERVER_ADD_WIDTH).max(strip.left + MARGIN);
+        let available = (chips_right - (strip.left + MARGIN) - gaps).max(count);
+        // Prefer SERVER_TAB_MIN_WIDTH when the strip has room; shrink so every
+        // chip remains clickable when many servers are listed.
         let width = (available / count)
             .clamp(48, SERVER_TAB_MAX_WIDTH)
             .min(available / count);
+        let width = width.max(SERVER_TAB_MIN_WIDTH.min(available / count));
         let mut left = strip.left + MARGIN;
         let mut out = Vec::new();
         for (index, row) in self.server_tabs.iter().enumerate() {
             let right = if index + 1 == self.server_tabs.len() {
-                // Last chip absorbs remainder so the strip edge stays clean.
-                (strip.right - MARGIN).max(left + width)
+                // Last chip absorbs remainder up to the reserved [+] gutter.
+                chips_right.max(left + width)
             } else {
                 left + width
             };
@@ -4494,7 +4572,24 @@ impl RemoteWindowState {
         out
     }
 
-    fn server_tab_instance_at(&self, x: i32, y: i32) -> Option<String> {
+    fn server_add_rect(&self) -> Option<ProductPixelRect> {
+        let strip = self.workspace_geometry().server_strip?;
+        let strip = win_rect(strip);
+        Some(ProductPixelRect {
+            left: strip.right - MARGIN - SERVER_ADD_WIDTH,
+            top: strip.top + 4,
+            right: strip.right - MARGIN,
+            bottom: strip.bottom - 4,
+        })
+    }
+
+    fn server_add_contains(&self, x: i32, y: i32) -> bool {
+        self.server_add_rect().is_some_and(|rect| {
+            x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+        })
+    }
+
+    fn server_tab_row_at(&self, x: i32, y: i32) -> Option<&InstancePickerRow> {
         let Some(strip) = self.workspace_geometry().server_strip else {
             return None;
         };
@@ -4504,10 +4599,14 @@ impl RemoteWindowState {
         }
         for (rect, row) in self.server_tab_rects() {
             if x >= rect.left && x < rect.right {
-                return Some(row.instance.clone());
+                return Some(row);
             }
         }
         None
+    }
+
+    fn server_tab_instance_at(&self, x: i32, y: i32) -> Option<String> {
+        self.server_tab_row_at(x, y).map(|row| row.instance.clone())
     }
 
     fn force_refresh_server_tabs(&mut self) {
@@ -4581,8 +4680,7 @@ impl RemoteWindowState {
     }
 
     fn sidebar_clock_text(&self) -> String {
-        // Local wall-clock placeholder above the exclusive Tabs column.
-        // Format is intentionally simple until a real status provider owns it.
+        // Two-line local wall-clock above the exclusive Tabs column.
         sidebar_local_clock_text()
     }
 
@@ -4593,15 +4691,28 @@ impl RemoteWindowState {
         let clock = win_rect(clock);
         fill(device, &clock, palette.status.canvas_rgb());
         frame(device, &clock, palette.active_border.canvas_rgb());
+        let (date, time) = agenterm_platform::local_clock::local_clock_chrome_lines();
+        let mid = clock.top + clock.height() / 2;
         draw_text(
             device,
             ProductPixelRect {
-                left: clock.left + MARGIN,
-                top: clock.top + 8,
-                right: clock.right - MARGIN,
-                bottom: clock.bottom - 6,
+                left: clock.left + 4,
+                top: clock.top + 2,
+                right: clock.right - 4,
+                bottom: mid,
             },
-            &self.sidebar_clock_text(),
+            &date,
+            palette.text.canvas_rgb(),
+        );
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: clock.left + 4,
+                top: mid,
+                right: clock.right - 4,
+                bottom: clock.bottom - 2,
+            },
+            &time,
             palette.text.canvas_rgb(),
         );
     }
@@ -4617,59 +4728,78 @@ impl RemoteWindowState {
             InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid))
                 .map(|id| id.instance);
         if self.server_tabs.is_empty() {
+            let chips_right = strip.right - MARGIN - SERVER_ADD_WIDTH;
             draw_text(
                 device,
                 ProductPixelRect {
                     left: strip.left + MARGIN,
                     top: strip.top + 8,
-                    right: strip.right - MARGIN,
+                    right: chips_right.max(strip.left + MARGIN + 1),
                     bottom: strip.bottom - 6,
                 },
                 "Servers: (refreshing…)",
                 palette.muted_text.canvas_rgb(),
             );
-            return;
+        } else {
+            for (rect, row) in self.server_tab_rects() {
+                let active = current.as_deref() == Some(row.instance.as_str());
+                let fill_color = if active {
+                    palette.accent.canvas_rgb()
+                } else if row.can_attach {
+                    palette.composer.canvas_rgb()
+                } else {
+                    palette.status.canvas_rgb()
+                };
+                fill(device, &rect, fill_color);
+                frame(device, &rect, palette.active_border.canvas_rgb());
+                let label = if row.can_attach {
+                    // Prefer short instance id so chips stay clickable at a glance.
+                    let short = row
+                        .instance
+                        .strip_prefix("custom:")
+                        .unwrap_or(row.instance.as_str());
+                    format!("{short} · {}", row.pid)
+                } else {
+                    let short = row
+                        .instance
+                        .strip_prefix("custom:")
+                        .unwrap_or(row.instance.as_str());
+                    format!("{short} (stale)")
+                };
+                draw_text(
+                    device,
+                    ProductPixelRect {
+                        left: rect.left + 8,
+                        top: rect.top + 6,
+                        right: rect.right - 8,
+                        bottom: rect.bottom - 4,
+                    },
+                    &label,
+                    if active {
+                        palette.modal.canvas_rgb()
+                    } else {
+                        palette.text.canvas_rgb()
+                    },
+                );
+            }
         }
-        for (rect, row) in self.server_tab_rects() {
-            let active = current.as_deref() == Some(row.instance.as_str());
-            let fill_color = if active {
-                palette.accent.canvas_rgb()
-            } else if row.can_attach {
-                palette.composer.canvas_rgb()
-            } else {
-                palette.status.canvas_rgb()
-            };
-            fill(device, &rect, fill_color);
-            frame(device, &rect, palette.active_border.canvas_rgb());
-            let label = if row.can_attach {
-                // Prefer short instance id so chips stay clickable at a glance.
-                let short = row
-                    .instance
-                    .strip_prefix("custom:")
-                    .unwrap_or(row.instance.as_str());
-                format!("{short} · {}", row.pid)
-            } else {
-                let short = row
-                    .instance
-                    .strip_prefix("custom:")
-                    .unwrap_or(row.instance.as_str());
-                format!("{short} (stale)")
-            };
+        if let Some(add) = self.server_add_rect() {
+            fill(device, &add, palette.composer.canvas_rgb());
+            frame(device, &add, palette.active_border.canvas_rgb());
             draw_text(
                 device,
                 ProductPixelRect {
-                    left: rect.left + 8,
-                    top: rect.top + 6,
-                    right: rect.right - 8,
-                    bottom: rect.bottom - 4,
+                    left: add.left,
+                    top: add.top,
+                    right: add.right,
+                    bottom: add.bottom,
                 },
-                &label,
-                if active {
-                    palette.modal.canvas_rgb()
-                } else {
-                    palette.text.canvas_rgb()
-                },
+                "+",
+                palette.text.canvas_rgb(),
             );
+        }
+        if self.server_tab_context_menu.is_some() {
+            self.paint_server_tab_context_menu(device, palette);
         }
     }
 
@@ -4812,10 +4942,11 @@ impl RemoteWindowState {
 
     fn spawn_gui_for_instance(&mut self, instance: &str) -> Result<()> {
         let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
+        let short = instance.strip_prefix("custom:").unwrap_or(instance);
         let mut command = std::process::Command::new(exe);
         command
             .arg("--instance")
-            .arg(instance)
+            .arg(short)
             .arg("--no-activate")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -4825,9 +4956,521 @@ impl RemoteWindowState {
             .map_err(|error| anyhow::anyhow!(error))?;
         command
             .spawn()
-            .map_err(|error| anyhow::anyhow!("could not open instance `{instance}`: {error}"))?;
-        self.last_message = Some(format!("Opening instance `{instance}` in a new window"));
+            .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
+        self.last_message = Some(format!("Opening instance `{short}` in a new window"));
         Ok(())
+    }
+
+    fn spawn_server_instance(&mut self, name: &str) -> Result<()> {
+        let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
+        let mut command = std::process::Command::new(exe);
+        command
+            .arg("server")
+            .arg("--instance")
+            .arg(name)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        crate::platform::process::configure_breakaway_visible_command(&mut command)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        command
+            .spawn()
+            .map_err(|error| anyhow::anyhow!("could not start server `{name}`: {error}"))?;
+        self.force_refresh_server_tabs();
+        self.last_message = Some(format!("Started server `{name}`"));
+        Ok(())
+    }
+
+    fn open_server_new_dialog(&mut self) -> Result<()> {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::ServerNew)
+            && !self.server_new_dialog.is_open()
+        {
+            anyhow::bail!("another modal is open");
+        }
+        self.dismiss_server_tab_context_menu();
+        self.server_new_dialog.open();
+        self.show_workspace_controls(false);
+        self.layout_server_strip_dialogs();
+        self.set_control_text(self.server_name_edit, "");
+        self.focus_control(self.server_name_edit);
+        self.window.request_redraw();
+        Ok(())
+    }
+
+    fn close_server_new_dialog(&mut self) {
+        self.server_new_dialog.close();
+        self.layout_server_strip_dialogs();
+        self.show_workspace_controls(true);
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+        self.window.focus();
+        self.window.request_redraw();
+    }
+
+    fn sync_server_new_name_from_control(&mut self) {
+        if self.server_new_dialog.is_open() {
+            self.server_new_dialog
+                .set_name(self.control_text(self.server_name_edit));
+        }
+    }
+
+    fn finish_server_new_dialog(&mut self, create: bool) {
+        if !self.server_new_dialog.is_open() {
+            return;
+        }
+        if !create {
+            self.close_server_new_dialog();
+            return;
+        }
+        self.sync_server_new_name_from_control();
+        match self.server_new_dialog.take_validated_name() {
+            Ok(name) => match self.spawn_server_instance(&name) {
+                Ok(()) => self.close_server_new_dialog(),
+                Err(error) => {
+                    self.server_new_dialog.set_error(format!("{error:#}"));
+                    self.server_new_dialog.set_name(name);
+                    self.set_control_text(self.server_name_edit, self.server_new_dialog.name());
+                    self.layout_server_strip_dialogs();
+                    self.window.request_redraw();
+                }
+            },
+            Err(message) => {
+                self.server_new_dialog.set_error(message);
+                self.layout_server_strip_dialogs();
+                self.window.request_redraw();
+            }
+        }
+    }
+
+    fn dismiss_server_tab_context_menu(&mut self) {
+        if self.server_tab_context_menu.take().is_some() {
+            self.window.request_redraw();
+        }
+    }
+
+    fn open_server_tab_context_menu(&mut self, x: i32, y: i32, row: &InstancePickerRow) {
+        if self.focus_gate().full_modal_blocked() {
+            return;
+        }
+        self.server_tab_context_menu = Some(ServerTabContextMenu {
+            instance: row.instance.clone(),
+            endpoint: row.endpoint.clone(),
+            can_attach: row.can_attach,
+            origin_x: x,
+            origin_y: y,
+        });
+        self.window.request_redraw();
+    }
+
+    fn server_context_menu_geometry(
+        &self,
+    ) -> Option<(ProductPixelRect, ProductPixelRect, ProductPixelRect)> {
+        let menu = self.server_tab_context_menu.as_ref()?;
+        let client = self.window.client_size();
+        let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
+        let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
+        let width = SERVER_CONTEXT_MENU_WIDTH;
+        let item_h = SERVER_CONTEXT_MENU_ITEM_HEIGHT;
+        let height = item_h * 2 + 4;
+        let left = menu.origin_x.clamp(0, (client_right - width).max(0));
+        let top = menu.origin_y.clamp(0, (client_bottom - height).max(0));
+        let frame = ProductPixelRect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let close = ProductPixelRect {
+            left: left + 2,
+            top: top + 2,
+            right: left + width - 2,
+            bottom: top + 2 + item_h,
+        };
+        let new_window = ProductPixelRect {
+            left: left + 2,
+            top: top + 2 + item_h,
+            right: left + width - 2,
+            bottom: top + 2 + item_h * 2,
+        };
+        Some((frame, close, new_window))
+    }
+
+    fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
+        let (_, close, new_window) = self.server_context_menu_geometry()?;
+        if x >= close.left && x < close.right && y >= close.top && y < close.bottom {
+            return Some(ServerContextAction::Close);
+        }
+        if x >= new_window.left
+            && x < new_window.right
+            && y >= new_window.top
+            && y < new_window.bottom
+        {
+            return Some(ServerContextAction::NewWindow);
+        }
+        None
+    }
+
+    fn handle_server_context_menu_click(&mut self, x: i32, y: i32) -> bool {
+        if self.server_tab_context_menu.is_none() {
+            return false;
+        }
+        if let Some(action) = self.server_context_action_at(x, y) {
+            let menu = self.server_tab_context_menu.take();
+            if let Some(menu) = menu {
+                match action {
+                    ServerContextAction::NewWindow => {
+                        let short = menu
+                            .instance
+                            .strip_prefix("custom:")
+                            .unwrap_or(menu.instance.as_str());
+                        if let Err(error) = self.spawn_gui_for_instance(short) {
+                            self.last_error = Some(format!("{error:#}"));
+                        }
+                    }
+                    ServerContextAction::Close => {
+                        self.open_server_close_confirm(menu);
+                    }
+                }
+            }
+            self.window.request_redraw();
+            return true;
+        }
+        // Click outside dismisses without consuming strip/workspace clicks below.
+        self.dismiss_server_tab_context_menu();
+        false
+    }
+
+    fn open_server_close_confirm(&mut self, menu: ServerTabContextMenu) {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::ServerClose)
+        {
+            self.last_error = Some("another modal is open".to_owned());
+            self.window.request_redraw();
+            return;
+        }
+        self.pending_server_close = Some(ServerCloseConfirm {
+            instance: menu.instance,
+            endpoint: menu.endpoint,
+            can_attach: menu.can_attach,
+        });
+        self.show_workspace_controls(false);
+        self.layout_server_strip_dialogs();
+        self.window.request_redraw();
+        self.window.focus();
+    }
+
+    fn finish_server_close_confirm(&mut self, confirm: bool) {
+        let Some(pending) = self.pending_server_close.take() else {
+            return;
+        };
+        if !confirm {
+            self.layout_server_strip_dialogs();
+            self.show_workspace_controls(true);
+            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+            self.window.focus();
+            self.window.request_redraw();
+            return;
+        }
+        let closed_instance = pending.instance.clone();
+        if let Err(error) = self.shutdown_server_instance(&pending) {
+            self.last_error = Some(format!("{error:#}"));
+            self.layout_server_strip_dialogs();
+            self.show_workspace_controls(true);
+            self.window.request_redraw();
+            return;
+        }
+        self.force_refresh_server_tabs();
+        let current = InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
+        let closed_current = current
+            .as_ref()
+            .is_some_and(|id| id.instance == closed_instance);
+        if closed_current || self.client.is_none() {
+            if let Some(row) = self.server_tabs.iter().find(|row| {
+                row.can_attach && row.instance != closed_instance
+            }) {
+                let endpoint = row.endpoint.clone();
+                let instance = row.instance.clone();
+                if let Err(error) = self.attach_current_window_to_endpoint(&endpoint, &instance) {
+                    self.last_error = Some(format!("reattach after server close failed: {error:#}"));
+                } else {
+                    self.last_message = Some(format!("Switched to `{instance}` after close"));
+                }
+            } else {
+                self.last_message =
+                    Some(format!("Server `{closed_instance}` closed; no other live server"));
+            }
+        } else {
+            self.last_message = Some(format!("Closed server `{closed_instance}`"));
+        }
+        self.layout_server_strip_dialogs();
+        self.show_workspace_controls(true);
+        self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+        self.window.focus();
+        self.window.request_redraw();
+    }
+
+    fn shutdown_server_instance(&mut self, pending: &ServerCloseConfirm) -> Result<()> {
+        if !pending.can_attach {
+            anyhow::bail!(
+                "server `{}` is not live and cannot be shut down from the strip",
+                pending.instance
+            );
+        }
+        let current =
+            InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
+        let is_current = current
+            .as_ref()
+            .is_some_and(|id| id.instance == pending.instance);
+        if is_current {
+            let client = self
+                .client
+                .as_mut()
+                .context("UI is disconnected")?;
+            client.run_control(vec!["shutdown".to_owned()])?;
+            // Detach local lease; the authority is gone.
+            let _ = client.detach();
+            self.client = None;
+            return Ok(());
+        }
+        use crate::ipc_endpoint::IpcEndpoint;
+        let parsed = pending
+            .endpoint
+            .parse::<IpcEndpoint>()
+            .map_err(|error| anyhow::anyhow!("invalid endpoint {}: {error}", pending.endpoint))?;
+        let previous = resolved_ipc_endpoint().ok();
+        let short = pending
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(pending.instance.as_str());
+        // Temporarily pin IPC selectors so run_control / send_ipc targets the peer.
+        crate::frontend_server::pin_client_peer_for_gui(&parsed, Some(short))
+            .map_err(anyhow::Error::msg)?;
+        let shutdown = crate::client::send_ipc_request(vec!["shutdown".to_owned()]);
+        // Always restore the prior peer so this window keeps its attachment.
+        if let Some(prev) = previous.as_ref() {
+            let _ = crate::frontend_server::pin_client_peer_for_gui(
+                &prev.endpoint,
+                Some(&prev.logical_instance.canonical_name()),
+            );
+        }
+        let response = shutdown?;
+        if !response.ok {
+            anyhow::bail!(
+                "shutdown of `{}` failed: {}",
+                pending.instance,
+                response.error
+            );
+        }
+        Ok(())
+    }
+
+    fn server_new_modal_geometry(&self) -> (ProductPixelRect, [ProductPixelRect; 3]) {
+        let client = self.window.client_size();
+        let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
+        let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
+        let width = (client_right - 48).clamp(360, 480);
+        let height = 190;
+        let left = ((client_right - width) / 2).max(0);
+        let top = ((client_bottom - height) / 2).max(0);
+        let modal = ProductPixelRect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let name = ProductPixelRect {
+            left: left + 24,
+            top: top + 72,
+            right: left + width - 24,
+            bottom: top + 108,
+        };
+        let create = ProductPixelRect {
+            left: left + width - 250,
+            top: top + 132,
+            right: left + width - 132,
+            bottom: top + 168,
+        };
+        let cancel = ProductPixelRect {
+            left: left + width - 120,
+            top: top + 132,
+            right: left + width - 24,
+            bottom: top + 168,
+        };
+        (modal, [name, create, cancel])
+    }
+
+    fn server_close_modal_geometry(&self) -> (ProductPixelRect, [ProductPixelRect; 2]) {
+        let client = self.window.client_size();
+        let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
+        let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
+        let width = (client_right - 48).clamp(360, 480);
+        let height = 180;
+        let left = ((client_right - width) / 2).max(0);
+        let top = ((client_bottom - height) / 2).max(0);
+        let modal = ProductPixelRect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let confirm = ProductPixelRect {
+            left: left + width - 280,
+            top: top + 120,
+            right: left + width - 132,
+            bottom: top + 156,
+        };
+        let cancel = ProductPixelRect {
+            left: left + width - 120,
+            top: top + 120,
+            right: left + width - 24,
+            bottom: top + 156,
+        };
+        (modal, [confirm, cancel])
+    }
+
+    fn layout_server_strip_dialogs(&self) {
+        let new_open = self.server_new_dialog.is_open();
+        let (_, new_bounds) = self.server_new_modal_geometry();
+        for (control, rect) in [
+            (self.server_name_edit, new_bounds[0]),
+            (self.server_create_ok, new_bounds[1]),
+            (self.server_create_cancel, new_bounds[2]),
+        ] {
+            self.set_control_bounds(control, rect);
+            self.set_control_visible(control, new_open);
+        }
+        if new_open {
+            self.set_control_text(self.server_create_ok, "Create");
+            self.set_control_text(self.server_create_cancel, "Cancel");
+        }
+
+        let close_open = self.pending_server_close.is_some();
+        let (_, close_bounds) = self.server_close_modal_geometry();
+        for (control, rect) in [
+            (self.server_close_confirm, close_bounds[0]),
+            (self.server_close_cancel, close_bounds[1]),
+        ] {
+            self.set_control_bounds(control, rect);
+            self.set_control_visible(control, close_open);
+        }
+        if close_open {
+            self.set_control_text(self.server_close_confirm, "Close Server");
+            self.set_control_text(self.server_close_cancel, "Cancel");
+        }
+    }
+
+    fn paint_server_new_dialog(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+        let (modal, _) = self.server_new_modal_geometry();
+        fill(device, &modal, palette.modal.canvas_rgb());
+        frame(device, &modal, palette.accent.canvas_rgb());
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: modal.left + 24,
+                top: modal.top + 18,
+                right: modal.right - 24,
+                bottom: modal.top + 48,
+            },
+            "New server instance",
+            palette.text.canvas_rgb(),
+        );
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: modal.left + 24,
+                top: modal.top + 48,
+                right: modal.right - 24,
+                bottom: modal.top + 72,
+            },
+            "Name (letters, digits, '-' or '_')",
+            palette.muted_text.canvas_rgb(),
+        );
+        if let Some(error) = self.server_new_dialog.error() {
+            draw_text(
+                device,
+                ProductPixelRect {
+                    left: modal.left + 24,
+                    top: modal.top + 108,
+                    right: modal.right - 24,
+                    bottom: modal.top + 130,
+                },
+                error,
+                palette.warning.canvas_rgb(),
+            );
+        }
+    }
+
+    fn paint_server_close_dialog(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+        let Some(pending) = self.pending_server_close.as_ref() else {
+            return;
+        };
+        let (modal, _) = self.server_close_modal_geometry();
+        fill(device, &modal, palette.modal.canvas_rgb());
+        frame(device, &modal, palette.warning.canvas_rgb());
+        let short = pending
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(pending.instance.as_str());
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: modal.left + 24,
+                top: modal.top + 24,
+                right: modal.right - 24,
+                bottom: modal.top + 60,
+            },
+            &format!("Close server `{short}`?"),
+            palette.text.canvas_rgb(),
+        );
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: modal.left + 24,
+                top: modal.top + 68,
+                right: modal.right - 24,
+                bottom: modal.top + 100,
+            },
+            if pending.can_attach {
+                "This stops the server process and disconnects its clients."
+            } else {
+                "This registration is not live; close will not send shutdown."
+            },
+            palette.muted_text.canvas_rgb(),
+        );
+    }
+
+    fn paint_server_tab_context_menu(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+        let Some((frame_rect, close, new_window)) = self.server_context_menu_geometry() else {
+            return;
+        };
+        fill(device, &frame_rect, palette.modal.canvas_rgb());
+        frame(device, &frame_rect, palette.accent.canvas_rgb());
+        fill(device, &close, palette.composer.canvas_rgb());
+        fill(device, &new_window, palette.composer.canvas_rgb());
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: close.left + 12,
+                top: close.top,
+                right: close.right - 8,
+                bottom: close.bottom,
+            },
+            "Close",
+            palette.text.canvas_rgb(),
+        );
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: new_window.left + 12,
+                top: new_window.top,
+                right: new_window.right - 8,
+                bottom: new_window.bottom,
+            },
+            "New Window",
+            palette.text.canvas_rgb(),
+        );
     }
 
     fn finish_window_close(&mut self, choice: WindowCloseChoice) {
@@ -5154,6 +5797,7 @@ impl RemoteWindowState {
             self.new_initial_command,
             self.new_http_proxy,
             self.new_https_proxy,
+            self.server_name_edit,
         ]
         .contains(&control)
     }
@@ -5175,6 +5819,8 @@ impl RemoteWindowState {
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_editor_dialog.is_open(),
             instance_picker_open: self.instance_picker_dialog.is_open(),
+            server_new_open: self.server_new_dialog.is_open(),
+            server_close_pending: self.pending_server_close.is_some(),
         }
     }
 
@@ -5702,17 +6348,28 @@ impl RemoteWindowState {
 
     fn handle_left_button_down(&mut self, x: i32, y: i32) -> bool {
         self.recent_sidebar_text_click = None;
+        // Painted server-tab context menu owns left clicks while open.
+        if self.handle_server_context_menu_click(x, y) {
+            return true;
+        }
         // Top multi-server strip: hit-test first so tab chrome stays clickable
         // whenever no full modal owns the surface. Flush attach immediately —
         // unlike `ui-action select-server-tab`, mouse input is not a relayed
         // command and will never reach process_client_command's post-complete
-        // rebind path.
+        // rebind path. Order: context menu (above) → [+] → tab select.
         if !self.focus_gate().full_modal_blocked()
             && self
                 .workspace_geometry()
                 .server_strip
                 .is_some_and(|strip| y >= strip.top && y < strip.bottom)
         {
+            if self.server_add_contains(x, y) {
+                if let Err(error) = self.open_server_new_dialog() {
+                    self.last_error = Some(format!("{error:#}"));
+                    self.window.request_redraw();
+                }
+                return true;
+            }
             if let Some(instance) = self.server_tab_instance_at(x, y) {
                 if let Err(error) = self.select_server_tab(&instance) {
                     self.last_error = Some(format!("{error:#}"));
@@ -5721,8 +6378,9 @@ impl RemoteWindowState {
                     self.flush_deferred_server_tab_attach();
                 }
             } else {
-                self.last_message =
-                    Some("No live server tab under the pointer (stale chips are not selectable)".to_owned());
+                self.last_message = Some(
+                    "No server tab under the pointer (use [+] to start a server)".to_owned(),
+                );
                 self.window.request_redraw();
             }
             return true;
@@ -5984,6 +6642,26 @@ impl RemoteWindowState {
                 },
                 ConfirmTarget::None => {}
             }
+            return true;
+        }
+        if self.pending_server_close.is_some() {
+            match key {
+                0x0d => self.finish_server_close_confirm(true),
+                0x1b => self.finish_server_close_confirm(false),
+                _ => {}
+            }
+            return true;
+        }
+        if self.server_new_dialog.is_open() {
+            match key {
+                0x0d => self.finish_server_new_dialog(true),
+                0x1b => self.finish_server_new_dialog(false),
+                _ => {}
+            }
+            return true;
+        }
+        if self.server_tab_context_menu.is_some() && key == 0x1b {
+            self.dismiss_server_tab_context_menu();
             return true;
         }
         if self.instance_picker_dialog.is_open() {
@@ -6330,6 +7008,10 @@ impl RemoteWindowState {
             self.paint_new_terminal(device, palette);
         } else if self.close_confirmation.is_open() {
             self.paint_tab_close(device, palette);
+        } else if self.server_new_dialog.is_open() {
+            self.paint_server_new_dialog(device, palette);
+        } else if self.pending_server_close.is_some() {
+            self.paint_server_close_dialog(device, palette);
         }
     }
 
@@ -7199,6 +7881,9 @@ impl RemoteWindowApplication {
         if control_id == state.settings_font || control_id == state.settings_size {
             state.sync_settings_drafts();
         }
+        if control_id == state.server_name_edit {
+            state.sync_server_new_name_from_control();
+        }
         if let Some(hit) = windows_toolbar_hit(control_id) {
             state.dispatch_windows_toolbar_action(hit.action_id());
             return;
@@ -7247,6 +7932,10 @@ impl RemoteWindowApplication {
             NEW_POWERSHELL_ID => state.choose_new_shell(NewShellChoice::Alternate),
             NEW_CREATE_ID => state.finish_new_terminal(true),
             NEW_CANCEL_ID => state.finish_new_terminal(false),
+            SERVER_CREATE_OK_ID => state.finish_server_new_dialog(true),
+            SERVER_CREATE_CANCEL_ID => state.finish_server_new_dialog(false),
+            SERVER_CLOSE_CONFIRM_ID => state.finish_server_close_confirm(true),
+            SERVER_CLOSE_CANCEL_ID => state.finish_server_close_confirm(false),
             _ => {}
         }
     }
@@ -7379,7 +8068,17 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 let code = if button == PointerButton::Right { 2 } else { 1 };
                 match button_state {
                     ButtonState::Pressed => {
-                        if state.forward_terminal_mouse(
+                        // Right-click on a server tab opens the strip context menu
+                        // before any terminal mouse-report forward.
+                        if button == PointerButton::Right
+                            && !state.focus_gate().full_modal_blocked()
+                            && let Some(row) =
+                                state.server_tab_row_at(position.x, position.y).cloned()
+                        {
+                            state.open_server_tab_context_menu(position.x, position.y, &row);
+                            consumed = true;
+                            redraw = true;
+                        } else if state.forward_terminal_mouse(
                             position.x,
                             position.y,
                             Some(code),

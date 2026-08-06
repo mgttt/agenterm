@@ -1229,6 +1229,8 @@ impl UnixApp {
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_editor_dialog.is_open(),
             instance_picker_open: false,
+            server_new_open: false,
+            server_close_pending: false,
         }
     }
 
@@ -2492,6 +2494,10 @@ impl UnixApp {
                     "rows": [],
                     "selected": 0,
                     "error": "instance picker is Windows-first in this build",
+                }),
+                ModalSurface::ServerNew | ModalSurface::ServerClose => serde_json::json!({
+                    "kind": "server-strip",
+                    "error": "server strip dialogs are Windows-first in this build",
                 }),
             }),
             "system_menu": system_menu_json(

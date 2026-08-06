@@ -23,6 +23,7 @@ pub(crate) mod instance_picker;
 pub(crate) mod interaction;
 pub(crate) mod new_terminal;
 pub(crate) mod selection;
+pub(crate) mod server_strip_ui;
 pub(crate) mod settings;
 pub(crate) mod tab_editor;
 pub(crate) mod text_selection;

@@ -94,6 +94,8 @@ pub(crate) struct FocusTransitionGate {
     pub(crate) close_confirmation_open: bool,
     pub(crate) cwd_editor_open: bool,
     pub(crate) instance_picker_open: bool,
+    pub(crate) server_new_open: bool,
+    pub(crate) server_close_pending: bool,
 }
 
 impl FocusTransitionGate {
@@ -111,14 +113,18 @@ impl FocusTransitionGate {
             || self.new_terminal_open
             || self.close_confirmation_open
             || self.instance_picker_open
+            || self.server_new_open
+            || self.server_close_pending
     }
 
     pub(crate) const fn modal_entry_blocked(self, surface: ModalSurface) -> bool {
         match surface {
             ModalSurface::WindowClose => self.window_close_pending,
-            ModalSurface::Settings | ModalSurface::NewTerminal | ModalSurface::InstancePicker => {
-                self.full_modal_blocked()
-            }
+            ModalSurface::Settings
+            | ModalSurface::NewTerminal
+            | ModalSurface::InstancePicker
+            | ModalSurface::ServerNew
+            | ModalSurface::ServerClose => self.full_modal_blocked(),
             ModalSurface::TabClose => self.full_modal_blocked(),
             ModalSurface::CwdEditor => self.blocked(),
         }
@@ -130,6 +136,8 @@ impl FocusTransitionGate {
             && !self.new_terminal_open
             && !self.close_confirmation_open
             && !self.instance_picker_open
+            && !self.server_new_open
+            && !self.server_close_pending
     }
 }
 
@@ -141,6 +149,8 @@ pub(crate) enum ModalSurface {
     CwdEditor,
     TabClose,
     InstancePicker,
+    ServerNew,
+    ServerClose,
 }
 
 impl ModalSurface {
@@ -152,6 +162,8 @@ impl ModalSurface {
             Self::CwdEditor => "cwd-editor",
             Self::TabClose => "tab-close",
             Self::InstancePicker => "instance-picker",
+            Self::ServerNew => "server-new",
+            Self::ServerClose => "server-close",
         }
     }
 }
@@ -159,6 +171,10 @@ impl ModalSurface {
 pub(crate) fn modal_surface_from_gate(gate: FocusTransitionGate) -> Option<ModalSurface> {
     if gate.window_close_pending {
         Some(ModalSurface::WindowClose)
+    } else if gate.server_close_pending {
+        Some(ModalSurface::ServerClose)
+    } else if gate.server_new_open {
+        Some(ModalSurface::ServerNew)
     } else if gate.instance_picker_open {
         Some(ModalSurface::InstancePicker)
     } else if gate.settings_open {
@@ -693,6 +709,8 @@ mod tests {
                 cwd_editor_open: true,
                 tab_editor_open: true,
                 instance_picker_open: false,
+                server_new_open: false,
+                server_close_pending: false,
             }),
             CancelTarget::WindowClose
         );
@@ -808,6 +826,8 @@ mod tests {
             close_confirmation_open: true,
             tab_editor_open: true,
             instance_picker_open: true,
+                server_new_open: false,
+                server_close_pending: false,
         };
         assert_eq!(
             modal_surface_from_gate(gate),
