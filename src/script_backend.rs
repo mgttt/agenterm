@@ -1,8 +1,10 @@
 //! Script execution backend selection.
 //!
 //! Today every live invocation uses Rhai. The parallel `rh` track (`crates/agenterm-rh`)
-//! validates pack subsets and transpiles to Rust for AOT; flip
-//! `AGENTERM_SCRIPT_BACKEND=rh` once native pack loading ships.
+//! validates pack subsets, AOT-compiles to native libraries, and loads them with dlopen;
+//! flip `AGENTERM_SCRIPT_BACKEND=rh` once pack loading ships in-process.
+
+use std::path::Path;
 
 /// Active script backend for pack execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,6 +40,14 @@ pub fn rh_check(source: &str) -> Result<(), agenterm_rh::RhError> {
 
 pub fn rh_transpile(source: &str) -> Result<String, agenterm_rh::RhError> {
     agenterm_rh::transpile(source)
+}
+
+pub fn rh_compile(source: &str, output: &Path) -> Result<agenterm_rh::CompileOutput, agenterm_rh::RhError> {
+    agenterm_rh::compile_native(source, output)
+}
+
+pub fn rh_run_smoke(native: &Path) -> Result<i64, agenterm_rh::RhError> {
+    agenterm_rh::load_and_call_entry(native)
 }
 
 #[cfg(test)]

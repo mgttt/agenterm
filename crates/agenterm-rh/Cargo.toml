@@ -18,3 +18,6 @@ path = "src/main.rs"
 
 [dependencies]
 rhai = { version = "1.22", default-features = false, features = ["std", "internals"] }
+sha2 = { version = "0.11", default-features = false }
+tempfile = "3.25"
+libloading = "0.9"
