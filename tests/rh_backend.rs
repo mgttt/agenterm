@@ -70,6 +70,32 @@ fn rh_backend_eval_stdlib_fixture_via_host_eval() {
 }
 
 #[test]
+fn rh_backend_run_matches_eval_for_entry_fixture() {
+    with_rh_backend(|| {
+        let source = include_str!("../fixtures/rh/entry.rh");
+        let eval = try_execute_rh_invocation(ScriptOperation::Eval, source, None)
+            .expect("eval")
+            .expect("rh handled");
+        let run = try_execute_rh_invocation(ScriptOperation::Run, source, None)
+            .expect("run")
+            .expect("rh handled");
+        assert_eq!(run.value, eval.value);
+        assert_eq!(run.stdout, eval.stdout);
+    });
+}
+
+#[test]
+fn rh_backend_run_while_count_fixture() {
+    with_rh_backend(|| {
+        let source = include_str!("../fixtures/rh/while-count.rh");
+        let result = try_execute_rh_invocation(ScriptOperation::Run, source, None)
+            .expect("run")
+            .expect("rh handled");
+        assert_eq!(result.value, Some(serde_json::json!(0)));
+    });
+}
+
+#[test]
 fn rhai_backend_returns_none_for_check() {
     let _guard = ENV_LOCK.lock().expect("env lock");
     unsafe {

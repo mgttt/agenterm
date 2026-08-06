@@ -68,6 +68,7 @@ version = "0.1.15"
 dependencies = [
  "libloading 0.9.0",
  "rhai",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

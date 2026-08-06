@@ -82,6 +82,21 @@ fn print_stmt(out: &mut String, stmt: &Stmt, trailing_semi: bool) -> Result<(), 
             print_block(out, &flow.body, true)?;
             out.push('}');
         }
+        Stmt::Assignment(boxed, ..) => {
+            let (op, bin) = boxed.as_ref();
+            print_expr(out, &bin.lhs)?;
+            if let Some((_, _, _, syntax, _, _)) = op.get_op_assignment_info() {
+                out.push(' ');
+                out.push_str(syntax);
+                out.push(' ');
+            } else {
+                out.push_str(" = ");
+            }
+            print_expr(out, &bin.rhs)?;
+            if trailing_semi {
+                out.push(';');
+            }
+        }
         Stmt::Block(block) => {
             out.push_str("{ ");
             print_block(out, block, true)?;
@@ -287,6 +302,10 @@ fn stmt_uses_host(stmt: &Stmt) -> bool {
         Stmt::While(boxed, ..) => {
             let flow = boxed.as_ref();
             uses_host_surface(&flow.expr) || flow.body.iter().any(stmt_uses_host)
+        }
+        Stmt::Assignment(boxed, ..) => {
+            let (_, bin) = boxed.as_ref();
+            !is_pure_int_expr(&bin.lhs) || !is_pure_int_expr(&bin.rhs)
         }
         Stmt::Block(block) => block.iter().any(stmt_uses_host),
         Stmt::FnCall(call, ..) => call.args.iter().any(uses_host_surface),

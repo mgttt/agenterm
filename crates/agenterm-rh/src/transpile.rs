@@ -308,12 +308,31 @@ fn emit_stmt(
         Stmt::Var(boxed, ..) => {
             let (ident, expr, _) = boxed.as_ref();
             let kind = infer_binding_kind(expr);
-            out.push_str("    let ");
+            out.push_str("    let mut ");
             out.push_str(ident.name.as_str());
             out.push_str(" = ");
             emit_expr(out, expr, ctx)?;
             out.push_str(";\n");
             *ctx = ctx.clone().with_binding(ident.name.as_str(), kind);
+        }
+        Stmt::Assignment(boxed, ..) => {
+            let (op, bin) = boxed.as_ref();
+            let Expr::Variable(ident, ..) = &bin.lhs else {
+                return Err(RhError::Transpile(
+                    "assignment lhs must be a variable".into(),
+                ));
+            };
+            out.push_str("    ");
+            out.push_str(ident.1.as_str());
+            if let Some((_, _, _, syntax, _, _)) = op.get_op_assignment_info() {
+                out.push(' ');
+                out.push_str(syntax);
+                out.push(' ');
+            } else {
+                out.push_str(" = ");
+            }
+            emit_expr(out, &bin.rhs, ctx)?;
+            out.push_str(";\n");
         }
         Stmt::Return(Some(expr), ..) => {
             out.push_str("    return ");

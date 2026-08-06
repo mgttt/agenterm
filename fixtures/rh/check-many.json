@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "agenterm-rh-check-manifest",
+  "files": [
+    "fixtures/rh/entry.rh",
+    "fixtures/rh/fleet.rh",
+    "fixtures/rh/stdlib.rh",
+    "fixtures/rh/while.rh",
+    "fixtures/rh/while-count.rh"
+  ]
+}

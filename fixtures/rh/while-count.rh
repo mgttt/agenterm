@@ -1,0 +1,11 @@
+fn entry() {
+    let x = 3;
+    while x != 0 {
+        x -= 1;
+    }
+    x
+}
+
+fn cc_lines() {
+    ["rh-3 while-count", "assign-aot"]
+}

@@ -58,7 +58,10 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 |----|------|------|
 | M14 | `while` 纯 int 条件原生 AOT | [x] |
 | M15 | `agenterm-rh eval` dev 命令 | [x] |
-| M16–M22 | assign/try、check-many、bootstrap 默认构建、worker parity、corpus 扫描、rhai 薄替换 | [ ] |
+| M16 | 赋值/复合赋值 + while-count | [x] |
+| M18 | `agenterm-rh check-many` | [x] |
+| M19–M21 | bootstrap 构建、Run parity、fixture corpus | [x] |
+| M17 | `try`/`catch` 子集 | [ ] |
 
 执行计划：[`plan-rh-3.md`](plan-rh-3.md)。**JIT** 在本轨指 **T0–T1 分层 AOT**（源码缓存 + 原生扩面），Cranelift 仍在 RH-4。
 

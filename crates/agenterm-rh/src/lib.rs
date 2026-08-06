@@ -1,4 +1,5 @@
 pub mod check;
+pub mod check_many;
 pub mod compile;
 pub mod error;
 pub mod expr_print;
@@ -12,6 +13,9 @@ pub mod subset;
 pub mod transpile;
 
 pub use check::check;
+pub use check_many::{
+    run_check_many, CheckManyManifest, CheckManyOptions, CheckManyReport, read_manifest,
+};
 pub use compile::{
     CompileOutput, compile_native, compile_native_for_target, hash_bytes, hash_file,
 };

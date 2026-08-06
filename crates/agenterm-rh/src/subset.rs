@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use rhai::{AST, ASTNode, Expr, FnCallExpr, Stmt};
+use rhai::{BinaryExpr, OpAssignment, AST, ASTNode, Expr, FnCallExpr, Stmt};
 
 use crate::RhError;
 use crate::expr_print::{is_pure_int_expr, uses_host_surface};
@@ -72,6 +72,22 @@ fn reject_expr(expr: &Expr) -> Option<RhError> {
     }
 }
 
+fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
+    if !matches!(assign.1.lhs, Expr::Variable(..)) {
+        return Some(subset_error(
+            "RH_SUBSET_ASSIGN_LHS",
+            "assignment lhs must be a simple variable in rh-3",
+        ));
+    }
+    if !is_pure_int_expr(&assign.1.rhs) {
+        return Some(subset_error(
+            "RH_SUBSET_ASSIGN_RHS",
+            "assignment rhs must be a pure int expression in rh-3",
+        ));
+    }
+    None
+}
+
 fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
     match stmt {
         Stmt::Expr(expr) => validate_root_expr(expr.as_ref()),
@@ -109,6 +125,7 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
             validate_stmt_block(&flow.body)
         }
         Stmt::Block(block) => validate_stmt_block(block),
+        Stmt::Assignment(boxed, ..) => validate_assignment(boxed),
         Stmt::FnCall(call, ..) => {
             if call.name == "throw" {
                 if call.args.len() != 1 {
@@ -238,6 +255,16 @@ mod tests {
             .compile("fn entry() { while std::fs::exists(`/tmp`) { 0 } 0 }")
             .expect("compile");
         assert!(validate_ast(&ast).is_err());
+    }
+
+    #[test]
+    fn accepts_while_with_assignment() {
+        let mut engine = rhai::Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile("fn entry() { let x = 3; while x != 0 { x -= 1; } x }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
     }
 
     #[test]
