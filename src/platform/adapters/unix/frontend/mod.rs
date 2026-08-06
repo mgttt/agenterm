@@ -87,6 +87,7 @@ use crate::frontend::selection::{
 };
 use crate::frontend::settings::{self, SettingsDialog};
 use crate::frontend::tab_editor::{TabEditorDialog, TabEditorFocus};
+use crate::frontend::text_selection::{self, TextCursor};
 use crate::frontend::window_close::{WindowCloseChoice, WindowCloseDialog};
 use crate::ui_snapshot::{
     PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
@@ -310,6 +311,16 @@ struct TabsResizeDrag {
 }
 
 const DOUBLE_CLICK_MS: u64 = 500;
+
+/// A recent composer click, used to promote repeats into word and line
+/// selection. `offset` is compared so that a second click elsewhere starts a
+/// fresh caret instead of selecting a word the user did not point at.
+#[derive(Clone, Copy, Debug)]
+struct ComposerClick {
+    offset: usize,
+    at: Instant,
+    count: u8,
+}
 
 const APP_NAME: &str = "AgenTerm™";
 const INITIAL_WIDTH: u32 = 960;
@@ -611,6 +622,17 @@ struct UnixApp {
     focus_state: FocusState,
     composer_buffer: String,
     composer_select_all: bool,
+    /// Caret and selection extent inside `composer_buffer`, in character
+    /// offsets. Drives mouse selection, which `composer_select_all` alone
+    /// could never express.
+    composer_cursor: TextCursor,
+    /// Set while the pointer is down inside the composer text, so pointer
+    /// motion extends the selection instead of being forwarded to the
+    /// terminal's mouse protocol.
+    composer_selection_dragging: bool,
+    /// Last click inside the composer, for promoting a second click to
+    /// select-word and a third to select-line.
+    composer_click: Option<ComposerClick>,
     text_field_select_all: bool,
     config: AppConfig,
     settings_dialog: SettingsDialog,
@@ -714,6 +736,9 @@ impl UnixApp {
             focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             composer_buffer: String::new(),
             composer_select_all: false,
+            composer_cursor: TextCursor::default(),
+            composer_selection_dragging: false,
+            composer_click: None,
             text_field_select_all: false,
             settings_dialog: SettingsDialog::new(
                 config.effective_terminal_appearance(&crate::client::ipc_address(), None),
@@ -1077,6 +1102,117 @@ impl UnixApp {
 
     fn composer_region_contains(&self, x: f64, y: f64) -> bool {
         self.layout().composer.contains(x as i32, y as i32)
+    }
+
+    /// Prefix drawn ahead of the composer draft. Shared by the renderer and
+    /// the click hit-test so the two agree on where the text starts.
+    fn composer_label(&self) -> &'static str {
+        if self.cwd_editor_dialog.is_open() {
+            "CWD> "
+        } else {
+            ""
+        }
+    }
+
+    /// Character offset in the composer draft under a client-space point.
+    fn composer_offset_at(&self, x: f64, y: f64) -> Option<usize> {
+        let layout = self.layout();
+        let geometry = composer_geometry(layout.composer);
+        render::composer_offset_at_client(
+            &self.composer_buffer,
+            self.composer_label(),
+            layout.composer.top.max(0) as u32,
+            self.sidebar_width(),
+            geometry.send.left.max(0) as u32,
+            x,
+            y,
+        )
+    }
+
+    /// Place the caret, or extend/promote a selection, from a composer click.
+    ///
+    /// Follows the conventions users get from every native text field: a plain
+    /// click places a caret, shift+click extends from the far end of the
+    /// current selection, a second click selects the word and a third selects
+    /// the line.
+    fn begin_composer_selection(&mut self, x: f64, y: f64) -> bool {
+        let Some(offset) = self.composer_offset_at(x, y) else {
+            return false;
+        };
+        let now = Instant::now();
+        let length = self.composer_buffer.chars().count();
+
+        if self.pointer_modifiers.shift {
+            let anchor = text_selection::shift_extend_anchor(self.composer_cursor, offset);
+            self.set_composer_cursor(TextCursor::new(anchor, offset));
+            self.composer_selection_dragging = true;
+            self.composer_click = None;
+            return true;
+        }
+
+        let repeat = self
+            .composer_click
+            .filter(|click| {
+                click.offset == offset
+                    && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+            })
+            .map_or(1, |click| click.count.saturating_add(1).min(3));
+
+        match repeat {
+            2 => {
+                let (start, end) = text_selection::word_bounds(&self.composer_buffer, offset);
+                self.set_composer_cursor(TextCursor::new(start, end));
+                self.composer_selection_dragging = false;
+            }
+            3 => {
+                let (start, end) = text_selection::line_bounds(&self.composer_buffer, offset);
+                self.set_composer_cursor(TextCursor::new(start, end));
+                self.composer_selection_dragging = false;
+            }
+            _ => {
+                self.set_composer_cursor(TextCursor::at(offset.min(length)));
+                self.composer_selection_dragging = true;
+            }
+        }
+        self.composer_click = Some(ComposerClick {
+            offset,
+            at: now,
+            count: repeat,
+        });
+        true
+    }
+
+    /// Extend the composer selection while the pointer is held down.
+    fn drag_composer_selection(&mut self, x: f64, y: f64) {
+        if !self.composer_selection_dragging {
+            return;
+        }
+        let Some(offset) = self.composer_offset_at(x, y) else {
+            return;
+        };
+        self.set_composer_cursor(self.composer_cursor.extended_to(offset));
+    }
+
+    fn end_composer_selection(&mut self) {
+        self.composer_selection_dragging = false;
+    }
+
+    /// Store a cursor, keeping `composer_select_all` consistent with it.
+    ///
+    /// The legacy flag still drives the "replace everything on next edit"
+    /// behaviour and the full-width highlight, so it is derived here rather
+    /// than left to drift out of step with the real selection.
+    fn set_composer_cursor(&mut self, cursor: TextCursor) {
+        let length = self.composer_buffer.chars().count();
+        let cursor = cursor.clamped(length);
+        self.composer_cursor = cursor;
+        self.composer_select_all = length > 0 && cursor.range() == (0, length);
+        self.request_redraw();
+    }
+
+    /// Text currently selected in the composer, if any.
+    fn composer_selected_text(&self) -> Option<String> {
+        text_selection::selected_text(&self.composer_buffer, self.composer_cursor)
     }
 
     fn focus_gate(&self) -> FocusTransitionGate {
@@ -2321,9 +2457,23 @@ impl UnixApp {
                     .as_ref()
                     .map(|pending| format!("@{}", pending.tab_id)),
             },
+            // Selection state is reported so an automated client can verify a
+            // caret move or a drag without a human watching the window; a GUI
+            // affordance that no machine can observe cannot be regression
+            // tested.
             "composer": {
                 "draft_length": self.composer_buffer.chars().count(),
                 "focused": self.focus_surface == UnixFocusSurface::Composer,
+                "caret": self.composer_cursor.focus(),
+                "anchor": self.composer_cursor.anchor(),
+                "selection": self.composer_cursor.has_selection().then(|| {
+                    let (start, end) = self.composer_cursor.range();
+                    serde_json::json!({
+                        "start": start,
+                        "end": end,
+                        "text": self.composer_selected_text(),
+                    })
+                }),
             },
             "modal": modal_surface_from_gate(self.focus_gate()).map(|surface| match surface {
                 ModalSurface::WindowClose => self.window_close_dialog.snapshot_modal(),
@@ -2728,6 +2878,7 @@ impl UnixApp {
         }
         if self.composer_region_contains(x, y) {
             self.set_focus_surface_internal(UnixFocusSurface::Composer, "mouse");
+            self.begin_composer_selection(x, y);
         } else {
             self.set_focus_surface_internal(UnixFocusSurface::Terminal, "mouse");
         }
@@ -4033,11 +4184,7 @@ impl UnixApp {
         let (cell_width, cell_height) = self.cell_dimensions();
         let content_height = layout.terminal.bottom.max(0) as u32;
         let cwd_label = self.active_cwd_status_text();
-        let composer_label = if self.cwd_editor_dialog.is_open() {
-            "CWD> "
-        } else {
-            ""
-        };
+        let composer_label = self.composer_label();
         let scrollbar = self.active_position().map(|position| {
             let visible_rows = usize::from(self.tabs[position].last_size.0);
             let (offset, maximum) = self.tabs[position].scrollback_bounds();
@@ -4095,6 +4242,11 @@ impl UnixApp {
             text: &self.composer_buffer,
             focused: self.focus_surface == UnixFocusSurface::Composer,
             selected_all: self.composer_select_all,
+            selection: self
+                .composer_cursor
+                .has_selection()
+                .then(|| self.composer_cursor.range()),
+            caret: self.composer_cursor.focus(),
             top: composer_top,
             label: composer_label,
             send_button: (
@@ -5141,6 +5293,12 @@ impl UnixApp {
                         &mut self.composer_select_all,
                     ) {
                         input::ComposerKeyAction::Edited => {
+                            // Editing still appends at the end of the draft,
+                            // so the caret follows it; clamping also drops a
+                            // selection the edit has just invalidated.
+                            self.set_composer_cursor(TextCursor::at(
+                                self.composer_buffer.chars().count(),
+                            ));
                             self.sync_composer_buffer_to_tab();
                             self.request_redraw();
                         }
@@ -5163,18 +5321,48 @@ impl UnixApp {
                                 );
                             }
                         }
+                        // Copy and cut act on the selection when there is one,
+                        // which is what a text field is expected to do; with
+                        // only a caret they still fall back to the whole
+                        // draft so the previous shortcut keeps working.
                         input::ComposerKeyAction::Copy => {
-                            if clipboard::set_clipboard_text(&self.composer_buffer).is_ok() {
-                                self.set_status_message("Copied composer draft");
+                            let (text, label) = match self.composer_selected_text() {
+                                Some(selected) => (selected, "Copied selection"),
+                                None => (self.composer_buffer.clone(), "Copied composer draft"),
+                            };
+                            match clipboard::set_clipboard_text(&text) {
+                                Ok(()) => self.set_status_message(label),
+                                Err(error) => {
+                                    self.set_status_message(format!("Copy failed: {error}"))
+                                }
                             }
                         }
                         input::ComposerKeyAction::Cut => {
-                            if clipboard::set_clipboard_text(&self.composer_buffer).is_ok() {
-                                self.composer_buffer.clear();
-                                self.composer_select_all = false;
-                                self.sync_composer_buffer_to_tab();
-                                self.set_status_message("Cut composer draft");
-                                self.request_redraw();
+                            let selected = self.composer_selected_text();
+                            let text = selected
+                                .clone()
+                                .unwrap_or_else(|| self.composer_buffer.clone());
+                            match clipboard::set_clipboard_text(&text) {
+                                Ok(()) => {
+                                    if selected.is_some() {
+                                        let cursor = text_selection::delete_selection(
+                                            &mut self.composer_buffer,
+                                            self.composer_cursor,
+                                        )
+                                        .unwrap_or_default();
+                                        self.set_composer_cursor(cursor);
+                                        self.set_status_message("Cut selection");
+                                    } else {
+                                        self.composer_buffer.clear();
+                                        self.set_composer_cursor(TextCursor::default());
+                                        self.set_status_message("Cut composer draft");
+                                    }
+                                    self.sync_composer_buffer_to_tab();
+                                    self.request_redraw();
+                                }
+                                Err(error) => {
+                                    self.set_status_message(format!("Cut failed: {error}"))
+                                }
                             }
                         }
                         input::ComposerKeyAction::Paste => {
@@ -5231,6 +5419,8 @@ impl UnixApp {
                     self.drag_sidebar_scrollbar(y as i32);
                 } else if self.scroll_drag.is_some() {
                     self.drag_scrollbar(y as i32);
+                } else if self.composer_selection_dragging {
+                    self.drag_composer_selection(x, y);
                 } else if self
                     .terminal_selection_gesture
                     .as_ref()
@@ -5295,6 +5485,8 @@ impl UnixApp {
                     self.end_scroll_drag();
                 } else if self.sidebar_scroll_drag.is_some() {
                     self.end_sidebar_scroll_drag();
+                } else if self.composer_selection_dragging {
+                    self.end_composer_selection();
                 } else {
                     self.complete_terminal_selection();
                 }
