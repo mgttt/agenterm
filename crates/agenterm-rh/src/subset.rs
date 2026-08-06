@@ -48,10 +48,6 @@ fn reject_stmt(stmt: &Stmt) -> Option<RhError> {
             "RH_SUBSET_NO_LOOP",
             "do/switch are not in rh-3",
         )),
-        Stmt::Import(..) | Stmt::Export(..) => Some(subset_error(
-            "RH_SUBSET_NO_MODULE",
-            "import/export are not in rh-2",
-        )),
         Stmt::Share(..) => Some(subset_error(
             "RH_SUBSET_NO_CLOSURE",
             "closure capture is not in rh-2",
@@ -193,12 +189,39 @@ fn validate_root_expr(expr: &Expr) -> Option<RhError> {
     {
         return None;
     }
-    match expr {
-        Expr::Property(..) | Expr::ThisPtr(..) | Expr::Dot(..) | Expr::Index(..) => Some(
-            subset_error("RH_SUBSET_NO_OBJECT", "unsupported object access in rh-2"),
-        ),
-        _ => None,
+    None
+}
+
+/// Fallback validation for scripts that delegate to the full Rhai worker runtime.
+pub fn compat_validate(source: &str, ast: &AST) -> Result<(), RhError> {
+    let _ = source;
+    if ast_contains_eval(ast) {
+        return Err(subset_error(
+            "RH_SUBSET_NO_EVAL",
+            "eval is forbidden in rh",
+        ));
     }
+    Ok(())
+}
+
+pub fn ast_contains_eval(ast: &AST) -> bool {
+    let found = RefCell::new(false);
+    ast.walk(&mut |path| {
+        if *found.borrow() {
+            return false;
+        }
+        let Some(ASTNode::Expr(expr)) = path.last() else {
+            return true;
+        };
+        if let Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) = expr {
+            if call.name == "eval" {
+                *found.borrow_mut() = true;
+                return false;
+            }
+        }
+        true
+    });
+    found.into_inner()
 }
 
 fn reject_call(call: &FnCallExpr) -> Option<RhError> {

@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | **rh-3 收尾**（M21 corpus + M22a caller 清单；M22 替换轨待 Candidate） |
+| 状态 | **rh-3 compat 轨**：58/58 task check + delegating pack（host v3） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -63,7 +63,7 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M19–M21 | bootstrap 构建、Run parity、fixture corpus | [x] |
 | M17 | `try`/`catch` 子集 | [x] |
 | M21 | `corpus-scan` on scripts/rhai + `--tasks` | [x] |
-| M22a | `caller-inventory` operational reference report | [ ] |
+| M22a | `caller-inventory` operational reference report | [x] |
 
 执行计划：[`plan-rh-3.md`](plan-rh-3.md)。**JIT** 在本轨指 **T0–T1 分层 AOT**（源码缓存 + 原生扩面），Cranelift 仍在 RH-4。
 
@@ -73,7 +73,7 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 
 **允许（rh-3 在 rh-2 基础上）：** rh-2 全部 + **`while`（纯 INT 条件）** 原生 AOT。  
 **允许（rh-2）：** rh-1 全部 + `for`、字符串、`throw`、任意 `std::`/`rhai::`/对象链（经 host eval）。  
-**禁止：** `import`/`export`、`do`/`switch`/`try`/闭包捕获。
+**允许（compat 轨）：** 子集/AOT emit 失败时整脚本经 `rh_host_run_script` 走完整 Rhai worker（import、对象、复杂度与 rhai 等价）。
 
 **机制：**
 - 纯 `INT` 控制流/算术 → 原生机器码

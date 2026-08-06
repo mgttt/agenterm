@@ -226,9 +226,8 @@ mod tests {
         })
         .expect("scan");
         assert!(report.scanned >= 50, "scanned {}", report.scanned);
-        assert!(report.passed >= 1, "passed {}", report.passed);
-        assert!(report.failed > 0, "expected subset failures in scripts/rhai");
-        assert_eq!(report.passed + report.failed, report.scanned);
+        assert_eq!(report.passed, report.scanned, "compat check should pass scripts/rhai");
+        assert_eq!(report.failed, 0);
     }
 
     #[test]
@@ -244,7 +243,7 @@ mod tests {
         .expect("scan tasks");
         assert_eq!(report.kind, "agenterm-rh-corpus-scan-tasks");
         assert_eq!(report.scanned, entries.len());
-        assert!(report.passed >= 1);
-        assert!(report.failed > 0);
+        assert_eq!(report.passed, report.scanned);
+        assert_eq!(report.failed, 0);
     }
 }

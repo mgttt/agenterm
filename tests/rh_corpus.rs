@@ -12,7 +12,8 @@ fn scripts_rhai_corpus_scan_from_integration_test() {
     })
     .expect("scan");
     assert!(report.scanned >= 50);
-    assert!(report.failed > 0);
+    assert_eq!(report.failed, 0);
+    assert_eq!(report.passed, report.scanned);
 }
 
 #[test]
@@ -25,8 +26,8 @@ fn task_manifest_corpus_scan_from_integration_test() {
     .expect("scan tasks");
     assert_eq!(report.kind, "agenterm-rh-corpus-scan-tasks");
     assert!(report.scanned >= 50);
-    assert!(report.passed >= 1);
-    assert!(report.failed > 0);
+    assert_eq!(report.failed, 0);
+    assert_eq!(report.passed, report.scanned);
 }
 
 #[test]

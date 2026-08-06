@@ -63,14 +63,63 @@ pub fn call_pack_entry_with_host(
 }
 
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
-    if module.host_api_version() < RH_HOST_API_VERSION {
-        return Err(RhError::Compile(format!(
-            "rh pack host api {} is older than host {}",
-            module.host_api_version(),
-            RH_HOST_API_VERSION
-        )));
+    let api = module.host_api_version();
+    if api >= RH_HOST_API_VERSION {
+        module.register_host_v3(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+        )
+    } else if api >= 2 {
+        module.register_host_v2(host_fleet_call, Some(host_eval_call))
+    } else {
+        Err(RhError::Compile(format!(
+            "rh pack host api {api} is older than the minimum supported version 2"
+        )))
     }
-    module.register_host_v2(host_fleet_call, Some(host_eval_call))
+}
+
+extern "C" fn host_run_script_call(
+    source: *const u8,
+    source_len: u32,
+    out_buf: *mut u8,
+    out_cap: u32,
+) -> i32 {
+    if source.is_null() || out_buf.is_null() || out_cap == 0 {
+        return -1;
+    }
+    let source = match unsafe { read_utf8(source, source_len) } {
+        Ok(value) => value,
+        Err(()) => return -2,
+    };
+    let response = host_run_script_source(&source).map_err(|_| -5);
+    write_response(response, out_buf, out_cap)
+}
+
+fn host_run_script_source(source: &str) -> Result<String, String> {
+    use rhai::{Dynamic, Engine, Scope};
+
+    let project_root = std::env::var("AGENTERM_WORKSPACE_PATH")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| "project root unavailable".to_owned())?;
+    let mut engine = Engine::new();
+    crate::script_runtime::configure_engine(
+        &mut engine,
+        &crate::script_protocol::ScriptBudgets::default(),
+    );
+    let resolver = crate::script_project::ProjectModuleResolver::new(&project_root)
+        .map_err(|error| error.to_string())?;
+    engine.set_module_resolver(resolver);
+    let mut scope = Scope::new();
+    let ast = engine
+        .compile_into_self_contained(&scope, source)
+        .map_err(|error| error.to_string())?;
+    let value = engine
+        .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
+        .map_err(|error| error.to_string())?;
+    encode_host_result(&value)
 }
 
 extern "C" fn host_fleet_call(
@@ -251,6 +300,20 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].0, "protocol.info");
         clear_fleet_bridge();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn native_pack_runs_import_script_via_compat_delegating() {
+        let dir =
+            std::env::temp_dir().join(format!("agenterm-rh-host-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let source = r#"import "scripts/rhai/lib/build_identity" as build_identity;
+fn entry() { 42 }"#;
+        agenterm_rh::build_pack_dir(source, &dir).expect("build");
+        let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
+        let value = call_pack_entry_with_host(&native, None).expect("entry");
+        assert_eq!(value, 42);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
