@@ -18,7 +18,8 @@ cargo test --locked \
   --test rh_regression \
   --test rh_backend \
   --test rh_corpus \
-  --test rh_framed_worker
+  --test rh_framed_worker \
+  --test rh_check_many_forward
 
 echo "== rh host + cache lib tests =="
 cargo test -p agenterm --locked --lib script_rh_host

@@ -34,6 +34,7 @@ call :validate_cache
 if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
 cargo build --quiet --locked --bin agenterm-rhai
+cargo build --quiet --locked -p agenterm-rh --bin agenterm-rh
 if errorlevel 1 goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_CARGO_START_CS% %AGENTERM_BOOTSTRAP_CARGO_END_CS% AGENTERM_BOOTSTRAP_CARGO_CS
@@ -66,6 +67,13 @@ call :clock_cs AGENTERM_BOOTSTRAP_COPY_START_CS
 mkdir "%AGENTERM_BOOTSTRAP_DIR%" >nul 2>nul
 copy /y "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rhai.exe" >nul
 if errorlevel 1 goto :failed
+set "AGENTERM_BOOTSTRAP_RH_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\debug\agenterm-rh.exe"
+if exist "%AGENTERM_BOOTSTRAP_RH_SOURCE%" (
+    for %%A in ("%AGENTERM_BOOTSTRAP_RH_SOURCE%") do if %%~zA GTR 0 (
+        copy /y "%AGENTERM_BOOTSTRAP_RH_SOURCE%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rh.exe" >nul
+        if errorlevel 1 goto :failed
+    )
+)
 for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rhai.exe"') do set "AGENTERM_BOOTSTRAP_INVOKED_HASH=%%H"
 if not "%AGENTERM_BOOTSTRAP_INVOKED_HASH%"=="%AGENTERM_BOOTSTRAP_CACHE_HASH%" goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_COPY_END_CS
