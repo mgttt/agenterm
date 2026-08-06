@@ -8,10 +8,37 @@ fn scripts_rhai_corpus_scan_from_integration_test() {
     let report = agenterm_rh::scan_rhai_directory(agenterm_rh::CorpusScanOptions {
         project_root: repo.clone(),
         relative_dir: "scripts/rhai".to_owned(),
+        ..Default::default()
     })
     .expect("scan");
     assert!(report.scanned >= 50);
     assert!(report.failed > 0);
+}
+
+#[test]
+fn task_manifest_corpus_scan_from_integration_test() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let report = agenterm_rh::scan_task_manifest(agenterm_rh::CorpusScanOptions {
+        project_root: repo,
+        ..Default::default()
+    })
+    .expect("scan tasks");
+    assert_eq!(report.kind, "agenterm-rh-corpus-scan-tasks");
+    assert!(report.scanned >= 50);
+    assert!(report.passed >= 1);
+    assert!(report.failed > 0);
+}
+
+#[test]
+fn caller_inventory_lists_bootstrap_and_ci() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let report = agenterm_rh::scan_caller_inventory(agenterm_rh::CallerInventoryOptions {
+        project_root: repo,
+    })
+    .expect("inventory");
+    assert!(report.hit_count >= 40);
+    assert!(report.categories.get("bootstrap").copied().unwrap_or(0) >= 1);
+    assert!(report.categories.get("ci").copied().unwrap_or(0) >= 5);
 }
 
 #[test]

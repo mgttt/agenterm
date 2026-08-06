@@ -1,8 +1,9 @@
 //! Scan production `.rhai` scripts for rh subset compatibility (report-only).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{check, RhError};
 
@@ -32,6 +33,7 @@ pub struct CorpusScanReport {
 pub struct CorpusScanOptions {
     pub project_root: PathBuf,
     pub relative_dir: String,
+    pub tasks_manifest: Option<PathBuf>,
 }
 
 impl Default for CorpusScanOptions {
@@ -39,11 +41,64 @@ impl Default for CorpusScanOptions {
         Self {
             project_root: PathBuf::from("."),
             relative_dir: "scripts/rhai".to_owned(),
+            tasks_manifest: None,
         }
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct TaskManifest {
+    tasks: Vec<TaskEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskEntry {
+    entry: String,
+}
+
+pub fn extract_task_entries(manifest_path: &Path) -> Result<Vec<String>, RhError> {
+    let metadata = std::fs::metadata(manifest_path).map_err(|err| RhError::Parse(err.to_string()))?;
+    if metadata.len() as usize > 512 * 1024 {
+        return Err(RhError::Parse("task manifest exceeds 512 KiB".into()));
+    }
+    let bytes = std::fs::read(manifest_path).map_err(|err| RhError::Parse(err.to_string()))?;
+    let manifest: TaskManifest =
+        serde_json::from_slice(&bytes).map_err(|err| RhError::Parse(err.to_string()))?;
+    if manifest.tasks.is_empty() || manifest.tasks.len() > SCAN_FILES_MAX {
+        return Err(RhError::Parse(format!(
+            "task manifest must contain 1..={SCAN_FILES_MAX} tasks"
+        )));
+    }
+    let mut entries = HashSet::new();
+    for task in manifest.tasks {
+        if !task.entry.ends_with(".rhai") {
+            return Err(RhError::Parse(format!(
+                "task entry must be a .rhai path: {}",
+                task.entry
+            )));
+        }
+        entries.insert(task.entry.replace('\\', "/"));
+    }
+    let mut sorted = entries.into_iter().collect::<Vec<_>>();
+    sorted.sort();
+    Ok(sorted)
+}
+
+pub fn scan_task_manifest(options: CorpusScanOptions) -> Result<CorpusScanReport, RhError> {
+    let manifest_path = options
+        .tasks_manifest
+        .clone()
+        .unwrap_or_else(|| options.project_root.join("agenterm.tasks.json"));
+    let entries = extract_task_entries(&manifest_path)?;
+    let mut report = scan_relative_files(&options.project_root, &entries)?;
+    report.kind = "agenterm-rh-corpus-scan-tasks";
+    Ok(report)
+}
+
 pub fn scan_rhai_directory(options: CorpusScanOptions) -> Result<CorpusScanReport, RhError> {
+    if options.tasks_manifest.is_some() {
+        return scan_task_manifest(options);
+    }
     let dir = options.project_root.join(&options.relative_dir);
     if !dir.is_dir() {
         return Err(RhError::Parse(format!(
@@ -159,19 +214,37 @@ pub fn scan_relative_files(root: &Path, paths: &[String]) -> Result<CorpusScanRe
 mod tests {
     use std::path::PathBuf;
 
-    use super::{scan_rhai_directory, CorpusScanOptions};
+    use super::{extract_task_entries, scan_rhai_directory, scan_task_manifest, CorpusScanOptions};
 
     #[test]
     fn scripts_rhai_scan_produces_report() {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let report = scan_rhai_directory(CorpusScanOptions {
-            project_root: repo,
+            project_root: repo.clone(),
             relative_dir: "scripts/rhai".to_owned(),
+            ..CorpusScanOptions::default()
         })
         .expect("scan");
         assert!(report.scanned >= 50, "scanned {}", report.scanned);
         assert!(report.passed >= 1, "passed {}", report.passed);
         assert!(report.failed > 0, "expected subset failures in scripts/rhai");
         assert_eq!(report.passed + report.failed, report.scanned);
+    }
+
+    #[test]
+    fn task_manifest_scan_covers_named_tasks() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let entries = extract_task_entries(&repo.join("agenterm.tasks.json")).expect("entries");
+        assert!(entries.len() >= 50, "entries {}", entries.len());
+        let report = scan_task_manifest(CorpusScanOptions {
+            project_root: repo,
+            tasks_manifest: None,
+            ..CorpusScanOptions::default()
+        })
+        .expect("scan tasks");
+        assert_eq!(report.kind, "agenterm-rh-corpus-scan-tasks");
+        assert_eq!(report.scanned, entries.len());
+        assert!(report.passed >= 1);
+        assert!(report.failed > 0);
     }
 }

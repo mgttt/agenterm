@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | **rh-3 进行中**（while 原生 AOT + `agenterm-rh eval`；见 [`plan-rh-3.md`](plan-rh-3.md)） |
+| 状态 | **rh-3 收尾**（M21 corpus + M22a caller 清单；M22 替换轨待 Candidate） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -62,7 +62,8 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M18 | `agenterm-rh check-many` | [x] |
 | M19–M21 | bootstrap 构建、Run parity、fixture corpus | [x] |
 | M17 | `try`/`catch` 子集 | [x] |
-| M21 | `corpus-scan` on scripts/rhai | [x] |
+| M21 | `corpus-scan` on scripts/rhai + `--tasks` | [x] |
+| M22a | `caller-inventory` operational reference report | [ ] |
 
 执行计划：[`plan-rh-3.md`](plan-rh-3.md)。**JIT** 在本轨指 **T0–T1 分层 AOT**（源码缓存 + 原生扩面），Cranelift 仍在 RH-4。
 

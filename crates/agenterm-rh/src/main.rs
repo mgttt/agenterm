@@ -2,8 +2,8 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
     RH_VERSION, RhError, build_pack_dir, check, compile_native, hash_file, load_and_call_entry,
-    qualify_pack_dir, read_manifest, run_check_many, scan_rhai_directory, transpile, write_receipt,
-    CheckManyOptions, CorpusScanOptions,
+    qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory, scan_rhai_directory,
+    transpile, write_receipt, CallerInventoryOptions, CheckManyOptions, CorpusScanOptions,
 };
 
 fn main() -> ExitCode {
@@ -38,6 +38,9 @@ fn run() -> Result<(), RhError> {
         }
         "corpus-scan" => {
             run_corpus_scan_command(&mut args)?;
+        }
+        "caller-inventory" => {
+            run_caller_inventory_command(&mut args)?;
         }
         "transpile" => {
             let path = require_path(&mut args, "transpile")?;
@@ -145,7 +148,7 @@ fn run() -> Result<(), RhError> {
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | check-many | corpus-scan | transpile | compile | eval | run-smoke | pack | qualify | hash | version"
+                "unknown command `{other}`; try check | check-many | corpus-scan | caller-inventory | transpile | compile | eval | run-smoke | pack | qualify | hash | version"
             )));
         }
     }
@@ -215,6 +218,7 @@ fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<(),
 fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
     let mut project_root = PathBuf::from(".");
     let mut relative_dir = "scripts/rhai".to_owned();
+    let mut tasks_manifest = None::<PathBuf>;
     let mut json = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -229,6 +233,12 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<()
                     .next()
                     .ok_or_else(|| RhError::Parse("missing path after --dir".into()))?;
             }
+            "--tasks" => {
+                tasks_manifest = Some(match args.next() {
+                    Some(path) => PathBuf::from(path),
+                    None => project_root.join("agenterm.tasks.json"),
+                });
+            }
             "--json" => json = true,
             other => return Err(RhError::Parse(format!("unknown corpus-scan option `{other}`"))),
         }
@@ -236,6 +246,7 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<()
     let report = scan_rhai_directory(CorpusScanOptions {
         project_root,
         relative_dir,
+        tasks_manifest,
     })?;
     if json {
         let encoded = serde_json::to_string_pretty(&report)
@@ -248,6 +259,42 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<()
         );
         for entry in report.entries.iter().filter(|entry| entry.ok) {
             println!("  OK  {}", entry.path);
+        }
+    }
+    Ok(())
+}
+
+fn run_caller_inventory_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
+    let mut project_root = PathBuf::from(".");
+    let mut json = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--root" => {
+                project_root = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| RhError::Parse("missing path after --root".into()))?,
+                );
+            }
+            "--json" => json = true,
+            other => {
+                return Err(RhError::Parse(format!(
+                    "unknown caller-inventory option `{other}`"
+                )));
+            }
+        }
+    }
+    let report = scan_caller_inventory(CallerInventoryOptions { project_root })?;
+    if json {
+        let encoded = serde_json::to_string_pretty(&report)
+            .map_err(|err| RhError::Parse(err.to_string()))?;
+        println!("{encoded}");
+    } else {
+        println!(
+            "caller-inventory: {} hits in {} scanned files",
+            report.hit_count, report.scanned_files
+        );
+        for (category, count) in &report.categories {
+            println!("  {category}: {count}");
         }
     }
     Ok(())
@@ -321,7 +368,8 @@ fn print_usage() {
          commands:\n\
            check <file>                      validate rh subset\n\
            check-many --manifest FILE        bounded multi-file rh subset check\n\
-           corpus-scan [--root PATH] [--dir REL]  scan .rhai scripts for rh subset fit\n\
+           corpus-scan [--root PATH] [--dir REL|--tasks [MANIFEST]]  scan .rhai scripts or task entries\n\
+           caller-inventory [--root PATH]            report agenterm-rhai operational references\n\
            transpile <file> [-o rs]            emit Rust source for AOT\n\
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
            eval <file>                         check + AOT pack + dlopen entry (dev loop)\n\
