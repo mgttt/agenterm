@@ -1,0 +1,13 @@
+fn entry() {
+    let sum = 0;
+    for i in 1..10 {
+        if i == 3 {
+            continue;
+        }
+        if i == 8 {
+            break;
+        }
+        sum += i;
+    }
+    sum
+}

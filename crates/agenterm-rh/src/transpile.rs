@@ -513,6 +513,18 @@ fn emit_stmt(
             emit_call(out, call, ctx)?;
             out.push_str(";\n");
         }
+        Stmt::BreakLoop(expr, flags, ..) => {
+            if expr.is_some() {
+                return Err(RhError::Transpile(
+                    "break/continue with value is not in rh-3".into(),
+                ));
+            }
+            if flags.contains(ASTFlags::BREAK) {
+                out.push_str("    break;\n");
+            } else {
+                out.push_str("    continue;\n");
+            }
+        }
         Stmt::Noop(..) => {}
         other => {
             return Err(RhError::Transpile(format!(
@@ -594,6 +606,18 @@ fn emit_try_stmt(
             out.push_str("        return Err(");
             emit_expr(out, expr, ctx)?;
             out.push_str(");\n");
+        }
+        Stmt::BreakLoop(expr, flags, ..) => {
+            if expr.is_some() {
+                return Err(RhError::Transpile(
+                    "break/continue with value is not in rh-3".into(),
+                ));
+            }
+            if flags.contains(ASTFlags::BREAK) {
+                out.push_str("        break;\n");
+            } else {
+                out.push_str("        continue;\n");
+            }
         }
         Stmt::FnCall(call, ..) if call.name == "throw" => {
             out.push_str("        ");

@@ -285,7 +285,7 @@ mod tests {
         manifest.kind = super::RHAI_CHECK_MANIFEST_KIND.to_owned();
         let report = run_check_many(manifest, parsed.options);
         assert!(report.ok, "failures: {:?}", report.failures);
-        assert_eq!(report.checked_files, 7);
+        assert_eq!(report.checked_files, 8);
     }
 
     #[test]
@@ -305,6 +305,6 @@ mod tests {
             "failures: {:?}",
             report.failures
         );
-        assert_eq!(report.checked_files, 7);
+        assert_eq!(report.checked_files, 8);
     }
 }

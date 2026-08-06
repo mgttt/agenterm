@@ -8,6 +8,7 @@
     "fixtures/rh/while.rh",
     "fixtures/rh/while-count.rh",
     "fixtures/rh/try-catch.rh",
-    "fixtures/rh/try-ok.rh"
+    "fixtures/rh/try-ok.rh",
+    "fixtures/rh/break-continue.rh"
   ]
 }

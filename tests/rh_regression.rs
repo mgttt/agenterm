@@ -18,6 +18,7 @@ fn check_accepts_all_fixtures() {
         ("try-ok", include_str!("../fixtures/rh/try-ok.rh")),
         ("for-range", include_str!("../fixtures/rh/for-range.rh")),
         ("for-dyn-range", include_str!("../fixtures/rh/for-dyn-range.rh")),
+        ("break-continue", include_str!("../fixtures/rh/break-continue.rh")),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -89,6 +90,15 @@ fn for_range_fixture_transpile_emits_native_loop() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("for value in 1..5"));
     assert!(!rust.contains("rh_host_eval_int(\"for"));
+}
+
+#[test]
+fn break_continue_fixture_transpile_emits_native_control_flow() {
+    let source = include_str!("../fixtures/rh/break-continue.rh");
+    let rust = transpile_cdylib(source).expect("transpile");
+    assert!(rust.contains("continue;"));
+    assert!(rust.contains("break;"));
+    assert!(!rust.contains("rh_host_eval_int(\"break"));
 }
 
 #[test]
