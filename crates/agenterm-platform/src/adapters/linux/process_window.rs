@@ -724,6 +724,13 @@ pub(crate) fn facts(process_id: u32) -> ProcessWindowFacts {
     }
 }
 
+pub(crate) fn activate(process_id: u32) -> Result<(), ProcessWindowError> {
+    let _ = process_id;
+    Err(unsupported(
+        "activate process window is not implemented on this host",
+    ))
+}
+
 pub(crate) fn key(process_id: u32, key: ProcessWindowKey) -> Result<(), ProcessWindowError> {
     #[cfg(target_os = "linux")]
     {

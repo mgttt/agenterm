@@ -4883,7 +4883,7 @@ impl RemoteWindowState {
         }
         match self.instance_picker_dialog.mode() {
             InstancePickerMode::OpenAnother => {
-                self.spawn_gui_for_instance(&row.instance)?;
+                self.focus_existing_or_spawn_instance_gui(&row.instance, &row.endpoint)?;
                 self.close_instance_picker();
             }
             InstancePickerMode::Attach => {
@@ -4938,13 +4938,15 @@ impl RemoteWindowState {
             }
             Err(error) => {
                 let message = error.to_string();
-                // Target already has a replaceable UI — focus that window instead of stealing.
-                if message.contains("rejected replaceable UI") || message.contains("rejected") {
+                // Interactive GUI lease is single-owner (PRD). Do not spawn a twin that
+                // cannot attach — restore this window and bring the owner forward.
+                if message.contains("rejected replaceable UI")
+                    || message.contains("rejected")
+                    || message.contains("ui_lease_conflict")
+                    || message.contains("another live UI client")
+                {
                     restore_previous(self);
-                    self.spawn_gui_for_instance(instance)?;
-                    self.last_message = Some(format!(
-                        "Instance `{instance}` already has a GUI; focusing that window"
-                    ));
+                    self.focus_existing_or_spawn_instance_gui(instance, endpoint)?;
                     self.server_recovery.on_reconnected(Instant::now());
                     self.refresh_window_title();
                     self.window.request_redraw();
@@ -4972,6 +4974,92 @@ impl RemoteWindowState {
         self.refresh_window_title();
         self.window.request_redraw();
         Ok(())
+    }
+
+    /// Query `ui-lease status` on a peer without taking the interactive lease.
+    fn query_ui_lease_owner_pid(endpoint: &str) -> Option<u32> {
+        let response = crate::client::send_ipc_request_to_timeout(
+            endpoint,
+            vec!["ui-lease".to_owned(), "status".to_owned()],
+            std::time::Duration::from_millis(800),
+        )
+        .ok()?;
+        if !response.ok {
+            return None;
+        }
+        let value: serde_json::Value = serde_json::from_str(response.output.trim()).ok()?;
+        if value.get("attached").and_then(|flag| flag.as_bool()) != Some(true) {
+            return None;
+        }
+        value
+            .get("client_pid")
+            .and_then(|pid| pid.as_u64())
+            .and_then(|pid| u32::try_from(pid).ok())
+            .filter(|pid| *pid != 0)
+    }
+
+    fn activate_gui_process(pid: u32) -> Result<()> {
+        agenterm_platform::process_window::activate(pid).map_err(|error| {
+            anyhow::anyhow!(
+                "could not foreground GUI PID {pid}: {} ({})",
+                error.message,
+                error.code
+            )
+        })
+    }
+
+    /// As Window / focus path: one interactive GUI lease per server (PRD).
+    /// Prefer bringing the existing owner forward; only spawn when nobody holds it.
+    fn focus_existing_or_spawn_instance_gui(
+        &mut self,
+        instance: &str,
+        endpoint: &str,
+    ) -> Result<()> {
+        let short = instance.strip_prefix("custom:").unwrap_or(instance);
+        let current =
+            InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
+        if current.as_ref().is_some_and(|id| {
+            id.instance == instance
+                || id.instance.strip_prefix("custom:") == Some(short)
+                || id.instance.ends_with(&format!("_{short}"))
+                || id.instance == short
+        }) {
+            // This window already owns the interactive projection for that server.
+            let _ = self.window.focus();
+            self.last_message = Some(format!(
+                "This window is already the interactive GUI for `{short}` \
+                 (one replaceable UI lease per server; CLI/mux still share the authority)"
+            ));
+            self.window.request_redraw();
+            return Ok(());
+        }
+        if let Some(pid) = Self::query_ui_lease_owner_pid(endpoint) {
+            if pid == std::process::id() {
+                let _ = self.window.focus();
+                self.last_message = Some(format!(
+                    "This process already holds the interactive GUI for `{short}`"
+                ));
+                self.window.request_redraw();
+                return Ok(());
+            }
+            match Self::activate_gui_process(pid) {
+                Ok(()) => {
+                    self.last_message = Some(format!(
+                        "Server `{short}` already has an interactive GUI (PID {pid}); \
+                         brought that window forward (this window stays on its server)"
+                    ));
+                    self.window.request_redraw();
+                    return Ok(());
+                }
+                Err(error) => {
+                    // Stale lease / no HWND — fall through and try a fresh GUI.
+                    self.last_error = Some(format!(
+                        "Could not foreground existing GUI PID {pid}: {error:#}; starting a new window"
+                    ));
+                }
+            }
+        }
+        self.spawn_gui_for_instance(short)
     }
 
     fn spawn_gui_for_instance(&mut self, instance: &str) -> Result<()> {
@@ -5155,11 +5243,9 @@ impl RemoteWindowState {
             if let Some(menu) = menu {
                 match action {
                     ServerContextAction::NewWindow => {
-                        let short = menu
-                            .instance
-                            .strip_prefix("custom:")
-                            .unwrap_or(menu.instance.as_str());
-                        if let Err(error) = self.spawn_gui_for_instance(short) {
+                        if let Err(error) = self
+                            .focus_existing_or_spawn_instance_gui(&menu.instance, &menu.endpoint)
+                        {
                             self.last_error = Some(format!("{error:#}"));
                         }
                     }
@@ -8925,6 +9011,38 @@ mod tests {
         assert!(
             !source.contains("\"New Window\""),
             "prefer As Window label over New Window"
+        );
+        assert!(
+            source.contains("focus_existing_or_spawn_instance_gui"),
+            "As Window / busy-server attach must focus existing interactive lease owner"
+        );
+        assert!(
+            source.contains("query_ui_lease_owner_pid"),
+            "must read ui-lease status client_pid without stealing the lease"
+        );
+    }
+
+    #[test]
+    fn ui_lease_status_json_exposes_owner_pid_when_attached() {
+        let attached: serde_json::Value = serde_json::json!({
+            "schema_version": 1,
+            "attached": true,
+            "client_pid": 4242u64,
+        });
+        assert_eq!(
+            attached
+                .get("client_pid")
+                .and_then(|pid| pid.as_u64())
+                .and_then(|pid| u32::try_from(pid).ok()),
+            Some(4242)
+        );
+        let free: serde_json::Value = serde_json::json!({
+            "attached": false,
+            "client_pid": null,
+        });
+        assert!(
+            free.get("attached").and_then(|flag| flag.as_bool()) != Some(true)
+                || free.get("client_pid").and_then(|pid| pid.as_u64()).is_none()
         );
     }
 

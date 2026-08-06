@@ -69,6 +69,29 @@ fn control(
     }
 }
 
+/// Bring a process's top-level window to the foreground (best-effort).
+pub(crate) fn activate(process_id: u32) -> Result<(), ScriptWindowError> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
+    let window = required_window(process_id)?;
+    unsafe {
+        if IsIconic(window) != 0 {
+            let _ = ShowWindow(window, SW_RESTORE);
+        }
+        if SetForegroundWindow(window) == 0 {
+            // Still restore visibility even when foreground rules block focus.
+            let _ = ShowWindow(window, SW_RESTORE);
+            return Err(error(
+                "process_window_activate",
+                "could not foreground process window",
+                "platform_error",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn facts(process_id: u32) -> ScriptWindowFacts {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,

@@ -10,6 +10,11 @@ use crate::selected::process_window as adapter;
 pub fn facts(process_id: u32) -> ProcessWindowFacts {
     adapter::facts(process_id)
 }
+
+/// Best-effort bring a process top-level window to the foreground.
+pub fn activate(process_id: u32) -> Result<(), ProcessWindowError> {
+    adapter::activate(process_id)
+}
 pub fn key(process_id: u32, key: ProcessWindowKey) -> Result<(), ProcessWindowError> {
     adapter::key(process_id, key)
 }

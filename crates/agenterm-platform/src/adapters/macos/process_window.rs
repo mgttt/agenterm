@@ -382,6 +382,15 @@ fn event_source() -> Result<OwnedCf, ProcessWindowError> {
     )
 }
 
+pub(crate) fn activate(process_id: u32) -> Result<(), ProcessWindowError> {
+    let _ = process_id;
+    Err(ProcessWindowError::new(
+        "process_window_unsupported",
+        "activate process window is not implemented on this host",
+        Some("unsupported"),
+    ))
+}
+
 pub(crate) fn facts(process_id: u32) -> ProcessWindowFacts {
     match search_windows(process_id) {
         Ok(search) => match resolve_candidates(&search.candidates) {
