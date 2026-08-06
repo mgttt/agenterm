@@ -2589,3 +2589,52 @@ ui-input key --key NAME [--mods shift,ctrl,alt,meta]
 优先级 1 我可以直接开工（改动小、状态机现成、用户可感知）。
 2/3/4 是「要不要把 Windows-first 的多实例 UX 补到 macOS」的**产品排期问题**，
 5 需要先定 macOS 菜单的形态——这三类都**等你拍板**，我不自己定。
+
+## 12. OSX 对齐 Win：优先级 1 已交付（2026-08-06 深夜）
+
+### 12.1 Settings 逐终端外观 —— 已上线
+
+macOS 用户以前**只能改全局外观**：Settings 没有作用域切换，无法给某个终端单独
+设字体/字号/主题，也看不到某个字段是继承还是覆写。Windows 从共享对话框写出来
+那天起就有。
+
+三个缺陷层层遮掩，逐个揭开：
+
+1. `open_settings` 传 `target_tab_id: None`，而 `switch_scope` **在没有目标终端时
+   一律拒绝** —— 所以 Current Terminal 作用域根本进不去，尽管状态机支持。
+2. 六个 ui-action **哪里都没有 dispatch 分支**。我加在**共享 `control_dispatch`**
+   而不是 Unix adapter 里，这样两端共用一份实现，也堵死了将来冒出第三份的路。
+3. `close_settings` 只应用了 `changes.default_appearance`，**丢掉了
+   `changes.override_draft`** —— 即使作用域切过去了，Apply 也会静默吃掉用户的修改。
+
+**状态机本身（`src/frontend/settings.rs` 的 `SettingsScope`/`AppearanceField`/
+`switch_scope`/`toggle_inheritance`/`reset_overrides`）一行没改** —— Unix 只是
+从来没调用过它。这印证了 §11.2 的判断。
+
+实机验证：开 → `scope=defaults, target=@5` → `settings-current` →
+`scope=current-terminal` → toggle + apply → `current_terminal_override =
+{appearance_preset: "classic-night"}` → reset + apply → `None`。
+
+catalog：SHARED **44 → 50**，WINDOWS_ONLY **14 → 8**。
+
+### 12.2 顺手修掉一个会静默失败的安装事故
+
+`install.sh` 被 `6b7ea4d` 改成了**全文 601 行 CRLF**，在 macOS/Linux 上直接死在
+shebang：
+
+```
+env: bash\r: No such file or directory
+```
+
+**而且丢弃输出时它是静默失败的** —— 我自己就为此丢过一次构建，直到发现装进去的
+镜像比 `target/release` 老了几个钟头才察觉。凡是 `./install.sh ... >/dev/null`
+的调用都会「看起来成功、实际没装」。
+
+`.gitattributes` 本来就把 `Cargo.lock` 和 JSON 清单钉成 LF，但**没有 shell 脚本
+规则**，已补 `*.sh text eol=lf`。install.sh 是唯一受影响的脚本。
+
+### 12.3 剩下的 8 个 WINDOWS_ONLY 全是多实例 UI
+
+`instance-picker-*`（5 个）、`open-instance-picker`、`open-instance`、
+`select-server-tab`。对应 §11.3 的优先级 2/3/4，**都是「要不要把 Windows-first
+的多实例 UX 补到 macOS」这一个产品排期问题**，等拍板。
