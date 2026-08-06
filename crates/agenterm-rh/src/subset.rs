@@ -274,6 +274,7 @@ mod tests {
         validate_ast(&ast).expect("subset");
     }
 
+    #[test]
     fn accepts_for_int_range() {
         let ast = Engine::new()
             .compile("fn entry() { for x in 1..5 { if x == 4 { return 7; } } 0 }")
