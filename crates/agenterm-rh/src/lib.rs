@@ -1,3 +1,4 @@
+pub mod caller_inventory;
 pub mod check;
 pub mod check_many;
 pub mod compile;
@@ -13,11 +14,17 @@ pub mod qualify;
 pub mod subset;
 pub mod transpile;
 
+pub use caller_inventory::{
+    scan_caller_inventory, CallerHit, CallerInventoryOptions, CallerInventoryReport,
+};
 pub use check::check;
 pub use check_many::{
     read_manifest, run_check_many, CheckManyManifest, CheckManyOptions, CheckManyReport,
 };
-pub use corpus::{scan_rhai_directory, scan_relative_files, CorpusScanOptions, CorpusScanReport};
+pub use corpus::{
+    extract_task_entries, scan_rhai_directory, scan_relative_files, scan_task_manifest,
+    CorpusScanOptions, CorpusScanReport,
+};
 pub use compile::{
     CompileOutput, compile_native, compile_native_for_target, hash_bytes, hash_file,
 };

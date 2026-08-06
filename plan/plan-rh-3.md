@@ -35,6 +35,7 @@
 | M19 | rh-3c：bootstrap / CI 默认构建 `agenterm-rh` 二进制 | [x] |
 | M20 | rh-3d：worker 路径 `Run`/`Eval` 黑盒 parity（rh_backend 扩展） | [x] |
 | M21 | rh-4：task corpus 扫描器（62 脚本 rh-2/3 校验报告，不强制迁移） | [x] |
+| M22a | M22 预备：`caller-inventory` + `corpus-scan --tasks` 机器可读报告 | [ ] |
 | M22 | 替换轨：`agenterm-rhai` → 薄转发或 rename（需全量 caller 清单 + Candidate 证据） | [ ] |
 
 ---
