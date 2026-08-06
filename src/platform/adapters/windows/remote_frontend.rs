@@ -1153,10 +1153,8 @@ impl RemoteWindowState {
                     Some(WindowCloseChoice::StopServerAndExit)
                 ),
             )?;
-        if let Some((endpoint, instance)) = self.relay_attach_after_completion.take() {
-            if let Err(error) = self.attach_current_window_to_endpoint(&endpoint, &instance) {
-                self.last_error = Some(format!("instance attach failed: {error:#}"));
-            }
+        if self.relay_attach_after_completion.is_some() {
+            self.flush_deferred_server_tab_attach();
             return Ok(true);
         }
         if let Some(choice) = close_after_completion {
@@ -4458,9 +4456,28 @@ impl RemoteWindowState {
             self.last_message = Some(format!("Already on `{}`", row.instance));
             return Ok(());
         }
-        // Defer rebind so the UI command completes on the current server lease.
+        // Defer rebind so a relayed UI command can complete on the *current*
+        // server lease. Mouse clicks flush this immediately (see
+        // `flush_deferred_server_tab_attach`).
         self.relay_attach_after_completion = Some((row.endpoint, row.instance));
         Ok(())
+    }
+
+    /// Apply a pending server-tab rebind outside the UI-command completion path.
+    ///
+    /// Mouse clicks queue attach via `select_server_tab` but never run
+    /// `process_client_command`, so without this flush the strip looked
+    /// clickable while remaining effectively read-only.
+    fn flush_deferred_server_tab_attach(&mut self) {
+        let Some((endpoint, instance)) = self.relay_attach_after_completion.take() else {
+            return;
+        };
+        if let Err(error) = self.attach_current_window_to_endpoint(&endpoint, &instance) {
+            self.last_error = Some(format!("instance attach failed: {error:#}"));
+        } else {
+            self.last_message = Some(format!("Switched to `{instance}`"));
+        }
+        self.window.request_redraw();
     }
 
     fn paint_server_strip(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
@@ -5550,13 +5567,18 @@ impl RemoteWindowState {
 
     fn handle_left_button_down(&mut self, x: i32, y: i32) -> bool {
         self.recent_sidebar_text_click = None;
-        // Top multi-server strip stays clickable even when a full modal is open
-        // only if no modal is blocking — otherwise modals own the surface.
+        // Top multi-server strip: hit-test first so tab chrome stays clickable
+        // whenever no full modal owns the surface. Flush attach immediately —
+        // unlike `ui-action select-server-tab`, mouse input is not a relayed
+        // command and will never reach process_client_command's post-complete
+        // rebind path.
         if !self.focus_gate().full_modal_blocked()
             && let Some(instance) = self.server_tab_instance_at(x, y)
         {
             if let Err(error) = self.select_server_tab(&instance) {
                 self.last_error = Some(format!("{error:#}"));
+            } else {
+                self.flush_deferred_server_tab_attach();
             }
             return true;
         }
