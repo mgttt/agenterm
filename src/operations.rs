@@ -17,6 +17,8 @@ pub const CONTROL_CENTER_OPEN: &str = "control-center.open";
 pub const CONTROL_CENTER_STATUS: &str = "control-center.status";
 pub const CONTROL_CENTER_SNAPSHOT: &str = "control-center.snapshot";
 pub const CONTROL_CENTER_CLOSE: &str = "control-center.close";
+pub const UI_INPUT_POINTER: &str = "ui.input.pointer";
+pub const UI_INPUT_WHEEL: &str = "ui.input.wheel";
 pub const TABS_SET_NOTE: &str = "tabs.set-note";
 pub const TAB_NOTE_MAX_BYTES: usize = 4096;
 
@@ -170,6 +172,22 @@ const CAPTURE_PARAMETERS: &[OperationParameterSpec] = &[
         required: true,
         minimum: Some(1),
         maximum: Some(1024 * 1024),
+    },
+];
+const POINTER_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "x",
+        value_type: "number",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "y",
+        value_type: "number",
+        required: true,
+        minimum: None,
+        maximum: None,
     },
 ];
 const TABS_WIDTH_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpec {
@@ -517,6 +535,36 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         since: "0.1.6",
     },
     OperationSpec {
+        id: UI_INPUT_POINTER,
+        script_surface: "fleet.ui.input.pointer",
+        class: OperationClass::Control,
+        command: "ui-input",
+        action: Some("pointer"),
+        aliases: &[],
+        parameters: POINTER_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.15",
+    },
+    OperationSpec {
+        id: UI_INPUT_WHEEL,
+        script_surface: "fleet.ui.input.wheel",
+        class: OperationClass::Control,
+        command: "ui-input",
+        action: Some("wheel"),
+        aliases: &[],
+        parameters: POINTER_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.15",
+    },
+    OperationSpec {
         id: UI_WINDOW_ACTIVATE,
         script_surface: "fleet.ui.window.activate",
         class: OperationClass::Control,
@@ -634,6 +682,14 @@ pub(crate) fn operation_for_args(
         }
         "kill-server" | "server-kill" => operation_by_id("server.kill"),
         "shutdown" => operation_by_id("workspace.shutdown"),
+        "ui-input" => {
+            let id = match args.get(1).map(String::as_str) {
+                Some("pointer") => UI_INPUT_POINTER,
+                Some("wheel") => UI_INPUT_WHEEL,
+                _ => return Ok(None),
+            };
+            operation_by_id(id)
+        }
         "ui-action" => {
             let Some(action) = args.get(1).map(String::as_str) else {
                 return Ok(None);

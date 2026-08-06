@@ -7966,6 +7966,27 @@ impl ControlWindowApplication for RemoteWindowApplication {
         Ok(ControlWindowDirective::Redraw)
     }
 
+    /// REVIEW(macos → windows owner): `ui-input` parity.
+    ///
+    /// v0.1.15 adds `ui-input pointer|wheel` (registered in `src/commands.rs`,
+    /// `src/operations.rs` and `prd/PRD_02_15_command_line.md`), giving an agent
+    /// the pointer affordances a human has, in the same pixel space
+    /// `ui-snapshot` already reports element bounds in. It is implemented on the
+    /// Unix frontend only, so on Windows the command currently does nothing.
+    ///
+    /// The argument parsing is deliberately platform-neutral and already shared:
+    /// `crate::frontend::pointer_input::parse_pointer_request` returns a
+    /// `PointerRequest` with no OS types in it. Porting should be about this
+    /// function — synthesize `ControlWindowEvent::PointerButton`/`PointerMoved`/
+    /// `MouseWheel` and feed them here, exactly as `apply_pointer_request` does
+    /// for `PixelWindowEvent` in `adapters/unix/frontend/mod.rs`.
+    ///
+    /// The one rule worth keeping: do **not** call the hit-test or click
+    /// handlers directly. Routing synthetic gestures through the ordinary event
+    /// path is what stops machine input from drifting away from human input —
+    /// and note the composer here is a native `EDIT` control, so a press
+    /// delivered to the window will not reach it the way it reaches the
+    /// self-drawn Unix composer; that case needs its own decision.
     fn event(
         &mut self,
         _window: &ControlWindow,
