@@ -212,6 +212,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   synchronous pipeline behavior, and child exit-code propagation in both
   `cmd.exe` and PowerShell
 - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
+- [x] `agenterm-cli mux ...` and `agenterm-cli mcp ...` host those two
+  frontends in-process, so a deployment can ship one executable instead of
+  three. Each subcommand strips its own name and delegates to the same entry
+  the dedicated binary calls, so the two spellings execute one implementation
+  and cannot drift; output is byte-identical. Routing is decided before the
+  CLI parses its own options, because both frontends own their flag grammar
+  (`mux --address` must reach the mux parser). The dedicated executables
+  remain for compatibility. Control Center is deliberately **not** folded in:
+  it is a separate authority whose product design is still open.
 - [ ] `agenterm-cc.exe` / `agenterm-cc`: independent AgenTerm Control Center
   client. It owns only its window, navigation and uncommitted display state;
   it observes and controls existing authorities through public typed

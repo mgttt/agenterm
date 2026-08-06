@@ -139,8 +139,49 @@ struct CliControlOptions {
     receipt_json: bool,
 }
 
+/// A frontend `agenterm-cli` hosts in-process to keep the shipped executable
+/// count down.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HostedSubcommand {
+    Mux,
+    Mcp,
+}
+
+/// Resolves the leading argument to a hosted frontend, if any.
+///
+/// Only an exact bare word counts. A leading `-` is always an option for the
+/// CLI itself, and `agenterm-cli mux` must not be reachable by accident from
+/// something like a `--endpoint mux` value, which is why this looks at the
+/// first argument only and does not scan.
+pub(crate) fn hosted_subcommand(first: Option<&str>) -> Option<HostedSubcommand> {
+    match first {
+        Some("mux") => Some(HostedSubcommand::Mux),
+        Some("mcp") => Some(HostedSubcommand::Mcp),
+        _ => None,
+    }
+}
+
 pub fn run_cli_entry() -> i32 {
     let mut arguments: Vec<String> = env::args().skip(1).collect();
+    // `mux` and `mcp` are hosted here as subcommands so a deployment ships one
+    // executable instead of three. Each strips its own name and delegates to
+    // the same entry the standalone binary calls, so there is one
+    // implementation and the two spellings cannot diverge. The dedicated
+    // binaries stay for compatibility.
+    //
+    // Checked before option parsing because both surfaces own their own flag
+    // grammar -- `mux --address` must reach the mux parser, not this one.
+    match hosted_subcommand(arguments.first().map(String::as_str)) {
+        Some(HostedSubcommand::Mux) => {
+            arguments.remove(0);
+            return run_mux_entry_with_args(arguments);
+        }
+        Some(HostedSubcommand::Mcp) => {
+            arguments.remove(0);
+            return crate::mcp_catalog::run_mcp_entry_with_args(arguments);
+        }
+        None => {}
+    }
     let mut control_options = CliControlOptions::default();
     let mut selectors = EndpointSelectorArgs::default();
     loop {
@@ -1431,7 +1472,17 @@ where
 }
 
 pub fn run_mux_entry() -> i32 {
-    let mut arguments: Vec<String> = env::args().skip(1).collect();
+    run_mux_entry_with_args(env::args().skip(1).collect())
+}
+
+/// Runs the mux frontend over an explicit argument list.
+///
+/// Taking the arguments instead of reading `env::args` is what lets
+/// `agenterm-cli mux …` host this surface in-process: the subcommand strips its
+/// own name and hands the remainder here, so both entry points execute the same
+/// code and cannot drift.
+pub fn run_mux_entry_with_args(arguments: Vec<String>) -> i32 {
+    let mut arguments = arguments;
     if arguments
         .first()
         .is_some_and(|arg| arg == "-V" || arg == "--version")
@@ -4878,6 +4929,8 @@ AgenTerm CLI - control the native tabbed terminal
 Usage:
   agenterm-cli [--endpoint ENDPOINT|--address HOST:PORT|--instance NAME] [--request-id ID] [--deadline-ms MS]
                 [--receipt-json] command [args...]
+  agenterm-cli mux COMMAND [ARGS...]     (hosts the agenterm-mux frontend)
+  agenterm-cli mcp COMMAND [ARGS...]     (hosts the agenterm-mcp sidecar)
   agenterm-cli list-instances [--json] [--prune]
   agenterm-cli server-list [--json] [--prune]
   agenterm-cli control-center open|status|snapshot|close [--no-activate]
@@ -5116,8 +5169,28 @@ fn print_mux_compatibility(json: bool) {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_script_source, parse_loopback_ipc_address, parse_terminal_grid, run_wait_ui,
+        HostedSubcommand, hosted_subcommand, normalize_script_source, parse_loopback_ipc_address,
+        parse_terminal_grid, run_wait_ui,
     };
+
+    #[test]
+    fn mux_and_mcp_are_hosted_as_bare_subcommands() {
+        assert_eq!(hosted_subcommand(Some("mux")), Some(HostedSubcommand::Mux));
+        assert_eq!(hosted_subcommand(Some("mcp")), Some(HostedSubcommand::Mcp));
+    }
+
+    #[test]
+    fn ordinary_cli_arguments_are_not_mistaken_for_a_hosted_frontend() {
+        // Options and real commands must keep reaching the CLI's own parser.
+        for argument in ["--endpoint", "-t", "list-sessions", "ui-snapshot", ""] {
+            assert_eq!(hosted_subcommand(Some(argument)), None, "{argument}");
+        }
+        assert_eq!(hosted_subcommand(None), None);
+        // Near-misses stay with the CLI rather than silently switching surface.
+        for argument in ["Mux", "muxx", "mcp-serve", "--mux"] {
+            assert_eq!(hosted_subcommand(Some(argument)), None, "{argument}");
+        }
+    }
 
     #[test]
     fn accepts_only_loopback_ipc_addresses() {
