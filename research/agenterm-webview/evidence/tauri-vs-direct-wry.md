@@ -73,12 +73,16 @@ silently promoted into stronger claims.
 
 ## Decision status
 
-`defer`. Direct-WRY provides the narrower dependency and API surface and was
-substantially smaller in this Windows artifact comparison. Tauri offers
-packaging/configuration conventions that may be valuable for a larger
-independent application, but its shutdown emitted a WebView2 window-class
-unregister warning despite a zero exit code. Neither choice has the required
-three-platform evidence, and the stable renderer remains native.
+`prefer-direct-wry-if-webview` (still no product adoption). Direct-WRY provides
+the narrower dependency and API surface and was substantially smaller in this
+Windows artifact comparison (~521 KiB host vs ~8.4 MiB Tauri). WRY itself is a
+thin system-WebView wrapper; cargo-bloat typically shows only tens of KiB of
+`.text` for the crate, with WebView2 / WKWebView / WebKitGTK owning the engine
+outside the binary. Tauri remains useful for packaging/engineering comparison
+only and must not enter the release `agenterm-cc` 4 MiB budget path. Tauri
+shutdown also emitted a WebView2 window-class unregister warning despite a zero
+exit code. Neither choice has the required three-platform evidence, and the
+stable renderer remains native.
 
 Primary references:
 
