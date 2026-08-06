@@ -7,11 +7,11 @@ REST API **不能**改 `name`；下面登记表供主控与分身对齐身份与
 动作清单 → [inter-agent-comms.md](inter-agent-comms.md)；换防 → [hand-off-controller.md](hand-off-controller.md)。
 Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`）。
 
-最后更新：2026-08-06（主控2 → 主控1 换防准备中）
+最后更新：2026-08-06（主控1 已接管；主控2 已换防/待命）
 
 | 显示名 | bcId | 来源 | 当前职责 | 注释 |
 |--------|------|------|----------|------|
-| **主控1** | `bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b` | api | **当前主控**（换防后）：统筹、合流、编排 | env=`7ef6e5b0-…`；URL=https://cursor.com/agents/bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b |
+| **主控1** | `bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b` | api | **当前主控** | env=`7ef6e5b0-…`；近程 server/CLI |
 | **主控2** | `bc-05b7c357-d712-440d-b140-8774bfa90e2a` | api | 已换防 / 待命 | 勿再当唯一统筹 |
 | **舰队值班会话** | _(每次 Automations 新开 bcId；例 `bc-0958a47a-…`)_ | automation | **auto-dream 值班**：只跑 `fleet-duty` 一轮 | Automation 名=`主控 造梦`；`--from` 须用本行显示名 |
 | **主控** | `bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1` | mobile | 已换防 / 待命 | 勿再当唯一统筹 |
@@ -30,6 +30,7 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`�
 
 - Automations：https://cursor.com/automations/f2326638-90f1-11f1-ba66-0e7d0216e441
 - 最近造梦：https://cursor.com/agents/bc-0958a47a-6276-413e-8053-046fdba854d8
+- 主控1：https://cursor.com/agents/bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b
 - 主控2：https://cursor.com/agents/bc-05b7c357-d712-440d-b140-8774bfa90e2a
 - 旧主控：https://cursor.com/agents/bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1
 - 分身1：https://cursor.com/agents/bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f
