@@ -104,6 +104,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       [--contains text|--dead|--submit-complete]
       [--timeout-ms ms]`
     - `ui-snapshot`, `ui-bootstrap`, `protocol-info`
+    - [x] `ui-input pointer --x PX --y PX [--button left|right|middle]
+      [--action press|release|move] [--count 1|2|3]
+      [--mods shift,ctrl,alt,meta]` and
+      `ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels]`
+      give an agent the pointer affordances a human has. Coordinates are
+      pixels in the same space `ui-snapshot` reports element bounds in, so a
+      caller can read a snapshot, find an element, and press its centre
+      without converting. Requests are turned into the same window events a
+      window manager delivers and enter the frontend through its ordinary
+      event path; no second hit-test exists, and multi-click is delivered as
+      repeated press/release pairs rather than by seeding promotion state, so
+      a synthetic gesture cannot diverge from a human one. Wheel deltas
+      default to notches (`lines`); trackpad callers ask for `pixels`.
     - [x] `ui-hello --minimum VERSION --maximum VERSION [--client-id ID]`
       negotiates the renderer protocol and returns server identity plus a causal
       baseline without mutating state
