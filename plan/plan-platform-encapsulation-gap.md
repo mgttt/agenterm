@@ -1,44 +1,50 @@
 # platform 封装漏点表（机制债）
 
-状态：active（2026-08-06 · goal-crate-platform P1）  
-范围：**仅 OS 机制**（应进 `crates/agenterm-platform` 的能力）。  
-产品工作台差距见 [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md)。  
+状态：active（2026-08-06 · goal-crate-platform 加深）  
+范围：**仅 OS 机制**（应进 `crates/agenterm-platform` 的能力）+ catalog **归属**误标（产品闸，非 OS API）。  
+产品可见行为差距见 [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md)。  
 边界 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md) §1.0、[`goal-crate-platform.md`](goal-crate-platform.md)。
 
 ## 证据基线
 
 | 检查 | 结果 | 路径 |
 |------|------|------|
-| 产品 `src/**` 禁止 `windows_sys`/winit/x11/… | **PASS**（本机） | `platform::boundary_tests::production_sources_use_platform_crate_as_the_only_native_boundary` |
-| platform 无 `AGENTERM_` / `agenterm::` 产品耦合 | 既有 boundary 测 | `boundary_tests` product-coupling markers on crate |
-| 散装 breakaway / ACCESS_DENIED=5 | **已收（本轮）** | 见下表 G1 |
+| 产品 `src/**` 禁止 `windows_sys`/winit/x11/… | **PASS** | `platform::boundary_tests::production_sources_use_platform_crate_as_the_only_native_boundary` |
+| platform 无 `AGENTERM_` / `agenterm::` 产品耦合 | **PASS**（既有） | `boundary_tests` product-coupling on crate |
+| 散装 breakaway / ACCESS_DENIED=5 | **closed G1** + 回归测 | `spawn_breakaway_visible_*`；`process::tests::product_sources_do_not_hardcode_breakaway_access_denied` |
+| catalog 误把 shared dispatch 标成 WINDOWS_ONLY | **closed G6** | 24 id 升 SHARED；`windows_only_is_not_implemented_in_shared_dispatcher` |
+| `open-new-terminal` 仅 Unix 一等动词 | **closed G7**（最小） | Win remote 接线 `open_new_terminal()`；升 SHARED |
 
 ## 漏点 / 收口表
 
 | ID | site | should live in | priority | notes / parity-gap? | status |
 |----|------|----------------|----------|---------------------|--------|
-| G1 | `src/control_center.rs` 手写 `raw_os_error()==Some(5)` + 二次 `Command::spawn`；`remote_frontend` 仅 `configure_breakaway_visible` 无 denial 回落 | `process`：`spawn_breakaway_visible_command` / `is_breakaway_denied` | **P0** | 产品不应认识 `ERROR_ACCESS_DENIED` 数值；可见 GUI 回落不能用 `CREATE_NO_WINDOW` 的 `spawn_detached_*` | **closed 2026-08-06**：platform 新增 `spawn_breakaway_visible_child/command` + `configure_visible_in_caller_job`；CC 与 `spawn_gui_for_instance` 改走 facade；`spawn_server_instance` 改 `spawn_detached_command`（无窗 authority，与 `autostart_server` 一致） |
-| G2 | `std::process::Command` 直接 spawn 的产品路径（script/worker/rhai） | 视语义：`process-spawn` 或保留产品策略 | P2 | Script Runtime / worker 的 argv/env 是产品；仅当需要 Job breakaway/继承事务时必须走 platform | open — 非本轮；勿误把 Rhai 策略塞进 crate |
-| G3 | Unix embedded 截图走 softbuffer 像素再 `png` 编码 | `screenshot` 已有编码；capture 在 host present | P3 | 编码可共享；像素来源属 present 合法 | open — 非散装 OS API 泄漏 |
-| G4 | Win remote 大量 control-window / GDI 绘制 | `window` control-window host（platform 已有 Win 实现） | P2 | **巨石 present**，不是「漏调 windows_sys 在产品层」；拆分属 L2 结构债 | open — 阻塞：双拓扑 + 巨石；不本轮空转拆 |
-| G5 | IME / clipboard / activation 产品侧 | 已经 `agenterm_platform::{ime,clipboard,activation}` | — | 抽查 remote_frontend 已走 facade | **no leak found** |
+| G1 | `control_center` / `remote_frontend` 手写 breakaway denial | `process`：`spawn_breakaway_visible_*` | P0 | 产品不得认识 `ERROR_ACCESS_DENIED` 数值 | **closed** |
+| G2 | `script_process` / `worker_supervisor` `Command::spawn` | 已用 `configure_command` / `configure_worker_command` + `ProcessTreeGuard` | P2 | **审计结论（2026-08-06）**：spawn 前均走 platform 配置/树守卫；裸 `spawn()` 是 std 出口，**不**算散装 Job/flags 语义。无强制迁 `spawn_detached_*`（stdio 管道语义不同） | **no leak / 文档证伪** |
+| G3 | Unix softbuffer → PNG | `screenshot` 编码 + host present 像素 | P3 | present 合法；非产品层 OS API | open（低） |
+| G4 | Win remote control-window 巨石 | `window` control host | P2 | L2 结构债，非 boundary 泄漏 | open（阻塞双拓扑） |
+| G5 | IME / clipboard / activation | 已 `agenterm_platform::*` | — | 抽查 OK | **no leak** |
+| G6 | `ui_action_catalog` 把 `control_dispatch` 已实现的 24 个动词标 WINDOWS_ONLY | catalog 归属 | P0 | 并发 review：Unix 经 `dispatch_shared_command` **先**处理 `ui-action`，真共享 | **closed**：升 SHARED；闸防回退 |
+| G7 | `open-new-terminal` UNIX_ONLY | 两端 ui-action | P1 | Win 已有 `open_new_terminal()` / 工具栏 NEW_TAB | **closed 最小**：Win 增加同名 ui-action；shell/create 仍 UNIX_ONLY |
 
-## 书面结论（P1）
+## 书面结论
 
-- **并非**「产品层到处直接调 Win32」：boundary 闸已绿。  
-- **真实机制漏点**是 **平台语义散落在产品里**（G1：硬编码 ACCESS_DENIED、可见 breakaway 回落未进库）。  
-- 本轮 **≥1 收口 = G1**。剩余 open 项不阻塞 goal 成功标准。
+1. **OS 边界闸有效**：产品层几乎没有直接 native markers。  
+2. **机制语义泄漏** 以 G1 为代表（错误码/创建 flags 散落）——已收 + 回归。  
+3. **catalog 书账错误** 比「Unix 没实现」更危险（G6）——会低估已共享面、诱使重复移植。  
+4. **真·host-only 残余**（instance strip / 部分 settings chrome / font-locale / Unix dialog 字段动词）见 catalog `parity-gap:` 注释。
 
 ## Agent 执行句式（跨平台任务强制）
 
 1. 判定：platform **机制** / frontend **产品语义** / host **present**？  
 2. 机制 → 改 `crates/agenterm-platform`，feature 与 typed Unsupported 诚实更新。  
-3. 产品 → 改 `src/frontend/*` + `ui_action_catalog`，再改 **两端** adapter。  
+3. 产品 → 改 `src/frontend/*` + `ui_action_catalog`，再改 **两端** adapter（或确认 `control_dispatch` 已覆盖）。  
 4. 仅 host → 只动对应 adapter，并登记 catalog allowlist 或本表。  
-5. 证据：`cargo test -p agenterm-platform`（相关）+ `cargo test --lib ui_action_catalog` + 直接单测；无证据不宣称三端手感已齐。
+5. 证据：`cargo test -p agenterm-platform --features process`（相关）+ `cargo test --lib ui_action_catalog` + `cargo test --lib product_sources_do_not_hardcode_breakaway`；无证据不宣称三端手感已齐。
 
 ## 下一刀候选（不自动开工）
 
-1. G2 审计：哪些 `Command::spawn` 需要 breakaway/继承事务。  
-2. L2：remote/embedded 收敛或 action 表驱动（版本 plan §九 刀5）。  
-3. 从 `WINDOWS_ONLY` 提升单个 SHARED 手势（产品叶，见 catalog）。
+1. settings scope chrome / font-locale 升 SHARED 或诚实保持 ONLY。  
+2. instance-picker / server-strip Unix 产品叶（S′ 排期）。  
+3. L2 remote/embedded 收敛或 action 表驱动（plan §九 刀5）。  
+4. Unix dialog `create` / shell-* 是否要对 Win 暴露自动化 id。

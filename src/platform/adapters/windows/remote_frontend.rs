@@ -1328,6 +1328,11 @@ impl RemoteWindowState {
                 )?;
                 self.last_message = Some("Control Center launched".to_owned());
             }
+            "open-new-terminal" => {
+                // Shared id with Unix embedded; Windows still uses native
+                // controls for shell/create fields after the dialog opens.
+                self.open_new_terminal();
+            }
             "select-tab" => {
                 self.invalidate_sidebar_text_click();
                 self.finish_tab_edit(false);

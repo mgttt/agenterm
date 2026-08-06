@@ -55,6 +55,8 @@ fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn current_process_has_stable_observation_and_inventory_entry() {
@@ -67,6 +69,56 @@ mod tests {
                 .expect("process inventory")
                 .iter()
                 .any(|entry| entry.id == std::process::id())
+        );
+    }
+
+    /// G1 regression: product code must classify breakaway denial via
+    /// `agenterm_platform::process::is_breakaway_denied` / spawn facades, not
+    /// hard-coded `raw_os_error() == Some(5)`.
+    #[test]
+    fn product_sources_do_not_hardcode_breakaway_access_denied() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![root];
+        let mut offenders = Vec::new();
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                    continue;
+                }
+                let Ok(source) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                // Ignore this test module's own needle.
+                if path.ends_with("platform\\process.rs") || path.ends_with("platform/process.rs")
+                {
+                    continue;
+                }
+                for (index, line) in source.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("//") {
+                        continue;
+                    }
+                    if trimmed.contains("raw_os_error()")
+                        && (trimmed.contains("Some(5)") || trimmed.contains("== 5"))
+                    {
+                        offenders.push(format!("{}:{}", path.display(), index + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "use agenterm_platform::process::is_breakaway_denied / \
+             spawn_breakaway_visible_* instead of hard-coding ACCESS_DENIED:\n{}",
+            offenders.join("\n")
         );
     }
 }
