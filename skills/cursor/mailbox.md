@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**舰队值班会话**刷新：2026-08-05T23:26Z（duty 一轮）
+最后由**舰队值班会话**刷新：2026-08-06T00:26Z（duty 一轮）
 
 ## 共享事实
 
@@ -14,11 +14,11 @@
 | 当前主线任务 | **CI 收口中**；下一产品叶倾向 **CC nav-chrome**（PR-2） |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | `plan/plan-control-center-ux.md` |
-| `origin/main` | tip（selector/boundary CI 修复进行中） |
+| `origin/main` | tip `da25929` |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
-| auto-dream | **绿**：Automation `f2326638-…` 已绑主控2 同环境；本轮 `bc-da35c7e5-…`（显示名「舰队值班会话」）完整跑通 |
+| auto-dream | **绿**：Automation `f2326638-…` 已绑主控2 同环境；本轮 `bc-0c498e8e-…`（显示名「舰队值班会话」）完整跑通 |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -45,10 +45,10 @@
 - 已合: skins Phase 1–2B；`bb5ef28` cursor_agent.py；palette SSOT；`appearance_preset_grid`
 - 舰队: duty findings=0；auto-dream 已通（Automation `f2326638-…`）
 
-### 舰队值班会话 · 2026-08-05T23:26Z
+### 舰队值班会话 · 2026-08-06T00:26Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-da35c7e5-9c42-4939-b03a-a7e136927eb5`
-- URL: https://cursor.com/agents/bc-da35c7e5-9c42-4939-b03a-a7e136927eb5
+- bcId: `bc-0c498e8e-c148-4db5-8efd-91ad465b1e07`
+- URL: https://cursor.com/agents/bc-0c498e8e-c148-4db5-8efd-91ad465b1e07
 - 分支: `main`（duty 工作区）
 - 下一步: cron 下一轮再起
 - 阻塞: 无
@@ -73,5 +73,6 @@
 
 ## 交接日志
 
+- 2026-08-06T00:26Z · 舰队值班会话(`bc-0c498e8e-…`) · duty: noop findings=0 main=da25929；未 apply；lock 已清
 - 2026-08-05T23:26Z · 舰队值班会话(`bc-da35c7e5-…`) · duty: noop findings=0 main=30437eb；未 apply；lock 已清
 - 2026-08-05T23:06Z · 舰队值班会话(`bc-0958a47a-…`) · duty: noop findings=0 main=478e131；env=`7ef6e5b0` 已对齐；未 apply；lock 已清
