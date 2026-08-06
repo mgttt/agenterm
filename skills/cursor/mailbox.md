@@ -14,8 +14,8 @@
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | `plan/plan-control-center-ux.md` |
-| `origin/main` | tip `ff7b4f5`（含 CI selector 修 + research 三 Tab + Wry 体积倾向） |
-| CI | run `31059086660` @ `da25929`：**Windows quality gate 异常长**（>30min，先前失败跑约 3.5min）；其余 matrix 已绿。docs tip `ff7b4f5` 未再触发 CI |
+| `origin/main` | tip 见 git；含 CI selector 修 + research 三 Tab + Wry 体积倾向 + 换防准备 |
+| CI | run `31059086660` @ `da25929`：非 Windows 全绿后 **Windows 被 cancel**（quality gate ~35min 未结束）。`gh` 无 dispatch/rerun 权；用非 md 触达重跑。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |

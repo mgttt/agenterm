@@ -439,8 +439,8 @@ let failure = "";
 
 try {
     print("STEP CLI selector conflicts fail fast and typed");
-    // --endpoint may pair with --instance for attach identity; real conflict
-    // is --endpoint with legacy --address.
+    // --endpoint may pair with --instance for attach identity; the real
+    // conflict is --endpoint with legacy --address.
     let conflict_started =
         std::time::SystemTime::now().unix_millis;
     let conflict = invoke(
