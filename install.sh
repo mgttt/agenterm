@@ -58,6 +58,7 @@ Environment variables:
   AGENTERM_APPLICATIONS_DIR         macOS app directory (default: ~/Applications)
   AGENTERM_NO_LAUNCH=1              Install without starting the GUI
   AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 Permit a labeled macOS unsigned preview
+  AGENTERM_RELEASES_KEEP=N          Keep current + (N-1) prior release dirs (default 2)
 EOF
 }
 
@@ -352,6 +353,64 @@ if [[ -d "$BIN_DIR" ]]; then
     esac
   done
 fi
+
+# G6: keep current release dir + (N-1) newest others (default N=2).
+# Override with AGENTERM_RELEASES_KEEP. Never delete the just-installed dir or
+# anything still referenced by a BIN symlink.
+prune_old_releases() {
+  local keep="${AGENTERM_RELEASES_KEEP:-2}"
+  [[ "$keep" =~ ^[1-9][0-9]*$ ]] || keep=2
+  local max_old=$((keep - 1))
+  [[ "$max_old" -lt 0 ]] && max_old=0
+
+  local current_real
+  current_real="$(cd "$RELEASE_DIR" && pwd -P 2>/dev/null || echo "$RELEASE_DIR")"
+
+  local -a rows=()
+  local dir mtime ref target referenced
+  shopt -s nullglob
+  for dir in "$RELEASES_DIR"/*; do
+    [[ -d "$dir" && ! -L "$dir" ]] || continue
+    local dir_real
+    dir_real="$(cd "$dir" && pwd -P 2>/dev/null || echo "$dir")"
+    [[ "$dir_real" == "$current_real" ]] && continue
+    referenced=0
+    if [[ -d "$BIN_DIR" ]]; then
+      for ref in "$BIN_DIR"/*; do
+        [[ -L "$ref" || -e "$ref" ]] || continue
+        if command -v readlink >/dev/null 2>&1; then
+          target="$(readlink -f "$ref" 2>/dev/null || true)"
+        else
+          target=""
+        fi
+        case "$target" in
+          "$dir_real"/* | "$dir"/*) referenced=1; break ;;
+        esac
+      done
+    fi
+    [[ "$referenced" -eq 1 ]] && continue
+    mtime="$(stat -c %Y "$dir" 2>/dev/null || stat -f %m "$dir" 2>/dev/null || echo 0)"
+    rows+=("$mtime|$dir")
+  done
+  shopt -u nullglob
+
+  if [[ ${#rows[@]} -eq 0 ]]; then
+    return 0
+  fi
+  local sorted n=0
+  sorted="$(printf '%s\n' "${rows[@]}" | sort -t'|' -k1,1nr)"
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    dir="${row#*|}"
+    n=$((n + 1))
+    if [[ "$n" -le "$max_old" ]]; then
+      continue
+    fi
+    say "Pruning old release directory (keep=$keep): $dir"
+    rm -rf "$dir"
+  done <<<"$sorted"
+}
+prune_old_releases
 
 if [[ "$OS" == "macos" ]]; then
   APP_DIR="$APPLICATIONS_DIR/AgenTerm.app"

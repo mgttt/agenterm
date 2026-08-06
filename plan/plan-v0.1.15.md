@@ -463,8 +463,10 @@ v0.1.15  Feedback shift-left & release-lane economics
     「要启用新版该做什么」；**用户无需读文档**
   - **成本**：小；**依赖**：G3
   - **注**：纯文案，**不受 G-P2 阻塞**（G7b/c/d 才受）
-- [ ] **G6 releases 目录保留策略**（current + N，默认 2）
+- [x] **G6 releases 目录保留策略**（current + N，默认 2）
   - **动机**：`0.1.11-local` / `0.1.12-local` 永久堆积
+  - **落地**：`install.sh` `prune_old_releases`；`AGENTERM_RELEASES_KEEP`
+    默认 2；保留刚装目录；BIN 仍引用的目录不删
   - **验收**：装新版后旧目录按策略修剪，且不删仍被非 current 链引用者
   - **成本**：小；**依赖**：无
 
@@ -478,11 +480,11 @@ v0.1.15  Feedback shift-left & release-lane economics
 U′. 标签切换假刷新
 ├─ [x] U1 no-op composer / 同 metrics 跳过 font·layout / 同文案跳过 SetWindowText
 ├─ [ ] U2 真机回归 + 可选黑盒（空 composer 连点 tab 无 ComposerDraft 风暴）
-├─ [ ] U3 显示后再 debounce PTY resize（网格落后 tab，TS2）
+├─ [x] U3 显示后再 debounce PTY resize（网格落后 tab，TS2）
 └─ [ ] U4 纯 TabSelected 不重推整屏 cells（协议/delta 优化，可选）
 ```
 
-- [x] **U1 假刷新热路径止血**（代码已落工作区，待合 main）
+- [x] **U1 假刷新热路径止血**（代码已落 main）
   - **动机**：见 §3.5 TS1
   - **做法（已实现）**：
     1. `ControlHost::apply_set_composer`（default）与 Unix 覆盖：文本相同 →
@@ -505,13 +507,13 @@ U′. 标签切换假刷新
   - **验收**：用户确认假刷新明显减轻；若加黑盒则一条路径全绿
   - **成本**：极小–小；**依赖**：U1 合入
 
-- [ ] **U3 显示后再 debounce PTY resize**（§3.5 TS2）
+- [x] **U3 显示后再 debounce PTY resize**（§3.5 TS2）
   - **动机**：切到「网格仍停留在旧窗口尺寸」的 tab 时，立即
     `resize_active_terminal` → ConPTY/应用整屏重排（vim 等），体感仍重
-  - **做法**：仅当 active 且（聚焦终端 / 短 debounce 到期）再发 resize；
-    快速连点多个 tab 只 resize **最终** active
+  - **落地（Win remote）**：`deferred_pty_resize_deadline` + 100ms debounce；
+    `select-tab` / 活动 tab 变化 / new-tab|child 只 schedule；窗布局仍立即 resize
   - **验收**：快速扫过 N 个落后网格 tab，只对最后停留的 tab 发一次
-    resize；最终网格仍对齐当前 layout
+    resize；最终网格仍对齐当前 layout（**真机 U2 仍建议手测**）
   - **成本**：中；**依赖**：U1；**工期紧可砍**
   - **非目标**：取消 resize（尺寸必须最终正确）
 
@@ -547,7 +549,10 @@ U′. 标签切换假刷新
 - [x] **P0-1 附着 live peer，禁止静默第二 main**（代码已落）
 - [x] **P0-2 黑盒**：同 instance 第二 server 进程退出；`start_frontend` 拒绝双开；
   tab 名/note 在单 server 存活时保持（隔离 instance 实测）
-- [ ] **P0-3 server 脱离 GUI job（Windows breakaway）** 防关窗误杀 server
+- [x] **P0-3 server 脱离 GUI job（Windows breakaway）** 防关窗误杀 server
+  - **落地**：`autostart_server` 走 `spawn_detached_command`（breakaway +
+    ACCESS_DENIED→CallerJobFallback）；单测锁源码路径。限制性 Job 下仍可能
+    随父进程结束——诚实诊断，非假 Keep-Running。
 
 ### S′. 多 Server / Instance 可达与选择（**用户 2026-08-05**；关窗后找得回来）
 
@@ -1682,6 +1687,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **Win CI-R 主波落地**：R1 CI target **v3-slim**；R2 Candidate cargo-home **restore-keys**；R3 net-research 出 release 门（gates.json + check.rhai），push CI linux 仍跑；A3 script-smoke 进 windows release-lane-smokes；A4 Candidate summary 强化 bootstrap 行。R4 未做。OSX/Lnx 接手见 **§2.2.2** |
 | 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 `agenterm-cli mux` / `agenterm-cli mcp`。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
 | 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
+| 2026-08-06 | **续推 2**：G6 `prune_old_releases`（`AGENTERM_RELEASES_KEEP`）；U3 Win tab PTY resize debounce 100ms；P0-3 文档/单测锁 breakaway autostart。U2 真机/H1 releases.json/B′/M 仍开 |
 
 ---
 

@@ -225,6 +225,8 @@ const SERVER_CONTEXT_MENU_WIDTH: i32 = 148;
 const SERVER_CONTEXT_MENU_ITEM_HEIGHT: i32 = 28;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
+/// U3: coalesce PTY regrids when the user flips tabs quickly.
+const TAB_PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
 const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
@@ -802,6 +804,9 @@ struct RemoteWindowState {
     applied_terminal_font_size: u16,
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
     pending_terminal_resize: Option<RemoteTerminalResize>,
+    /// U3: when switching tabs rapidly, only resize PTY after a short idle so
+    /// intermediate tabs do not each force a ConPTY regrid.
+    deferred_pty_resize_deadline: Option<Instant>,
     terminal_resize_worker: RemoteTerminalResizeWorker,
     pending_terminal_paste: Option<RemoteTerminalPasteRequest>,
     terminal_paste_worker: RemoteTerminalPasteWorker,
@@ -1028,6 +1033,7 @@ impl RemoteWindowState {
             applied_terminal_font_size: appearance.terminal_font_size,
             last_composer_identity,
             pending_terminal_resize: None,
+            deferred_pty_resize_deadline: None,
             terminal_resize_worker,
             pending_terminal_paste: None,
             terminal_paste_worker,
@@ -1076,6 +1082,7 @@ impl RemoteWindowState {
         let resize_changed = self.process_terminal_resize_results();
         let paste_changed = self.process_terminal_paste_results();
         let server_tabs_changed = self.refresh_server_tabs_if_due();
+        let deferred_resize_changed = self.flush_deferred_pty_resize_if_due();
         let clock_text = sidebar_local_clock_text();
         let clock_changed = clock_text != self.last_sidebar_clock_text;
         if clock_changed {
@@ -1110,6 +1117,7 @@ impl RemoteWindowState {
                         self.finish_tab_edit(false);
                     }
                 }
+                let tab_changed = active != self.last_active_id;
                 if active != self.last_active_id || composer != self.last_composer_identity {
                     self.last_active_id = active;
                     self.last_composer_identity = composer;
@@ -1117,6 +1125,10 @@ impl RemoteWindowState {
                         self.last_error = Some(format!("Terminal font update failed: {error:#}"));
                     }
                     self.load_composer();
+                    if tab_changed {
+                        // U3: do not regrid PTY on every intermediate tab hop.
+                        self.schedule_debounced_pty_resize();
+                    }
                 }
                 let command_changed = match self.process_client_command() {
                     Ok(changed) => {
@@ -1135,6 +1147,7 @@ impl RemoteWindowState {
                     Ok(published) => {
                         ime_changed
                             || resize_changed
+                            || deferred_resize_changed
                             || paste_changed
                             || server_tabs_changed
                             || clock_changed
@@ -1301,7 +1314,8 @@ impl RemoteWindowState {
                     .as_ref()
                     .and_then(|client| client.snapshot().active_tab_id.clone());
                 self.load_composer();
-                self.resize_active_terminal();
+                // New tabs usually need a grid soon; still debounce with select hops.
+                self.schedule_debounced_pty_resize();
             }
             "new-child" => {
                 self.sync_composer()?;
@@ -1311,7 +1325,7 @@ impl RemoteWindowState {
                     .as_ref()
                     .and_then(|client| client.snapshot().active_tab_id.clone());
                 self.load_composer();
-                self.resize_active_terminal();
+                self.schedule_debounced_pty_resize();
                 if let Some(tab) = self.active_tab().cloned() {
                     self.begin_tab_edit(tab);
                 }
@@ -1344,7 +1358,8 @@ impl RemoteWindowState {
                     .as_ref()
                     .and_then(|client| client.snapshot().active_tab_id.clone());
                 self.load_composer();
-                self.resize_active_terminal();
+                // U3: coalesce regrids across rapid tab hops.
+                self.schedule_debounced_pty_resize();
                 self.window.focus();
             }
             "toggle-tree" => {
@@ -3284,7 +3299,25 @@ impl RemoteWindowState {
         }
     }
 
+    fn schedule_debounced_pty_resize(&mut self) {
+        self.deferred_pty_resize_deadline = Some(Instant::now() + TAB_PTY_RESIZE_DEBOUNCE);
+    }
+
+    fn flush_deferred_pty_resize_if_due(&mut self) -> bool {
+        let Some(deadline) = self.deferred_pty_resize_deadline else {
+            return false;
+        };
+        if Instant::now() < deadline {
+            return false;
+        }
+        self.deferred_pty_resize_deadline = None;
+        self.resize_active_terminal();
+        true
+    }
+
     fn resize_active_terminal(&mut self) {
+        // Immediate path (window layout / reconnect) cancels a pending debounce.
+        self.deferred_pty_resize_deadline = None;
         let Some((server_epoch, tab_id, current_rows, current_columns)) =
             self.client.as_ref().and_then(|client| {
                 let snapshot = client.snapshot();

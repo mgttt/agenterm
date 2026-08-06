@@ -43,6 +43,8 @@ fn autostart_server_impl(parameter_name: &str, parameter_value: &str) -> std::io
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // P0-3: detached spawn prefers Job breakaway so Keep-Server survives GUI
+    // process-tree teardown. CallerJobFallback is an honest host limit.
     let spawn_mode = agenterm_platform::process::spawn_detached_command(&mut command)?;
     if spawn_mode == agenterm_platform::process::DetachedSpawnMode::CallerJobFallback {
         let _ = agenterm_platform::process::write_parent_console_stderr(
@@ -57,6 +59,25 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    /// Structural proof that GUI autostart uses the platform detached path
+    /// (breakaway + ACCESS_DENIED fallback), not a raw Command::spawn.
+    #[test]
+    fn autostart_server_source_uses_spawn_detached_command() {
+        let src = include_str!("process.rs");
+        let production = src
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production half of process.rs");
+        assert!(
+            production.contains("spawn_detached_command"),
+            "autostart_server must use platform detached/breakaway spawn"
+        );
+        assert!(
+            !production.contains(".spawn()"),
+            "autostart_server must not raw-spawn without platform flags"
+        );
+    }
 
     #[test]
     fn current_process_has_stable_observation_and_inventory_entry() {
