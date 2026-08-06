@@ -835,6 +835,13 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         PENDING_MESSAGES.with(|pending| {
             pending.borrow_mut().push((msg, wp, lp));
         });
+        // Title-bar X / Alt+F4 must never hit DefWindowProc while we are already
+        // inside another event (paint, layout, poll). Default SC_CLOSE posts
+        // WM_CLOSE and can tear the window down before the product confirm
+        // modal is painted — the dialog then "never appears".
+        if msg == WM_CLOSE || (msg == WM_SYSCOMMAND && (wp & 0xFFF0) == 0xF060) {
+            return 0;
+        }
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
     DISPATCHING.with(|flag| flag.set(true));

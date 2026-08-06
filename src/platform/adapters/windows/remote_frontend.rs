@@ -1213,11 +1213,16 @@ impl RemoteWindowState {
                 }
             }
             "open-control-center" => {
+                // CLI automation may pass --no-activate on the GUI; still allow
+                // an explicit ui-action open to surface the CC window unless the
+                // caller set AGENTERM_NO_ACTIVATE for a headless smoke.
+                let no_activate = self.no_activate
+                    && crate::client::no_activate_from_environment();
                 crate::control_center::open_control_center(
-                    self.no_activate,
+                    no_activate,
                     &crate::client::ipc_address(),
                 )?;
-                self.last_message = Some("Control Center opened".to_owned());
+                self.last_message = Some("Control Center launched".to_owned());
             }
             "select-tab" => {
                 self.invalidate_sidebar_text_click();
@@ -4418,16 +4423,30 @@ impl RemoteWindowState {
     }
 
     fn server_tab_instance_at(&self, x: i32, y: i32) -> Option<String> {
+        let Some(strip) = self.workspace_geometry().server_strip else {
+            return None;
+        };
+        // Full strip height is clickable (not only the inner tab chip padding).
+        if y < strip.top || y >= strip.bottom || x < strip.left || x >= strip.right {
+            return None;
+        }
         for (rect, row) in self.server_tab_rects() {
-            if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
+            if x >= rect.left && x < rect.right {
                 return Some(row.instance.clone());
             }
         }
         None
     }
 
+    fn force_refresh_server_tabs(&mut self) {
+        self.server_tabs_refresh_after = Instant::now();
+        let _ = self.refresh_server_tabs_if_due();
+    }
+
     fn select_server_tab(&mut self, instance: &str) -> Result<()> {
-        self.refresh_server_tabs_if_due();
+        // Always re-read the live registry on an explicit select — a 2s cache
+        // made clicks look dead after a just-started second server.
+        self.force_refresh_server_tabs();
         // Match bare names and custom: prefixes.
         let row = self
             .server_tabs
@@ -4442,7 +4461,7 @@ impl RemoteWindowState {
             .ok_or_else(|| anyhow::anyhow!("server tab `{instance}` is not listed"))?;
         if !row.can_attach {
             anyhow::bail!(
-                "server tab `{}` is {} and cannot be selected",
+                "server tab `{}` is {} and cannot be selected (stale registration)",
                 row.instance,
                 row.classification
             );
@@ -4454,6 +4473,7 @@ impl RemoteWindowState {
             .is_some_and(|id| id.instance == row.instance)
         {
             self.last_message = Some(format!("Already on `{}`", row.instance));
+            self.window.request_redraw();
             return Ok(());
         }
         // Defer rebind so a relayed UI command can complete on the *current*
@@ -5573,12 +5593,22 @@ impl RemoteWindowState {
         // command and will never reach process_client_command's post-complete
         // rebind path.
         if !self.focus_gate().full_modal_blocked()
-            && let Some(instance) = self.server_tab_instance_at(x, y)
+            && self
+                .workspace_geometry()
+                .server_strip
+                .is_some_and(|strip| y >= strip.top && y < strip.bottom)
         {
-            if let Err(error) = self.select_server_tab(&instance) {
-                self.last_error = Some(format!("{error:#}"));
+            if let Some(instance) = self.server_tab_instance_at(x, y) {
+                if let Err(error) = self.select_server_tab(&instance) {
+                    self.last_error = Some(format!("{error:#}"));
+                    self.window.request_redraw();
+                } else {
+                    self.flush_deferred_server_tab_attach();
+                }
             } else {
-                self.flush_deferred_server_tab_attach();
+                self.last_message =
+                    Some("No live server tab under the pointer (stale chips are not selectable)".to_owned());
+                self.window.request_redraw();
             }
             return true;
         }
@@ -5940,14 +5970,19 @@ impl RemoteWindowState {
             action::TOGGLE_TABS => self.toggle_tabs(),
             action::NEW_TAB => self.open_new_terminal(),
             action::OPEN_CONTROL_CENTER => {
+                // Human toolbar open always activates. Inheriting
+                // AGENTERM_NO_ACTIVATE / --no-activate left CC invisible
+                // behind the terminal so users thought "old terminal" opened.
                 if let Err(error) = crate::control_center::open_control_center(
-                    self.no_activate,
+                    false,
                     &crate::client::ipc_address(),
                 ) {
                     self.last_error = Some(format!("Control Center unavailable: {error:#}"));
                 } else {
-                    self.last_message = Some("Control Center opened".to_owned());
+                    self.last_message =
+                        Some("Control Center launched (AgenTerm Control Center window)".to_owned());
                 }
+                self.window.request_redraw();
             }
             action::OPEN_SETTINGS => {
                 self.finish_cwd_editor(false, ComposerWriteMode::EmptyOnly);
@@ -6402,6 +6437,17 @@ impl RemoteWindowState {
 
     fn paint_window_close(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
         let (modal, _) = self.close_modal_geometry();
+        // Full-client dim so the confirm cannot blend into terminal chrome
+        // (users reported the dialog "not appearing" when only the three
+        // native buttons floated without a clear modal surface).
+        let client = self.window.client_size();
+        let client_rect = ProductPixelRect {
+            left: 0,
+            top: 0,
+            right: i32::try_from(client.width).unwrap_or(i32::MAX),
+            bottom: i32::try_from(client.height).unwrap_or(i32::MAX),
+        };
+        fill(device, &client_rect, palette.sidebar.canvas_rgb());
         fill(device, &modal, palette.modal.canvas_rgb());
         frame(device, &modal, palette.accent.canvas_rgb());
         draw_text(

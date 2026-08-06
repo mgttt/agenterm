@@ -951,20 +951,45 @@ fn projection_worker_unavailable_snapshot() -> SnapshotDocument {
 /// Start or reuse the isolated Control Center without blocking the GUI thread.
 pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> Result<()> {
     let executable = control_center_executable()?;
-    let mut command = Command::new(&executable);
+    if !executable.is_file() {
+        anyhow::bail!(
+            "Control Center binary missing next to the GUI: {} \
+             (rebuild/stage agenterm-cc.exe beside agenterm.exe)",
+            executable.display()
+        );
+    }
     let instance = env::var("AGENTERM_INSTANCE")
         .ok()
         .filter(|instance| !instance.trim().is_empty());
-    command.args(control_center_launch_arguments(
-        no_activate,
-        server_endpoint,
-        instance.as_deref(),
-    )?);
-    command
+    let arguments =
+        control_center_launch_arguments(no_activate, server_endpoint, instance.as_deref())?;
+    // Prefer Job breakaway so agent harnesses do not kill CC with the parent
+    // Job. When Windows denies breakaway (ERROR_ACCESS_DENIED), fall back to a
+    // normal visible spawn — still better than silently opening nothing.
+    let mut breakaway = Command::new(&executable);
+    breakaway
+        .args(&arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    command
+    if crate::platform::process::configure_breakaway_visible_command(&mut breakaway).is_ok() {
+        match breakaway.spawn() {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if error.raw_os_error()
+                    == Some(5 /* ERROR_ACCESS_DENIED / breakaway denied */) => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to launch {}", executable.display()));
+            }
+        }
+    }
+    let mut fallback = Command::new(&executable);
+    fallback
+        .args(&arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    fallback
         .spawn()
         .with_context(|| format!("failed to launch {}", executable.display()))?;
     Ok(())
