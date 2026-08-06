@@ -6,10 +6,21 @@ does not replace native `agenterm-cc`, and `agenterm.exe` (GUI or
 `server`) does not acquire a WebView dependency.
 
 The first vertical slice compares direct-WRY with a minimal Tauri v2 reference
-host over the same packaged, read-only Cockpit placeholder. Its stable outcome
-is still `active_renderer=native`; both hosts are experimental until the three
-native platforms have independent runtime, rendering, no-activate,
-crash/reload, DPI, PNG, size and resource evidence.
+host over the same packaged, read-only Control Center shell placeholder
+(`assets/`: three client-side tabs — **超级智能体** / **超级Hub** /
+**超级控制**). Its stable outcome is still `active_renderer=native`; both
+hosts are experimental until the three native platforms have independent
+runtime, rendering, no-activate, crash/reload, DPI, PNG, size and resource
+evidence.
+
+**Product direction (2026-08-06):** future CC may become `agenterm cc`
+(subcommand, separate process/GUI). Content target is the super-agent + Hub
+shell. **Do not** link Tauri into release `agenterm-cc` or `agenterm.exe`
+while measuring size here — production CC budget is 4 MiB. Reviewed Windows
+receipt (`evidence/windows-comparison.json`, 2026-07-31): direct-WRY
+520,704 B vs Tauri reference 8,763,392 B (~8.4 MiB). The three-tab shell
+assets are HTML/CSS/JS only; re-measure on Windows after UI growth. Near-term
+priority remains server/CLI hardening.
 
 ## Architecture and failure boundary
 

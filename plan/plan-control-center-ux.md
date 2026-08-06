@@ -299,3 +299,4 @@ Phase C — InfoHub + 可选 WebView 富布局
 | 日期 | 记录 |
 |------|------|
 | 2026-08-05 | 创建本设计任务书；推荐左侧垂直 Tab + 顶栏 server 条；Cockpit Phase A 为设计优先项 |
+| 2026-08-06 | 产品意向：远期可吸收为 `agenterm cc` 子命令（独立进程/窗口）；内容面向超级智能体与各类 Hub。近程仍以 server/CLI 为首要。Tauri 三 Tab 占位（超级智能体/超级Hub/超级控制）仅在 `research/agenterm-webview` 做体积观察，不并入发布版 `agenterm-cc`（4 MiB 预算）。 |

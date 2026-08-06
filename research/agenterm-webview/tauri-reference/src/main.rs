@@ -87,7 +87,7 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
         .setup(move |app| {
             let app_handle = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("AgenTerm Cockpit — experimental Tauri reference")
+                .title("AgenTerm Control Center — experimental Tauri reference")
                 .inner_size(980.0, 680.0)
                 .visible(!no_activate)
                 .focused(!no_activate)
@@ -106,7 +106,7 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
                         let _ = print_receipt(
                             receipt(
                                 "loaded",
-                                "packaged Cockpit load completed".to_string(),
+                                "packaged Control Center shell load completed".to_string(),
                                 Some(version_for_load.clone()),
                                 no_activate,
                                 Some(started.elapsed().as_millis()),

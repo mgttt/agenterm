@@ -1,36 +1,88 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="no-referrer">
-    <title>AgenTerm Cockpit — experimental</title>
+    <title>AgenTerm Control Center — experimental</title>
     <link rel="stylesheet" href="/app.css">
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">System WebView technical spike</p>
-        <h1>AgenTerm Cockpit</h1>
-        <p class="lede">A packaged, read-only projection. Native AgenTerm remains the stable renderer and authority.</p>
-      </header>
-      <section class="facts" aria-labelledby="facts-heading">
-        <h2 id="facts-heading">Host facts</h2>
-        <dl>
-          <div><dt>Asset version</dt><dd>cockpit-placeholder/1</dd></div>
-          <div><dt>Bridge</dt><dd>Absent in foundation spike</dd></div>
-          <div><dt>Network</dt><dd>Blocked by CSP and host navigation</dd></div>
-          <div><dt>Authority</dt><dd>Read-only placeholder</dd></div>
-        </dl>
-      </section>
-      <section aria-labelledby="fleet-heading">
-        <div class="section-title">
-          <h2 id="fleet-heading">Fleet projection</h2>
-          <span id="projection-state" class="badge">Packaged</span>
+    <div class="shell">
+      <header class="chrome">
+        <div>
+          <p class="eyebrow">Tauri / system-WebView size spike</p>
+          <h1>AgenTerm Control Center</h1>
+          <p class="lede">
+            Experimental shell only. Production <code>agenterm-cc</code> stays native.
+            Fleet truth remains on <code>agenterm server</code>.
+          </p>
         </div>
-        <p class="empty">No Fleet data is connected. A future bounded bridge must satisfy bridge v1 before this surface receives a snapshot.</p>
-      </section>
-    </main>
+        <p id="host-badge" class="badge">Packaged · bridge absent</p>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Control Center views">
+        <button type="button" class="tab is-active" role="tab" aria-selected="true"
+          aria-controls="panel-agent" id="tab-agent" data-tab="agent">
+          超级智能体
+        </button>
+        <button type="button" class="tab" role="tab" aria-selected="false"
+          aria-controls="panel-hub" id="tab-hub" data-tab="hub">
+          超级Hub
+        </button>
+        <button type="button" class="tab" role="tab" aria-selected="false"
+          aria-controls="panel-control" id="tab-control" data-tab="control">
+          超级控制
+        </button>
+      </nav>
+
+      <main>
+        <section id="panel-agent" class="panel is-active" role="tabpanel"
+          aria-labelledby="tab-agent">
+          <h2>超级智能体</h2>
+          <p class="empty">
+            Placeholder page for the future agent fleet cockpit.
+            No live agents, no bridge, no network.
+          </p>
+          <dl>
+            <div><dt>Surface</dt><dd>super-agent</dd></div>
+            <div><dt>Asset</dt><dd id="asset-version">cc-shell-placeholder/2</dd></div>
+            <div><dt>Authority</dt><dd>agenterm server (not connected)</dd></div>
+            <div><dt>Status</dt><dd>temporary HTML stub</dd></div>
+          </dl>
+        </section>
+
+        <section id="panel-hub" class="panel" role="tabpanel" hidden
+          aria-labelledby="tab-hub">
+          <h2>超级Hub</h2>
+          <p class="empty">
+            Placeholder page for PluginHub / AppHub / InfoHub routes.
+            Install and marketplace transactions stay out of this spike.
+          </p>
+          <dl>
+            <div><dt>Surface</dt><dd>super-hub</dd></div>
+            <div><dt>Hubs</dt><dd>plugin · app · info (planned)</dd></div>
+            <div><dt>softmgr</dt><dd>not linked</dd></div>
+            <div><dt>Status</dt><dd>temporary HTML stub</dd></div>
+          </dl>
+        </section>
+
+        <section id="panel-control" class="panel" role="tabpanel" hidden
+          aria-labelledby="tab-control">
+          <h2>超级控制</h2>
+          <p class="empty">
+            Placeholder page for operational control: server context, recovery,
+            diagnostics. Does not replace native Control Center yet.
+          </p>
+          <dl>
+            <div><dt>Surface</dt><dd>super-control</dd></div>
+            <div><dt>Renderer</dt><dd>experimental-tauri-v2</dd></div>
+            <div><dt>CSP</dt><dd>deny-by-default / no connect</dd></div>
+            <div><dt>Status</dt><dd>temporary HTML stub</dd></div>
+          </dl>
+        </section>
+      </main>
+    </div>
   </body>
 </html>

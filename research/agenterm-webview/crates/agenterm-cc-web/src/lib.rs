@@ -10,7 +10,7 @@ pub use bridge::{
 };
 
 pub const CONTRACT_VERSION: &str = "agenterm.webview-host/1";
-pub const ASSET_VERSION: &str = "cockpit-placeholder/1";
+pub const ASSET_VERSION: &str = "cc-shell-placeholder/2";
 pub const LOCAL_URL: &str = "agenterm://localhost/index.html";
 pub const MAX_ASSET_BYTES: usize = 64 * 1024;
 
