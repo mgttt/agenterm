@@ -1469,11 +1469,12 @@ fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields(
         String::from_utf8_lossy(&canonical.stdout),
         String::from_utf8_lossy(&canonical.stderr)
     );
-    // 78357dd deleted agenterm-server.exe (authority is `agenterm server` now),
-    // taking the manifest from 7 executables to 6 without updating this count.
+    // The manifest shrinks as PEs are folded into subcommands: 78357dd removed
+    // agenterm-server.exe (authority is `agenterm server`), then 7b930b9
+    // removed agenterm-mux.exe and agenterm-mcp.exe (now `agenterm-cli mux|mcp`).
     assert!(
         String::from_utf8_lossy(&canonical.stdout)
-            .contains("defines 6 validated Windows executables")
+            .contains("defines 4 validated Windows executables")
     );
 
     let root = fixture_root("artifact-manifest");
@@ -2152,8 +2153,8 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     assert_eq!(
         String::from_utf8_lossy(&accepted.stdout).trim(),
         concat!(
-            "PASS: PRD aligns with 69 catalog entries, 97 public names, ",
-            "11 protocol features, 53 mux commands, 66 capability IDs, ",
+            "PASS: PRD aligns with 70 catalog entries, 98 public names, ",
+            "11 protocol features, 55 mux commands, 66 capability IDs, ",
             "and 103 executable evidence IDs"
         )
     );
