@@ -22,6 +22,7 @@ pub(crate) mod instance_identity;
 pub(crate) mod instance_picker;
 pub(crate) mod interaction;
 pub(crate) mod new_terminal;
+pub(crate) mod pointer_input;
 pub(crate) mod selection;
 pub(crate) mod server_strip_ui;
 pub(crate) mod settings;

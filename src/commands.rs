@@ -80,6 +80,7 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("ui-client-state", &[]),
     command("ui-client-command", &[]),
     command("ui-deltas", &[]),
+    command("ui-input", &[]),
     command("ui-hello", &[]),
     command("ui-interact", &[]),
     command("ui-lease", &[]),
@@ -782,6 +783,24 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-bootstrap" => ("agenterm-cli ui-bootstrap", &[][..], &[][..], false),
+        "ui-input" => (
+            "agenterm-cli ui-input pointer --x PX --y PX \
+             [--button left|right|middle] [--action press|release|move] \
+             [--count 1|2|3] [--mods shift,ctrl,alt,meta] | \
+             ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels]",
+            &[
+                "--x",
+                "--y",
+                "--button",
+                "--action",
+                "--count",
+                "--mods",
+                "--delta-y",
+                "--units",
+            ][..],
+            &[][..],
+            false,
+        ),
         "ui-client-state" => (
             "agenterm-cli ui-client-state publish --lease-id ID \
              --client-pid PID --snapshot-json JSON",

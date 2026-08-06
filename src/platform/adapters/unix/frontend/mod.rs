@@ -23,9 +23,10 @@ use std::{
 use agenterm_platform::{
     input::{KeyPressState, LogicalKey as Key, NamedKey, NormalizedKeyEvent},
     window_host::{
-        GeometryChange, LogicalRect, LogicalSize, PixelWindow, PixelWindowApplication,
-        PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowMetrics,
-        PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
+        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelWindow,
+        PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
+        PixelWindowMetrics, PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta,
+        XrgbPixelFrame,
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -81,6 +82,9 @@ use crate::frontend::interaction::{
     sidebar_scroll_offset_for_thumb_top, system_menu_clipboard_state, window_close_request,
 };
 use crate::frontend::new_terminal;
+use crate::frontend::pointer_input::{
+    PointerActionKind, PointerButtonKind, PointerRequest, RequestedModifiers,
+};
 use crate::frontend::selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
@@ -325,6 +329,17 @@ struct ComposerClick {
     offset: usize,
     at: Instant,
     count: u8,
+}
+
+/// Converts a parsed `--mods` list into the modifier state a window event
+/// carries, so synthetic gestures see the same shift/ctrl handling as real ones.
+fn modifier_state(modifiers: RequestedModifiers) -> agenterm_platform::input::ModifierState {
+    agenterm_platform::input::ModifierState {
+        control: modifiers.control,
+        shift: modifiers.shift,
+        alt: modifiers.alt,
+        meta: modifiers.meta,
+    }
 }
 
 const APP_NAME: &str = "AgenTerm™";
@@ -3891,6 +3906,23 @@ impl UnixApp {
                     Err(error) => IpcResponse::failure(error),
                 }
             }
+            None if command == Some("ui-input") => {
+                match crate::frontend::pointer_input::parse_pointer_request(&envelope.request.args)
+                {
+                    Ok(request) => match self.apply_pointer_request(request) {
+                        // Returning the fresh snapshot lets a caller act and
+                        // observe the result in one round trip.
+                        Ok(()) => IpcResponse::success(self.build_ui_snapshot_json()),
+                        Err(error) => IpcResponse::failure(error),
+                    },
+                    Err(error) => IpcResponse::typed_failure(
+                        error,
+                        "operation_invalid_arguments",
+                        "validation",
+                        false,
+                    ),
+                }
+            }
             None if command == Some("ui-action") => {
                 let args = &envelope.request.args;
                 let action = args.get(1).map(String::as_str).unwrap_or("");
@@ -5174,6 +5206,106 @@ impl UnixApp {
         self.set_focus_surface_internal(target, "keyboard-navigation");
         true
     }
+    /// Drives a `ui-input` request through the ordinary window event path.
+    ///
+    /// Everything a human can do must be reachable from the CLI, and the only
+    /// way to keep the two honest is to make them the *same* code. So this
+    /// builds real `PixelWindowEvent`s and hands them to `handle_pixel_event`
+    /// rather than calling `handle_content_click` (or any hit-test) directly:
+    /// a synthetic gesture then cannot take a shortcut a human gesture lacks,
+    /// and cannot rot when the real path changes.
+    ///
+    /// Multi-click is delivered as N press/release pairs in immediate
+    /// succession, because that is literally what a double click is — the
+    /// surfaces promote a repeat by consulting their own recent-click state.
+    /// Seeding that state directly would be a second implementation of the
+    /// promotion rule, and would drift from the one users exercise.
+    fn apply_pointer_request(&mut self, request: PointerRequest) -> Result<(), String> {
+        match request {
+            PointerRequest::Pointer {
+                x,
+                y,
+                button,
+                action,
+                count,
+                modifiers,
+            } => {
+                let modifiers = modifier_state(modifiers);
+                let button = match button {
+                    PointerButtonKind::Left => PointerButton::Left,
+                    PointerButtonKind::Right => PointerButton::Right,
+                    PointerButtonKind::Middle => PointerButton::Middle,
+                };
+                let position = Some(LogicalPoint { x, y });
+                match action {
+                    PointerActionKind::Move => {
+                        self.handle_pixel_event(PixelWindowEvent::PointerMoved {
+                            position: LogicalPoint { x, y },
+                            modifiers,
+                        });
+                    }
+                    PointerActionKind::Press => {
+                        // Move first so the surfaces see the pointer arrive,
+                        // exactly as they would for a real cursor.
+                        self.handle_pixel_event(PixelWindowEvent::PointerMoved {
+                            position: LogicalPoint { x, y },
+                            modifiers,
+                        });
+                        for click in 0..count {
+                            self.handle_pixel_event(PixelWindowEvent::PointerButton {
+                                button,
+                                state: PointerButtonState::Pressed,
+                                position,
+                                modifiers,
+                            });
+                            // Release between repeats, but leave the button
+                            // held after the final press so a caller can drag.
+                            if click + 1 < count {
+                                self.handle_pixel_event(PixelWindowEvent::PointerButton {
+                                    button,
+                                    state: PointerButtonState::Released,
+                                    position,
+                                    modifiers,
+                                });
+                            }
+                        }
+                    }
+                    PointerActionKind::Release => {
+                        self.handle_pixel_event(PixelWindowEvent::PointerButton {
+                            button,
+                            state: PointerButtonState::Released,
+                            position,
+                            modifiers,
+                        });
+                    }
+                }
+                Ok(())
+            }
+            PointerRequest::Wheel {
+                x,
+                y,
+                delta_y,
+                line_based,
+                modifiers,
+            } => {
+                let delta = if line_based {
+                    WheelDelta::Lines {
+                        x: 0.0,
+                        y: delta_y as f32,
+                    }
+                } else {
+                    WheelDelta::LogicalPixels { x: 0.0, y: delta_y }
+                };
+                self.handle_pixel_event(PixelWindowEvent::MouseWheel {
+                    delta,
+                    position: Some(LogicalPoint { x, y }),
+                    modifiers: modifier_state(modifiers),
+                });
+                Ok(())
+            }
+        }
+    }
+
     fn handle_pixel_event(&mut self, event: PixelWindowEvent) {
         match event {
             PixelWindowEvent::Wake => {
