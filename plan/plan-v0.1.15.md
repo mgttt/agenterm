@@ -14,6 +14,9 @@
 不要另开 `plan/orchestrate-*.md`——派工以本文为 SSOT。  
 平台封装 / shared-first 纪律见 `AGENTS.md`、`plan/plan-platform-encapsulation-gap.md`。
 
+**Win CI-R 主波状态（2026-08-06）**：R1/R2/R3/A3/A4 **配置已落地 main**；  
+R4 / G′ / O* / U2 / H1 等 **未** 由本波宣称完成。OSX/Lnx 接手见 **§2.2.2**。
+
 ## 0. 数据来源与关键事实（全部实测，可复现）
 
 v0.1.14 发布日 ~10 轮 gate 级遥测，加 2026-08-05 对成功 Candidate
@@ -375,25 +378,35 @@ v0.1.15  Feedback shift-left & release-lane economics
 
 ### R. 发布链降本（本版第一优先；全部有实测收益）
 
-- [ ] **R1 cache 配额治理** ★最高性价比
+- [x] **R1 cache 配额治理** ★最高性价比
   - **动机**：9.9/10GB 撞顶 → LRU 驱逐 → Candidate cache 每轮全 miss，
     bootstrap 47s→81s **单调恶化**（见头部实测块）
   - **做法**：CI 的 debug target cache 限制保留份数或缩小缓存路径；
     必要时给 candidate 车道独立前缀，确保关键路径不被挤掉
+  - **落地（Win CI-R · 配置已合）**：Windows push CI target cache 改为
+    **v3-slim**（只缓存 `deps/build/.fingerprint/incremental`，不整包
+    `target/debug/` PE）；key 前缀与 Candidate `*-candidate-*` 仍隔离。
+    **全量验收**（连续两次 Candidate `bootstrap.worker.state==reused` +
+    cache 总量 &lt;8GB）需后续 Actions 观测，本叶不宣称已测绿。
   - **验收（可证伪）**：连续两次 Candidate 的 timing artifact 中
     `bootstrap.worker.state == "reused"`（当前恒为 `"rebuilt"`）；
     且 `gh api .../actions/caches` 总量 < 8GB
   - **成本**：小（改 workflow cache 配置 + 一次清理）
   - **收益**：≈3min/次 Candidate；**依赖**：无
-- [ ] **R2 `cargo-home-candidate-v2` 补 `restore-keys`**
+- [x] **R2 `cargo-home-candidate-v2` 补 `restore-keys`**
   - **动机**：它只有 `key` 无 `restore-keys`（对照 `cargo-target-v2` 有），
     hashFiles 一变即彻底 miss、无近似回退
+  - **落地**：`candidate.yml` 所有 `cargo-home-candidate-v2` **restore**
+    步已加前缀 `restore-keys`（含 windows-aarch64）。
   - **验收**：版本冻结提交后首轮 Candidate 日志出现前缀命中，
-    而非 `Cache not found`
+    而非 `Cache not found`（需下一次 Candidate 日志确认）
   - **成本**：极小（一行）；**依赖**：R1 先腾配额，否则命中也会被驱逐
-- [ ] **R3 net-research 移出 release 门**（原 B1）
+- [x] **R3 net-research 移出 release 门**（原 B1）
   - **动机**：142.2s／16.4%，耗时第二名，却与发布产物正确性关系最弱
   - **做法**：改为 push CI 跑一次；**不是删除**——保留验证，只换车道
+  - **落地**：`check.rhai` release 块不再跑 `agenterm-net-research`；
+    `scripts/qualification-gates.json` 去掉该 required gate；
+    push CI linux 仍 `AGENTERM_BOOTSTRAP_TASK: agenterm-net-research`。
   - **验收**：release 门不再含该 gate 且 push CI 含之；
     `qualification-gates.json` 声明同步（fail-closed 不破）
   - **成本**：小；**依赖**：无
@@ -405,16 +418,22 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **验收**：`dry_run=true` 跑完 verify 且仓库无新 tag、无新 draft
   - **成本**：中；**依赖**：无
   - ⚠️ **本叶自身就是「没跑过的车道」**，必须先自证，别重蹈覆辙
+  - **本波未做**：CI-R 先稳住 R1–R3/A3/A4；R4 另开
 
 ### A′. 反馈左移（只保留最便宜的两叶；A1/A2 推迟见 §2.6）
 
-- [ ] **A3 script-smoke 左移进 push CI**（debug 版，实测 ~7s）
+- [x] **A3 script-smoke 左移进 push CI**（debug 版，实测 ~7s）
   - **动机**：v0.1.14 发布日它贡献 2 次腐化；左移后 6 分钟内暴露
   - **做法**：并入 `94c3227` 已建的 windows CI release-lane-smokes 步骤
+  - **落地**：`ci.yml` windows `release-lane-smokes` 增加
+    `task run script-smoke`（与 remote-ui / fleet 同步）
   - **验收**：push CI 含 script-smoke 且 CI 总时长增幅 < 30s
   - **成本**：极小；**依赖**：无
-- [ ] **A4 per-gate timing 写进 `GITHUB_STEP_SUMMARY`**
+- [x] **A4 per-gate timing 写进 `GITHUB_STEP_SUMMARY`**
   - **动机**：现在要下载 artifact 才能看每门耗时；R1 的验收也依赖它可读
+  - **落地**：`timing-summary.rhai` 本就会 append 门表到
+    `GITHUB_STEP_SUMMARY`；Candidate 步改为 bash 明确调用，并追加
+    **bootstrap.worker.state** 行便于 R1 观测
   - **验收**：Candidate 运行页直接可见逐门耗时表，无需下载 artifact
   - **成本**：小；**依赖**：无（但先于 R1 做更好验证）
 
@@ -1148,6 +1167,21 @@ L′. v0.1.14 carry-forward
 - Lnx agent：本表 **Lnx-env**（+ 若 Unix-UX 明确交权才动 frontend）。  
 - Win agent：本表 **Win-UX + 可选 CI-R（若未另派）**。
 
+### 2.2.2 OSX / Lnx 接手清单（Win CI-R 主波之后）
+
+> **角色**：跑测试套件并修失败；**不要**重做 R1–R3/A3/A4 workflow 改动。  
+> **先** `git pull --ff-only origin main`，读 §2.2.1 禁区。
+
+| 主机 | 必做 | 可选 / 勿做 |
+|------|------|-------------|
+| **OSX** | `./check.sh --quick`（或本机惯用 quick）；有 GUI 时再跑相关 smoke；**G3→G7a→G2→G6** install 真机（§8）；**O1b** 若仍开 | 勿改 `.github/workflows` cache 键除非修你引入的红；勿整页重写 server-strip |
+| **Lnx** | `./check.sh --quick` + 本机/CI 已有 linux smokes 复验；**F1/F2** 环境 | 勿与 OSX 同时写 `unix/frontend/mod.rs`；Wine 不替 ConPTY 真机 |
+| **两端** | 失败先归因是否 pre-existing；修自己引入的红；精确 pathspec 提交 | 不宣称 R1 Candidate `worker.state=reused` 除非你观测了 Actions |
+
+**Win 已交棒的 CI-R 证据指针**：`ci.yml`（v3-slim target + script-smoke）、  
+`candidate.yml`（cargo-home restore-keys + timing/bootstrap summary）、  
+`check.rhai` + `qualification-gates.json`（net-research 出 release 门）。
+
 ### 2.3 明确不做速度优化的部分
 
 - **gate 分片**（39 门串行 869s，理论可压到 7–9min）：收益最大，但要重排
@@ -1635,6 +1669,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **goal-crate-platform 封装完结（contract）**：G8 `font-decrease`/`font-increase`/`toggle-locale` Unix 补 ui-action 并升 SHARED（方法本已存在）；gap 文写「完结定义」+ G3/G4 标 out-of-goal residual；WINDOWS_ONLY 余 14=strip/picker+settings-scope（产品叶非 OS 泄漏）；成功清单在 `goal-crate-platform.md` 勾选 |
 | 2026-08-06 | **三端并发派工写入本文 §2.2.1**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§1.5 与 §11 指针回链 |
 | 2026-08-06 | **章节编号改为阿拉伯数字** `x.y.z`（废止「一、二·二-b」等中文章节号）；交叉引用同步为 `§2.2.1` 等形式；原 CLI 专节与结构 §9 撞号 → CLI 改为 **§12** |
+| 2026-08-06 | **Win CI-R 主波落地**：R1 CI target **v3-slim**；R2 Candidate cargo-home **restore-keys**；R3 net-research 出 release 门（gates.json + check.rhai），push CI linux 仍跑；A3 script-smoke 进 windows release-lane-smokes；A4 Candidate summary 强化 bootstrap 行。R4 未做。OSX/Lnx 接手见 **§2.2.2** |
 
 ---
 

@@ -129,7 +129,10 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
+          # R2: prefix restore so hashFiles drift still reuses registry (v0.1.15).
           key: cargo-home-candidate-v2-${{ matrix.platform_id }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          restore-keys: |
+            cargo-home-candidate-v2-${{ matrix.platform_id }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-
 
       - name: Report candidate cache hit profile
         if: matrix.platform_id == 'windows-x86_64' && always()
@@ -152,6 +155,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: cargo-home-candidate-v2-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          restore-keys: |
+            cargo-home-candidate-v2-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-
 
       - name: Run release quality gate
         if: matrix.platform_id == 'windows-x86_64'
@@ -191,16 +196,42 @@ jobs:
             target/smoke/*.png
 
       - name: Publish Candidate quality timing summary
+        # A4: timing-summary.rhai appends the per-gate table to GITHUB_STEP_SUMMARY
+        # when that env is set (Actions always sets it). No artifact download needed.
         if: always() && matrix.platform_id == 'windows-x86_64'
         continue-on-error: true
-        shell: cmd
+        shell: bash
         run: |
-          @if not exist target\qualification\timing.json exit /b 0
-          @if exist dist\agenterm-rhai.exe (
-            dist\agenterm-rhai.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
-          ) else (
-            target\debug\agenterm-rhai.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          set -euo pipefail
+          if [[ ! -f target/qualification/timing.json ]]; then
+            echo "No timing.json; skip quality timing summary." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -x dist/agenterm-rhai.exe ]]; then
+            RHAI=dist/agenterm-rhai.exe
+          else
+            RHAI=target/debug/agenterm-rhai.exe
+          fi
+          "$RHAI" task run timing-summary --manifest agenterm.tasks.json -- \
+            target/qualification/timing.json
+          # Surface bootstrap reuse for R1 acceptance without opening the artifact.
+          python - <<'PY'
+          import json, os, pathlib
+          p = pathlib.Path("target/qualification/timing.json")
+          report = json.loads(p.read_text(encoding="utf-8"))
+          boot = report.get("bootstrap") or {}
+          worker = (boot.get("worker") or {})
+          line = (
+              f"- **bootstrap.worker.state**: `{worker.get('state', '?')}` "
+              f"(bootstrap `{boot.get('state', '?')}`)\n"
           )
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as fh:
+                  fh.write("\n### Candidate bootstrap (R1 signal)\n\n")
+                  fh.write(line)
+          print(line.strip())
+          PY
 
       - name: Upload Candidate quality timing
         if: always() && matrix.platform_id == 'windows-x86_64'

@@ -848,7 +848,6 @@ context.timing = qualification::new_timing(
 if !release {
     for id in [
         "release-preflight",
-        "agenterm-net-research",
         "preflight-benchmark"
     ] {
         context.timing = qualification::timing_set_gate(
@@ -913,23 +912,8 @@ if release {
     );
     context = release_preflight.context;
     sequence = release_preflight.sequence;
-    let net_research = run_gate(
-        context,
-        "agenterm-net-research",
-        "isolated agenterm-net research",
-        [task(
-            bootstrap_worker,
-            manifest,
-            "agenterm-net-research",
-            600000,
-            []
-        )],
-        repo,
-        scratch,
-        sequence
-    );
-    context = net_research.context;
-    sequence = net_research.sequence;
+    // R3 (v0.1.15): agenterm-net-research is no longer a release/Candidate gate.
+    // Push CI still runs it (linux job AGENTERM_BOOTSTRAP_TASK=agenterm-net-research).
     let benchmark = run_gate(
         context,
         "preflight-benchmark",
