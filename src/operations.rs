@@ -17,6 +17,10 @@ pub const CONTROL_CENTER_OPEN: &str = "control-center.open";
 pub const CONTROL_CENTER_STATUS: &str = "control-center.status";
 pub const CONTROL_CENTER_SNAPSHOT: &str = "control-center.snapshot";
 pub const CONTROL_CENTER_CLOSE: &str = "control-center.close";
+pub const UI_TAB_SELECT: &str = "ui.tab.select";
+pub const UI_TAB_NEW_CHILD: &str = "ui.tab.new-child";
+pub const UI_TREE_TOGGLE: &str = "ui.tree.toggle";
+pub const UI_COMPOSER_SEND: &str = "ui.composer.send";
 pub const UI_INPUT_POINTER: &str = "ui.input.pointer";
 pub const UI_INPUT_WHEEL: &str = "ui.input.wheel";
 pub const TABS_SET_NOTE: &str = "tabs.set-note";
@@ -535,6 +539,66 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         since: "0.1.6",
     },
     OperationSpec {
+        id: UI_TAB_SELECT,
+        script_surface: "fleet.ui.tab.select",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("select-tab"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.15",
+    },
+    OperationSpec {
+        id: UI_TAB_NEW_CHILD,
+        script_surface: "fleet.ui.tab.new_child",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("new-child"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.15",
+    },
+    OperationSpec {
+        id: UI_TREE_TOGGLE,
+        script_surface: "fleet.ui.tree.toggle",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("toggle-tree"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.15",
+    },
+    OperationSpec {
+        id: UI_COMPOSER_SEND,
+        script_surface: "fleet.ui.composer.send",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("composer-send"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.15",
+    },
+    OperationSpec {
         id: UI_INPUT_POINTER,
         script_surface: "fleet.ui.input.pointer",
         class: OperationClass::Control,
@@ -702,6 +766,10 @@ pub(crate) fn operation_for_args(
                 "window-activate" => UI_WINDOW_ACTIVATE,
                 "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
+                "select-tab" => UI_TAB_SELECT,
+                "new-child" => UI_TAB_NEW_CHILD,
+                "toggle-tree" => UI_TREE_TOGGLE,
+                "composer-send" => UI_COMPOSER_SEND,
                 action if action.starts_with("tabs-") => {
                     return Err(operation_error(
                         "operation_unknown",
