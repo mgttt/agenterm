@@ -204,6 +204,47 @@ mod tests {
         );
     }
 
+    /// REVIEW(macos → windows owner): the host-only lists are currently much
+    /// larger than reality, and the existing checks cannot see it because they
+    /// only ask "does this action appear somewhere?", never "is it *absent*
+    /// from the peer host?".
+    ///
+    /// The missing haystack is `src/control_dispatch.rs`. Both hosts route
+    /// through it — Unix from `unix/frontend/mod.rs:3862`, Windows from
+    /// `server_app.rs:829/880/1126/1386` — so an action implemented there is
+    /// already shared, whatever the catalog says. Measured on this tree, 24 of
+    /// the 41 `WINDOWS_ONLY` entries are implemented in that shared dispatcher:
+    /// close-tab, composer-send, confirm, copy-selection, edit-tab, new-child,
+    /// new-tab, open-settings, select-tab, settings-apply, the four
+    /// settings-preset-*, settings-theme-dark/light, tab-editor-save/cancel,
+    /// tabs-show/hide/toggle/set-width, toggle-tabs and toggle-tree.
+    ///
+    /// Probed against a live Unix GUI, every one of them answers rather than
+    /// returning "unknown UI action", so this is a bookkeeping gap, not a
+    /// parity gap — and it understates Unix, which risks someone "porting" work
+    /// that already exists.
+    ///
+    /// This test pins the current count so the number cannot quietly grow. The
+    /// real fix is yours to make deliberately: promote those ids to
+    /// `SHARED_UI_ACTIONS` and drop this test. Left as a red-flag rather than a
+    /// unilateral edit because the catalog is your in-flight work.
+    #[test]
+    fn windows_only_entries_implemented_in_the_shared_dispatcher_are_counted() {
+        let shared_dispatcher = include_str!("../control_dispatch.rs");
+        let misfiled: Vec<&str> = WINDOWS_ONLY_UI_ACTIONS
+            .iter()
+            .copied()
+            .filter(|action| shared_dispatcher.contains(&format!("\"{action}\"")))
+            .collect();
+        assert_eq!(
+            misfiled.len(),
+            24,
+            "WINDOWS_ONLY entries implemented in the shared dispatcher changed: {misfiled:?}. \
+             Promote them to SHARED_UI_ACTIONS (and delete this test), or update the count \
+             if the set legitimately moved."
+        );
+    }
+
     #[test]
     fn windows_catalog_literals_exist_in_remote_frontend() {
         let src = include_str!("../platform/adapters/windows/remote_frontend.rs");
