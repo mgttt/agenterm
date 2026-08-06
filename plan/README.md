@@ -7,7 +7,8 @@
 
 | 文件 | 角色 |
 |------|------|
-| [`plan-v0.1.15.md`](plan-v0.1.15.md) | **在制版本**工作树（§一·五 叶 + **§二·二-b 三端泳道派工**；含 L′ 尾账） |
+| [`plan-v0.1.16.md`](plan-v0.1.16.md) | **在制版本**工作树（多 GUI 产品化 + Unix 多实例 + 0.1.15 尾账） |
+| [`plan-v0.1.15.md`](plan-v0.1.15.md) | 上版证据与推迟表全文（must-ship 主波已合 main；未公开发版） |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层 / 热文件 / 结构禁令 |
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix **可见行为**差距地图 |
 | [`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) | 平台 UX 证据矩阵（+ template） |
