@@ -25,7 +25,8 @@
 - **三端工作台手感齐** = 产品语义单点 + 两端 adapter 接线；**不**把 AgenTerm 工作台塞进 platform。  
 - 产品 `ui-action` interim 集合闸：[`src/frontend/ui_action_catalog.rs`](../src/frontend/ui_action_catalog.rs)。  
 - 机制漏点表：[`plan/plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md)。  
-- 可执行 goal：[`plan/goal-crate-platform.md`](goal-crate-platform.md)。
+- 可执行 goal：[`plan/goal-crate-platform.md`](goal-crate-platform.md)。  
+- **Rhai ↔ Rust Facade 边界**（L3 pack / L2 catalog / L1 kernel）：[`plan/design-rhai-rust-boundary.md`](design-rhai-rust-boundary.md)。
 
 ### 1.1 目录树
 

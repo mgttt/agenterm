@@ -5,7 +5,7 @@
 | **文档** | 薄 DI 基座 + 随发布携带的 Rhai 应用包 + 可选远程互动更新 |
 | **日期** | 2026-08-06 |
 | **状态** | 讨论稿 rev1 |
-| **关联** | `plan/design-release-base-vs-apps.md`、`plan/design-llm-gateway-rhai-logic-pack.md`、`plan/ARCHITECTURE.md`、`prd/PRD_02_10_rhai_scripting.md` |
+| **关联** | `plan/design-rhai-rust-boundary.md`（封装边界 SSOT）、`plan/design-release-base-vs-apps.md`、`plan/design-llm-gateway-rhai-logic-pack.md`、`plan/ARCHITECTURE.md`、`prd/PRD_02_10_rhai_scripting.md` |
 
 ---
 
