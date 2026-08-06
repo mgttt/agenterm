@@ -301,7 +301,7 @@ impl RecentSidebarTextClick {
     fn matches(&self, tab_id: u64, geometry_generation: u64, now: Instant) -> bool {
         self.tab_id == tab_id
             && self.geometry_generation == geometry_generation
-            && now.duration_since(self.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+            && now.duration_since(self.at) <= Duration::from_millis(double_click_ms())
     }
 }
 
@@ -310,7 +310,12 @@ struct TabsResizeDrag {
     original_width: u16,
 }
 
-const DOUBLE_CLICK_MS: u64 = 500;
+/// Multi-click grouping window, owned by shared input policy because the value
+/// is per-host (macOS and each Linux desktop expose their own user setting)
+/// rather than a Unix commonality.
+fn double_click_ms() -> u64 {
+    crate::platform::multi_click_interval_ms()
+}
 
 /// A recent composer click, used to promote repeats into word and line
 /// selection. `offset` is compared so that a second click elsewhere starts a
@@ -1154,7 +1159,7 @@ impl UnixApp {
             .composer_click
             .filter(|click| {
                 click.offset == offset
-                    && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+                    && now.duration_since(click.at) <= Duration::from_millis(double_click_ms())
             })
             .map_or(1, |click| click.count.saturating_add(1).min(3));
 
@@ -2956,7 +2961,7 @@ impl UnixApp {
         if self.recent_terminal_click.is_some_and(|click| {
             click.tab_id == tab_id
                 && click.point == point
-                && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+                && now.duration_since(click.at) <= Duration::from_millis(double_click_ms())
         }) {
             self.recent_terminal_click = None;
             if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point) {
@@ -2966,7 +2971,7 @@ impl UnixApp {
                     self.set_status_message(format!("Copy failed: {error}"));
                 }
                 self.terminal_double_click = now
-                    .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
+                    .checked_add(Duration::from_millis(double_click_ms()))
                     .map(|expires_at| TerminalDoubleClick {
                         tab_id,
                         point,
