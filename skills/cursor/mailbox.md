@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控1**刷新：2026-08-06T07:20Z（CC 超控智能体设计稿已合 main）
+最后由**主控1**刷新：2026-08-06T07:28Z（LLM Web 桥 + BYOK 设计稿）
 
 ## 共享事实
 
@@ -13,7 +13,8 @@
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
-| 执行计划 | `plan/plan-control-center-ux.md`；**超控 Tab** → `plan/design-cc-hyper-control-agent.md` |
+| 执行计划 | CC → `plan/design-cc-hyper-control-agent.md`；LLM → `plan/design-llm-bridge-web-to-api.md` |
+| LLM | 免费 Web 会话桥（Playwright/Camoufox）+ BYOK；统一 `agenterm-llm-gateway` loopback；LQ-1–7 待裁决 |
 | `origin/main` | tip `26dae49`；含 CC 超控设计稿 + mailbox 登记 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
