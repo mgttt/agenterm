@@ -16,6 +16,7 @@ fn check_accepts_all_fixtures() {
         ("while", include_str!("../fixtures/rh/while.rh")),
         ("try-catch", include_str!("../fixtures/rh/try-catch.rh")),
         ("try-ok", include_str!("../fixtures/rh/try-ok.rh")),
+        ("for-range", include_str!("../fixtures/rh/for-range.rh")),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -71,6 +72,14 @@ fn while_fixture_transpile_emits_native_loop() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("while "));
     assert!(!rust.contains("rh_host_eval_int(\"while"));
+}
+
+#[test]
+fn for_range_fixture_transpile_emits_native_loop() {
+    let source = include_str!("../fixtures/rh/for-range.rh");
+    let rust = transpile_cdylib(source).expect("transpile");
+    assert!(rust.contains("for value in 1..5"));
+    assert!(!rust.contains("rh_host_eval_int(\"for"));
 }
 
 #[test]

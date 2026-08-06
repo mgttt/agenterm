@@ -401,17 +401,39 @@ fn emit_stmt(
         }
         Stmt::For(boxed, ..) => {
             let (counter, _, flow) = boxed.as_ref();
-            if let Some(items) = int_for_iterable(&flow.expr) {
-                out.push_str("    for ");
-                out.push_str(counter.name.as_str());
-                out.push_str(" in [");
-                for (index, item) in items.iter().enumerate() {
-                    if index > 0 {
-                        out.push_str(", ");
+            if let Some(plan) = int_for_plan(&flow.expr) {
+                match plan {
+                    IntForPlan::Values(items) => {
+                        out.push_str("    for ");
+                        out.push_str(counter.name.as_str());
+                        out.push_str(" in [");
+                        for (index, item) in items.iter().enumerate() {
+                            if index > 0 {
+                                out.push_str(", ");
+                            }
+                            out.push_str(&item.to_string());
+                        }
+                        out.push_str("].iter().copied() {\n");
                     }
-                    out.push_str(&item.to_string());
+                    IntForPlan::Exclusive { start, end } => {
+                        out.push_str("    for ");
+                        out.push_str(counter.name.as_str());
+                        out.push_str(" in ");
+                        out.push_str(&start.to_string());
+                        out.push_str("..");
+                        out.push_str(&end.to_string());
+                        out.push_str(" {\n");
+                    }
+                    IntForPlan::Inclusive { start, end } => {
+                        out.push_str("    for ");
+                        out.push_str(counter.name.as_str());
+                        out.push_str(" in ");
+                        out.push_str(&start.to_string());
+                        out.push_str("..=");
+                        out.push_str(&end.to_string());
+                        out.push_str(" {\n");
+                    }
                 }
-                out.push_str("].iter().copied() {\n");
                 let mut loop_ctx = ctx
                     .clone()
                     .with_binding(counter.name.as_str(), ValueKind::Int);
@@ -653,18 +675,63 @@ fn infer_binding_kind(expr: &Expr) -> ValueKind {
     }
 }
 
-fn int_for_iterable(iterable: &Expr) -> Option<Vec<i64>> {
-    let Expr::Array(items, ..) = iterable else {
+const MAX_NATIVE_FOR_SPAN: i64 = 4096;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IntForPlan {
+    Values(Vec<i64>),
+    Exclusive { start: i64, end: i64 },
+    Inclusive { start: i64, end: i64 },
+}
+
+fn int_const(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::IntegerConstant(value, ..) => Some(*value),
+        _ => None,
+    }
+}
+
+fn bounded_exclusive_span(start: i64, end: i64) -> Option<i64> {
+    if end <= start {
+        return Some(0);
+    }
+    let span = end.checked_sub(start)?;
+    (span <= MAX_NATIVE_FOR_SPAN).then_some(span)
+}
+
+fn bounded_inclusive_span(start: i64, end: i64) -> Option<i64> {
+    if end < start {
+        return Some(0);
+    }
+    let span = end.checked_sub(start)?.checked_add(1)?;
+    (span <= MAX_NATIVE_FOR_SPAN).then_some(span)
+}
+
+fn int_for_plan(iterable: &Expr) -> Option<IntForPlan> {
+    if let Expr::Array(items, ..) = iterable {
+        let mut values = Vec::new();
+        for item in items {
+            values.push(int_const(item)?);
+        }
+        return Some(IntForPlan::Values(values));
+    }
+    let Expr::FnCall(call, ..) = iterable else {
         return None;
     };
-    let mut values = Vec::new();
-    for item in items {
-        let Expr::IntegerConstant(value, ..) = item else {
-            return None;
-        };
-        values.push(*value);
+    if call.args.len() != 2 {
+        return None;
     }
-    Some(values)
+    let start = int_const(&call.args[0])?;
+    let end = int_const(&call.args[1])?;
+    if call.name.as_str() == Token::ExclusiveRange.literal_syntax() {
+        bounded_exclusive_span(start, end)?;
+        Some(IntForPlan::Exclusive { start, end })
+    } else if call.name.as_str() == Token::InclusiveRange.literal_syntax() {
+        bounded_inclusive_span(start, end)?;
+        Some(IntForPlan::Inclusive { start, end })
+    } else {
+        None
+    }
 }
 
 fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), RhError> {
@@ -890,6 +957,16 @@ mod tests {
         assert!(
             rust.contains("while "),
             "expected while in:\n{rust}"
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_for_int_range() {
+        let source = include_str!("../../../fixtures/rh/for-range.rh");
+        let rust = transpile_cdylib(source).expect("transpile");
+        assert!(
+            rust.contains("for value in 1..5"),
+            "expected native for-range in:\n{rust}"
         );
     }
 

@@ -80,3 +80,69 @@ fn framed_worker_run_honors_task_arguments_with_rh_backend() {
         assert_eq!(result.value, Some(serde_json::json!(2)));
     });
 }
+
+#[test]
+fn framed_worker_run_entry_fixture_with_rh_backend() {
+    with_rh_backend(|| {
+        let source = std::fs::read_to_string("fixtures/rh/entry.rh").expect("read entry.rh");
+        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+            .arg("--framed-worker")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn framed worker");
+
+        let invocation = ScriptInvocation {
+            envelope_version: SCRIPT_ENVELOPE_VERSION,
+            invocation_id: "rh-framed-entry".into(),
+            api_version: SCRIPT_API_VERSION,
+            operation: ScriptOperation::Run,
+            profile: ScriptProfile::Local,
+            source_label: "fixtures/rh/entry.rh".into(),
+            source,
+            project_root: Some(env!("CARGO_MANIFEST_DIR").into()),
+            invocation_temp_root: None,
+            arguments: vec![],
+            budgets: ScriptBudgets::default(),
+            observation: None,
+        };
+
+        let frame = ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: "invoke-rh-framed-entry".into(),
+            payload: ScriptFramePayload::Invoke(invocation),
+        };
+
+        {
+            let mut stdin = child.stdin.take().expect("stdin");
+            write_script_frame(&mut stdin, &frame).expect("write invoke frame");
+        }
+
+        let mut stdout = child.stdout.take().expect("stdout");
+        let result = loop {
+            match read_script_frame(&mut stdout).expect("read frame") {
+                ScriptFrameRead::Frame(frame) => {
+                    if let ScriptFramePayload::Result(result) = frame.payload {
+                        break result;
+                    }
+                }
+                ScriptFrameRead::Eof => {
+                    let stderr = child.stderr.take().map(|mut stderr| {
+                        let mut text = String::new();
+                        let _ = std::io::Read::read_to_string(&mut stderr, &mut text);
+                        text
+                    });
+                    panic!("worker EOF before result: stderr={stderr:?}");
+                }
+                ScriptFrameRead::Rejected(rejection) => {
+                    panic!("frame rejected: {rejection:?}");
+                }
+            }
+        };
+        let _ = child.wait();
+
+        assert!(result.ok, "expected ok result, got {:?}", result.failure);
+        assert_eq!(result.value, Some(serde_json::json!(42)));
+    });
+}
