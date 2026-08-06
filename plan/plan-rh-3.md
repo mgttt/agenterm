@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M22 执行轨完成**（rh 默认；`agenterm-rhai` 薄壳） |
+| **状态** | **M22 执行轨完成**（rh 默认；`agenterm-rhai` 薄壳）；**M23 扩面轨进行中** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -42,6 +42,10 @@
 | M22e | CLI 薄转发黑盒（check/eval/run/version）；framed-worker entry fixture；`for` 整型 range 原生 AOT | [x] |
 | M22f | **默认 rh 后端**（`AGENTERM_SCRIPT_BACKEND=rh`）；bootstrap/worker 注入；删除 Rhai check-many 回退 | [x] |
 | M22 | 替换轨：`agenterm-rhai` 薄壳 + rh 默认执行（Candidate 六 cell 改名仍待人审） | [x] |
+| M23a | for-loop 纯 int / `.len` range 原生 AOT（`for x in 1..5`、`for i in 0..arr.len()`） | [x] |
+| M23b | rh `check` parity：`import`/project root + API catalog 对齐 rhai lint 语义 | [x] |
+| M23c | caller wave 1：CI / bootstrap 运营引用清单化迁移（`caller-inventory` 基线 guard） | [x] |
+| M23d | `agenterm-rhai` shim 硬化：剩余 dev forward 路径（check/eval/run/version/worker） | [x] |
 
 ---
 
@@ -76,12 +80,29 @@
 
 ---
 
-## 5. 依赖与顺序
+## 5. M23 扩面轨（rh-3 后续）
+
+相对 M22 默认 rh 后端，M23 把 **原生 AOT 覆盖面**、**check 语义 parity**、**caller 清单 wave 1**、**薄壳 forward 硬化** 拆成四条可独立验收的叶。
+
+| ID | 用户问题 | 交付 | 验收 | 非目标 |
+|----|----------|------|------|--------|
+| **M23a** | `for` range 仍部分 host eval | 纯 int 字面/`..` range 与 `.len()` 上界原生 emit | `fixtures/rh/for-range.rh` qualify；`rh_regression` 含 `for … in` 机器码 | 任意 host 表面迭代器；`for-in` 对象/map |
+| **M23b** | rh `check` 与 rhai lint 对 import/catalog 不一致 | `agenterm-rh check` / check-many 校验 project imports + `script_api` catalog 可见性 | `./rh-check.sh`；与 rhai check-many 同 manifest 零 diff（允许 rh-only 扩展字段） | 重写 catalog；改 broker 权限 |
+| **M23c** | CI/bootstrap 仍大量 `agenterm-rhai` 字符串 | wave 1：`.github/workflows/**`、`scripts/bootstrap.*` 运营引用改指向 `agenterm-rh` 或 env 中性名 | `caller-inventory` ≥400 hits 基线 guard；bootstrap+ci 类非零；wave 1 diff 可审 | 一次删光 432 引用；改 task manifest 文件名 |
+| **M23d** | 薄壳 forward 边角仍漏 dev 路径 | `agenterm-rhai` 剩余 check/eval/run/version/worker 转发与错误码对齐 | `rh_cli_forward` + framed-worker 黑盒；无静默 Rhai 回退（除显式 `=rhai`） | 移除 `agenterm-rhai` PE；Candidate 六 cell 改名 |
+
+**顺序：** M23a ∥ M23b（热文件不同）→ M23c（依赖 inventory 基线）→ M23d（整合 forward 面）。M23c 的 read-only guard 已落 `tests/rh_corpus` + `fixtures/rh/caller-inventory-baseline.json`。
+
+---
+
+## 6. 依赖与顺序
 
 ```text
 rh-3a (while + eval) → rh-3b (assign + try) → rh-3c (check-many + worker parity)
         ↓
-rh-4 corpus 报告 → 0.1.15 完成后 M15 全量迁移决策
+rh-4 corpus 报告 → M22 默认 rh + 薄壳
         ↓
-agenterm-rhai 薄替换 / rename（Candidate 六 cell + caller 清单）
+M23a/b (AOT + check parity) → M23c (caller wave 1) → M23d (shim hardening)
+        ↓
+Candidate 六 cell 改名 / 全量 caller 清单（待人审）
 ```

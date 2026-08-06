@@ -32,7 +32,7 @@ Unix 侧仍缺的多实例入口，顺带关掉最贵的未验证据与测试腐
 | **B′** | buffer/send-keys 主路径；mux/mcp **独立 PE 移除**，CLI 子命令保留 |
 | **租约** | multi-lease + `As Window` 强制 `--ui-client`（`94f0990`） |
 | **Unix** | 逐终端 Settings（pri-1）、顶栏 server strip（`dd2bc29`） |
-| **rh** | rh-3a…3d + corpus 扫描已合；M22 薄替换未做 |
+| **rh** | rh-3a…3d + corpus 扫描已合；**M22f 默认 rh 后端** + `agenterm-rhai` 薄壳已合；M23 扩面轨见 [`plan-rh-3.md`](plan-rh-3.md) §5 |
 
 ### 0.2 用户现场仍开的痛点（驱动本版主题）
 
@@ -177,8 +177,9 @@ R′. Evidence closeout
 
 | 叶 | 说明 |
 |----|------|
-| **Rh-M22** | `agenterm-rhai` → 薄转发/替换决策 + caller 清单；**需 Candidate 证据** 才宣称替换 |
-| **Rh-default** | **不**默认 `AGENTERM_SCRIPT_BACKEND=rh`（非目标） |
+| **Rh-M22** | [x] `agenterm-rhai` 薄壳 + **M22f 默认 rh**；Candidate 六 cell 改名仍待人审 |
+| **Rh-M23** | AOT 扩面 + check parity + caller wave 1 + shim 硬化（[`plan-rh-3.md`](plan-rh-3.md) §5） |
+| **Rh-default** | [x] **M22f 已默认** `AGENTERM_SCRIPT_BACKEND=rh`；显式 `=rhai` 可回退 |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)。
 
@@ -205,7 +206,7 @@ R′. Evidence closeout
 | 4 | **O-P2 → O-P4 → O-P3 → O-evidence** | Unix 多实例闭环 |
 | 5 | **R′ / T-debt** | 证据与发布红；可并行 |
 | 6 | **L7/L1** | 极小成本卫生 |
-| 7 | **Rh-M22** | 独立轨；不挡 GUI |
+| 7 | **Rh-M23** | 独立轨；不挡 GUI；M22 已 ship |
 | 砍 | U4、S4 实现、M 大叶、G7 策略、H2 | 见表 §3 |
 
 ### 2.2 泳道（继承 0.1.15 纪律，略）
@@ -216,7 +217,7 @@ R′. Evidence closeout
 | **Unix-UX** | **OSX 单写** frontend | O-* | `unix/frontend/**`、shared 仅真共享 | 不与 Lnx 同写 frontend |
 | **Lnx-env** | Linux | F 环境、Linux smoke 复验、T-debt | `adapters/linux/**`、环境笔记 | 不写 unix frontend 巨石 |
 | **CI-R** | 任意独占 | R′ 观测/最小 workflow 修 | workflows / check.rhai | 不扩 scope 到 GUI |
-| **Rh** | 任意 | Rh-M22 | `crates/agenterm-rh/**`、caller 清单 | 不默认切 backend |
+| **Rh** | 任意 | Rh-M23 | `crates/agenterm-rh/**`、caller 清单、wave 1 CI/bootstrap | 不删 `agenterm-rhai` PE；Candidate 改名仍 HOLD |
 
 规则：一人一热域；shared-first；机制进 `agenterm-platform`；小步 push main。
 
@@ -227,7 +228,7 @@ R′. Evidence closeout
   Win-UX:  [W1][W2][W3][W4][U2]
   Unix-UX: [==== O-P2 → O-P4 → O-P3 → O-evidence ====]
   CI-R:    [R1e/R2e 观测][R4e dry_run][T-debt]
-  Rh:      [........ M22 决策与清单 ........]
+  Rh:      [........ M23a/b → M23c → M23d ........]
 ```
 
 ---
@@ -239,7 +240,7 @@ R′. Evidence closeout
 - 夜间彩排 A1、Candidate 自动派发 A2
 - gate 大分片、smoke 并行分片
 - L-NET 实现、L-CC 大内容、computer-use
-- 默认切 rh backend；Cranelift JIT
+- 回退 M22f 默认 rh backend（除非显式 bugfix）；Cranelift JIT
 - 结构 SSOT 大重构（S-struct HOLD，待用户通知）
 - 静默杀死用户 keep-server 会话
 
@@ -252,7 +253,7 @@ R′. Evidence closeout
 | **G-P2** | 升级遇 running server 默认策略 | G7b/c/d |
 | **P1/P5** | agenterm.work / Pages 归属 | H5、E1 |
 | **D1** | Candidate preflight 是否可祖先 SHA | 仅工具链 |
-| **Rh-M22-go** | 是否本版替换 `agenterm-rhai` 入口 | 薄替换落地 |
+| **Rh-M22-go** | ~~是否本版替换 `agenterm-rhai` 入口~~ → **M22f 已 ship 薄壳+默认 rh**；Candidate 六 cell 改名仍 HOLD | 公开 rename |
 | **S-struct** | 是否开 architecture 围栏重构 | HOLD |
 
 已拍板沿用：G-P1 unsigned 回落+警告；multi-lease；O Settings 对齐；mux/mcp 无独立 PE。
@@ -294,6 +295,7 @@ R′. Evidence closeout
 | 2026-08-06 | multi-lease + As Window `--ui-client` 合 main（`bd51eae`…`94f0990`）；用户确认「GUI 不独占 server」 |
 | 2026-08-06 | Unix Settings pri-1 + server strip 合 main；picker/open-instance 仍为本版 O 组 |
 | 2026-08-06 | v0.1.15 must-ship 主波合 main；**未**公开 tag/Release |
+| 2026-08-06 | **M22f** 默认 `AGENTERM_SCRIPT_BACKEND=rh` + `agenterm-rhai` 薄壳合 main；v0.1.16 Rh 表同步 |
 
 ---
 

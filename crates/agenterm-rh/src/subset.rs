@@ -275,6 +275,22 @@ mod tests {
     }
 
     #[test]
+    fn accepts_for_dyn_int_range() {
+        let ast = Engine::new()
+            .compile("fn entry() { let count = 5; for x in 1..count { if x == 4 { return 7; } } 0 }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_for_var_len_range() {
+        let ast = Engine::new()
+            .compile("fn entry() { for x in 1..args.len { if x == 2 { return 9; } } 0 }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
     fn accepts_for_int_range() {
         let ast = Engine::new()
             .compile("fn entry() { for x in 1..5 { if x == 4 { return 7; } } 0 }")

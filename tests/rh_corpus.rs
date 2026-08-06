@@ -31,15 +31,43 @@ fn task_manifest_corpus_scan_from_integration_test() {
 }
 
 #[test]
-fn caller_inventory_lists_bootstrap_and_ci() {
+fn caller_inventory_hit_count_baseline_guard() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let baseline_path = repo.join("fixtures/rh/caller-inventory-baseline.json");
+    let baseline_raw = std::fs::read_to_string(&baseline_path).expect("baseline fixture");
+    let baseline: serde_json::Value = serde_json::from_str(&baseline_raw).expect("baseline json");
+    let min_hit_count = baseline["min_hit_count"]
+        .as_u64()
+        .expect("min_hit_count") as usize;
+    let min_categories = baseline["min_categories"]
+        .as_object()
+        .expect("min_categories");
+
     let report = agenterm_rh::scan_caller_inventory(agenterm_rh::CallerInventoryOptions {
         project_root: repo,
     })
     .expect("inventory");
-    assert!(report.hit_count >= 40);
-    assert!(report.categories.get("bootstrap").copied().unwrap_or(0) >= 1);
-    assert!(report.categories.get("ci").copied().unwrap_or(0) >= 5);
+
+    assert!(
+        report.hit_count >= min_hit_count,
+        "hit_count {} below baseline {}",
+        report.hit_count,
+        min_hit_count
+    );
+    for (category, min) in min_categories {
+        let min = min.as_u64().expect("category min") as usize;
+        let actual = report
+            .categories
+            .get(category.as_str())
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            actual >= min,
+            "category {category}: {actual} below baseline {min}"
+        );
+    }
+    assert!(report.categories.contains_key("bootstrap"));
+    assert!(report.categories.contains_key("ci"));
 }
 
 #[test]
