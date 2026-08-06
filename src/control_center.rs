@@ -37,9 +37,9 @@ Usage:
   agenterm-cc [open] [--no-activate] [--instance NAME | --endpoint ENDPOINT]
   agenterm-cc status [--json]
   agenterm-cc close [--json]
-  agenterm-cc snapshot [--json] [--instance NAME | --endpoint ENDPOINT]
-  agenterm-cc inspect --tab @ID [--json] [--instance NAME | --endpoint ENDPOINT]
-  agenterm-cc select --tab @ID [--json] [--instance NAME | --endpoint ENDPOINT]
+  agenterm-cc snapshot [--json] [--instance NAME] [--endpoint ENDPOINT]
+  agenterm-cc inspect --tab @ID [--json] [--instance NAME] [--endpoint ENDPOINT]
+  agenterm-cc select --tab @ID [--json] [--instance NAME] [--endpoint ENDPOINT]
   agenterm-cc screenshot --output PATH [--json]
   agenterm-cc capabilities [--json]
   agenterm-cc --help
@@ -47,7 +47,8 @@ Usage:
 
 ENDPOINT is transport-qualified: unix:<path>, pipe:<name>, or tcp:<host>:<port>.
 The legacy --server-endpoint and --logical-instance spellings remain migration
-aliases. Endpoint and instance selectors are mutually exclusive.
+aliases. --endpoint may pair with --instance for attach identity; canonical
+selectors cannot be mixed with those migration aliases.
 
 The Control Center is an isolated projection process. It never owns terminal,
 PTY, workspace, server, or workflow state.

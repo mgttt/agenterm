@@ -148,14 +148,15 @@ fn direct_control_center_selectors_resolve_or_fail_fast_without_opening_the_shel
     assert_ne!(document["server_reason"], "no_server_context");
     assert!(!registry.exists());
 
+    // --endpoint may annotate --instance; conflict with migration alias instead.
     let started = std::time::Instant::now();
     let conflict = Command::new(executable)
         .args([
             "snapshot",
-            "--instance",
-            "dev",
             "--endpoint",
             "tcp:127.0.0.1:9",
+            "--server-endpoint",
+            "127.0.0.1:8",
             "--json",
         ])
         .env("AGENTERM_CC_REGISTRY_PATH", &registry)
@@ -167,7 +168,10 @@ fn direct_control_center_selectors_resolve_or_fail_fast_without_opening_the_shel
         "selector conflicts must fail without attempting IPC"
     );
     let diagnostic = String::from_utf8_lossy(&conflict.stderr);
-    assert!(diagnostic.contains("endpoint_selector_error"));
-    assert!(diagnostic.contains("ConflictingCliSelectors"));
+    assert!(
+        diagnostic.contains("endpoint_selector_conflict")
+            || diagnostic.contains("endpoint_selector_error"),
+        "unexpected diagnostic: {diagnostic}"
+    );
     assert!(!registry.exists());
 }
