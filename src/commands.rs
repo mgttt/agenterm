@@ -694,7 +694,9 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         ),
         "paste-buffer" | "pasteb" => (
             "agenterm-cli paste-buffer [-b name] [-t target]\n\
-             Injects buffer bytes into the target pane PTY (not an agent mailbox).",
+             Injects buffer bytes into the target pane PTY (not an agent mailbox).\n\
+             Collab/status → note/handoff; shell typing → send-keys/paste-buffer \
+             (see PRD_02_15 B′ vs agent messaging).",
             &["-b", "-t"][..],
             &[][..],
             false,

@@ -279,6 +279,65 @@ fn exact_sha_candidate_happy_path_is_self_describing_and_verifiable() {
 }
 
 #[test]
+fn releases_index_is_pure_derived_from_sealed_candidate() {
+    let fixture = fixture("releases-index");
+    let created = aggregate(&fixture);
+    assert!(created.status.success(), "{}", output_text(&created));
+
+    let index_path = fixture.root.join("releases.json");
+    let indexed = run_script(
+        "build-releases-index.rhai",
+        &[&fixture.manifest, &fixture.assets, &index_path],
+    );
+    assert!(indexed.status.success(), "{}", output_text(&indexed));
+    assert!(output_text(&indexed).contains("RELEASES_INDEX"));
+    assert!(output_text(&indexed).contains("artifacts=6"));
+
+    let index: Value =
+        serde_json::from_str(&fs::read_to_string(&index_path).expect("read releases.json"))
+            .expect("parse releases.json");
+    assert_eq!(index["schema_version"], 1);
+    assert_eq!(index["kind"], "agenterm-releases-index");
+    assert_eq!(index["product"], "AgenTerm");
+    assert_eq!(index["source"]["source_sha"], SOURCE_SHA);
+    assert_eq!(index["source"]["version"], VERSION);
+    assert_eq!(index["source"]["tag"], format!("v{VERSION}"));
+    assert_eq!(index["channels"]["stable"]["tag"], format!("v{VERSION}"));
+    assert_eq!(index["channels"]["preview"]["tag"], format!("v{VERSION}"));
+    let artifacts = index["releases"][0]["artifacts"]
+        .as_array()
+        .expect("artifacts array");
+    assert_eq!(artifacts.len(), 6);
+    let linux = artifacts
+        .iter()
+        .find(|a| a["os"] == "linux" && a["arch"] == "x86_64")
+        .expect("linux-x86_64 artifact");
+    assert_eq!(linux["variant"], "release");
+    assert_eq!(linux["distribution"], "stable");
+    assert_eq!(linux["channel"], "release");
+    assert_eq!(
+        linux["name"],
+        format!("agenterm-{VERSION}-linux-x86_64.tar.gz")
+    );
+    assert_eq!(linux["source_commit"], SOURCE_SHA);
+    let mac = artifacts
+        .iter()
+        .find(|a| a["os"] == "macos" && a["arch"] == "aarch64")
+        .expect("macos-aarch64 artifact");
+    assert_eq!(mac["variant"], "unsigned-preview");
+    assert_eq!(mac["distribution"], "preview");
+    assert_eq!(mac["channel"], "macos-unsigned-preview");
+    assert_eq!(
+        mac["provenance"]["name"],
+        format!("agenterm-{VERSION}-macos-aarch64-unsigned-preview.zip.provenance.json")
+    );
+
+    let help = run_script("build-releases-index.rhai", &[Path::new("--help")]);
+    assert!(help.status.success(), "{}", output_text(&help));
+    assert!(output_text(&help).contains("usage: build-releases-index"));
+}
+
+#[test]
 fn candidate_rejects_archive_tampering_and_extra_payload_files() {
     let fixture = fixture("payload-tamper");
     let created = aggregate(&fixture);

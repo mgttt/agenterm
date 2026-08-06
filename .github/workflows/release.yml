@@ -196,6 +196,32 @@ jobs:
             } >>"$GITHUB_STEP_SUMMARY"
           fi
 
+      # H1: pure-derive releases.json from sealed candidate (not inside payload).
+      - name: Derive releases.json index
+        run: |
+          set -euo pipefail
+          manifest="$(find candidate -maxdepth 1 -type f \
+            -name 'agenterm-*-candidate-manifest.json' -print -quit)"
+          test -n "$manifest"
+          test -x "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai"
+          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai" \
+            run scripts/rhai/build-releases-index.rhai --project-root . -- \
+            "$manifest" candidate/payload candidate/releases.json
+          test -f candidate/releases.json
+          jq -e '
+            .schema_version == 1
+            and .kind == "agenterm-releases-index"
+            and (.releases | length) == 1
+            and (.releases[0].artifacts | length) == 6
+          ' candidate/releases.json >/dev/null
+          {
+            echo "### H1 releases.json"
+            echo
+            echo "- Derived pure index at \`candidate/releases.json\`"
+            echo "- Artifact count: $(jq '.releases[0].artifacts | length' candidate/releases.json)"
+            echo "- Channels: $(jq -c '.channels | keys' candidate/releases.json)"
+          } >>"$GITHUB_STEP_SUMMARY"
+
       - name: Upload verified promotion handoff
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -241,6 +267,15 @@ jobs:
             "$(find candidate -maxdepth 1 -type f \
               -name 'agenterm-*-candidate-manifest.json' -print -quit)" \
             candidate/payload
+          # H1: re-derive releases.json so the published asset matches this
+          # sealed handoff (pure function of manifest + payload provenance).
+          manifest="$(find candidate -maxdepth 1 -type f \
+            -name 'agenterm-*-candidate-manifest.json' -print -quit)"
+          test -n "$manifest"
+          "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rhai" \
+            run scripts/rhai/build-releases-index.rhai --project-root . -- \
+            "$manifest" candidate/payload candidate/releases.json
+          test -f candidate/releases.json
 
       - name: Create draft and publish immutable Release
         env:
@@ -300,6 +335,8 @@ jobs:
             {
               find candidate/payload -maxdepth 1 -type f -print0
               printf '%s\0' "$manifest"
+              # H1 index sits beside the sealed payload (not inside it).
+              printf '%s\0' "candidate/releases.json"
             } | sort -z
           )
           test "${#files[@]}" -gt 0

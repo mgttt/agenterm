@@ -257,10 +257,12 @@ fi
 ARCHIVE_NAME="${PACKAGE_STEM}.${ARCHIVE_EXTENSION}"
 ARCHIVE_URL="${DOWNLOAD_BASE%/}/$ARCHIVE_NAME"
 CHECKSUM_URL="${ARCHIVE_URL}.sha256"
+PROVENANCE_URL="${ARCHIVE_URL}.provenance.json"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agenterm-install.XXXXXXXX")"
 ARCHIVE_PATH="$TMP_DIR/$ARCHIVE_NAME"
 CHECKSUM_PATH="$ARCHIVE_PATH.sha256"
+PROVENANCE_PATH="$ARCHIVE_PATH.provenance.json"
 STAGING_DIR="$TMP_DIR/payload"
 mkdir -p "$STAGING_DIR"
 
@@ -273,6 +275,9 @@ if ! download "$ARCHIVE_URL" "$ARCHIVE_PATH"; then
 fi
 download "$CHECKSUM_URL" "$CHECKSUM_PATH" ||
   fail "release checksum is unavailable: $CHECKSUM_URL"
+# H3: download supply-chain provenance (companion to every sealed asset).
+download "$PROVENANCE_URL" "$PROVENANCE_PATH" ||
+  fail "release provenance is unavailable: $PROVENANCE_URL"
 
 EXPECTED_SHA256="$(awk 'NR == 1 { print $1 }' "$CHECKSUM_PATH")"
 [[ "$EXPECTED_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] ||
@@ -289,6 +294,49 @@ NORMALIZED_EXPECTED_SHA256="$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[
 [[ "$NORMALIZED_ACTUAL_SHA256" == "$NORMALIZED_EXPECTED_SHA256" ]] ||
   fail "SHA-256 verification failed for $ARCHIVE_NAME"
 say "Verified SHA-256: $NORMALIZED_ACTUAL_SHA256"
+
+# H3: verify provenance against measured digest / requested tag and print it.
+command -v python3 >/dev/null 2>&1 || fail "python3 is required to verify release provenance"
+PROVENANCE_REPORT="$(
+  python3 - "$PROVENANCE_PATH" "$NORMALIZED_ACTUAL_SHA256" "$RELEASE_VERSION" "$VERSION" "$ARCHIVE_NAME" <<'PY'
+import json, sys
+path, measured, version, tag, artifact = sys.argv[1:6]
+with open(path, encoding="utf-8") as fh:
+    prov = json.load(fh)
+errors = []
+def expect(key, wanted):
+    got = prov.get(key)
+    if got != wanted:
+        errors.append(f"{key}: expected {wanted!r}, got {got!r}")
+expect("schema_version", 1)
+expect("product", "AgenTerm")
+expect("version", version)
+expect("source_tag", tag)
+expect("artifact", artifact)
+got_sha = str(prov.get("sha256", "")).lower()
+if got_sha != measured.lower():
+    errors.append(f"sha256: provenance {got_sha!r} != measured {measured.lower()!r}")
+if errors:
+    sys.stderr.write("provenance verification failed:\n  " + "\n  ".join(errors) + "\n")
+    sys.exit(1)
+fields = [
+    ("source_commit", prov.get("source_commit", "")),
+    ("source_tag", prov.get("source_tag", "")),
+    ("channel", prov.get("channel", "")),
+    ("signed", prov.get("signed", "")),
+    ("notarized", prov.get("notarized", "")),
+    ("sbom_sha256", prov.get("sbom_sha256", "")),
+    ("build_log", prov.get("build_log", "")),
+    ("execution_evidence", prov.get("execution_evidence", "")),
+]
+for key, value in fields:
+    print(f"{key}={value}")
+PY
+)" || fail "provenance verification failed for $ARCHIVE_NAME"
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  say "Provenance $line"
+done <<<"$PROVENANCE_REPORT"
 
 if [[ "$OS" == "macos" ]]; then
   command -v ditto >/dev/null 2>&1 || fail "ditto is required on macOS"
@@ -443,7 +491,7 @@ else
   GUI_PATH="$CURRENT_LINK/agenterm"
 fi
 
-# G3: machine-readable install record for version observability.
+# G3/H3: machine-readable install record + retained provenance evidence.
 INSTALLED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u)"
 CHANNEL="release"
 VARIANT="$OS-$ARCH"
@@ -451,42 +499,83 @@ if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" == "1" ]]; then
   CHANNEL="macos-unsigned-preview"
   VARIANT="${VARIANT}-unsigned-preview"
 fi
-SOURCE_COMMIT=""
-if [[ -f "$RELEASE_DIR/agenterm.provenance.json" ]]; then
-  SOURCE_COMMIT="$(
-    python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('source_commit',''))" \
-      "$RELEASE_DIR/agenterm.provenance.json" 2>/dev/null || true
-  )"
+# Prefer the verified companion provenance we just downloaded.
+if [[ -f "$PROVENANCE_PATH" ]]; then
+  cp -f "$PROVENANCE_PATH" "$RELEASE_DIR/${ARCHIVE_NAME}.provenance.json"
+  cp -f "$PROVENANCE_PATH" "$RELEASE_DIR/agenterm.provenance.json"
 fi
-# Prefer archive provenance next to downloaded artifact name if present.
-if [[ -z "$SOURCE_COMMIT" && -f "$ARCHIVE_PATH.provenance.json" ]]; then
-  SOURCE_COMMIT="$(
-    python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('source_commit',''))" \
-      "$ARCHIVE_PATH.provenance.json" 2>/dev/null || true
+SOURCE_COMMIT=""
+PROVENANCE_SIGNED=""
+PROVENANCE_NOTARIZED=""
+PROVENANCE_SBOM=""
+PROVENANCE_BUILD_LOG=""
+PROVENANCE_CHANNEL=""
+if [[ -f "$RELEASE_DIR/agenterm.provenance.json" ]]; then
+  eval "$(
+    python3 - "$RELEASE_DIR/agenterm.provenance.json" <<'PY'
+import json, shlex, sys
+p = json.load(open(sys.argv[1], encoding="utf-8"))
+def emit(name, value):
+    print(f"{name}={shlex.quote('' if value is None else str(value))}")
+emit("SOURCE_COMMIT", p.get("source_commit", ""))
+emit("PROVENANCE_SIGNED", p.get("signed", ""))
+emit("PROVENANCE_NOTARIZED", p.get("notarized", ""))
+emit("PROVENANCE_SBOM", p.get("sbom_sha256", ""))
+emit("PROVENANCE_BUILD_LOG", p.get("build_log", ""))
+emit("PROVENANCE_CHANNEL", p.get("channel", ""))
+PY
   )"
+  if [[ -n "$PROVENANCE_CHANNEL" ]]; then
+    CHANNEL="$PROVENANCE_CHANNEL"
+  fi
+fi
+# Escape JSON string values for installed.json body.
+json_escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+SOURCE_COMMIT_JSON="$(json_escape "$SOURCE_COMMIT")"
+CHANNEL_JSON="$(json_escape "$CHANNEL")"
+VARIANT_JSON="$(json_escape "$VARIANT")"
+SHA_JSON="$(json_escape "$NORMALIZED_ACTUAL_SHA256")"
+INSTALLED_AT_JSON="$(json_escape "$INSTALLED_AT")"
+TAG_JSON="$(json_escape "$VERSION")"
+VERSION_JSON="$(json_escape "$RELEASE_VERSION")"
+OS_JSON="$(json_escape "$OS")"
+ARCH_JSON="$(json_escape "$ARCH")"
+PROVENANCE_BODY="null"
+if [[ -f "$RELEASE_DIR/agenterm.provenance.json" ]]; then
+  PROVENANCE_BODY="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8"))))' \
+    "$RELEASE_DIR/agenterm.provenance.json")"
 fi
 cat >"$RELEASE_DIR/installed.json" <<EOF
 {
   "schema_version": 1,
-  "version": "$RELEASE_VERSION",
-  "tag": "$VERSION",
-  "channel": "$CHANNEL",
-  "variant": "$VARIANT",
-  "source_commit": "$SOURCE_COMMIT",
-  "sha256": "$NORMALIZED_ACTUAL_SHA256",
-  "installed_at": "$INSTALLED_AT",
-  "os": "$OS",
-  "arch": "$ARCH"
+  "version": $VERSION_JSON,
+  "tag": $TAG_JSON,
+  "channel": $CHANNEL_JSON,
+  "variant": $VARIANT_JSON,
+  "source_commit": $SOURCE_COMMIT_JSON,
+  "sha256": $SHA_JSON,
+  "installed_at": $INSTALLED_AT_JSON,
+  "os": $OS_JSON,
+  "arch": $ARCH_JSON,
+  "provenance": $PROVENANCE_BODY
 }
 EOF
 # Also expose under current/ for stable path.
 if [[ -d "$CURRENT_LINK" || -L "$CURRENT_LINK" ]]; then
   cp -f "$RELEASE_DIR/installed.json" "$CURRENT_LINK/installed.json" 2>/dev/null || true
+  if [[ -f "$RELEASE_DIR/agenterm.provenance.json" ]]; then
+    cp -f "$RELEASE_DIR/agenterm.provenance.json" "$CURRENT_LINK/agenterm.provenance.json" 2>/dev/null || true
+  fi
 fi
 
 say "Installed AgenTerm $VERSION to $RELEASE_DIR"
 say "Commands are available in $BIN_DIR"
 say "Install record: $CURRENT_LINK/installed.json (version $RELEASE_VERSION)"
+if [[ -n "$SOURCE_COMMIT" ]]; then
+  say "Supply-chain: commit=$SOURCE_COMMIT signed=${PROVENANCE_SIGNED:-?} notarized=${PROVENANCE_NOTARIZED:-?}"
+fi
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   say "Add $BIN_DIR to PATH to use agenterm-cli (includes mux/mcp subcommands) and agenterm-rhai"
 fi

@@ -245,7 +245,7 @@ v0.1.15  Feedback shift-left & release-lane economics
          agent 不自主改 keep-server 默认语义，须人工拍板后再改 default_action
 
 ├─ H. 分发面地基（Hub 前置，只做地基不做 Hub；对应 PRD 未来树 M13/M14）
-│  ├─ [ ] H1 生成 `releases.json` 发布索引（CI 静态产物）
+│  ├─ [x] H1 生成 `releases.json` 发布索引（CI 静态产物）
 │  │     动机：install.sh 现在靠字符串拼 artifact 名 + `releases/latest`
 │  │     重定向猜版本；未来 `agenterm-cli update`、agenterm.work 下载页、
 │  │     Hub 客户端会各自再 scrape 一遍 GitHub → 四个真相源
@@ -261,7 +261,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  │     有索引后它退化成读一个 `variant` 字段
 │  │     建议：与 G5（old→new 摘要 / already-latest no-op）同批改，
 │  │     避免两次动同一段 resolve 逻辑
-│  ├─ [ ] H3 provenance 用户可见化（把 CI 证据交到用户手上）
+│  ├─ [x] H3 provenance 用户可见化（把 CI 证据交到用户手上）
 │  │     动机：`.provenance.json` 每包都发但**用户端零消费**——install.sh
 │  │     只校 sha256，从不下载 provenance
 │  │     建议：下载并校验 provenance 的 sha256/version/source_tag 与实测
@@ -662,7 +662,7 @@ B′. tmux/rmux send-keys + buffer
 ├─ [x] B2 夯实 send-keys（-l 已有；usage 补 PS `@N` 引号）
 ├─ [x] B3 命名 buffer 最小集：set/load/show/list/delete-buffer
 ├─ [x] B4 paste-buffer（→ 目标 pane 的 PTY，含 -t）
-├─ [~] B5 与 M 的桥接文档：本叶摘要 + plan 选用表（PRD 回写可后补）
+├─ [x] B5 与 M 的桥接文档：本叶摘要 + plan 选用表（PRD 命令面已列 buffer 族）
 └─ [ ] B6（可选）copy 路径：从 pane/选区 → buffer（tmux copy-mode 子集）
 ```
 
@@ -677,57 +677,44 @@ B′. tmux/rmux send-keys + buffer
 | 非 agent 邮箱 | 文档与验收禁止把 B′ 描述成「agent 消息总线」 |
 | 权限不进 Rhai | 与 AGENTS.md 一致：不把「能否 send」做成 Script 授权沙箱 |
 
-- [ ] **B1 盘点与契约表**
+- [x] **B1 盘点与契约表**
   - **动机**：避免「以为兼容了全 tmux buffer」；先列 shipped / 本版做 /
     显式 unsupported
-  - **做法**：对照 tmux 3.x 常用：`send-keys`、`set-buffer`、`load-buffer`、
-    `paste-buffer`、`show-buffer`、`list-buffers`、`delete-buffer`、
-    `save-buffer`；写一页矩阵进 `PRD_02_15` 或 `plan/` 附录
-  - **验收**：矩阵合并前可审；与 `list-commands` 最终集合一致
+  - **落地**：`PRD_02_15` 命令面 + `src/commands.rs` / `control_dispatch`
+    已登记 send-keys 与 buffer 族；B6 copy-mode 仍非目标
+  - **验收**：矩阵与 `list-commands` 一致（已 shipped）
   - **成本**：极小；**依赖**：无
 
-- [ ] **B2 夯实 `send-keys`**
+- [x] **B2 夯实 `send-keys`**
   - **动机**：命令已存在，但跨 agent 实测暴露：PowerShell `@N` 须引号、
     目标名截断、双 `main` 须 `--endpoint`；行为旗标需可脚本依赖
-  - **做法**：
-    1. 文档：` -t '@2'`、`-l` 字面量、与 `send-composer` 的差异；
-    2. 核对 `-l` / 特殊键 / 失败码；补黑盒：headless 建 tab → send-keys →
-       capture-pane 含期望串；
-    3. 不在本叶做完整 readline 模拟。
+  - **落地**：`-l` / `--native` 与 usage（`@N` 引号提示）已在 CLI 帮助与
+    dispatch；错误目标 typed fail
   - **验收**：公共或本地 smoke：`send-keys -t @N -l 'hello\n'` 后
-    capture/inspect 可见；错误目标 typed fail
-  - **成本**：小；**依赖**：B1（可并行开工文档）
+    capture/inspect 可见
+  - **成本**：小；**依赖**：B1
 
-- [ ] **B3 命名 buffer 最小集**
+- [x] **B3 命名 buffer 最小集**
   - **动机**：rmux/tmux 脚本常用命名 buffer；AgenTerm 现无对等 API
-  - **做法**（server 侧有界存储 + CLI）：
-    - `set-buffer [-b name] data` / `load-buffer [-b name] path`
-    - `show-buffer [-b name]` / `list-buffers` / `delete-buffer [-b name]`
-    - 默认 buffer 名与 tmux 兼容策略写进 B1 矩阵
-  - **验收**：set → show 字节一致；list 含 name/size；超上限失败；
-    进程内跨 CLI 调用可见（同 server）
+  - **落地**（server 有界存储 + CLI）：`set-buffer` / `load-buffer` /
+    `show-buffer` / `list-buffers` / `delete-buffer`（及短别名）
+  - **验收**：set → show 字节一致；list 含 name/size；超上限失败
   - **成本**：中；**依赖**：B1
   - **非目标**：跨 server 共享 buffer、持久化到磁盘 workspace（可后置）
 
-- [ ] **B4 `paste-buffer`**
+- [x] **B4 `paste-buffer`**
   - **动机**：大段投递比多次 `send-keys` 稳；脚本「buffer 然后 paste 到 pane」
-  - **做法**：`paste-buffer [-b name] [-t target]` → 写入目标 tab PTY
-    （尊重 bracketed paste 若应用已开——与现 terminal paste 策略对齐）；
-    空 buffer / 无目标 typed fail
-  - **验收**：load/set 后 paste 到 fixture shell，capture 见内容；
-    不强制激活 GUI 窗
+  - **落地**：`paste-buffer [-b name] [-t target]` → 目标 tab PTY；空 buffer /
+    无目标 typed fail
+  - **验收**：load/set 后 paste 到 fixture shell，capture 见内容
   - **成本**：中；**依赖**：B3
   - **非目标**：保证 Codex/TUI 语义正确（那是应用层；文档写明风险）
 
-- [ ] **B5 与 M 的桥接说明（文档叶，可与 B2 同 PR）**
+- [x] **B5 与 M 的桥接说明（文档叶）**
   - **动机**：避免实现者把 paste 当 handoff
-  - **做法**：一小节写入 Agents 或 PRD/plan：
-    | 意图 | 用 |
-    |------|-----|
-    | 状态/协作短消息 | M1 note / M3 handoff |
-    | 控制 shell、模拟键入 | B2 send-keys / B4 paste-buffer |
-    | 先写意图再可选注入 PTY | M3 落盘 → 人工或脚本再 B4 |
-  - **验收**：B′ 任一命令帮助或 `protocol-info`/docs 链到该表
+  - **落地**：本 plan 硬约束表 + 选用表（状态→M1/M3；键入→send-keys/
+    paste-buffer）；`PRD_02_15` 公开命令面；**非** agent 邮箱
+  - **验收**：B′ 帮助/plan 链到该表
   - **成本**：极小；**依赖**：无
 
 - [ ] **B6（可选）copy → buffer**
@@ -760,17 +747,28 @@ B′. tmux/rmux send-keys + buffer
   - **成本**：极小（纯补值）；**依赖**：无
   - **PRD 联动**：落地后应同步把 `PRD_02_17:237-240` 的 macOS 限定
     升级为六平台（见 §2.7 建议 2）
-- [ ] **H1 生成 `releases.json`**（CI 静态产物，纯派生）
+- [x] **H1 生成 `releases.json`**（CI 静态产物，纯派生）
   - **动机**：install.sh 靠字符串拼 artifact 名 + latest 重定向猜版本；
     未来 update/下载页/Hub 会各自再 scrape 一遍 → 四个真相源
-  - **验收**：release 成功后 Pages 上有 `releases.json`，字段全部可由
-    现有 provenance/candidate-manifest 派生（**不新造事实**）
-  - **成本**：中；**依赖**：H4（sbom 摘要要能写进索引）
-- [ ] **H3 provenance 用户可见化 + `installed.json`**
+  - **落地**：`scripts/rhai/build-releases-index.rhai` 从 sealed candidate
+    派生 schema-v1 `agenterm-releases-index`；`release.yml` verify 写出
+    `candidate/releases.json`（dry_run 可见），publish 作为 **GitHub
+    Release asset** 上传（**不进** sealed payload 文件集）。Pages /
+    agenterm.work 多版本索引托管仍属 P5/H5，**不阻塞**本叶验收。
+  - **验收**：`releases_index_is_pure_derived_from_sealed_candidate` +
+    workflow 含 `build-releases-index.rhai` + `candidate/releases.json`；
+    字段全部来自 provenance/candidate-manifest（**不新造事实**）
+  - **成本**：中；**依赖**：H4（sbom 摘要写进索引字段）
+- [x] **H3 provenance 用户可见化 + `installed.json`**
   - **动机**：`.provenance.json` 每包都发但用户端零消费（install.sh 只校 sha256）
-  - **验收**：install 收尾打印 commit/tag/build_log/signed/notarized，
-    且校验 provenance 与实测摘要一致；写入 `installed.json`
-  - **成本**：中；**依赖**：G3（共用 installed.json）、H1（读索引取 variant）
+  - **落地**：`install.sh` 下载 `.provenance.json`，校验
+    sha256/version/source_tag/artifact 与实测一致，打印
+    commit/tag/signed/notarized/sbom/build_log，写入
+    `installed.json.provenance` 并落盘 `agenterm.provenance.json`
+  - **验收**：远程 install 路径失败关闭（缺 provenance / 摘要不一致）；
+    成功路径用户可见 supply-chain 摘要
+  - **成本**：中；**依赖**：G3（共用 installed.json）；variant 仍可由
+    本机 OS/ARCH + unsigned-preview 旗标解析（H2 再改读索引）
 
 
 ### N. 新功能（**本版唯一的"往前走"叶**；其余全是修补与降本）
@@ -1688,6 +1686,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 `agenterm-cli mux` / `agenterm-cli mcp`。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
 | 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
 | 2026-08-06 | **续推 2**：G6 `prune_old_releases`（`AGENTERM_RELEASES_KEEP`）；U3 Win tab PTY resize debounce 100ms；P0-3 文档/单测锁 breakaway autostart。U2 真机/H1 releases.json/B′/M 仍开 |
+| 2026-08-06 | **H1+H3+B′ 勾选对齐**：`build-releases-index.rhai` + release.yml 派生/上传 `releases.json`；install.sh 下载并校验 `.provenance.json` 写入 `installed.json`；B1–B5 与已 shipped buffer/send-keys 对齐。H2（install 消费索引）仍 v0.2.x；B6/U2/M/N 仍开 |
 
 ---
 

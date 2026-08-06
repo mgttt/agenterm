@@ -39,6 +39,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - `list-buffers|lsb`
       - `delete-buffer|deleteb [-b name]`
       - `paste-buffer|pasteb [-b name] [-t target]`
+      - **B′ vs agent messaging (B5):** PTY inject is not a mailbox.
+        Short collab/status → note/handoff (M1/M3). Drive shell / type
+        keys → `send-keys` / `paste-buffer`. Intent then optional PTY
+        inject → handoff on disk, then human/script `paste-buffer`.
+        Optional copy-mode → buffer is not in this minimal set.
     - `capture-pane|capturep -p [-t target]`
     - `display-message|display -p [-t target] format`
     - `show-options|show`, `list-commands|lscm`

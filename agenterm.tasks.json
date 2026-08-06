@@ -116,6 +116,13 @@
       "network": [],
       "evidence": ["task.candidate-verify"]
     },
+    "build-releases-index": {
+      "inputs": ["candidate-manifest", "sealed-candidate-assets"],
+      "outputs": ["releases-index"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.build-releases-index"]
+    },
     "bootstrap-info": {
       "inputs": ["source-tree", "toolchain"],
       "outputs": ["bootstrap-facts"],
@@ -588,6 +595,16 @@
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": []
+    },
+    {
+      "id": "build-releases-index",
+      "description": "Derive pure machine-readable releases.json from a sealed candidate manifest and provenance",
+      "entry": "scripts/rhai/build-releases-index.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "bootstrap-info",

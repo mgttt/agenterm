@@ -125,6 +125,10 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(PROMOTION.contains("head_sha"));
     assert!(PROMOTION.contains("publish-$tag"));
     assert!(PROMOTION.contains("candidate-verify.rhai"));
+    // H1: pure-derive releases.json during verify + publish (not a second truth).
+    assert!(PROMOTION.contains("build-releases-index.rhai"));
+    assert!(PROMOTION.contains("candidate/releases.json"));
+    assert!(PROMOTION.contains("Derive releases.json index"));
     assert!(PROMOTION.contains("environment: release"));
     assert!(PROMOTION.contains("contents: write"));
     assert!(PROMOTION.contains("repos/$GITHUB_REPOSITORY/git/refs"));
