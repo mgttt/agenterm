@@ -156,9 +156,43 @@ agenterm-app-llm-pack-2026.08.06.1.agp
 | 更新类型 | 用户感知 | 机制 |
 |----------|----------|------|
 | Base patch | 「AgenTerm 0.1.15 → 0.1.16」 | 全量 zip；server 协议兼容检查 |
-| App update | 「Control Center 更新」 | `.agp` 或差分；**不**替换 `agenterm.exe` |
+| App update | 「Control Center 更新」 | 整包 `.agp` 替换该 App 文件集；**不**替换 `agenterm.exe` |
 | Logic pack | 「模型提供方适配更新」 | reload gateway；无 PE |
 | 捆绑促销 | 「Desktop 套件 2026.08」 | Release 页多资产一键下 |
+
+### 4.4 分发模型澄清：不是 npm / PyPI / apt 路线
+
+用户可能把「App 增量更新」理解成 **bun / npm / PyPI / apt** 那类**库与依赖图分发**。我们**不走**那条路。
+
+| 维度 | npm / PyPI / apt 类 | AgenTerm（目标态） |
+|------|---------------------|-------------------|
+| 单元 | 版本化模块 + 传递依赖 | **密封的可执行资产** + 可选 **App 整包** |
+| 解析 | 依赖求解、semver 范围、lockfile | **显式 `requires_base` 区间**；无传递依赖树 |
+| 安装 | 全局/虚拟 env、node_modules | 固定安装根（如 `Program Files/AgenTerm/` + `apps/<id>/`） |
+| 更新 | `upgrade` 拉最新满足范围的包 | **替换已知路径的 sealed bytes**（Candidate/Promotion 同源） |
+| 信任 | registry + hash（各异） | **签名 + SHA-256 + qualification receipt**；无公共 registry 必需 |
+| 「增量」含义 | 常指 patch 包或 cache 层 | **产品增量**：只下/只换 **App 层**，Base PE 不动 |
+
+**我们说的「增量」= 发布与安装范围的增量，不是包管理器式的依赖增量。**
+
+```text
+  ❌ 不是：agenterm-cc@0.2.0 depends on agenterm@^0.1.15 → npm install 拉树
+  ✅ 而是：已装 Base 0.1.15 → 用户或 softmgr 应用 app.control-center 0.2.0.agp
+           → 校验 requires_base + 签名 → 覆盖 bin/agenterm-cc.exe（及 manifest 列出的文件）
+           → Base 二进制与 server 状态不受影响
+```
+
+**Logic Pack** 再轻一层：仍是 **manifest + 文件集合** 的热替换（`llm-gateway reload`），不是 `pip install deepseek-adapter`。
+
+**softmgr / PluginHub（远期）** 形态更接近 **可选组件安装器 + 签名渠道**（类似浏览器扩展/可选功能包），而不是取代 Cargo/npm 的第三方 registry。外置市场若出现，也是 **curated 密封资产列表**，不是任意 semver 解析。
+
+**仍可能借用的工程概念（仅内部）：**
+
+- manifest 里的 **minimum/maximum**（像 API 兼容范围，不像 `^1.2.3` 求解）
+- **content hash**（像 npm integrity，但绑定 **固定 allowlist 路径**）
+- **rollback**（保留上一代 `.agp` 或 pack 目录）
+
+**明确非目标：** 用户项目内 `agenterm add foo`、transitive Rhai 模块市场、与系统包管理器混装同一 PE 的多版本并存。
 
 ---
 
@@ -273,7 +307,7 @@ app.control-center-web 0.1.x
 | RQ-4 | LLM browser worker 是否随 Gateway App 一起 | **是**；仍独立 PE |
 | RQ-5 | App 是否共用 Base 的 Git tag | **否**；Base `v0.1.x`；App 独立 tag 或 Release asset 版本 |
 | RQ-6 | macOS/Linux CC 与 Win 同 App 版本号 | **是**（同 app_id 跨平台矩阵） |
-| RQ-7 | 产品设计角色是否 spawn 分身 | 主控可 spawn **产品设计** 会话跟 P1–P2 线框+Release note |
+| RQ-8 | 是否做 npm/PyPI 式 registry | **否**；仅 sealed App 包 + 可选 curated 列表 |
 
 ---
 
