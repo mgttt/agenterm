@@ -14,7 +14,7 @@
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | `plan/plan-control-center-ux.md`；**超控 Tab** → `plan/design-cc-hyper-control-agent.md` |
-| `origin/main` | tip `820626a`；含 CC 超控智能体 IA 设计稿 |
+| `origin/main` | tip `26dae49`；含 CC 超控设计稿 + mailbox 登记 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
@@ -62,10 +62,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T06:23Z
+### 舰队值班会话 · 2026-08-06T07:24Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-1a5f3cb6-9f7b-4b98-b2fe-d227fef5afc3`
-- URL: https://cursor.com/agents/bc-1a5f3cb6-9f7b-4b98-b2fe-d227fef5afc3
+- bcId: `bc-bdaf35b3-b690-4db0-abd9-50cc85eed3e8`
+- URL: https://cursor.com/agents/bc-bdaf35b3-b690-4db0-abd9-50cc85eed3e8
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -81,6 +81,7 @@
 
 ## 交接日志
 
+- 2026-08-06T07:24Z · 舰队值班会话(`bc-bdaf35b3-…`) · duty: noop findings=0 main=26dae49；未 apply；lock 已清
 - 2026-08-06T06:23Z · 舰队值班会话(`bc-1a5f3cb6-…`) · duty: noop findings=0 main=602503f；未 apply；lock 已清
 - 2026-08-06T05:26Z · 舰队值班会话(`bc-1dee92a9-…`) · duty: noop findings=0 main=531032c；未 apply；lock 已清
 - 2026-08-06T04:22Z · 舰队值班会话(`bc-d7d3689f-…`) · duty: noop findings=0 main=1292807；未 apply；lock 已清
