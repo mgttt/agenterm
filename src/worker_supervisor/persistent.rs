@@ -101,6 +101,10 @@ impl PersistentWorkerClient {
             .stderr(Stdio::null());
         platform::configure_worker_command(&mut command)
             .map_err(|error| SupervisorError::Spawn(error.message))?;
+        command.env(
+            "AGENTERM_SCRIPT_BACKEND",
+            std::env::var("AGENTERM_SCRIPT_BACKEND").unwrap_or_else(|_| "rh".into()),
+        );
         if let Some(working_directory) = working_directory {
             command.current_dir(working_directory);
         }

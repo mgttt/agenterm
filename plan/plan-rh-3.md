@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **进行中** |
+| **状态** | **M22 执行轨完成**（rh 默认；`agenterm-rhai` 薄壳） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -40,7 +40,8 @@
 | M22c | check-many 薄转发兼容：rhai CLI/manifest kind、bootstrap.cmd 对称、forward 黑盒 | [x] |
 | M22d | lint.rhai 优先 `agenterm-rh` check-many；artifacts/stage-build 纳入 dev CLI | [x] |
 | M22e | CLI 薄转发黑盒（check/eval/run/version）；framed-worker entry fixture；`for` 整型 range 原生 AOT | [x] |
-| M22 | 替换轨：`agenterm-rhai` → 薄转发或 rename（需全量 caller 清单 + Candidate 证据） | [ ] |
+| M22f | **默认 rh 后端**（`AGENTERM_SCRIPT_BACKEND=rh`）；bootstrap/worker 注入；删除 Rhai check-many 回退 | [x] |
+| M22 | 替换轨：`agenterm-rhai` 薄壳 + rh 默认执行（Candidate 六 cell 改名仍待人审） | [x] |
 
 ---
 
@@ -67,10 +68,11 @@
 
 ## 4. 非目标（rh-3）
 
-- 不默认 `AGENTERM_SCRIPT_BACKEND=rh`
-- 不迁移 62 task manifest
+- ~~不默认 `AGENTERM_SCRIPT_BACKEND=rh`~~ → **M22f 已默认 rh**；显式 `=rhai` 可回退
+- 不迁移 62 task manifest 文件名（compat-delegating 继续跑 `.rhai`）
 - 不引入 Cranelift / 字节码 JIT
-- 不替换 `agenterm-rhai` worker/repl/task（M18–M22）
+- ~~不替换 `agenterm-rhai` worker/repl/task~~ → **pack 热路径已 rh**；REPL/复杂语句仍 Rhai 回退
+- 不移除 `rhai` crate 依赖（AST 解析 + host_eval 桥）
 
 ---
 

@@ -20,18 +20,25 @@ fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
 }
 
 #[test]
-fn rh_backend_enabled_only_when_env_set() {
+fn rh_backend_defaults_to_rh_without_env() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-    }
-    assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
-    unsafe {
-        std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rh");
     }
     assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rh);
+    assert!(agenterm::script_backend::rh_backend_enabled());
     unsafe {
-        std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+        std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rhai");
+    }
+    assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
+    match prior {
+        Some(value) => unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+        },
+        None => unsafe {
+            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+        },
     }
 }
 
@@ -129,7 +136,7 @@ fn rh_backend_run_while_count_fixture() {
 fn rhai_backend_returns_none_for_check() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     unsafe {
-        std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+        std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rhai");
     }
     let probe = try_execute_rh_invocation(
         ScriptOperation::Check,
@@ -139,6 +146,9 @@ fn rhai_backend_returns_none_for_check() {
     )
     .expect("probe");
     assert!(probe.is_none());
+    unsafe {
+        std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+    }
 }
 
 #[test]

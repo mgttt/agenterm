@@ -36,10 +36,6 @@ use sha2::{Digest, Sha256};
 type PendingBroker = Option<(String, mpsc::SyncSender<ScriptBrokerResponse>)>;
 type SharedFrameOutput = Arc<Mutex<Box<dyn Write + Send>>>;
 
-const CHECK_MANY_MANIFEST_MAX_BYTES: usize = 64 * 1024;
-const CHECK_MANY_FILES_MAX: usize = 256;
-const CHECK_MANY_PATH_MAX_BYTES: usize = 4 * 1024;
-const CHECK_MANY_TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
 const INCREMENTAL_WRAPPER_MODE: &str = "agenterm-incremental-manifest-v1";
 const INCREMENTAL_IDENTITY_ALGORITHM: &str = "full-tree-metadata-v1";
 const INCREMENTAL_MAX_ENTRIES_PER_ROOT: usize = 100_000;
@@ -99,33 +95,6 @@ struct IncrementalTouchManifest {
     roots: Vec<IncrementalManifestRoot>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CheckManyManifest {
-    schema_version: u32,
-    kind: String,
-    files: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct CheckManyFailure {
-    path: String,
-    code: String,
-    message: String,
-    invocation_id: String,
-    exit_class: String,
-}
-
-#[derive(Serialize)]
-struct CheckManyReport {
-    schema_version: u32,
-    kind: &'static str,
-    ok: bool,
-    checked_files: usize,
-    total_source_bytes: usize,
-    duration_ms: u64,
-    failures: Vec<CheckManyFailure>,
-}
 
 #[derive(Clone)]
 struct BrokerClient {
@@ -703,6 +672,11 @@ fn main() -> ExitCode {
 
 fn run() -> anyhow::Result<u8> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Some(status) = agenterm::script_rh_cli::try_forward_version_flags(&arguments) {
+        let status = status?;
+        return u8::try_from(status.code().unwrap_or(1))
+            .map_err(|_| anyhow::anyhow!("agenterm-rh returned an invalid exit code"));
+    }
     if let Some(status) = agenterm::script_rh_cli::try_forward_dev_cli(&arguments) {
         let status = status?;
         return u8::try_from(status.code().unwrap_or(1))
@@ -714,7 +688,9 @@ fn run() -> anyhow::Result<u8> {
         }
         [mode] if mode == "--worker" => run_worker(),
         [mode] if mode == "--framed-worker" => run_framed_worker(),
-        [mode, rest @ ..] if mode == "check-many" => run_check_many(rest),
+        [mode, ..] if mode == "check-many" => {
+            anyhow::bail!("{}", agenterm::script_rh_cli::check_many_requires_rh_error())
+        }
         [mode] if mode == "--version" || mode == "-V" => {
             println!("agenterm-rhai {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
@@ -724,347 +700,6 @@ fn run() -> anyhow::Result<u8> {
     }
 }
 
-fn run_check_many(arguments: &[String]) -> anyhow::Result<u8> {
-    let started = Instant::now();
-    let mut manifest_path = None::<String>;
-    let mut project_root = None::<String>;
-    let mut profile = ScriptProfile::Local;
-    let mut budgets = ScriptBudgets::default();
-    let mut json = false;
-    let hard_limits = ScriptBudgets::hard_limits();
-    let mut index = 0;
-    while index < arguments.len() {
-        let option = arguments[index].as_str();
-        let value = |name: &str| -> anyhow::Result<&str> {
-            arguments
-                .get(index + 1)
-                .map(String::as_str)
-                .ok_or_else(|| anyhow::anyhow!("check-many option {name} requires a value"))
-        };
-        match option {
-            "--manifest" => {
-                manifest_path = Some(value(option)?.to_owned());
-                index += 2;
-            }
-            "--project-root" => {
-                project_root = Some(value(option)?.to_owned());
-                index += 2;
-            }
-            "--profile" => {
-                profile = match value(option)? {
-                    "pure" | "observe" | "local" => ScriptProfile::Local,
-                    other => anyhow::bail!("unknown script profile: {other}"),
-                };
-                index += 2;
-            }
-            "--timeout-ms" => {
-                budgets.wall_time_ms =
-                    parse_check_many_budget(option, value(option)?, hard_limits.wall_time_ms)?;
-                index += 2;
-            }
-            "--max-operations" => {
-                budgets.operations =
-                    parse_check_many_budget(option, value(option)?, hard_limits.operations)?;
-                index += 2;
-            }
-            "--max-collection-items" => {
-                budgets.collection_items = usize::try_from(parse_check_many_budget(
-                    option,
-                    value(option)?,
-                    hard_limits.collection_items as u64,
-                )?)?;
-                index += 2;
-            }
-            "--max-string-bytes" => {
-                budgets.string_bytes = usize::try_from(parse_check_many_budget(
-                    option,
-                    value(option)?,
-                    hard_limits.string_bytes as u64,
-                )?)?;
-                index += 2;
-            }
-            "--max-output-bytes" => {
-                budgets.output_bytes = usize::try_from(parse_check_many_budget(
-                    option,
-                    value(option)?,
-                    hard_limits.output_bytes as u64,
-                )?)?;
-                index += 2;
-            }
-            "--json" => {
-                json = true;
-                index += 1;
-            }
-            other => anyhow::bail!("unknown check-many option: {other}"),
-        }
-    }
-    let manifest_path =
-        manifest_path.ok_or_else(|| anyhow::anyhow!("check-many requires --manifest FILE"))?;
-    let root = std::fs::canonicalize(project_root.as_deref().unwrap_or("."))
-        .map_err(|error| anyhow::anyhow!("check_many_project_root: {error}"))?;
-    if !root.is_dir() {
-        anyhow::bail!("check_many_project_root: expected a directory");
-    }
-    let manifest = read_check_many_manifest(std::path::Path::new(&manifest_path))?;
-    let mut failures = Vec::new();
-    let mut checked_files = 0;
-    let mut total_source_bytes = 0_usize;
-    let mut seen = HashSet::new();
-    for (ordinal, label) in manifest.files.into_iter().enumerate() {
-        if started.elapsed() >= Duration::from_millis(budgets.wall_time_ms) {
-            failures.push(check_many_host_failure(
-                label,
-                "limit_wall_time",
-                "check-many reached its aggregate wall-time budget".to_owned(),
-                ordinal,
-                "limit",
-            ));
-            continue;
-        }
-        if label.is_empty() || label.len() > CHECK_MANY_PATH_MAX_BYTES {
-            failures.push(check_many_host_failure(
-                label,
-                "check_many_path",
-                format!("path must contain from 1 to {CHECK_MANY_PATH_MAX_BYTES} bytes"),
-                ordinal,
-                "configuration",
-            ));
-            continue;
-        }
-        let requested = std::path::Path::new(&label);
-        let requested = if requested.is_absolute() {
-            requested.to_path_buf()
-        } else {
-            root.join(requested)
-        };
-        let path = match std::fs::canonicalize(&requested) {
-            Ok(path) if path.is_file() => path,
-            Ok(_) => {
-                failures.push(check_many_host_failure(
-                    label,
-                    "host_source_read",
-                    "script source is not a file".to_owned(),
-                    ordinal,
-                    "host",
-                ));
-                continue;
-            }
-            Err(error) => {
-                failures.push(check_many_host_failure(
-                    label,
-                    "host_source_resolve",
-                    error.to_string(),
-                    ordinal,
-                    "host",
-                ));
-                continue;
-            }
-        };
-        if !seen.insert(path.clone()) {
-            failures.push(check_many_host_failure(
-                label,
-                "check_many_duplicate",
-                "manifest resolves the same file more than once".to_owned(),
-                ordinal,
-                "configuration",
-            ));
-            continue;
-        }
-        let source = match read_check_many_source(&path, budgets.source_bytes) {
-            Ok(source) => source,
-            Err((code, message, exit_class)) => {
-                failures.push(check_many_host_failure(
-                    label, code, message, ordinal, exit_class,
-                ));
-                continue;
-            }
-        };
-        let Some(next_total) = total_source_bytes.checked_add(source.len()) else {
-            failures.push(check_many_host_failure(
-                label,
-                "check_many_total_source_bytes",
-                "aggregate source byte count overflowed".to_owned(),
-                ordinal,
-                "limit",
-            ));
-            continue;
-        };
-        if next_total > CHECK_MANY_TOTAL_SOURCE_MAX_BYTES {
-            failures.push(check_many_host_failure(
-                label,
-                "check_many_total_source_bytes",
-                format!(
-                    "aggregate source exceeds the {CHECK_MANY_TOTAL_SOURCE_MAX_BYTES} byte limit"
-                ),
-                ordinal,
-                "limit",
-            ));
-            continue;
-        }
-        total_source_bytes = next_total;
-        checked_files += 1;
-        let invocation_id = format!("check-many-{}-{ordinal}", std::process::id());
-        let result = execute(ScriptInvocation {
-            envelope_version: SCRIPT_ENVELOPE_VERSION,
-            invocation_id: invocation_id.clone(),
-            api_version: SCRIPT_API_VERSION,
-            operation: ScriptOperation::Check,
-            profile,
-            source_label: path.display().to_string(),
-            source,
-            project_root: Some(root.display().to_string()),
-            invocation_temp_root: None,
-            arguments: Vec::new(),
-            budgets: budgets.clone(),
-            observation: None,
-        });
-        if let Some(failure) = result.failure {
-            failures.push(CheckManyFailure {
-                path: label,
-                code: failure.code,
-                message: failure.message,
-                invocation_id,
-                exit_class: result.exit_class.as_str().to_owned(),
-            });
-        } else if !result.ok {
-            failures.push(check_many_host_failure(
-                label,
-                "host_worker_protocol",
-                "check returned an inconsistent result".to_owned(),
-                ordinal,
-                "host",
-            ));
-        }
-    }
-    let report = CheckManyReport {
-        schema_version: 1,
-        kind: "agenterm-rhai-check-many",
-        ok: failures.is_empty(),
-        checked_files,
-        total_source_bytes,
-        duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-        failures,
-    };
-    if json {
-        serde_json::to_writer_pretty(std::io::stdout().lock(), &report)?;
-        std::io::stdout().lock().write_all(b"\n")?;
-    } else if report.ok {
-        println!("OK ({} files)", report.checked_files);
-    } else {
-        let mut stderr = std::io::stderr().lock();
-        for failure in &report.failures {
-            writeln!(
-                stderr,
-                "{}: {}",
-                failure.path,
-                serde_json::json!({
-                    "code": failure.code,
-                    "message": failure.message,
-                    "invocation_id": failure.invocation_id,
-                    "exit_class": failure.exit_class,
-                })
-            )?;
-        }
-    }
-    Ok(report
-        .failures
-        .first()
-        .map_or(0, |failure| match failure.exit_class.as_str() {
-            "configuration" => 2,
-            "limit" => 3,
-            "child" => 4,
-            "cancelled" => 5,
-            "fleet" => 6,
-            _ => 1,
-        }))
-}
-
-fn parse_check_many_budget(option: &str, value: &str, maximum: u64) -> anyhow::Result<u64> {
-    let parsed = value
-        .parse::<u64>()
-        .map_err(|_| anyhow::anyhow!("check-many {option} must be numeric"))?;
-    if !(1..=maximum).contains(&parsed) {
-        anyhow::bail!("check-many {option} must be from 1 to {maximum}");
-    }
-    Ok(parsed)
-}
-
-fn read_check_many_manifest(path: &std::path::Path) -> anyhow::Result<CheckManyManifest> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|error| anyhow::anyhow!("check_many_manifest_read: {error}"))?;
-    if !metadata.is_file() || metadata.len() > CHECK_MANY_MANIFEST_MAX_BYTES as u64 {
-        anyhow::bail!(
-            "check_many_manifest_size: manifest must be a file of at most {CHECK_MANY_MANIFEST_MAX_BYTES} bytes"
-        );
-    }
-    let file = std::fs::File::open(path)
-        .map_err(|error| anyhow::anyhow!("check_many_manifest_read: {error}"))?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize + 1);
-    file.take((CHECK_MANY_MANIFEST_MAX_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > CHECK_MANY_MANIFEST_MAX_BYTES {
-        anyhow::bail!("check_many_manifest_size: manifest grew beyond its byte limit");
-    }
-    let manifest: CheckManyManifest = serde_json::from_slice(&bytes)
-        .map_err(|error| anyhow::anyhow!("check_many_manifest_json: {error}"))?;
-    if manifest.schema_version != 1 || manifest.kind != "agenterm-rhai-check-manifest" {
-        anyhow::bail!("check_many_manifest_schema");
-    }
-    if manifest.files.is_empty() || manifest.files.len() > CHECK_MANY_FILES_MAX {
-        anyhow::bail!("check_many_manifest_files: expected from 1 to {CHECK_MANY_FILES_MAX} files");
-    }
-    Ok(manifest)
-}
-
-fn read_check_many_source(
-    path: &std::path::Path,
-    maximum: usize,
-) -> Result<String, (&'static str, String, &'static str)> {
-    let file = std::fs::File::open(path)
-        .map_err(|error| ("host_source_read", error.to_string(), "host"))?;
-    let mut bytes = Vec::with_capacity(maximum.min(64 * 1024).saturating_add(1));
-    file.take(maximum.saturating_add(1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| ("host_source_read", error.to_string(), "host"))?;
-    if bytes.len() > maximum {
-        return Err((
-            "limit_source_bytes",
-            format!("script source exceeds the {maximum} byte limit"),
-            "limit",
-        ));
-    }
-    let source = String::from_utf8(bytes).map_err(|error| {
-        (
-            "host_source_read",
-            format!("script source is not UTF-8: {error}"),
-            "host",
-        )
-    })?;
-    Ok(normalize_script_source(source))
-}
-
-fn normalize_script_source(mut source: String) -> String {
-    if source.starts_with("#!") {
-        source.replace_range(..2, "//");
-    }
-    source
-}
-
-fn check_many_host_failure(
-    path: String,
-    code: &str,
-    message: String,
-    ordinal: usize,
-    exit_class: &str,
-) -> CheckManyFailure {
-    CheckManyFailure {
-        path,
-        code: code.to_owned(),
-        message,
-        invocation_id: format!("check-many-{}-{ordinal}", std::process::id()),
-        exit_class: exit_class.to_owned(),
-    }
-}
 
 fn run_worker() -> anyhow::Result<u8> {
     let mut input = Vec::new();

@@ -117,7 +117,7 @@ fn rhai_forwards_run_as_eval_for_rh_fixture() {
 }
 
 #[test]
-fn rhai_forwards_version_to_adjacent_rh() {
+fn rhai_forwards_version_subcommand_to_adjacent_rh() {
     let output = run_rhai(&["version"]);
     assert!(
         output.status.success(),
@@ -130,4 +130,26 @@ fn rhai_forwards_version_to_adjacent_rh() {
         stdout.contains("agenterm-rh"),
         "expected rh version banner: {stdout}"
     );
+}
+
+#[test]
+fn rhai_forwards_version_flags_to_adjacent_rh() {
+    let output = run_rhai(&["--version"]);
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("agenterm-rh"),
+        "expected rh version banner: {stdout}"
+    );
+}
+
+#[test]
+fn rhai_forwards_dash_capital_version_to_adjacent_rh() {
+    let output = run_rhai(&["-V"]);
+    assert!(output.status.success());
 }

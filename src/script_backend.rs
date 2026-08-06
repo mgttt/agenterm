@@ -1,8 +1,7 @@
 //! Script execution backend selection.
 //!
-//! Today every live invocation uses Rhai unless `AGENTERM_SCRIPT_BACKEND=rh`.
-//! The parallel `rh` track (`crates/agenterm-rh`) validates pack subsets,
-//! AOT-compiles to native libraries, and loads them with dlopen.
+//! Pack execution defaults to the rh AOT backend. Set `AGENTERM_SCRIPT_BACKEND=rhai`
+//! to force the legacy Rhai interpreter path.
 
 use std::path::{Path, PathBuf};
 
@@ -25,9 +24,10 @@ impl ScriptBackend {
             .as_deref()
             .map(str::trim)
             .map(str::to_ascii_lowercase)
+            .as_deref()
         {
-            Some(value) if value == "rh" => Self::Rh,
-            _ => Self::Rhai,
+            Some("rhai") => Self::Rhai,
+            _ => Self::Rh,
         }
     }
 
@@ -163,9 +163,13 @@ mod tests {
     use crate::script_protocol::ScriptOperation;
 
     #[test]
-    fn default_backend_is_rhai() {
-        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
-        assert!(!rh_backend_enabled());
+    fn default_backend_is_rh() {
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+        }
+        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rh);
+        assert!(rh_backend_enabled());
         assert!(
             try_execute_rh_invocation(
                 ScriptOperation::Check,
@@ -174,7 +178,15 @@ mod tests {
                 None,
             )
             .expect("probe")
-            .is_none()
+            .is_some()
         );
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
     }
 }

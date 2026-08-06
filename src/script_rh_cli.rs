@@ -1,6 +1,6 @@
-//! Resolve and forward dev-facing commands to the adjacent `agenterm-rh` binary.
+//! Resolve and forward dev-facing commands to `agenterm-rh`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
 const RH_DEV_COMMANDS: &[&str] = &[
@@ -18,15 +18,58 @@ const RH_DEV_COMMANDS: &[&str] = &[
     "caller-inventory",
 ];
 
+fn non_empty_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+}
+
 pub fn resolve_adjacent_rh_cli() -> Option<PathBuf> {
     let current = std::env::current_exe().ok()?;
     let parent = current.parent()?;
     let candidate = parent.join(crate::platform::filesystem::executable_name("agenterm-rh"));
-    candidate.is_file().then_some(candidate)
+    non_empty_file(&candidate).then_some(candidate)
+}
+
+pub fn resolve_rh_cli() -> Option<PathBuf> {
+    if let Some(adjacent) = resolve_adjacent_rh_cli() {
+        return Some(adjacent);
+    }
+    let repo = std::env::var("AGENTERM_PROJECT_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())?;
+    let name = crate::platform::filesystem::executable_name("agenterm-rh");
+    for candidate in [
+        repo.join("dist").join(&name),
+        repo.join("target/debug").join(&name),
+    ] {
+        if non_empty_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+pub fn try_forward_version_flags(arguments: &[String]) -> Option<std::io::Result<ExitStatus>> {
+    if arguments.len() != 1 {
+        return None;
+    }
+    let flag = arguments[0].as_str();
+    if flag != "--version" && flag != "-V" {
+        return None;
+    }
+    let rh = resolve_rh_cli()?;
+    Some(
+        Command::new(rh)
+            .arg("version")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status(),
+    )
 }
 
 pub fn try_forward_dev_cli(arguments: &[String]) -> Option<std::io::Result<ExitStatus>> {
-    let rh = resolve_adjacent_rh_cli()?;
+    let rh = resolve_rh_cli()?;
     if arguments.is_empty() {
         return None;
     }
@@ -45,6 +88,10 @@ pub fn try_forward_dev_cli(arguments: &[String]) -> Option<std::io::Result<ExitS
             .stderr(Stdio::inherit())
             .status(),
     )
+}
+
+pub fn check_many_requires_rh_error() -> String {
+    "check-many requires agenterm-rh; build with: cargo build -p agenterm-rh --bin agenterm-rh".into()
 }
 
 fn forward_if_rh_path(arguments: &[String], path_index: usize, prefix: &[&str]) -> Option<Vec<String>> {
@@ -69,11 +116,16 @@ fn forward_run_as_eval(arguments: &[String]) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{forward_run_as_eval, resolve_adjacent_rh_cli};
+    use super::{forward_run_as_eval, resolve_adjacent_rh_cli, resolve_rh_cli};
 
     #[test]
     fn adjacent_rh_cli_resolves_next_to_current_exe() {
         assert!(resolve_adjacent_rh_cli().is_some());
+    }
+
+    #[test]
+    fn resolve_rh_cli_falls_back_to_target_debug() {
+        assert!(resolve_rh_cli().is_some());
     }
 
     #[test]
