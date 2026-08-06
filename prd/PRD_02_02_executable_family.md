@@ -26,7 +26,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     still a separate OS process from the GUI — not in-process with the window).
     The former `agenterm-server.exe` PE is **removed**; GUI autostart spawns
     `agenterm.exe server …` (see
-    [`plan/plan-agenterm-server-mode.md`](../plan/plan-agenterm-server-mode.md)).
+    [`plan/archive/plan-agenterm-server-mode.md`](../plan/archive/plan-agenterm-server-mode.md)).
     Sharing one PE means Windows may lock `agenterm.exe` while authority
     lives — stop the server before replacing that image. The short-lived
     `agenterm --server` flag remains a transitional alias.

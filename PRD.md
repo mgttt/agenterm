@@ -49,6 +49,7 @@ Public version plans live under [`plan/`](plan/). They record sequencing,
 dependencies, risks, decisions, and delivery history, but remain execution
 projections rather than canonical product truth. Every accepted product scope
 or capability-status change also belongs in its owning PRD module.
+Living vs archived plan files: [`plan/README.md`](plan/README.md).
 
 Current source layout (layers, bins, hot files, structural bans) lives in
 [`plan/ARCHITECTURE.md`](plan/ARCHITECTURE.md). Version plans link to it; they

@@ -1,6 +1,12 @@
 # Platform Facade revision-4 execution plan
 
-状态：完成（2026-08-01）。此计划已收敛跨平台原生边界；它不授予或限制
+> ## ⚠️ 已归档（2026-08-06）
+>
+> **状态：完成（2026-08-01）**。跨平台原生边界已收敛；现行结构 SSOT：  
+> [`plan/ARCHITECTURE.md`](../ARCHITECTURE.md)。  
+> 产品 platform 契约：[`prd/PRD_02_20_native_platform.md`](../../prd/PRD_02_20_native_platform.md)。
+
+状态：完成（2026-08-01）· 已归档。此计划已收敛跨平台原生边界；它不授予或限制
 Script Runtime 能力。调用方策略、预算和 typed failure 保持在上层产品合同。
 
 ## Outcome and dependency graph

@@ -366,7 +366,7 @@ Wave 4（可选体验）
 | `plan/archive/plan-v0.1.12.md` | 0.1.12 收口与 Wave D；发布闭环权威执行记录 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同 |
 | `prd/PRD_02_18_roadmap.md` | M11/M12 路线状态 |
-| `plan/platform-ui-ux-boundary-tree.md` | **历史过程文**（superseded）；只作叙事，不权威 |
+| `plan/archive/platform-ui-ux-boundary-tree.md` | **历史过程文**（superseded）；只作叙事，不权威 |
 | `plan/plan-unix-gui-win-parity.md` | Win↔Unix **可见行为**对齐地图（差距，非结构 SSOT） |
 | `plan/platform-ux-parity-evidence-matrix.md` | 缺口矩阵模板 |
 | `prd/PRD_*.md` | 仅当能力状态变化时回写；不写模块搬家流水账 |

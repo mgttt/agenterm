@@ -158,7 +158,7 @@ O1 并发树（并行）
 下一波并发：D3 与 D4 串行；D4 依赖 D3 落地。
 
 > 现行结构 SSOT：`plan/ARCHITECTURE.md`。  
-> 历史边界叙事（非权威）：`plan/platform-ui-ux-boundary-tree.md`。
+> 历史边界叙事（非权威）：`plan/archive/platform-ui-ux-boundary-tree.md`。
 
 ## 验收证据
 

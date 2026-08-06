@@ -182,7 +182,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 ## Built-in skins (v1)
 
 Owns the product contract for built-in appearance presets. Execution map:
-[`plan/plan-skins-v1.md`](../plan/plan-skins-v1.md). External SkinHub packages
+[`plan/archive/plan-skins-v1.md`](../plan/archive/plan-skins-v1.md). External SkinHub packages
 remain a later roadmap leaf (`prd/PRD_02_18_roadmap.md` M14) and must reuse
 this theme contract rather than invent a second system.
 

@@ -611,7 +611,7 @@ track remains planned, but every declared dependency must still pass.
     theme contract and never become a second extension system. Built-in
     classic/fancy × day/night presets ship first under
     [Human workspace](PRD_02_06_human_workspace.md) /
-    [`plan/plan-skins-v1.md`](../plan/plan-skins-v1.md) before any external
+    [`plan/archive/plan-skins-v1.md`](../plan/archive/plan-skins-v1.md) before any external
     SkinHub package format is frozen.
   - [ ] discovery is cross-kind and renders one signed registry index that both
     the web surface and Control Center consume; the index is a static signed

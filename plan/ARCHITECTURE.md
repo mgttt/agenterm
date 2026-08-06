@@ -7,7 +7,7 @@
 > **抗漂规则**：全仓库只维护 **这一份** 现行结构图。其它 `plan/*` 只链到本文，禁止再画第二棵「现行」树。  
 > 结构变更与本文冲突时：同批改本文，或改代码；禁止第三现实。  
 > 自动闸（**局部**，非全文双向）：`src/platform/boundary_tests.rs`。  
-> 历史过程文 `plan/platform-ui-ux-boundary-tree.md` = **superseded**，不得当现行权威。
+> 历史过程文 `plan/archive/platform-ui-ux-boundary-tree.md` = **superseded**，不得当现行权威。
 
 ---
 
@@ -75,7 +75,7 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm-mcp` | `src/bin/agenterm-mcp.rs` | 只读 MCP sidecar |
 | `agenterm-mux` | `src/bin/agenterm-mux.rs` | Fleet multiplexer 前端 |
 
-Authority entry plan: [`plan/plan-agenterm-server-mode.md`](plan-agenterm-server-mode.md)。
+Authority entry plan: [`plan/archive/plan-agenterm-server-mode.md`](archive/plan-agenterm-server-mode.md)。
 
 Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发版以 Candidate/Release 链为准）。
 
@@ -123,7 +123,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | Win↔Unix 可见行为差距？ | `plan/plan-unix-gui-win-parity.md` + evidence matrix（**差距地图，不是结构 SSOT**） |
 | Agent 操作纪律？ | `AGENTS.md` |
 | 产品总树？ | `PRD.md` |
-| 旧 boundary-tree 叙事？ | `plan/platform-ui-ux-boundary-tree.md`（**superseded**） |
+| 旧 boundary-tree 叙事？ | `plan/archive/platform-ui-ux-boundary-tree.md`（**superseded**） |
 
 历史过程文若与本文冲突：**以本文 + 代码 + boundary_tests 为准**。
 

@@ -412,10 +412,11 @@ integrated validation recorded below):
   compilation remains the existing six-target CI responsibility and is not
   misreported here as local evidence.
 
-- [x] The dependency graph and explicitly bounded delivery leaves for this
-  continuing migration live in `plan/plan-platform-facade-v4.md`; they keep
+- [x] The dependency graph and delivery leaves for the platform-facade migration
+  are historical in `plan/archive/plan-platform-facade-v4.md` (completed
+  2026-08-01; living structure SSOT is `plan/ARCHITECTURE.md`). They keep
   Script Runtime process/window/clipboard/stream/file work separate from the
-  Control Center and PTY/frontend hot paths. This plan grants no runtime
+  Control Center and PTY/frontend hot paths. That plan grants no runtime
   authority and does not imply Candidate, tag, or public Release.
 - [x] Script Runtime `std.process.list` and `std.process.kill`, together with
   owned child-tree cleanup, now call `platform::process` as their only native

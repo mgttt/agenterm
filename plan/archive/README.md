@@ -17,6 +17,12 @@
 | `plan-v0.1.13.md` | **从未公开发布** | Candidate 被放弃，目标移至 v0.1.14；§10.2.1 坑清单已提炼 |
 | `plan-v0.1.14.md` | **已公开发布** | tag `8ff2b5a`；未完成叶 → `plan-v0.1.15.md` §一·五 **L′** |
 | `goal-v0.1.14.md` | 交接快照 | 发布 goal 历史；勿再执行 |
+| `goal-v0.1.15-server-instance-s-prime.md` | goal 完成 | S′ 形态已落地；进度见 plan-v0.1.15 §一·五 S′ |
+| `plan-agenterm-server-mode.md` | 已实现 | `agenterm server` 同 PE 子命令；契约 PRD_02_02 |
+| `plan-skins-v1.md` | 已实现 | 内置四预设（X1）；SkinHub 外置仍 v0.2.x |
+| `plan-platform-facade-v4.md` | 已完成 | 2026-08-01；结构 SSOT → ARCHITECTURE |
+| `osx-cpu-improve.md` | 已 shipped | P0–P3；再卡顿对照历史 + O 组 |
+| `platform-ui-ux-boundary-tree.md` | superseded | 只叙事；权威 ARCHITECTURE |
 
 > 公开发布序列：v0.1.6 → v0.1.10 → v0.1.11 → **v0.1.14**。  
 > v0.1.12 与 v0.1.13 有完整 plan 但无 tag、无 GitHub Release  
@@ -26,6 +32,7 @@
 
 | 内容 | 文档 |
 |------|------|
+| **plan/ 现行索引** | [`plan/README.md`](../README.md) |
 | 在制版本工作树 | `plan/plan-v0.1.15.md` |
 | 上一已发布版本复盘（历史） | `plan/archive/plan-v0.1.14.md` |
 | 发布链要求（版本无关） | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements |

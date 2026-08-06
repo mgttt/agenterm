@@ -926,7 +926,7 @@ M. 多 Agent 观察与交接
     `assets/skins/` 新增 11 文件）
   - 证据：`theme-smoke.rhai` 21 处 preset 断言；契约在
     `prd/PRD_02_06_human_workspace.md` §Built-in skins (v1)
-  - 执行计划：[`plan/plan-skins-v1.md`](plan-skins-v1.md)
+  - 执行计划：[`plan/archive/plan-skins-v1.md`](archive/plan-skins-v1.md)
   - **与 §五 5.4 L-EXT 的关系**：这是**内置**皮肤，外部 SkinHub 包仍归
     M14／v0.2.x——即 P6（Hub 单一 kind 底座）**未被本次落地预判**
 - [x] **X2 Windows IME 内联合成 + 协议兼容 UX** — 已落地 `83843ea`
@@ -1561,6 +1561,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | **O6 关闭** `fb573f9`（O6a+O6b）；§11.8 定因全成立；agent(cc) 更正「pre-existing flake」归因 → 稳定红 `prd_alignment_public_command_missing:delete-buffer` |
 | 2026-08-05 | **编排拍板（不转嫁董事长）**：P-P1=T2 立 v0.2.x / T1 不做 / v0.1.15 text-only；G-P1=无 signed 自动 unsigned+警告；G-P2=不默认 kill server，版本落后须提示；**O1b 开工**；**O-fix 认领** PRD 补 buffer 公开命令。agent 问决策 → 编排回写 §五 5.7 + §一 O |
 | 2026-08-06 | **v0.1.14 未完成 upsert → §一·五 L′**（L1–L7 可执行 + L8→C1）；`plan-v0.1.14.md` / `goal-v0.1.14.md` **归档**至 `plan/archive/`（已公开发布 tag `8ff2b5a`）；archive README 与引用指针改指向 archive 路径 + 在制 `plan-v0.1.15.md` |
+| 2026-08-06 | **plan/ 卫生**：再归档已落地/superseded 专题（`plan-agenterm-server-mode`、`plan-skins-v1`、`plan-platform-facade-v4`、`osx-cpu-improve`、S′ goal、`platform-ui-ux-boundary-tree`）；新增 `plan/README.md` 现行索引；PRD/ARCHITECTURE 链接改指向 archive |
 
 ---
 
@@ -1623,7 +1624,7 @@ O  macOS 本机泳道
 │
 └─ O5 可选
    ├─ physical pointer acceptance
-   └─ CPU：仅用户仍报卡时对照 osx-cpu-improve.md
+   └─ CPU：仅用户仍报卡时对照 archive/osx-cpu-improve.md
 ```
 
 ### 11.3 验收命令（亲测，示例）
@@ -1765,7 +1766,7 @@ winit 通过 `set_ime_cursor_area` 代劳，**且已被逐帧调用**。
 ### 11.10 O5 尾账实测（2026-08-05）
 
 **CPU**：O5 的触发条件是「仅当用户仍报高 CPU 再回归测」。
-`plan/osx-cpu-improve.md:3` 记 `P0–P3 all shipped`，本机实测现网 v0.1.14：
+`plan/archive/osx-cpu-improve.md:3` 记 `P0–P3 all shipped`，本机实测现网 v0.1.14：
 
 ```
 $ ps -Ao pid,pcpu,pmem,comm | grep agenterm
@@ -1773,7 +1774,7 @@ $ ps -Ao pid,pcpu,pmem,comm | grep agenterm
 ```
 
 **6.0% CPU（空闲态）**——不是该计划针对的病态占用，触发条件不成立，
-**本版不开工**。若用户后续再报卡顿，回归入口仍是 `plan/osx-cpu-improve.md`。
+**本版不开工**。若用户后续再报卡顿，回归入口仍是 `plan/archive/osx-cpu-improve.md`。
 
 **physical pointer acceptance**：属 parity 矩阵尾账，无用户诉求驱动，
 优先级低于 O6（用户阻塞）与 O2（复制粘贴刚需），**本版不做**。
