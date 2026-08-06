@@ -527,8 +527,10 @@ U′. 标签切换假刷新
 >   身份可见；关窗后 server 可能仍 live（keep-server）。
 > - **2026-08-06 用户拍板**：要的是 **窗口顶部横向 server tab 条**（点选切
 >   当前窗附着的 server）。此前「默认不做顶栏 tab」的判断被用户明确覆盖。
-> - **实现**：顶栏 full-width server strip（与左侧 PTY 树分离）；点选 = 本窗
->   rebind attach（S1）；`Open instance…` / `open-instance` 仍可新窗（S3）。
+> - **实现（2026-08-06 真机迭代后）**：server strip **仅终端列**（左缘对齐终端，
+>   左侧 Tabs 独占 + 左上时钟）；标签树顶在时钟下；点选 = 本窗 rebind（鼠标
+>   flush attach；全部芯片可点；进程存活即可 enter；stale 开新窗）；
+>   CLI `select-server-tab --name`；`Open instance…` / `open-instance` 仍可新窗（S3）。
 > - **仍不做**：无确认的静默双权威、把 server tab 画进左侧 PTY 树。
 
 ```text
@@ -536,7 +538,7 @@ S′. 多 Server / Instance 可达与选择
 ├─ [x] S1 启动/重开：live instance 列表 + 一键附着
 ├─ [x] S2 主窗身份常显（标题/状态栏：instance · pid · 简短 endpoint）
 ├─ [x] S3 主窗「打开另一 instance…」（新窗附着，非同窗热切）
-└─ [ ] S4（后置）同窗热切换权威 + 确认；明确不做无确认横向 server tab
+└─ [x] S4 同窗热切换：顶栏 server strip 点选 rebind（用户拍板形态；非 PTY 树）
 ```
 
 **硬约束**
