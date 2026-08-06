@@ -424,12 +424,13 @@ mod tests {
 
     #[test]
     fn endpoint_selector_conflicts_and_duplicates_fail_before_stdio() {
+        // --endpoint + --instance is a valid attach annotation, not a conflict.
         assert_eq!(
             run_mcp_entry_with_args(vec![
                 "--endpoint".to_owned(),
                 "tcp:127.0.0.1:1".to_owned(),
-                "--instance".to_owned(),
-                "dev".to_owned(),
+                "--address".to_owned(),
+                "127.0.0.1:2".to_owned(),
                 "serve".to_owned(),
                 "--stdio".to_owned(),
             ]),

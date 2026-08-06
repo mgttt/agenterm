@@ -75,6 +75,12 @@ pub fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     crate::selected::process_spawn::configure_detached_command(command)
 }
 
+/// Configure a child that may outlive the caller Job/session while remaining a
+/// normal visible GUI process (no `CREATE_NO_WINDOW` / equivalent).
+pub fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), String> {
+    crate::selected::process_spawn::configure_breakaway_visible_command(command)
+}
+
 /// Spawn a detached child while retaining a handle for startup and exit
 /// observation.
 ///

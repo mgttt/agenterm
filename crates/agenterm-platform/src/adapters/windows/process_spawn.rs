@@ -16,6 +16,16 @@ pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), St
     Ok(())
 }
 
+/// Break away from a caller Job while keeping a normal visible GUI console/window.
+pub(crate) fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), String> {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Threading::{
+        CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP,
+    };
+    command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP);
+    Ok(())
+}
+
 pub(crate) fn is_breakaway_denied(error: &std::io::Error) -> bool {
     error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED as i32)
 }

@@ -2952,16 +2952,34 @@ mod tests {
 
     #[test]
     fn endpoint_selectors_reject_conflicts_and_duplicates_before_opening() {
-        let conflict = parse_entry(&[
+        // --endpoint may pair with --instance for attach identity.
+        let paired = parse_entry(&[
             OsString::from("snapshot"),
             OsString::from("--endpoint"),
             OsString::from("tcp:127.0.0.1:42001"),
             OsString::from("--instance"),
             OsString::from("dev"),
         ])
-        .expect_err("endpoint and instance are mutually exclusive");
-        assert!(conflict.contains("endpoint_selector_error"));
-        assert!(conflict.contains("ConflictingCliSelectors"));
+        .expect("endpoint may annotate instance identity");
+        let EntryCommand::Snapshot {
+            context: Some(context),
+            ..
+        } = paired
+        else {
+            panic!("paired selectors must produce a snapshot context");
+        };
+        assert_eq!(context.endpoint, "tcp:127.0.0.1:42001");
+        assert_eq!(context.logical_instance.as_deref(), Some("dev"));
+
+        let conflict = parse_entry(&[
+            OsString::from("snapshot"),
+            OsString::from("--endpoint"),
+            OsString::from("tcp:127.0.0.1:42001"),
+            OsString::from("--server-endpoint"),
+            OsString::from("127.0.0.1:42002"),
+        ])
+        .expect_err("canonical and migration endpoints conflict");
+        assert!(conflict.contains("endpoint_selector_conflict"));
 
         let duplicate = parse_entry(&[
             OsString::from("snapshot"),

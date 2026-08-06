@@ -689,6 +689,8 @@ mod tests {
 
     #[test]
     fn environment_selector_priority_is_endpoint_then_address_then_instance() {
+        // Transport priority remains endpoint > address > instance default.
+        // Explicit instance always annotates logical identity (attach/rebind).
         let cases = [
             (
                 EndpointSelectorArgs {
@@ -697,7 +699,7 @@ mod tests {
                     instance: Some("dev".to_owned()),
                 },
                 "tcp:127.0.0.1:49201",
-                LogicalInstance::Main,
+                LogicalInstance::Dev,
             ),
             (
                 EndpointSelectorArgs {
@@ -706,7 +708,7 @@ mod tests {
                     instance: Some("dev".to_owned()),
                 },
                 "tcp:127.0.0.1:49202",
-                LogicalInstance::Main,
+                LogicalInstance::Dev,
             ),
         ];
         for (environment, expected, expected_instance) in cases {

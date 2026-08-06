@@ -11,8 +11,8 @@ pub(crate) use agenterm_platform::contract::process::{
 };
 #[allow(unused_imports)] // Compatibility exports consumed by product modules per target.
 pub(crate) use agenterm_platform::process::{
-    ProcessTreeGuard, configure_command, configure_owned_command, kill, list, observe,
-    start_identity,
+    ProcessTreeGuard, configure_breakaway_visible_command, configure_command,
+    configure_owned_command, kill, list, observe, start_identity,
 };
 
 pub(crate) fn autostart_server(

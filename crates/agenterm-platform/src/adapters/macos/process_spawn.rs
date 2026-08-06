@@ -29,6 +29,20 @@ pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), St
     Ok(())
 }
 
+pub(crate) fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn is_breakaway_denied(_error: &std::io::Error) -> bool {
     false
 }

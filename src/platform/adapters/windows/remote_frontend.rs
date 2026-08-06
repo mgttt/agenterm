@@ -4668,14 +4668,9 @@ impl RemoteWindowState {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        // Escape the agent Job so the new window survives the launcher.
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-            command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP);
-        }
+        // Escape the caller Job/session while keeping a visible GUI window.
+        crate::platform::process::configure_breakaway_visible_command(&mut command)
+            .map_err(|error| anyhow::anyhow!(error))?;
         command
             .spawn()
             .map_err(|error| anyhow::anyhow!("could not open instance `{instance}`: {error}"))?;
