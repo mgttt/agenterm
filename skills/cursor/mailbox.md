@@ -15,15 +15,15 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `b211245` |
-| 待审合 | （无） |
+| `origin/main` | tip `75fc7eb` |
+| 待审合 | `cursor/1-0e37` @ `f4e72cd` ahead=1（tip 14:41Z，新鲜未催） |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 @ `b211245`（noop） |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 @ `75fc7eb`（待审合未催） |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -63,10 +63,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T14:24Z
+### 舰队值班会话 · 2026-08-06T15:23Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-b6e60a59-f45f-4687-be1f-1e020003c22b`
-- URL: https://cursor.com/agents/bc-b6e60a59-f45f-4687-be1f-1e020003c22b
+- bcId: `bc-e092a619-d1c8-4baa-a372-83afe7b79c64`
+- URL: https://cursor.com/agents/bc-e092a619-d1c8-4baa-a372-83afe7b79c64
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -82,6 +82,7 @@
 
 ## 交接日志
 
+- 2026-08-06T15:23Z · 舰队值班会话(`bc-e092a619-…`) · duty: findings=1 待审合 `cursor/1-0e37`@f4e72cd ahead=1 main=75fc7eb；nudge=0 未 apply；tip 14:41Z 新鲜未催主控；lock 已清
 - 2026-08-06T14:24Z · 舰队值班会话(`bc-b6e60a59-…`) · duty: noop findings=0 main=b211245；未 apply；lock 已清
 - 2026-08-06T13:25Z · 舰队值班会话(`bc-f4adb0da-…`) · duty: noop findings=0 main=f71a132；`cursor/1-0e37` 已合入（ahead=0）；未 apply；lock 已清
 - 2026-08-06T12:26Z · 舰队值班会话(`bc-097822ea-…`) · duty: findings=1 待审合 `cursor/1-0e37`@76896bd ahead=1 main=d50e1b0；nudge=0 未 apply；tip 12:23Z 新鲜未催主控；lock 已清
