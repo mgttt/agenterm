@@ -74,6 +74,14 @@ fn print_stmt(out: &mut String, stmt: &Stmt, trailing_semi: bool) -> Result<(), 
             print_block(out, &flow.body, true)?;
             out.push('}');
         }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            out.push_str("while ");
+            print_expr(out, &flow.expr)?;
+            out.push_str(" { ");
+            print_block(out, &flow.body, true)?;
+            out.push('}');
+        }
         Stmt::Block(block) => {
             out.push_str("{ ");
             print_block(out, block, true)?;
@@ -204,7 +212,7 @@ fn print_op(out: &mut String, op: &Token, args: &[Expr]) -> Result<(), RhError> 
         (Token::Multiply, 2) => binary(out, "*", &args[0], &args[1]),
         (Token::Divide, 2) => binary(out, "/", &args[0], &args[1]),
         (Token::Modulo, 2) => binary(out, "%", &args[0], &args[1]),
-        (Token::Equals, 2) => binary(out, "==", &args[0], &args[1]),
+        (Token::Equals, 2) | (Token::EqualsTo, 2) => binary(out, "==", &args[0], &args[1]),
         (Token::NotEqualsTo, 2) => binary(out, "!=", &args[0], &args[1]),
         (Token::GreaterThan, 2) => binary(out, ">", &args[0], &args[1]),
         (Token::GreaterThanEqualsTo, 2) => binary(out, ">=", &args[0], &args[1]),
@@ -274,6 +282,10 @@ fn stmt_uses_host(stmt: &Stmt) -> bool {
         }
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
+            uses_host_surface(&flow.expr) || flow.body.iter().any(stmt_uses_host)
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
             uses_host_surface(&flow.expr) || flow.body.iter().any(stmt_uses_host)
         }
         Stmt::Block(block) => block.iter().any(stmt_uses_host),

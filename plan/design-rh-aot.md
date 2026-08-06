@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | **rh-2 可试切换**（host eval + 源码 AOT 缓存 + stdlib parity 路径） |
+| 状态 | **rh-3 进行中**（while 原生 AOT + `agenterm-rh eval`；见 [`plan-rh-3.md`](plan-rh-3.md)） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -52,12 +52,23 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M12 | rh-2：`AGENTERM_SCRIPT_BACKEND=rh` 可无 pack 跑 source | [x] |
 | M13 | 试切换：stdlib fixture + `std::fs::exists` native 验收 | [x] |
 
+### rh-3（AOT 扩面 + agenterm-rh 成长）
+
+| ID | 交付 | 状态 |
+|----|------|------|
+| M14 | `while` 纯 int 条件原生 AOT | [~] |
+| M15 | `agenterm-rh eval` dev 命令 | [~] |
+| M16–M22 | assign/try、check-many、bootstrap 默认构建、worker parity、corpus 扫描、rhai 薄替换 | [ ] |
+
+执行计划：[`plan-rh-3.md`](plan-rh-3.md)。**JIT** 在本轨指 **T0–T1 分层 AOT**（源码缓存 + 原生扩面），Cranelift 仍在 RH-4。
+
 ---
 
-## 4. rh-2 语言与 host eval
+## 4. rh-2 / rh-3 语言与 host eval
 
+**允许（rh-3 在 rh-2 基础上）：** rh-2 全部 + **`while`（纯 INT 条件）** 原生 AOT。  
 **允许（rh-2）：** rh-1 全部 + `for`、字符串、`throw`、任意 `std::`/`rhai::`/对象链（经 host eval）。  
-**禁止：** `import`/`export`、`while`/`try`/闭包捕获。
+**禁止：** `import`/`export`、`do`/`switch`/`try`/闭包捕获。
 
 **机制：**
 - 纯 `INT` 控制流/算术 → 原生机器码

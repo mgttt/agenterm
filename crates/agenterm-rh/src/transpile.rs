@@ -90,9 +90,7 @@ pub fn transpile_cdylib(source: &str) -> Result<String, RhError> {
 }
 
 fn parse(source: &str) -> Result<AST, RhError> {
-    rhai::Engine::new()
-        .compile(source)
-        .map_err(|err| RhError::Parse(err.to_string()))
+    crate::check::parse_rh_ast(source)
 }
 
 fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
@@ -368,6 +366,22 @@ fn emit_stmt(
                 out.push_str(";\n");
             }
         }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            if is_pure_int_expr(&flow.expr) {
+                out.push_str("    while ");
+                emit_expr(out, &flow.expr, ctx)?;
+                out.push_str(" != 0 {\n");
+                emit_block(out, &flow.body, ctx, false)?;
+                out.push_str("    }\n");
+            } else {
+                let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
+                out.push_str("    let _while = rh_host_eval_int(");
+                out.push_str(&format!("{:?}, ", snippet));
+                ctx.emit_scope_json_expr(out);
+                out.push_str(";\n");
+            }
+        }
         Stmt::Block(boxed) => {
             out.push_str("    {\n");
             emit_block(out, boxed, ctx, implicit_return)?;
@@ -541,14 +555,18 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
         (Token::Multiply, 2) => binary(out, "*", &args[0], &args[1], ctx),
         (Token::Divide, 2) => binary(out, "/", &args[0], &args[1], ctx),
         (Token::Modulo, 2) => binary(out, "%", &args[0], &args[1], ctx),
-        (Token::Equals, 2) => binary(out, "==", &args[0], &args[1], ctx),
-        (Token::NotEqualsTo, 2) => binary(out, "!=", &args[0], &args[1], ctx),
-        (Token::GreaterThan, 2) => binary(out, ">", &args[0], &args[1], ctx),
-        (Token::GreaterThanEqualsTo, 2) => binary(out, ">=", &args[0], &args[1], ctx),
-        (Token::LessThan, 2) => binary(out, "<", &args[0], &args[1], ctx),
-        (Token::LessThanEqualsTo, 2) => binary(out, "<=", &args[0], &args[1], ctx),
-        (Token::And, 2) => binary(out, "&&", &args[0], &args[1], ctx),
-        (Token::Or, 2) => binary(out, "||", &args[0], &args[1], ctx),
+        (Token::Equals, 2) | (Token::EqualsTo, 2) => {
+            comparison_binary(out, "==", &args[0], &args[1], ctx)
+        }
+        (Token::NotEqualsTo, 2) => comparison_binary(out, "!=", &args[0], &args[1], ctx),
+        (Token::GreaterThan, 2) => comparison_binary(out, ">", &args[0], &args[1], ctx),
+        (Token::GreaterThanEqualsTo, 2) => {
+            comparison_binary(out, ">=", &args[0], &args[1], ctx)
+        }
+        (Token::LessThan, 2) => comparison_binary(out, "<", &args[0], &args[1], ctx),
+        (Token::LessThanEqualsTo, 2) => comparison_binary(out, "<=", &args[0], &args[1], ctx),
+        (Token::And, 2) => logical_binary(out, "&&", &args[0], &args[1], ctx),
+        (Token::Or, 2) => logical_binary(out, "||", &args[0], &args[1], ctx),
         (Token::Minus, 1) => {
             out.push_str("(-(");
             emit_expr(out, &args[0], ctx)?;
@@ -565,6 +583,44 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
             "unsupported operator `{op:?}` in rh-0"
         ))),
     }
+}
+
+fn comparison_binary(
+    out: &mut String,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    if ctx.cdylib {
+        out.push('(');
+        binary(out, op, lhs, rhs, ctx)?;
+        out.push_str(") as INT");
+    } else {
+        binary(out, op, lhs, rhs, ctx)?;
+    }
+    Ok(())
+}
+
+fn logical_binary(
+    out: &mut String,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    if ctx.cdylib {
+        out.push('(');
+        emit_expr(out, lhs, ctx)?;
+        out.push(' ');
+        out.push_str(op);
+        out.push(' ');
+        emit_expr(out, rhs, ctx)?;
+        out.push_str(") as INT");
+    } else {
+        binary(out, op, lhs, rhs, ctx)?;
+    }
+    Ok(())
 }
 
 fn binary(
@@ -602,6 +658,16 @@ mod tests {
         let rust = transpile_cdylib("fn entry() { 42 }").expect("transpile");
         assert!(rust.contains("fn entry() -> INT"));
         assert!(rust.contains("#[no_mangle]"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_while_loop() {
+        let source = include_str!("../../../fixtures/rh/while.rh");
+        let rust = transpile_cdylib(source).expect("transpile");
+        assert!(
+            rust.contains("while "),
+            "expected while in:\n{rust}"
+        );
     }
 
     #[test]

@@ -1,0 +1,10 @@
+fn entry() {
+    while 0 == 1 {
+        0
+    }
+    42
+}
+
+fn cc_lines() {
+    ["rh-3 while", "native-aot"]
+}

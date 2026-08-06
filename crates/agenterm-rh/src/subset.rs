@@ -44,9 +44,10 @@ pub fn validate_ast(ast: &AST) -> Result<(), RhError> {
 
 fn reject_stmt(stmt: &Stmt) -> Option<RhError> {
     match stmt {
-        Stmt::While(..) | Stmt::Do(..) | Stmt::Switch(..) | Stmt::TryCatch(..) => Some(
-            subset_error("RH_SUBSET_NO_LOOP", "while/do/switch/try are not in rh-2"),
-        ),
+        Stmt::Do(..) | Stmt::Switch(..) | Stmt::TryCatch(..) => Some(subset_error(
+            "RH_SUBSET_NO_LOOP",
+            "do/switch/try are not in rh-3",
+        )),
         Stmt::Import(..) | Stmt::Export(..) => Some(subset_error(
             "RH_SUBSET_NO_MODULE",
             "import/export are not in rh-2",
@@ -95,6 +96,16 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
             validate_root_expr(&flow.expr)?;
+            validate_stmt_block(&flow.body)
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            if !is_pure_int_expr(&flow.expr) {
+                return Some(subset_error(
+                    "RH_SUBSET_WHILE_COND",
+                    "while condition must be a pure int expression in rh-3",
+                ));
+            }
             validate_stmt_block(&flow.body)
         }
         Stmt::Block(block) => validate_stmt_block(block),
@@ -211,6 +222,22 @@ mod tests {
             .compile("fn entry() { for x in [1, 2] { if x == 2 { return 9; } } 0 }")
             .expect("compile");
         validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_while_with_pure_int_condition() {
+        let ast = Engine::new()
+            .compile("fn entry() { while 0 == 1 { 0 } 42 }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn rejects_while_with_host_condition() {
+        let ast = Engine::new()
+            .compile("fn entry() { while std::fs::exists(`/tmp`) { 0 } 0 }")
+            .expect("compile");
+        assert!(validate_ast(&ast).is_err());
     }
 
     #[test]
