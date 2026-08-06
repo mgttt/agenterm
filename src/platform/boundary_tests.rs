@@ -23,6 +23,18 @@ const NATIVE_BOUNDARY_MARKERS: &[&str] = &[
     "softbuffer::",
     "winit::",
     "raw_window_handle::",
+    // A bare `#[link(name = "kernel32")]` in an adapter is compiled on every
+    // host, because `adapters/mod.rs` declares each adapter module
+    // unconditionally. It then breaks the link on the other two platforms with
+    // `ld: library '<name>' not found` while `cargo build --lib` still passes,
+    // so nothing notices until someone links a test or binary.
+    //
+    // This marker earns its keep on the host that *can* link the symbol: there
+    // the suite fails by name and points at the offending line, instead of the
+    // breakage surfacing only on someone else's machine. On a host that cannot
+    // link it the linker still wins first, so treat this as a fast review
+    // signal rather than the sole defence.
+    "#[link(",
 ];
 
 const PRODUCT_COUPLING_MARKERS: &[&str] = &[
