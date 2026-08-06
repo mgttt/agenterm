@@ -11,8 +11,8 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`�
 
 | 显示名 | bcId | 来源 | 当前职责 | 注释 |
 |--------|------|------|----------|------|
-| **主控1** | _(待 spawn；创建时 `name=主控1`)_ | api | **换防目标**：接管后=当前主控 | 同 env=`7ef6e5b0-…`；见 mailbox 交接 |
-| **主控2** | `bc-05b7c357-d712-440d-b140-8774bfa90e2a` | api | **HANDOFF / 即将待命** | 会话过长；换防完成后勿再当唯一统筹 |
+| **主控1** | `bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b` | api | **当前主控**（换防后）：统筹、合流、编排 | env=`7ef6e5b0-…`；URL=https://cursor.com/agents/bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b |
+| **主控2** | `bc-05b7c357-d712-440d-b140-8774bfa90e2a` | api | 已换防 / 待命 | 勿再当唯一统筹 |
 | **舰队值班会话** | _(每次 Automations 新开 bcId；例 `bc-0958a47a-…`)_ | automation | **auto-dream 值班**：只跑 `fleet-duty` 一轮 | Automation 名=`主控 造梦`；`--from` 须用本行显示名 |
 | **主控** | `bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1` | mobile | 已换防 / 待命 | 勿再当唯一统筹 |
 | **分身1** | `bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f` | api | 待命（旧 Linux platform） | 皮肤任务不复用 |

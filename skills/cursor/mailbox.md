@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控2**刷新：2026-08-06T00:49Z（准备换防 → 主控1）
+最后由**主控2**刷新：2026-08-06T00:51Z（已 spawn 主控1；本席转待命）
 
 ## 共享事实
 
@@ -15,7 +15,7 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | `plan/plan-control-center-ux.md` |
 | `origin/main` | tip 见 git；含 CI selector 修 + research 三 Tab + Wry 体积倾向 + 换防准备 |
-| CI | run `31059086660` @ `da25929`：非 Windows 全绿后 **Windows 被 cancel**（quality gate ~35min 未结束）。`gh` 无 dispatch/rerun 权；用非 md 触达重跑。docs 推送不触发 CI（paths-ignore） |
+| CI | 重跑 `31060999962` @ `f3b95a5`（前次 `31059086660` Windows cancel）。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
@@ -45,17 +45,17 @@
 
 ## 席位状态
 
-### 主控2 · 2026-08-06T00:49Z
-- 状态: HANDOFF — 会话过长，准备把统筹权交给主控1
+### 主控1 · 2026-08-06T00:51Z
+- 状态: RUNNING — 已 spawn，接管统筹（registry 由其确认）
+- bcId: `bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b`
+- URL: https://cursor.com/agents/bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b
+- 下一步: pull main；盯 CI `31060999962`；更新 registry 自己=当前主控
+
+### 主控2 · 2026-08-06T00:51Z
+- 状态: IDLE — 已换防 / 待命
 - bcId: `bc-05b7c357-d712-440d-b140-8774bfa90e2a`
 - URL: https://cursor.com/agents/bc-05b7c357-d712-440d-b140-8774bfa90e2a
-- 分支: `main`（代理元数据分支 `cursor/2-c843` 勿当工作区）
-- 下一步: 用户开主控1 后本席转待命
-- 阻塞: CI Windows quality gate 仍 in_progress（观察中）
-
-### 主控1 · （待创建）
-- 状态: PENDING_SPAWN
-- 下一步: 按 `hand-off-controller.md` 开会话；首条 prompt 见交接日志
+- 下一步: 勿再当唯一统筹
 
 ### 舰队值班会话 · 2026-08-06T00:26Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
@@ -74,7 +74,8 @@
 
 ## 交接日志
 
-- 2026-08-06T00:49Z · 主控2(`bc-05b7c357-…`) · 准备换防主控1；tip=`ff7b4f5`；CI=`31059086660` Windows gate 异常长；Wry>Tauri 体积结论已写入 plan/evidence
+- 2026-08-06T00:51Z · 主控2(`bc-05b7c357-…`) · 已 spawn 主控1=`bc-a4df769a-…`；CI 重跑=`31060999962` @ `f3b95a5`；本席 IDLE
+- 2026-08-06T00:49Z · 主控2(`bc-05b7c357-…`) · 准备换防；Wry>Tauri 体积结论已写入 plan/evidence
 - 2026-08-06T00:26Z · 舰队值班会话(`bc-0c498e8e-…`) · duty: noop findings=0 main=da25929；未 apply；lock 已清
 - 2026-08-05T23:26Z · 舰队值班会话(`bc-da35c7e5-…`) · duty: noop findings=0 main=30437eb；未 apply；lock 已清
 - 2026-08-05T23:06Z · 舰队值班会话(`bc-0958a47a-…`) · duty: noop findings=0 main=478e131；env=`7ef6e5b0` 已对齐；未 apply；lock 已清
