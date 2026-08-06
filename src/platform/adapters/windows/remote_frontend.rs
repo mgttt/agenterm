@@ -46,7 +46,9 @@ use crate::{
             remote_word_selection,
         },
         server_strip_ui::{
-            ServerCloseConfirm, ServerContextAction, ServerNewDialog, ServerTabContextMenu,
+            SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, StripRect, ServerCloseConfirm,
+            ServerContextAction, ServerNewDialog, ServerTabContextMenu, layout_server_add_chip,
+            layout_server_context_menu, layout_server_tab_chips, server_tab_chip_label,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope, appearance_preset_grid},
         tab_editor::{TabEditorDialog, TabEditorFocus},
@@ -215,14 +217,7 @@ fn toolbar_action_returns_terminal_focus(action_id: &str) -> bool {
 
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
-const SERVER_STRIP_HEIGHT: i32 = 32;
-const SERVER_TAB_MIN_WIDTH: i32 = 88;
-const SERVER_TAB_MAX_WIDTH: i32 = 160;
-const SERVER_TAB_GAP: i32 = 4;
-/// Trailing `[+]` chip width reserved on the right of the server strip.
-const SERVER_ADD_WIDTH: i32 = 28;
-const SERVER_CONTEXT_MENU_WIDTH: i32 = 148;
-const SERVER_CONTEXT_MENU_ITEM_HEIGHT: i32 = 28;
+const SERVER_STRIP_HEIGHT: i32 = 34;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 /// U3: coalesce PTY regrids when the user flips tabs quickly.
@@ -4575,48 +4570,44 @@ impl RemoteWindowState {
             return Vec::new();
         };
         let strip = win_rect(strip);
-        let count = self.server_tabs.len().max(1) as i32;
-        // Fit *all* chips: shrink below the preferred min rather than dropping
-        // trailing servers (user must be able to click every listed instance).
-        // Reserve trailing [+] so chips never cover the add control.
-        let gaps = SERVER_TAB_GAP * (count - 1).max(0);
-        let chips_right = (strip.right - MARGIN - SERVER_ADD_WIDTH).max(strip.left + MARGIN);
-        let available = (chips_right - (strip.left + MARGIN) - gaps).max(count);
-        // Prefer SERVER_TAB_MIN_WIDTH when the strip has room; shrink so every
-        // chip remains clickable when many servers are listed.
-        let width = (available / count)
-            .clamp(48, SERVER_TAB_MAX_WIDTH)
-            .min(available / count);
-        let width = width.max(SERVER_TAB_MIN_WIDTH.min(available / count));
-        let mut left = strip.left + MARGIN;
-        let mut out = Vec::new();
-        for (index, row) in self.server_tabs.iter().enumerate() {
-            let right = if index + 1 == self.server_tabs.len() {
-                // Last chip absorbs remainder up to the reserved [+] gutter.
-                chips_right.max(left + width)
-            } else {
-                left + width
-            };
-            let rect = ProductPixelRect {
-                left,
-                top: strip.top + 4,
-                right,
-                bottom: strip.bottom - 4,
-            };
-            out.push((rect, row));
-            left = right + SERVER_TAB_GAP;
-        }
-        out
+        let strip = StripRect {
+            left: strip.left,
+            top: strip.top,
+            right: strip.right,
+            bottom: strip.bottom,
+        };
+        let chips = layout_server_tab_chips(strip, self.server_tabs.len());
+        chips
+            .into_iter()
+            .zip(self.server_tabs.iter())
+            .map(|(chip, row)| {
+                (
+                    ProductPixelRect {
+                        left: chip.left,
+                        top: chip.top,
+                        right: chip.right,
+                        bottom: chip.bottom,
+                    },
+                    row,
+                )
+            })
+            .collect()
     }
 
     fn server_add_rect(&self) -> Option<ProductPixelRect> {
         let strip = self.workspace_geometry().server_strip?;
         let strip = win_rect(strip);
+        let add = layout_server_add_chip(StripRect {
+            left: strip.left,
+            top: strip.top,
+            right: strip.right,
+            bottom: strip.bottom,
+        });
         Some(ProductPixelRect {
-            left: strip.right - MARGIN - SERVER_ADD_WIDTH,
-            top: strip.top + 4,
-            right: strip.right - MARGIN,
-            bottom: strip.bottom - 4,
+            left: add.left,
+            top: add.top,
+            right: add.right,
+            bottom: add.bottom,
         })
     }
 
@@ -4627,13 +4618,9 @@ impl RemoteWindowState {
     }
 
     fn server_tab_row_at(&self, x: i32, y: i32) -> Option<&InstancePickerRow> {
-        let strip = self.workspace_geometry().server_strip?;
-        // Full strip height is clickable (not only the inner tab chip padding).
-        if y < strip.top || y >= strip.bottom || x < strip.left || x >= strip.right {
-            return None;
-        }
+        // Hit chips only (not the empty strip gutter or the [+] control).
         for (rect, row) in self.server_tab_rects() {
-            if x >= rect.left && x < rect.right {
+            if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
                 return Some(row);
             }
         }
@@ -4763,17 +4750,18 @@ impl RemoteWindowState {
             InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid))
                 .map(|id| id.instance);
         if self.server_tabs.is_empty() {
-            let chips_right = strip.right - MARGIN - SERVER_ADD_WIDTH;
-            draw_text(
+            let chips_right = strip.right - SERVER_TAB_STRIP_INSET - SERVER_ADD_WIDTH;
+            draw_text_aligned(
                 device,
                 ProductPixelRect {
-                    left: strip.left + MARGIN,
-                    top: strip.top + 8,
-                    right: chips_right.max(strip.left + MARGIN + 1),
+                    left: strip.left + SERVER_TAB_STRIP_INSET,
+                    top: strip.top + 6,
+                    right: chips_right.max(strip.left + SERVER_TAB_STRIP_INSET + 1),
                     bottom: strip.bottom - 6,
                 },
                 "Servers: (refreshing…)",
                 palette.muted_text.canvas_rgb(),
+                TextHorizontalAlignment::Left,
             );
         } else {
             for (rect, row) in self.server_tab_rects() {
@@ -4786,28 +4774,23 @@ impl RemoteWindowState {
                     palette.status.canvas_rgb()
                 };
                 fill(device, &rect, fill_color);
-                frame(device, &rect, palette.active_border.canvas_rgb());
-                let label = if row.can_attach {
-                    // Prefer short instance id so chips stay clickable at a glance.
-                    let short = row
-                        .instance
-                        .strip_prefix("custom:")
-                        .unwrap_or(row.instance.as_str());
-                    format!("{short} · {}", row.pid)
-                } else {
-                    let short = row
-                        .instance
-                        .strip_prefix("custom:")
-                        .unwrap_or(row.instance.as_str());
-                    format!("{short} (stale)")
-                };
-                draw_text(
+                frame(
+                    device,
+                    &rect,
+                    if active {
+                        palette.focus_ring.canvas_rgb()
+                    } else {
+                        palette.active_border.canvas_rgb()
+                    },
+                );
+                let label = server_tab_chip_label(&row.instance, row.can_attach);
+                draw_text_aligned(
                     device,
                     ProductPixelRect {
-                        left: rect.left + 8,
-                        top: rect.top + 6,
-                        right: rect.right - 8,
-                        bottom: rect.bottom - 4,
+                        left: rect.left + 6,
+                        top: rect.top,
+                        right: rect.right - 6,
+                        bottom: rect.bottom,
                     },
                     &label,
                     if active {
@@ -4815,22 +4798,19 @@ impl RemoteWindowState {
                     } else {
                         palette.text.canvas_rgb()
                     },
+                    TextHorizontalAlignment::Center,
                 );
             }
         }
         if let Some(add) = self.server_add_rect() {
             fill(device, &add, palette.composer.canvas_rgb());
             frame(device, &add, palette.active_border.canvas_rgb());
-            draw_text(
+            draw_text_aligned(
                 device,
-                ProductPixelRect {
-                    left: add.left,
-                    top: add.top,
-                    right: add.right,
-                    bottom: add.bottom,
-                },
+                add,
                 "+",
                 palette.text.canvas_rgb(),
+                TextHorizontalAlignment::Center,
             );
         }
         // Context menu is painted last in `paint_frame` so the terminal
@@ -5210,32 +5190,39 @@ impl RemoteWindowState {
         let client = self.window.client_size();
         let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
         let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
-        let width = SERVER_CONTEXT_MENU_WIDTH;
-        let item_h = SERVER_CONTEXT_MENU_ITEM_HEIGHT;
-        let height = item_h * 2 + 4;
-        let left = menu.origin_x.clamp(0, (client_right - width).max(0));
-        let top = menu.origin_y.clamp(0, (client_bottom - height).max(0));
-        let frame = ProductPixelRect {
-            left,
-            top,
-            right: left + width,
-            bottom: top + height,
-        };
-        // Top: As Window (open instance in a new GUI); bottom: Close.
-        // Keep Close last so the destructive action is not the first hit.
-        let as_window = ProductPixelRect {
-            left: left + 2,
-            top: top + 2,
-            right: left + width - 2,
-            bottom: top + 2 + item_h,
-        };
-        let close = ProductPixelRect {
-            left: left + 2,
-            top: top + 2 + item_h,
-            right: left + width - 2,
-            bottom: top + 2 + item_h * 2,
-        };
-        Some((frame, close, as_window))
+        // Align the menu under the owning chip when we can still find it.
+        let anchor_left = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(_, row)| row.instance == menu.instance)
+            .map(|(rect, _)| rect.left);
+        let (frame, as_window, close) = layout_server_context_menu(
+            menu.origin_x,
+            menu.origin_y,
+            client_right,
+            client_bottom,
+            anchor_left,
+        );
+        Some((
+            ProductPixelRect {
+                left: frame.left,
+                top: frame.top,
+                right: frame.right,
+                bottom: frame.bottom,
+            },
+            ProductPixelRect {
+                left: close.left,
+                top: close.top,
+                right: close.right,
+                bottom: close.bottom,
+            },
+            ProductPixelRect {
+                left: as_window.left,
+                top: as_window.top,
+                right: as_window.right,
+                bottom: as_window.bottom,
+            },
+        ))
     }
 
     fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
@@ -5595,27 +5582,30 @@ impl RemoteWindowState {
         frame(device, &frame_rect, palette.accent.canvas_rgb());
         fill(device, &as_window, palette.composer.canvas_rgb());
         fill(device, &close, palette.composer.canvas_rgb());
-        draw_text(
+        // Left-aligned menu labels with equal horizontal padding.
+        draw_text_aligned(
             device,
             ProductPixelRect {
                 left: as_window.left + 12,
                 top: as_window.top,
-                right: as_window.right - 8,
+                right: as_window.right - 12,
                 bottom: as_window.bottom,
             },
             "As Window",
             palette.text.canvas_rgb(),
+            TextHorizontalAlignment::Left,
         );
-        draw_text(
+        draw_text_aligned(
             device,
             ProductPixelRect {
                 left: close.left + 12,
                 top: close.top,
-                right: close.right - 8,
+                right: close.right - 12,
                 bottom: close.bottom,
             },
             "Close",
             palette.text.canvas_rgb(),
+            TextHorizontalAlignment::Left,
         );
     }
 
@@ -8730,12 +8720,22 @@ fn frame(device: &mut dyn ControlCanvas, rect: &ProductPixelRect, color: Rgb8) {
 }
 
 fn draw_text(device: &mut dyn ControlCanvas, rect: ProductPixelRect, text: &str, color: Rgb8) {
+    draw_text_aligned(device, rect, text, color, TextHorizontalAlignment::Left);
+}
+
+fn draw_text_aligned(
+    device: &mut dyn ControlCanvas,
+    rect: ProductPixelRect,
+    text: &str,
+    color: Rgb8,
+    horizontal: TextHorizontalAlignment,
+) {
     device.text_rect(
         control_rect(rect),
         text,
         color,
         TextOptions {
-            horizontal: TextHorizontalAlignment::Left,
+            horizontal,
             vertical_center: true,
             single_line: true,
             end_ellipsis: true,

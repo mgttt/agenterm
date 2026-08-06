@@ -1,4 +1,135 @@
-//! Server-strip chrome dialogs: new-server name, context menu, close confirm.
+//! Server-strip chrome: layout, labels, dialogs, and context menu.
+//!
+//! Product intent:
+//! - Chips are **equal width**, packed **left-to-right** (no last-chip stretch).
+//! - Labels use a short instance name, centered; state is color not long text.
+//! - Trailing `[+]` stays right-aligned in the strip gutter.
+//! - Context menu is left-aligned under the chip, with consistent item padding.
+
+/// Preferred equal chip width when the strip has room.
+pub(crate) const SERVER_TAB_PREFERRED_WIDTH: i32 = 112;
+/// Floor so a short name like `main` still has a comfortable hit target.
+pub(crate) const SERVER_TAB_MIN_WIDTH: i32 = 72;
+/// Cap so one noisy label cannot dominate the strip.
+pub(crate) const SERVER_TAB_MAX_WIDTH: i32 = 140;
+pub(crate) const SERVER_TAB_GAP: i32 = 6;
+pub(crate) const SERVER_TAB_STRIP_INSET: i32 = 6;
+pub(crate) const SERVER_TAB_CHIP_V_INSET: i32 = 4;
+pub(crate) const SERVER_ADD_WIDTH: i32 = 28;
+pub(crate) const SERVER_CONTEXT_MENU_WIDTH: i32 = 156;
+pub(crate) const SERVER_CONTEXT_MENU_ITEM_HEIGHT: i32 = 30;
+pub(crate) const SERVER_CONTEXT_MENU_PAD: i32 = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StripRect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl StripRect {
+    pub(crate) const fn width(self) -> i32 {
+        self.right - self.left
+    }
+
+    #[allow(dead_code)] // handy for hit-tests / future layout asserts
+    pub(crate) const fn height(self) -> i32 {
+        self.bottom - self.top
+    }
+
+    #[allow(dead_code)] // handy for hit-tests / future layout asserts
+    pub(crate) const fn contains(self, x: i32, y: i32) -> bool {
+        x >= self.left && x < self.right && y >= self.top && y < self.bottom
+    }
+}
+
+/// Short chip label: instance token only (state is conveyed by fill color).
+pub(crate) fn server_tab_chip_label(instance: &str, can_attach: bool) -> String {
+    let short = instance.strip_prefix("custom:").unwrap_or(instance);
+    if can_attach {
+        short.to_owned()
+    } else {
+        format!("{short} · stale")
+    }
+}
+
+/// Equal-width chips packed from the left; `[+]` is not part of this list.
+pub(crate) fn layout_server_tab_chips(strip: StripRect, count: usize) -> Vec<StripRect> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let count_i = count as i32;
+    let gaps = SERVER_TAB_GAP * (count_i - 1).max(0);
+    let chips_right = (strip.right - SERVER_TAB_STRIP_INSET - SERVER_ADD_WIDTH)
+        .max(strip.left + SERVER_TAB_STRIP_INSET);
+    let available = (chips_right - (strip.left + SERVER_TAB_STRIP_INSET) - gaps).max(count_i);
+    let equal = available / count_i;
+    let width = equal
+        .clamp(1, SERVER_TAB_MAX_WIDTH)
+        .min(SERVER_TAB_PREFERRED_WIDTH)
+        .max(SERVER_TAB_MIN_WIDTH.min(equal));
+    // If still wider than available/count after prefer, shrink equally so all fit.
+    let width = width.min(equal.max(1));
+    let mut left = strip.left + SERVER_TAB_STRIP_INSET;
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let right = left + width;
+        out.push(StripRect {
+            left,
+            top: strip.top + SERVER_TAB_CHIP_V_INSET,
+            right,
+            bottom: strip.bottom - SERVER_TAB_CHIP_V_INSET,
+        });
+        left = right + SERVER_TAB_GAP;
+    }
+    out
+}
+
+pub(crate) fn layout_server_add_chip(strip: StripRect) -> StripRect {
+    StripRect {
+        left: strip.right - SERVER_TAB_STRIP_INSET - SERVER_ADD_WIDTH,
+        top: strip.top + SERVER_TAB_CHIP_V_INSET,
+        right: strip.right - SERVER_TAB_STRIP_INSET,
+        bottom: strip.bottom - SERVER_TAB_CHIP_V_INSET,
+    }
+}
+
+/// Menu frame + (as_window item, close item), aligned under `anchor_left`.
+pub(crate) fn layout_server_context_menu(
+    origin_x: i32,
+    origin_y: i32,
+    client_right: i32,
+    client_bottom: i32,
+    anchor_left: Option<i32>,
+) -> (StripRect, StripRect, StripRect) {
+    let width = SERVER_CONTEXT_MENU_WIDTH;
+    let item_h = SERVER_CONTEXT_MENU_ITEM_HEIGHT;
+    let pad = SERVER_CONTEXT_MENU_PAD;
+    let height = item_h * 2 + pad * 2;
+    let preferred_left = anchor_left.unwrap_or(origin_x);
+    let left = preferred_left.clamp(0, (client_right - width).max(0));
+    let top = origin_y.clamp(0, (client_bottom - height).max(0));
+    let frame = StripRect {
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+    };
+    let as_window = StripRect {
+        left: left + pad,
+        top: top + pad,
+        right: left + width - pad,
+        bottom: top + pad + item_h,
+    };
+    let close = StripRect {
+        left: left + pad,
+        top: top + pad + item_h,
+        right: left + width - pad,
+        bottom: top + pad + item_h * 2,
+    };
+    (frame, as_window, close)
+}
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ServerNewDialog {
@@ -95,4 +226,65 @@ pub(crate) struct ServerCloseConfirm {
 pub(crate) enum ServerContextAction {
     Close,
     NewWindow,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chips_are_equal_width_and_left_packed() {
+        let strip = StripRect {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 32,
+        };
+        let chips = layout_server_tab_chips(strip, 3);
+        assert_eq!(chips.len(), 3);
+        let width = chips[0].width();
+        assert!(width >= SERVER_TAB_MIN_WIDTH);
+        assert!(width <= SERVER_TAB_PREFERRED_WIDTH);
+        assert_eq!(chips[1].width(), width);
+        assert_eq!(chips[2].width(), width);
+        assert_eq!(chips[0].left, SERVER_TAB_STRIP_INSET);
+        assert_eq!(chips[1].left, chips[0].right + SERVER_TAB_GAP);
+        // Last chip must not stretch to the [+] gutter.
+        let add = layout_server_add_chip(strip);
+        assert!(chips[2].right + SERVER_TAB_GAP <= add.left);
+    }
+
+    #[test]
+    fn many_chips_shrink_equally_instead_of_dropping() {
+        let strip = StripRect {
+            left: 0,
+            top: 0,
+            right: 400,
+            bottom: 32,
+        };
+        let chips = layout_server_tab_chips(strip, 8);
+        assert_eq!(chips.len(), 8);
+        let width = chips[0].width();
+        assert!(chips.iter().all(|chip| chip.width() == width));
+        assert!(width >= 1);
+        let add = layout_server_add_chip(strip);
+        assert!(chips.last().unwrap().right <= add.left);
+    }
+
+    #[test]
+    fn chip_label_prefers_short_instance_token() {
+        assert_eq!(server_tab_chip_label("main", true), "main");
+        assert_eq!(server_tab_chip_label("custom:work", true), "work");
+        assert_eq!(server_tab_chip_label("custom:work", false), "work · stale");
+    }
+
+    #[test]
+    fn context_menu_aligns_under_chip_and_orders_as_window_then_close() {
+        let (frame, as_window, close) =
+            layout_server_context_menu(100, 40, 1000, 800, Some(120));
+        assert_eq!(frame.left, 120);
+        assert!(as_window.top < close.top);
+        assert_eq!(as_window.left, close.left);
+        assert_eq!(as_window.width(), close.width());
+    }
 }
