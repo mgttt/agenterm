@@ -39,7 +39,7 @@ pub(crate) struct RequestedModifiers {
 }
 
 /// A validated `ui-input` request.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PointerRequest {
     Pointer {
         x: f64,
@@ -58,6 +58,33 @@ pub(crate) enum PointerRequest {
         line_based: bool,
         modifiers: RequestedModifiers,
     },
+    /// A keystroke aimed at whatever surface currently holds focus.
+    ///
+    /// Distinct from `send-keys`, which addresses a pane and writes to its PTY.
+    /// This drives the window's own key handling, so it can reach the composer,
+    /// dialogs and shortcuts the way a human keyboard does.
+    Key {
+        key: KeyRequest,
+        modifiers: RequestedModifiers,
+    },
+}
+
+/// Which key to synthesize.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum KeyRequest {
+    /// Literal text, typically one character.
+    Text(String),
+    Enter,
+    Backspace,
+    Delete,
+    Tab,
+    Escape,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    ArrowDown,
+    Home,
+    End,
 }
 
 /// Largest accepted click count. Triple-click (line select) is the deepest
@@ -75,9 +102,20 @@ pub(crate) fn parse_pointer_request(args: &[String]) -> Result<PointerRequest, S
         .map(String::as_str)
         .ok_or_else(|| "ui_input_kind_missing".to_owned())?;
     let options = parse_pairs(&args[2..])?;
+    let modifiers = parse_modifiers(options.get("--mods").map(String::as_str))?;
+    if kind == "key" {
+        let key = options
+            .get("--key")
+            .ok_or_else(|| "ui_input_key_missing".to_owned())?;
+        return Ok(PointerRequest::Key {
+            key: parse_key(key)?,
+            modifiers,
+        });
+    }
+    // Pointer and wheel are positional; `key` above goes to the focused surface
+    // and has no coordinates, so it must not be forced to supply them.
     let x = coordinate(&options, "--x")?;
     let y = coordinate(&options, "--y")?;
-    let modifiers = parse_modifiers(options.get("--mods").map(String::as_str))?;
 
     match kind {
         "pointer" => {
@@ -148,6 +186,31 @@ fn coordinate(
         .ok()
         .filter(|value| value.is_finite() && value.abs() <= MAX_COORDINATE)
         .ok_or_else(|| "ui_input_coordinate_invalid".to_owned())
+}
+
+/// Resolves a `--key` name to the keystroke to synthesize.
+///
+/// Named keys are matched case-insensitively; anything else is taken as literal
+/// text so a caller can type a character (or a whole word) directly.
+fn parse_key(value: &str) -> Result<KeyRequest, String> {
+    if value.is_empty() {
+        return Err("ui_input_key_invalid".to_owned());
+    }
+    Ok(match value.to_ascii_lowercase().as_str() {
+        "enter" | "return" => KeyRequest::Enter,
+        "backspace" => KeyRequest::Backspace,
+        "delete" | "del" => KeyRequest::Delete,
+        "tab" => KeyRequest::Tab,
+        "escape" | "esc" => KeyRequest::Escape,
+        "left" | "arrowleft" => KeyRequest::ArrowLeft,
+        "right" | "arrowright" => KeyRequest::ArrowRight,
+        "up" | "arrowup" => KeyRequest::ArrowUp,
+        "down" | "arrowdown" => KeyRequest::ArrowDown,
+        "home" => KeyRequest::Home,
+        "end" => KeyRequest::End,
+        "space" => KeyRequest::Text(" ".to_owned()),
+        _ => KeyRequest::Text(value.to_owned()),
+    })
 }
 
 fn parse_modifiers(value: Option<&str>) -> Result<RequestedModifiers, String> {
@@ -265,6 +328,52 @@ mod tests {
                 "{value} should not reach hit-testing"
             );
         }
+    }
+
+    #[test]
+    fn key_requests_need_no_coordinates_and_name_common_keys() {
+        // Coordinates are meaningless here: the keystroke goes to whatever
+        // surface holds focus, so requiring --x/--y would be noise.
+        let request =
+            parse_pointer_request(&args(&["ui-input", "key", "--key", "Enter"])).expect("valid");
+        assert_eq!(
+            request,
+            PointerRequest::Key {
+                key: KeyRequest::Enter,
+                modifiers: RequestedModifiers::default(),
+            }
+        );
+        for (name, expected) in [
+            ("escape", KeyRequest::Escape),
+            ("ESC", KeyRequest::Escape),
+            ("Backspace", KeyRequest::Backspace),
+            ("left", KeyRequest::ArrowLeft),
+            ("ArrowDown", KeyRequest::ArrowDown),
+        ] {
+            let parsed = parse_pointer_request(&args(&["ui-input", "key", "--key", name]))
+                .expect("valid key");
+            let PointerRequest::Key { key, .. } = parsed else {
+                panic!("expected a key request");
+            };
+            assert_eq!(key, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn unrecognised_key_names_are_typed_as_literal_text() {
+        // So a caller can type a character, or a whole word, without escaping.
+        for value in ["X", "中", "hello"] {
+            let parsed = parse_pointer_request(&args(&["ui-input", "key", "--key", value]))
+                .expect("valid text key");
+            let PointerRequest::Key { key, .. } = parsed else {
+                panic!("expected a key request");
+            };
+            assert_eq!(key, KeyRequest::Text(value.to_owned()));
+        }
+        assert_eq!(
+            parse_pointer_request(&args(&["ui-input", "key"])),
+            Err("ui_input_key_missing".to_owned())
+        );
     }
 
     #[test]

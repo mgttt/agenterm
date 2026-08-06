@@ -21,7 +21,7 @@ use std::{
 };
 
 use agenterm_platform::{
-    input::{KeyPressState, LogicalKey as Key, NamedKey, NormalizedKeyEvent},
+    input::{KeyPressState, LogicalKey as Key, NamedKey, NormalizedKeyEvent, PhysicalKeyCode},
     window_host::{
         GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelWindow,
         PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
@@ -83,7 +83,7 @@ use crate::frontend::interaction::{
 };
 use crate::frontend::new_terminal;
 use crate::frontend::pointer_input::{
-    PointerActionKind, PointerButtonKind, PointerRequest, RequestedModifiers,
+    KeyRequest, PointerActionKind, PointerButtonKind, PointerRequest, RequestedModifiers,
 };
 use crate::frontend::selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -1233,6 +1233,44 @@ impl UnixApp {
     /// Text currently selected in the composer, if any.
     fn composer_selected_text(&self) -> Option<String> {
         text_selection::selected_text(&self.composer_buffer, self.composer_cursor)
+    }
+
+    /// Deletes the composer selection when `event` is about to replace it.
+    ///
+    /// Returns whether anything was removed. Only keys that produce text or
+    /// delete backwards count: a bare arrow key or a shortcut must move or act
+    /// without destroying the draft, which is why this inspects the event
+    /// instead of clearing the selection on every keystroke.
+    fn take_composer_selection_for_edit(&mut self, event: &NormalizedKeyEvent) -> bool {
+        if event.state != KeyPressState::Pressed || event.repeat {
+            return false;
+        }
+        // A primary-shortcut chord is a command (copy, select-all), not text.
+        if input::primary_shortcut(event.modifiers) {
+            return false;
+        }
+        if !self.composer_cursor.has_selection() {
+            return false;
+        }
+        let typed = match &event.logical {
+            Key::Character(text) if !text.starts_with(char::is_control) => Some(text.clone()),
+            Key::Named(NamedKey::Space) => Some(" ".to_owned()),
+            Key::Named(NamedKey::Backspace | NamedKey::Delete) => Some(String::new()),
+            _ => None,
+        };
+        let Some(typed) = typed else {
+            return false;
+        };
+        // Replace in place. Deleting here and letting the shared key path
+        // append would put the character at the end of the draft instead of
+        // where the selection was -- selecting "hello" in "hello world" and
+        // typing X has to give "X world", not " worldX".
+        let cursor = text_selection::insert(&mut self.composer_buffer, self.composer_cursor, &typed);
+        self.composer_select_all = false;
+        self.set_composer_cursor(cursor);
+        self.sync_composer_buffer_to_tab();
+        self.request_redraw();
+        true
     }
 
     fn focus_gate(&self) -> FocusTransitionGate {
@@ -5316,6 +5354,85 @@ impl UnixApp {
                 });
                 Ok(())
             }
+            PointerRequest::Key { key, modifiers } => {
+                let modifiers = modifier_state(modifiers);
+                let (logical, physical, text) = match &key {
+                    KeyRequest::Text(text) => {
+                        let physical = text
+                            .chars()
+                            .next()
+                            .filter(char::is_ascii_alphabetic)
+                            .map_or(PhysicalKeyCode::Other, PhysicalKeyCode::Letter);
+                        (
+                            Key::Character(text.clone()),
+                            physical,
+                            Some(text.clone()),
+                        )
+                    }
+                    KeyRequest::Enter => (
+                        Key::Named(NamedKey::Enter),
+                        PhysicalKeyCode::Enter,
+                        None,
+                    ),
+                    KeyRequest::Backspace => (
+                        Key::Named(NamedKey::Backspace),
+                        PhysicalKeyCode::Backspace,
+                        None,
+                    ),
+                    KeyRequest::Delete => (
+                        Key::Named(NamedKey::Delete),
+                        PhysicalKeyCode::Other,
+                        None,
+                    ),
+                    KeyRequest::Tab => {
+                        (Key::Named(NamedKey::Tab), PhysicalKeyCode::Tab, None)
+                    }
+                    KeyRequest::Escape => (
+                        Key::Named(NamedKey::Escape),
+                        PhysicalKeyCode::Other,
+                        None,
+                    ),
+                    KeyRequest::ArrowLeft => (
+                        Key::Named(NamedKey::ArrowLeft),
+                        PhysicalKeyCode::Other,
+                        None,
+                    ),
+                    KeyRequest::ArrowRight => (
+                        Key::Named(NamedKey::ArrowRight),
+                        PhysicalKeyCode::Other,
+                        None,
+                    ),
+                    KeyRequest::ArrowUp => (
+                        Key::Named(NamedKey::ArrowUp),
+                        PhysicalKeyCode::Other,
+                        None,
+                    ),
+                    KeyRequest::ArrowDown => (
+                        Key::Named(NamedKey::ArrowDown),
+                        PhysicalKeyCode::Other,
+                        None,
+                    ),
+                    KeyRequest::Home => {
+                        (Key::Named(NamedKey::Home), PhysicalKeyCode::Other, None)
+                    }
+                    KeyRequest::End => {
+                        (Key::Named(NamedKey::End), PhysicalKeyCode::Other, None)
+                    }
+                };
+                // Press and release, so surfaces that track key state see a
+                // complete stroke rather than a key stuck down.
+                for state in [KeyPressState::Pressed, KeyPressState::Released] {
+                    self.handle_pixel_event(PixelWindowEvent::Keyboard(NormalizedKeyEvent {
+                        logical: logical.clone(),
+                        physical,
+                        text: text.clone(),
+                        state,
+                        repeat: false,
+                        modifiers,
+                    }));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -5441,6 +5558,18 @@ impl UnixApp {
                         && let Some(bytes) = input::composer_passthrough_bytes(&event)
                     {
                         self.queue_pty_input(bytes);
+                        return;
+                    }
+                    // Typing over a selection replaces it, the way every native
+                    // text field behaves. The shared key path only knows a
+                    // select-all flag, so the range deletion happens here where
+                    // the cursor model lives; afterwards the buffer holds just
+                    // the surviving text and the key action appends to it.
+                    // A keystroke that replaces a selection is fully handled
+                    // there, in place. Running the shared append-based path
+                    // afterwards would duplicate the character (or, for
+                    // Backspace, eat a second unselected one).
+                    if self.take_composer_selection_for_edit(&event) {
                         return;
                     }
                     match input::composer_key_action(

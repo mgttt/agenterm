@@ -787,7 +787,8 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             "agenterm-cli ui-input pointer --x PX --y PX \
              [--button left|right|middle] [--action press|release|move] \
              [--count 1|2|3] [--mods shift,ctrl,alt,meta] | \
-             ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels]",
+             ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels] | \
+             ui-input key --key NAME [--mods shift,ctrl,alt,meta]",
             &[
                 "--x",
                 "--y",
@@ -797,6 +798,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--mods",
                 "--delta-y",
                 "--units",
+                "--key",
             ][..],
             &[][..],
             false,
