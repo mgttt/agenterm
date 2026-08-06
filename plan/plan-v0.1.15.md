@@ -1566,6 +1566,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **CLI ui-input 交付**（远程 main）：见本文 §9；`operations` 登记 ui-input 与四枚孤儿 ui-action；Windows 侧 ui-input 仍为开放决策 |
 | 2026-08-06 | **goal-crate-platform 执行**：P0 边界 SSOT（platform README / ARCHITECTURE §1.0 / AGENTS Platform crate vs product UI）；P1 gap 表 `plan-platform-encapsulation-gap.md` + **G1 收口** `spawn_breakaway_visible_*`（去产品侧 `ERROR_ACCESS_DENIED=5`）；P2 catalog 纪律测；P3 执行句式 |
 | 2026-08-06 | **goal-crate-platform 加深**：G6 纠正 catalog——`control_dispatch` 已实现的 24 个动词从 WINDOWS_ONLY 升 SHARED（防「假 parity-gap」）；G7 `open-new-terminal` Win 接线并升 SHARED；G2 script/worker spawn 审计证伪；G1 回归测禁产品硬编码 `raw_os_error==5`；WINDOWS_ONLY 余 17 条按 strip/settings/font 分组 `parity-gap` |
+| 2026-08-06 | **goal-crate-platform 封装完结（contract）**：G8 `font-decrease`/`font-increase`/`toggle-locale` Unix 补 ui-action 并升 SHARED（方法本已存在）；gap 文写「完结定义」+ G3/G4 标 out-of-goal residual；WINDOWS_ONLY 余 14=strip/picker+settings-scope（产品叶非 OS 泄漏）；成功清单在 `goal-crate-platform.md` 勾选 |
 
 ---
 

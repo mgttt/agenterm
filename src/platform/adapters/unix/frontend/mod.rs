@@ -4034,6 +4034,19 @@ impl UnixApp {
                                 Some(error.ipc_response())
                             }
                         },
+                        // Same product verbs as toolbar `action::*` (shared with Windows).
+                        "toggle-locale" => {
+                            self.toggle_locale();
+                            None
+                        }
+                        "font-decrease" => {
+                            self.adjust_active_terminal_font(-1);
+                            None
+                        }
+                        "font-increase" => {
+                            self.adjust_active_terminal_font(1);
+                            None
+                        }
                         other => {
                             if let Some(window) = self.window.as_ref() {
                                 let handle = PixelWindowHandle {

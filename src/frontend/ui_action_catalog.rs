@@ -38,6 +38,8 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
     "cwd-prepare-replace",
     "cwd-send-now",
     "edit-tab",
+    "font-decrease",
+    "font-increase",
     "keep-server-running",
     "new-child",
     "new-tab",
@@ -61,6 +63,7 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
     "tabs-show",
     "tabs-toggle",
     "terminal-paste",
+    "toggle-locale",
     "toggle-tabs",
     "toggle-tree",
     "window-activate",
@@ -73,16 +76,12 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
 /// Windows remote frontend only (`remote_frontend::execute_client_command`).
 ///
 /// Not implemented in `control_dispatch::dispatch_shared_ui_action`. Grouped
-/// `parity-gap:` reasons:
+/// `parity-gap:` reasons (product workbench, **not** OS-crate leaks):
 /// - **instance / server strip**: multi-instance strip + picker (S′); Unix still
 ///   returns an honest gap for picker depth.
 /// - **settings scope chrome**: defaults/current/inherit toggles beyond the
 ///   shared preset/apply path already in SHARED.
-/// - **toolbar font/locale**: product chrome still Win-local present path.
 pub const WINDOWS_ONLY_UI_ACTIONS: &[&str] = &[
-    // parity-gap: toolbar font step — Unix lacks matching ui-action arms.
-    "font-decrease",
-    "font-increase",
     // parity-gap: instance picker + strip (S′); Unix product surface incomplete.
     "instance-picker-cancel",
     "instance-picker-confirm",
@@ -99,8 +98,6 @@ pub const WINDOWS_ONLY_UI_ACTIONS: &[&str] = &[
     "settings-reset-overrides",
     "settings-size-toggle",
     "settings-theme-toggle",
-    // parity-gap: locale toggle is toolbar present on Windows remote.
-    "toggle-locale",
 ];
 
 /// Unix embedded frontend only (`unix/frontend` + `new_terminal::dispatch_ui_action`).

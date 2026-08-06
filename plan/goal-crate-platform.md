@@ -107,11 +107,11 @@
 
 ## 成功标准（检查清单）
 
-- [ ] platform README + ARCHITECTURE + AGENTS 对「crate = 跨平台机制封装」口径一致
-- [ ] `plan/plan-platform-encapsulation-gap.md` 存在且可执行
-- [ ] ≥1 机制漏点收口 **或** 书面证伪无漏点
-- [ ] `ui_action_catalog` 测试绿；shared-first 路径可执行
-- [ ] 报告：改了什么、为什么、怎么验、未决项；文件列表完整
+- [x] platform README + ARCHITECTURE + AGENTS 对「crate = 跨平台机制封装」口径一致
+- [x] `plan/plan-platform-encapsulation-gap.md` 存在且可执行
+- [x] ≥1 机制漏点收口 **或** 书面证伪无漏点（G1 breakaway + G2 证伪 + G6/G7/G8 catalog）
+- [x] `ui_action_catalog` 测试绿；shared-first 路径可执行
+- [x] 报告：见 gap 文「封装完结定义」+ plan-v0.1.15 决策记录；推送 `origin/main`
 
 ## 开工第一句（强制自检，≤15 行）
 
