@@ -134,7 +134,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       facts
     - [x] `ui-client-state publish --lease-id ID --client-pid PID
       --snapshot-json JSON` is the bounded internal publication arm used by
-      the exact interactive lease owner; it preserves public `ui-snapshot`
+      a live interactive lease holder; it preserves public `ui-snapshot`
       observation while keeping client-local UI facts out of server authority
     - [x] `ui-client-command poll|apply|invoke|complete|result` is the internal
       exact-lease command/result relay behind synchronous public GUI commands;
