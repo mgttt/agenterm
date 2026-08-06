@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控1**刷新：2026-08-06T00:52Z（换防完成；主控2 待命）
+最后由**主控1**刷新：2026-08-06T07:20Z（CC 超控智能体设计稿已合 main）
 
 ## 共享事实
 
@@ -13,14 +13,14 @@
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
-| 执行计划 | `plan/plan-control-center-ux.md` |
-| `origin/main` | tip 见 git；含 CI 重跑 + research 三 Tab + Wry 体积倾向 + 换防登记 |
+| 执行计划 | `plan/plan-control-center-ux.md`；**超控 Tab** → `plan/design-cc-hyper-control-agent.md` |
+| `origin/main` | tip `820626a`；含 CC 超控智能体 IA 设计稿 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
-| CC 远景 | 可吸收为 `agenterm cc` 子命令（独立进程/GUI）；超级智能体 + Hub；慢慢丰富 |
+| CC 远景 | Tab1 **超控智能体**（view `hyper_control`）；Cockpit 降为 Tab2；OQ-1–8 待用户裁决 |
 | auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 |
 | `duty.lock` | （无） |
 
@@ -46,13 +46,13 @@
 
 ## 席位状态
 
-### 主控1 · 2026-08-06T00:52Z
-- 状态: RUNNING — 当前主控；换防自 主控2
+### 主控1 · 2026-08-06T07:20Z
+- 状态: RUNNING — 当前主控
 - bcId: `bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b`
 - URL: https://cursor.com/agents/bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b
-- 分支: `main`（代理元数据 `cursor/1-0e37` 勿当工作区）
-- tip: 见 git
-- 下一步: 等用户指令；观察 CI `31060999962`
+- 分支: `main`
+- tip: `820626a`
+- 下一步: 等用户对 CC 设计 OQ 裁决；近程仍 server/CLI
 - 阻塞: 无
 
 ### 主控2 · 2026-08-06T00:52Z
