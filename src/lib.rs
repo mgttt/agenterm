@@ -19,6 +19,7 @@ mod named_buffer;
 pub mod operations;
 mod protocol;
 pub mod script_api_view;
+pub mod script_api_validate;
 pub mod script_backend;
 pub mod script_catalog;
 pub mod script_clipboard;

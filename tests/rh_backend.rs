@@ -43,6 +43,19 @@ fn rh_backend_defaults_to_rh_without_env() {
 }
 
 #[test]
+fn rh_backend_check_rejects_unknown_api_like_rhai_path() {
+    with_rh_backend(|| {
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Check,
+            "fn entry() { std::fs::not_shipped(`x`) }",
+            RhInvocationOptions::default(),
+            None,
+        );
+        assert!(result.is_err());
+    });
+}
+
+#[test]
 fn rh_backend_check_accepts_entry_fixture() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/entry.rh");
