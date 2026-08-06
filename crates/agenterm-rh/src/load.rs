@@ -5,7 +5,7 @@ use libloading::{Library, Symbol};
 use crate::{
     RhError,
     compile::hash_file,
-    host_api::{RhHostEvalCall, RhHostFleetCall},
+    host_api::{RhHostEvalCall, RhHostFleetCall, RhHostRunScriptCall},
 };
 
 pub struct RhNativeModule {
@@ -28,7 +28,27 @@ impl RhNativeModule {
         fleet_call: RhHostFleetCall,
         eval_call: Option<RhHostEvalCall>,
     ) -> Result<(), RhError> {
+        self.register_host_v3(fleet_call, eval_call, None)
+    }
+
+    pub fn register_host_v3(
+        &self,
+        fleet_call: RhHostFleetCall,
+        eval_call: Option<RhHostEvalCall>,
+        run_script_call: Option<RhHostRunScriptCall>,
+    ) -> Result<(), RhError> {
         unsafe {
+            if let Ok(register_v3) = self.library.get::<Symbol<
+                extern "C" fn(RhHostFleetCall, RhHostEvalCall, RhHostRunScriptCall),
+            >>(b"rh_register_host_v3")
+            {
+                register_v3(
+                    fleet_call,
+                    eval_call.unwrap_or(dummy_eval_call),
+                    run_script_call.unwrap_or(dummy_run_script_call),
+                );
+                return Ok(());
+            }
             if let Ok(register_v2) = self.library.get::<Symbol<
                 extern "C" fn(RhHostFleetCall, RhHostEvalCall),
             >>(b"rh_register_host_v2")
@@ -119,6 +139,15 @@ extern "C" fn dummy_eval_call(
     _snippet_len: u32,
     _scope_json: *const u8,
     _scope_json_len: u32,
+    _out_buf: *mut u8,
+    _out_cap: u32,
+) -> i32 {
+    -4
+}
+
+extern "C" fn dummy_run_script_call(
+    _source: *const u8,
+    _source_len: u32,
     _out_buf: *mut u8,
     _out_cap: u32,
 ) -> i32 {

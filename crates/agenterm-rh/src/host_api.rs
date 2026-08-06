@@ -1,6 +1,6 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 2;
+pub const RH_HOST_API_VERSION: u32 = 3;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 
 pub type RhHostFleetCall = extern "C" fn(
@@ -21,12 +21,33 @@ pub type RhHostEvalCall = extern "C" fn(
     out_cap: u32,
 ) -> i32;
 
+pub type RhHostRunScriptCall = extern "C" fn(
+    source: *const u8,
+    source_len: u32,
+    out_buf: *mut u8,
+    out_cap: u32,
+) -> i32;
+
+pub fn rust_raw_string_literal(source: &str) -> String {
+    let mut hashes = 0_usize;
+    loop {
+        let delimiter = "#".repeat(hashes);
+        let terminator = format!("\"{delimiter}");
+        if !source.contains(&terminator) {
+            return format!("r{delimiter}\"{source}\"{delimiter}");
+        }
+        hashes += 1;
+    }
+}
+
 pub fn emit_host_runtime(out: &mut String) {
     out.push_str(
         "type RhHostFleetCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\
-         type RhHostEvalCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\n\
+         type RhHostEvalCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\
+         type RhHostRunScriptCall = extern \"C\" fn(*const u8, u32, *mut u8, u32) -> i32;\n\n\
          static mut RH_HOST_FLEET_CALL: Option<RhHostFleetCall> = None;\n\
          static mut RH_HOST_EVAL_CALL: Option<RhHostEvalCall> = None;\n\
+         static mut RH_HOST_RUN_SCRIPT_CALL: Option<RhHostRunScriptCall> = None;\n\
          static mut RH_HOST_OUT_LEN: usize = 0;\n\
          static RH_HOST_OUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();\n\n\
          #[no_mangle]\n\
@@ -47,6 +68,18 @@ pub fn emit_host_runtime(out: &mut String) {
              unsafe {\n\
                  RH_HOST_FLEET_CALL = Some(fleet_call);\n\
                  RH_HOST_EVAL_CALL = Some(eval_call);\n\
+             }\n\
+         }\n\n\
+         #[no_mangle]\n\
+         pub extern \"C\" fn rh_register_host_v3(\n\
+             fleet_call: RhHostFleetCall,\n\
+             eval_call: RhHostEvalCall,\n\
+             run_script_call: RhHostRunScriptCall,\n\
+         ) {\n\
+             unsafe {\n\
+                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
+                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
+                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
              }\n\
          }\n\n\
          fn rh_host_store(wrote: i32, scratch: Vec<u8>) -> i32 {\n\
@@ -106,6 +139,36 @@ pub fn emit_host_runtime(out: &mut String) {
              if wrote <= 0 {\n\
                  return wrote as INT;\n\
              }\n\
+             if let Some(value) = rh_host_json() {\n\
+                 if let Some(number) = value.get(\"value\").and_then(|v| v.as_i64()) {\n\
+                     return number as INT;\n\
+                 }\n\
+                 if let Some(flag) = value.get(\"value\").and_then(|v| v.as_bool()) {\n\
+                     return if flag { 1 } else { 0 };\n\
+                 }\n\
+             }\n\
+             -6\n\
+         }\n\n\
+         fn rh_host_run_script(source: &str) -> INT {\n\
+             let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\
+                 return -4;\n\
+             };\n\
+             let mut scratch = vec![0u8; ",
+    );
+    out.push_str(&RH_HOST_OUT_CAP.to_string());
+    out.push_str(
+        "usize];\n\
+             let wrote = call(\n\
+                 source.as_ptr(),\n\
+                 source.len() as u32,\n\
+                 scratch.as_mut_ptr(),\n\
+                 scratch.len() as u32,\n\
+             );\n\
+             if wrote <= 0 {\n\
+                 return wrote as INT;\n\
+             }\n\
+             unsafe { RH_HOST_OUT_LEN = wrote as usize; }\n\
+             let _ = RH_HOST_OUT.set(scratch);\n\
              if let Some(value) = rh_host_json() {\n\
                  if let Some(number) = value.get(\"value\").and_then(|v| v.as_i64()) {\n\
                      return number as INT;\n\

@@ -3,8 +3,8 @@
 use agenterm_rh::{RH_HOST_API_VERSION, check, transpile_cdylib};
 
 #[test]
-fn rh_host_api_version_is_two() {
-    assert_eq!(RH_HOST_API_VERSION, 2);
+fn rh_host_api_version_is_three() {
+    assert_eq!(RH_HOST_API_VERSION, 3);
 }
 
 #[test]
@@ -22,9 +22,22 @@ fn check_accepts_all_fixtures() {
 }
 
 #[test]
-fn check_rejects_eval_and_import() {
+fn check_rejects_eval_only() {
     assert!(check("eval(\"1\");").is_err());
-    assert!(check("import \"x\" as y;").is_err());
+}
+
+#[test]
+fn check_accepts_import_via_compat() {
+    check("import \"scripts/rhai/lib/build_identity\" as build_identity; fn entry() { 1 }")
+        .expect("import script");
+}
+
+#[test]
+fn build_rhai_transpiles_compat_delegating() {
+    let source = std::fs::read_to_string("scripts/rhai/build.rhai").expect("read");
+    let rust = transpile_cdylib(&source).expect("transpile");
+    assert!(rust.contains("compat delegating"));
+    assert!(rust.contains("rh_host_run_script"));
 }
 
 #[test]
@@ -33,7 +46,7 @@ fn cdylib_transpile_emits_host_runtime_and_entry() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_entry"));
     assert!(rust.contains("rh_host_api_version"));
-    assert!(rust.contains("rh_register_host_v2"));
+    assert!(rust.contains("rh_register_host_v3") || rust.contains("rh_register_host_v2"));
 }
 
 #[test]

@@ -8,7 +8,7 @@ use agenterm::script_protocol::ScriptOperation;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
-    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     unsafe {
         std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rh");
     }
@@ -21,7 +21,7 @@ fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
 
 #[test]
 fn rh_backend_enabled_only_when_env_set() {
-    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
     }
@@ -97,7 +97,7 @@ fn rh_backend_run_while_count_fixture() {
 
 #[test]
 fn rhai_backend_returns_none_for_check() {
-    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
     }
