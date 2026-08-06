@@ -4833,9 +4833,8 @@ impl RemoteWindowState {
                 palette.text.canvas_rgb(),
             );
         }
-        if self.server_tab_context_menu.is_some() {
-            self.paint_server_tab_context_menu(device, palette);
-        }
+        // Context menu is painted last in `paint_frame` so the terminal
+        // surface cannot cover it (menu extends below the strip).
     }
 
     fn open_instance_picker(&mut self, mode: InstancePickerMode) -> Result<()> {
@@ -4982,10 +4981,14 @@ impl RemoteWindowState {
         command
             .arg("--instance")
             .arg(short)
-            .arg("--no-activate")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+        // Human "As Window" / Open another should surface the new GUI. Only
+        // inherit --no-activate from automation environments so smokes stay quiet.
+        if crate::client::no_activate_from_environment() {
+            command.arg("--no-activate");
+        }
         // Breakaway + ACCESS_DENIED visible fallback: agenterm-platform only.
         crate::platform::process::spawn_breakaway_visible_command(&mut command)
             .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
@@ -5111,32 +5114,34 @@ impl RemoteWindowState {
             right: left + width,
             bottom: top + height,
         };
-        let close = ProductPixelRect {
+        // Top: As Window (open instance in a new GUI); bottom: Close.
+        // Keep Close last so the destructive action is not the first hit.
+        let as_window = ProductPixelRect {
             left: left + 2,
             top: top + 2,
             right: left + width - 2,
             bottom: top + 2 + item_h,
         };
-        let new_window = ProductPixelRect {
+        let close = ProductPixelRect {
             left: left + 2,
             top: top + 2 + item_h,
             right: left + width - 2,
             bottom: top + 2 + item_h * 2,
         };
-        Some((frame, close, new_window))
+        Some((frame, close, as_window))
     }
 
     fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
-        let (_, close, new_window) = self.server_context_menu_geometry()?;
-        if x >= close.left && x < close.right && y >= close.top && y < close.bottom {
-            return Some(ServerContextAction::Close);
-        }
-        if x >= new_window.left
-            && x < new_window.right
-            && y >= new_window.top
-            && y < new_window.bottom
+        let (_, close, as_window) = self.server_context_menu_geometry()?;
+        if x >= as_window.left
+            && x < as_window.right
+            && y >= as_window.top
+            && y < as_window.bottom
         {
             return Some(ServerContextAction::NewWindow);
+        }
+        if x >= close.left && x < close.right && y >= close.top && y < close.bottom {
+            return Some(ServerContextAction::Close);
         }
         None
     }
@@ -5478,13 +5483,24 @@ impl RemoteWindowState {
         device: &mut dyn ControlCanvas,
         palette: &ThemePalette,
     ) {
-        let Some((frame_rect, close, new_window)) = self.server_context_menu_geometry() else {
+        let Some((frame_rect, close, as_window)) = self.server_context_menu_geometry() else {
             return;
         };
         fill(device, &frame_rect, palette.modal.canvas_rgb());
         frame(device, &frame_rect, palette.accent.canvas_rgb());
+        fill(device, &as_window, palette.composer.canvas_rgb());
         fill(device, &close, palette.composer.canvas_rgb());
-        fill(device, &new_window, palette.composer.canvas_rgb());
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: as_window.left + 12,
+                top: as_window.top,
+                right: as_window.right - 8,
+                bottom: as_window.bottom,
+            },
+            "As Window",
+            palette.text.canvas_rgb(),
+        );
         draw_text(
             device,
             ProductPixelRect {
@@ -5494,17 +5510,6 @@ impl RemoteWindowState {
                 bottom: close.bottom,
             },
             "Close",
-            palette.text.canvas_rgb(),
-        );
-        draw_text(
-            device,
-            ProductPixelRect {
-                left: new_window.left + 12,
-                top: new_window.top,
-                right: new_window.right - 8,
-                bottom: new_window.bottom,
-            },
-            "New Window",
             palette.text.canvas_rgb(),
         );
     }
@@ -7046,6 +7051,11 @@ impl RemoteWindowState {
             self.paint_server_new_dialog(device, palette);
         } else if self.pending_server_close.is_some() {
             self.paint_server_close_dialog(device, palette);
+        }
+        // Floating overlays that extend into the terminal rect must paint after
+        // terminal fill/cells so they are not covered (z-order).
+        if self.server_tab_context_menu.is_some() {
+            self.paint_server_tab_context_menu(device, palette);
         }
     }
 
@@ -8886,6 +8896,36 @@ mod tests {
         assert!(terminal_char_is_named_key_echo(0x09));
         assert!(terminal_char_is_named_key_echo(0x1b));
         assert!(!terminal_char_is_named_key_echo(u16::from(b'A')));
+    }
+
+    #[test]
+    fn server_tab_context_menu_paints_after_terminal_and_labels_as_window() {
+        // Source-order lock: menu used to paint inside paint_server_strip and
+        // was covered by the terminal fill that runs later in paint_frame.
+        let source = include_str!("remote_frontend.rs");
+        let paint_frame = source
+            .split("fn paint_frame(")
+            .nth(1)
+            .and_then(|rest| rest.split("fn paint_terminal_selection(").next())
+            .expect("paint_frame body");
+        let terminal_fill = paint_frame
+            .find("fill(device, &terminal,")
+            .expect("terminal fill in paint_frame");
+        let menu_paint = paint_frame
+            .find("paint_server_tab_context_menu")
+            .expect("context menu paint in paint_frame");
+        assert!(
+            menu_paint > terminal_fill,
+            "server-tab context menu must paint after terminal fill (z-order)"
+        );
+        assert!(
+            source.contains("\"As Window\""),
+            "context menu must expose As Window for new-GUI open"
+        );
+        assert!(
+            !source.contains("\"New Window\""),
+            "prefer As Window label over New Window"
+        );
     }
 
     #[test]
