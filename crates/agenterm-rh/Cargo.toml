@@ -1,0 +1,20 @@
+[package]
+name = "agenterm-rh"
+version = "0.1.15"
+edition = "2024"
+rust-version = "1.97"
+description = "AgenTerm rh pack language: subset check, transpile, and AOT pipeline"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mgttt/agenterm"
+publish = false
+
+[lib]
+name = "agenterm_rh"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agenterm-rh"
+path = "src/main.rs"
+
+[dependencies]
+rhai = { version = "1.22", default-features = false, features = ["std", "internals"] }

@@ -30,6 +30,7 @@ version = "0.1.15"
 dependencies = [
  "ab_glyph",
  "agenterm-platform",
+ "agenterm-rh",
  "anyhow",
  "libc",
  "png",
@@ -59,6 +60,13 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "x11rb",
+]
+
+[[package]]
+name = "agenterm-rh"
+version = "0.1.15"
+dependencies = [
+ "rhai",
 ]
 
 [[package]]

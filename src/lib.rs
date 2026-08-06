@@ -31,6 +31,7 @@ pub mod script_project;
 pub mod script_protocol;
 pub mod script_repl;
 pub mod script_runtime;
+pub mod script_backend;
 pub mod script_stdlib;
 pub mod script_stream;
 pub mod script_task;
