@@ -2277,3 +2277,66 @@ agenterm-cli --version
 ls -la ~/.local/bin/agenterm*
 # 期望：无断链；version=0.1.14；已开 GUI 需手动重开
 ```
+
+## 9. CLI 输入面（ui-input）——已交付
+
+### 9.1 背景：能看见，但按不下去
+
+`ui-snapshot` 在 `projection: "embedded_gui"` 下早已输出几乎所有可点元素的像素
+bounds（toolbar 各按钮、tab 行、close/new_child、disclosure_hit、滚动条
+thumb/track、sidebar resize_grip、composer input），并带 `focus`/`caret`/
+`anchor`/`selection`。**观察面是完整的**。
+
+动作面却是空的：`send-mouse` 在 `commands.rs`、`control_authority.rs`、
+`client/mod.rs` 共四处声明，`control_dispatch.rs` 里**零个 dispatch 分支**；
+实测返回 `Unix GUI does not implement 'send-mouse' yet`。而且它的参数是
+`-x col -y row`（终端单元格），本质是 tmux 的「往 PTY 写鼠标上报」，
+**不可能点到工具栏按钮**。结论：agent 能看见按钮，按不下去。
+
+### 9.2 交付内容
+
+```
+ui-input pointer --x PX --y PX [--button left|right|middle]
+                 [--action press|release|move] [--count 1|2|3]
+                 [--mods shift,ctrl,alt,meta]
+ui-input wheel   --x PX --y PX --delta-y N [--units lines|pixels]
+```
+
+坐标与 `ui-snapshot` 同一像素空间，读了就能点，无需换算。
+
+**关键约束**：请求被合成为真正的 `PixelWindowEvent`，走 `handle_pixel_event`
+——窗口管理器喂进来的同一个入口。没有第二份 hit-test；多击是**真的发 N 次
+press/release**，而不是去种 promotion 状态。理由是 composer 曾经在 Unix 有选区、
+Windows 没有，正是两份实现漂移的结果。
+
+### 9.3 实测证据（装进 `~/Applications/AgenTerm.app` 后跑）
+
+| 手势 | 结果 |
+|---|---|
+| press→move→release 拖拽 | 选中 `hello wo`（anchor 0, caret 8） |
+| `--count 2` | 选中单词 `hello` |
+| `--count 3` | 选中整行含 CJK |
+| `--count 2` 落在中文区 | 精确选中 `中文测试`（字符 12–16，非字节） |
+| 读 `toolbar.tabs.bounds` → 点中心 | `tabs_visible` true → false |
+| `--x NaN` / `--count 9` | 各自 typed 报错，不进 hit-test |
+
+perceive→act 闭环成立。
+
+### 9.4 目录登记
+
+`ui.input.pointer` / `ui.input.wheel` 已入 `operations.rs` 与
+`prd/PRD_02_15_command_line.md`（alignment 计数 69/97）。顺带补登记了四个
+孤儿动词：`select-tab` / `new-child` / `toggle-tree` / `composer-send`
+——它们此前只在 `control_dispatch.rs` 有实现、无 typed spec 无脚本面，
+与 `delete-buffer` 是同一类漂移。
+
+### 9.5 未决（决策项，待拍板）
+
+1. **Windows 侧 `ui-input` 未实现**。解析层 `frontend/pointer_input.rs` 是平台中立的，
+   可直接复用；但 Windows 的 composer 是原生 `EDIT` 控件，合成 press 送到窗口
+   **不会**像 Unix 自绘 composer 那样落到输入框，需要单独决定怎么处理。
+   已在 `remote_frontend.rs` 的 `fn event` 上留 `REVIEW(macos → windows owner)`。
+2. **headless 跑不了闭环**。`server_app.rs:1908` 的 headless 快照硬编码
+   `composer.visible:false`、`focus.surface:null` 且不带几何；macOS/Linux 的
+   `screenshot` 还需要活着的渲染进程。所以 9.3 那套验证目前**只能在有窗口的会话里跑，
+   CI headless 跑不了**。要不要让 headless 也供几何，是架构取舍。
