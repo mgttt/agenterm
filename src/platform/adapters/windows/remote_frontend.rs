@@ -1334,8 +1334,7 @@ impl RemoteWindowState {
                 // CLI automation may pass --no-activate on the GUI; still allow
                 // an explicit ui-action open to surface the CC window unless the
                 // caller set AGENTERM_NO_ACTIVATE for a headless smoke.
-                let no_activate = self.no_activate
-                    && crate::client::no_activate_from_environment();
+                let no_activate = self.no_activate && crate::client::no_activate_from_environment();
                 crate::control_center::open_control_center(
                     no_activate,
                     &crate::client::ipc_address(),
@@ -4628,9 +4627,7 @@ impl RemoteWindowState {
     }
 
     fn server_tab_row_at(&self, x: i32, y: i32) -> Option<&InstancePickerRow> {
-        let Some(strip) = self.workspace_geometry().server_strip else {
-            return None;
-        };
+        let strip = self.workspace_geometry().server_strip?;
         // Full strip height is clickable (not only the inner tab chip padding).
         if y < strip.top || y >= strip.bottom || x < strip.left || x >= strip.right {
             return None;
@@ -4990,9 +4987,8 @@ impl RemoteWindowState {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         // Breakaway + ACCESS_DENIED visible fallback: agenterm-platform only.
-        crate::platform::process::spawn_breakaway_visible_command(&mut command).map_err(
-            |error| anyhow::anyhow!("could not open instance `{short}`: {error}"),
-        )?;
+        crate::platform::process::spawn_breakaway_visible_command(&mut command)
+            .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
         self.last_message = Some(format!("Opening instance `{short}` in a new window"));
         Ok(())
     }
@@ -5008,9 +5004,8 @@ impl RemoteWindowState {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         // Headless authority: NO_WINDOW detached path (not visible breakaway).
-        crate::platform::process::spawn_detached_command(&mut command).map_err(|error| {
-            anyhow::anyhow!("could not start server `{name}`: {error}")
-        })?;
+        crate::platform::process::spawn_detached_command(&mut command)
+            .map_err(|error| anyhow::anyhow!("could not start server `{name}`: {error}"))?;
         self.force_refresh_server_tabs();
         self.last_message = Some(format!("Started server `{name}`"));
         Ok(())
@@ -5217,24 +5212,29 @@ impl RemoteWindowState {
             return;
         }
         self.force_refresh_server_tabs();
-        let current = InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
+        let current =
+            InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
         let closed_current = current
             .as_ref()
             .is_some_and(|id| id.instance == closed_instance);
         if closed_current || self.client.is_none() {
-            if let Some(row) = self.server_tabs.iter().find(|row| {
-                row.can_attach && row.instance != closed_instance
-            }) {
+            if let Some(row) = self
+                .server_tabs
+                .iter()
+                .find(|row| row.can_attach && row.instance != closed_instance)
+            {
                 let endpoint = row.endpoint.clone();
                 let instance = row.instance.clone();
                 if let Err(error) = self.attach_current_window_to_endpoint(&endpoint, &instance) {
-                    self.last_error = Some(format!("reattach after server close failed: {error:#}"));
+                    self.last_error =
+                        Some(format!("reattach after server close failed: {error:#}"));
                 } else {
                     self.last_message = Some(format!("Switched to `{instance}` after close"));
                 }
             } else {
-                self.last_message =
-                    Some(format!("Server `{closed_instance}` closed; no other live server"));
+                self.last_message = Some(format!(
+                    "Server `{closed_instance}` closed; no other live server"
+                ));
             }
         } else {
             self.last_message = Some(format!("Closed server `{closed_instance}`"));
@@ -5259,10 +5259,7 @@ impl RemoteWindowState {
             .as_ref()
             .is_some_and(|id| id.instance == pending.instance);
         if is_current {
-            let client = self
-                .client
-                .as_mut()
-                .context("UI is disconnected")?;
+            let client = self.client.as_mut().context("UI is disconnected")?;
             client.run_control(vec!["shutdown".to_owned()])?;
             // Detach local lease; the authority is gone.
             let _ = client.detach();
@@ -5476,7 +5473,11 @@ impl RemoteWindowState {
         );
     }
 
-    fn paint_server_tab_context_menu(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+    fn paint_server_tab_context_menu(
+        &self,
+        device: &mut dyn ControlCanvas,
+        palette: &ThemePalette,
+    ) {
         let Some((frame_rect, close, new_window)) = self.server_context_menu_geometry() else {
             return;
         };
@@ -6413,9 +6414,8 @@ impl RemoteWindowState {
                     self.flush_deferred_server_tab_attach();
                 }
             } else {
-                self.last_message = Some(
-                    "No server tab under the pointer (use [+] to start a server)".to_owned(),
-                );
+                self.last_message =
+                    Some("No server tab under the pointer (use [+] to start a server)".to_owned());
                 self.window.request_redraw();
             }
             return true;
@@ -6801,10 +6801,9 @@ impl RemoteWindowState {
                 // Human toolbar open always activates. Inheriting
                 // AGENTERM_NO_ACTIVATE / --no-activate left CC invisible
                 // behind the terminal so users thought "old terminal" opened.
-                if let Err(error) = crate::control_center::open_control_center(
-                    false,
-                    &crate::client::ipc_address(),
-                ) {
+                if let Err(error) =
+                    crate::control_center::open_control_center(false, &crate::client::ipc_address())
+                {
                     self.last_error = Some(format!("Control Center unavailable: {error:#}"));
                 } else {
                     self.last_message =

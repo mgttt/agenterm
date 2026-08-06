@@ -14,8 +14,10 @@
 不要另开 `plan/orchestrate-*.md`——派工以本文为 SSOT。  
 平台封装 / shared-first 纪律见 `AGENTS.md`、`plan/plan-platform-encapsulation-gap.md`。
 
-**Win CI-R 主波状态（2026-08-06）**：R1/R2/R3/A3/A4 **配置已落地 main**；  
-R4 / G′ / O* / U2 / H1 等 **未** 由本波宣称完成。OSX/Lnx 接手见 **§2.2.2**。
+**Win must-ship 状态（2026-08-06 收口）**：R1–R4、A3–A4、G2/G3/G6/G7a、  
+H1/H3/H4、B1–B5、P0-1–P0-3、U1/U3、mux/mcp 独立 PE 移除 **已在 main**。  
+U2 真机证据 / B6 / H2 / M* / N1 等仍开或后置。OSX/Lnx 接手见 **§2.2.2**。  
+**本版不发布 tag/Candidate/Release** 直至人工授权。
 
 ## 0. 数据来源与关键事实（全部实测，可复现）
 
@@ -1693,6 +1695,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **续推 2**：G6 `prune_old_releases`（`AGENTERM_RELEASES_KEEP`）；U3 Win tab PTY resize debounce 100ms；P0-3 文档/单测锁 breakaway autostart。U2 真机/H1 releases.json/B′/M 仍开 |
 | 2026-08-06 | **H1+H3+B′ 勾选对齐**：`build-releases-index.rhai` + release.yml 派生/上传 `releases.json`；install.sh 下载并校验 `.provenance.json` 写入 `installed.json`；B1–B5 与已 shipped buffer/send-keys 对齐。H2（install 消费索引）仍 v0.2.x；B6/U2/M/N 仍开 |
 | 2026-08-06 | **B′ 尾巴**：`save-buffer` 显式 unsupported；`paste-buffer` 空失败 + UTF-8 规范化/bracketed-paste；`cli-smoke` `cli.named-buffer-paste`（set→paste→capture）。B6 仍开 |
+| 2026-08-06 | **测试门收口（不发布）**：rustfmt/clippy/rh pack Windows dll 名、fleet-smoke `mux_argv`、prd-alignment（mux/rh-pack）、quick unit 超时与 CJK 测试宿主字体条件；`lint`+`check --quick` 绿；隔离 GUI buffer 黑盒绿 |
 
 ---
 

@@ -19,9 +19,6 @@ use crate::{
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
     theme::AppearancePreset,
-    ui_clipboard::{
-        TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes,
-    },
     ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
         UI_DELTA_SCHEMA_VERSION, UI_HELLO_SCHEMA_VERSION, UI_SCREEN_MAX_COLUMNS,
@@ -31,6 +28,7 @@ use crate::{
         UiHelloResponse, UiProtocolRange, UiScreenSnapshot, UiTabBootstrap,
         UiWorkingContextSnapshot, negotiate,
     },
+    ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
     ui_snapshot::PROJECTION_REPLACEABLE_UI_CLIENT,
     workspace::workspace_path,
 };
@@ -2223,9 +2221,11 @@ mod tests {
 
     #[test]
     fn prepare_paste_buffer_rejects_empty_and_frames_utf8() {
-        assert!(prepare_paste_buffer_bytes(b"", false)
-            .unwrap_err()
-            .contains("empty"));
+        assert!(
+            prepare_paste_buffer_bytes(b"", false)
+                .unwrap_err()
+                .contains("empty")
+        );
         assert_eq!(
             prepare_paste_buffer_bytes(b"hello\n", false).unwrap(),
             b"hello\r"

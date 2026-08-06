@@ -29,7 +29,7 @@ fn expr_contains_fleet(expr: &Expr) -> bool {
         Expr::MethodCall(call, ..) | Expr::FnCall(call, ..) => {
             call.args.iter().any(expr_uses_fleet)
         }
-        Expr::Stmt(block) => block.iter().any(|stmt| stmt_uses_fleet(stmt)),
+        Expr::Stmt(block) => block.iter().any(stmt_uses_fleet),
         _ => false,
     }
 }

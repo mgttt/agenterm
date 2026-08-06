@@ -1,8 +1,8 @@
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
-    build_pack_dir, check, compile_native, hash_file, load_and_call_entry, qualify_pack_dir,
-    transpile, write_receipt, RhError, RH_VERSION,
+    RH_VERSION, RhError, build_pack_dir, check, compile_native, hash_file, load_and_call_entry,
+    qualify_pack_dir, transpile, write_receipt,
 };
 
 fn main() -> ExitCode {
@@ -38,7 +38,11 @@ fn run() -> Result<(), RhError> {
             let source = read_source(&path)?;
             let rust = transpile(&source)?;
             fs::write(&output, rust).map_err(|err| RhError::Transpile(err.to_string()))?;
-            println!("rh transpile ok: {} -> {}", path.display(), output.display());
+            println!(
+                "rh transpile ok: {} -> {}",
+                path.display(),
+                output.display()
+            );
         }
         "compile" => {
             let path = require_path(&mut args, "compile")?;
@@ -57,7 +61,10 @@ fn run() -> Result<(), RhError> {
         "run-smoke" => {
             let path = require_path(&mut args, "run-smoke")?;
             let value = load_and_call_entry(&path)?;
-            println!("rh run-smoke ok: {} -> rh_entry() = {value}", path.display());
+            println!(
+                "rh run-smoke ok: {} -> rh_entry() = {value}",
+                path.display()
+            );
         }
         "hash" => {
             let path = require_path(&mut args, "hash")?;
@@ -68,7 +75,8 @@ fn run() -> Result<(), RhError> {
             let path = require_path(&mut args, "qualify")?;
             let mut subargs = args;
             let dir = pack_dir_flag(&mut subargs)?;
-            let output = parse_output_flag(&mut subargs)?.unwrap_or_else(|| dir.join("qualification.json"));
+            let output =
+                parse_output_flag(&mut subargs)?.unwrap_or_else(|| dir.join("qualification.json"));
             let source = read_source(&path)?;
             let receipt = qualify_pack_dir(&source, &dir)?;
             write_receipt(&output, &receipt)?;
@@ -121,7 +129,10 @@ fn read_source(path: &PathBuf) -> Result<String, RhError> {
     fs::read_to_string(path).map_err(|err| RhError::Parse(err.to_string()))
 }
 
-fn require_path(args: &mut impl Iterator<Item = String>, command: &str) -> Result<PathBuf, RhError> {
+fn require_path(
+    args: &mut impl Iterator<Item = String>,
+    command: &str,
+) -> Result<PathBuf, RhError> {
     args.next()
         .map(PathBuf::from)
         .ok_or_else(|| RhError::Parse(format!("usage: agenterm-rh {command} <file> [-o out]")))
@@ -155,9 +166,8 @@ fn native_output_path(
     args: &mut impl Iterator<Item = String>,
     input: &PathBuf,
 ) -> Result<PathBuf, RhError> {
-    Ok(parse_output_flag(args)?.unwrap_or_else(|| {
-        input.with_extension(agenterm_rh::compile::native_extension())
-    }))
+    Ok(parse_output_flag(args)?
+        .unwrap_or_else(|| input.with_extension(agenterm_rh::compile::native_extension())))
 }
 
 fn pack_dir_flag(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, RhError> {

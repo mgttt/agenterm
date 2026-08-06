@@ -1,7 +1,7 @@
 use rhai::Engine;
 
-use crate::subset::validate_ast;
 use crate::RhError;
+use crate::subset::validate_ast;
 
 pub fn check(source: &str) -> Result<(), RhError> {
     let ast = Engine::new()

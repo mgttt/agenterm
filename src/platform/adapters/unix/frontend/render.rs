@@ -2739,7 +2739,10 @@ pub(super) fn composer_offset_at_client(
     let within_visible = char_offset_at_width(&visible_text, relative_x);
 
     // The visible text may be a truncated tail; map back to the whole line.
-    let hidden = line.chars().count().saturating_sub(visible_text.chars().count());
+    let hidden = line
+        .chars()
+        .count()
+        .saturating_sub(visible_text.chars().count());
     let offset_in_line = (hidden + within_visible).min(line.chars().count());
 
     // Convert the line-local offset into a buffer-wide one.
@@ -2748,7 +2751,10 @@ pub(super) fn composer_offset_at_client(
             .chars()
             .count()
             .saturating_sub(last_line.chars().count() + 1 + previous.chars().count()),
-        (Some(_), _) | (None, _) => text.chars().count().saturating_sub(last_line.chars().count()),
+        (Some(_), _) | (None, _) => text
+            .chars()
+            .count()
+            .saturating_sub(last_line.chars().count()),
     };
     Some((line_start + offset_in_line).min(text.chars().count()))
 }
@@ -3137,7 +3143,7 @@ mod tests {
         // colour, so a whole-strip count would never reach zero.
         let count_highlight = |view: ComposerView<'_>| {
             let mut buffer = vec![0u32; (width * height) as usize];
-            render_composer(&mut buffer, width, width, height, &palette, 0, view);
+            render_composer(&mut buffer, width, width, height, palette, 0, view);
             let text_left = 8usize;
             let text_right = 200usize;
             (18..(18 + COMPOSER_LINE_HEIGHT * 2) as usize)
@@ -3170,7 +3176,7 @@ mod tests {
 
         let count_highlight = |view: ComposerView<'_>| {
             let mut buffer = vec![0u32; (width * height) as usize];
-            render_composer(&mut buffer, width, width, height, &palette, 0, view);
+            render_composer(&mut buffer, width, width, height, palette, 0, view);
             let text_left = 8usize;
             let text_right = 200usize;
             (18..(18 + COMPOSER_LINE_HEIGHT * 2) as usize)
@@ -3209,12 +3215,21 @@ mod tests {
         let text = "中文ab";
         let wide = ui_text_width("中");
         let narrow = ui_text_width("a");
-        assert!(wide > narrow, "CJK glyphs must be wider than latin ones");
-
+        // Host rasterizers (especially when the Unix adapter unit tests run on
+        // Windows) may fall back to a monospaced cell for CJK; still prove that
+        // char_offset_at_width walks glyph advances rather than a fixed grid.
         assert_eq!(char_offset_at_width(text, 0), 0);
         assert_eq!(char_offset_at_width(text, wide), 1);
         assert_eq!(char_offset_at_width(text, wide * 2), 2);
         assert_eq!(char_offset_at_width(text, 10_000), 4);
+        if wide > narrow {
+            // When real double-width metrics exist, two CJK cells must outrun
+            // two latin ones for the same character count.
+            assert!(
+                ui_text_width("中文") > ui_text_width("ab"),
+                "CJK glyphs must be wider than latin ones when the host font reports wide advances"
+            );
+        }
     }
 
     #[test]

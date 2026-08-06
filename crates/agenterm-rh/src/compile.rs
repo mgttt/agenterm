@@ -70,18 +70,28 @@ pub fn compile_native_for_target(
         Some(triple) => target_dir.join(triple).join("release"),
         None => target_dir.join("release"),
     };
-    let artifact = release_dir.join(format!("lib{GENERATED_CRATE}.{extension}"));
-    if !artifact.is_file() {
-        return Err(RhError::Compile(format!(
-            "expected native artifact at {}",
-            artifact.display()
-        )));
-    }
+    // Windows MSVC emits `{crate}.dll`; Unix (and some GNU toolchains) use
+    // the `lib` prefix. Accept either so host packs are portable.
+    let artifact_candidates = [
+        release_dir.join(format!("lib{GENERATED_CRATE}.{extension}")),
+        release_dir.join(format!("{GENERATED_CRATE}.{extension}")),
+    ];
+    let artifact = artifact_candidates
+        .iter()
+        .find(|path| path.is_file())
+        .cloned()
+        .ok_or_else(|| {
+            RhError::Compile(format!(
+                "expected native artifact at {} or {}",
+                artifact_candidates[0].display(),
+                artifact_candidates[1].display()
+            ))
+        })?;
 
-    if let Some(parent) = output_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|err| RhError::Compile(err.to_string()))?;
-        }
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|err| RhError::Compile(err.to_string()))?;
     }
     std::fs::copy(&artifact, output_path).map_err(|err| RhError::Compile(err.to_string()))?;
 

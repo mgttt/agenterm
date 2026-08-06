@@ -48,7 +48,7 @@ pub struct RhInvocationResult {
 pub fn try_execute_rh_invocation(
     operation: ScriptOperation,
     source: &str,
-    fleet_bridge: Option<Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>>,
+    fleet_bridge: Option<crate::script_rh_host::FleetBridgeFn>,
 ) -> Result<Option<RhInvocationResult>, agenterm_rh::RhError> {
     if !rh_backend_enabled() {
         return Ok(None);

@@ -1003,7 +1003,8 @@ fn control_center_web_launch_arguments(
 ) -> Result<Vec<OsString>> {
     // Keep product open spelling so logs/CLI stay consistent; the web host
     // accepts and currently ignores fleet selectors (projection placeholder).
-    let mut arguments = control_center_launch_arguments(no_activate, server_endpoint, logical_instance)?;
+    let mut arguments =
+        control_center_launch_arguments(no_activate, server_endpoint, logical_instance)?;
     // Ensure "open" is present for hosts that treat it as the default verb.
     if arguments
         .first()
@@ -1505,9 +1506,7 @@ fn run_entry(command: EntryCommand) -> Result<()> {
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&crate::script_rh_pack::rh_pack_document(
-                        &pack
-                    ))?
+                    serde_json::to_string_pretty(&crate::script_rh_pack::rh_pack_document(&pack))?
                 );
             } else {
                 println!("rh pack loaded: {}", path.display());

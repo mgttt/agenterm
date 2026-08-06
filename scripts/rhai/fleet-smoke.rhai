@@ -4,7 +4,9 @@
 // Args:
 //   --list-evidence
 // or:
-//   REPO CLI_EXE MUX_EXE [--skip-event-load|--event-load]
+//   REPO CLI_EXE [--skip-event-load|--event-load]
+//
+// Mux surface is `agenterm-cli mux …` (no separate agenterm-mux PE).
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
@@ -28,6 +30,15 @@ fn require(condition, message) {
     if !condition {
         throw message;
     }
+}
+
+// Build argv for the mux frontend: agenterm-cli mux <args…>
+fn mux_argv(parts) {
+    let argv = ["mux"];
+    for part in parts {
+        argv.push(part);
+    }
+    argv
 }
 
 fn run_program(
@@ -249,18 +260,14 @@ fn cleanup_server(context, cli, address) {
 }
 
 require(
-    args.len >= 3 && args.len <= 5,
-    "expected: REPO CLI_EXE MUX_EXE " +
-        "[--skip-event-load|--event-load]"
+    args.len >= 2 && args.len <= 4,
+    "expected: REPO CLI_EXE [--skip-event-load|--event-load]"
 );
 let repo = std::path::absolute(args[0]).display;
 let cli = std::path::absolute(args[1]).display;
-let mux = std::path::absolute(args[2]).display;
-for path in [cli, mux] {
-    require(std::fs::exists(path), "fleet_executable_missing:" + path);
-}
+require(std::fs::exists(cli), "fleet_executable_missing:" + cli);
 let run_event_load = true;
-for index in 3..args.len {
+for index in 2..args.len {
     require(
         args[index] == "--skip-event-load"
             || args[index] == "--event-load",

@@ -47,7 +47,7 @@ impl EmitCtx {
         let mut first = true;
         for (name, kind) in &self.scope {
             if !first {
-                out.push_str(",");
+                out.push(',');
             }
             first = false;
             match kind {

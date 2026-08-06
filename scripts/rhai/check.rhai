@@ -785,11 +785,14 @@ if quick {
     );
     timing = quick_gate.timing;
     sequence = quick_gate.sequence;
+    // rh AOT pack unit tests each run an isolated `cargo build --release` of a
+    // generated cdylib (~1m each on cold host). 60s was enough for the pre-rh
+    // lib suite and now false-fails the quick gate with gate_deadline_exceeded.
     let quick_gate = run_quick_gate(
         timing,
         "unit-tests",
         "library unit tests",
-        [spec("cargo", unit_arguments, 60000, identity.environment)],
+        [spec("cargo", unit_arguments, 600000, identity.environment)],
         repo,
         scratch,
         sequence

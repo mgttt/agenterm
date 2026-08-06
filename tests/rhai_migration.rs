@@ -1002,12 +1002,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
         br#"{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT"}"#,
     )
     .expect("write SBOM fixture");
-    for name in [
-        "agenterm",
-        "agenterm-cc",
-        "agenterm-cli",
-        "agenterm-rhai",
-    ] {
+    for name in ["agenterm", "agenterm-cc", "agenterm-cli", "agenterm-rhai"] {
         fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
     }
 
@@ -1192,12 +1187,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            for executable in [
-                "agenterm",
-                "agenterm-cc",
-                "agenterm-cli",
-                "agenterm-rhai",
-            ] {
+            for executable in ["agenterm", "agenterm-cc", "agenterm-cli", "agenterm-rhai"] {
                 assert_ne!(
                     fs::metadata(extracted.join(executable))
                         .expect("executable metadata")
@@ -1220,12 +1210,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
     let binaries = root.join("bin");
     let output_directory = root.join("dist");
     fs::create_dir_all(&binaries).expect("create binary fixture");
-    for name in [
-        "agenterm",
-        "agenterm-cc",
-        "agenterm-cli",
-        "agenterm-rhai",
-    ] {
+    for name in ["agenterm", "agenterm-cc", "agenterm-cli", "agenterm-rhai"] {
         fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
     }
 

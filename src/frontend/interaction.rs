@@ -826,8 +826,8 @@ mod tests {
             close_confirmation_open: true,
             tab_editor_open: true,
             instance_picker_open: true,
-                server_new_open: false,
-                server_close_pending: false,
+            server_new_open: false,
+            server_close_pending: false,
         };
         assert_eq!(
             modal_surface_from_gate(gate),

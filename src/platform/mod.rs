@@ -23,8 +23,7 @@ pub(crate) mod policy;
 #[allow(dead_code, unused_imports)]
 pub(crate) use policy::input::{
     caret_blink_interval_ms, is_primary_shortcut_via_meta, multi_click_interval_ms,
-    primary_text_field_shortcut_modifiers,
-    terminal_shortcut_empty_copy_action_is_suppressed,
+    primary_text_field_shortcut_modifiers, terminal_shortcut_empty_copy_action_is_suppressed,
 };
 
 #[allow(unused_imports)]

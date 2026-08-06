@@ -1,6 +1,6 @@
 //! rh language + pipeline regression (fast, no AOT compile unless noted).
 
-use agenterm_rh::{check, transpile_cdylib, RH_HOST_API_VERSION};
+use agenterm_rh::{RH_HOST_API_VERSION, check, transpile_cdylib};
 
 #[test]
 fn rh_host_api_version_is_two() {

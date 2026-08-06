@@ -118,8 +118,7 @@ mod tests {
                     continue;
                 };
                 // Ignore this test module's own needle.
-                if path.ends_with("platform\\process.rs") || path.ends_with("platform/process.rs")
-                {
+                if path.ends_with("platform\\process.rs") || path.ends_with("platform/process.rs") {
                     continue;
                 }
                 for (index, line) in source.lines().enumerate() {

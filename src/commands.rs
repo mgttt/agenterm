@@ -1326,8 +1326,7 @@ mod tests {
         ));
         assert_eq!(save.status, alias.status);
         assert!(
-            control_command_usage("save-buffer")
-                .is_some_and(|usage| usage.contains("unsupported")),
+            control_command_usage("save-buffer").is_some_and(|usage| usage.contains("unsupported")),
             "CLI help should document save-buffer as unsupported"
         );
     }

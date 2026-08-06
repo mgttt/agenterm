@@ -76,6 +76,7 @@ impl TextCursor {
     }
 
     /// Collapse to a caret at the given end of the current selection.
+    #[allow(dead_code)] // public selection API for frontend adapters not yet fully wired
     pub(crate) const fn collapsed_to(self, offset: usize) -> Self {
         Self::at(offset)
     }
@@ -89,6 +90,7 @@ impl TextCursor {
     }
 
     /// Select everything in a buffer of `len` characters.
+    #[allow(dead_code)] // public selection API for frontend adapters not yet fully wired
     pub(crate) const fn select_all(len: usize) -> Self {
         Self {
             anchor: 0,
@@ -153,6 +155,7 @@ pub(crate) fn byte_offset(text: &str, char_index: usize) -> usize {
 }
 
 /// Character index of a byte offset, for callers that already hold one.
+#[allow(dead_code)] // inverse of `byte_offset`; kept for adapter parity
 pub(crate) fn char_index(text: &str, byte_offset: usize) -> usize {
     text[..byte_offset.min(text.len())].chars().count()
 }
@@ -214,7 +217,11 @@ pub(crate) fn shift_extend_anchor(cursor: TextCursor, target: usize) -> usize {
     let (start, end) = cursor.range();
     let start_distance = target.abs_diff(start);
     let end_distance = target.abs_diff(end);
-    if start_distance >= end_distance { start } else { end }
+    if start_distance >= end_distance {
+        start
+    } else {
+        end
+    }
 }
 
 #[cfg(test)]

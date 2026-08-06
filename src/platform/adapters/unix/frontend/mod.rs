@@ -1265,7 +1265,8 @@ impl UnixApp {
         // append would put the character at the end of the draft instead of
         // where the selection was -- selecting "hello" in "hello world" and
         // typing X has to give "X world", not " worldX".
-        let cursor = text_selection::insert(&mut self.composer_buffer, self.composer_cursor, &typed);
+        let cursor =
+            text_selection::insert(&mut self.composer_buffer, self.composer_cursor, &typed);
         self.composer_select_all = false;
         self.set_composer_cursor(cursor);
         self.sync_composer_buffer_to_tab();
@@ -5363,35 +5364,23 @@ impl UnixApp {
                             .next()
                             .filter(char::is_ascii_alphabetic)
                             .map_or(PhysicalKeyCode::Other, PhysicalKeyCode::Letter);
-                        (
-                            Key::Character(text.clone()),
-                            physical,
-                            Some(text.clone()),
-                        )
+                        (Key::Character(text.clone()), physical, Some(text.clone()))
                     }
-                    KeyRequest::Enter => (
-                        Key::Named(NamedKey::Enter),
-                        PhysicalKeyCode::Enter,
-                        None,
-                    ),
+                    KeyRequest::Enter => {
+                        (Key::Named(NamedKey::Enter), PhysicalKeyCode::Enter, None)
+                    }
                     KeyRequest::Backspace => (
                         Key::Named(NamedKey::Backspace),
                         PhysicalKeyCode::Backspace,
                         None,
                     ),
-                    KeyRequest::Delete => (
-                        Key::Named(NamedKey::Delete),
-                        PhysicalKeyCode::Other,
-                        None,
-                    ),
-                    KeyRequest::Tab => {
-                        (Key::Named(NamedKey::Tab), PhysicalKeyCode::Tab, None)
+                    KeyRequest::Delete => {
+                        (Key::Named(NamedKey::Delete), PhysicalKeyCode::Other, None)
                     }
-                    KeyRequest::Escape => (
-                        Key::Named(NamedKey::Escape),
-                        PhysicalKeyCode::Other,
-                        None,
-                    ),
+                    KeyRequest::Tab => (Key::Named(NamedKey::Tab), PhysicalKeyCode::Tab, None),
+                    KeyRequest::Escape => {
+                        (Key::Named(NamedKey::Escape), PhysicalKeyCode::Other, None)
+                    }
                     KeyRequest::ArrowLeft => (
                         Key::Named(NamedKey::ArrowLeft),
                         PhysicalKeyCode::Other,
@@ -5402,22 +5391,16 @@ impl UnixApp {
                         PhysicalKeyCode::Other,
                         None,
                     ),
-                    KeyRequest::ArrowUp => (
-                        Key::Named(NamedKey::ArrowUp),
-                        PhysicalKeyCode::Other,
-                        None,
-                    ),
+                    KeyRequest::ArrowUp => {
+                        (Key::Named(NamedKey::ArrowUp), PhysicalKeyCode::Other, None)
+                    }
                     KeyRequest::ArrowDown => (
                         Key::Named(NamedKey::ArrowDown),
                         PhysicalKeyCode::Other,
                         None,
                     ),
-                    KeyRequest::Home => {
-                        (Key::Named(NamedKey::Home), PhysicalKeyCode::Other, None)
-                    }
-                    KeyRequest::End => {
-                        (Key::Named(NamedKey::End), PhysicalKeyCode::Other, None)
-                    }
+                    KeyRequest::Home => (Key::Named(NamedKey::Home), PhysicalKeyCode::Other, None),
+                    KeyRequest::End => (Key::Named(NamedKey::End), PhysicalKeyCode::Other, None),
                 };
                 // Press and release, so surfaces that track key state see a
                 // complete stroke rather than a key stuck down.

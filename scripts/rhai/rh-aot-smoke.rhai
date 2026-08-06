@@ -13,12 +13,18 @@ let repo = std::path::absolute(args[0]).display;
 let fixture = std::path::join(repo, "fixtures/rh/entry.rh").display;
 require(std::fs::exists(fixture), "rh_aot_missing_fixture");
 
+// Prefer an explicit binary; otherwise pick host layout by path presence
+// (std::process::platform is not a shipped Script API).
 let rh = if args.len == 2 {
     std::path::absolute(args[1]).display
-} else if std::process::platform() == "windows" {
-    std::path::join(repo, "target/debug/agenterm-rh.exe").display
 } else {
-    std::path::join(repo, "target/debug/agenterm-rh").display
+    let win = std::path::join(repo, "target/debug/agenterm-rh.exe").display;
+    let unix = std::path::join(repo, "target/debug/agenterm-rh").display;
+    if std::fs::exists(win) {
+        win
+    } else {
+        unix
+    }
 };
 require(std::fs::exists(rh), "rh_aot_missing_binary:" + rh);
 
@@ -42,12 +48,15 @@ build.timeout(std::time::Duration::from_secs(180));
 let build_out = build.output();
 require(build_out.success, "rh_aot_pack_build:" + build_out.stderr_text());
 
-let native = if std::process::platform() == "windows" {
-    std::path::join(pack_dir, "pack.dll").display
-} else if std::process::platform() == "macos" {
-    std::path::join(pack_dir, "pack.dylib").display
+let native_dll = std::path::join(pack_dir, "pack.dll").display;
+let native_dylib = std::path::join(pack_dir, "pack.dylib").display;
+let native_so = std::path::join(pack_dir, "pack.so").display;
+let native = if std::fs::exists(native_dll) {
+    native_dll
+} else if std::fs::exists(native_dylib) {
+    native_dylib
 } else {
-    std::path::join(pack_dir, "pack.so").display
+    native_so
 };
 
 let smoke = std::process::command(rh);

@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use agenterm::script_backend::{try_execute_rh_invocation, ScriptBackend};
+use agenterm::script_backend::{ScriptBackend, try_execute_rh_invocation};
 use agenterm::script_protocol::ScriptOperation;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -75,7 +75,7 @@ fn rhai_backend_returns_none_for_check() {
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
     }
-    let probe = try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }", None)
-        .expect("probe");
+    let probe =
+        try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }", None).expect("probe");
     assert!(probe.is_none());
 }

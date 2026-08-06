@@ -155,25 +155,25 @@ fn set_diff<'a>(left: &[&'a str], right: &[&str]) -> Vec<&'a str> {
         .collect()
 }
 
-/// Shared dispatcher + Unix local surfaces that can own a `ui-action` id.
-fn unix_ui_action_haystack() -> String {
-    let unix_mod = include_str!("../platform/adapters/unix/frontend/mod.rs");
-    let window_state = include_str!("../platform/adapters/unix/frontend/window_state.rs");
-    let new_terminal = include_str!("new_terminal.rs");
-    let control_dispatch = include_str!("../control_dispatch.rs");
-    format!("{control_dispatch}\n{unix_mod}\n{window_state}\n{new_terminal}")
-}
-
-/// Windows replaceable client + shared dispatcher (server authority path).
-fn windows_ui_action_haystack() -> String {
-    let remote = include_str!("../platform/adapters/windows/remote_frontend.rs");
-    let control_dispatch = include_str!("../control_dispatch.rs");
-    format!("{remote}\n{control_dispatch}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shared dispatcher + Unix local surfaces that can own a `ui-action` id.
+    fn unix_ui_action_haystack() -> String {
+        let unix_mod = include_str!("../platform/adapters/unix/frontend/mod.rs");
+        let window_state = include_str!("../platform/adapters/unix/frontend/window_state.rs");
+        let new_terminal = include_str!("new_terminal.rs");
+        let control_dispatch = include_str!("../control_dispatch.rs");
+        format!("{control_dispatch}\n{unix_mod}\n{window_state}\n{new_terminal}")
+    }
+
+    /// Windows replaceable client + shared dispatcher (server authority path).
+    fn windows_ui_action_haystack() -> String {
+        let remote = include_str!("../platform/adapters/windows/remote_frontend.rs");
+        let control_dispatch = include_str!("../control_dispatch.rs");
+        format!("{remote}\n{control_dispatch}")
+    }
 
     #[test]
     fn catalogs_are_sorted_unique_and_disjoint() {

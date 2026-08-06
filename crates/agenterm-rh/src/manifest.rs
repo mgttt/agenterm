@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{load::verify_native_hash, RhError, RH_VERSION};
+use crate::{RH_VERSION, RhError, load::verify_native_hash};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RhPackManifest {

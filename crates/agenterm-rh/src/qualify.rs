@@ -3,9 +3,9 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::{
+    RH_VERSION, RhError,
     compile::hash_file,
-    pack::{build_pack_dir, RhPack},
-    RhError, RH_VERSION,
+    pack::{RhPack, build_pack_dir},
 };
 
 pub const QUALIFICATION_SCHEMA: &str = "agenterm.rh-qualification/v1";
@@ -57,12 +57,15 @@ pub fn write_receipt(path: &Path, receipt: &RhQualificationReceipt) -> Result<()
         "api_version": receipt.api_version,
         "cc_line_count": receipt.cc_line_count,
     });
-    let json = serde_json::to_string_pretty(&value)
-        .map_err(|err| RhError::Compile(err.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(&value).map_err(|err| RhError::Compile(err.to_string()))?;
     std::fs::write(path, json).map_err(|err| RhError::Compile(err.to_string()))
 }
 
-pub fn verify_receipt_native(receipt: &RhQualificationReceipt, native_path: &Path) -> Result<(), RhError> {
+pub fn verify_receipt_native(
+    receipt: &RhQualificationReceipt,
+    native_path: &Path,
+) -> Result<(), RhError> {
     let actual = hash_file(native_path)?;
     if actual == receipt.native_hash {
         Ok(())
@@ -98,20 +101,15 @@ pub fn host_target_triple() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{qualify_pack_dir, write_receipt, RhQualificationReceipt, QUALIFICATION_SCHEMA};
+    use super::{QUALIFICATION_SCHEMA, RhQualificationReceipt, qualify_pack_dir, write_receipt};
 
     #[test]
     fn qualification_receipt_round_trips() {
-        let dir = std::env::temp_dir().join(format!(
-            "agenterm-rh-qualify-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("agenterm-rh-qualify-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let receipt = qualify_pack_dir(
-            "fn entry() { 99 }\nfn cc_lines() { [\"qualified\"] }",
-            &dir,
-        )
-        .expect("qualify");
+        let receipt =
+            qualify_pack_dir("fn entry() { 99 }\nfn cc_lines() { [\"qualified\"] }", &dir)
+                .expect("qualify");
         assert_eq!(receipt.schema, QUALIFICATION_SCHEMA);
         assert_eq!(receipt.entry_value, 99);
         assert_eq!(receipt.cc_line_count, 1);

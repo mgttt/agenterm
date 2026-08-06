@@ -65,10 +65,7 @@ mod tests {
 
     #[test]
     fn offline_version_and_help_are_solo_flags() {
-        assert_eq!(
-            offline_cli_exit(&["--version".to_owned()]),
-            Some(0)
-        );
+        assert_eq!(offline_cli_exit(&["--version".to_owned()]), Some(0));
         assert_eq!(offline_cli_exit(&["-V".to_owned()]), Some(0));
         assert_eq!(offline_cli_exit(&["--help".to_owned()]), Some(0));
         assert_eq!(

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    compile::compile_native,
-    load::{verify_native_hash, RhNativeModule},
-    manifest::{default_pack_layout, manifest_path_for, RhPackManifest},
     RhError,
+    compile::compile_native,
+    load::{RhNativeModule, verify_native_hash},
+    manifest::{RhPackManifest, default_pack_layout, manifest_path_for},
 };
 
 pub struct RhPack {

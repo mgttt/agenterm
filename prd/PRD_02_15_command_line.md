@@ -156,6 +156,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `script check FILE|-`
     - `script eval EXPRESSION`
     - `script run FILE|- [-- ARGS...]`
+    - [x] `rh-pack --path PATH [--json]` inspects a built rh AOT pack
+      directory (native library + manifest; offline CLI surface)
   - Composer and tab metadata
     - `show-composer [-t target]`
     - `set-composer [-t target] text|--stdin|--file path`

@@ -2,9 +2,10 @@ use std::path::Path;
 
 use agenterm_rh::{RH_HOST_API_VERSION, RhError, RhNativeModule};
 
-pub fn broker_fleet_bridge<F>(
-    call: F,
-) -> Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>
+/// Fleet bridge injected into rh host eval: (operation_id, params_json) → result JSON.
+pub type FleetBridgeFn = Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>;
+
+pub fn broker_fleet_bridge<F>(call: F) -> FleetBridgeFn
 where
     F: Fn(&str, serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync + 'static,
 {
@@ -21,7 +22,7 @@ where
     })
 }
 
-pub fn set_fleet_bridge(bridge: Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>) {
+pub fn set_fleet_bridge(bridge: FleetBridgeFn) {
     FLEET_BRIDGE.with(|slot| {
         *slot.borrow_mut() = Some(bridge);
     });
@@ -33,9 +34,7 @@ pub fn clear_fleet_bridge() {
     });
 }
 
-pub fn call_cached_pack_entry_with_fleet(
-    bridge: Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>,
-) -> Result<i64, RhError> {
+pub fn call_cached_pack_entry_with_fleet(bridge: FleetBridgeFn) -> Result<i64, RhError> {
     let native_path = crate::script_rh_pack::cached_native_path()
         .ok_or_else(|| RhError::Compile("AGENTERM_RH_PACK native path is unavailable".into()))?;
     call_pack_entry_with_fleet(native_path, bridge)
@@ -43,7 +42,7 @@ pub fn call_cached_pack_entry_with_fleet(
 
 pub fn call_pack_entry_with_fleet(
     native_path: &Path,
-    bridge: Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>,
+    bridge: FleetBridgeFn,
 ) -> Result<i64, RhError> {
     set_fleet_bridge(bridge);
     let module = RhNativeModule::load(native_path)?;
@@ -53,7 +52,7 @@ pub fn call_pack_entry_with_fleet(
 
 pub fn call_pack_entry_with_host(
     native_path: &Path,
-    fleet_bridge: Option<Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>>,
+    fleet_bridge: Option<FleetBridgeFn>,
 ) -> Result<i64, RhError> {
     if let Some(bridge) = fleet_bridge {
         set_fleet_bridge(bridge);
@@ -207,7 +206,7 @@ unsafe fn read_utf8(ptr: *const u8, len: u32) -> Result<String, ()> {
 }
 
 std::thread_local! {
-    static FLEET_BRIDGE: std::cell::RefCell<Option<Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>>> =
+    static FLEET_BRIDGE: std::cell::RefCell<Option<FleetBridgeFn>> =
         const { std::cell::RefCell::new(None) };
 }
 

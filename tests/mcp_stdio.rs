@@ -959,19 +959,14 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
         let root_entries_before = directory_entry_names(&root);
         let settings_before = fs::read(&settings).ok();
 
-        let mut sidecar = configured_command(
-            mcp_cli(),
-            &address,
-            &workspace,
-            &settings,
-            &instances,
-        )
-        .args(["mcp", "--address", &address, "serve", "--stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("start isolation sidecar");
+        let mut sidecar =
+            configured_command(mcp_cli(), &address, &workspace, &settings, &instances)
+                .args(["mcp", "--address", &address, "serve", "--stdio"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start isolation sidecar");
         let stdout = sidecar.stdout.take().expect("sidecar stdout");
         let (sender, receiver) = mpsc::channel();
         let reader = spawn_stdout_reader(stdout, sender);

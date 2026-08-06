@@ -5,6 +5,8 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - Architecture
+  - [x] tmux/RMUX-compatible fleet control entry point
+    (`agenterm-cli mux`; no separate `agenterm-mux` PE)
   - [x] thin console frontend over AgenTerm IPC; internal
     `agenterm server` (main-program subcommand) is the PTY/workspace authority, while the replaceable
     `agenterm.exe` GUI is only a client. Mux consumes the same typed operations

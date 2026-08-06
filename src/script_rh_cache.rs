@@ -9,10 +9,11 @@ static SOURCE_CACHE: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
 
 pub fn compile_source_to_cache(source: &str) -> Result<PathBuf, RhError> {
     let hash = agenterm_rh::hash_bytes(source.as_bytes());
-    if let Some((cached_hash, path)) = SOURCE_CACHE.lock().expect("lock").clone() {
-        if cached_hash == hash && path.is_dir() {
-            return Ok(path);
-        }
+    if let Some((cached_hash, path)) = SOURCE_CACHE.lock().expect("lock").clone()
+        && cached_hash == hash
+        && path.is_dir()
+    {
+        return Ok(path);
     }
 
     let dir = std::env::temp_dir().join(format!("agenterm-rh-src-{hash}"));

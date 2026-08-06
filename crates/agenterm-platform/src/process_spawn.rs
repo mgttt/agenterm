@@ -282,7 +282,12 @@ mod tests {
             mode,
             DetachedSpawnMode::Independent | DetachedSpawnMode::CallerJobFallback
         ));
-        assert!(child.wait().expect("wait visible breakaway probe").success());
+        assert!(
+            child
+                .wait()
+                .expect("wait visible breakaway probe")
+                .success()
+        );
     }
 
     #[test]
