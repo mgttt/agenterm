@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="no-referrer">
-    <title>AgenTerm Control Center — experimental</title>
+    <title>AgenTerm Control Center</title>
     <link rel="stylesheet" href="/app.css">
     <script src="/app.js" defer></script>
   </head>
@@ -12,11 +12,11 @@
     <div class="shell">
       <header class="chrome">
         <div>
-          <p class="eyebrow">Tauri / system-WebView size spike</p>
+          <p class="eyebrow">Control Center · system WebView</p>
           <h1>AgenTerm Control Center</h1>
           <p class="lede">
-            Experimental shell only. Production <code>agenterm-cc</code> stays native.
-            Fleet truth remains on <code>agenterm server</code>.
+            Multi-tab projection shell. Fleet truth remains on
+            <code>agenterm server</code>. Click tabs to switch views.
           </p>
         </div>
         <p id="host-badge" class="badge">Packaged · bridge absent</p>
@@ -29,7 +29,7 @@
         </button>
         <button type="button" class="tab" role="tab" aria-selected="false"
           aria-controls="panel-hub" id="tab-hub" data-tab="hub">
-          超级Hub
+          InfoHub
         </button>
         <button type="button" class="tab" role="tab" aria-selected="false"
           aria-controls="panel-control" id="tab-control" data-tab="control">
@@ -55,14 +55,14 @@
 
         <section id="panel-hub" class="panel" role="tabpanel" hidden
           aria-labelledby="tab-hub">
-          <h2>超级Hub</h2>
+          <h2>InfoHub</h2>
           <p class="empty">
-            Placeholder page for PluginHub / AppHub / InfoHub routes.
-            Install and marketplace transactions stay out of this spike.
+            Placeholder page for InfoHub / PluginHub / AppHub routes.
+            Install and marketplace transactions stay out of this shell.
           </p>
           <dl>
-            <div><dt>Surface</dt><dd>super-hub</dd></div>
-            <div><dt>Hubs</dt><dd>plugin · app · info (planned)</dd></div>
+            <div><dt>Surface</dt><dd>info-hub</dd></div>
+            <div><dt>Hubs</dt><dd>info · plugin · app (planned)</dd></div>
             <div><dt>softmgr</dt><dd>not linked</dd></div>
             <div><dt>Status</dt><dd>temporary HTML stub</dd></div>
           </dl>

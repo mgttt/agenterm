@@ -40,16 +40,32 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "agenterm-cc-web-direct-wry (experimental)\n\nUSAGE:\n  agenterm-cc-web-direct-wry --probe\n  agenterm-cc-web-direct-wry [--smoke] [--no-activate]"
+            "AgenTerm Control Center (WebView shell)\n\nUSAGE:\n  agenterm-cc-web [--probe]\n  agenterm-cc-web [open] [--no-activate] [--smoke]\n                 [--server-endpoint ENDPOINT | --endpoint ENDPOINT]\n                 [--logical-instance NAME | --instance NAME]\n\nProduct launch from the main GUI uses the open/--server-endpoint form;\nthis experimental host currently ignores fleet selectors and only shows\nthe packaged multi-tab placeholder (超级智能体 / InfoHub / 超级控制)."
         );
         return ExitCode::SUCCESS;
     }
-    if args
-        .iter()
-        .any(|arg| !matches!(arg.as_str(), "--probe" | "--smoke" | "--no-activate"))
-    {
-        eprintln!("unsupported argument; use --help");
-        return ExitCode::from(64);
+    // Accept product agenterm-cc launch spelling so toolbar open works.
+    // Unknown flags still fail closed.
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "open" | "--probe" | "--smoke" | "--no-activate" => index += 1,
+            "--server-endpoint" | "--endpoint" | "--logical-instance" | "--instance" => {
+                if args.get(index + 1).is_none() {
+                    eprintln!("option {} requires a value", args[index]);
+                    return ExitCode::from(64);
+                }
+                index += 2;
+            }
+            other if other.starts_with('-') => {
+                eprintln!("unsupported argument: {other}; use --help");
+                return ExitCode::from(64);
+            }
+            other => {
+                eprintln!("unsupported argument: {other}; use --help");
+                return ExitCode::from(64);
+            }
+        }
     }
     let no_activate = env::var_os("AGENTERM_NO_ACTIVATE").is_some()
         || args.iter().any(|arg| arg == "--no-activate");
@@ -101,10 +117,10 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
     let event_loop = EventLoopBuilder::<HostEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let window = match WindowBuilder::new()
-        .with_title("AgenTerm Cockpit — experimental system WebView")
+        .with_title("AgenTerm Control Center — 超级智能体 / InfoHub / 超级控制")
         .with_inner_size(LogicalSize::new(980.0, 680.0))
         .with_visible(false)
-        .with_focused(false)
+        .with_focused(!no_activate)
         .build(&event_loop)
     {
         Ok(window) => window,

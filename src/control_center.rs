@@ -954,15 +954,20 @@ pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> R
     if !executable.is_file() {
         anyhow::bail!(
             "Control Center binary missing next to the GUI: {} \
-             (rebuild/stage agenterm-cc.exe beside agenterm.exe)",
+             (stage agenterm-cc-web.exe or agenterm-cc.exe beside agenterm.exe)",
             executable.display()
         );
     }
     let instance = env::var("AGENTERM_INSTANCE")
         .ok()
         .filter(|instance| !instance.trim().is_empty());
-    let arguments =
-        control_center_launch_arguments(no_activate, server_endpoint, instance.as_deref())?;
+    let web_shell = is_control_center_web_shell(&executable);
+    let arguments = if web_shell {
+        // Multi-tab WebView shell (超级智能体 / InfoHub / 超级控制).
+        control_center_web_launch_arguments(no_activate, server_endpoint, instance.as_deref())?
+    } else {
+        control_center_launch_arguments(no_activate, server_endpoint, instance.as_deref())?
+    };
     // Prefer Job breakaway so agent harnesses do not kill CC with the parent
     // Job. When Windows denies breakaway (ERROR_ACCESS_DENIED), fall back to a
     // normal visible spawn — still better than silently opening nothing.
@@ -993,6 +998,33 @@ pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> R
         .spawn()
         .with_context(|| format!("failed to launch {}", executable.display()))?;
     Ok(())
+}
+
+fn is_control_center_web_shell(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let lower = name.to_ascii_lowercase();
+            lower.contains("cc-web") || lower.contains("direct-wry")
+        })
+}
+
+fn control_center_web_launch_arguments(
+    no_activate: bool,
+    server_endpoint: &str,
+    logical_instance: Option<&str>,
+) -> Result<Vec<OsString>> {
+    // Keep product open spelling so logs/CLI stay consistent; the web host
+    // accepts and currently ignores fleet selectors (projection placeholder).
+    let mut arguments = control_center_launch_arguments(no_activate, server_endpoint, logical_instance)?;
+    // Ensure "open" is present for hosts that treat it as the default verb.
+    if arguments
+        .first()
+        .is_none_or(|first| first.to_string_lossy() != "open")
+    {
+        arguments.insert(0, OsString::from("open"));
+    }
+    Ok(arguments)
 }
 
 fn control_center_launch_arguments(
@@ -1723,7 +1755,25 @@ fn available(id: &'static str, label: &'static str, data: Value) -> ViewSnapshot
 
 fn control_center_executable() -> Result<PathBuf> {
     let current = env::current_exe().context("current executable is unavailable")?;
-    Ok(current.with_file_name(crate::platform::paths::control_center_executable_name()))
+    let dir = current
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Prefer the multi-tab WebView shell when staged next to the GUI so the
+    // toolbar Control Center button opens 超级智能体 / InfoHub / 超级控制.
+    // Native agenterm-cc remains the fallback (CLI snapshot/smoke path).
+    let candidates = [
+        crate::platform::filesystem::executable_name("agenterm-cc-web"),
+        crate::platform::filesystem::executable_name("agenterm-cc-web-direct-wry"),
+        crate::platform::paths::control_center_executable_name(),
+    ];
+    for name in candidates {
+        let path = dir.join(name);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    Ok(dir.join(crate::platform::paths::control_center_executable_name()))
 }
 
 fn registry_path() -> PathBuf {

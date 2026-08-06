@@ -4511,9 +4511,12 @@ impl RemoteWindowState {
             .ok_or_else(|| anyhow::anyhow!("server tab `{instance}` is not listed"))?;
         if !row.can_attach {
             anyhow::bail!(
-                "server tab `{}` is {} and cannot be selected (stale registration)",
+                "server tab `{}` is {} — only live servers switch. Start one with: agenterm server --instance {}",
                 row.instance,
-                row.classification
+                row.classification,
+                row.instance
+                    .strip_prefix("custom:")
+                    .unwrap_or(row.instance.as_str())
             );
         }
         let current =
@@ -4612,9 +4615,18 @@ impl RemoteWindowState {
             fill(device, &rect, fill_color);
             frame(device, &rect, palette.active_border.canvas_rgb());
             let label = if row.can_attach {
-                format!("{} · {}", row.instance, row.pid)
+                // Prefer short instance id so chips stay clickable at a glance.
+                let short = row
+                    .instance
+                    .strip_prefix("custom:")
+                    .unwrap_or(row.instance.as_str());
+                format!("{short} · {}", row.pid)
             } else {
-                format!("{} (stale)", row.instance)
+                let short = row
+                    .instance
+                    .strip_prefix("custom:")
+                    .unwrap_or(row.instance.as_str());
+                format!("{short} (stale)")
             };
             draw_text(
                 device,
