@@ -90,21 +90,56 @@ agenterm-base-<ver>-<plat>.zip
   providers/ …
 ```
 
-### 4.2 DI Host API（Base 提供给 pack）
+### 4.2 与现有 Rhai 供应的关系（「host API」是什么、缺什么）
 
-Pack **只能**通过稳定 host 面与 native 交互（类似 LLM gateway 的 `llm.*`，这里是 `app.*` / `ui.*`）：
+**先答：** 对 **自动化 / smoke / 构建 task / 用户脚本**，现有 Script API v2 **已经够用**——`std.*`、`rhai::http`、`fleet.*`（含 `ui.snapshot`、tabs、terminal capture、events、operations 目录）在 `docs/agenterm-rhai-runtime.md` 里已 shipped。
 
-| 域 | Host 职责 | Pack 职责 |
-|----|-----------|-----------|
-| `ui.shell` | 窗口、帧循环、输入泵 | 每帧「要画什么」的 **语义模型** |
-| `ui.render` | 实际 blit/文本行/纹理 | 提交 `lines[]` / scene graph / theme tokens |
-| `fleet.*` | IPC 到 server | 调用 observe/mutate（已有 Script 方向） |
-| `pack.*` | 加载、reload、版本、回滚 | — |
-| `update.*` | 下载、签名校验、用户确认 UI | 无网络策略 |
+**「host API」不是第二套 Rhai，也不是缩减版 runtime。** 它仅指：当 Rhai 从 **「跑完即 exit 的 task」** 变成 **「嵌在 GUI/网关进程里、长生命周期的 product pack」** 时，native 侧还需补的那几条 **嵌入钩子**——仍应 **挂进同一 Script API catalog**，用 `product.*` / `pack.*` / `cc.*` 等稳定 ID，**不**另起权限/profile 体系。
 
-**禁止：** pack 直接 `import` OS API 或绕过 server receipt。
+| 能力域 | 现有 Rhai | App Pack 是否够用 |
+|--------|-----------|-------------------|
+| 读写在册文件、子进程、HTTP | `std::fs` / `process` / `rhai::http` | ✅ 够用 |
+| 观察/变更 Fleet（经 broker） | `fleet.*` | ✅ 自动化够用；❌ **不适合** CC 每帧 UI 热路径（IPC 延迟 + 非 in-process） |
+| 读主 GUI 语义快照 | `fleet.ui.snapshot()` | ✅ 观察够用；❌ 不能 **驱动 CC 绘制** |
+| 侧栏 show/hide | `fleet.ui.tabs.*` | ✅ 主 GUI 侧栏；❌ 不含 CC `hyper_control` / nav |
+| 本地 task 清单 | `agenterm.tasks.json` | ✅ 开发/CI；❌ 不是产品 app pack manifest |
+| Pack 加载 / reload / 版本 | — | ❌ **缺**（需 `pack.*` 或 CLI 等价，native 实现） |
+| 远程 pack 下载 / 签名 / 回滚 | — | ❌ **缺**（需 `update.*` 或 softmgr 契约） |
+| CC 每帧行生成 / 指针 hit 语义 | — | ❌ **缺**（今天 Rust `control_center.rs` 内做；pack 化需 **in-process** `product.cc.present(lines)` 或等价） |
+| LLM 网关 SiteAdapter | — | ❌ **缺** `llm.*`（见 gateway pack 设计；与通用 fleet 无关） |
 
-### 4.3 统一 UX 如何实现（ realistic ）
+**结论：**
+
+1. **不必重写 Rhai**——App Pack 应 **复用** 现有 `std` / `fleet` / `http` / `json` / task 模块机制。  
+2. **缺口是「嵌入模式」+「产品面」**，不是「脚本语言不够」：  
+   - **嵌入**：长驻 Engine、与帧循环/输入泵同进程、reload 不杀 PE；  
+   - **产品面**：CC 呈现契约、pack 生命周期、（可选）LLM `llm.*`。  
+3. 新能力 **增量注册** 到 catalog（与 v0.1.9 以来做法一致），**禁止** 平行搞一套 `app-host-rhai`。
+
+### 4.3 Native 嵌入钩子（仅列缺口，非全量 API）
+
+仅在 App Pack 落地时，向 **同一 catalog** 增补（名称待定，示意）：
+
+| 钩子 | 用途 |
+|------|------|
+| `pack.version()` / `pack.reload()` | 生命周期 |
+| `product.cc.on_frame(ctx) -> lines[]` | CC Native-A 行合成 |
+| `product.cc.on_key` / `on_click` | 与 `ControlCenterKey` 对齐 |
+| `llm.*` | 网关 pack（已另文） |
+
+**Fleet 事实仍走 server**；pack 内可 **调用** `fleet.*`，但 CC 热路径应 **native 缓存 snapshot + pack 只算 presentation**，避免每帧 broker 往返。
+
+### 4.4 DI 分工（修订）
+
+| 域 | Native | Pack（现有 + 少量增补） |
+|----|--------|-------------------------|
+| 窗口/帧循环/绘制 | ✅ | 提交 lines / 状态 |
+| Fleet 变更 | server | `fleet.*` 调用 |
+| Pack/update | ✅ loader | Rhai 业务逻辑 |
+
+**禁止：** pack 直接 OS API；**禁止** 为 pack 单独做「阉割 Rhai」。
+
+### 4.5 统一 UX 如何实现（ realistic ）
 
 Rhai **不能** magic 掉 winit vs Win32。跨平台对齐靠：
 
@@ -138,7 +173,7 @@ Rhai **不能** magic 掉 winit vs Win32。跨平台对齐靠：
 | 坑 | 严重度 | 说明 |
 |----|--------|------|
 | **P1 范围蠕变** | 🔴 | 「整个 GUI 脚本化」→ PTY/渲染延迟、证据门崩溃。**必须写清 pack 边界** |
-| **P2 Host API 冻结成本** | 🟠 | pack 每要用新能力就要 Base 增 API + 发版；与「少发 Base」矛盾 → 需 **前向兼容** host 设计 |
+| **P2 嵌入钩子增量** | 🟠 | 缺口小但 **必须在 Base 注册**（pack/cc/llm）；用 catalog 扩展，勿平行 runtime |
 | **P3 双调试栈** | 🟠 | 生产 bug 在 Rhai 还是 native？需 pack 行号映射、结构化 panic、`app-pack doctor` |
 | **P4 两套 truth 风险** | 🔴 | pack 若缓存 Fleet 状态 → 第二权威。**pack 只投影** server snapshot |
 | **P5 CC 与主 GUI 耦合** | 🟠 | 一个 pack 还是多个（`app.shell` vs `app.control-center`）？建议 **monorepo pack + 模块**，可配置拆分 |
