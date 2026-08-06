@@ -196,6 +196,9 @@ pub mod storage;
 #[cfg(feature = "entropy")]
 pub mod entropy;
 
+// Host-neutral today (std only), so it needs no feature gate or adapter split.
+pub mod local_clock;
+
 #[cfg(feature = "user-identity")]
 pub mod user_identity;
 

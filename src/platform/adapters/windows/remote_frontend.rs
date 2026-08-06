@@ -203,37 +203,24 @@ const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
 /// Local HH:MM:SS for the top-left clock placeholder (Tabs column exclusive).
+///
+/// REVIEW(macos → windows owner): this was an inline `GetLocalTime` behind
+/// `#[link(name = "kernel32")]`. Because `src/platform/adapters/mod.rs` declares
+/// `mod windows` unconditionally, that block was compiled on macOS and Linux
+/// too and broke every non-Windows link with `ld: library 'kernel32' not found`
+/// — invisible to `cargo build --lib`, which is why CI on this branch stayed
+/// green while macOS `cargo test` could not link at all.
+///
+/// `platform::boundary_tests` also forbids `#[cfg(windows)]` here, so gating it
+/// in place is not the fix either: native boundaries belong in
+/// `crates/agenterm-platform/**`. The call now goes through
+/// `agenterm_platform::local_clock`, which all three hosts share.
+///
+/// That facade currently renders UTC and carries a `TODO(windows)` to restore
+/// the real local offset via `GetTimeZoneInformation` — please claim it, since
+/// the Windows strip is the only UI that shows this clock today.
 fn sidebar_local_clock_text() -> String {
-    #[repr(C)]
-    struct SystemTime {
-        year: u16,
-        month: u16,
-        day_of_week: u16,
-        day: u16,
-        hour: u16,
-        minute: u16,
-        second: u16,
-        milliseconds: u16,
-    }
-    // SAFETY: GetLocalTime only writes the provided SYSTEMTIME buffer.
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetLocalTime(time: *mut SystemTime);
-    }
-    let mut time = SystemTime {
-        year: 0,
-        month: 0,
-        day_of_week: 0,
-        day: 0,
-        hour: 0,
-        minute: 0,
-        second: 0,
-        milliseconds: 0,
-    };
-    unsafe {
-        GetLocalTime(&raw mut time);
-    }
-    format!("{:02}:{:02}:{:02}", time.hour, time.minute, time.second)
+    agenterm_platform::local_clock::local_clock_hms()
 }
 
 /// First non-flag token after `ui-action <action>` (for `--name` alternatives).
