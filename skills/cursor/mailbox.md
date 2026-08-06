@@ -22,7 +22,7 @@
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 @ `c6768e7` |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -62,10 +62,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T07:24Z
+### 舰队值班会话 · 2026-08-06T08:23Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-bdaf35b3-b690-4db0-abd9-50cc85eed3e8`
-- URL: https://cursor.com/agents/bc-bdaf35b3-b690-4db0-abd9-50cc85eed3e8
+- bcId: `bc-429b4a77-92fb-43d5-a667-c64a1ac5bd91`
+- URL: https://cursor.com/agents/bc-429b4a77-92fb-43d5-a667-c64a1ac5bd91
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -81,6 +81,7 @@
 
 ## 交接日志
 
+- 2026-08-06T08:23Z · 舰队值班会话(`bc-429b4a77-…`) · duty: noop findings=0 main=c6768e7；未 apply；lock 已清
 - 2026-08-06T07:24Z · 舰队值班会话(`bc-bdaf35b3-…`) · duty: noop findings=0 main=26dae49；未 apply；lock 已清
 - 2026-08-06T06:23Z · 舰队值班会话(`bc-1a5f3cb6-…`) · duty: noop findings=0 main=602503f；未 apply；lock 已清
 - 2026-08-06T05:26Z · 舰队值班会话(`bc-1dee92a9-…`) · duty: noop findings=0 main=531032c；未 apply；lock 已清
