@@ -2541,3 +2541,51 @@ ui-input key --key NAME [--mods shift,ctrl,alt,meta]
    无 fontconfig，非 Debian 系发行版会静默掉到 8x8 点阵字体。
 5. 去中心化网络选型见 `plan/research-decentralized-network.md`（**建议等 CC
    产品形态清楚再动**）。
+
+## 11. OSX ↔ Win UI/UX 差距清单（2026-08-06 晚）
+
+### 11.1 测试基线
+
+`cargo test --lib` **691 绿**。集成套件修好 2 盏因 `7b930b9`（删掉 mux/mcp PE）
+而过期的计数 pin；仍红 2 盏，**实测与本轮改动无关**（把改动 stash 掉照样红）：
+`linux_package`（缺 `dist/agenterm-sbom.spdx.json`）和 `supply_chain`
+（`supply_chain_notice_count`）——都是发布链的，**需要有人认领**。
+
+### 11.2 关键发现：状态机早就是共享的，缺的是 Unix 侧的「画」和「接线」
+
+这轮最重要的结论。逐项实机探过 14 个 `WINDOWS_ONLY_UI_ACTIONS`，
+**macOS 上全部返回 unknown**，是真缺；但源码看下来：
+
+| 共享模块 | 行数 | Win 引用 | Unix 引用 |
+|---|---|---|---|
+| `src/frontend/settings.rs`（`SettingsScope`/`AppearanceField`） | 555 | 有 | **0** |
+| `src/frontend/instance_picker.rs` | 284 | 79 | **1**（只有报错） |
+| `src/frontend/server_strip_ui.rs` | 98 | 1 | **0** |
+
+也就是说**难的部分（状态机）已经在共享层写好了**，Unix 缺的是模态渲染、
+命中测试和 ui-action 接线。这直接影响排期估算——不是「重写一遍」。
+
+### 11.3 建议的 osx 对齐顺序
+
+| 优先级 | 项 | 用户视角缺什么 | 规模 | 理由 |
+|---|---|---|---|---|
+| **1** | Settings 作用域 + 逐字段继承 + reset-overrides（6 个 action） | macOS 用户**无法只改当前终端的外观**，只能改全局；也看不到某个终端的字体/字号/主题是继承还是覆写 | **小–中** | 状态机全在 `settings.rs`，只差一个作用域选择器 UI + 6 个 dispatch 分支。性价比最高 |
+| **2** | Instance picker（6 个 action） | 现在直接给用户看 `"instance picker is Windows-first in this build"` 这句错误 | **大**（纯渲染） | 模型已共享，但 Unix 没有这个模态的渲染骨架 |
+| **3** | Server strip + 右键菜单 + 新建服务器对话框 | 整个「一眼看到多个 server 实例并切换」的 UX 在 macOS 完全没有 | **大** | 几何计算已在 `ui_geometry.rs` 共享（`server_strip_height`），但绘制/输入要从零写 |
+| **4** | `open-instance`（在新窗口打开实例） | 没有它，2 和 3 是死路 | **中** | 缺 Unix 侧的「按实例拉起新 GUI 进程」helper |
+| **5** | macOS 原生菜单 | Unix 只算出 `system_menu_json` 喂给自动化，**没有接到真的 macOS 菜单栏** | **未定** | macOS 习惯是应用级菜单栏而非 Win 的窗口系统菜单，**不能照抄**，建议先做 scoping spike |
+
+### 11.4 反向：Unix 有而 Windows 没有的
+
+- **工作区自动保存**（`unix/frontend/mod.rs:3860-3910`，约每秒 + 关闭时持久化 tab 树/草稿）。
+  `remote_frontend.rs` 里找不到对应调用。但这是架构差异——Windows 那边是瘦客户端，
+  持久化可能在 server 侧，**未确认**，需要 Windows owner 确认后再说是不是缺陷。
+- New-Terminal 对话框的字段级 action（`shell-*`、`new-terminal-set-*`）在 Unix 是
+  一等 ui-action，Windows 用原生控件驱动同一个共享 `NewTerminalDialog`。
+  **不是 Windows 用户的功能缺失**，是驱动方式不同。
+
+### 11.5 决策项
+
+优先级 1 我可以直接开工（改动小、状态机现成、用户可感知）。
+2/3/4 是「要不要把 Windows-first 的多实例 UX 补到 macOS」的**产品排期问题**，
+5 需要先定 macOS 菜单的形态——这三类都**等你拍板**，我不自己定。
