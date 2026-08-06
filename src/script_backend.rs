@@ -4,9 +4,12 @@
 //! The parallel `rh` track (`crates/agenterm-rh`) validates pack subsets,
 //! AOT-compiles to native libraries, and loads them with dlopen.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::script_protocol::ScriptOperation;
+use serde_json::Value;
+
+use crate::script_protocol::{ScriptBudgets, ScriptOperation};
+use crate::script_rh_run::RhRunContext;
 
 /// Active script backend for pack execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,6 +43,13 @@ pub fn rh_backend_enabled() -> bool {
     matches!(ScriptBackend::from_env(), ScriptBackend::Rh)
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RhInvocationOptions {
+    pub project_root: Option<PathBuf>,
+    pub arguments: Option<Value>,
+    pub budgets: Option<ScriptBudgets>,
+}
+
 pub struct RhInvocationResult {
     pub stdout: String,
     pub value: Option<serde_json::Value>,
@@ -48,11 +58,18 @@ pub struct RhInvocationResult {
 pub fn try_execute_rh_invocation(
     operation: ScriptOperation,
     source: &str,
+    options: RhInvocationOptions,
     fleet_bridge: Option<crate::script_rh_host::FleetBridgeFn>,
 ) -> Result<Option<RhInvocationResult>, agenterm_rh::RhError> {
     if !rh_backend_enabled() {
         return Ok(None);
     }
+
+    let run_context = RhRunContext {
+        project_root: options.project_root.clone(),
+        arguments: options.arguments.clone(),
+        budgets: options.budgets.clone(),
+    };
 
     match operation {
         ScriptOperation::Api => Ok(None),
@@ -72,8 +89,11 @@ pub fn try_execute_rh_invocation(
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
             let (pack, native_path) = resolve_rh_pack(source)?;
-            let entry_value =
-                crate::script_rh_host::call_pack_entry_with_host(&native_path, fleet_bridge)?;
+            let entry_value = crate::script_rh_host::call_pack_entry_with_host(
+                &native_path,
+                fleet_bridge,
+                run_context,
+            )?;
             let mut stdout = String::new();
             for line in &pack.cc_lines {
                 stdout.push_str(line);
@@ -81,10 +101,14 @@ pub fn try_execute_rh_invocation(
             }
             Ok(Some(RhInvocationResult {
                 stdout,
-                value: Some(serde_json::Value::from(entry_value)),
+                value: json_value_from_entry(entry_value),
             }))
         }
     }
+}
+
+fn json_value_from_entry(entry_value: i64) -> Option<serde_json::Value> {
+    Some(serde_json::Value::from(entry_value))
 }
 
 fn resolve_rh_pack(
@@ -135,7 +159,7 @@ pub fn rh_load_pack(
 
 #[cfg(test)]
 mod tests {
-    use super::{ScriptBackend, rh_backend_enabled, try_execute_rh_invocation};
+    use super::{ScriptBackend, rh_backend_enabled, try_execute_rh_invocation, RhInvocationOptions};
     use crate::script_protocol::ScriptOperation;
 
     #[test]
@@ -143,9 +167,14 @@ mod tests {
         assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
         assert!(!rh_backend_enabled());
         assert!(
-            try_execute_rh_invocation(ScriptOperation::Check, "fn entry() { 1 }", None)
-                .expect("probe")
-                .is_none()
+            try_execute_rh_invocation(
+                ScriptOperation::Check,
+                "fn entry() { 1 }",
+                RhInvocationOptions::default(),
+                None,
+            )
+            .expect("probe")
+            .is_none()
         );
     }
 }

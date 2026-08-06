@@ -49,6 +49,7 @@ fn fleet_fixture_qualifies_and_calls_host_shim() {
                 .push((operation_id.to_owned(), params.to_owned()));
             Ok("{\"operation_id\":\"protocol.info\"}".to_owned())
         }),
+        agenterm::script_rh_run::RhRunContext::default(),
     )
     .expect("entry");
     assert_eq!(value, 11);
@@ -100,7 +101,12 @@ fn stdlib_fixture_qualifies_with_host_eval() {
     let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
     assert_eq!(receipt.entry_value, 42);
     let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-    let value = agenterm::script_rh_host::call_pack_entry_with_host(&native, None).expect("entry");
+    let value = agenterm::script_rh_host::call_pack_entry_with_host(
+        &native,
+        None,
+        agenterm::script_rh_run::RhRunContext::default(),
+    )
+    .expect("entry");
     assert_eq!(value, 42);
     let _ = std::fs::remove_dir_all(&dir);
 }
