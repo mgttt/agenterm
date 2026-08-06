@@ -3085,7 +3085,8 @@ pub(super) fn sidebar_row_at_y(y: u32, tree_height: u32) -> Option<usize> {
     if y >= tree_height {
         return None;
     }
-    tree_row_at_y(y as i32)
+    // Unix callers pass Y relative to the tree surface origin.
+    tree_row_at_y(y as i32, 0)
 }
 
 pub(super) fn scrollbar_view_from_geometry(

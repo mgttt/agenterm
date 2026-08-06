@@ -1,3 +1,9 @@
+// Windows GUI subsystem: no black console when double-clicked / launched from
+// the main toolbar. CLI diagnostics still work when the process is started
+// with an inherited console (AttachConsole) or via --help/--probe on a console
+// host — see print_cli_line.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use agenterm_cc_web::{
     ASSET_VERSION, CONTENT_SECURITY_POLICY, CONTRACT_VERSION, HostFailure, HostFailureCode,
     HostFailureStage, LOCAL_URL, asset_for_path, canonical_local_path, is_allowed_navigation,
@@ -5,6 +11,7 @@ use agenterm_cc_web::{
 use serde::Serialize;
 use std::borrow::Cow;
 use std::env;
+use std::io::Write;
 use std::process::ExitCode;
 use std::time::Instant;
 use tao::dpi::LogicalSize;
@@ -36,11 +43,31 @@ struct HostReceipt {
     load_complete_ms: Option<u128>,
 }
 
+fn print_cli_line(line: &str) {
+    // GUI-subsystem PE has no console by default. Attach to the parent console
+    // when present so `agenterm-cc-web --help` / `--probe` from a terminal still
+    // print; otherwise fall back to stderr (often discarded) without failing.
+    #[cfg(windows)]
+    {
+        // SAFETY: ATTACH_PARENT_PROCESS is a well-defined AttachConsole pseudo-handle.
+        const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+        unsafe extern "system" {
+            fn AttachConsole(dw_process_id: u32) -> i32;
+        }
+        unsafe {
+            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "{line}");
+    let _ = out.flush();
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!(
-            "AgenTerm Control Center (WebView shell)\n\nUSAGE:\n  agenterm-cc-web [--probe]\n  agenterm-cc-web [open] [--no-activate] [--smoke]\n                 [--server-endpoint ENDPOINT | --endpoint ENDPOINT]\n                 [--logical-instance NAME | --instance NAME]\n\nProduct launch from the main GUI uses the open/--server-endpoint form;\nthis experimental host currently ignores fleet selectors and only shows\nthe packaged multi-tab placeholder (超级智能体 / InfoHub / 超级控制)."
+        print_cli_line(
+            "AgenTerm Control Center (WebView shell)\n\nUSAGE:\n  agenterm-cc-web [--probe]\n  agenterm-cc-web [open] [--no-activate] [--smoke]\n                 [--server-endpoint ENDPOINT | --endpoint ENDPOINT]\n                 [--logical-instance NAME | --instance NAME]\n\nProduct launch from the main GUI uses the open/--server-endpoint form;\nthis experimental host currently ignores fleet selectors and only shows\nthe packaged multi-tab placeholder (超级智能体 / InfoHub / 超级控制).\n\nWindows: PE is a GUI subsystem binary (no black console on open). CLI text\nattaches to the parent console when launched from a terminal.",
         );
         return ExitCode::SUCCESS;
     }
@@ -52,17 +79,17 @@ fn main() -> ExitCode {
             "open" | "--probe" | "--smoke" | "--no-activate" => index += 1,
             "--server-endpoint" | "--endpoint" | "--logical-instance" | "--instance" => {
                 if args.get(index + 1).is_none() {
-                    eprintln!("option {} requires a value", args[index]);
+                    print_cli_line(&format!("option {} requires a value", args[index]));
                     return ExitCode::from(64);
                 }
                 index += 2;
             }
             other if other.starts_with('-') => {
-                eprintln!("unsupported argument: {other}; use --help");
+                print_cli_line(&format!("unsupported argument: {other}; use --help"));
                 return ExitCode::from(64);
             }
             other => {
-                eprintln!("unsupported argument: {other}; use --help");
+                print_cli_line(&format!("unsupported argument: {other}; use --help"));
                 return ExitCode::from(64);
             }
         }
@@ -274,9 +301,8 @@ fn platform_runtime() -> &'static str {
 }
 
 fn print_receipt(receipt: HostReceipt, code: ExitCode) -> ExitCode {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&receipt).expect("receipt serializes")
+    print_cli_line(
+        &serde_json::to_string_pretty(&receipt).expect("receipt serializes"),
     );
     code
 }

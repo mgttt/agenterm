@@ -642,8 +642,15 @@ pub(crate) fn tree_connector_x(depth: usize, sidebar_width: i32, mode: TreeRowMo
     TREE_ANCHOR_LEFT + depth as i32 * responsive_tree_indent(sidebar_width, mode)
 }
 
-pub(crate) fn tree_row_at_y(y: i32) -> Option<usize> {
-    (y >= TAB_TOP).then_some(((y - TAB_TOP) / TAB_HEIGHT) as usize)
+/// Map an absolute client Y into a visible tree row index, or `None` if above
+/// the first row padding inside the tree surface.
+///
+/// `tree_top` is the absolute top of the sidebar tree (below the clock strip
+/// when the multi-server chrome is on). Local row geometry is still measured
+/// from `TAB_TOP` within that surface.
+pub(crate) fn tree_row_at_y(y: i32, tree_top: i32) -> Option<usize> {
+    let local_y = y - tree_top;
+    (local_y >= TAB_TOP).then_some(((local_y - TAB_TOP) / TAB_HEIGHT) as usize)
 }
 
 /// Compatibility geometry for the current host. New host code should use
@@ -755,34 +762,38 @@ pub(crate) fn sidebar_row_capacity(sidebar_tree_height: i32) -> usize {
 pub(crate) fn translate_tree_row_geometry(
     mut geometry: TreeRowGeometry,
     delta_x: i32,
+    delta_y: i32,
 ) -> TreeRowGeometry {
-    fn translate(mut rect: PixelRect, delta: i32) -> PixelRect {
-        rect.left += delta;
-        rect.right += delta;
+    fn translate(mut rect: PixelRect, delta_x: i32, delta_y: i32) -> PixelRect {
+        rect.left += delta_x;
+        rect.right += delta_x;
+        rect.top += delta_y;
+        rect.bottom += delta_y;
         rect
     }
 
-    geometry.row = translate(geometry.row, delta_x);
-    geometry.selection = translate(geometry.selection, delta_x);
+    geometry.row = translate(geometry.row, delta_x, delta_y);
+    geometry.selection = translate(geometry.selection, delta_x, delta_y);
     geometry.node_x += delta_x;
-    geometry.expander = translate(geometry.expander, delta_x);
-    geometry.status = translate(geometry.status, delta_x);
-    geometry.disclosure_hit = translate(geometry.disclosure_hit, delta_x);
-    geometry.text = translate(geometry.text, delta_x);
-    geometry.name = translate(geometry.name, delta_x);
-    geometry.note = translate(geometry.note, delta_x);
+    geometry.node_y += delta_y;
+    geometry.expander = translate(geometry.expander, delta_x, delta_y);
+    geometry.status = translate(geometry.status, delta_x, delta_y);
+    geometry.disclosure_hit = translate(geometry.disclosure_hit, delta_x, delta_y);
+    geometry.text = translate(geometry.text, delta_x, delta_y);
+    geometry.name = translate(geometry.name, delta_x, delta_y);
+    geometry.note = translate(geometry.note, delta_x, delta_y);
     geometry.editors = geometry.editors.map(|mut editors| {
-        editors.name = translate(editors.name, delta_x);
-        editors.note = translate(editors.note, delta_x);
+        editors.name = translate(editors.name, delta_x, delta_y);
+        editors.note = translate(editors.note, delta_x, delta_y);
         editors
     });
-    geometry.actions.bounds = translate(geometry.actions.bounds, delta_x);
+    geometry.actions.bounds = translate(geometry.actions.bounds, delta_x, delta_y);
     geometry.actions.add_child = geometry
         .actions
         .add_child
-        .map(|bounds| translate(bounds, delta_x));
-    geometry.actions.primary = translate(geometry.actions.primary, delta_x);
-    geometry.actions.secondary = translate(geometry.actions.secondary, delta_x);
+        .map(|bounds| translate(bounds, delta_x, delta_y));
+    geometry.actions.primary = translate(geometry.actions.primary, delta_x, delta_y);
+    geometry.actions.secondary = translate(geometry.actions.secondary, delta_x, delta_y);
     geometry
 }
 
@@ -794,9 +805,12 @@ pub(crate) fn sidebar_tree_row_geometry(
 ) -> TreeRowGeometry {
     let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
     let content_width = (sidebar_tree.right - content_left).max(0);
+    // Local row geometry is origin-relative (TAB_TOP…). Shift into the tree
+    // surface so rows sit *below* the clock strip when body_top > 0.
     translate_tree_row_geometry(
         tree_row_geometry_for_mode(viewport_position, depth, content_width, mode),
         content_left,
+        sidebar_tree.top,
     )
 }
 
@@ -1101,6 +1115,10 @@ mod tests {
             layout.workspace_toolbar.expect("toolbar").bounds.top,
             layout.sidebar.top
         );
+        // Painted rows must start at/below the tree top, never under the clock.
+        let first = sidebar_tree_row_geometry(layout.sidebar_tree, 0, 0, TreeRowMode::Normal);
+        assert!(first.row.top >= layout.sidebar_tree.top);
+        assert!(first.row.top >= clock.bottom);
         // Hidden Tabs: strip spans full width, no clock cell.
         let hidden = workspace_layout(WorkspaceLayoutInput {
             client_width: 1000,
@@ -1423,9 +1441,13 @@ mod tests {
         assert!(geometry.disclosure_hit.contains_x(geometry.node_x));
         assert!(geometry.disclosure_hit.contains_x(geometry.node_x - 6));
         assert!(!geometry.disclosure_hit.contains_x(geometry.node_x + 12));
-        assert_eq!(tree_row_at_y(TAB_TOP - 1), None);
-        assert_eq!(tree_row_at_y(TAB_TOP), Some(0));
-        assert_eq!(tree_row_at_y(TAB_TOP + TAB_HEIGHT), Some(1));
+        assert_eq!(tree_row_at_y(TAB_TOP - 1, 0), None);
+        assert_eq!(tree_row_at_y(TAB_TOP, 0), Some(0));
+        assert_eq!(tree_row_at_y(TAB_TOP + TAB_HEIGHT, 0), Some(1));
+        // Tree under a 32px clock strip uses absolute client Y.
+        assert_eq!(tree_row_at_y(32 + TAB_TOP - 1, 32), None);
+        assert_eq!(tree_row_at_y(32 + TAB_TOP, 32), Some(0));
+        assert_eq!(tree_row_at_y(32 + TAB_TOP + TAB_HEIGHT, 32), Some(1));
     }
 
     #[test]
@@ -1780,9 +1802,15 @@ mod tests {
             let content_width = sidebar_tree.right - TERMINAL_SCROLLBAR_WIDTH;
             let untranslated = tree_row_geometry_for_mode(1, MAX_TREE_DEPTH, content_width, mode);
             assert_eq!(deep.node_x, untranslated.node_x + TERMINAL_SCROLLBAR_WIDTH);
+            assert_eq!(deep.node_y, untranslated.node_y + sidebar_tree.top);
             assert_eq!(
                 deep.disclosure_hit,
-                translate_tree_row_geometry(untranslated, TERMINAL_SCROLLBAR_WIDTH).disclosure_hit
+                translate_tree_row_geometry(
+                    untranslated,
+                    TERMINAL_SCROLLBAR_WIDTH,
+                    sidebar_tree.top
+                )
+                .disclosure_hit
             );
         }
     }

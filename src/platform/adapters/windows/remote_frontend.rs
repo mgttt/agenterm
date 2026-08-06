@@ -1969,7 +1969,8 @@ impl RemoteWindowState {
     }
 
     fn sidebar_row_index_at_y(&self, y: i32) -> Option<usize> {
-        tree_row_at_y(y).map(|position| self.sidebar_offset().saturating_add(position))
+        let tree_top = self.workspace_geometry().sidebar_tree.top;
+        tree_row_at_y(y, tree_top).map(|position| self.sidebar_offset().saturating_add(position))
     }
 
     fn settings_snapshot_value(
@@ -4450,24 +4451,30 @@ impl RemoteWindowState {
         };
         let strip = win_rect(strip);
         let count = self.server_tabs.len().max(1) as i32;
-        let available = (strip.width() - MARGIN * 2).max(SERVER_TAB_MIN_WIDTH);
+        // Fit *all* chips: shrink below the preferred min rather than dropping
+        // trailing servers (user must be able to click every listed instance).
+        let gaps = SERVER_TAB_GAP * (count - 1).max(0);
+        let available = (strip.width() - MARGIN * 2 - gaps).max(count);
         let width = (available / count)
-            .clamp(SERVER_TAB_MIN_WIDTH, SERVER_TAB_MAX_WIDTH)
-            .min(available);
+            .clamp(48, SERVER_TAB_MAX_WIDTH)
+            .min(available / count);
         let mut left = strip.left + MARGIN;
         let mut out = Vec::new();
-        for row in &self.server_tabs {
+        for (index, row) in self.server_tabs.iter().enumerate() {
+            let right = if index + 1 == self.server_tabs.len() {
+                // Last chip absorbs remainder so the strip edge stays clean.
+                (strip.right - MARGIN).max(left + width)
+            } else {
+                left + width
+            };
             let rect = ProductPixelRect {
                 left,
                 top: strip.top + 4,
-                right: left + width,
+                right,
                 bottom: strip.bottom - 4,
             };
             out.push((rect, row));
-            left = rect.right + SERVER_TAB_GAP;
-            if left >= strip.right - MARGIN {
-                break;
-            }
+            left = right + SERVER_TAB_GAP;
         }
         out
     }
@@ -4509,15 +4516,20 @@ impl RemoteWindowState {
             })
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("server tab `{instance}` is not listed"))?;
+        let short = row
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(row.instance.as_str());
         if !row.can_attach {
-            anyhow::bail!(
-                "server tab `{}` is {} — only live servers switch. Start one with: agenterm server --instance {}",
-                row.instance,
-                row.classification,
-                row.instance
-                    .strip_prefix("custom:")
-                    .unwrap_or(row.instance.as_str())
-            );
+            // Dead registration: open a new GUI for that instance name so the
+            // strip remains an "enter" control even with no live tabs/owner.
+            self.spawn_gui_for_instance(short)?;
+            self.last_message = Some(format!(
+                "Server `{}` was {}; opened a new window for that instance",
+                row.instance, row.classification
+            ));
+            self.window.request_redraw();
+            return Ok(());
         }
         let current =
             InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
@@ -4531,7 +4543,7 @@ impl RemoteWindowState {
         }
         // Defer rebind so a relayed UI command can complete on the *current*
         // server lease. Mouse clicks flush this immediately (see
-        // `flush_deferred_server_tab_attach`).
+        // `flush_deferred_server_tab_attach`). Empty tab trees still attach.
         self.relay_attach_after_completion = Some((row.endpoint, row.instance));
         Ok(())
     }

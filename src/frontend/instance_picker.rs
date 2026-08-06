@@ -188,20 +188,22 @@ pub(crate) fn collect_instance_picker_rows() -> Result<Vec<InstancePickerRow>, S
         };
         let logical = instance.record.resolved_logical_instance();
         let owner = registration_owner_state(&instance.record);
+        // Enter/switch is allowed whenever the owner process is still alive.
+        // Empty tab trees and flaky protocol probes must not block the strip;
+        // attach itself fails typed if the endpoint is truly unreachable.
+        let alive = instance_process_is_alive(instance.record.pid);
         let (classification, can_attach) = match owner {
-            RegistrationOwnerState::ConfirmedLive { .. }
-                if instance_process_is_alive(instance.record.pid) && protocol_live(&endpoint) =>
-            {
+            RegistrationOwnerState::ConfirmedLive { .. } if alive && protocol_live(&endpoint) => {
                 ("live".to_owned(), true)
             }
             RegistrationOwnerState::ConfirmedLive { .. }
-            | RegistrationOwnerState::OwnerUnknown { .. } => {
-                if instance_process_is_alive(instance.record.pid) {
-                    ("owner-unknown".to_owned(), false)
-                } else {
-                    ("stale".to_owned(), false)
-                }
+            | RegistrationOwnerState::OwnerUnknown { .. }
+                if alive =>
+            {
+                ("live-unverified".to_owned(), true)
             }
+            RegistrationOwnerState::ConfirmedLive { .. }
+            | RegistrationOwnerState::OwnerUnknown { .. } => ("stale".to_owned(), false),
             RegistrationOwnerState::Dead { .. } | RegistrationOwnerState::PidReused { .. } => {
                 ("stale".to_owned(), false)
             }
