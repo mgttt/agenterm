@@ -956,9 +956,13 @@ fn child_id_remains_public_after_process_completion() {
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["value"]["before"], envelope["value"]["after"]);
     assert_eq!(envelope["value"]["state"], "exited");
+    // macOS implements process-window automation too (adapters/macos/process_window.rs
+    // reports supported: true), so this is no longer a Windows-only capability.
+    // Linux has no adapter yet, hence the explicit three-way expectation rather
+    // than cfg!(windows).
     assert_eq!(
         envelope["value"]["window_supported"],
-        serde_json::Value::Bool(cfg!(windows))
+        serde_json::Value::Bool(cfg!(any(windows, target_os = "macos")))
     );
     assert_eq!(envelope["value"]["window_present"], false);
     assert_eq!(envelope["value"]["window_id"], 0);
@@ -1490,9 +1494,11 @@ fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields(
         String::from_utf8_lossy(&canonical.stdout),
         String::from_utf8_lossy(&canonical.stderr)
     );
+    // 78357dd deleted agenterm-server.exe (authority is `agenterm server` now),
+    // taking the manifest from 7 executables to 6 without updating this count.
     assert!(
         String::from_utf8_lossy(&canonical.stdout)
-            .contains("defines 7 validated Windows executables")
+            .contains("defines 6 validated Windows executables")
     );
 
     let root = fixture_root("artifact-manifest");
