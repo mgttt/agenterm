@@ -118,16 +118,29 @@ Ux. Windows residual UX
 
 ```text
 O. Unix multi-instance reachability
-├─ [ ] O-P2 Instance picker（模态 + 6 个 ui-action 接线）
-├─ [ ] O-P4 open-instance / 新窗拉起（含 As Window 语义对齐）
-├─ [ ] O-P3 strip 右键菜单深度（Close / As Window 与 Win 行为契约）
+├─ [x] O-P2 Instance picker（模态 + 6 个 ui-action 接线）
+├─ [x] O-P4 open-instance / 新窗拉起（含 As Window 语义对齐）
+├─ [x] O-P3 strip 右键菜单深度（Close / As Window 与 Win 行为契约）
 └─ [ ] O-evidence macOS 真机：strip 切换 + 第二窗 attach
 ```
 
-- [ ] **O-P2** — 消灭 `"instance picker is Windows-first"` 用户可见死胡同  
-  （shared `instance_picker` 状态机已在；Unix 画 + hit + dispatch）
-- [ ] **O-P4** — Unix 侧 breakaway/spawn helper；**必须** `--ui-client` 对齐 Win
-- [ ] **O-P3** — strip 上下文菜单；z-order 与 Win 同契约（不盖在终端下）
+- [x] **O-P2** — 已消灭。Unix 画 + 6 个 action 接进 **shared `control_dispatch`**
+  （不是 Unix adapter），两端一份实现。实测：6 行、next/prev/select --name
+  可用、confirm 开窗后关闭模态、cancel 关闭；坏名字报
+  `instance \`nosuch\` is not in the picker list`。
+  **`WINDOWS_ONLY_UI_ACTIONS` 归零**（三个提交前是 14），SHARED 58。
+- [x] **O-P4** — `spawn_gui_for_instance` 已落地。路上修了个真 bug：原来同时传
+  `--instance` 和 `--endpoint`，被 `parse_gui_launch_target` 判为冲突选择器，
+  **子进程其实起不来**；现在二选一。
+  ⚠️ **未对齐 `--ui-client`**：Unix 嵌入式 frontend 没有 lease rebind，
+  `As Window` / confirm 一律**开新窗口**而不是原地切换。这是有意的语义差异
+  （假装切换但没切比明确开窗更糟），不是遗漏 —— 要真对齐需要先给 Unix 做 lease。
+- [x] **O-P3** — 右键菜单 `As Window` / `Close` 已上线，菜单最后绘制所以压在
+  strip 和工作区之上。菜单 item bounds 进 `ui-snapshot`，agent 可用
+  `ui-input pointer` 驱动。
+  ⚠️ **Close 没有确认框**：Unix 无 `ModalSurface::ServerClose`，写一半会让用户
+  卡在无法 confirm/cancel 的死状态，所以改为直接执行 + 两道 guard（stale 行、
+  自己的 server 都拒绝，实测 GUI 存活）。已留 `TODO(macos)`。
 - [ ] **O-evidence** — 真机表：切换 instance、As Window、keep-server 后再附着
 
 **禁区**：Lnx 与 OSX **不同时**写 `unix/frontend/**`（继承 0.1.15 §2.2.1）。
