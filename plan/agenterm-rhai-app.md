@@ -243,6 +243,53 @@ Rhai **不能** magic 掉 winit vs Win32。跨平台对齐靠：
 
 **终端网格、ConPTY、server、parser：不在 pack 路线图内。**
 
+### 8.1 占位 pack + 从 Rust 渐进迁移（Strangler，推荐）
+
+**可以，且应这样做。** 第一版 Rhai App Pack 故意 **极小**——验证生命周期与嵌入链路，不承担产品逻辑；Rust 仍是 **source of truth**，pack 逐步「接管线」。
+
+```text
+Phase 0（占位 pack，~几十行 Rhai + 一个 manifest）
+  native CC/GUI 行为 100% 不变
+  pack 只做：pack.version()、noop entry、一次 fleet.protocol.info() 或读 settings JSON
+  证据：cc-snapshot 多字段 app_pack_version；smoke 证明 load/reload 不杀 PTY
+
+Phase 1（接一条竖线）
+  例如：空态 copy / footer 一行 / 某 reason 字符串 从 pack 来；Rust fallback 同文案
+  feature flag：pack 失败 → Rust 路径（永远有 fallback）
+
+Phase 2+（按模块迁）
+  nav 状态机 → hyper_control 分区 → LLM 路由表 …
+  每迁一块：删 Rust 重复 + 黑盒断言不变
+```
+
+| 原则 | 说明 |
+|------|------|
+| **Rust fallback** | pack 编译失败 / panic / 超时 → 当前 Rust 行为；用户无感 |
+| **双路径短存** | 同屏只允许一种 authority；迁移完成再删 Rust 分支 |
+| **先数据后逻辑** | 先迁 JSON/copy/constants，再迁状态机 |
+| **先 CC 后主 GUI** | CC 已是独立 PE + composed lines，最适合 Strangler |
+| **永不迁移** | PTY、parser、server、platform 机制、渲染 blit |
+
+**v0 占位 pack 最小 native 钩子（仅 3 类）：**
+
+1. **loader**：解压/定位 manifest、内嵌 Engine、`pack.version`  
+2. **reload**：CLI `app-pack reload` 或开发 `--watch`（不必 v0 做远程更新）  
+3. **一条回调（可选）**：如 `product.cc.footer_line()` → 一行字符串；无则 Rust 默认  
+
+不必 v0 就上 `on_frame` 全屏。占位跑通后，再 **按 PR 把 Rust 函数改成调 pack**。
+
+**迁移顺序建议：**
+
+```text
+1. footer / version 字符串 / about 文案
+2. unavailable reason → user_message 映射表
+3. CC selected_view 默认值与 nav 标签（仍 native hit-test）
+4. hyper_control 空态分区 copy
+5. layout 行生成（大块，最后与 geometry 测试一起迁）
+```
+
+这与「先 LLM gateway pack、后 CC chrome」可并行：**gateway 不依赖 CC on_frame**。
+
 ---
 
 ## 9. 决策表（帮助拍板）
