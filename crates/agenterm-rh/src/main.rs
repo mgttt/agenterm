@@ -3,7 +3,7 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 use agenterm_rh::{
     RH_VERSION, RhError, build_pack_dir, check, compile_native, hash_file, load_and_call_entry,
     qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory, scan_rhai_directory,
-    transpile, write_receipt, CallerInventoryOptions, CheckManyOptions, CorpusScanOptions,
+    transpile, write_receipt, CallerInventoryOptions, CorpusScanOptions, parse_check_many_cli,
 };
 
 fn main() -> ExitCode {
@@ -157,47 +157,10 @@ fn run() -> Result<(), RhError> {
 }
 
 fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
-    let mut manifest_path = None::<PathBuf>;
-    let mut project_root = PathBuf::from(".");
-    let mut wall_time_ms = agenterm_rh::check_many::DEFAULT_WALL_TIME_MS;
-    let mut json = false;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--manifest" => {
-                manifest_path = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| RhError::Parse("missing path after --manifest".into()))?,
-                ));
-            }
-            "--project-root" => {
-                project_root = PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| RhError::Parse("missing path after --project-root".into()))?,
-                );
-            }
-            "--timeout-ms" => {
-                wall_time_ms = args
-                    .next()
-                    .ok_or_else(|| RhError::Parse("missing value after --timeout-ms".into()))?
-                    .parse()
-                    .map_err(|err| RhError::Parse(format!("timeout-ms: {err}")))?;
-            }
-            "--json" => json = true,
-            other => return Err(RhError::Parse(format!("unknown check-many option `{other}`"))),
-        }
-    }
-    let manifest_path =
-        manifest_path.ok_or_else(|| RhError::Parse("check-many requires --manifest FILE".into()))?;
-    let manifest = read_manifest(&manifest_path)?;
-    let report = run_check_many(
-        manifest,
-        CheckManyOptions {
-            project_root,
-            wall_time_ms,
-            ..CheckManyOptions::default()
-        },
-    );
-    if json {
+    let parsed = parse_check_many_cli(args)?;
+    let manifest = read_manifest(&parsed.manifest_path)?;
+    let report = run_check_many(manifest, parsed.options);
+    if parsed.json {
         let encoded = serde_json::to_string_pretty(&report)
             .map_err(|err| RhError::Parse(err.to_string()))?;
         println!("{encoded}");

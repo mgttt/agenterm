@@ -37,6 +37,7 @@
 | M21 | rh-4：task corpus 扫描器（62 脚本 rh-2/3 校验报告，不强制迁移） | [x] |
 | M22a | M22 预备：`caller-inventory` + `corpus-scan --tasks` 机器可读报告 | [x] |
 | M22b | worker parity：`RhRunContext` args/project_root、`host_eval`/`host_run_script` 注入、framed-worker 黑盒 | [x] |
+| M22c | check-many 薄转发兼容：rhai CLI/manifest kind、bootstrap.cmd 对称、forward 黑盒 | [x] |
 | M22 | 替换轨：`agenterm-rhai` → 薄转发或 rename（需全量 caller 清单 + Candidate 证据） | [ ] |
 
 ---

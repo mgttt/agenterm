@@ -19,7 +19,8 @@ pub use caller_inventory::{
 };
 pub use check::check;
 pub use check_many::{
-    read_manifest, run_check_many, CheckManyManifest, CheckManyOptions, CheckManyReport,
+    parse_check_many_cli, read_manifest, run_check_many, CheckManyManifest, CheckManyOptions,
+    CheckManyReport, ParsedCheckManyCli,
 };
 pub use corpus::{
     extract_task_entries, scan_rhai_directory, scan_relative_files, scan_task_manifest,

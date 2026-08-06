@@ -136,7 +136,7 @@ fi
 # WORKER is rooted under target/ and cannot begin with an option.
 chmod +x "$WORKER"
 RH_SOURCE="$TARGET_ROOT/debug/agenterm-rh"
-if [ -f "$RH_SOURCE" ]; then
+if [ -s "$RH_SOURCE" ]; then
     cp -- "$RH_SOURCE" "$BOOTSTRAP_DIR/agenterm-rh"
     chmod +x "$BOOTSTRAP_DIR/agenterm-rh"
 fi

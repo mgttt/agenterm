@@ -15,6 +15,16 @@ pub const TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_WALL_TIME_MS: u64 = 10_000;
 pub const DEFAULT_SOURCE_BYTES: usize = 512 * 1024;
 
+const RHAI_CHECK_MANIFEST_KIND: &str = "agenterm-rhai-check-manifest";
+const RH_CHECK_MANIFEST_KIND: &str = "agenterm-rh-check-manifest";
+
+#[derive(Debug, Clone)]
+pub struct ParsedCheckManyCli {
+    pub manifest_path: PathBuf,
+    pub options: CheckManyOptions,
+    pub json: bool,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CheckManyManifest {
@@ -71,7 +81,7 @@ pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, RhError> {
     if manifest.schema_version != 1 {
         return Err(RhError::Parse("unsupported manifest schema_version".into()));
     }
-    if manifest.kind != "agenterm-rh-check-manifest" {
+    if manifest.kind != RH_CHECK_MANIFEST_KIND && manifest.kind != RHAI_CHECK_MANIFEST_KIND {
         return Err(RhError::Parse(format!(
             "unexpected manifest kind `{}`",
             manifest.kind
@@ -180,11 +190,103 @@ fn failure(path: String, code: &str, message: String) -> CheckManyFailure {
     }
 }
 
+/// Parse `check-many` argv with rhai-compatible options accepted for thin-forward migration.
+pub fn parse_check_many_cli<I>(mut args: I) -> Result<ParsedCheckManyCli, RhError>
+where
+    I: Iterator<Item = String>,
+{
+    let mut manifest_path = None::<PathBuf>;
+    let mut project_root = PathBuf::from(".");
+    let mut wall_time_ms = DEFAULT_WALL_TIME_MS;
+    let mut source_bytes = DEFAULT_SOURCE_BYTES;
+    let mut json = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--manifest" => {
+                manifest_path = Some(PathBuf::from(next_value(&mut args, "--manifest")?));
+            }
+            "--project-root" => {
+                project_root = PathBuf::from(next_value(&mut args, "--project-root")?);
+            }
+            "--timeout-ms" => {
+                wall_time_ms = next_value(&mut args, "--timeout-ms")?
+                    .parse()
+                    .map_err(|err| RhError::Parse(format!("timeout-ms: {err}")))?;
+            }
+            "--max-output-bytes" => {
+                let value = next_value(&mut args, "--max-output-bytes")?
+                    .parse::<usize>()
+                    .map_err(|err| RhError::Parse(format!("max-output-bytes: {err}")))?;
+                source_bytes = source_bytes.min(value);
+            }
+            "--profile" => {
+                let profile = next_value(&mut args, "--profile")?;
+                if !matches!(profile.as_str(), "local" | "pure" | "observe") {
+                    return Err(RhError::Parse(format!("unknown script profile: {profile}")));
+                }
+            }
+            "--max-operations" | "--max-collection-items" | "--max-string-bytes" => {
+                let _ = next_value(&mut args, arg.as_str())?;
+            }
+            "--json" => json = true,
+            other => return Err(RhError::Parse(format!("unknown check-many option `{other}`"))),
+        }
+    }
+    let manifest_path =
+        manifest_path.ok_or_else(|| RhError::Parse("check-many requires --manifest FILE".into()))?;
+    Ok(ParsedCheckManyCli {
+        manifest_path,
+        options: CheckManyOptions {
+            project_root,
+            wall_time_ms,
+            source_bytes,
+        },
+        json,
+    })
+}
+
+fn next_value<I>(args: &mut I, option: &str) -> Result<String, RhError>
+where
+    I: Iterator<Item = String>,
+{
+    args.next()
+        .ok_or_else(|| RhError::Parse(format!("missing value after {option}")))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{read_manifest, run_check_many, CheckManyOptions};
+    use super::{parse_check_many_cli, read_manifest, run_check_many, CheckManyOptions};
+
+    #[test]
+    fn accepts_rhai_manifest_kind_and_compat_flags() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let manifest_path = repo.join("fixtures/rh/check-many.json");
+        let parsed = parse_check_many_cli(
+            [
+                "--manifest",
+                &manifest_path.display().to_string(),
+                "--profile",
+                "local",
+                "--project-root",
+                &repo.display().to_string(),
+                "--timeout-ms",
+                "10000",
+                "--max-operations",
+                "1000000",
+                "--json",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("parse");
+        let mut manifest = read_manifest(&parsed.manifest_path).expect("manifest");
+        manifest.kind = super::RHAI_CHECK_MANIFEST_KIND.to_owned();
+        let report = run_check_many(manifest, parsed.options);
+        assert!(report.ok, "failures: {:?}", report.failures);
+        assert_eq!(report.checked_files, 7);
+    }
 
     #[test]
     fn fixture_manifest_checks_all_rh_files() {
