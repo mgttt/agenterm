@@ -2171,9 +2171,9 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     assert_eq!(
         String::from_utf8_lossy(&accepted.stdout).trim(),
         concat!(
-            "PASS: PRD aligns with 62 catalog entries, 84 public names, ",
-            "11 protocol features, 41 mux commands, 64 capability IDs, ",
-            "and 91 executable evidence IDs"
+            "PASS: PRD aligns with 68 catalog entries, 96 public names, ",
+            "11 protocol features, 53 mux commands, 66 capability IDs, ",
+            "and 103 executable evidence IDs"
         )
     );
 
