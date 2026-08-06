@@ -23,6 +23,7 @@ pub mod ime;
 pub mod input;
 #[cfg(feature = "ipc")]
 pub mod ipc_transport;
+pub mod local_clock;
 pub mod native_virtualization;
 #[cfg(feature = "process")]
 pub mod process;

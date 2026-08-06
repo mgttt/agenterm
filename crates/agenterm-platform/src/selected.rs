@@ -346,6 +346,18 @@ pub(crate) mod file_identity;
 #[path = "adapters/unix/file_identity.rs"]
 pub(crate) mod file_identity;
 
+#[cfg(windows)]
+#[path = "adapters/windows/local_clock.rs"]
+pub(crate) mod local_clock;
+
+#[cfg(target_os = "linux")]
+#[path = "adapters/linux/local_clock.rs"]
+pub(crate) mod local_clock;
+
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/local_clock.rs"]
+pub(crate) mod local_clock;
+
 #[cfg(all(feature = "font", windows))]
 #[path = "adapters/windows/font.rs"]
 pub(crate) mod font;
