@@ -7,7 +7,7 @@
 
 | 文件 | 角色 |
 |------|------|
-| [`plan-v0.1.15.md`](plan-v0.1.15.md) | **在制版本**工作树（含 L′ 从 0.1.14 迁入的尾账） |
+| [`plan-v0.1.15.md`](plan-v0.1.15.md) | **在制版本**工作树（§一·五 叶 + **§二·二-b 三端泳道派工**；含 L′ 尾账） |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层 / 热文件 / 结构禁令 |
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix **可见行为**差距地图 |
 | [`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) | 平台 UX 证据矩阵（+ template） |

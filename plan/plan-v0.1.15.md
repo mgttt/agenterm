@@ -10,6 +10,10 @@
 
 开工前需人工拍板 §五 5.7 的政策决策项（阻塞关系见 §二·五）。
 
+**三端 agent 并发派工**：见 **§二·二-b**（叶 × 泳道 × 文件域 × 禁区）。  
+不要另开 `plan/orchestrate-*.md`——派工以本文为 SSOT。  
+平台封装 / shared-first 纪律见 `AGENTS.md`、`plan/plan-platform-encapsulation-gap.md`。
+
 ## 数据来源与关键事实（全部实测，可复现）
 
 v0.1.14 发布日 ~10 轮 gate 级遥测，加 2026-08-05 对成功 Candidate
@@ -363,6 +367,8 @@ v0.1.15  Feedback shift-left & release-lane economics
 §一 的 A–H + P + S 共约 30 叶，是多轮追加堆出来的，含大量「观察」而非
 「可执行」。本节是取舍后的定稿：**只列进入 v0.1.15 的叶**，每叶带动机、
 可证伪验收、成本、依赖。未列入者一律见 §二·六（推迟表，含推迟理由）。
+
+**多 agent / 三端怎么并行**：叶仍在本节；**派工与文件域互斥见 §二·二-b**。
 
 选择原则（v0.1.14 教训）：**宁可少而全绿，不要多而半途**——发布日 5–6 小时
 耗在从未跑过的车道上，根因不是做得少，是同时开了太多没验证的面。
@@ -1080,7 +1086,67 @@ L′. v0.1.14 carry-forward
 | 11 | **B5 + M1/M2 文档** | 划清 note/handoff vs send/paste；可与 B2 同 PR |
 | 12 | **S3** | 新窗打开另一 instance；复用 S1 列表 |
 | 13 | **M3 → M4 / U3 / N1** | 后置并行池；S4/U4/B6 默认可砍或 v0.2.x |
-| **OSX 机** | **O0 → O6（复制阻塞）→ O1 → O2 → O3**（§一 O / §十一） | 另一 agent 本机跟进；O6 用户真机痛点优先；O1=N1 macOS 半叶 |
+| **OSX 机** | **O 泳道 + G′ 真机**（详见 §二·二-b / §十一） | 不与 Lnx 同时改 `unix/frontend` 巨石；O6 已关则接 O1b / G |
+
+### 二·二-b 三端并发泳道派工（2026-08-06；Win / OSX / Lnx）
+
+> **先编排、再并发。** 不要三台 agent 同时「对齐 Win 工作台手感」。  
+> 主轴仍是 **R/G/A**（发布与安装）；GUI 三端只做 **有文件域、有 catalog 纪律** 的叶。  
+> 叶定义仍以 **§一·五** 为准；本节只回答 **谁做、碰哪、禁哪、怎么验收**。
+
+#### 1. 总原则
+
+| # | 规则 |
+|---|------|
+| 1 | **一人一热域**：同一时刻同一热文件只一个 agent 写（见下表）。改前 `git pull --ff-only`；pathspec 精确提交；禁止 `git add -A`。 |
+| 2 | **shared-first**：新产品手势先进 `src/frontend/*` / `control_dispatch` / `ui_action_catalog`；单端必须 catalog `WINDOWS_ONLY`/`UNIX_ONLY` + `parity-gap:`。禁止「Win 先做完再让 OSX/Lnx 抄 match」。 |
+| 3 | **机制进 crate**：OS 能力只改 `crates/agenterm-platform`；产品层不硬编码 `ERROR_ACCESS_DENIED` / 散装 native（boundary + breakaway 闸）。 |
+| 4 | **unix/frontend 单写者**：OSX 与 Lnx **不得**同时改 `src/platform/adapters/unix/frontend/**`。默认 **Unix 产品主责 = OSX 机 agent**；Lnx 做复验 / 环境 / Linux-only adapter。 |
+| 5 | **R/A 泳道独占**：workflow / cache / qualification 改动 **一人** 串行做完 R1→R2→A4…，另端不抢 `.github/workflows/*`。 |
+| 6 | **S 结构 HOLD**：`plan/ARCHITECTURE.md` 大重构 / boundary 扩围栏等用户通知 + §九 复审后再开。 |
+| 7 | **推送**：小步 `main`；冲突热文件让写者 rebase；观察 Actions 遵守 `AGENTS.md`（单 observer、退避，勿多 agent 狂刷 API）。 |
+
+#### 2. 泳道表（可直接派工）
+
+| 泳道 | 主机 / agent | 叶（优先序） | 文件域（可写） | 禁区 / 备注 |
+|------|--------------|--------------|---------------|-------------|
+| **CI-R** | 任意一台，**独占一人** | §二·二 序 1–3、6：**R1→R2→A4→R3/A3→R4** | `.github/workflows/*`、`scripts/rhai/check*.rhai`、qualification / cache 相关声明 | 不碰 GUI 巨石；R4 自身是新车道须 dry-run 自证 |
+| **G-install** | **优先 OSX**（§八真机）；Lnx 可选复验 | **G3→G7a→G2→G6**（与 R 正交并行） | `install.sh`、version / `installed.json` 写出路径、相关 docs | **不**改 keep-server 默认（G7b/c/d 等 G-P2）；G7a 纯文案可先做 |
+| **Win-UX** | **Windows agent** | **U2** 真机回归；**P0-3** breakaway 若仍欠；用户现场 Win-only 痛点；B′/M 文档若排期到 | `windows/remote_frontend*` 最小 diff；已 SHARED 的只改 present | 新 ui-action 先 catalog；strip/picker 深度仍 Win-first，Unix 不默默假实现 |
+| **Unix-UX** | **OSX agent 主责**（单写 `unix/frontend`） | **O1b** 状态栏 IME（已拍板）；§十一余叶；对 **SHARED** 的诚实接线 / 真机 | `unix/frontend/**`、`adapters/macos/**`、共享 `frontend/*` 仅当语义真共享 | **禁止**复刻 server-strip 全量当本版必做；读 `ui_action_catalog` WINDOWS_ONLY 的 `parity-gap` |
+| **Lnx-env** | **Linux agent** | **F1/F2** 环境快照（可不进 PR）；Linux adapter / smoke 复验；**不**开第二套产品策略 | 云桌面依赖、DPI、`adapters/linux/**`、CI 复现笔记 | **不写** `unix/frontend/mod.rs` 巨石除非 Unix-UX 交接写权；Wine 不能替真机 ConPTY |
+| **S-struct** | — | **HOLD** | — | 用户通知后再开 §九 |
+
+#### 3. 推荐并发波形（2–3 条即可）
+
+```text
+时间 →
+  CI-R:     [R1][R2][A4][R3|A3]……[R4]
+  G-install:[==== G3 → G7a → G2 → G6 ====]     （OSX 真机）
+  Win-UX:   [U2 真机][P0-3?][现场叶]
+  Unix-UX:  [O1b][O 余叶 / SHARED 接线真机]
+  Lnx-env:  [F1/F2][Linux smoke 复验]          （不与 Unix-UX 抢 frontend）
+```
+
+- **H4 / H1 / H3** 仍按 §二·二 序 4、7：CI-R 或 Win 独占，**勿**与 R1 抢同一 workflow 文件同时写。  
+- **S′ S1–S4** 已落地：本派工表不重开；Unix strip/picker 属 **parity 产品叶**，非 CI 阻塞，默认不进本版强制三端齐。  
+- **U1** 代码已落：Win-UX 只做 **U2 真机**；U3/U4 工期紧可砍（§一·五）。
+
+#### 4. 接手 agent 开工检查单（每台复制）
+
+1. `git pull --ff-only origin main`；读 **§一·五 自己泳道的叶** + 本表禁区。  
+2. 读 `AGENTS.md`（Platform crate vs product UI / shared-first）与 `plan/plan-platform-encapsulation-gap.md`。  
+3. 声明本回合 **pathspec 热区**（聊天或 PR 描述一行）；与他泳道冲突则让路。  
+4. 验证：本叶写明的验收；GUI 叶须真机或黑盒，不只 `cargo check`。  
+5. 小步 commit + push；不扩 scope 到 HOLD / 推迟表（§二·六）。
+
+#### 5. 与 §十一（OSX 作业规格）的关系
+
+- §十一 = **macOS 本机上下文与 O 组细节**。  
+- 本小节 = **三端怎么并行、谁不抢谁**。  
+- OSX agent：§十一 工序 + 本表 **G-install + Unix-UX**。  
+- Lnx agent：本表 **Lnx-env**（+ 若 Unix-UX 明确交权才动 frontend）。  
+- Win agent：本表 **Win-UX + 可选 CI-R（若未另派）**。
 
 ### 二·三 明确不做速度优化的部分
 
@@ -1567,6 +1633,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **goal-crate-platform 执行**：P0 边界 SSOT（platform README / ARCHITECTURE §1.0 / AGENTS Platform crate vs product UI）；P1 gap 表 `plan-platform-encapsulation-gap.md` + **G1 收口** `spawn_breakaway_visible_*`（去产品侧 `ERROR_ACCESS_DENIED=5`）；P2 catalog 纪律测；P3 执行句式 |
 | 2026-08-06 | **goal-crate-platform 加深**：G6 纠正 catalog——`control_dispatch` 已实现的 24 个动词从 WINDOWS_ONLY 升 SHARED（防「假 parity-gap」）；G7 `open-new-terminal` Win 接线并升 SHARED；G2 script/worker spawn 审计证伪；G1 回归测禁产品硬编码 `raw_os_error==5`；WINDOWS_ONLY 余 17 条按 strip/settings/font 分组 `parity-gap` |
 | 2026-08-06 | **goal-crate-platform 封装完结（contract）**：G8 `font-decrease`/`font-increase`/`toggle-locale` Unix 补 ui-action 并升 SHARED（方法本已存在）；gap 文写「完结定义」+ G3/G4 标 out-of-goal residual；WINDOWS_ONLY 余 14=strip/picker+settings-scope（产品叶非 OS 泄漏）；成功清单在 `goal-crate-platform.md` 勾选 |
+| 2026-08-06 | **三端并发派工写入本文 §二·二-b**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§一·五 与 §十一 指针回链 |
 
 ---
 
@@ -1574,8 +1641,9 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 
 > **给接手 agent 的完整上下文。** 用户本机：macOS aarch64（曾验证 macOS 26.5 + 微信输入法 TIS）。  
 > 仓库：`agenterm`，分支 `main`（派发时 HEAD 约 `b15b145`，开工前务必 `git pull`）。  
-> 目标树入口：**§一 O 组**；契约 SSOT：`plan/ARCHITECTURE.md`。  
-> **不做**：Windows IME 文件、发布链 R/H 核心、S 组结构大重构（HOLD）、T2 粘贴。
+> 目标树入口：**§一 O 组** + 收敛叶 **§一·五**；三端并行派工 **§二·二-b**（G-install + Unix-UX）。  
+> 契约 SSOT：`plan/ARCHITECTURE.md`；shared-first：`AGENTS.md` + `ui_action_catalog`。  
+> **不做**：Windows IME 文件、发布链 R/H 核心（归 CI-R 泳道）、S 组结构大重构（HOLD）、T2 粘贴。
 
 ### 11.1 分工（避免撞车）
 
