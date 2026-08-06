@@ -76,7 +76,8 @@ use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
 use crate::frontend::instance_picker::{InstancePickerRow, collect_instance_picker_rows};
 use crate::frontend::server_strip_ui::{
-    SERVER_TABS_REFRESH, StripRect, layout_server_add_chip, layout_server_tab_chips,
+    SERVER_TABS_REFRESH, ServerCloseConfirm, ServerContextAction, ServerTabContextMenu, StripRect,
+    layout_server_add_chip, layout_server_context_menu, layout_server_tab_chips,
     server_tab_chip_label,
 };
 use crate::frontend::interaction::{
@@ -347,13 +348,19 @@ fn spawn_gui_for_instance(instance: &str, endpoint: Option<&str>) -> Result<u32,
     let short = instance.strip_prefix("custom:").unwrap_or(instance);
     let mut command = std::process::Command::new(exe);
     command
-        .arg("--instance")
-        .arg(short)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    if let Some(endpoint) = endpoint {
-        command.arg("--endpoint").arg(endpoint);
+    // `--endpoint` and `--instance` are conflicting selectors and the launch
+    // parser rejects both together, so prefer the row's live endpoint when we
+    // have one and fall back to the name otherwise.
+    match endpoint {
+        Some(endpoint) => {
+            command.arg("--endpoint").arg(endpoint);
+        }
+        None => {
+            command.arg("--instance").arg(short);
+        }
     }
     command
         .spawn()
@@ -678,6 +685,10 @@ struct UnixApp {
     server_tabs: Vec<InstancePickerRow>,
     /// Next time `refresh_server_tabs_if_due` may re-scan the registry.
     server_tabs_refresh_after: Instant,
+    /// Right-click menu on a server chip: `As Window` and `Close`.
+    server_tab_context_menu: Option<ServerTabContextMenu>,
+    /// Pending destructive close, awaiting confirmation.
+    pending_server_close: Option<ServerCloseConfirm>,
     /// Set while the pointer is down inside the composer text, so pointer
     /// motion extends the selection instead of being forwarded to the
     /// terminal's mouse protocol.
@@ -791,6 +802,8 @@ impl UnixApp {
             composer_cursor: TextCursor::default(),
             server_tabs: collect_instance_picker_rows().unwrap_or_default(),
             server_tabs_refresh_after: Instant::now(),
+            server_tab_context_menu: None,
+            pending_server_close: None,
             composer_selection_dragging: false,
             composer_click: None,
             text_field_select_all: false,
@@ -1311,6 +1324,232 @@ impl UnixApp {
                 )
             })
             .collect()
+    }
+
+    /// Opens the chip context menu at the pointer, anchored under the chip.
+    fn open_server_tab_context_menu(&mut self, x: i32, y: i32, row: &InstancePickerRow) {
+        if self.focus_gate().full_modal_blocked() {
+            return;
+        }
+        self.server_tab_context_menu = Some(ServerTabContextMenu {
+            instance: row.instance.clone(),
+            endpoint: row.endpoint.clone(),
+            can_attach: row.can_attach,
+            origin_x: x,
+            origin_y: y,
+        });
+        self.request_redraw();
+    }
+
+    fn dismiss_server_tab_context_menu(&mut self) -> bool {
+        if self.server_tab_context_menu.take().is_some() {
+            self.request_redraw();
+            return true;
+        }
+        false
+    }
+
+    /// Menu frame plus the `As Window` and `Close` item rects.
+    fn server_context_menu_geometry(
+        &self,
+    ) -> Option<(
+        crate::ui_geometry::PixelRect,
+        crate::ui_geometry::PixelRect,
+        crate::ui_geometry::PixelRect,
+    )> {
+        let menu = self.server_tab_context_menu.as_ref()?;
+        let (client_width, client_height) = self.client_size();
+        let client_right = i32::try_from(client_width).unwrap_or(i32::MAX);
+        let client_bottom = i32::try_from(client_height).unwrap_or(i32::MAX);
+        // Anchor under the owning chip while it is still on screen, so the menu
+        // reads as belonging to that chip rather than floating at the cursor.
+        let anchor_left = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(_, row)| row.instance == menu.instance)
+            .map(|(rect, _)| rect.left);
+        let (frame, as_window, close) = layout_server_context_menu(
+            menu.origin_x,
+            menu.origin_y,
+            client_right,
+            client_bottom,
+            anchor_left,
+        );
+        let to_rect = |r: StripRect| crate::ui_geometry::PixelRect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        };
+        Some((to_rect(frame), to_rect(as_window), to_rect(close)))
+    }
+
+    fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
+        let (_, as_window, close) = self.server_context_menu_geometry()?;
+        if as_window.contains(x, y) {
+            return Some(ServerContextAction::NewWindow);
+        }
+        if close.contains(x, y) {
+            return Some(ServerContextAction::Close);
+        }
+        None
+    }
+
+    /// Handles a click while the context menu is open.
+    ///
+    /// Returns whether the click was consumed. A click outside the menu only
+    /// dismisses it and is *not* consumed, so the same press still reaches the
+    /// strip or workbench underneath -- matching how native menus behave.
+    fn handle_server_context_menu_click(&mut self, x: i32, y: i32) -> bool {
+        let Some((frame, _, _)) = self.server_context_menu_geometry() else {
+            return false;
+        };
+        if !frame.contains(x, y) {
+            self.dismiss_server_tab_context_menu();
+            return false;
+        }
+        let action = self.server_context_action_at(x, y);
+        let Some(menu) = self.server_tab_context_menu.take() else {
+            return true;
+        };
+        match action {
+            Some(ServerContextAction::NewWindow) => {
+                if let Err(error) = self.select_server_tab_by_instance(&menu.instance) {
+                    self.set_status_message(error);
+                }
+            }
+            Some(ServerContextAction::Close) => self.open_server_close_confirm(menu),
+            None => {}
+        }
+        self.request_redraw();
+        true
+    }
+
+    /// Shuts the target server down over IPC.
+    ///
+    /// Closing the server this window is attached to would strand the GUI, so
+    /// that case is refused rather than half-performed; the user can close the
+    /// window itself instead.
+    fn shutdown_server_instance(&mut self, pending: &ServerCloseConfirm) -> Result<(), String> {
+        if !pending.can_attach {
+            return Err(format!(
+                "server `{}` is not live and cannot be shut down from the strip",
+                pending.instance
+            ));
+        }
+        if pending.endpoint == crate::client::ipc_address() {
+            return Err(format!(
+                "`{}` is this window's own server; close the window instead",
+                pending.instance
+            ));
+        }
+        use crate::ipc_endpoint::IpcEndpoint;
+        let parsed = pending
+            .endpoint
+            .parse::<IpcEndpoint>()
+            .map_err(|error| format!("invalid endpoint {}: {error}", pending.endpoint))?;
+        let previous = crate::client::resolved_ipc_endpoint().ok();
+        let short = pending
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(pending.instance.as_str());
+        // Pin the client selectors at the peer for one request, then always put
+        // them back so this window keeps its own attachment even on failure.
+        crate::frontend_server::pin_client_peer_for_gui(&parsed, Some(short))?;
+        let shutdown = crate::client::send_ipc_request(vec!["shutdown".to_owned()]);
+        if let Some(previous) = previous.as_ref() {
+            let _ = crate::frontend_server::pin_client_peer_for_gui(
+                &previous.endpoint,
+                Some(&previous.logical_instance.canonical_name()),
+            );
+        }
+        let response = shutdown.map_err(|error| format!("{error:#}"))?;
+        if !response.ok {
+            return Err(format!(
+                "shutdown of `{}` failed: {}",
+                pending.instance, response.error
+            ));
+        }
+        Ok(())
+    }
+
+    /// Closes the server behind a chip.
+    ///
+    /// Windows stages this behind its own confirm modal. Unix has no
+    /// `ServerClose` modal surface yet, and wiring a pending state with no way
+    /// to confirm or cancel would strand the user, so this acts directly and
+    /// relies on `shutdown_server_instance` to refuse the two dangerous cases
+    /// (a stale row, and this window's own server).
+    ///
+    /// TODO(macos): add the confirm modal for parity once Unix grows a
+    /// `ModalSurface::ServerClose`, so an accidental click on a *live* peer is
+    /// recoverable rather than immediate.
+    fn open_server_close_confirm(&mut self, menu: ServerTabContextMenu) {
+        if !menu.can_attach {
+            // A stale registration has no live owner to shut down; saying so
+            // beats a confirm that could only fail.
+            self.set_status_message(format!(
+                "Server `{}` is not live; nothing to close",
+                menu.instance
+            ));
+            return;
+        }
+        self.pending_server_close = Some(ServerCloseConfirm {
+            instance: menu.instance,
+            endpoint: menu.endpoint,
+            can_attach: menu.can_attach,
+        });
+        if let Err(error) = self.finish_server_close_confirm(true) {
+            self.set_status_message(error);
+        }
+    }
+
+    fn finish_server_close_confirm(&mut self, confirm: bool) -> Result<(), String> {
+        let Some(pending) = self.pending_server_close.take() else {
+            return Ok(());
+        };
+        if !confirm {
+            self.request_redraw();
+            return Ok(());
+        }
+        let instance = pending.instance.clone();
+        let result = self.shutdown_server_instance(&pending);
+        self.server_tabs = collect_instance_picker_rows().unwrap_or_default();
+        self.server_tabs_refresh_after = Instant::now() + SERVER_TABS_REFRESH;
+        self.request_redraw();
+        match result {
+            Ok(()) => {
+                self.set_status_message(format!("Server `{instance}` closed"));
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Opens the chip menu on a right-click inside the strip.
+    ///
+    /// Returns whether the press was consumed, so a right-click on chrome never
+    /// reaches the terminal's mouse reporting.
+    fn handle_server_strip_secondary_click(&mut self, x: i32, y: i32) -> bool {
+        let Some(strip) = self.layout().server_strip else {
+            return false;
+        };
+        if !strip.contains(x, y) {
+            return false;
+        }
+        let row = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(chip, _)| chip.contains(x, y))
+            .map(|(_, row)| row.clone());
+        match row {
+            Some(row) => self.open_server_tab_context_menu(x, y, &row),
+            // Right-clicking empty strip background just closes any open menu.
+            None => {
+                self.dismiss_server_tab_context_menu();
+            }
+        }
+        true
     }
 
     /// Routes a click in the top strip to a chip or the add button.
@@ -2634,6 +2873,15 @@ impl UnixApp {
                                 "bounds": pixel_rect_json(chip),
                             }))
                             .collect::<Vec<_>>(),
+                        // Menu item bounds so an agent can drive `As Window` /
+                        // `Close` with `ui-input pointer`, as a human does.
+                        "menu": self.server_context_menu_geometry().map(
+                            |(frame, as_window, close)| serde_json::json!({
+                                "bounds": pixel_rect_json(frame),
+                                "as_window": pixel_rect_json(as_window),
+                                "close": pixel_rect_json(close),
+                            }),
+                        ),
                         "add": pixel_rect_json({
                             let add = layout_server_add_chip(StripRect {
                                 left: strip.left,
@@ -3051,6 +3299,9 @@ impl UnixApp {
 
     fn handle_content_click(&mut self, x: f64, y: f64) {
         if self.handle_window_close_click(x, y) {
+            return;
+        }
+        if self.handle_server_context_menu_click(x as i32, y as i32) {
             return;
         }
         if self.handle_server_strip_click(x as i32, y as i32) {
@@ -4539,6 +4790,13 @@ impl UnixApp {
                 bottom: strip.bottom,
             });
             render::ServerStripView {
+                menu: self.server_context_menu_geometry().map(
+                    |(frame, as_window, close)| render::ServerStripMenuView {
+                        frame: u32_rect(frame),
+                        as_window: u32_rect(as_window),
+                        close: u32_rect(close),
+                    },
+                ),
                 bounds: u32_rect(strip),
                 chips,
                 add: u32_rect(crate::ui_geometry::PixelRect {
@@ -6049,6 +6307,14 @@ impl UnixApp {
                     .unwrap_or(self.last_cursor);
                 match state {
                     PointerButtonState::Pressed => {
+                        // Chrome wins over terminal mouse reporting: a
+                        // right-click on the server strip must open its menu,
+                        // not travel to the shell as an SGR report.
+                        if button == PointerButton::Right
+                            && self.handle_server_strip_secondary_click(x as i32, y as i32)
+                        {
+                            return;
+                        }
                         if self.forward_terminal_mouse(x, y, Some(code), true, false) {
                             self.mouse_report_button = Some(code);
                         }

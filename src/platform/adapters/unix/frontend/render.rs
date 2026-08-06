@@ -1547,6 +1547,14 @@ pub(super) struct ServerStripView {
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) chips: Vec<ServerStripChipView>,
     pub(super) add: (u32, u32, u32, u32),
+    /// Open chip context menu: frame, `As Window` item, `Close` item.
+    pub(super) menu: Option<ServerStripMenuView>,
+}
+
+pub(super) struct ServerStripMenuView {
+    pub(super) frame: (u32, u32, u32, u32),
+    pub(super) as_window: (u32, u32, u32, u32),
+    pub(super) close: (u32, u32, u32, u32),
 }
 
 fn render_server_strip(
@@ -1607,6 +1615,35 @@ fn render_server_strip(
         "+",
         palette.text,
     );
+    // The menu is drawn last so it sits above the strip and the workbench.
+    if let Some(menu) = strip.menu.as_ref() {
+        let (fx, fy, fw, fh) = menu.frame;
+        fill_rect(buffer, stride, fx, fy, fw, fh, rgb_to_pixel(palette.composer));
+        fill_rect(buffer, stride, fx, fy, fw, 1, rgb_to_pixel(palette.divider));
+        fill_rect(
+            buffer,
+            stride,
+            fx,
+            fy + fh.saturating_sub(1),
+            fw,
+            1,
+            rgb_to_pixel(palette.divider),
+        );
+        for (rect, label) in [(menu.as_window, "As Window"), (menu.close, "Close")] {
+            let (ix, iy, iw, ih) = rect;
+            draw_text(
+                buffer,
+                stride,
+                width,
+                height,
+                ix + 8,
+                iy + ih.saturating_sub(12) / 2,
+                label,
+                palette.text,
+            );
+            let _ = iw;
+        }
+    }
 }
 
 fn render_workspace_toolbar(
