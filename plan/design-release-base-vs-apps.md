@@ -74,6 +74,7 @@
 | `app.control-center-web` | WebView 壳 + `assets/`（research → 可选 App） | host ~521KiB 级 + assets | 高（UI 壳） |
 | `app.llm-gateway` | `agenterm-llm-gateway` + browser worker | 独立预算 | 中（Native Shell） |
 | `app.llm-gateway-pack` | Rhai Logic Pack | 小（KiB–MiB） | **很高**（站点适配） |
+| `app.agenterm-rhai`（讨论） | 统一 Rhai 产品层 `.agp` | 中 | 高；见 `plan/agenterm-rhai-app.md` |
 | `app.skins-builtin` | 四预设皮肤 | 小 | 低 |
 | （远期）`app.softmgr-ui` | 包管理 UI | TBD | 低 |
 

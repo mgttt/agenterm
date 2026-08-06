@@ -13,7 +13,7 @@
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
-| 执行计划 | CC → `design-cc-hyper-control-agent.md`；LLM → `design-llm-bridge-web-to-api.md`；**发布分轨** → `design-release-base-vs-apps.md` |
+| 执行计划 | CC/LLM/发布：`design-*`；**Rhai App Pack 讨论** → `plan/agenterm-rhai-app.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
 | `origin/main` | tip `26dae49`；含 CC 超控设计稿 + mailbox 登记 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
@@ -88,7 +88,7 @@
 - 2026-08-06T03:22Z · 舰队值班会话(`bc-8af14925-…`) · duty: noop findings=0 main=195103a；未 apply；lock 已清
 - 2026-08-06T02:23Z · 舰队值班会话(`bc-07d1aea6-…`) · duty: noop findings=0 main=0ae2c2f；未 apply；lock 已清
 - 2026-08-06T01:26Z · 舰队值班会话(`bc-98ea34bf-…`) · duty: noop findings=0 main=06c76b2；未 apply；lock 已清
-- 2026-08-06T00:52Z · 主控1(`bc-a4df769a-…`) · 换防完成；主控2 待命；CI=`31060999962` 观察中
+- 2026-08-06T08:22Z · 主控1 · `plan/agenterm-rhai-app.md`：Thin Base + Rhai App Pack 可行性讨论稿
 - 2026-08-06T00:51Z · 主控2(`bc-05b7c357-…`) · 已 spawn 主控1=`bc-a4df769a-…`；CI 重跑=`31060999962` @ `f3b95a5`；本席 IDLE
 - 2026-08-06T00:49Z · 主控2(`bc-05b7c357-…`) · 准备换防；Wry>Tauri 体积结论已写入 plan/evidence
 - 2026-08-06T00:26Z · 舰队值班会话(`bc-0c498e8e-…`) · duty: noop findings=0 main=da25929；未 apply；lock 已清
