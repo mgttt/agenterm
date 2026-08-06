@@ -331,6 +331,7 @@ Facade 读写作 **server 投影**；Rhai/pack **不得** 持久化 Fleet truth 
 - 架构三层：`plan/ARCHITECTURE.md` §1.0
 - Script 契约：`prd/PRD_02_10_rhai_scripting.md`
 - **行业对照（Lua/Python/Node/Bun）：** `plan/design-scripting-boundary-comparison.md`
+- **挤压深度研究（D0–D9）：** `plan/research-rhai-kernel-depth.md`
 - Agent 纪律：`AGENTS.md`（unrestricted runtime ≠ 无边界 Facade）
 
 ---
