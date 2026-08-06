@@ -118,7 +118,21 @@ const KEY_F9: u16 = 0x78;
 const KEY_F10: u16 = 0x79;
 const KEY_F11: u16 = 0x7a;
 const KEY_F12: u16 = 0x7b;
-const DOUBLE_CLICK_MS: u64 = 500;
+/// Multi-click grouping window for the terminal's own click chain.
+///
+/// REVIEW(macos → windows owner): this was a second `const DOUBLE_CLICK_MS = 500`,
+/// duplicating the one the Unix frontend used to carry. Both now read shared
+/// input policy so the two frontends cannot drift apart silently.
+///
+/// The value is still a fixed default on every host. Windows can do better than
+/// macOS/Linux here, because `GetDoubleClickTime()` returns the user's setting
+/// directly — see the `TODO(windows)` in `src/platform/policy/input.rs`. Worth
+/// claiming: the native `EDIT` composer already honours the real system setting
+/// (the OS owns its click handling), so today the composer and the terminal in
+/// the same window can disagree about what counts as a double-click.
+fn double_click_ms() -> u64 {
+    crate::platform::multi_click_interval_ms()
+}
 
 const EDIT_ID: ControlId = ControlId(2101);
 const SEND_ID: ControlId = ControlId(2102);
@@ -288,6 +302,20 @@ fn product_rect(rect: ControlPixelRect) -> ProductPixelRect {
     }
 }
 
+/// REVIEW(macos → windows owner): composer gesture parity.
+///
+/// The composer here is a native `EDIT` control, so the OS supplies caret
+/// placement, drag-select and double-click word-select for free. Win32 `EDIT`
+/// has no triple-click "select line" gesture, and nothing in this file adds
+/// one, so a Windows user who triple-clicks the composer gets nothing while
+/// macOS/Linux select the whole line.
+///
+/// The Unix side implements this over a platform-neutral model in
+/// `src/frontend/text_selection.rs` (`TextCursor`, `word_bounds`, `line_bounds`,
+/// `shift_extend_anchor`) — all pure text logic with no OS dependency, and unit
+/// tested for CJK/emoji char-vs-byte offsets. `line_bounds` plus an `EM_SETSEL`
+/// is likely the whole fix; the model is deliberately reusable rather than
+/// Unix-specific.
 fn remote_control_specs() -> Vec<ControlSpec> {
     let button = |id, text, visible| control_spec(id, ControlKind::Button, text, visible);
     let edit = |id, multiline, visible| {
@@ -5794,7 +5822,7 @@ impl RemoteWindowState {
         if self.recent_terminal_click.as_ref().is_some_and(|click| {
             click.tab_id == tab_id
                 && click.point == point
-                && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+                && now.duration_since(click.at) <= Duration::from_millis(double_click_ms())
         }) {
             self.recent_terminal_click = None;
             let cells = self.active_tab().map(|tab| screen_cells(&tab.screen));
@@ -5804,7 +5832,7 @@ impl RemoteWindowState {
             if let Some((start, end)) = selected {
                 self.set_completed_terminal_selection(tab_id.clone(), rows, columns, start, end);
                 self.terminal_double_click = now
-                    .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
+                    .checked_add(Duration::from_millis(double_click_ms()))
                     .map(|expires_at| RemoteTerminalDoubleClick {
                         tab_id: tab_id.clone(),
                         point,

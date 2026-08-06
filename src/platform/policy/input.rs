@@ -55,6 +55,10 @@ pub(crate) fn terminal_shortcut_empty_copy_action_is_suppressed() -> bool {
 /// TODO(macos): read `NSEvent.doubleClickInterval` instead of the default.
 /// TODO(linux): read `org.gnome.desktop.peripherals.mouse double-click` (and
 /// the KDE equivalent) instead of the default.
+/// TODO(windows): read `GetDoubleClickTime()`. This one is user-visible today:
+/// the composer is a native `EDIT` control whose click handling the OS owns, so
+/// it already follows the real setting while the terminal beside it follows
+/// this constant — one window, two different double-click speeds.
 #[allow(dead_code)]
 pub(crate) fn multi_click_interval_ms() -> u64 {
     DEFAULT_MULTI_CLICK_INTERVAL_MS
