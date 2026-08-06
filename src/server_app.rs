@@ -367,15 +367,26 @@ impl ServerState {
         Ok(())
     }
 
-    fn reap_stale_ui_lease(&mut self, now_unix_ms: u64) {
-        if let Some((record, reason)) = self
-            .ui_lease
-            .reap_stale(now_unix_ms, instance_process_is_alive)
-        {
+    fn clear_ui_client_snapshot_for(&mut self, lease_id: &str, client_pid: u32) {
+        if self.ui_client_snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.lease_id == lease_id && snapshot.client_pid == client_pid
+        }) {
             self.ui_client_snapshot = None;
             self.ui_client_commands.clear_active();
+        }
+    }
+
+    fn reap_stale_ui_lease(&mut self, now_unix_ms: u64) {
+        let removed = self
+            .ui_lease
+            .reap_stale(now_unix_ms, instance_process_is_alive);
+        let reaped = !removed.is_empty();
+        for (record, reason) in removed {
+            self.clear_ui_client_snapshot_for(&record.lease_id, record.client_pid);
             self.commit_ui_lease_event(&record, "detached", reason);
-            self.commit_window_visibility(false, true, reason);
+        }
+        if reaped && self.ui_lease.is_empty() {
+            self.commit_window_visibility(false, true, "leases-empty");
         }
     }
 
@@ -502,8 +513,8 @@ impl ServerState {
                 {
                     Ok((record, created)) => {
                         if created {
-                            self.ui_client_snapshot = None;
-                            self.ui_client_commands.clear_active();
+                            // Concurrent GUIs are allowed; do not wipe another
+                            // client's published snapshot when a peer attaches.
                             self.commit_ui_lease_event(&record, "attached", "requested");
                             self.commit_window_visibility(true, false, "lease-attached");
                         }
@@ -557,10 +568,11 @@ impl ServerState {
                 };
                 match self.ui_lease.detach(lease_id, client_pid) {
                     Ok(record) => {
-                        self.ui_client_snapshot = None;
-                        self.ui_client_commands.clear_active();
+                        self.clear_ui_client_snapshot_for(&record.lease_id, record.client_pid);
                         self.commit_ui_lease_event(&record, "detached", "requested");
-                        self.commit_window_visibility(false, true, "detach");
+                        if self.ui_lease.is_empty() {
+                            self.commit_window_visibility(false, true, "detach");
+                        }
                         let position = self.event_journal.position();
                         IpcResponse::success(
                             serde_json::json!({
@@ -569,6 +581,7 @@ impl ServerState {
                                 "client_id": record.client_id,
                                 "client_pid": record.client_pid,
                                 "client_build": record.client_build,
+                                "remaining_leases": self.ui_lease.leases().len(),
                                 "position": {
                                     "server_epoch": position.epoch,
                                     "sequence": position.sequence,
@@ -624,10 +637,28 @@ impl ServerState {
             "status" => {
                 let position = self.event_journal.position();
                 let active = self.ui_lease.active();
+                let clients: Vec<serde_json::Value> = self
+                    .ui_lease
+                    .leases()
+                    .iter()
+                    .map(|record| {
+                        serde_json::json!({
+                            "lease_id": record.lease_id,
+                            "client_id": record.client_id,
+                            "client_pid": record.client_pid,
+                            "client_build": record.client_build,
+                            "expires_unix_ms": record.expires_unix_ms,
+                            "observed_sequence": record.observed_sequence,
+                        })
+                    })
+                    .collect();
                 IpcResponse::success(
                     serde_json::json!({
                         "schema_version": UI_LEASE_SCHEMA_VERSION,
-                        "attached": active.is_some(),
+                        "attached": !clients.is_empty(),
+                        "client_count": clients.len(),
+                        "clients": clients,
+                        // First client fields retained for older status consumers.
                         "client_id": active.map(|record| record.client_id.as_str()),
                         "client_pid": active.map(|record| record.client_pid),
                         "client_build": active.and_then(|record| record.client_build.as_ref()),
@@ -951,10 +982,11 @@ impl ServerState {
                         Ok(record) => record,
                         Err(error) => return Self::ui_lease_failure(error),
                     };
-                    self.ui_client_snapshot = None;
-                    self.ui_client_commands.clear_active();
+                    self.clear_ui_client_snapshot_for(&record.lease_id, record.client_pid);
                     self.commit_ui_lease_event(&record, "detached", "requested");
-                    self.commit_window_visibility(false, true, "detach");
+                    if self.ui_lease.is_empty() {
+                        self.commit_window_visibility(false, true, "detach");
+                    }
                     let position = self.event_journal.position();
                     if response.ok
                         && let Ok(mut value) =

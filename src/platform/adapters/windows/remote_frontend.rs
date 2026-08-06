@@ -4938,21 +4938,19 @@ impl RemoteWindowState {
             }
             Err(error) => {
                 let message = error.to_string();
-                // Interactive GUI lease is single-owner (PRD). Do not spawn a twin that
-                // cannot attach — restore this window and bring the owner forward.
+                restore_previous(self);
+                // Concurrent interactive GUIs are allowed. On attach failure still
+                // offer open/focus so the strip never looks dead.
                 if message.contains("rejected replaceable UI")
                     || message.contains("rejected")
                     || message.contains("ui_lease_conflict")
-                    || message.contains("another live UI client")
                 {
-                    restore_previous(self);
                     self.focus_existing_or_spawn_instance_gui(instance, endpoint)?;
                     self.server_recovery.on_reconnected(Instant::now());
                     self.refresh_window_title();
                     self.window.request_redraw();
                     return Ok(());
                 }
-                restore_previous(self);
                 anyhow::bail!("attach to {instance} failed: {message}");
             }
         }
@@ -5008,58 +5006,35 @@ impl RemoteWindowState {
         })
     }
 
-    /// As Window / focus path: one interactive GUI lease per server (PRD).
-    /// Prefer bringing the existing owner forward; only spawn when nobody holds it.
+    /// As Window: always open another interactive GUI for the instance.
+    /// Multiple concurrent GUI leases on one server are allowed.
     fn focus_existing_or_spawn_instance_gui(
         &mut self,
         instance: &str,
         endpoint: &str,
     ) -> Result<()> {
         let short = instance.strip_prefix("custom:").unwrap_or(instance);
-        let current =
-            InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid));
-        if current.as_ref().is_some_and(|id| {
-            id.instance == instance
-                || id.instance.strip_prefix("custom:") == Some(short)
-                || id.instance.ends_with(&format!("_{short}"))
-                || id.instance == short
-        }) {
-            // This window already owns the interactive projection for that server.
-            let _ = self.window.focus();
-            self.last_message = Some(format!(
-                "This window is already the interactive GUI for `{short}` \
-                 (one replaceable UI lease per server; CLI/mux still share the authority)"
-            ));
-            self.window.request_redraw();
-            return Ok(());
-        }
-        if let Some(pid) = Self::query_ui_lease_owner_pid(endpoint) {
-            if pid == std::process::id() {
-                let _ = self.window.focus();
-                self.last_message = Some(format!(
-                    "This process already holds the interactive GUI for `{short}`"
-                ));
-                self.window.request_redraw();
-                return Ok(());
-            }
-            match Self::activate_gui_process(pid) {
-                Ok(()) => {
+        let _ = endpoint;
+        // Prefer a new window so the same server can be projected in multiple
+        // GUIs at once (multi-lease). Foreground existing owners only when spawn
+        // fails hard (e.g. process launch denied).
+        match self.spawn_gui_for_instance(short) {
+            Ok(()) => Ok(()),
+            Err(spawn_error) => {
+                if let Some(pid) = Self::query_ui_lease_owner_pid(endpoint)
+                    && pid != std::process::id()
+                    && Self::activate_gui_process(pid).is_ok()
+                {
                     self.last_message = Some(format!(
-                        "Server `{short}` already has an interactive GUI (PID {pid}); \
-                         brought that window forward (this window stays on its server)"
+                        "Could not start a new window ({spawn_error:#}); \
+                         brought existing GUI PID {pid} forward for `{short}`"
                     ));
                     self.window.request_redraw();
                     return Ok(());
                 }
-                Err(error) => {
-                    // Stale lease / no HWND — fall through and try a fresh GUI.
-                    self.last_error = Some(format!(
-                        "Could not foreground existing GUI PID {pid}: {error:#}; starting a new window"
-                    ));
-                }
+                Err(spawn_error)
             }
         }
-        self.spawn_gui_for_instance(short)
     }
 
     fn spawn_gui_for_instance(&mut self, instance: &str) -> Result<()> {
@@ -9014,11 +8989,14 @@ mod tests {
         );
         assert!(
             source.contains("focus_existing_or_spawn_instance_gui"),
-            "As Window / busy-server attach must focus existing interactive lease owner"
+            "As Window must open or fall back to an instance GUI path"
         );
         assert!(
-            source.contains("query_ui_lease_owner_pid"),
-            "must read ui-lease status client_pid without stealing the lease"
+            source.contains("Multiple concurrent GUI leases")
+                || source.contains("multiple concurrent")
+                || source.contains("multi-lease")
+                || source.contains("concurrent interactive GUIs"),
+            "product path must not reintroduce exclusive single-GUI messaging"
         );
     }
 

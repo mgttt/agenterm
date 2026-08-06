@@ -47,7 +47,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     GUI PID/HWND reconnects across a server epoch restart. Default launch,
     full workbench parity, previous-compatible-GUI rollback and zero-orphan
     cleanup are qualified.
-  - [x] ordinary `agenterm.exe` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
+  - [x] ordinary `agenterm.exe` starts or connects to the independent headless authority, acquires an interactive lease (concurrent GUIs allowed) with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
     - [x] GUI-triggered Windows autostart now uses the same platform-facade
       breakaway/no-window contract as CLI autostart. The complete public
       replaceable-UI journey proves `Keep Server Running` survives an owning

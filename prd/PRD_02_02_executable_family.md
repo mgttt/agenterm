@@ -43,7 +43,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     `agenterm server` as a separate process of the same PE, then connects
     through the same typed loopback control boundary instead of becoming the
     server itself
-    - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
+    - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires an interactive lease (concurrent with other GUIs) with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
       - [x] Windows GUI server autostart reuses the platform process facade so
         the independent authority has null stdio, no console window, and breaks
         away from a caller-owned kill-on-close Job. A v0.1.12 live regression
@@ -96,13 +96,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       contracts through public loopback IPC; the replaceable GUI consumes them
       and reconnects after epoch restart. A dedicated subscription channel is
       a future transport optimization, not a correctness dependency.
-  - [x] one interactive UI lease owns terminal resize/focus/input while future
-    read-only observers remain possible; replacing or crashing the GUI releases
-    only that lease and never ends PTYs
-    - [x] `ui-lease attach|heartbeat|detach|status` provides single-live-owner
-      identity: matching attach renews idempotently, another live PID conflicts,
-      and an exited or expired owner can be recovered without ending PTYs
-    - [x] the dedicated `ui-interact` path requires the exact live lease for
+  - [x] concurrent interactive UI leases may share terminal resize/focus/input
+    on one server (bounded capacity); replacing or crashing one GUI releases
+    only that client's lease and never ends PTYs
+    - [x] `ui-lease attach|heartbeat|detach|status` provides multi-client
+      interactive GUI leases: matching attach renews that client idempotently,
+      additional live PIDs attach concurrently (not exclusive single-owner),
+      capacity overflow is the only conflict, and exited/expired leases reaped
+      without ending PTYs
+    - [x] the dedicated `ui-interact` path requires a live lease for
       stable-ID active-tab selection, bounded binary terminal input and bounded
       PTY resize; independent typed automation remains a separate control plane
     - [x] the ordinary replaceable GUI consumer acquires and uses that path; it

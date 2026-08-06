@@ -1,8 +1,17 @@
+//! Interactive replaceable-UI leases for GUI clients.
+//!
+//! Multiple live GUI clients may hold concurrent leases on the same server.
+//! Each lease is identified by `lease_id` and verified by matching `client_pid`.
+//! CLI / mux / Control Center do not use this lease surface.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{UpgradeIdentity, ui_bridge::UI_CLIENT_ID_MAX_BYTES};
 
 pub(crate) const UI_LEASE_TTL_MS: u64 = 5_000;
+
+/// Soft upper bound on concurrent interactive GUI leases per server.
+pub(crate) const UI_LEASE_MAX_CLIENTS: usize = 16;
 
 static NEXT_LEASE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -21,6 +30,7 @@ pub(crate) enum UiLeaseError {
     InvalidClientId,
     InvalidClientPid,
     InvalidLeaseId,
+    /// Capacity only — not "another owner blocks you".
     Conflict,
     NotAttached,
     OwnerMismatch,
@@ -61,9 +71,9 @@ impl UiLeaseError {
             Self::InvalidClientId => "UI lease client ID is empty, oversized, or contains controls",
             Self::InvalidClientPid => "UI lease client PID must identify a live nonzero process",
             Self::InvalidLeaseId => "UI lease ID is empty, oversized, or contains controls",
-            Self::Conflict => "another live UI client currently owns the interactive lease",
-            Self::NotAttached => "no live UI client currently owns the interactive lease",
-            Self::OwnerMismatch => "UI lease ID or client PID does not match the current owner",
+            Self::Conflict => "too many concurrent interactive UI leases on this server",
+            Self::NotAttached => "no live UI lease matches the supplied identity",
+            Self::OwnerMismatch => "UI lease ID or client PID does not match a live lease",
             Self::InvalidObservedSequence => {
                 "UI observed sequence must advance monotonically within the current journal"
             }
@@ -73,12 +83,21 @@ impl UiLeaseError {
 
 #[derive(Debug, Default)]
 pub(crate) struct UiLeaseAuthority {
-    active: Option<UiLeaseRecord>,
+    leases: Vec<UiLeaseRecord>,
 }
 
 impl UiLeaseAuthority {
+    /// First live lease if any (status / visibility convenience).
     pub(crate) fn active(&self) -> Option<&UiLeaseRecord> {
-        self.active.as_ref()
+        self.leases.first()
+    }
+
+    pub(crate) fn leases(&self) -> &[UiLeaseRecord] {
+        &self.leases
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.leases.is_empty()
     }
 
     pub(crate) fn verify_owner(
@@ -87,13 +106,31 @@ impl UiLeaseAuthority {
         client_pid: u32,
     ) -> Result<&UiLeaseRecord, UiLeaseError> {
         validate_lease_id(lease_id)?;
-        let Some(active) = self.active.as_ref() else {
-            return Err(UiLeaseError::NotAttached);
-        };
-        if active.lease_id != lease_id || active.client_pid != client_pid {
-            return Err(UiLeaseError::OwnerMismatch);
-        }
-        Ok(active)
+        self.leases
+            .iter()
+            .find(|lease| lease.lease_id == lease_id && lease.client_pid == client_pid)
+            .ok_or(if self.leases.is_empty() {
+                UiLeaseError::NotAttached
+            } else {
+                UiLeaseError::OwnerMismatch
+            })
+    }
+
+    fn find_mut(
+        &mut self,
+        lease_id: &str,
+        client_pid: u32,
+    ) -> Result<&mut UiLeaseRecord, UiLeaseError> {
+        validate_lease_id(lease_id)?;
+        let empty = self.leases.is_empty();
+        self.leases
+            .iter_mut()
+            .find(|lease| lease.lease_id == lease_id && lease.client_pid == client_pid)
+            .ok_or(if empty {
+                UiLeaseError::NotAttached
+            } else {
+                UiLeaseError::OwnerMismatch
+            })
     }
 
     pub(crate) fn attach(
@@ -107,12 +144,17 @@ impl UiLeaseAuthority {
         if client_pid == 0 {
             return Err(UiLeaseError::InvalidClientPid);
         }
-        if let Some(active) = self.active.as_mut() {
-            if active.client_id == client_id && active.client_pid == client_pid {
-                active.client_build = client_build;
-                active.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
-                return Ok((active.clone(), false));
-            }
+        // Renew exact client identity (same GUI process).
+        if let Some(existing) = self
+            .leases
+            .iter_mut()
+            .find(|lease| lease.client_id == client_id && lease.client_pid == client_pid)
+        {
+            existing.client_build = client_build;
+            existing.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
+            return Ok((existing.clone(), false));
+        }
+        if self.leases.len() >= UI_LEASE_MAX_CLIENTS {
             return Err(UiLeaseError::Conflict);
         }
         let sequence = NEXT_LEASE_ID.fetch_add(1, Ordering::Relaxed);
@@ -129,7 +171,7 @@ impl UiLeaseAuthority {
             expires_unix_ms: now_unix_ms.saturating_add(UI_LEASE_TTL_MS),
             observed_sequence: 0,
         };
-        self.active = Some(record.clone());
+        self.leases.push(record.clone());
         Ok((record, true))
     }
 
@@ -139,15 +181,9 @@ impl UiLeaseAuthority {
         client_pid: u32,
         now_unix_ms: u64,
     ) -> Result<UiLeaseRecord, UiLeaseError> {
-        validate_lease_id(lease_id)?;
-        let Some(active) = self.active.as_mut() else {
-            return Err(UiLeaseError::NotAttached);
-        };
-        if active.lease_id != lease_id || active.client_pid != client_pid {
-            return Err(UiLeaseError::OwnerMismatch);
-        }
-        active.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
-        Ok(active.clone())
+        let lease = self.find_mut(lease_id, client_pid)?;
+        lease.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
+        Ok(lease.clone())
     }
 
     pub(crate) fn detach(
@@ -156,13 +192,16 @@ impl UiLeaseAuthority {
         client_pid: u32,
     ) -> Result<UiLeaseRecord, UiLeaseError> {
         validate_lease_id(lease_id)?;
-        let Some(active) = self.active.as_ref() else {
-            return Err(UiLeaseError::NotAttached);
-        };
-        if active.lease_id != lease_id || active.client_pid != client_pid {
-            return Err(UiLeaseError::OwnerMismatch);
-        }
-        Ok(self.active.take().expect("active UI lease was checked"))
+        let position = self
+            .leases
+            .iter()
+            .position(|lease| lease.lease_id == lease_id && lease.client_pid == client_pid)
+            .ok_or(if self.leases.is_empty() {
+                UiLeaseError::NotAttached
+            } else {
+                UiLeaseError::OwnerMismatch
+            })?;
+        Ok(self.leases.remove(position))
     }
 
     pub(crate) fn acknowledge(
@@ -173,35 +212,38 @@ impl UiLeaseAuthority {
         current_sequence: u64,
         now_unix_ms: u64,
     ) -> Result<UiLeaseRecord, UiLeaseError> {
-        validate_lease_id(lease_id)?;
-        let Some(active) = self.active.as_mut() else {
-            return Err(UiLeaseError::NotAttached);
-        };
-        if active.lease_id != lease_id || active.client_pid != client_pid {
-            return Err(UiLeaseError::OwnerMismatch);
-        }
-        if observed_sequence < active.observed_sequence || observed_sequence > current_sequence {
+        let lease = self.find_mut(lease_id, client_pid)?;
+        if observed_sequence < lease.observed_sequence || observed_sequence > current_sequence {
             return Err(UiLeaseError::InvalidObservedSequence);
         }
-        active.observed_sequence = observed_sequence;
-        active.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
-        Ok(active.clone())
+        lease.observed_sequence = observed_sequence;
+        lease.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
+        Ok(lease.clone())
     }
 
+    /// Reap every stale lease; returns detached records with reasons.
     pub(crate) fn reap_stale(
         &mut self,
         now_unix_ms: u64,
         mut process_is_alive: impl FnMut(u32) -> bool,
-    ) -> Option<(UiLeaseRecord, &'static str)> {
-        let active = self.active.as_ref()?;
-        let reason = if active.expires_unix_ms <= now_unix_ms {
-            "expired"
-        } else if !process_is_alive(active.client_pid) {
-            "client_exited"
-        } else {
-            return None;
-        };
-        self.active.take().map(|record| (record, reason))
+    ) -> Vec<(UiLeaseRecord, &'static str)> {
+        let mut removed = Vec::new();
+        self.leases.retain(|lease| {
+            let reason = if lease.expires_unix_ms <= now_unix_ms {
+                Some("expired")
+            } else if !process_is_alive(lease.client_pid) {
+                Some("client_exited")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                removed.push((lease.clone(), reason));
+                false
+            } else {
+                true
+            }
+        });
+        removed
     }
 }
 
@@ -241,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn one_live_client_owns_and_idempotently_renews_the_lease() {
+    fn multiple_live_clients_may_attach_concurrently() {
         let mut authority = UiLeaseAuthority::default();
         let (first, created) = authority.attach("gui-a", 42, None, 1_000).unwrap();
         assert!(created);
@@ -249,10 +291,13 @@ mod tests {
         assert!(!created);
         assert_eq!(renewed.lease_id, first.lease_id);
         assert!(renewed.expires_unix_ms > first.expires_unix_ms);
-        assert_eq!(
-            authority.attach("gui-b", 43, None, 2_000),
-            Err(UiLeaseError::Conflict)
-        );
+
+        let (second, created) = authority.attach("gui-b", 43, None, 2_000).unwrap();
+        assert!(created);
+        assert_ne!(second.lease_id, first.lease_id);
+        assert_eq!(authority.leases().len(), 2);
+        assert!(authority.verify_owner(&first.lease_id, 42).is_ok());
+        assert!(authority.verify_owner(&second.lease_id, 43).is_ok());
     }
 
     #[test]
@@ -277,6 +322,7 @@ mod tests {
     fn heartbeat_and_detach_require_the_exact_owner() {
         let mut authority = UiLeaseAuthority::default();
         let (lease, _) = authority.attach("gui", 42, None, 1_000).unwrap();
+        let (other, _) = authority.attach("gui-b", 43, None, 1_000).unwrap();
         assert_eq!(
             authority.heartbeat(&lease.lease_id, 43, 2_000),
             Err(UiLeaseError::OwnerMismatch)
@@ -288,7 +334,8 @@ mod tests {
             Err(UiLeaseError::OwnerMismatch)
         );
         assert_eq!(authority.detach(&lease.lease_id, 42).unwrap(), renewed);
-        assert!(authority.active().is_none());
+        assert_eq!(authority.leases().len(), 1);
+        assert_eq!(authority.active().map(|l| l.lease_id.as_str()), Some(other.lease_id.as_str()));
     }
 
     #[test]
@@ -332,18 +379,34 @@ mod tests {
     }
 
     #[test]
-    fn expired_or_dead_clients_are_recoverable_without_stealing_a_live_lease() {
+    fn expired_or_dead_clients_are_reaped_independently() {
         let mut authority = UiLeaseAuthority::default();
-        let (lease, _) = authority.attach("gui", 42, None, 1_000).unwrap();
-        assert!(authority.reap_stale(2_000, |_| true).is_none());
+        let (live, _) = authority.attach("gui-live", 42, None, 1_000).unwrap();
+        let (dead, _) = authority.attach("gui-dead", 43, None, 1_000).unwrap();
+        // Only pid 43 is dead; do not reap by expiry yet.
+        let removed = authority.reap_stale(1_500, |pid| pid != 43);
+        assert_eq!(removed, vec![(dead, "client_exited")]);
+        assert_eq!(authority.leases().len(), 1);
         assert_eq!(
-            authority.reap_stale(2_000, |_| false),
-            Some((lease.clone(), "client_exited"))
+            authority.active().map(|l| l.lease_id.as_str()),
+            Some(live.lease_id.as_str())
         );
-        let (replacement, _) = authority.attach("gui-b", 43, None, 2_000).unwrap();
+        let removed = authority.reap_stale(live.expires_unix_ms, |_| true);
+        assert_eq!(removed, vec![(live, "expired")]);
+        assert!(authority.is_empty());
+    }
+
+    #[test]
+    fn capacity_bounds_concurrent_leases() {
+        let mut authority = UiLeaseAuthority::default();
+        for index in 0..UI_LEASE_MAX_CLIENTS {
+            authority
+                .attach(&format!("gui-{index}"), 100 + index as u32, None, 1_000)
+                .unwrap();
+        }
         assert_eq!(
-            authority.reap_stale(replacement.expires_unix_ms, |_| true),
-            Some((replacement, "expired"))
+            authority.attach("gui-overflow", 999, None, 1_000),
+            Err(UiLeaseError::Conflict)
         );
     }
 }
