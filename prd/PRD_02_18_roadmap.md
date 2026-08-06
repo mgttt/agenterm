@@ -313,7 +313,7 @@ track remains planned, but every declared dependency must still pass.
 - [~] M0 cross-version boundaries and baselines: typed control operations,
   sidecar protocol boundaries, binary size/startup, compatibility corpus, and
   artifact provenance remain prerequisites consumed by later tracks
-- [x] M1 fleet CLI: ship `agenterm-mux.exe` from the existing supported
+- [x] M1 fleet CLI: ship `agenterm-cli mux` from the existing supported
   tmux/RMUX command surface and generated compatibility matrix
 - [ ] M2 shell gate: prototype `agenterm-bash.exe`, select and license the
   real Bash runtime strategy, then pass clean-machine terminal tests
@@ -406,7 +406,7 @@ track remains planned, but every declared dependency must still pass.
     of build, quality, black-box, qualification, packaging, and approved
     release semantics; platform entry points only bootstrap and forward
     arguments/exit status
-  - [x] ship `agenterm-mcp.exe` as an on-demand stdio sidecar pinned to one
+  - [x] ship `agenterm-cli mcp` as an on-demand stdio sidecar pinned to one
     stable MCP protocol revision; offline discovery declares exact methods,
     resources, tools, limits, schemas, and unavailable future roles
   - [x] expose only metadata-safe instance, workspace, tab, and causal Fleet

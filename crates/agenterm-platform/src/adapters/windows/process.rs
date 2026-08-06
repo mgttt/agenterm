@@ -6,20 +6,41 @@ use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo};
 
 pub(crate) fn write_parent_console_stderr(message: &str) -> bool {
+    write_parent_console(message, true)
+}
+
+pub(crate) fn write_parent_console_stdout(message: &str) -> bool {
+    write_parent_console(message, false)
+}
+
+fn write_parent_console(message: &str, to_stderr: bool) -> bool {
     use std::{fs::OpenOptions, io::Write as _};
     use windows_sys::Win32::{
         Foundation::INVALID_HANDLE_VALUE,
         System::Console::{
             ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetStdHandle, STD_ERROR_HANDLE,
+            STD_OUTPUT_HANDLE,
         },
     };
 
     let payload = format!("{message}\n");
-    let stderr_handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
-    if !stderr_handle.is_null() && stderr_handle != INVALID_HANDLE_VALUE {
-        let mut stderr = std::io::stderr().lock();
-        if stderr.write_all(payload.as_bytes()).is_ok() && stderr.flush().is_ok() {
-            return true;
+    let std_handle = if to_stderr {
+        STD_ERROR_HANDLE
+    } else {
+        STD_OUTPUT_HANDLE
+    };
+    let handle = unsafe { GetStdHandle(std_handle) };
+    if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+        if to_stderr {
+            let mut stream = std::io::stderr().lock();
+            if stream.write_all(payload.as_bytes()).is_ok() && stream.flush().is_ok() {
+                return true;
+            }
+        } else {
+            let mut stream = std::io::stdout().lock();
+            if stream.write_all(payload.as_bytes()).is_ok() && stream.flush().is_ok() {
+                return true;
+            }
         }
     }
     if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {

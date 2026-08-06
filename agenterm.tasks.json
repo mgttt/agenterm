@@ -791,7 +791,7 @@
       "entry": "scripts/rhai/fleet-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-mux.exe", "--skip-event-load"],
+      "args": [".", "dist/agenterm-cli.exe", "--skip-event-load"],
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
@@ -1007,7 +1007,7 @@
       "entry": "scripts/rhai/prd-alignment.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli", "dist/agenterm-mux"],
+      "args": [".", "dist/agenterm-cli"],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["process_spawn"]

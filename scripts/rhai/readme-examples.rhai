@@ -126,9 +126,9 @@ if !skip_probes {
     }
 
     let mux = std::process::command(
-        std::path::join(artifact_root, "agenterm-mux.exe").display
+        std::path::join(artifact_root, "agenterm-cli.exe").display
     );
-    mux.args(["compatibility", "--json"]);
+    mux.args(["mux", "compatibility", "--json"]);
     mux.env("AGENTERM_NO_ACTIVATE", "1");
     mux.timeout(std::time::Duration::from_secs(10));
     let mux_output = mux.output();

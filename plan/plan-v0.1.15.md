@@ -411,14 +411,16 @@ v0.1.15  Feedback shift-left & release-lane economics
     `qualification-gates.json` 声明同步（fail-closed 不破）
   - **成本**：小；**依赖**：无
   - **PRD 核对**：已 grep，无任何 PRD 要求它必须在 release 门（见 §2.7）
-- [ ] **R4 promotion dry-run**（新增叶，v0.1.14 直接教训）
+- [x] **R4 promotion dry-run**（新增叶，v0.1.14 直接教训）
   - **动机**：`release.yml` 首跑即藏 4 个缺陷；dry-run 可在几十秒内
     暴露其中 4/8
   - **做法**：加 `-f dry_run=true`，跑完 verify 全部断言但不建 tag/release
+  - **落地**：`release.yml` 增加 boolean `dry_run`；verify 接受
+    `dry-run-publish-vX.Y.Z`；`publish` job `if: inputs.dry_run != true`。
+    **真跑 dry_run 需人工 dispatch**（本波只合配置）。
   - **验收**：`dry_run=true` 跑完 verify 且仓库无新 tag、无新 draft
   - **成本**：中；**依赖**：无
-  - ⚠️ **本叶自身就是「没跑过的车道」**，必须先自证，别重蹈覆辙
-  - **本波未做**：CI-R 先稳住 R1–R3/A3/A4；R4 另开
+  - ⚠️ **本叶自身就是「没跑过的车道」**，配置已合后须用真实 Candidate run_id 自证一次
 
 ### A′. 反馈左移（只保留最便宜的两叶；A1/A2 推迟见 §2.6）
 
@@ -439,19 +441,24 @@ v0.1.15  Feedback shift-left & release-lane economics
 
 ### G′. 安装/更新卫生（用户真机踩坑，详见 §8；与发布链正交，可并行）
 
-- [ ] **G3 版本可观测性**：`agenterm --version` 打印即退 + 写 `installed.json`
+- [x] **G3 版本可观测性**：`agenterm --version` 打印即退 + 写 `installed.json`
   - **动机**：用户/agent 无法确认「窗口是不是旧版」；G7a 的判断也依赖它
+  - **落地**：`agenterm` GUI PE 支持 `--version`/`-V`（parent console attach）；
+    `install.sh` 写 `releases/…/installed.json`（version/channel/variant/…
+    installed_at）。**OSX 真机**复验 install 路径。
   - **验收**：GUI 二进制 `--version` 不启窗口即输出版本；
     `current/installed.json` 含 version/channel/variant/source_commit/
     sha256/installed_at
   - **成本**：小；**依赖**：无（是 G7a/H3 的前置）
-- [ ] **G2 升级后孤儿 symlink 清理**
+- [x] **G2 升级后孤儿 symlink 清理**
   - **动机**：实测 `~/.local/bin/agenterm-script` 断链残留（改名后遗留）
+  - **落地**：`install.sh` 装完后扫 `BIN_DIR` 断链（目标落在 install root 下）
   - **验收**：装完后 BIN 下无「指向 current/releases 但目标不存在」的链
   - **成本**：小；**依赖**：无
-- [ ] **G7a 升级后自适应文案**（install 收尾）
+- [x] **G7a 升级后自适应文案**（install 收尾）
   - **动机**：用户点名——磁盘已 0.1.14、running server 仍 0.1.12，
     关窗默认 keep-server → 再进仍旧版，用户无从得知该怎么做
+  - **落地**：检测到 running agenterm 时打印 stop-server / `--version` 指引
   - **验收**：探测到 live server 且版本低于已装时，收尾文案明确给出
     「要启用新版该做什么」；**用户无需读文档**
   - **成本**：小；**依赖**：G3
@@ -733,13 +740,16 @@ B′. tmux/rmux send-keys + buffer
 
 ### H′. 分发面地基（只做**纯派生 + 补值**，不建服务；详见 §1 H 组）
 
-- [ ] **H4 补齐 Linux/Windows 的 `provenance.sbom_sha256`** ★先做
+- [x] **H4 补齐 Linux/Windows 的 `provenance.sbom_sha256`** ★先做
   - **动机（已修正，见 §2.7）**：实测六平台——**macOS 两个 arch 已正确填入**
     `65c32add…`，**Linux 两个为空串、Windows x86_64 缺字段、
     windows-aarch64 为空串**。`PRD_02_17:237-240` 只要求「macOS 双档
     provenance 携带同一 SBOM 摘要」，故**当前实现并未违反 PRD**；
     本叶是**把该保证扩展到全部六平台**，因为 M14 Hub 信任分级要对
     所有平台复用这个字段
+  - **落地**：`package-client-release.rhai` 全平台写 `sbom_sha256`；
+    `package-release-qualified.rhai` Windows 资产补字段。下一次 Candidate
+    六平台 provenance 应非空（待打包门验证）。
   - **验收**：新 Candidate 六平台 provenance 的 `sbom_sha256` 均 ==
     实际 SBOM 摘要（windows-x86_64 从「无此字段」变为有值）
   - **成本**：极小（纯补值）；**依赖**：无
@@ -1670,6 +1680,8 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **三端并发派工写入本文 §2.2.1**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§1.5 与 §11 指针回链 |
 | 2026-08-06 | **章节编号改为阿拉伯数字** `x.y.z`（废止「一、二·二-b」等中文章节号）；交叉引用同步为 `§2.2.1` 等形式；原 CLI 专节与结构 §9 撞号 → CLI 改为 **§12** |
 | 2026-08-06 | **Win CI-R 主波落地**：R1 CI target **v3-slim**；R2 Candidate cargo-home **restore-keys**；R3 net-research 出 release 门（gates.json + check.rhai），push CI linux 仍跑；A3 script-smoke 进 windows release-lane-smokes；A4 Candidate summary 强化 bootstrap 行。R4 未做。OSX/Lnx 接手见 **§2.2.2** |
+| 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 genterm-cli mux / genterm-cli mcp。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
+| 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
 
 ---
 
@@ -2503,7 +2515,8 @@ ui-input key --key NAME [--mods shift,ctrl,alt,meta]
 
 1. **`install.sh:157` 仍硬性要求 5 个可执行文件**。mux/mcp 子命令已经能用且
    输出逐字节一致，但要真省下 1.6 MB 得允许不装那两个二进制 —— 这会破坏现有
-   `agenterm-mux` 调用方，**是产品决定，等你拍板**。
+   `agenterm-cli mux` 调用方。**已拍板（2026-08-06）**：不保留独立
+   `agenterm-mux` / `agenterm-mcp` PE，仅 CLI 子命令。
 2. **Windows 侧 `ui-input` 未实现**（pointer 和 key 都是）。解析层平台中立可直接
    复用；难点是 Windows 的 composer 是原生 `EDIT` 控件，合成 press 送到窗口不会
    像 Unix 自绘 composer 那样落进输入框。已在 `remote_frontend.rs` 留

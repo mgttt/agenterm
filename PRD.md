@@ -81,13 +81,13 @@ AgenTerm — local agent & process fleet work OS
 ├─ 工作区与权威
 │  ├─ 06 Human workspace        Tabs、composer、settings、持久化、状态栏
 │  ├─ 02 Executable family      二进制角色、边界、预算、sidecar 归属
-│  ├─ 05 Fleet multiplexer      agenterm-mux.exe（tmux/RMUX 兼容控制）
+│  ├─ 05 Fleet multiplexer      agenterm-cli mux（tmux/RMUX 兼容控制）
 │  ├─ 08 Observable Fleet       纪元/序列日志、读取、等待、缺口、重启
 │  └─ 07 Agent control plane    观察、控制、协议、身份、确定性等待
 │
 ├─ 自动化与智能
 │  ├─ 10 Rust host + Rhai       本地无限制运行时、监督、注册、审计；Agent 权限在其上层
-│  ├─ 11 MCP orchestration      agenterm-mcp.exe（只读 MCP → 受管工具/流/调度）
+│  ├─ 11 MCP orchestration      agenterm-cli mcp（只读 MCP → 受管工具/流/调度）
 │  ├─ 12 Specialized intelligence  agenterm-ai.exe（未指派研究方向的证据门）
 │  └─ 13 Local LLM gateway      agenterm-llm-gateway.exe（受管网关假设门）
 │
@@ -116,13 +116,13 @@ AgenTerm — local agent & process fleet work OS
 | 02 | [Executable family](prd/PRD_02_02_executable_family.md) | 二进制角色、边界、预算、sidecar 归属 |
 | 03 | [Default shell (`agenterm-bash.exe`)](prd/PRD_02_03_default_shell.md) | 真实 Bash 策略与兼容门 |
 | 04 | [Optional component lifecycle (`agenterm-softmgr.exe`)](prd/PRD_02_04_optional_components.md) | 签名清单、安装、更新、回滚、供应链安全 |
-| 05 | [Fleet multiplexer (`agenterm-mux.exe`)](prd/PRD_02_05_fleet_multiplexer.md) | tmux/RMUX 兼容控制 |
+| 05 | [Fleet multiplexer (`agenterm-cli mux`)](prd/PRD_02_05_fleet_multiplexer.md) | tmux/RMUX 兼容控制 |
 | 06 | [Human workspace](prd/PRD_02_06_human_workspace.md) | Tabs、composer、settings、持久化、状态栏、交互设计 |
 | 07 | [Agent control plane](prd/PRD_02_07_agent_control_plane.md) | 观察、控制、协议、身份、确定性等待 |
 | 08 | [Observable Fleet event core](prd/PRD_02_08_observable_fleet.md) | 纪元/序列日志、读取、等待、缺口、重启、消费者 |
 | 09 | [Self-hosted development loop](prd/PRD_02_09_self_hosted_development.md) | 构建、暂存、更新可见性、安全迭代 |
 | 10 | [Rust host + Rhai scripting](prd/PRD_02_10_rhai_scripting.md) | 本地无限制运行时、监督、注册、审计、providers |
-| 11 | [MCP and agentic orchestration (`agenterm-mcp.exe`)](prd/PRD_02_11_mcp_orchestration.md) | 只读 MCP 先行，再受管工具、流、调度 |
+| 11 | [MCP and agentic orchestration (`agenterm-cli mcp`)](prd/PRD_02_11_mcp_orchestration.md) | 只读 MCP 先行，再受管工具、流、调度 |
 | 12 | [Lightweight specialized intelligence (`agenterm-ai.exe`)](prd/PRD_02_12_specialized_intelligence.md) | 未指派可选智能研究方向的证据门 |
 | 13 | [Local LLM gateway (`agenterm-llm-gateway.exe`)](prd/PRD_02_13_llm_gateway.md) | 未指派受管网关假设的安全门 |
 | 14 | [Research provenance and clean-room boundary](prd/PRD_02_14_research_provenance.md) | 源码审查、许可、来源、独立实现 |

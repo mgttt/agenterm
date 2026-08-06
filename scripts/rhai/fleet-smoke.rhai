@@ -413,8 +413,8 @@ try {
     let compatibility = rhai::json::parse(
         run_without_address(
             context,
-            mux,
-            ["compatibility", "--json"]
+            cli,
+            mux_argv(["compatibility", "--json"])
         ).stdout
     );
     let split_unsupported = false;
@@ -432,8 +432,8 @@ try {
     );
     let mux_commands = run_without_address(
         context,
-        mux,
-        ["list-commands"]
+        cli,
+        mux_argv(["list-commands"])
     ).stdout;
     require(
         mux_commands.contains("split-window (unsupported:")
@@ -442,8 +442,8 @@ try {
     );
     let compatibility_text = run_without_address(
         context,
-        mux,
-        ["compatibility"]
+        cli,
+        mux_argv(["compatibility"])
     ).stdout;
     require(
         compatibility_text.contains("unsupported: split-window"),
@@ -451,8 +451,8 @@ try {
     );
     let split_failure = fail_without_address(
         context,
-        mux,
-        ["split-window"]
+        cli,
+        mux_argv(["split-window"])
     );
     require(
         (split_failure.stdout + split_failure.stderr).contains(
@@ -462,8 +462,8 @@ try {
     );
     run_program(
         context,
-        mux,
-        ["--address", "0.0.0.0:42000", "compatibility"],
+        cli,
+        mux_argv(["--address", "0.0.0.0:42000", "compatibility"]),
         true,
         true,
         ""
@@ -1221,11 +1221,11 @@ try {
     print("STEP mux uses shared IPC, address override, and native namespace");
     let mux_windows = run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "list-windows", "-F", "#{window_name}"
-        ],
+        ]),
         false,
         true,
         ""
@@ -1237,11 +1237,11 @@ try {
     let mux_protocol = rhai::json::parse(
         run_program(
             context,
-            mux,
-            [
+            cli,
+            mux_argv([
                 "--address", context.address,
                 "agenterm", "protocol-info", "--running"
-            ],
+            ]),
             false,
             true,
             ""
@@ -1255,11 +1255,11 @@ try {
     print("STEP destructive mux failures preserve the live session and tabs");
     let before_destructive = run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "list-windows", "-F", "#{window_id}:#{window_name}"
-        ],
+        ]),
         false,
         true,
         ""
@@ -1274,8 +1274,8 @@ try {
     ] {
         run_program(
             context,
-            mux,
-            rejected,
+            cli,
+            mux_argv(rejected),
             true,
             true,
             ""
@@ -1283,11 +1283,11 @@ try {
     }
     let after_failures = run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "list-windows", "-F", "#{window_id}:#{window_name}"
-        ],
+        ]),
         false,
         true,
         ""
@@ -1300,33 +1300,33 @@ try {
     let victim_name = "victim-" + std::process::id();
     run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "new-window", "-d", "-n", victim_name
-        ],
+        ]),
         false,
         true,
         ""
     );
     run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "kill-window", "-t", victim_name
-        ],
+        ]),
         false,
         true,
         ""
     );
     let after_kill = run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "list-windows", "-F", "#{window_name}"
-        ],
+        ]),
         false,
         true,
         ""
@@ -1338,8 +1338,8 @@ try {
     );
     run_program(
         context,
-        mux,
-        ["ui-snapshot"],
+        cli,
+        mux_argv(["ui-snapshot"]),
         true,
         true,
         ""
@@ -1348,11 +1348,11 @@ try {
     print("STEP matching kill-session performs the requested destructive action");
     run_program(
         context,
-        mux,
-        [
+        cli,
+        mux_argv([
             "--address", context.address,
             "kill-session", "-t", "agenterm"
-        ],
+        ]),
         false,
         true,
         ""

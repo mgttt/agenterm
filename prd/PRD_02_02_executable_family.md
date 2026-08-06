@@ -211,16 +211,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   GUI launch, and acceptance requires correct inherited/redirection handles,
   synchronous pipeline behavior, and child exit-code propagation in both
   `cmd.exe` and PowerShell
-- [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
-- [x] `agenterm-cli mux ...` and `agenterm-cli mcp ...` host those two
-  frontends in-process, so a deployment can ship one executable instead of
-  three. Each subcommand strips its own name and delegates to the same entry
-  the dedicated binary calls, so the two spellings execute one implementation
-  and cannot drift; output is byte-identical. Routing is decided before the
-  CLI parses its own options, because both frontends own their flag grammar
-  (`mux --address` must reach the mux parser). The dedicated executables
-  remain for compatibility. Control Center is deliberately **not** folded in:
-  it is a separate authority whose product design is still open.
+- [x] `agenterm-cli mux ...` and `agenterm-cli mcp ...` are the **only** public
+  fleet-mux and MCP entry points. Each subcommand strips its own name and
+  runs the shared library frontend (same implementation as the former
+  standalone PEs). Routing is decided before the CLI parses its own options,
+  because both frontends own their flag grammar (`mux --address` must reach
+  the mux parser). The dedicated `agenterm-mux` / `agenterm-mcp` executables
+  are **removed** (not compatibility shims). Control Center remains a separate
+  PE (`agenterm-cc`); it is deliberately **not** folded into the CLI.
 - [ ] `agenterm-cc.exe` / `agenterm-cc`: independent AgenTerm Control Center
   client. It owns only its window, navigation and uncommitted display state;
   it observes and controls existing authorities through public typed
@@ -260,7 +258,6 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   [Decentralized network foundation](PRD_02_22_decentralized_network.md).
 - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
 - Future executable hypotheses, not release commitments:
-  - `agenterm-mcp.exe`: MCP server/client and agentic orchestration sidecar
   - `agenterm-desktop.exe`: optional companion desktop/workspace application;
     it must coexist with Explorer before any separately approved shell role
   - `agenterm-shell-host.exe`: possible minimal recovery watchdog for a much

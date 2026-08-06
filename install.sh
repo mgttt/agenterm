@@ -154,7 +154,7 @@ if [[ -n "$LOCAL_BUILD_DIR" ]]; then
   [[ "$OS" == "macos" ]] || fail "--local-build currently supports macOS only"
   [[ -d "$LOCAL_BUILD_DIR" ]] || fail "local build directory does not exist: $LOCAL_BUILD_DIR"
   LOCAL_BUILD_DIR="$(cd "$LOCAL_BUILD_DIR" && pwd -P)"
-  REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-mux agenterm-rhai agenterm-mcp)
+  REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-rhai)
   for executable in "${REQUIRED_EXECUTABLES[@]}"; do
     SOURCE_PATH="$LOCAL_BUILD_DIR/$executable"
     [[ -f "$SOURCE_PATH" && ! -L "$SOURCE_PATH" && -x "$SOURCE_PATH" ]] ||
@@ -214,7 +214,23 @@ if [[ -n "$LOCAL_BUILD_DIR" ]]; then
 </dict>
 </plist>
 EOF
+  INSTALLED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u)"
+  cat >"$RELEASE_DIR/installed.json" <<EOF
+{
+  "schema_version": 1,
+  "version": "$RELEASE_VERSION",
+  "tag": "$VERSION",
+  "channel": "local-build",
+  "variant": "$OS-$ARCH-local",
+  "source_commit": "",
+  "sha256": "",
+  "installed_at": "$INSTALLED_AT",
+  "os": "$OS",
+  "arch": "$ARCH"
+}
+EOF
   say "Installed local AgenTerm $RELEASE_VERSION to $RELEASE_DIR"
+  say "Install record: $CURRENT_LINK/installed.json"
   say "Commands are available in $BIN_DIR"
   say "Dock application is available at $APP_DIR"
   if [[ "$NO_LAUNCH" != "1" ]]; then
@@ -284,9 +300,7 @@ fi
 REQUIRED_EXECUTABLES=(
   agenterm
   agenterm-cli
-  agenterm-mux
   agenterm-rhai
-  agenterm-mcp
 )
 for executable in "${REQUIRED_EXECUTABLES[@]}"; do
   [[ -f "$STAGING_DIR/$executable" && ! -L "$STAGING_DIR/$executable" ]] ||
@@ -321,6 +335,24 @@ for executable in "${REQUIRED_EXECUTABLES[@]}"; do
   replace_symlink "$CURRENT_LINK/$executable" "$LINK_PATH"
 done
 
+# G2: remove broken BIN symlinks that still point under this install root
+# (e.g. renamed agenterm-script → agenterm-rhai left a dangling link).
+if [[ -d "$BIN_DIR" ]]; then
+  for link in "$BIN_DIR"/*; do
+    [[ -L "$link" ]] || continue
+    target="$(readlink "$link" 2>/dev/null || true)"
+    [[ -n "$target" ]] || continue
+    case "$target" in
+      "$INSTALL_ROOT"/* | "$CURRENT_LINK"/* | */agenterm/*)
+        if [[ ! -e "$link" ]]; then
+          say "Removing broken install symlink: $link -> $target"
+          rm -f "$link"
+        fi
+        ;;
+    esac
+  done
+fi
+
 if [[ "$OS" == "macos" ]]; then
   APP_DIR="$APPLICATIONS_DIR/AgenTerm.app"
   APP_CONTENTS="$APP_DIR/Contents"
@@ -352,16 +384,61 @@ else
   GUI_PATH="$CURRENT_LINK/agenterm"
 fi
 
+# G3: machine-readable install record for version observability.
+INSTALLED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u)"
+CHANNEL="release"
+VARIANT="$OS-$ARCH"
+if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" == "1" ]]; then
+  CHANNEL="macos-unsigned-preview"
+  VARIANT="${VARIANT}-unsigned-preview"
+fi
+SOURCE_COMMIT=""
+if [[ -f "$RELEASE_DIR/agenterm.provenance.json" ]]; then
+  SOURCE_COMMIT="$(
+    python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('source_commit',''))" \
+      "$RELEASE_DIR/agenterm.provenance.json" 2>/dev/null || true
+  )"
+fi
+# Prefer archive provenance next to downloaded artifact name if present.
+if [[ -z "$SOURCE_COMMIT" && -f "$ARCHIVE_PATH.provenance.json" ]]; then
+  SOURCE_COMMIT="$(
+    python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('source_commit',''))" \
+      "$ARCHIVE_PATH.provenance.json" 2>/dev/null || true
+  )"
+fi
+cat >"$RELEASE_DIR/installed.json" <<EOF
+{
+  "schema_version": 1,
+  "version": "$RELEASE_VERSION",
+  "tag": "$VERSION",
+  "channel": "$CHANNEL",
+  "variant": "$VARIANT",
+  "source_commit": "$SOURCE_COMMIT",
+  "sha256": "$NORMALIZED_ACTUAL_SHA256",
+  "installed_at": "$INSTALLED_AT",
+  "os": "$OS",
+  "arch": "$ARCH"
+}
+EOF
+# Also expose under current/ for stable path.
+if [[ -d "$CURRENT_LINK" || -L "$CURRENT_LINK" ]]; then
+  cp -f "$RELEASE_DIR/installed.json" "$CURRENT_LINK/installed.json" 2>/dev/null || true
+fi
+
 say "Installed AgenTerm $VERSION to $RELEASE_DIR"
 say "Commands are available in $BIN_DIR"
+say "Install record: $CURRENT_LINK/installed.json (version $RELEASE_VERSION)"
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  say "Add $BIN_DIR to PATH to use agenterm-cli, agenterm-mux, and agenterm-rhai"
+  say "Add $BIN_DIR to PATH to use agenterm-cli (includes mux/mcp subcommands) and agenterm-rhai"
 fi
 
 if command -v pgrep >/dev/null 2>&1 && pgrep -f '/agenterm( |$)' >/dev/null 2>&1; then
-  say "A running AgenTerm server was detected; it will keep using its already-loaded version"
-  say "To switch a running window to $VERSION: close it choosing \"stop server and exit\" (not \"keep server running\"), then reopen AgenTerm"
-  say "Alternatively run: agenterm-cli shutdown  (then reopen AgenTerm)"
+  # G7a: adaptive text when a live server is still on an older binary.
+  say "A running AgenTerm process was detected (server may still be the previous version)."
+  say "Disk install is $VERSION, but keep-server windows keep using the already-loaded PE."
+  say "To enable $VERSION in the UI: close AgenTerm and choose \"stop server and exit\" (not \"keep server running\"), then reopen."
+  say "Or: agenterm-cli shutdown   then start AgenTerm again."
+  say "Check disk version without opening a window: agenterm --version   (or agenterm-cli --version)"
 fi
 
 if [[ "$NO_LAUNCH" != "1" ]]; then

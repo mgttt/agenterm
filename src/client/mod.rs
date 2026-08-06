@@ -139,8 +139,7 @@ struct CliControlOptions {
     receipt_json: bool,
 }
 
-/// A frontend `agenterm-cli` hosts in-process to keep the shipped executable
-/// count down.
+/// Fleet mux and MCP frontends hosted only under `agenterm-cli` (no separate PE).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HostedSubcommand {
     Mux,
@@ -163,14 +162,10 @@ pub(crate) fn hosted_subcommand(first: Option<&str>) -> Option<HostedSubcommand>
 
 pub fn run_cli_entry() -> i32 {
     let mut arguments: Vec<String> = env::args().skip(1).collect();
-    // `mux` and `mcp` are hosted here as subcommands so a deployment ships one
-    // executable instead of three. Each strips its own name and delegates to
-    // the same entry the standalone binary calls, so there is one
-    // implementation and the two spellings cannot diverge. The dedicated
-    // binaries stay for compatibility.
-    //
-    // Checked before option parsing because both surfaces own their own flag
-    // grammar -- `mux --address` must reach the mux parser, not this one.
+    // `mux` and `mcp` are exclusive CLI subcommands (standalone agenterm-mux /
+    // agenterm-mcp PEs removed). Each strips its name and delegates to the
+    // shared library entry. Checked before CLI option parsing so frontend flag
+    // grammar is preserved (`mux --address` reaches the mux parser).
     match hosted_subcommand(arguments.first().map(String::as_str)) {
         Some(HostedSubcommand::Mux) => {
             arguments.remove(0);

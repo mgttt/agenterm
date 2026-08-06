@@ -277,7 +277,6 @@ fn run_prd_alignment(repo_under_test: &Path) -> Output {
         ])
         .arg(repo_under_test)
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
-        .arg(env!("CARGO_BIN_EXE_agenterm-mux"))
         .output()
         .expect("run Rhai PRD-alignment task")
 }
@@ -624,7 +623,6 @@ fn run_fleet_smoke() -> Output {
         ])
         .arg(repo)
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
-        .arg(env!("CARGO_BIN_EXE_agenterm-mux"))
         .arg("--skip-event-load")
         .env("AGENTERM_NO_ACTIVATE", "1")
         .output()
@@ -1008,9 +1006,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
         "agenterm",
         "agenterm-cc",
         "agenterm-cli",
-        "agenterm-mux",
         "agenterm-rhai",
-        "agenterm-mcp",
     ] {
         fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
     }
@@ -1166,8 +1162,6 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             "agenterm",
             "agenterm-cc",
             "agenterm-cli",
-            "agenterm-mcp",
-            "agenterm-mux",
             "agenterm-sbom.spdx.json",
             "agenterm-rhai",
             "artifacts.json",
@@ -1202,9 +1196,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
                 "agenterm",
                 "agenterm-cc",
                 "agenterm-cli",
-                "agenterm-mux",
                 "agenterm-rhai",
-                "agenterm-mcp",
             ] {
                 assert_ne!(
                     fs::metadata(extracted.join(executable))
@@ -1232,9 +1224,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
         "agenterm",
         "agenterm-cc",
         "agenterm-cli",
-        "agenterm-mux",
         "agenterm-rhai",
-        "agenterm-mcp",
     ] {
         fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
     }

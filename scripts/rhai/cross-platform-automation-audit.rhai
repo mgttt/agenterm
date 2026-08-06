@@ -149,8 +149,7 @@ let check_source = std::fs::read_to_string(
 require(
     check_source.contains(`"native public catalog clients"`)
         && check_source.contains(`"client-build"`)
-        && check_source.contains(`"agenterm-cli"`)
-        && check_source.contains(`"agenterm-mux"`),
+        && check_source.contains(`"agenterm-cli"`),
     "cross_platform_unix_prd_catalog_bootstrap"
 );
 let manifest = rhai::json::parse_file(

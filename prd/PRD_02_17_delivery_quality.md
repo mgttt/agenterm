@@ -15,7 +15,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   budget and the separately awaited asynchronous terminal-ready state pass
 - [x] version-tagged GitHub Release automation for all five EXEs, metadata,
   and ZIP
-- [x] release automation publishes `agenterm-mux.exe` after its acceptance
+- [x] release automation publishes `agenterm-cli` (including mux/mcp surfaces) after acceptance
   gate
 - [x] the public static documentation landing page provides reviewed English
   and Traditional Chinese product copy, explicit language selection,

@@ -485,9 +485,7 @@ try {
         "agenterm.exe",
         "agenterm-cc.exe",
         "agenterm-cli.exe",
-        "agenterm-mux.exe",
-        "agenterm-rhai.exe",
-        "agenterm-mcp.exe"
+        "agenterm-rhai.exe"
     ];
     let names = #{};
     for entry in manifest.executables {

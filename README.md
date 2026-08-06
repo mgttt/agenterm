@@ -59,17 +59,17 @@ client, and a deliberately bounded tmux/RMUX frontend.
 - `agenterm-rhai.exe` is the public Rhai CLI for local automation, persistent
   REPL sessions, observable Fleet tools, and versioned named tasks without
   linking the scripting engine into the GUI.
-- `agenterm-mcp.exe` is the on-demand read-only MCP sidecar. Its first
-  v0.1.10 slice serves four metadata-only Fleet resources and one bounded
-  `agenterm_wait` tool over stdio; it exposes no mutation tool or network
-  listener.
+- `agenterm-cli mcp` is the on-demand read-only MCP surface (no separate
+  `agenterm-mcp` PE). Its first v0.1.10 slice serves four metadata-only Fleet
+  resources and one bounded `agenterm_wait` tool over stdio; it exposes no
+  mutation tool or network listener.
 - `agenterm server` proves the headless
   workspace/PTY/parser/event authority required for replaceable GUI work.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
 - Tab-scoped environment and proxy values apply only to the child process and
   are not written to the persistent workspace.
-- `agenterm-mux.exe` provides the supported tmux/RMUX session/window surface;
-  unsupported operations fail explicitly.
+- `agenterm-cli mux` provides the supported tmux/RMUX session/window surface
+  (no separate `agenterm-mux` PE); unsupported operations fail explicitly.
 - Whole-window and per-pane PNG screenshots support visual feedback testing.
 - PTY process management uses `rmux-pty`.
 
@@ -165,12 +165,10 @@ build metadata under `dist/`:
 - `dist/agenterm-cc.exe` — isolated Control Center projection; informational
   commands include `--help`, `--version`, `capabilities --json`, and
   `snapshot --json`.
-- `dist/agenterm-cli.exe` — full native observation and automation client.
-- `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
-  server.
+- `dist/agenterm-cli.exe` — full native observation and automation client,
+  including `mux` (tmux/RMUX) and `mcp` (stdio sidecar) subcommands.
 - `dist/agenterm-rhai.exe` — public Rhai scripting CLI and worker, including
   persistent REPL and one-shot execution modes.
-- `dist/agenterm-mcp.exe` — on-demand read-only MCP stdio sidecar.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
@@ -199,8 +197,7 @@ relabeled as available.
 ### Linux GUI
 
 Native Linux `agenterm` and `agenterm-cc` use winit. Control clients
-(`agenterm-cli`, `agenterm-mux`, `agenterm-rhai`, `agenterm-mcp`) do not need
-display libraries.
+(`agenterm-cli`, `agenterm-rhai`) do not need display libraries.
 
 **Release tarballs** ship a small `lib/` directory plus `agenterm` and
 `agenterm-cc` launchers that set `LD_LIBRARY_PATH` before starting their hidden
@@ -266,11 +263,11 @@ $r = ".\dist\agenterm-cli.exe"
 & $r new-agent -n scratch --yolo
 
 # Inspect the honest mux compatibility matrix.
-.\dist\agenterm-mux.exe compatibility --json
+.\dist\agenterm-cli.exe mux compatibility --json
 ```
 
 IPC listens and connects only on numeric loopback addresses (`127.0.0.0/8` or
-`::1`), including explicit `agenterm-mux --address` overrides.
+`::1`), including explicit `agenterm-cli mux --address` overrides.
 
 ## Release
 

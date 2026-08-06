@@ -8,9 +8,14 @@ on:
         required: true
         type: string
       confirmation:
-        description: Type publish-vX.Y.Z after reviewing the candidate
+        description: Type publish-vX.Y.Z after reviewing the candidate (or dry-run-publish-vX.Y.Z when dry_run)
         required: true
         type: string
+      dry_run:
+        description: R4 — run full verify only; do not create tag/draft/release
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -125,7 +130,14 @@ jobs:
             "$(jq -r .event "$RUNNER_TEMP/candidate-run-identity.json")" ]]
           [[ "$tag" == "v$version" ]]
           [[ "$tag" != "v0.1.7" ]]
-          [[ "$CONFIRMATION" == "publish-$tag" ]]
+          # R4 dry_run accepts dry-run-publish-vX.Y.Z so verify can rehearse
+          # without the publish job ever creating tag/draft.
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            [[ "$CONFIRMATION" == "publish-$tag" || \
+               "$CONFIRMATION" == "dry-run-publish-$tag" ]]
+          else
+            [[ "$CONFIRMATION" == "publish-$tag" ]]
+          fi
           cargo_version="$(
             sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1
           )"
@@ -174,6 +186,15 @@ jobs:
           fi
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            {
+              echo "### Release dry_run (R4)"
+              echo
+              echo "- Candidate verify **passed** for \`$tag\` @ \`$source_sha\`"
+              echo "- **No** tag, draft, or public Release will be created (publish job skipped)."
+              echo "- Confirmation accepted: \`$CONFIRMATION\`"
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload verified promotion handoff
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -184,6 +205,8 @@ jobs:
           retention-days: 2
 
   publish:
+    # R4: dry_run stops after verify; no tag, draft, or public release mutation.
+    if: ${{ inputs.dry_run != true }}
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10

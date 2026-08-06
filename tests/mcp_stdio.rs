@@ -17,8 +17,7 @@ use serde_json::{Value, json};
 
 #[test]
 fn public_stdio_lifecycle_keeps_stdout_machine_only() {
-    let mut child = Command::new(mcp_executable())
-        .args(["serve", "--stdio"])
+    let mut child = mcp_command(&["serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -111,8 +110,7 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
 
 #[test]
 fn public_stdio_rejects_an_unsupported_revision_and_recovers() {
-    let mut child = Command::new(mcp_executable())
-        .args(["serve", "--stdio"])
+    let mut child = mcp_command(&["serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -157,8 +155,7 @@ fn public_stdio_rejects_an_unsupported_revision_and_recovers() {
 
 #[test]
 fn public_stdio_recovers_after_malformed_and_oversized_frames() {
-    let mut child = Command::new(mcp_executable())
-        .args(["serve", "--stdio"])
+    let mut child = mcp_command(&["serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -963,13 +960,13 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
         let settings_before = fs::read(&settings).ok();
 
         let mut sidecar = configured_command(
-            mcp_executable(),
+            mcp_cli(),
             &address,
             &workspace,
             &settings,
             &instances,
         )
-        .args(["--address", &address, "serve", "--stdio"])
+        .args(["mcp", "--address", &address, "serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1124,8 +1121,7 @@ fn public_wait_returns_one_projected_event_and_verified_post_state() {
             reply_to_backend(stream);
         }
     });
-    let mut child = Command::new(mcp_executable())
-        .args(["--address", &address, "serve", "--stdio"])
+    let mut child = mcp_command(&["--address", &address, "serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1500,7 +1496,8 @@ fn run_discovery_resource(instances: &Path, uri: &str) -> Vec<Value> {
 }
 
 fn run_selected_resource(instances: &Path, selectors: &[&str], uri: &str) -> Vec<Value> {
-    let mut child = Command::new(mcp_executable())
+    let mut child = Command::new(mcp_cli())
+        .arg("mcp")
         .args(selectors)
         .args(["serve", "--stdio"])
         .env("AGENTERM_INSTANCE_DIR", instances)
@@ -1668,8 +1665,7 @@ fn directory_entry_names(directory: &Path) -> Vec<String> {
 }
 
 fn start_mcp(address: &str) -> std::process::Child {
-    Command::new(mcp_executable())
-        .args(["--address", address, "serve", "--stdio"])
+    mcp_command(&["--address", address, "serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1695,10 +1691,19 @@ fn configured_command(
     command
 }
 
-fn mcp_executable() -> PathBuf {
-    std::env::var_os("AGENTERM_MCP_EXE")
+fn mcp_cli() -> PathBuf {
+    // MCP is only hosted under agenterm-cli (standalone PE removed).
+    std::env::var_os("AGENTERM_MCP_CLI")
+        .or_else(|| std::env::var_os("AGENTERM_MCP_EXE"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_agenterm-mcp")))
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_agenterm-cli")))
+}
+
+fn mcp_command(args: &[&str]) -> Command {
+    let mut command = Command::new(mcp_cli());
+    command.arg("mcp");
+    command.args(args);
+    command
 }
 
 #[cfg(windows)]

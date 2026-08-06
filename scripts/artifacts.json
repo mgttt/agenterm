@@ -14,7 +14,9 @@
       "role": "control-center-gui",
       "pe_subsystem": 2,
       "documentation_role": "isolated Control Center projection",
-      "offline_probe": ["--version"],
+      "offline_probe": [
+        "--version"
+      ],
       "release_budget_bytes": 4194304
     },
     {
@@ -22,15 +24,9 @@
       "role": "cli",
       "pe_subsystem": 3,
       "documentation_role": "native observation and automation client",
-      "offline_probe": ["--version"],
-      "release_budget_bytes": 2097152
-    },
-    {
-      "name": "agenterm-mux.exe",
-      "role": "compatibility-cli",
-      "pe_subsystem": 3,
-      "documentation_role": "tmux/RMUX compatibility frontend",
-      "offline_probe": ["--version"],
+      "offline_probe": [
+        "--version"
+      ],
       "release_budget_bytes": 2097152
     },
     {
@@ -38,16 +34,10 @@
       "role": "scripting-cli",
       "pe_subsystem": 3,
       "documentation_role": "public Rhai scripting CLI and worker",
-      "offline_probe": ["--version"],
+      "offline_probe": [
+        "--version"
+      ],
       "release_budget_bytes": 4194304
-    },
-    {
-      "name": "agenterm-mcp.exe",
-      "role": "mcp-sidecar",
-      "pe_subsystem": 3,
-      "documentation_role": "on-demand read-only MCP stdio sidecar",
-      "offline_probe": ["--version"],
-      "release_budget_bytes": 2097152
     }
   ],
   "platforms": [
@@ -69,7 +59,9 @@
           "role": "control-center-gui",
           "pe_subsystem": 2,
           "documentation_role": "isolated Control Center projection",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
@@ -77,15 +69,9 @@
           "role": "cli",
           "pe_subsystem": 3,
           "documentation_role": "native observation and automation client",
-          "offline_probe": ["--version"],
-          "release_budget_bytes": 2097152
-        },
-        {
-          "name": "agenterm-mux.exe",
-          "role": "compatibility-cli",
-          "pe_subsystem": 3,
-          "documentation_role": "tmux/RMUX compatibility frontend",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 2097152
         },
         {
@@ -93,16 +79,10 @@
           "role": "scripting-cli",
           "pe_subsystem": 3,
           "documentation_role": "public Rhai scripting CLI and worker",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-mcp.exe",
-          "role": "mcp-sidecar",
-          "pe_subsystem": 3,
-          "documentation_role": "on-demand read-only MCP stdio sidecar",
-          "offline_probe": ["--version"],
-          "release_budget_bytes": 2097152
         }
       ]
     },
@@ -123,7 +103,9 @@
           "role": "control-center-gui",
           "pe_subsystem": 2,
           "documentation_role": "isolated Control Center projection",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
@@ -131,28 +113,18 @@
           "role": "cli",
           "pe_subsystem": 3,
           "documentation_role": "native observation and automation client",
-          "offline_probe": ["--version"]
-        },
-        {
-          "name": "agenterm-mux.exe",
-          "role": "compatibility-cli",
-          "pe_subsystem": 3,
-          "documentation_role": "tmux/RMUX compatibility frontend",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--version"
+          ]
         },
         {
           "name": "agenterm-rhai.exe",
           "role": "scripting-cli",
           "pe_subsystem": 3,
           "documentation_role": "public Rhai scripting CLI and worker",
-          "offline_probe": ["--version"]
-        },
-        {
-          "name": "agenterm-mcp.exe",
-          "role": "mcp-sidecar",
-          "pe_subsystem": 3,
-          "documentation_role": "on-demand read-only MCP stdio sidecar",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--version"
+          ]
         }
       ]
     },
@@ -171,32 +143,26 @@
           "name": "agenterm-cc",
           "role": "control-center-gui",
           "documentation_role": "isolated Control Center projection",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
-          "offline_probe": ["--version"]
-        },
-        {
-          "name": "agenterm-mux",
-          "role": "compatibility-cli",
-          "documentation_role": "tmux/RMUX compatibility frontend",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--version"
+          ]
         },
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
-          "offline_probe": ["--help"]
-        },
-        {
-          "name": "agenterm-mcp",
-          "role": "mcp-sidecar",
-          "documentation_role": "on-demand read-only MCP stdio sidecar",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--help"
+          ]
         }
       ]
     },
@@ -215,32 +181,26 @@
           "name": "agenterm-cc",
           "role": "control-center-gui",
           "documentation_role": "isolated Control Center projection",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
-          "offline_probe": ["--version"]
-        },
-        {
-          "name": "agenterm-mux",
-          "role": "compatibility-cli",
-          "documentation_role": "tmux/RMUX compatibility frontend",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--version"
+          ]
         },
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
-          "offline_probe": ["--help"]
-        },
-        {
-          "name": "agenterm-mcp",
-          "role": "mcp-sidecar",
-          "documentation_role": "on-demand read-only MCP stdio sidecar",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--help"
+          ]
         }
       ]
     },
@@ -259,32 +219,26 @@
           "name": "agenterm-cc",
           "role": "control-center-gui",
           "documentation_role": "isolated Control Center projection",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
-          "offline_probe": ["--version"]
-        },
-        {
-          "name": "agenterm-mux",
-          "role": "compatibility-cli",
-          "documentation_role": "tmux/RMUX compatibility frontend",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--version"
+          ]
         },
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
-          "offline_probe": ["--help"]
-        },
-        {
-          "name": "agenterm-mcp",
-          "role": "mcp-sidecar",
-          "documentation_role": "on-demand read-only MCP stdio sidecar",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--help"
+          ]
         }
       ]
     },
@@ -303,32 +257,26 @@
           "name": "agenterm-cc",
           "role": "control-center-gui",
           "documentation_role": "isolated Control Center projection",
-          "offline_probe": ["--version"],
+          "offline_probe": [
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
-          "offline_probe": ["--version"]
-        },
-        {
-          "name": "agenterm-mux",
-          "role": "compatibility-cli",
-          "documentation_role": "tmux/RMUX compatibility frontend",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--version"
+          ]
         },
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
-          "offline_probe": ["--help"]
-        },
-        {
-          "name": "agenterm-mcp",
-          "role": "mcp-sidecar",
-          "documentation_role": "on-demand read-only MCP stdio sidecar",
-          "offline_probe": ["--version"]
+          "offline_probe": [
+            "--help"
+          ]
         }
       ]
     }

@@ -380,11 +380,8 @@ try {
         cargo_lock_sha256: rhai::crypto::sha256_file(
             std::path::join(repo, "Cargo.lock").display
         ),
-        sbom_sha256: if os_name == "macos" {
-            rhai::crypto::sha256_file(sbom_source)
-        } else {
-            ""
-        },
+        // H4 (v0.1.15): fill sbom_sha256 on all platforms (was macOS-only).
+        sbom_sha256: rhai::crypto::sha256_file(sbom_source),
         execution_evidence: if host_os == os_name && host_arch == arch {
             "native_execution_eligible"
         } else {

@@ -76,6 +76,8 @@ let provenance = #{
     artifact_manifest_sha256:
         receipt.provenance.artifact_manifest_sha256,
     cargo_lock_sha256: receipt.provenance.cargo_lock_sha256,
+    // H4 (v0.1.15): Windows release assets must carry the SBOM digest.
+    sbom_sha256: rhai::crypto::sha256_file(sbom_destination),
     build_log: if std::env::has("GITHUB_SERVER_URL")
             && std::env::has("GITHUB_REPOSITORY")
             && std::env::has("GITHUB_RUN_ID") {

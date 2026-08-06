@@ -35,10 +35,8 @@ fn local_build_installs_a_dock_safe_app_bundle() {
     for name in [
         "agenterm",
         "agenterm-cli",
-        "agenterm-mux",
-        "agenterm-rhai",
-        "agenterm-mcp",
-    ] {
+                "agenterm-rhai",
+            ] {
         let body = if name == "agenterm-cli" {
             format!("#!/bin/sh\necho 'agenterm-cli {CURRENT_VERSION}'\n")
         } else {

@@ -67,3 +67,9 @@ pub fn pipe_available(token: PipeProbeToken) -> Result<usize, PipeProbeError> {
 pub fn write_parent_console_stderr(message: &str) -> bool {
     adapter::write_parent_console_stderr(message)
 }
+
+/// Write a CLI line (e.g. `--version`) to stdout or an attached parent console.
+/// GUI-subsystem binaries on Windows attach to the parent terminal when present.
+pub fn write_parent_console_stdout(message: &str) -> bool {
+    adapter::write_parent_console_stdout(message)
+}

@@ -1,4 +1,4 @@
-# Fleet multiplexer (`agenterm-mux.exe`)
+# Fleet multiplexer (`agenterm-cli mux`)
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
@@ -26,11 +26,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     agent extensions under an unambiguous namespace
   - [ ] expose future scripting commands through that same native namespace
     without masquerading as tmux features
-  - [x] `agenterm-cli` remains the richer machine API; `agenterm-mux` is the
-    compatibility UX and migration path
+  - [x] `agenterm-cli` remains the richer machine API; `agenterm-cli mux` is the
+    compatibility UX and migration path (no separate mux PE)
 - Conformance
   - [x] machine-readable compatibility matrix generated from the command
-    registry and exposed through `agenterm-mux compatibility`
+    registry and exposed through `agenterm-cli mux compatibility`
   - [~] black-box argv/output/exit-code corpus runs against AgenTerm and,
     where practical, reference tmux and RMUX versions
   - [x] behavioral differences are explicit, especially persistence,

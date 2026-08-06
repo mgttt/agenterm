@@ -86,11 +86,9 @@ src/platform/adapters/       主机实现（物理目录）
 | 二进制 | 路径 | 角色 |
 |--------|------|------|
 | `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；子命令 `server` = 无窗权威（另进程同 PE） |
-| `agenterm-cli` | `src/bin/agenterm-cli.rs` | 控制平面 CLI |
+| `agenterm-cli` | `src/bin/agenterm-cli.rs` | 控制平面 CLI；子命令 `mux` / `mcp`（无独立 PE） |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
 | `agenterm-rhai` | `src/bin/agenterm-rhai.rs` | 本地 Rhai 运行时（无权限策略） |
-| `agenterm-mcp` | `src/bin/agenterm-mcp.rs` | 只读 MCP sidecar |
-| `agenterm-mux` | `src/bin/agenterm-mux.rs` | Fleet multiplexer 前端 |
 
 Authority entry plan: [`plan/archive/plan-agenterm-server-mode.md`](archive/plan-agenterm-server-mode.md)。
 

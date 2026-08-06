@@ -690,8 +690,7 @@ if quick {
             10000,
             [
                 repo,
-                quick_native_bin,
-                std::path::join(quick_native_bin_root, "agenterm-mux").display
+                quick_native_bin
             ]
         );
     }

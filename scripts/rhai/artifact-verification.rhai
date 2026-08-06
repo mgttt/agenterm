@@ -171,9 +171,7 @@ require(metadata.rust_version != "", "artifact_metadata_rust_version");
 require(!release || !metadata.git_dirty, "artifact_release_dirty");
 
 let cli = std::path::join(dist, "agenterm-cli.exe").display;
-let mux = std::path::join(dist, "agenterm-mux.exe").display;
 let rhai = std::path::join(dist, "agenterm-rhai.exe").display;
-let mcp = std::path::join(dist, "agenterm-mcp.exe").display;
 let control_center =
     std::path::join(dist, "agenterm-cc.exe").display;
 require(
@@ -186,14 +184,15 @@ require(
         == "agenterm-cli " + metadata.version,
     "artifact_cli_version_mismatch"
 );
+// mux/mcp are CLI subcommands only (standalone PEs removed).
 require(
-    output(mux, ["--version"], repo, "artifact_mux_version")
+    output(cli, ["mux", "--version"], repo, "artifact_mux_version")
         == "agenterm-mux " + metadata.version +
             " (AgenTerm compatibility frontend)",
     "artifact_mux_version_mismatch"
 );
 require(
-    output(mcp, ["--version"], repo, "artifact_mcp_version")
+    output(cli, ["mcp", "--version"], repo, "artifact_mcp_version")
         == "agenterm-mcp " + metadata.version,
     "artifact_mcp_version_mismatch"
 );

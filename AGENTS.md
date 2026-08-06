@@ -244,9 +244,9 @@ checks may skip the bounded-journal saturation load. A candidate-bound
 qualification receipt requires `check.cmd --release --include-stress`; packaging
 must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
-`agenterm-cc.exe`, plus 2 MiB each for `agenterm-cli.exe`,
-`agenterm-mux.exe`, and `agenterm-mcp.exe`; investigate dependency
-or feature growth instead of raising them casually.
+`agenterm-cc.exe`, plus 2 MiB for `agenterm-cli.exe` (hosts `mux`/`mcp`
+subcommands; no separate mux/mcp PE); investigate dependency or feature growth
+instead of raising them casually.
 
 ## Runtime control and observation
 
@@ -327,8 +327,9 @@ behavior.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
   downloadable binaries are published only by exact-Candidate Promotion.
-- Keep `agenterm.exe` as a Windows-subsystem GUI, `agenterm-cli.exe` as the
-  native control client, and `agenterm-mux.exe` as the compatibility client.
+- Keep `agenterm.exe` as a Windows-subsystem GUI and `agenterm-cli.exe` as the
+  native control client (including **`agenterm-cli mux`** / **`agenterm-cli mcp`**
+  subcommands; the standalone `agenterm-mux` / `agenterm-mcp` PEs are removed).
   Preferred headless authority entry is `agenterm server` (separate process
   of the same PE; the old `agenterm-server.exe` binary is removed). All
   entry points must reuse the library.
@@ -402,21 +403,19 @@ LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 (`/usr/bin/clang-cl` -> `clang-18`), and Wine.
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
-build commands per cell. `src/bin/` currently holds **six** binaries
-(`agenterm`, `agenterm-cli`, `agenterm-mux`, `agenterm-rhai`,
-`agenterm-mcp`, `agenterm-cc`). **Prefer building without `--bin`
-filters** so new binaries are covered automatically — the explicit lists below
-are historical and skip `agenterm-mcp` and `agenterm-cc`, which means a
-clippy run using them silently lints only four of six:
+build commands per cell. `src/bin/` currently holds **four** product binaries
+(`agenterm`, `agenterm-cli`, `agenterm-rhai`, `agenterm-cc`). Mux/MCP are
+**`agenterm-cli` subcommands**, not separate PEs. **Prefer building without
+`--bin` filters** so new binaries are covered automatically:
 
 | Cell | Host | Build |
 |------|------|-------|
 | **win × x86_64** | Linux + `cargo-xwin` | `cargo xwin build --target x86_64-pc-windows-msvc` (all four bins) |
 | **win × aarch64** | Linux + `cargo-xwin` | `cargo xwin build --target aarch64-pc-windows-msvc` (all four bins) |
-| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
-| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
-| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
-| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-rhai` |
+| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu` (all bins; no `--bin` filter) |
+| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu` |
+| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin` |
+| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin` |
 
 Clippy: append `-- -D warnings` to the matching `cargo clippy` or
 `cargo xwin clippy` invocation with the same `--target`. Use

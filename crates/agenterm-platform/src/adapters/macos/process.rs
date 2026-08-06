@@ -12,6 +12,12 @@ pub(crate) fn write_parent_console_stderr(message: &str) -> bool {
     writeln!(stderr, "{message}").is_ok() && stderr.flush().is_ok()
 }
 
+pub(crate) fn write_parent_console_stdout(message: &str) -> bool {
+    use std::io::Write as _;
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{message}").is_ok() && stdout.flush().is_ok()
+}
+
 pub(crate) fn stdout_probe_token(_reader: &ChildStdout) -> Option<PipeProbeToken> {
     None
 }

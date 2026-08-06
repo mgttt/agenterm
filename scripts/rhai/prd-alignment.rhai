@@ -196,23 +196,18 @@ fn resolve_executable(path) {
     candidate
 }
 
-require(args.len == 1 || args.len == 3, "expected: REPO [CLI_EXE MUX_EXE]");
+require(args.len == 1 || args.len == 2, "expected: REPO [CLI_EXE]");
 let repo = std::path::absolute(args[0]).display;
-let cli = if args.len == 3 {
+let cli = if args.len == 2 {
     resolve_executable(args[1])
 } else {
     resolve_executable(std::path::join(repo, "dist/agenterm-cli").display)
-};
-let mux = if args.len == 3 {
-    resolve_executable(args[2])
-} else {
-    resolve_executable(std::path::join(repo, "dist/agenterm-mux").display)
 };
 let prd_path = std::path::join(repo, "PRD.md").display;
 let detail_directory = std::path::join(repo, "prd").display;
 let contract_path =
     std::path::join(detail_directory, "alignment-contract.json").display;
-for path in [repo, cli, mux, prd_path, detail_directory, contract_path] {
+for path in [repo, cli, prd_path, detail_directory, contract_path] {
     require(std::fs::exists(path), "prd_alignment_input_missing");
 }
 
@@ -500,13 +495,13 @@ for command in protocol.compatibility.partial {
 }
 
 let mux_compatibility = command_json(
-    mux,
-    ["compatibility", "--json"],
+    cli,
+    ["mux", "compatibility", "--json"],
     repo,
     "prd_alignment_mux_compatibility"
 );
 let mux_lines = nonempty_lines(
-    command_output(mux, ["list-commands"], repo, "prd_alignment_mux_catalog")
+    command_output(cli, ["mux", "list-commands"], repo, "prd_alignment_mux_catalog")
 );
 let supported_mux = [];
 let unsupported_mux = [];

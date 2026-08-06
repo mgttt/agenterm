@@ -15,7 +15,8 @@ let repo = if args.len == 1 {
 } else {
     std::env::current_dir().display
 };
-let candidate = std::path::join(repo, "dist/agenterm-mcp.exe").display;
+// MCP is hosted only under agenterm-cli (agenterm-mcp PE removed).
+let candidate = std::path::join(repo, "dist/agenterm-cli.exe").display;
 require(
     std::fs::exists(candidate) && std::fs::metadata(candidate).is_file,
     "mcp_candidate_missing:" + candidate
@@ -27,7 +28,8 @@ command.args([
 ]);
 command.current_dir(repo);
 command.env("AGENTERM_NO_ACTIVATE", "1");
-command.env("AGENTERM_MCP_EXE", candidate);
+// Tests prepend the `mcp` subcommand when spawning this CLI.
+command.env("AGENTERM_MCP_CLI", candidate);
 command.timeout(std::time::Duration::from_secs(600));
 let output = command.output();
 require(output.success, output.error("mcp-conformance"));

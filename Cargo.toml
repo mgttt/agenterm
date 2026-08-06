@@ -20,16 +20,8 @@ name = "agenterm-cli"
 path = "src/bin/agenterm-cli.rs"
 
 [[bin]]
-name = "agenterm-mux"
-path = "src/bin/agenterm-mux.rs"
-
-[[bin]]
 name = "agenterm-rhai"
 path = "src/bin/agenterm-rhai.rs"
-
-[[bin]]
-name = "agenterm-mcp"
-path = "src/bin/agenterm-mcp.rs"
 
 [[bin]]
 name = "agenterm-cc"

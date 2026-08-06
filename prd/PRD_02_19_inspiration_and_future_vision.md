@@ -498,7 +498,7 @@ Unified OPC operator story:
 ## Headless and server-side ambition
 
 Product-owner intent: eventually **replace pm2 + tmux/RMUX** as the stable
-long-running application manager on servers, with `agenterm-mux.exe` as the
+long-running application manager on servers, with `agenterm-cli mux` as the
 compatibility and migration frontend — not a second hidden fleet.
 
 | Target tool | What users hire it for | AgenTerm counter-promise | Gap before promotion |
@@ -630,7 +630,7 @@ INT, DUR, AUTO, ORCH, EXT, INF, REACH.
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
 | B1 | [promoted] | Typed loopback IPC, stable tab IDs, snapshots, waits | — | Agent control plane |
-| B2 | [promoted] | Bounded tmux/RMUX subset via `agenterm-mux.exe` | — | tmux/RMUX compatibility, Fleet multiplexer |
+| B2 | [promoted] | Bounded tmux/RMUX subset via `agenterm-cli mux` | — | tmux/RMUX compatibility, Fleet multiplexer |
 | B3 | [explore] | Remote/network transport for non-loopback clients | auth, subscription | Agent control plane, Observable Fleet |
 | B4 | [explore] | Stable event subscriptions for push and automation | Observable Fleet minimum | Observable Fleet, MCP orchestration |
 | B5 | [idea] | Cross-tab broadcast input and synchronized panes | typed op completeness | Agent control plane |
