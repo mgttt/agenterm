@@ -2,7 +2,11 @@ use std::path::Path;
 
 use libloading::{Library, Symbol};
 
-use crate::{RhError, compile::hash_file, host_api::RhHostFleetCall};
+use crate::{
+    RhError,
+    compile::hash_file,
+    host_api::{RhHostEvalCall, RhHostFleetCall},
+};
 
 pub struct RhNativeModule {
     library: Library,
@@ -16,7 +20,22 @@ impl RhNativeModule {
     }
 
     pub fn register_host(&self, fleet_call: RhHostFleetCall) -> Result<(), RhError> {
+        self.register_host_v2(fleet_call, None)
+    }
+
+    pub fn register_host_v2(
+        &self,
+        fleet_call: RhHostFleetCall,
+        eval_call: Option<RhHostEvalCall>,
+    ) -> Result<(), RhError> {
         unsafe {
+            if let Ok(register_v2) = self.library.get::<Symbol<
+                extern "C" fn(RhHostFleetCall, RhHostEvalCall),
+            >>(b"rh_register_host_v2")
+            {
+                register_v2(fleet_call, eval_call.unwrap_or(dummy_eval_call));
+                return Ok(());
+            }
             let register = self
                 .library
                 .get::<Symbol<extern "C" fn(RhHostFleetCall)>>(b"rh_register_host")
@@ -93,6 +112,17 @@ impl RhNativeModule {
             lines
         }
     }
+}
+
+extern "C" fn dummy_eval_call(
+    _snippet: *const u8,
+    _snippet_len: u32,
+    _scope_json: *const u8,
+    _scope_json_len: u32,
+    _out_buf: *mut u8,
+    _out_cap: u32,
+) -> i32 {
+    -4
 }
 
 pub fn load_and_call_entry(path: &Path) -> Result<i64, RhError> {

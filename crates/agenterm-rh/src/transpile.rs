@@ -1,37 +1,92 @@
+use std::collections::BTreeMap;
+
 use rhai::{AST, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
+    expr_print::{expr_to_rhai, is_pure_int_expr, uses_host_surface},
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
     host_api::emit_host_runtime,
     subset::validate_ast,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ValueKind {
+    Int,
+    Bool,
+}
+
+#[derive(Clone)]
 struct EmitCtx {
     cdylib: bool,
+    scope: BTreeMap<String, ValueKind>,
 }
 
 impl EmitCtx {
-    fn value_type(self) -> &'static str {
+    fn new(cdylib: bool) -> Self {
+        Self {
+            cdylib,
+            scope: BTreeMap::new(),
+        }
+    }
+
+    fn value_type(&self) -> &'static str {
         if self.cdylib { "INT" } else { "Dynamic" }
     }
 
-    fn unit_expr(self) -> &'static str {
+    fn unit_expr(&self) -> &'static str {
         if self.cdylib { "0" } else { "Dynamic::UNIT" }
+    }
+
+    fn emit_scope_json_expr(&self, out: &mut String) {
+        if self.scope.is_empty() {
+            out.push_str("\"{}\"");
+            return;
+        }
+        out.push_str("&format!(\"{{\\\"vars\\\":{{");
+        let mut first = true;
+        for (name, kind) in &self.scope {
+            if !first {
+                out.push_str(",");
+            }
+            first = false;
+            match kind {
+                ValueKind::Int => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"int\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
+                ValueKind::Bool => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"bool\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
+            }
+        }
+        out.push_str("}}}}\"");
+        for name in self.scope.keys() {
+            out.push_str(", ");
+            out.push_str(name);
+        }
+        out.push(')');
+    }
+
+    fn with_binding(mut self, name: &str, kind: ValueKind) -> Self {
+        self.scope.insert(name.to_owned(), kind);
+        self
     }
 }
 
 pub fn transpile(source: &str) -> Result<String, RhError> {
     let ast = parse(source)?;
     validate_ast(&ast)?;
-    emit(&ast, EmitCtx { cdylib: false })
+    emit(&ast, EmitCtx::new(false))
 }
 
 pub fn transpile_cdylib(source: &str) -> Result<String, RhError> {
     let ast = parse(source)?;
     validate_ast(&ast)?;
-    emit(&ast, EmitCtx { cdylib: true })
+    emit(&ast, EmitCtx::new(true))
 }
 
 fn parse(source: &str) -> Result<AST, RhError> {
@@ -72,7 +127,7 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
                 meta.name
             )));
         };
-        emit_fn(&mut out, def, ctx)?;
+        emit_fn(&mut out, def, &mut EmitCtx::new(ctx.cdylib))?;
         wrote_fn = true;
     }
 
@@ -202,7 +257,11 @@ fn find_fn_def<'a>(ast: &'a AST, name: &str) -> Option<&'a ScriptFuncDef> {
         .map(|def| def.as_ref())
 }
 
-fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: EmitCtx) -> Result<(), RhError> {
+fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    let mut fn_ctx = ctx.clone();
+    for param in &def.params {
+        fn_ctx = fn_ctx.with_binding(param.as_str(), ValueKind::Int);
+    }
     out.push_str("pub fn ");
     out.push_str(def.name.as_str());
     out.push('(');
@@ -210,7 +269,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: EmitCtx) -> Result<(), Rh
         if index > 0 {
             out.push_str(", ");
         }
-        if ctx.cdylib {
+        if fn_ctx.cdylib {
             out.push_str(param.as_str());
             out.push_str(": INT");
         } else {
@@ -220,9 +279,9 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: EmitCtx) -> Result<(), Rh
         }
     }
     out.push_str(") -> ");
-    out.push_str(ctx.value_type());
+    out.push_str(fn_ctx.value_type());
     out.push_str(" {\n");
-    emit_block(out, &def.body, ctx, true)?;
+    emit_block(out, &def.body, &mut fn_ctx, true)?;
     out.push_str("}\n\n");
     Ok(())
 }
@@ -230,7 +289,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: EmitCtx) -> Result<(), Rh
 fn emit_block(
     out: &mut String,
     block: &StmtBlock,
-    ctx: EmitCtx,
+    ctx: &mut EmitCtx,
     implicit_return: bool,
 ) -> Result<(), RhError> {
     let stmts: Vec<_> = block.iter().collect();
@@ -244,17 +303,19 @@ fn emit_block(
 fn emit_stmt(
     out: &mut String,
     stmt: &Stmt,
-    ctx: EmitCtx,
+    ctx: &mut EmitCtx,
     implicit_return: bool,
 ) -> Result<(), RhError> {
     match stmt {
         Stmt::Var(boxed, ..) => {
             let (ident, expr, _) = boxed.as_ref();
+            let kind = infer_binding_kind(expr);
             out.push_str("    let ");
             out.push_str(ident.name.as_str());
             out.push_str(" = ");
             emit_expr(out, expr, ctx)?;
             out.push_str(";\n");
+            *ctx = ctx.clone().with_binding(ident.name.as_str(), kind);
         }
         Stmt::Return(Some(expr), ..) => {
             out.push_str("    return ");
@@ -270,7 +331,7 @@ fn emit_stmt(
             let flow = boxed.as_ref();
             out.push_str("    if ");
             emit_expr(out, &flow.expr, ctx)?;
-            out.push_str(" {\n");
+            out.push_str(" != 0 {\n");
             emit_block(out, &flow.body, ctx, true)?;
             out.push_str("    }");
             if !flow.branch.is_empty() {
@@ -279,6 +340,32 @@ fn emit_stmt(
                 out.push_str("    }\n");
             } else {
                 out.push('\n');
+            }
+        }
+        Stmt::For(boxed, ..) => {
+            let (counter, _, flow) = boxed.as_ref();
+            if let Some(items) = int_for_iterable(&flow.expr) {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in [");
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&item.to_string());
+                }
+                out.push_str("].iter().copied() {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::Int);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
+            } else {
+                let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
+                out.push_str("    let _for = rh_host_eval_int(");
+                out.push_str(&format!("{:?}, ", snippet));
+                ctx.emit_scope_json_expr(out);
+                out.push_str(";\n");
             }
         }
         Stmt::Block(boxed) => {
@@ -292,8 +379,17 @@ fn emit_stmt(
             out.push_str(";\n");
         }
         Stmt::Expr(expr) => {
+            out.push_str("    ");
             emit_expr(out, expr, ctx)?;
             out.push_str(";\n");
+        }
+        Stmt::FnCall(call, ..) if call.name == "throw" => {
+            let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
+            out.push_str("    let _throw = rh_host_eval_int(");
+            out.push_str(&format!("{:?}, ", snippet));
+            ctx.emit_scope_json_expr(out);
+            out.push_str(";\n");
+            out.push_str("    return _throw;\n");
         }
         Stmt::FnCall(call, ..) if implicit_return => {
             out.push_str("    return ");
@@ -301,20 +397,52 @@ fn emit_stmt(
             out.push_str(";\n");
         }
         Stmt::FnCall(call, ..) => {
+            out.push_str("    ");
             emit_call(out, call, ctx)?;
             out.push_str(";\n");
         }
         Stmt::Noop(..) => {}
         other => {
             return Err(RhError::Transpile(format!(
-                "unsupported statement in rh-0: {other:?}"
+                "unsupported statement in rh-2: {other:?}"
             )));
         }
     }
     Ok(())
 }
 
-fn emit_expr(out: &mut String, expr: &Expr, ctx: EmitCtx) -> Result<(), RhError> {
+fn infer_binding_kind(expr: &Expr) -> ValueKind {
+    match expr {
+        Expr::BoolConstant(..) => ValueKind::Bool,
+        _ if uses_host_surface(expr) => ValueKind::Bool,
+        _ => ValueKind::Int,
+    }
+}
+
+fn int_for_iterable(iterable: &Expr) -> Option<Vec<i64>> {
+    let Expr::Array(items, ..) = iterable else {
+        return None;
+    };
+    let mut values = Vec::new();
+    for item in items {
+        let Expr::IntegerConstant(value, ..) = item else {
+            return None;
+        };
+        values.push(*value);
+    }
+    Some(values)
+}
+
+fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), RhError> {
+    let snippet = expr_to_rhai(expr)?;
+    out.push_str("rh_host_eval_int(");
+    out.push_str(&format!("{:?}, ", snippet));
+    ctx.emit_scope_json_expr(out);
+    out.push(')');
+    Ok(())
+}
+
+fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
         if let Some(call) = parse_fleet_call(expr) {
             validate_fleet_call(&call)?;
@@ -323,6 +451,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: EmitCtx) -> Result<(), RhError>
             out.push_str(&format!("{:?}, {:?}", call.operation_id, params));
             out.push(')');
             return Ok(());
+        }
+        if !is_pure_int_expr(expr)
+            && (uses_host_surface(expr)
+                || !matches!(
+                    expr,
+                    Expr::IntegerConstant(..) | Expr::BoolConstant(..) | Expr::Variable(..)
+                ))
+        {
+            return emit_host_expr(out, expr, ctx);
         }
     }
     match expr {
@@ -344,11 +481,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: EmitCtx) -> Result<(), RhError>
                 out.push(')');
             }
         }
-        Expr::StringConstant(..) if ctx.cdylib => {
-            return Err(RhError::Transpile(
-                "string literals are not supported in rh AOT (rh-0)".into(),
-            ));
-        }
+        Expr::StringConstant(..) if ctx.cdylib => emit_host_expr(out, expr, ctx)?,
         Expr::StringConstant(value, ..) => {
             out.push_str("Dynamic::from(");
             out.push_str(&format!("{value:?}"));
@@ -362,16 +495,17 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: EmitCtx) -> Result<(), RhError>
             emit_block(out, block, ctx, true)?;
             out.push_str(" }");
         }
+        other if ctx.cdylib && uses_host_surface(other) => emit_host_expr(out, expr, ctx)?,
         other => {
             return Err(RhError::Transpile(format!(
-                "unsupported expression in rh-0: {other:?}"
+                "unsupported expression in rh-2: {other:?}"
             )));
         }
     }
     Ok(())
 }
 
-fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: EmitCtx) -> Result<(), RhError> {
+fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if let Some(op) = &call.op_token {
         return emit_op(out, op, &call.args, ctx);
     }
@@ -386,13 +520,21 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: EmitCtx) -> Result<
         out.push(')');
         return Ok(());
     }
+    if call.name == "throw" && ctx.cdylib {
+        let mut snippet = String::from("throw ");
+        snippet.push_str(&expr_to_rhai(&call.args[0])?);
+        out.push_str("rh_host_eval_int(");
+        out.push_str(&format!("{:?}, ", snippet));
+        ctx.emit_scope_json_expr(out);
+        return Ok(());
+    }
     Err(RhError::Transpile(format!(
-        "unsupported call `{}` in rh-0",
+        "unsupported call `{}` in rh-2",
         call.name
     )))
 }
 
-fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: EmitCtx) -> Result<(), RhError> {
+fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Result<(), RhError> {
     match (op, args.len()) {
         (Token::Plus, 2) => binary(out, "+", &args[0], &args[1], ctx),
         (Token::Minus, 2) => binary(out, "-", &args[0], &args[1], ctx),
@@ -425,7 +567,13 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: EmitCtx) -> Result<
     }
 }
 
-fn binary(out: &mut String, op: &str, lhs: &Expr, rhs: &Expr, ctx: EmitCtx) -> Result<(), RhError> {
+fn binary(
+    out: &mut String,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
     out.push('(');
     emit_expr(out, lhs, ctx)?;
     out.push(' ');

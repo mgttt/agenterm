@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use rhai::{AST, ASTNode, Expr, FnCallExpr, Stmt};
 
 use crate::RhError;
+use crate::expr_print::{is_pure_int_expr, uses_host_surface};
 use crate::fleet::{expr_uses_fleet, parse_fleet_call, validate_fleet_call};
 
 pub fn validate_ast(ast: &AST) -> Result<(), RhError> {
@@ -43,19 +44,16 @@ pub fn validate_ast(ast: &AST) -> Result<(), RhError> {
 
 fn reject_stmt(stmt: &Stmt) -> Option<RhError> {
     match stmt {
-        Stmt::While(..) | Stmt::Do(..) | Stmt::For(..) | Stmt::Switch(..) | Stmt::TryCatch(..) => {
-            Some(subset_error(
-                "RH_SUBSET_NO_LOOP",
-                "loops and try/catch are not in rh-0",
-            ))
-        }
+        Stmt::While(..) | Stmt::Do(..) | Stmt::Switch(..) | Stmt::TryCatch(..) => Some(
+            subset_error("RH_SUBSET_NO_LOOP", "while/do/switch/try are not in rh-2"),
+        ),
         Stmt::Import(..) | Stmt::Export(..) => Some(subset_error(
             "RH_SUBSET_NO_MODULE",
-            "import/export are not in rh-0",
+            "import/export are not in rh-2",
         )),
         Stmt::Share(..) => Some(subset_error(
             "RH_SUBSET_NO_CLOSURE",
-            "closure capture is not in rh-0",
+            "closure capture is not in rh-2",
         )),
         Stmt::FnCall(call, ..) => reject_call(call),
         _ => None,
@@ -65,9 +63,9 @@ fn reject_stmt(stmt: &Stmt) -> Option<RhError> {
 fn reject_expr(expr: &Expr) -> Option<RhError> {
     match expr {
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => reject_call(call),
-        Expr::Map(..) | Expr::InterpolatedString(..) => Some(subset_error(
-            "RH_SUBSET_NO_COLLECTION",
-            "collections and interpolation are not in rh-0",
+        Expr::InterpolatedString(..) => Some(subset_error(
+            "RH_SUBSET_NO_INTERPOLATION",
+            "string interpolation is not in rh-2",
         )),
         _ => None,
     }
@@ -94,7 +92,25 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
             }
             None
         }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            validate_root_expr(&flow.expr)?;
+            validate_stmt_block(&flow.body)
+        }
         Stmt::Block(block) => validate_stmt_block(block),
+        Stmt::FnCall(call, ..) => {
+            if call.name == "throw" {
+                if call.args.len() != 1 {
+                    return Some(subset_error(
+                        "RH_SUBSET_THROW_ARGS",
+                        "throw expects one argument",
+                    ));
+                }
+                validate_root_expr(&call.args[0])
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -112,19 +128,29 @@ fn validate_root_expr(expr: &Expr) -> Option<RhError> {
     if let Some(call) = parse_fleet_call(expr) {
         return validate_fleet_call(&call).err();
     }
-    if expr_uses_fleet(expr) {
+    if expr_uses_fleet(expr) && parse_fleet_call(expr).is_none() {
         return Some(subset_error(
             "RH_SUBSET_FLEET_SHAPE",
             "fleet expression must be a supported fleet.* call",
         ));
     }
+    if is_pure_int_expr(expr)
+        || uses_host_surface(expr)
+        || matches!(
+            expr,
+            Expr::StringConstant(..)
+                | Expr::BoolConstant(..)
+                | Expr::Unit(..)
+                | Expr::Array(..)
+                | Expr::Map(..)
+        )
+    {
+        return None;
+    }
     match expr {
-        Expr::Property(..) | Expr::ThisPtr(..) | Expr::Dot(..) | Expr::Index(..) => {
-            Some(subset_error(
-                "RH_SUBSET_NO_OBJECT",
-                "object property access is not in rh-0",
-            ))
-        }
+        Expr::Property(..) | Expr::ThisPtr(..) | Expr::Dot(..) | Expr::Index(..) => Some(
+            subset_error("RH_SUBSET_NO_OBJECT", "unsupported object access in rh-2"),
+        ),
         _ => None,
     }
 }
@@ -136,7 +162,7 @@ fn reject_call(call: &FnCallExpr) -> Option<RhError> {
     if call.capture_parent_scope {
         return Some(subset_error(
             "RH_SUBSET_NO_CLOSURE",
-            "closure capture is not in rh-0",
+            "closure capture is not in rh-2",
         ));
     }
     None
@@ -167,6 +193,22 @@ mod tests {
     fn accepts_fleet_protocol_info() {
         let ast = Engine::new()
             .compile("fn entry() { fleet.protocol.info(); 1 }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_std_fs_exists() {
+        let ast = Engine::new()
+            .compile("fn entry() { if std::fs::exists(`/tmp`) { 1 } else { 0 } }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_for_loop() {
+        let ast = Engine::new()
+            .compile("fn entry() { for x in [1, 2] { if x == 2 { return 9; } } 0 }")
             .expect("compile");
         validate_ast(&ast).expect("subset");
     }

@@ -58,3 +58,16 @@ fn fleet_fixture_qualifies_and_calls_host_shim() {
     agenterm::script_rh_host::clear_fleet_bridge();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn stdlib_fixture_qualifies_with_host_eval() {
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-stdlib-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let source = include_str!("../fixtures/rh/stdlib.rh");
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    assert_eq!(receipt.entry_value, 42);
+    let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
+    let value = agenterm::script_rh_host::call_pack_entry_with_host(&native, None).expect("entry");
+    assert_eq!(value, 42);
+    let _ = std::fs::remove_dir_all(&dir);
+}

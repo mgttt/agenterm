@@ -1,6 +1,7 @@
 pub mod check;
 pub mod compile;
 pub mod error;
+pub mod expr_print;
 pub mod fleet;
 pub mod host_api;
 pub mod load;
@@ -16,7 +17,8 @@ pub use compile::{
 };
 pub use error::RhError;
 pub use host_api::{
-    RH_HOST_API_VERSION, RH_HOST_FLEET_OUT_CAP, RhHostFleetCall, emit_host_runtime,
+    RH_HOST_API_VERSION, RH_HOST_FLEET_OUT_CAP, RH_HOST_OUT_CAP, RhHostEvalCall, RhHostFleetCall,
+    emit_host_runtime,
 };
 pub use load::{RhNativeModule, load_and_call_entry, verify_native_hash};
 pub use manifest::RhPackManifest;

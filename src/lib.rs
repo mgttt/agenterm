@@ -31,6 +31,7 @@ pub mod script_process;
 pub mod script_project;
 pub mod script_protocol;
 pub mod script_repl;
+pub mod script_rh_cache;
 pub mod script_rh_host;
 pub mod script_rh_pack;
 pub mod script_runtime;

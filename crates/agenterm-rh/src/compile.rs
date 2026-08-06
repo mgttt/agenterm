@@ -4,9 +4,9 @@ use std::process::{Command, Stdio};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    manifest::{manifest_path_for, RhPackManifest},
-    transpile::{cc_line_count, transpile_cdylib},
     RhError,
+    manifest::{RhPackManifest, manifest_path_for},
+    transpile::{cc_line_count, transpile_cdylib},
 };
 
 const GENERATED_CRATE: &str = "rh_pack_generated";
@@ -120,11 +120,7 @@ fn cargo_command() -> Command {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| {
         std::env::var("RUSTC")
             .ok()
-            .and_then(|rustc| {
-                PathBuf::from(rustc)
-                    .parent()
-                    .map(|dir| dir.join("cargo"))
-            })
+            .and_then(|rustc| PathBuf::from(rustc).parent().map(|dir| dir.join("cargo")))
             .and_then(|path| path.to_str().map(str::to_owned))
             .unwrap_or_else(|| "cargo".to_string())
     });
@@ -143,7 +139,8 @@ fn generated_cargo_toml() -> String {
          [lib]\n\
          crate-type = [\"cdylib\"]\n\n\
          [dependencies]\n\
-         rhai = {{ version = \"1.22\", default-features = false, features = [\"std\"] }}\n"
+         rhai = {{ version = \"1.22\", default-features = false, features = [\"std\"] }}\n\
+         serde_json = \"1\"\n"
     )
 }
 
@@ -155,7 +152,10 @@ pub fn native_extension_for_target(target: Option<&str>) -> &'static str {
     let triple = target.unwrap_or("");
     if triple.contains("windows") || (target.is_none() && cfg!(target_os = "windows")) {
         "dll"
-    } else if triple.contains("apple") || triple.contains("darwin") || (target.is_none() && cfg!(target_os = "macos")) {
+    } else if triple.contains("apple")
+        || triple.contains("darwin")
+        || (target.is_none() && cfg!(target_os = "macos"))
+    {
         "dylib"
     } else {
         "so"
@@ -164,7 +164,9 @@ pub fn native_extension_for_target(target: Option<&str>) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_native, compile_native_for_target, hash_bytes, native_extension_for_target};
+    use super::{
+        compile_native, compile_native_for_target, hash_bytes, native_extension_for_target,
+    };
 
     #[test]
     fn source_hash_is_stable() {

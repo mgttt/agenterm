@@ -1,0 +1,11 @@
+fn entry() {
+    if std::fs::exists(`/tmp`) {
+        42
+    } else {
+        0
+    }
+}
+
+fn cc_lines() {
+    ["rh-2 stdlib", "host-eval"]
+}

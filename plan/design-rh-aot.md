@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | rh-1 闭环完成（AOT + 宿主回调 + fleet shim + broker 派发） |
+| 状态 | **rh-2 可试切换**（host eval + 源码 AOT 缓存 + stdlib parity 路径） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -27,12 +27,12 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
         │
    ┌────┴────┐
    Rhai      rh AOT (.so / 进程内 blob)
- Engine     dlopen + 同一 register_* 表
+ Engine     dlopen + rh_host_eval → 同一 Engine API 表
 ```
 
 | 层 | Rhai 期 | rh 切换后 |
 |----|---------|-----------|
-| Facade 注册 | `configure_engine` | native shim 调同一 Rust fn |
+| Facade 注册 | `configure_engine` | native 热路径 + **host eval** 复用同一表 |
 | pack 入口 | `Engine::eval` | `rh_entry()` 机器码 |
 | catalog / smoke | script_api 2 | **不变** |
 | broker / 预算 | script_protocol | **不变** |
@@ -41,51 +41,54 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 
 ---
 
-## 3. rh-0 里程碑（当前）
+## 3. 里程碑
 
 | ID | 交付 | 状态 |
 |----|------|------|
-| M0 | `agenterm-rh check` — 子集校验 | [x] |
-| M1 | `agenterm-rh transpile` — AST → Rust 源 | [x] 纯函数子集 |
-| M2 | `script_backend` + `AGENTERM_SCRIPT_BACKEND` | [x] |
-| M3 | AOT compile → `.so` + manifest + dlopen smoke | [x] |
-| M5 | CC in-process `dlopen` + `cc_lines` 原生呈现 | [x] |
-| M6 | 六 cell CI + qualification hash | [x] |
-| M7 | `AGENTERM_SCRIPT_BACKEND=rh` worker 原生 entry 派发 | [x] |
-| M8 | Fleet native shim：`rh_register_host` + `fleet.*` transpile | [x] |
-| M9 | worker broker 派发 + fleet fixture 验收 | [x] |
+| M0–M7 | rh-0：check/transpile/compile/pack/worker 切换 | [x] |
+| M8–M9 | rh-1：fleet shim + broker 派发 | [x] |
+| M10 | rh-2：`rh_host_eval` + Rhai 引擎宿主复用 | [x] |
+| M11 | rh-2：源码 hash 缓存 AOT（`script_rh_cache`） | [x] |
+| M12 | rh-2：`AGENTERM_SCRIPT_BACKEND=rh` 可无 pack 跑 source | [x] |
+| M13 | 试切换：stdlib fixture + `std::fs::exists` native 验收 | [x] |
 
 ---
 
-## 4. rh-1 语言扩展（fleet）
+## 4. rh-2 语言与 host eval
 
-**允许：** rh-0 全部 + `fleet.protocol.info()` 等 **零参/单整数** fleet 查询/变更。  
-**实现：** transpile → `rh_fleet_call("protocol.info", "{}")` → 宿主 C ABI → 同一 `fleet.call` broker。  
-**fixture：** `fixtures/rh/fleet.rh`；`rh_aot_smoke` + `script_rh_host` 黑盒。
+**允许（rh-2）：** rh-1 全部 + `for`、字符串、`throw`、任意 `std::`/`rhai::`/对象链（经 host eval）。  
+**禁止：** `import`/`export`、`while`/`try`/闭包捕获。
 
----
+**机制：**
+- 纯 `INT` 控制流/算术 → 原生机器码
+- `fleet.*` → `rh_fleet_call` → broker（快路径）
+- 其余 Rhai 表达式 → `rh_host_eval_int(snippet, scope)` → 宿主 **同一** `configure_engine` Rhai 引擎
 
-## 5. rh-0 语言子集
-
-**允许：** `fn`、 `let`/`const`、 `if`/`else`、 `return`、字面量、二元运算、`()` block。  
-**禁止（rh-0）：** `eval`、`import`/`export`、循环、`try/catch`、闭包捕获、动态模块。
-
-校验：`agenterm-rh check`；失败给出 rh 原因码。
+**fixture：** `fixtures/rh/stdlib.rh`（`std::fs::exists` → entry 42）
 
 ---
 
-## 6. 编译管线（目标）
+## 5. 试切换步骤
+
+1. 设置 `AGENTERM_SCRIPT_BACKEND=rh`
+2. 提供 rh 源码（`fn entry() { ... }`）或 `AGENTERM_RH_PACK`
+3. worker `execute_inner` → `try_execute_rh_invocation` → AOT 缓存 → dlopen → `rh_entry()`
+4. 含 fleet 时自动注册 broker bridge
+
+**回退：**  unset `AGENTERM_SCRIPT_BACKEND` 或设为 `rhai`（默认）。
+
+---
+
+## 6. 编译管线
 
 ```text
-pack/*.rh  →  parse (Rhai AST, 临时)
-          →  subset validate
-          →  transpile → generated.rs
-          →  rustc / cc  →  rh_pack.so
-          →  签名 + .agp manifest native_hash
-          →  Base dlopen @ pack load
+pack/*.rh  →  parse (Rhai AST)
+          →  subset validate (rh-2)
+          →  transpile → generated.rs (native + host eval calls)
+          →  rustc → rh_pack.so
+          →  manifest native_hash
+          →  dlopen @ load / script_rh_cache
 ```
-
-首版后端：**transpile → Rust → rustc**（最贴现有栈）。Cranelift 直出为 M6+。
 
 ---
 
@@ -95,31 +98,27 @@ pack/*.rh  →  parse (Rhai AST, 临时)
 |----|------|
 | RH-1 | rh-0 是否启用 `no_module` 依赖裁剪？ |
 | RH-2 | native artifact 是否独立于 Base PE qualification？ |
-| RH-3 | 切换窗口：`AGENTERM_SCRIPT_BACKEND=rh` 默认化版本？ |
+| RH-3 | **试切换已可用**；全量 task manifest（62 脚本）需逐脚本 rh-2 校验 |
+| RH-4 | import/模块图、Cranelift 直出、签名 OTA、gateway PE |
 
 ---
 
-## 8. rh-0 闭环验收
+## 8. 验收
 
 | 能力 | 证据 |
 |------|------|
-| 子集校验 | `agenterm-rh check` |
-| AOT 编译 | `agenterm-rh compile` / `pack build` |
-| native_hash | manifest + `verify_native_hash` on load |
-| dlopen entry | `rh_entry()` + `run-smoke` |
-| cc_lines C ABI | `rh_cc_line_*` 静态导出 |
-| CC / gateway 观测 | `AGENTERM_RH_PACK` + `protocol-info.script` |
-| CLI 诊断 | `agenterm-cli rh-pack --path` |
-| 六 cell | CI: host `cargo test -p agenterm-rh` + cross `AGENTERM_RH_QUALIFY_TARGET` |
-| worker 切换 | `execute_inner` → `try_execute_rh_invocation` when backend=rh |
-| fleet shim | native `rh_fleet_call` → host → `fleet.call` broker |
+| rh-0/1 | `cargo test -p agenterm-rh`、`rh_aot_smoke` |
+| host eval | `script_rh_host::host_eval_runs_std_fs_exists` |
+| stdlib pack | `fixtures/rh/stdlib.rh` qualify + native entry 42 |
+| 源码缓存 | `script_rh_cache::source_cache_is_stable` |
+| worker 切换 | `execute_inner` + source-only rh backend |
+| fleet shim | `fixtures/rh/fleet.rh` |
 
-**未纳入 rh-1（后续轨）：** 全 fleet 表覆盖、gateway 独立 PE、`llm.*` Logic Pack、签名 OTA、Cranelift 直出。
+**后续轨：** 全 task `.rhai`→`.rh` 迁移、gateway Logic Pack、`llm.*`、Cranelift、签名 OTA。
 
 ---
 
-## 9. 非目标（rh-0）
+## 9. 非目标（当前）
 
-- 不替换 `agenterm-rhai` 自动化/task manifest 路径
-- 不在 rh-0 实现 parser/grid/server 内嵌
+- 不在此轨替换 task manifest 全部 62 脚本（需逐脚本验收）
 - 不阻断近程 server/CLI 主轨

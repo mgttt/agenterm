@@ -51,6 +51,18 @@ pub fn call_pack_entry_with_fleet(
     Ok(module.call_entry())
 }
 
+pub fn call_pack_entry_with_host(
+    native_path: &Path,
+    fleet_bridge: Option<Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>>,
+) -> Result<i64, RhError> {
+    if let Some(bridge) = fleet_bridge {
+        set_fleet_bridge(bridge);
+    }
+    let module = RhNativeModule::load(native_path)?;
+    register_native_module(&module)?;
+    Ok(module.call_entry())
+}
+
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     if module.host_api_version() < RH_HOST_API_VERSION {
         return Err(RhError::Compile(format!(
@@ -59,7 +71,7 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             RH_HOST_API_VERSION
         )));
     }
-    module.register_host(host_fleet_call)
+    module.register_host_v2(host_fleet_call, Some(host_eval_call))
 }
 
 extern "C" fn host_fleet_call(
@@ -88,6 +100,89 @@ extern "C" fn host_fleet_call(
         };
         bridge(operation_id.as_str(), params_json.as_str()).map_err(|_| -5)
     });
+    write_response(response, out_buf, out_cap)
+}
+
+extern "C" fn host_eval_call(
+    snippet: *const u8,
+    snippet_len: u32,
+    scope_json: *const u8,
+    scope_json_len: u32,
+    out_buf: *mut u8,
+    out_cap: u32,
+) -> i32 {
+    if snippet.is_null() || scope_json.is_null() || out_buf.is_null() || out_cap == 0 {
+        return -1;
+    }
+    let snippet = match unsafe { read_utf8(snippet, snippet_len) } {
+        Ok(value) => value,
+        Err(()) => return -2,
+    };
+    let scope_json = match unsafe { read_utf8(scope_json, scope_json_len) } {
+        Ok(value) => value,
+        Err(()) => return -3,
+    };
+    let response = host_eval_snippet(&snippet, &scope_json).map_err(|_| -5);
+    write_response(response, out_buf, out_cap)
+}
+
+fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> {
+    use rhai::{Dynamic, Engine, Scope};
+
+    let scope_value: serde_json::Value =
+        serde_json::from_str(scope_json).unwrap_or_else(|_| serde_json::json!({}));
+    let mut engine = Engine::new();
+    crate::script_runtime::configure_engine(
+        &mut engine,
+        &crate::script_protocol::ScriptBudgets::default(),
+    );
+    let mut scope = Scope::new();
+    if let Some(vars) = scope_value.get("vars").and_then(|value| value.as_object()) {
+        for (name, binding) in vars {
+            if let Some(value) = binding.get("value") {
+                if let Some(number) = value.as_i64() {
+                    scope.push(name.as_str(), number);
+                    continue;
+                }
+                if let Some(flag) = value.as_bool() {
+                    scope.push(name.as_str(), flag);
+                    continue;
+                }
+                if let Some(text) = value.as_str() {
+                    scope.push(name.as_str(), text.to_owned());
+                }
+            }
+        }
+    }
+    let result = engine
+        .eval_with_scope::<Dynamic>(&mut scope, snippet)
+        .map_err(|error| error.to_string())?;
+    encode_host_result(&result)
+}
+
+fn encode_host_result(value: &rhai::Dynamic) -> Result<String, String> {
+    if value.is_unit() {
+        return Ok("{\"kind\":\"unit\"}".to_owned());
+    }
+    if let Ok(number) = value.as_int() {
+        return Ok(format!("{{\"kind\":\"int\",\"value\":{number}}}"));
+    }
+    if let Ok(flag) = value.as_bool() {
+        return Ok(format!("{{\"kind\":\"bool\",\"value\":{flag}}}"));
+    }
+    if let Ok(text) = value.clone().into_string() {
+        return Ok(format!(
+            "{{\"kind\":\"str\",\"value\":{}}}",
+            serde_json::to_string(&text).map_err(|error| error.to_string())?
+        ));
+    }
+    if let Ok(json) = rhai::serde::from_dynamic::<serde_json::Value>(value) {
+        return Ok(format!("{{\"kind\":\"json\",\"value\":{json}}}"));
+    }
+    Err("unsupported host eval result type".to_owned())
+}
+
+fn write_response(response: Result<String, i32>, out_buf: *mut u8, out_cap: u32) -> i32 {
     let Ok(json) = response else {
         return response.unwrap_err();
     };
@@ -118,8 +213,18 @@ std::thread_local! {
 
 #[cfg(test)]
 mod tests {
-    use super::{call_pack_entry_with_fleet, clear_fleet_bridge};
+    use super::{call_pack_entry_with_host, clear_fleet_bridge, host_eval_snippet};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn host_eval_runs_std_fs_exists() {
+        let dir = std::env::temp_dir();
+        let snippet = format!("std::fs::exists(`{}`)", dir.display());
+        let json = host_eval_snippet(&snippet, "{}").expect("eval");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("json");
+        assert_eq!(value["kind"], "bool");
+        assert!(value["value"].as_bool().unwrap());
+    }
 
     #[test]
     fn native_pack_calls_host_fleet_bridge() {
@@ -131,15 +236,15 @@ mod tests {
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
         let calls = Arc::new(Mutex::new(Vec::new()));
         let calls_for_bridge = Arc::clone(&calls);
-        let value = call_pack_entry_with_fleet(
+        let value = call_pack_entry_with_host(
             &native,
-            Box::new(move |operation_id, params| {
+            Some(Box::new(move |operation_id, params| {
                 calls_for_bridge
                     .lock()
                     .expect("calls")
                     .push((operation_id.to_owned(), params.to_owned()));
                 Ok("{\"operation_id\":\"protocol.info\"}".to_owned())
-            }),
+            })),
         )
         .expect("entry");
         assert_eq!(value, 7);
@@ -147,6 +252,22 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].0, "protocol.info");
         clear_fleet_bridge();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn native_pack_runs_stdlib_via_host_eval() {
+        let dir = std::env::temp_dir().join(format!("agenterm-rh-host-std-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tmp = std::env::temp_dir();
+        let source = format!(
+            "fn entry() {{ if std::fs::exists(`{}`) {{ 42 }} else {{ 0 }} }}",
+            tmp.display()
+        );
+        agenterm_rh::build_pack_dir(&source, &dir).expect("build");
+        let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
+        let value = call_pack_entry_with_host(&native, None).expect("entry");
+        assert_eq!(value, 42);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

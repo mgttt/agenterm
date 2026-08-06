@@ -71,16 +71,9 @@ pub fn try_execute_rh_invocation(
             }))
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
-            let pack = crate::script_rh_pack::cached_rh_pack().ok_or_else(|| {
-                agenterm_rh::RhError::Compile(
-                    "AGENTERM_SCRIPT_BACKEND=rh requires AGENTERM_RH_PACK for run/eval".into(),
-                )
-            })?;
-            let entry_value = if let Some(bridge) = fleet_bridge {
-                crate::script_rh_host::call_cached_pack_entry_with_fleet(bridge)?
-            } else {
-                pack.entry_value
-            };
+            let (pack, native_path) = resolve_rh_pack(source)?;
+            let entry_value =
+                crate::script_rh_host::call_pack_entry_with_host(&native_path, fleet_bridge)?;
             let mut stdout = String::new();
             for line in &pack.cc_lines {
                 stdout.push_str(line);
@@ -92,6 +85,27 @@ pub fn try_execute_rh_invocation(
             }))
         }
     }
+}
+
+fn resolve_rh_pack(
+    source: &str,
+) -> Result<(crate::script_rh_pack::LoadedRhPack, std::path::PathBuf), agenterm_rh::RhError> {
+    if let Some(pack) = crate::script_rh_pack::cached_rh_pack() {
+        let native = crate::script_rh_pack::cached_native_path()
+            .ok_or_else(|| {
+                agenterm_rh::RhError::Compile("AGENTERM_RH_PACK native path is unavailable".into())
+            })?
+            .to_path_buf();
+        return Ok((pack.clone(), native));
+    }
+    if !source.is_empty() {
+        let pack = crate::script_rh_cache::loaded_pack_for_source(source)?;
+        let native = crate::script_rh_cache::native_path_for_source(source)?;
+        return Ok((pack, native));
+    }
+    Err(agenterm_rh::RhError::Compile(
+        "AGENTERM_SCRIPT_BACKEND=rh requires AGENTERM_RH_PACK or non-empty rh source".into(),
+    ))
 }
 
 pub fn rh_check(source: &str) -> Result<(), agenterm_rh::RhError> {
