@@ -185,6 +185,16 @@ jobs:
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
         # note: check command runtime includes lint + quick integrated checks in this lane
+      - name: Prove rh AOT pack pipeline
+        id: rh-aot
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
+          ./rh-check.sh
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Run representative public-interface slice
         id: public-interface
         shell: bash
@@ -216,6 +226,7 @@ jobs:
           dist/agenterm-rhai.exe task run remote-ui-smoke --manifest agenterm.tasks.json
           dist/agenterm-rhai.exe task run fleet-smoke --manifest agenterm.tasks.json
           dist/agenterm-rhai.exe task run script-smoke --manifest agenterm.tasks.json
+          dist/agenterm-rhai.exe task run rh-aot-smoke --manifest agenterm.tasks.json
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -360,6 +371,14 @@ jobs:
           ./check.sh --quick \
             --target x86_64-unknown-linux-gnu \
             --timing target/qualification/timing.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Prove rh AOT pack pipeline
+        id: rh-aot
+        run: |
+          start_ms=$(date +%s%3N)
+          ./rh-check.sh
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -607,6 +626,13 @@ jobs:
         run: >-
           ./scripts/bootstrap.sh linux aarch64
           target/aarch64-unknown-linux-gnu/debug --existence-only
+      - name: Cross-compile rh reference pack
+        env:
+          AGENTERM_RH_QUALIFY_TARGET: aarch64-unknown-linux-gnu
+        run: |
+          cargo check -p agenterm-rh --locked --target aarch64-unknown-linux-gnu
+          AGENTERM_RH_QUALIFY_TARGET=aarch64-unknown-linux-gnu \
+            cargo test -p agenterm-rh --locked cross_compiles_reference_pack_when_target_env_set
       - name: Report cache hit profile
         if: always()
         shell: bash
@@ -749,6 +775,13 @@ jobs:
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Cross-compile rh reference pack
+        env:
+          AGENTERM_RH_QUALIFY_TARGET: ${{ matrix.target }}
+        run: |
+          cargo check -p agenterm-rh --locked --target ${{ matrix.target }}
+          AGENTERM_RH_QUALIFY_TARGET=${{ matrix.target }} \
+            cargo test -p agenterm-rh --locked cross_compiles_reference_pack_when_target_env_set
       - name: Prove published macOS IPC upgrade and rollback
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: native-ipc-compat
@@ -970,6 +1003,13 @@ jobs:
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Cross-compile rh reference pack
+        env:
+          AGENTERM_RH_QUALIFY_TARGET: aarch64-pc-windows-msvc
+        run: |
+          cargo check -p agenterm-rh --locked --target aarch64-pc-windows-msvc
+          AGENTERM_RH_QUALIFY_TARGET=aarch64-pc-windows-msvc \
+            cargo test -p agenterm-rh --locked cross_compiles_reference_pack_when_target_env_set
       - name: Report cache hit profile
         if: always()
         shell: bash

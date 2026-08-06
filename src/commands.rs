@@ -45,6 +45,7 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("next-window", &["next"]),
     command("pane-snapshot", &[]),
     command("protocol-info", &[]),
+    command("rh-pack", &[]),
     command("previous-window", &["prev"]),
     command("read-events", &[]),
     command("rename-session", &["rename"]),
@@ -590,6 +591,12 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             "agenterm-cli protocol-info [--running]",
             &[][..],
             &["--running"][..],
+            false,
+        ),
+        "rh-pack" => (
+            "agenterm-cli rh-pack --path PATH [--json]",
+            &["--path"][..],
+            &["--json"][..],
             false,
         ),
         "rename-session" | "rename" => (

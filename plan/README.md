@@ -19,6 +19,7 @@
 | [`plan-mobile.md`](plan-mobile.md) | 移动端占位（未授权开工） |
 | [`goal-crate-platform.md`](goal-crate-platform.md) | **/goal** 可执行：platform crate 跨平台封装收口（边界 SSOT + 机制 gap + catalog 闸） |
 | [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) | 机制封装漏点表 + 跨平台任务执行句式（G1 breakaway 已收） |
+| [`design-rh-aot.md`](design-rh-aot.md) | **rh 并行 AOT 轨**（check / transpile / backend 切换） |
 
 ## 已归档（勿当任务单）
 
