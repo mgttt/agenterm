@@ -1,23 +1,23 @@
 # AgenTerm v0.1.15 公开计划
 
 状态：**已定稿，待授权开工**（2026-08-05 定版；此前为占位稿/思维工作树，
-素材保留在 §三·五 / §五 / §七 / §八 / §九 / §十）。
+素材保留在 §3.5 / §5 / §7 / §8 / §9 / §10）。
 不改变任何已发布/在途版本的授权状态；不创建 tag/Candidate/Release。
 
 **主题：发布链降本（cache 优先）+ 交付后 install 卫生。**
 比占位稿的「反馈左移 + 发布链降本」**更窄**：反馈左移只保留最便宜的两叶，
-夜间彩排与自动派发推 v0.2.x——理由基于实测数字，见 §二。
+夜间彩排与自动派发推 v0.2.x——理由基于实测数字，见 §2。
 
-开工前需人工拍板 §五 5.7 的政策决策项（阻塞关系见 §二·五）。
+开工前需人工拍板 §5.7 的政策决策项（阻塞关系见 §2.5）。
 
-**三端 agent 并发派工**：见 **§二·二-b**（叶 × 泳道 × 文件域 × 禁区）。  
+**三端 agent 并发派工**：见 **§2.2.1**（叶 × 泳道 × 文件域 × 禁区）。  
 不要另开 `plan/orchestrate-*.md`——派工以本文为 SSOT。  
 平台封装 / shared-first 纪律见 `AGENTS.md`、`plan/plan-platform-encapsulation-gap.md`。
 
-## 数据来源与关键事实（全部实测，可复现）
+## 0. 数据来源与关键事实（全部实测，可复现）
 
 v0.1.14 发布日 ~10 轮 gate 级遥测，加 2026-08-05 对成功 Candidate
-`30942173420` 的逐门/逐 job 分析（详见 `plan/archive/plan-v0.1.14.md` §七）：
+`30942173420` 的逐门/逐 job 分析（详见 `plan/archive/plan-v0.1.14.md` §7）：
 
 ```text
 单轮全绿路径 ≈ 30min：CI ~5min → Candidate ~15-18min → Promotion ~1min
@@ -57,10 +57,10 @@ wake pump 余量。
 
 ---
 
-## 一、目标树素材全集（**非执行清单**——执行看 §一·五）
+## 1. 目标树素材全集（**非执行清单**——执行看 §1.5）
 
 > 本节保留占位稿的 A–H + P + S 全部原始条目与 review 行，作为**素材与依据**。
-> 取舍结果见 §一·五；未纳入本版者的推迟理由见 §二·六。
+> 取舍结果见 §1.5；未纳入本版者的推迟理由见 §2.6。
 
 ```text
 v0.1.15  Feedback shift-left & release-lane economics
@@ -151,7 +151,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  │     消除源头），需要则纳入清理策略
 │  │     现状（review）：仓库启用 Pages（docs/ + CNAME 生效），用户此前
 │  │     报告 Actions 列表存在大量 pages-build 噪音；域名为 agenterm.mega.tech，
-│  │     与用户所述 agenterm.work 的归属/迁移关系见 §五 决策项 P1
+│  │     与用户所述 agenterm.work 的归属/迁移关系见 §5 决策项 P1
 │  └─ [ ] E2 定期清理旧 run：moltbaby 侧已有 gh-ci-cleanup.sh
 │        （支持 --hours/--days/--keep-release-runs/--keep-pages-build/
 │        --verify-rounds/--dry-run，删除后全量复核），agenterm 侧
@@ -159,7 +159,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 │        §Release-chain operating requirements（v0.1.13/v0.1.14 两轮坑
 │        已合并去重为版本无关要求）
 │
-├─ F. Linux 云桌面实测尾账（2026-08-04 DISPLAY=:1，详见 §七）
+├─ F. Linux 云桌面实测尾账（2026-08-04 DISPLAY=:1，详见 §7）
 │  ├─ [x] 单测误耦合：child_id_remains_stable_after_wait 把
 │  │     top_level_window_supported 绑到 hosted_script_worker_available
 │  │     （有 X11 才失败；无 DISPLAY 的 CI 绿掩盖）——已修进 main
@@ -168,7 +168,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  └─ [ ] F2 云桌面默认 Xft.dpi=96（VNC 0mm + DPI=-1 → scale≈0.99，
 │        触发 control_center_linux_renderer_evidence）
 │
-├─ G. 安装/更新体验（2026-08-05 macOS aarch64 真机：0.1.12-local → v0.1.14，详见 §八）
+├─ G. 安装/更新体验（2026-08-05 macOS aarch64 真机：0.1.12-local → v0.1.14，详见 §8）
    ├─ [ ] G1 macOS 默认 `curl | bash` 失败面：无 signed asset 时
    │     必须 AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 才装得上
    │     动机：现网 v0.1.14 只有 `*-macos-*-unsigned-preview.zip`；
@@ -280,10 +280,10 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  │     联动：与 E1（pages-build 噪音）取向绑定——走 Pages 则 Pages 保留
 │  └─ [ ] H6 PRD 未来树落文：M13（分发面）/ M14（Hub 底座）
 │        **已落地**（本轮已写入 `prd/PRD_02_18_roadmap.md`），
-│        与 §五 L-EXT / L-PKG 主线互链
+│        与 §5 L-EXT / L-PKG 主线互链
 │        非目标：本版**不写任何 Hub 代码**，不建 registry，不动 softmgr
 │
-├─ P. 粘贴失败硬骨头（终端区 + 输入区/composer；2026-08-05 用户实测，详见 §十）
+├─ P. 粘贴失败硬骨头（终端区 + 输入区/composer；2026-08-05 用户实测，详见 §10）
 │  ├─ [ ] P1 **UTF-8 / 异源大段文本**（他终端复制 → 粘贴常失败）
 │  │     症状：从别的 terminal 复制大段（疑含 emoji / OSC 色码 / 混合控制符 /
 │  │     非严格 UTF-8 字节）粘到 AgenTerm **终端区或 composer**，提示失败
@@ -339,10 +339,10 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  │     structure 块；CI 与 ARCHITECTURE 围栏 diff（失败=结构漂）
 │  ├─ [ ] S3（可选，长期）`architecture.manifest` 真源（C 档）：
 │  │     清单驱动生成 md 块 + 同一清单喂测试；**不**新开第二份现行结构 md
-│  └─ [ ] S-prep 预备树（§九）：复审清单 + 微重构刀序 + 文件域互斥
+│  └─ [ ] S-prep 预备树（§9）：复审清单 + 微重构刀序 + 文件域互斥
 │        债务钩 L2/L3/L4 在 ARCHITECTURE §4；落地须同批回写 §1/§3
 │
-└─ O. **macOS / OSX 本机跟进泳道**（2026-08-05 派发 · 见 **§十一** 完整作业规格）
+└─ O. **macOS / OSX 本机跟进泳道**（2026-08-05 派发 · 见 **§11** 完整作业规格）
    ├─ [x] O0 接手基线（先做，只读）
    ├─ [x] O1a **ImeStatus macOS adapter** `28d6959`（N1 osx 半叶）
    │     ⚠ O1b Unix 状态栏 IME 段 **未开工**（跨平台布局，等用户定）— §11.7
@@ -354,21 +354,21 @@ v0.1.15  Feedback shift-left & release-lane economics
    │     交付 §11.13；定因 §11.8 **全部成立**；修饰键管线早已存在只是未读
    │     ⚠ 顺带暴露 main 红灯：`prd_alignment_public_command_missing:delete-buffer`
    │     （非 O6 引入、非 flake；须有人认领 PRD 公开命令目录，§11.13）
-   ├─ [ ] O1b Unix 状态栏 IME 段 — **已拍板开工**（编排者 2026-08-05，见 §六）
+   ├─ [ ] O1b Unix 状态栏 IME 段 — **已拍板开工**（编排者 2026-08-05，见 §6）
    │     对齐 Win `refresh_ime_label`；poll `ime::status()`；禁伪造 full_shape
    ├─ [ ] O-fix 红灯认领：`prd_alignment_public_command_missing:delete-buffer`
    │     **已拍板**：补 PRD 公开命令面提及 B′ buffer 族（含 delete-buffer），
    │     使 prd-alignment 绿；**不**删 CLI 命令
-   └─ [x] O-禁：禁 Win IME 域；P-P1/G-P1/O1b **已由编排 agent 拍板**（§六）
+   └─ [x] O-禁：禁 Win IME 域；P-P1/G-P1/O1b **已由编排 agent 拍板**（§6）
 ```
 
-## 一·五、v0.1.15 收敛工作树（**这是可执行清单**；上面 §一 是素材全集）
+## 1.5. v0.1.15 收敛工作树（**这是可执行清单**；上面 §1 是素材全集）
 
-§一 的 A–H + P + S 共约 30 叶，是多轮追加堆出来的，含大量「观察」而非
+§1 的 A–H + P + S 共约 30 叶，是多轮追加堆出来的，含大量「观察」而非
 「可执行」。本节是取舍后的定稿：**只列进入 v0.1.15 的叶**，每叶带动机、
-可证伪验收、成本、依赖。未列入者一律见 §二·六（推迟表，含推迟理由）。
+可证伪验收、成本、依赖。未列入者一律见 §2.6（推迟表，含推迟理由）。
 
-**多 agent / 三端怎么并行**：叶仍在本节；**派工与文件域互斥见 §二·二-b**。
+**多 agent / 三端怎么并行**：叶仍在本节；**派工与文件域互斥见 §2.2.1**。
 
 选择原则（v0.1.14 教训）：**宁可少而全绿，不要多而半途**——发布日 5–6 小时
 耗在从未跑过的车道上，根因不是做得少，是同时开了太多没验证的面。
@@ -397,7 +397,7 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **验收**：release 门不再含该 gate 且 push CI 含之；
     `qualification-gates.json` 声明同步（fail-closed 不破）
   - **成本**：小；**依赖**：无
-  - **PRD 核对**：已 grep，无任何 PRD 要求它必须在 release 门（见 §二·七）
+  - **PRD 核对**：已 grep，无任何 PRD 要求它必须在 release 门（见 §2.7）
 - [ ] **R4 promotion dry-run**（新增叶，v0.1.14 直接教训）
   - **动机**：`release.yml` 首跑即藏 4 个缺陷；dry-run 可在几十秒内
     暴露其中 4/8
@@ -406,7 +406,7 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **成本**：中；**依赖**：无
   - ⚠️ **本叶自身就是「没跑过的车道」**，必须先自证，别重蹈覆辙
 
-### A′. 反馈左移（只保留最便宜的两叶；A1/A2 推迟见 §二·六）
+### A′. 反馈左移（只保留最便宜的两叶；A1/A2 推迟见 §2.6）
 
 - [ ] **A3 script-smoke 左移进 push CI**（debug 版，实测 ~7s）
   - **动机**：v0.1.14 发布日它贡献 2 次腐化；左移后 6 分钟内暴露
@@ -418,7 +418,7 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **验收**：Candidate 运行页直接可见逐门耗时表，无需下载 artifact
   - **成本**：小；**依赖**：无（但先于 R1 做更好验证）
 
-### G′. 安装/更新卫生（用户真机踩坑，详见 §八；与发布链正交，可并行）
+### G′. 安装/更新卫生（用户真机踩坑，详见 §8；与发布链正交，可并行）
 
 - [ ] **G3 版本可观测性**：`agenterm --version` 打印即退 + 写 `installed.json`
   - **动机**：用户/agent 无法确认「窗口是不是旧版」；G7a 的判断也依赖它
@@ -442,7 +442,7 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **验收**：装新版后旧目录按策略修剪，且不删仍被非 current 链引用者
   - **成本**：小；**依赖**：无
 
-### U′. 标签切换假刷新（**用户 2026-08-05 现场**；观察见 §三·五 3.5.2a）
+### U′. 标签切换假刷新（**用户 2026-08-05 现场**；观察见 §3.5.2.1）
 
 > 标签区选不同 tab 时「基本会触发重新刷新渲染」，打断工作。根因是切 tab
 > 路径上叠了 **no-op composer 写、无条件 font/layout、整屏 delta**，不是
@@ -457,7 +457,7 @@ U′. 标签切换假刷新
 ```
 
 - [x] **U1 假刷新热路径止血**（代码已落工作区，待合 main）
-  - **动机**：见 §三·五 TS1
+  - **动机**：见 §3.5 TS1
   - **做法（已实现）**：
     1. `ControlHost::apply_set_composer`（default）与 Unix 覆盖：文本相同 →
        no-op，不 `ComposerDraft`；
@@ -479,7 +479,7 @@ U′. 标签切换假刷新
   - **验收**：用户确认假刷新明显减轻；若加黑盒则一条路径全绿
   - **成本**：极小–小；**依赖**：U1 合入
 
-- [ ] **U3 显示后再 debounce PTY resize**（§三·五 TS2）
+- [ ] **U3 显示后再 debounce PTY resize**（§3.5 TS2）
   - **动机**：切到「网格仍停留在旧窗口尺寸」的 tab 时，立即
     `resize_active_terminal` → ConPTY/应用整屏重排（vim 等），体感仍重
   - **做法**：仅当 active 且（聚焦终端 / 短 debounce 到期）再发 resize；
@@ -574,7 +574,7 @@ S′. 多 Server / Instance 可达与选择
 
 - [x] **S2 主窗身份常显**
   - **动机**：多开 main/work 时「我连的是谁」靠猜；标题 profile 噪音
-    （§三·五 W1）与身份信息不足并存
+    （§3.5 W1）与身份信息不足并存
   - **做法**：状态栏或标题稳定展示 `instance_label`（或 logical name）+
     可选短 pid；**发布构建**避免把内部 profile 噪音盖过身份
     （可与 W1 合并处理）
@@ -712,10 +712,10 @@ B′. tmux/rmux send-keys + buffer
 > B′ 偏 `control_dispatch` / CLI / server buffer；M 偏 note/handoff 约定与
 > observe——避免同 PR 混「邮箱」与「键入」。
 
-### H′. 分发面地基（只做**纯派生 + 补值**，不建服务；详见 §一 H 组）
+### H′. 分发面地基（只做**纯派生 + 补值**，不建服务；详见 §1 H 组）
 
 - [ ] **H4 补齐 Linux/Windows 的 `provenance.sbom_sha256`** ★先做
-  - **动机（已修正，见 §二·七）**：实测六平台——**macOS 两个 arch 已正确填入**
+  - **动机（已修正，见 §2.7）**：实测六平台——**macOS 两个 arch 已正确填入**
     `65c32add…`，**Linux 两个为空串、Windows x86_64 缺字段、
     windows-aarch64 为空串**。`PRD_02_17:237-240` 只要求「macOS 双档
     provenance 携带同一 SBOM 摘要」，故**当前实现并未违反 PRD**；
@@ -725,7 +725,7 @@ B′. tmux/rmux send-keys + buffer
     实际 SBOM 摘要（windows-x86_64 从「无此字段」变为有值）
   - **成本**：极小（纯补值）；**依赖**：无
   - **PRD 联动**：落地后应同步把 `PRD_02_17:237-240` 的 macOS 限定
-    升级为六平台（见 §二·七 建议 2）
+    升级为六平台（见 §2.7 建议 2）
 - [ ] **H1 生成 `releases.json`**（CI 静态产物，纯派生）
   - **动机**：install.sh 靠字符串拼 artifact 名 + latest 重定向猜版本；
     未来 update/下载页/Hub 会各自再 scrape 一遍 → 四个真相源
@@ -783,11 +783,11 @@ B′. tmux/rmux send-keys + buffer
   - **成本**：中（macOS 部分小；Linux 部分取决于走 XKB 还是 DBus）
   - **依赖**：无
   - **与 Windows agent 的分工（不冲突）**：他改的是 Windows **合成输入路径**
-    （WM_IME_* → 内联 preedit，见 §三·五 3.5.3 I1）；本叶补的是
+    （WM_IME_* → 内联 preedit，见 §3.5 3.5.3 I1）；本叶补的是
     **Unix 侧的状态读取**。两者在 facade 的不同侧，互不触碰对方文件。
   - **若工期紧**：可只做 macOS 档（Linux 留 stub 并注明），仍然兑现
     「三平台平权」的一半，且我方能真机验证
-  - **派工**：macOS 半叶由 **§一 O / §十一 O1** 本机 agent 执行；Linux 半叶另派
+  - **派工**：macOS 半叶由 **§1 O / §11 O1** 本机 agent 执行；Linux 半叶另派
 
 ### M. 多 Agent 观察与交接（**Fleet 控制面地基**；2026-08-05 实测驱动）
 
@@ -933,10 +933,10 @@ M. 多 Agent 观察与交接
   - 证据：`theme-smoke.rhai` 21 处 preset 断言；契约在
     `prd/PRD_02_06_human_workspace.md` §Built-in skins (v1)
   - 执行计划：[`plan/archive/plan-skins-v1.md`](archive/plan-skins-v1.md)
-  - **与 §五 5.4 L-EXT 的关系**：这是**内置**皮肤，外部 SkinHub 包仍归
+  - **与 §5 5.4 L-EXT 的关系**：这是**内置**皮肤，外部 SkinHub 包仍归
     M14／v0.2.x——即 P6（Hub 单一 kind 底座）**未被本次落地预判**
 - [x] **X2 Windows IME 内联合成 + 协议兼容 UX** — 已落地 `83843ea`
-  - 内容：见 §三·五 3.5.3（I1 候选条锚点／I2 ui-hello 版本分类 + 原生
+  - 内容：见 §3.5 3.5.3（I1 候选条锚点／I2 ui-hello 版本分类 + 原生
     MessageBox，新增 platform `alert` 能力）
   - 证据：607 lib tests 绿 + `incompatible_ui_contract_names_the_stale_side`
   - 待办：两项均**待真机回归**（中文输入、MessageBox 路径）
@@ -948,9 +948,9 @@ M. 多 Agent 观察与交接
 
 ### L′. 从 v0.1.14 迁入的未完成叶（**2026-08-06 upsert**；发版后归档）
 
-> 来源：`plan/archive/plan-v0.1.14.md` §一 目标树仍为 `[ ]` 的项。  
+> 来源：`plan/archive/plan-v0.1.14.md` §1 目标树仍为 `[ ]` 的项。  
 > v0.1.14 **已发布**（tag `8ff2b5a`）；未完成项**不是**发布阻塞，而是信任/卫生尾账。  
-> 与 §一 C 组、§一·五 其它泳道重叠的，只保留指针，避免双排期。
+> 与 §1 C 组、§1.5 其它泳道重叠的，只保留指针，避免双排期。
 
 ```text
 L′. v0.1.14 carry-forward
@@ -961,7 +961,7 @@ L′. v0.1.14 carry-forward
 ├─ L5 control-center-smoke 进 CI 评估（原 C）
 ├─ L6 stale 注册记录体验（原 C；S′ strip 已部分缓解）
 ├─ L7 多文件改动前置 cargo fmt 清单化（原 D）
-└─ L8 flaky child_wait → **并入 §一 C1**（不另开叶）
+└─ L8 flaky child_wait → **并入 §1 C1**（不另开叶）
 ```
 
 - [ ] **L1 身份真机回归**
@@ -998,7 +998,7 @@ L′. v0.1.14 carry-forward
   - **来源**：v0.1.14 占位稿两次 rustfmt fail-closed 教训
   - **验收**：agent/dev 清单或 lint 入口明确「改多文件先 fmt」；可与 `lint.cmd` 对齐
   - **成本**：极小；**依赖**：无
-- **L8** → **§一 C1**（`child_wait_timeout_reaps_descendants` flaky 根因复核）。  
+- **L8** → **§1 C1**（`child_wait_timeout_reaps_descendants` flaky 根因复核）。  
   不再单开叶；C1 勾选即关闭 0.1.14 D 尾账。
 
 **L′ 砍叶顺序（工期紧）**：L7 → L1 → L5 → L6 → L4 → L2/L3（后两者要拍板）。
@@ -1007,9 +1007,9 @@ L′. v0.1.14 carry-forward
 > **不**挤掉 R1/R2。C1 与 L8 合并后竞态组不增叶。
 
 > **规模影响**：X1+X2 已消耗的工期不小（约 2900 行入 main）。若把它们计入，
-> v0.1.15 实际范围已**超过**我在 §二 主张的「窄」。这不改变 R 组的排序理由
+> v0.1.15 实际范围已**超过**我在 §2 主张的「窄」。这不改变 R 组的排序理由
 > （cache 仍是最便宜的杠杆），但**应当据此更保守地对待 H1/H3**——
-> 见 §二·二 序 7 的「工期紧则优先砍」已预留该出口。
+> 见 §2.2 序 7 的「工期紧则优先砍」已预留该出口。
 > 2026-08-05 再补 **M 组 4 叶**（多 agent 观察/交接）与 **N1**：宽度继续
 > 上升，砍叶出口见上表与 M 组附注。
 > 2026-08-06 再补 **L′**（v0.1.14 未完成 upsert）+ **S′ 真机迭代已大部落地**。
@@ -1032,7 +1032,7 @@ L′. v0.1.14 carry-forward
 **H1/H3 → R4 → S4/U4/B6 → U3/S3 → M4 → M3 → N1 Linux → M2 子命令**；
 保留 **R1/R2、U1/U2、S1、B1–B4、M1 约定 + M2 文档**；**绝不砍 R1/R2**。
 
-### 为什么 v0.1.15 不推进 L-NET（ipfs/libp2p）
+### 1.5.1 为什么 v0.1.15 不推进 L-NET（ipfs/libp2p）
 
 用户 2026-08-05 原话：本想督促 ipfs/libp2p 功能，但认同「先把底子弄好」——
 多平台 UI/UX 对齐、稳定性增强、功能补丁优先。这个判断与实测证据一致：
@@ -1043,22 +1043,22 @@ L′. v0.1.14 carry-forward
   （Script API？InfoHub？CC 诊断？），那是**拍板题不是工程题**。
   在形态未定前投工程，做出来的接口大概率要返工。
 - **底子确实欠账**：N1 揭示 `ImeStatus` 契约只有 Windows 实现、Unix 两档全是
-  stub；§八 实测的安装/升级体验有 G2/G3/G6/G7a 四处硬伤；cache 撞顶正在
+  stub；§8 实测的安装/升级体验有 G2/G3/G6/G7a 四处硬伤；cache 撞顶正在
   单调恶化。这些都是**用户每天碰得到**的，而 L-NET 目前无人使用。
 - **结论**：v0.1.15 做底子，L-NET 保持 research 车道（R3 只是把它从 release
   门移到 push CI，**验证不减**）。待 N3 形态拍板后，L-NET 作为 v0.2.0 主线开工。
 
-## 二、排序与理由（**基于实测数字，非直觉**）
+## 2. 排序与理由（**基于实测数字，非直觉**）
 
-### 二·一 为什么主题从「反馈左移」改为「发布链降本（cache 优先）」
+### 2.1 为什么主题从「反馈左移」改为「发布链降本（cache 优先）」
 
 占位稿把 A1（夜间彩排）排第一，理由是「腐化攒到发布日爆雷」。这个判断
-**方向对但排序错**，因为当时还没有 §七 的逐门/cache 实测。三点修正：
+**方向对但排序错**，因为当时还没有 §7 的逐门/cache 实测。三点修正：
 
 1. **A1 成本远高于收益密度**。夜间 release-stress 每晚 ~1 runner-hour，
    且 win-full-gate 的 concurrency group 是 `win-full-gate-{ref}` +
    `cancel-in-progress: true`——同 ref 连跑会互相 cancel，落地前还得先改
-   并发语义（§一 A1 已核）。**投入是本版最大的一项，收益是概率性的**。
+   并发语义（§1 A1 已核）。**投入是本版最大的一项，收益是概率性的**。
 2. **R1（cache）投入最小、收益确定且可证伪**。9.9/10GB 撞顶是**已复验的
    常态**，bootstrap 47s→81s 是**单调恶化**的实测曲线。改 cache 配置属
    配置级改动，收益 ≈3min/次 Candidate，按 v0.1.14 的 6 次 Candidate 计
@@ -1069,7 +1069,7 @@ L′. v0.1.14 carry-forward
 > 结论：反馈左移的**思想**保留（A3/A4 + R4 dry-run 都是它的实现），
 > 但**最贵的实现方式（A1 夜间彩排）推迟**。主题相应改为「发布链降本」。
 
-### 二·二 执行顺序（建议）
+### 2.2 执行顺序（建议）
 
 | 序 | 叶 | 理由 |
 |----|-----|------|
@@ -1086,15 +1086,15 @@ L′. v0.1.14 carry-forward
 | 11 | **B5 + M1/M2 文档** | 划清 note/handoff vs send/paste；可与 B2 同 PR |
 | 12 | **S3** | 新窗打开另一 instance；复用 S1 列表 |
 | 13 | **M3 → M4 / U3 / N1** | 后置并行池；S4/U4/B6 默认可砍或 v0.2.x |
-| **OSX 机** | **O 泳道 + G′ 真机**（详见 §二·二-b / §十一） | 不与 Lnx 同时改 `unix/frontend` 巨石；O6 已关则接 O1b / G |
+| **OSX 机** | **O 泳道 + G′ 真机**（详见 §2.2.1 / §11） | 不与 Lnx 同时改 `unix/frontend` 巨石；O6 已关则接 O1b / G |
 
-### 二·二-b 三端并发泳道派工（2026-08-06；Win / OSX / Lnx）
+### 2.2.1 三端并发泳道派工（2026-08-06；Win / OSX / Lnx）
 
 > **先编排、再并发。** 不要三台 agent 同时「对齐 Win 工作台手感」。  
 > 主轴仍是 **R/G/A**（发布与安装）；GUI 三端只做 **有文件域、有 catalog 纪律** 的叶。  
-> 叶定义仍以 **§一·五** 为准；本节只回答 **谁做、碰哪、禁哪、怎么验收**。
+> 叶定义仍以 **§1.5** 为准；本节只回答 **谁做、碰哪、禁哪、怎么验收**。
 
-#### 1. 总原则
+#### 2.2.1.1 总原则
 
 | # | 规则 |
 |---|------|
@@ -1103,21 +1103,21 @@ L′. v0.1.14 carry-forward
 | 3 | **机制进 crate**：OS 能力只改 `crates/agenterm-platform`；产品层不硬编码 `ERROR_ACCESS_DENIED` / 散装 native（boundary + breakaway 闸）。 |
 | 4 | **unix/frontend 单写者**：OSX 与 Lnx **不得**同时改 `src/platform/adapters/unix/frontend/**`。默认 **Unix 产品主责 = OSX 机 agent**；Lnx 做复验 / 环境 / Linux-only adapter。 |
 | 5 | **R/A 泳道独占**：workflow / cache / qualification 改动 **一人** 串行做完 R1→R2→A4…，另端不抢 `.github/workflows/*`。 |
-| 6 | **S 结构 HOLD**：`plan/ARCHITECTURE.md` 大重构 / boundary 扩围栏等用户通知 + §九 复审后再开。 |
+| 6 | **S 结构 HOLD**：`plan/ARCHITECTURE.md` 大重构 / boundary 扩围栏等用户通知 + §9 复审后再开。 |
 | 7 | **推送**：小步 `main`；冲突热文件让写者 rebase；观察 Actions 遵守 `AGENTS.md`（单 observer、退避，勿多 agent 狂刷 API）。 |
 
-#### 2. 泳道表（可直接派工）
+#### 2.2.1.2 泳道表（可直接派工）
 
 | 泳道 | 主机 / agent | 叶（优先序） | 文件域（可写） | 禁区 / 备注 |
 |------|--------------|--------------|---------------|-------------|
-| **CI-R** | 任意一台，**独占一人** | §二·二 序 1–3、6：**R1→R2→A4→R3/A3→R4** | `.github/workflows/*`、`scripts/rhai/check*.rhai`、qualification / cache 相关声明 | 不碰 GUI 巨石；R4 自身是新车道须 dry-run 自证 |
-| **G-install** | **优先 OSX**（§八真机）；Lnx 可选复验 | **G3→G7a→G2→G6**（与 R 正交并行） | `install.sh`、version / `installed.json` 写出路径、相关 docs | **不**改 keep-server 默认（G7b/c/d 等 G-P2）；G7a 纯文案可先做 |
+| **CI-R** | 任意一台，**独占一人** | §2.2 序 1–3、6：**R1→R2→A4→R3/A3→R4** | `.github/workflows/*`、`scripts/rhai/check*.rhai`、qualification / cache 相关声明 | 不碰 GUI 巨石；R4 自身是新车道须 dry-run 自证 |
+| **G-install** | **优先 OSX**（§8真机）；Lnx 可选复验 | **G3→G7a→G2→G6**（与 R 正交并行） | `install.sh`、version / `installed.json` 写出路径、相关 docs | **不**改 keep-server 默认（G7b/c/d 等 G-P2）；G7a 纯文案可先做 |
 | **Win-UX** | **Windows agent** | **U2** 真机回归；**P0-3** breakaway 若仍欠；用户现场 Win-only 痛点；B′/M 文档若排期到 | `windows/remote_frontend*` 最小 diff；已 SHARED 的只改 present | 新 ui-action 先 catalog；strip/picker 深度仍 Win-first，Unix 不默默假实现 |
-| **Unix-UX** | **OSX agent 主责**（单写 `unix/frontend`） | **O1b** 状态栏 IME（已拍板）；§十一余叶；对 **SHARED** 的诚实接线 / 真机 | `unix/frontend/**`、`adapters/macos/**`、共享 `frontend/*` 仅当语义真共享 | **禁止**复刻 server-strip 全量当本版必做；读 `ui_action_catalog` WINDOWS_ONLY 的 `parity-gap` |
+| **Unix-UX** | **OSX agent 主责**（单写 `unix/frontend`） | **O1b** 状态栏 IME（已拍板）；§11余叶；对 **SHARED** 的诚实接线 / 真机 | `unix/frontend/**`、`adapters/macos/**`、共享 `frontend/*` 仅当语义真共享 | **禁止**复刻 server-strip 全量当本版必做；读 `ui_action_catalog` WINDOWS_ONLY 的 `parity-gap` |
 | **Lnx-env** | **Linux agent** | **F1/F2** 环境快照（可不进 PR）；Linux adapter / smoke 复验；**不**开第二套产品策略 | 云桌面依赖、DPI、`adapters/linux/**`、CI 复现笔记 | **不写** `unix/frontend/mod.rs` 巨石除非 Unix-UX 交接写权；Wine 不能替真机 ConPTY |
-| **S-struct** | — | **HOLD** | — | 用户通知后再开 §九 |
+| **S-struct** | — | **HOLD** | — | 用户通知后再开 §9 |
 
-#### 3. 推荐并发波形（2–3 条即可）
+#### 2.2.1.3 推荐并发波形（2–3 条即可）
 
 ```text
 时间 →
@@ -1128,27 +1128,27 @@ L′. v0.1.14 carry-forward
   Lnx-env:  [F1/F2][Linux smoke 复验]          （不与 Unix-UX 抢 frontend）
 ```
 
-- **H4 / H1 / H3** 仍按 §二·二 序 4、7：CI-R 或 Win 独占，**勿**与 R1 抢同一 workflow 文件同时写。  
+- **H4 / H1 / H3** 仍按 §2.2 序 4、7：CI-R 或 Win 独占，**勿**与 R1 抢同一 workflow 文件同时写。  
 - **S′ S1–S4** 已落地：本派工表不重开；Unix strip/picker 属 **parity 产品叶**，非 CI 阻塞，默认不进本版强制三端齐。  
-- **U1** 代码已落：Win-UX 只做 **U2 真机**；U3/U4 工期紧可砍（§一·五）。
+- **U1** 代码已落：Win-UX 只做 **U2 真机**；U3/U4 工期紧可砍（§1.5）。
 
-#### 4. 接手 agent 开工检查单（每台复制）
+#### 2.2.1.4 接手 agent 开工检查单（每台复制）
 
-1. `git pull --ff-only origin main`；读 **§一·五 自己泳道的叶** + 本表禁区。  
+1. `git pull --ff-only origin main`；读 **§1.5 自己泳道的叶** + 本表禁区。  
 2. 读 `AGENTS.md`（Platform crate vs product UI / shared-first）与 `plan/plan-platform-encapsulation-gap.md`。  
 3. 声明本回合 **pathspec 热区**（聊天或 PR 描述一行）；与他泳道冲突则让路。  
 4. 验证：本叶写明的验收；GUI 叶须真机或黑盒，不只 `cargo check`。  
-5. 小步 commit + push；不扩 scope 到 HOLD / 推迟表（§二·六）。
+5. 小步 commit + push；不扩 scope 到 HOLD / 推迟表（§2.6）。
 
-#### 5. 与 §十一（OSX 作业规格）的关系
+#### 2.2.1.5 与 §11（OSX 作业规格）的关系
 
-- §十一 = **macOS 本机上下文与 O 组细节**。  
+- §11 = **macOS 本机上下文与 O 组细节**。  
 - 本小节 = **三端怎么并行、谁不抢谁**。  
-- OSX agent：§十一 工序 + 本表 **G-install + Unix-UX**。  
+- OSX agent：§11 工序 + 本表 **G-install + Unix-UX**。  
 - Lnx agent：本表 **Lnx-env**（+ 若 Unix-UX 明确交权才动 frontend）。  
 - Win agent：本表 **Win-UX + 可选 CI-R（若未另派）**。
 
-### 二·三 明确不做速度优化的部分
+### 2.3 明确不做速度优化的部分
 
 - **gate 分片**（39 门串行 869s，理论可压到 7–9min）：收益最大，但要重排
   windows job 结构，属结构性改动，**推 v0.2.x**——本版不碰关键路径结构。
@@ -1158,7 +1158,7 @@ L′. v0.1.14 carry-forward
   **先做 R1 再测命中率**，不单独立叶。
 - **smoke 并行分片**（原 D2）：14 门合计仅 124.4s，现值低，维持不做。
 
-## 二·四 与 v0.1.14 教训的对应
+## 2.4 与 v0.1.14 教训的对应
 
 | v0.1.14 教训 | 本版对应叶 |
 |--------------|-----------|
@@ -1168,9 +1168,9 @@ L′. v0.1.14 carry-forward
 | provenance 有字段没填、用户端零消费 | **H4 + H3** |
 | 升级后不知道要 stop-server | **G3 + G7a** |
 
-## 二·五 决策项阻塞关系（**需人工拍板，agent 不自主执行**）
+## 2.5 决策项阻塞关系（**需人工拍板，agent 不自主执行**）
 
-政策项全文见 §五 5.7；此处只列**它阻塞了本版哪些叶**：
+政策项全文见 §5 5.7；此处只列**它阻塞了本版哪些叶**：
 
 | 决策项 | 阻塞的叶 | 不拍板的后果 |
 |--------|---------|-------------|
@@ -1179,14 +1179,14 @@ L′. v0.1.14 carry-forward
 | **G-P2**（升级遇 running server 的默认策略） | G7b/c/d；**G7a 不受阻**（纯文案） | 只做 G7a 即可交付主要价值 |
 | **D1**（preflight 放宽 HEAD 约束） | 本版无叶依赖 | 不阻塞；但若拍板通过会弱化 D3 |
 | **P6**（Hub 是否单一 kind 底座） | 本版无叶依赖（H 组只做地基） | 不阻塞 v0.1.15 |
-| **P-P1** | **已拍板（编排 2026-08-05）** 见 §六：T2 立项 v0.2.x；T1 不做；v0.1.15 不阻塞 | 粘贴产品化归 v0.2.x |
+| **P-P1** | **已拍板（编排 2026-08-05）** 见 §6：T2 立项 v0.2.x；T1 不做；v0.1.15 不阻塞 | 粘贴产品化归 v0.2.x |
 | **G-P1** | **已拍板**：无 signed 时 **自动回落 unsigned-preview + 强制信任警告**（G1 可开工） | 解锁 G1 |
 | **O1b** | **已拍板开工** | Unix 状态栏 IME |
 | **O-fix** | **已拍板**：PRD 补 buffer 公开命令（修 prd_alignment 红） | main 红灯 |
 
-> **O 泳道技术决策由编排 agent 拍板，不转嫁董事长。** 域名/预算/Hub 形态等仍见 §五 5.7 人工项。
+> **O 泳道技术决策由编排 agent 拍板，不转嫁董事长。** 域名/预算/Hub 形态等仍见 §5 5.7 人工项。
 
-## 二·六 推迟表（**明确不进 v0.1.15，含理由**）
+## 2.6 推迟表（**明确不进 v0.1.15，含理由**）
 
 | 叶 | 推去 | 理由 |
 |----|------|------|
@@ -1195,22 +1195,22 @@ L′. v0.1.14 carry-forward
 | B2 cache key 版本行归一化 | v0.2.x | 需六 workflow 共享算 key 脚本，一致性维护成本高；R1 已拿走大部分收益 |
 | B3 双构建复用审计 | 合入 R1 | 已核产物不可互换；真省法是 R1 的增量缓存副产品 |
 | C1–C4 竞态收口 | v0.2.x | 均已止血，剩根因排查；C4 明确说了要先观察复发率 |
-| D1–D3 政策 | 等拍板 | 见 §二·五 |
+| D1–D3 政策 | 等拍板 | 见 §2.5 |
 | E1 Pages 噪音 | 等 P1 | 与域名归属绑定，先拍板再动 |
 | E2 旧 run 清理 | v0.2.x | 纯卫生，无阻塞；moltbaby 已有脚本可随时搬 |
-| F1/F2 云桌面快照 | 环境维护 | **不走 PR**——是环境快照尾账，不是代码叶（见 §七） |
+| F1/F2 云桌面快照 | 环境维护 | **不走 PR**——是环境快照尾账，不是代码叶（见 §7） |
 | G1 macOS 默认回落 | 等 G-P1 | 政策未定 |
 | G4/G5 | v0.2.x | G7a 已覆盖主要价值；G5 是 G7a 的锦上添花 |
 | G7b/c/d | 等 G-P2 | 碰 keep-server 默认语义，须人工拍板 |
 | H2 install.sh 消费 releases.json | v0.2.x | 依赖 H1 落地并稳定一版后再改消费端 |
 | H5 agenterm.work 接通 | 等 P1/P5 | 政策未定 |
 | P 组（粘贴）全量跨平台 | v0.2.x 全量；**O2=本机 T0 诊断可先做** | 全量夹具重；macOS 真机半叶归 O 泳道 |
-| S 组（结构 SSOT） | **HOLD** | 多 agent 在途，用户通知后先复审再开工（见 §九） |
+| S 组（结构 SSOT） | **HOLD** | 多 agent 在途，用户通知后先复审再开工（见 §9） |
 | O 组 Linux 半叶 / Win IME | 他泳道 | O 只 macOS；N1 Linux、Win I1–I3 不归本机 agent |
-| §三·五 UI/UX 观察 | 分散 | T2/SB1/W1 标「顺手做」，其余归 v0.2.0+；本版不单独排期 |
-| §五 五条主线 | 各自版本 | L-NET/L-CC/L-EXT/L-PKG/L-CU 只做对齐记录与决策项 |
+| §3.5 UI/UX 观察 | 分散 | T2/SB1/W1 标「顺手做」，其余归 v0.2.0+；本版不单独排期 |
+| §5 五条主线 | 各自版本 | L-NET/L-CC/L-EXT/L-PKG/L-CU 只做对齐记录与决策项 |
 
-## 二·七 PRD 一致性核对（2026-08-05，逐叶 grep 实测）
+## 2.7 PRD 一致性核对（2026-08-05，逐叶 grep 实测）
 
 对本版每一叶反查 `PRD.md` 与 `prd/*.md`，找**契约冲突**而非措辞差异。
 结论：**一处需修正的是 plan 侧（已改），一处建议反向升级 PRD**。
@@ -1218,7 +1218,7 @@ L′. v0.1.14 carry-forward
 | 叶 | PRD 侧相关条款 | 判定 |
 |----|---------------|------|
 | R1/R2 cache | `PRD_02_17:241-243`「Cache miss/corruption 只影响速度，不影响资格」 | ✅ **一致**。R1 纯提速，不碰资格语义 |
-| R3 net-research 移出 | 全仓 grep：**无任何 PRD 要求它在 release 门**；唯一提及是 `PRD_02_19:562` 的二进制预算 | ✅ **无冲突**。且符合 §三「门的迁移要说明验证去哪了」 |
+| R3 net-research 移出 | 全仓 grep：**无任何 PRD 要求它在 release 门**；唯一提及是 `PRD_02_19:562` 的二进制预算 | ✅ **无冲突**。且符合 §3「门的迁移要说明验证去哪了」 |
 | R4 dry-run | `PRD_02_17:193-199` 已写「非发布彩排从未记录…dry-run 能力提为 v0.1.15 项」 | ✅ **PRD 已预留**，本叶正是它的落地 |
 | A3/A4 | 无相关契约 | ✅ 无冲突 |
 | G3 `--version` | `README:144` 记载 `agenterm-cc.exe` 已有 `--version` 信息命令；无 PRD 禁止 GUI 同样支持 | ✅ **有先例**，不冲突 |
@@ -1227,7 +1227,7 @@ L′. v0.1.14 carry-forward
 | H3 provenance 可见化 | `PRD_02_18` M13「supply-chain evidence becomes user-visible rather than CI-only」 | ✅ 一致 |
 | **H4 sbom_sha256** | **`PRD_02_17:237-240`：Candidate aggregation 独立校验「两个 macOS archive provenance 携带同一 SBOM SHA-256」** | ⚠️ **曾误判，已修正** |
 
-### 唯一的实质分歧：H4
+### 2.7.1 唯一的实质分歧：H4
 
 **起初的写法有误**。占位稿与本 plan 早期版本称「`sbom_sha256` 空串是
 违反声明的证据缺口」。逐平台实测后**这个说法不成立**：
@@ -1258,17 +1258,17 @@ windows x86_64  （无该字段）                             ← 缺字段
 > 的 `manifest.kind` 缺陷同源——**断言一个字段「应该有值」之前，先确认
 > 契约到底要求了哪些平台**。
 
-## 三、明确非目标
+## 3. 明确非目标
 
 - 不动 Candidate/Promotion 的授权语义（D1 除外，且 D1 只在人工批准后做）。
 - 不为提速削弱资格覆盖：任何门的移除/降级都要有「该验证去了哪里」的答案
   （如 B1 的 net-research 移去 CI/夜间，而不是删除）。
 - 不做投机性并行化（D2 现值低）。
-- **不把 §五 未来主线塞进 v0.1.15**：agenterm-net 稳定化、Control Center
+- **不把 §5 未来主线塞进 v0.1.15**：agenterm-net 稳定化、Control Center
   内容成熟、远程包管理、computer-use 各归其版本 plan 与 owning PRD。
 
 
-## 三·五、UI/UX 现场观察（2026-08-05，自截图 + ui-snapshot-full.json + 源码复核）
+## 3.5. UI/UX 现场观察（2026-08-05，自截图 + ui-snapshot-full.json + 源码复核）
 
 > 证据：dist/evidence/{tab-tree-uiux-review,sidebar-zoom,sidebar-top-zoom,tab-tree-collapsed}.png
 > ＋ ui-snapshot-full.json（1180x760 窗口，dark 主题）+ src/ui_geometry.rs + unix frontend render.rs。
@@ -1295,9 +1295,9 @@ windows x86_64  （无该字段）                             ← 缺字段
 | SB2 | 状态栏 cwd 260px 显示全路径 | 窗口窄时挤压其它段 | 紧凑模式（home 缩写 + 省略号） | v0.2.0+ |
 | W1 | 窗口标题带 profile 后缀（如 custom:uiux-review） | 用户可见噪音 | 发布构建隐藏 profile 后缀 | v0.1.15 顺手 |
 
-### 3.5.2a 标签切换整窗刷新（2026-08-05 用户报告）
+### 3.5.2.1 标签切换整窗刷新（2026-08-05 用户报告）
 
-**执行清单**：**§一·五 U′**（U1–U4）。本节保留现场观察与根因，不重复排期。
+**执行清单**：**§1.5 U′**（U1–U4）。本节保留现场观察与根因，不重复排期。
 
 | # | 观察（证据） | 问题 | 映射 | 状态 |
 |---|--------------|------|------|------|
@@ -1333,28 +1333,28 @@ click tab row
 非目标：不改变 ui-bridge 协议版本（仍为 1）；不自动杀旧 server（保留用户
 终端会话），错误文案明确指引用户重启/退出旧版。
 
-## 四、与其它文档的关系
+## 4. 与其它文档的关系
 
 | 文档 | 关系 |
 |------|------|
-| `plan/archive/plan-v0.1.14.md` | 上一版（已发布）执行记录；本文数据与止血项的出处；未完成叶已 upsert 为 **§一·五 L′** |
+| `plan/archive/plan-v0.1.14.md` | 上一版（已发布）执行记录；本文数据与止血项的出处；未完成叶已 upsert 为 **§1.5 L′** |
 | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13/v0.1.14 两轮合并去重，版本无关；runbook 素材，E2 配套） |
 | `plan/ARCHITECTURE.md` | 结构 SSOT（含 §8 对齐机制/工具边界）；**S 组**执行叶指针；本文不重画结构树 |
-| `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟（§五 L-CC 的版本归口；原 plan-v0.2.0.md 已并入） |
+| `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟（§5 L-CC 的版本归口；原 plan-v0.2.0.md 已并入） |
 | `plan/plan-mobile.md` | 移动端计划（第三个 host：接入端 + 去中心化链接端）；与 L-NET/L-PKG 共享去中心化底座，文件域独立 |
 | `prd/PRD_02_17_delivery_quality.md` | Candidate/Promotion 合同；D1 若通过需回写 |
 | `prd/PRD_02_18_roadmap.md` | 里程碑权威（M11 收敛 / M12 = v0.2.0） |
-| `prd/PRD_02_19_inspiration_and_future_vision.md` | 灵感库；§五 各主线 promotion 的入口 |
+| `prd/PRD_02_19_inspiration_and_future_vision.md` | 灵感库；§5 各主线 promotion 的入口 |
 | `prd/PRD_02_21_control_center.md` | Control Center 边界与能力树 |
 | `prd/PRD_02_22_decentralized_network.md` | agenterm-net 成熟度门（N0→N4） |
-| `prd/PRD_02_20_native_platform.md` | Platform Facade 收口证据（§五 前置判断） |
+| `prd/PRD_02_20_native_platform.md` | Platform Facade 收口证据（§5 前置判断） |
 | `plan/precision-audit.md` | C 组竞态根因复核的记录处 |
-| `install.sh` | 安装/更新实现 SSOT；§八 / G 组改进入口 |
-| `plan/plan-v0.1.15.md` §一 **O** + **§十一** | macOS 本机 agent 作业规格（ImeStatus / 粘贴 T0 / install UX） |
+| `install.sh` | 安装/更新实现 SSOT；§8 / G 组改进入口 |
+| `plan/plan-v0.1.15.md` §1 **O** + **§11** | macOS 本机 agent 作业规格（ImeStatus / 粘贴 T0 / install UX） |
 
 ---
 
-## 五、未来主线对齐（PRD 对比，2026-08-04 深夜补充）
+## 5. 未来主线对齐（PRD 对比，2026-08-04 深夜补充）
 
 > 目的：把「当前发布链经济学」与「产品未来主线」对齐，避免 v0.1.15
 > 完工后产品断档。以下主线按用户已声明的方向整理（ipfs/libp2p、Control
@@ -1439,22 +1439,22 @@ click tab row
 > 下一步真正的门槛不是再加协议能力，而是 §5.2 表里的 **N3 产品消费者**
 > ——决定它以什么形态（Script API / InfoHub / CC 诊断）被产品调用。
 
-### 5.2a 旁路：多 Agent 观察与交接（**v0.1.15 M 组**，非 L-NET）
+### 5.2.2 旁路：多 Agent 观察与交接（**v0.1.15 M 组**，非 L-NET）
 
 与 L-NET 无关的控制面地基：同屏多 agent（Codex / Grok / …）经
 `agenterm-cli` **只读观察**彼此 tab，handoff 走 note/文件/事件而非 PTY。
-执行清单见 **§一·五 M**；实证触发见该节头部。L-CC 未来可投影这些事实，
+执行清单见 **§1.5 M**；实证触发见该节头部。L-CC 未来可投影这些事实，
 但不作为 M 的开工前置。
 
-### 5.2b 旁路：多 Server / Instance 选择（**v0.1.15 S′**）
+### 5.2.3 旁路：多 Server / Instance 选择（**v0.1.15 S′**）
 
-关窗后找得回、多 instance 作业入口。执行清单见 **§一·五 S′**。
+关窗后找得回、多 instance 作业入口。执行清单见 **§1.5 S′**。
 **不做**主终端顶栏横向 server tab 作默认导航；CC 仍是控制塔投影面。
 
-### 5.2c 旁路：tmux/rmux `send-keys` + buffer（**v0.1.15 B′**）
+### 5.2.4 旁路：tmux/rmux `send-keys` + buffer（**v0.1.15 B′**）
 
-控制面兼容与脚本往 pane 投递。执行清单见 **§一·五 B′**。
-**不**当作 agent 消息总线；协作短消息仍 **§一·五 M**。
+控制面兼容与脚本往 pane 投递。执行清单见 **§1.5 B′**。
+**不**当作 agent 消息总线；协作短消息仍 **§1.5 M**。
 
 ### 5.3 主线 L-CC：Control Center 内容成熟（PRD_02_21 → v0.2.0）
 
@@ -1467,7 +1467,7 @@ click tab row
   MCP orchestration authority + CC 投影）、**AgenTerm 扩展能力台
   【插件/皮肤/信息】**（J4 promoted → softmgr substrate + PluginHub/
   AppHub 分视图）、**InfoHub**（J5 promoted）。
-- 用户提示 **Control Center 可能改名** —— 见 §五 决策项 P2。
+- 用户提示 **Control Center 可能改名** —— 见 §5 决策项 P2。
 - rhai 能力（PRD_02_10）：unrestricted 本地运行时已 shipped；CC 消费
   task catalogs/automation primitives，但 CC **不引入** Script 权限层
   （AGENTS.md 铁律：能力≠授权）。
@@ -1577,7 +1577,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | P2 | Control Center 是否改名、改什么名 | 影响 PRD_02_21 标题/命名、可执行族与文档 |
 | P3 | 「皮肤」扩展面与 theme/plugin 打包的边界 | 决定 L-EXT 的范围与版本归口 |
 | P4 | computer-use 是否立项、归口 PRD、首发平台与证据门 | 决定 L-CU 是否进 v0.2.0 或更后 |
-| D1–D3 | 见 §一 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
+| D1–D3 | 见 §1 D 组（发布链政策） | 与产品主线独立，但 A2/B1 落地依赖 D1 取向 |
 | G-P1 | ~~待拍~~ → **2026-08-05 编排裁定**：无 Developer ID signed asset 时 install **自动选用 unsigned-preview**，并 **强制打印多行信任/预览警告**（不得静默当 stable）；有 signed 则优先 signed。G1 可据此实现 | 解锁 G1 |
 | G-P2 | ~~全档待拍~~ → **2026-08-05 编排裁定**：默认 **不**把关窗 default 改成 stop-server（保会话）；**已装 version > 运行 server version 时必须可感知提示**（G7a 已部分交付；G7b/c 可做文案/标注，**不**自动 kill）。一键 apply（G7d）默认 off，仅显式 flag | G7b/c 可开工；G7d 可选 |
 | P-P1 | ~~打包待拍~~ → **2026-08-05 编排裁定**：**拆开**——(1) **T2 类型感知** 立项，目标 v0.2.x（O2 已证 pbpaste 无法区分空/图/非法）；(2) **T1 图→路径 本版与下版均不做**（零证据）；(3) v0.1.15 粘贴保持 text-only，图像/无文本继续硬失败，文案可在 T2 前仅做「可能无文本」级提示 | O2 不改码成立；T2 进 v0.2.x |
@@ -1588,60 +1588,61 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 
 ---
 
-## 六、决策记录
+## 6. 决策记录
 
 | 日期 | 决策 |
 |------|------|
 | 2026-08-04 | v0.1.15 主题定为反馈左移 + 发布链降本（占位稿，未授权开工） |
 | 2026-08-04 | 代码复核：win-full-gate profile/并发组、candidate dispatch-only、script-smoke 仅 release lane、net-research release 门、hashFiles 缓存 key、release-fast profile、Pages/CNAME、gh-ci-cleanup.sh 参数均属实；run 30907369093 与 pages-build 噪音为 review 结论（本地 gh 不可用，落地时以 Actions 复核） |
-| 2026-08-04 | §五 未来主线按用户声明对齐 PRD；P1–P4 为待拍板决策项，未开工 |
-| 2026-08-04 | 并发提交 2c5f3d4 已并入 plan-v0.1.15.md 主体与 plan-mobile.md；本工作区仅剩自审修正（E1 措辞 / 决策记录口径 / §三 引用） |
-| 2026-08-05 | 自截图 + ui-snapshot-full.json + 源码复核完成标签树区 UI/UX 观察（§三·五 T1-T6/TB1-TB2/SB1-SB2/W1）；全部为观察不改变 v0.1.15 授权范围；T2/SB1/W1 标 v0.1.15 顺手、其余归 v0.2.0+ |
+| 2026-08-04 | §5 未来主线按用户声明对齐 PRD；P1–P4 为待拍板决策项，未开工 |
+| 2026-08-04 | 并发提交 2c5f3d4 已并入 plan-v0.1.15.md 主体与 plan-mobile.md；本工作区仅剩自审修正（E1 措辞 / 决策记录口径 / §3 引用） |
+| 2026-08-05 | 自截图 + ui-snapshot-full.json + 源码复核完成标签树区 UI/UX 观察（§3.5 T1-T6/TB1-TB2/SB1-SB2/W1）；全部为观察不改变 v0.1.15 授权范围；T2/SB1/W1 标 v0.1.15 顺手、其余归 v0.2.0+ |
 
-| 2026-08-04 | Linux 云桌面（DISPLAY=:1 XFCE）实测意见写入 §七 / F 组；单测误耦合已修进 main；F1/F2 为环境快照尾账，不走 PR |
-| 2026-08-05 | macOS aarch64 真机 0.1.12-local→v0.1.14 安装更新实测写入 §八 / G 组；G1–G6 + G-P1 为改进需求，未授权开工 |
+| 2026-08-04 | Linux 云桌面（DISPLAY=:1 XFCE）实测意见写入 §7 / F 组；单测误耦合已修进 main；F1/F2 为环境快照尾账，不走 PR |
+| 2026-08-05 | macOS aarch64 真机 0.1.12-local→v0.1.14 安装更新实测写入 §8 / G 组；G1–G6 + G-P1 为改进需求，未授权开工 |
 | 2026-08-05 | 用户确认：升级后「关窗不退 server → 再进仍显示旧版」属真实踩坑；要求更新时**自适应或提示**，否则用户无法知道该选 stop-server；追加 **G7 + G-P2**，升 G7a 为 P0 文案、G7b/c 为体验主路径 |
 | 2026-08-05 | 结构对齐/工具澄清 upsert：`ARCHITECTURE.md` §8 + 债务 L4；本 plan 增 **S 组**（S1 扩闸 / S2 围栏 / S3 manifest）；明确 LSP≠结构契约引擎 |
-| 2026-08-05 | S 泳道 **HOLD**：等其他 agent 完成；用户再通知 → 新一轮 review → 再开工；预备树写入 **§九**（不改代码） |
-| 2026-08-05 | 用户报告终端/输入区粘贴常失败：异源 UTF-8 大段（疑 emoji/控制符）+ 截图类 `no pasteable characters`；写入 **§一 P 组 + §十**（硬骨头，未授权开工） |
+| 2026-08-05 | S 泳道 **HOLD**：等其他 agent 完成；用户再通知 → 新一轮 review → 再开工；预备树写入 **§9**（不改代码） |
+| 2026-08-05 | 用户报告终端/输入区粘贴常失败：异源 UTF-8 大段（疑 emoji/控制符）+ 截图类 `no pasteable characters`；写入 **§1 P 组 + §10**（硬骨头，未授权开工） |
 | 2026-08-05 | 用户补：多 harness 已支持图/复杂文本却透传不过 → §10.3 断裂点 A/B/C（text-only API + 归一 + 无投递协议）；T0/T1/T2 选项 |
-| 2026-08-05 | **定稿**：主题由「反馈左移 + 发布链降本」收窄为「发布链降本（cache 优先）+ install 卫生」；依据 §七 实测——cache 撞 10GB 顶致 bootstrap 47s→81s 单调恶化，治理成本最小收益确定（≈3min/次 Candidate），而 A1 夜间彩排是本版最贵项且收益概率性 → A1/A2 推 v0.2.x，保留 A3/A4 |
-| 2026-08-05 | 定稿产出 §一·五 收敛工作树（13 叶，含动机/可证伪验收/成本/依赖）、§二 排序理由、§二·五 决策阻塞关系、§二·六 推迟表（含理由）、§二·七 PRD 一致性核对 |
+| 2026-08-05 | **定稿**：主题由「反馈左移 + 发布链降本」收窄为「发布链降本（cache 优先）+ install 卫生」；依据 §7 实测——cache 撞 10GB 顶致 bootstrap 47s→81s 单调恶化，治理成本最小收益确定（≈3min/次 Candidate），而 A1 夜间彩排是本版最贵项且收益概率性 → A1/A2 推 v0.2.x，保留 A3/A4 |
+| 2026-08-05 | 定稿产出 §1.5 收敛工作树（13 叶，含动机/可证伪验收/成本/依赖）、§2 排序理由、§2.5 决策阻塞关系、§2.6 推迟表（含理由）、§2.7 PRD 一致性核对 |
 | 2026-08-05 | **PRD 核对纠错**：H4 原称「sbom_sha256 空串违反声明」不成立——逐平台实测 macOS 两档已填、Linux/Windows 未填，而 `PRD_02_17:237-240` 只要求 macOS 双档，故当前实现合规。H4 改为「把该保证扩展到六平台」；PRD 侧待 H4 落地后再升级为六平台描述（先实现后改契约） |
-| 2026-08-05 | **定稿后补记**：`fe51c7c` 合并带入并发 agent 的内置皮肤 v1（四预设，约 1600 行，`prd/PRD_02_06` §Built-in skins 已立契约）与 Windows IME/协议兼容 UX（见 §三·五 3.5.3）。二者已入 main 但**不在本次规划的 13 叶内** → 新增 §一·五 X 组登记，并据此调整规模自查：实际范围已不算窄，工期紧时的砍叶顺序定为 H1/H3 → R4，绝不砍 R1/R2。Control Center UX 明确归 v0.2.0，不占本版工期 |
+| 2026-08-05 | **定稿后补记**：`fe51c7c` 合并带入并发 agent 的内置皮肤 v1（四预设，约 1600 行，`prd/PRD_02_06` §Built-in skins 已立契约）与 Windows IME/协议兼容 UX（见 §3.5 3.5.3）。二者已入 main 但**不在本次规划的 13 叶内** → 新增 §1.5 X 组登记，并据此调整规模自查：实际范围已不算窄，工期紧时的砍叶顺序定为 H1/H3 → R4，绝不砍 R1/R2。Control Center UX 明确归 v0.2.0，不占本版工期 |
 | 2026-08-05 | 用户指出两点：(1) Windows agent 在修其 IME，osx 侧「要有自己的思路，这才是封装的意义」；(2) 工作树全是补丁，问「哪些是新开工的功能」。自查属实——13 叶无一新功能。实证核查发现 `ImeStatus` 契约仅 Windows 实现（286 行），macOS/Linux 各 30 行 stub 恒返回 None，状态栏在 Unix 侧永远 `IME: off` → 新增 **N 组 / N1** 补齐，并本机实测 TIS API 可行（`TISCopyCurrentKeyboardInputSource` 读到「微信输入法」/ zh-Hans）；同时诚实标注 macOS 无法获取 `open`/`full_shape`，按契约规定留空不猜 |
-| 2026-08-05 | 用户认同「先把底子弄好」优先于督促 ipfs/libp2p → 新增 §一·五「为什么 v0.1.15 不推进 L-NET」：L-NET 卡点是 N3 产品消费者**形态未定（拍板题）**而非工程量，形态未定前投工程会返工；底子欠账（IME 契约失衡、install 四处硬伤、cache 恶化）是用户每天碰得到的。L-NET 保持 research 车道，R3 只换车道不减验证 |
-| 2026-08-05 | 用户确认：`agenterm-cli` 可读 live tab `ds4@codex`（`@2`/`ds4@c`），并问跨 server 通讯前景 → 结论写入对话结论与 **§一·五 M 组**：观察地基已亮；通讯不得以 PTY 为总线。追加 **M1 身份 / M2 只读 observe / M3 handoff 契约 / M4 跨 instance 证据**；硬约束含无副作用观察、单一 Fleet 权威；CC UI 不阻塞 M；砍叶 M4→M3→M2 子命令，保留 M1+M2 文档；绝不砍 R1/R2。X3 指针同步到 `plan/design-control-center-ux.md` |
-| 2026-08-05 | 用户报告标签区切换 tab 几乎总触发整窗刷新 → §三·五 **TS1–TS4** 观察 + **§一·五 U′** 可执行子树：U1 假刷新止血（代码已落）、U2 真机回归、U3 debounce PTY resize、U4 纯 TabSelected 不重推 cells（可选/可推 v0.2.x）；砍叶 U4→U3，保留 U1/U2 |
-| 2026-08-05 | 用户 GUI 窗全关后提出「顶栏横向 tab 选 server」→ 判断**需求合理、默认形态不采用主窗横向 server tab**。新增 **§一·五 S′**：S1 启动/重开 live instance 列表附着、S2 身份常显、S3 新窗打开另一 instance、S4 同窗热切后置且须确认；硬约束一窗一权威、与 PTY tab 分离、列表复用 server-list；与 L-CC 分工写明；砍叶保 S1 |
-| 2026-08-05 | 用户要求排期兼容 tmux/rmux **send-keys + buffer-paste/copy** 以便「先能发信息」→ 判断 **B′ 控制面兼容要做，但不替代 M handoff**。新增 **§一·五 B′**：B1 契约盘点、B2 夯实 send-keys、B3 命名 buffer 最小集、B4 paste-buffer、B5 与 M 选用表、B6 可选 copy→buffer；硬约束一 pane/tab、有界、不抢焦点、显式 unsupported；排序 B1→B4 为核心 |
+| 2026-08-05 | 用户认同「先把底子弄好」优先于督促 ipfs/libp2p → 新增 §1.5「为什么 v0.1.15 不推进 L-NET」：L-NET 卡点是 N3 产品消费者**形态未定（拍板题）**而非工程量，形态未定前投工程会返工；底子欠账（IME 契约失衡、install 四处硬伤、cache 恶化）是用户每天碰得到的。L-NET 保持 research 车道，R3 只换车道不减验证 |
+| 2026-08-05 | 用户确认：`agenterm-cli` 可读 live tab `ds4@codex`（`@2`/`ds4@c`），并问跨 server 通讯前景 → 结论写入对话结论与 **§1.5 M 组**：观察地基已亮；通讯不得以 PTY 为总线。追加 **M1 身份 / M2 只读 observe / M3 handoff 契约 / M4 跨 instance 证据**；硬约束含无副作用观察、单一 Fleet 权威；CC UI 不阻塞 M；砍叶 M4→M3→M2 子命令，保留 M1+M2 文档；绝不砍 R1/R2。X3 指针同步到 `plan/design-control-center-ux.md` |
+| 2026-08-05 | 用户报告标签区切换 tab 几乎总触发整窗刷新 → §3.5 **TS1–TS4** 观察 + **§1.5 U′** 可执行子树：U1 假刷新止血（代码已落）、U2 真机回归、U3 debounce PTY resize、U4 纯 TabSelected 不重推 cells（可选/可推 v0.2.x）；砍叶 U4→U3，保留 U1/U2 |
+| 2026-08-05 | 用户 GUI 窗全关后提出「顶栏横向 tab 选 server」→ 判断**需求合理、默认形态不采用主窗横向 server tab**。新增 **§1.5 S′**：S1 启动/重开 live instance 列表附着、S2 身份常显、S3 新窗打开另一 instance、S4 同窗热切后置且须确认；硬约束一窗一权威、与 PTY tab 分离、列表复用 server-list；与 L-CC 分工写明；砍叶保 S1 |
+| 2026-08-05 | 用户要求排期兼容 tmux/rmux **send-keys + buffer-paste/copy** 以便「先能发信息」→ 判断 **B′ 控制面兼容要做，但不替代 M handoff**。新增 **§1.5 B′**：B1 契约盘点、B2 夯实 send-keys、B3 命名 buffer 最小集、B4 paste-buffer、B5 与 M 选用表、B6 可选 copy→buffer；硬约束一 pane/tab、有界、不抢焦点、显式 unsupported；排序 B1→B4 为核心 |
 | 2026-08-05 | **B′ 落地（工作区）**：`named_buffer` store + CLI `set/load/show/list/delete/paste-buffer`（别名 setb/loadb/…）；`send-keys` usage 补 PS `@N`；隔离 instance 黑盒：`set-buffer`→`paste-buffer`→capture 见 `BUFFER_PROBE_OK`。live main 须换新 `agenterm-server` 后才有命令。agent 协作仍优先 note；paste 进 Codex TUI 会打断 |
 | 2026-08-05 | **P0 关窗再开重置**：根因=新 server + workspace 假恢复 / 双 main。修 `find_live_endpoint_for_logical_instance` + GUI connect 附着 + `start_frontend_server` 拒双开；黑盒同 instance 仅 1 live、tab note 保留。P0-3 job breakaway 未做 |
 | 2026-08-05 | **关窗确认丢失**：`SC_CLOSE`→`CloseRequested`；`ensure_window_close_dialog_presented` 先 restore 再 layout/show 三按钮；AlreadyOpen 二次 close 重 assert。隔离 instance 黑盒：`ui-action close-window`→`confirm-window-close`；最小化后 close→restore+modal；Keep→重开同 `server_pid`+tab 名保留 |
 | 2026-08-05 | **S′ S1–S3 落地**：`instance_identity` + `instance_picker`；`ui-snapshot.window.instance/server_pid/endpoint`；状态栏 Connected·instance·pid；系统菜单 Open instance…；CLI `open-instance-picker` / `instance-picker-select --name` / `confirm` / `open-instance --name`；Attach 延后 rebind 避免 command 过期；OpenAnother breakaway 新窗。Unix picker 诚实 gap |
 | 2026-08-06 | **用户澄清**：只要窗口**顶栏横向 server tab**。落地 `server_strip` 几何 + 绘制/点击 + `select-server-tab --name` + snapshot `layout.server_strip`；点选 rebind 当前窗（非左侧 PTY 树） |
 | 2026-08-06 | **版本列车 0.1.15 + 顶栏/CC 真机迭代**（工作区 → main，用户测通后授权推远程）：(1) `Cargo.toml` / platform / tasks → **0.1.15**；(2) 默认 `build.bat` stage **release-fast** 到 `dist/`（`target/debug` 仍为纯 debug PE；显式 `build.bat dev`）；(3) **关窗确认**：重入 `window_proc` 禁 DefWindowProc(SC_CLOSE/WM_CLOSE)、整客户区变暗；(4) **server strip 可点**：鼠标路径 `flush_deferred_server_tab_attach`（曾只 defer 不 attach）；全部芯片可点（取消 mid-break 丢尾）、进程仍活即可 enter（空 tab 树不拦）、stale 点选开新窗；(5) **布局**：strip 仅终端列；左上时钟 `HH:MM:SS`；标签树几何 **+sidebar_tree.top** 不再压时钟；(6) **CC**：优先 `agenterm-cc-web.exe`（direct-WRY 三 Tab：超级智能体 / InfoHub / 超级控制；GUI 子系统无黑控制台；父控制台 AttachConsole 保 `--help`/`--probe`）；缺文件回落原生 `agenterm-cc`。证据：双 live instance 黑盒 strip 跳转；open-control-center 起 web 壳；geometry 单测 strip+clock+tree。相关提交含 `933b92e`…`e56cb67`；设计稿 `plan/plan-cc-automation-cli.md`（自动化 CLI 未开工） |
-| 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§三·五 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
-| 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§一 O 组 + §十一**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
-| 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
+| 2026-08-05 | 用户真机回归：vim 中文输入「中文+乱码」顺序输出 → 根因 = IME 合成期间 `TranslateMessage` 把拼音按键回显成 `WM_CHAR` 并透传进终端（用户猜测命中「不该透传的事件透传了」）。落地 **I3**（§3.5 3.5.3）：合成中丢弃非提交 `WM_CHAR`、`WM_IME_CHAR` 计数放行提交文本、失焦/结束重置；`77358bb`+`c71ffd5` 入 main。vim `set encoding=utf8` 下真机通过（用户提示此前可能也可行，编码未深究）。另状态条 CURSOR/MOUSE 读数 + 输入区 Ctrl-O/Ctrl-A（`5711880`）已入 main；本次 exe 构建为 dirty（含 B′ 未提交改动） |
+| 2026-08-05 | 用户要求在 plan 写入 **OSX 要做的事子树**，供另一 agent 在本 macOS 机跟进 → 新增 **§1 O 组 + §11**（O0 基线 / O1 ImeStatus / O2 粘贴 T0 / O3 install UX / O4 合成对照 / O5 可选；禁 Win 域） |
+| 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§11，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
 | 2026-08-05 | **O6 关闭** `fb573f9`（O6a+O6b）；§11.8 定因全成立；agent(cc) 更正「pre-existing flake」归因 → 稳定红 `prd_alignment_public_command_missing:delete-buffer` |
-| 2026-08-05 | **编排拍板（不转嫁董事长）**：P-P1=T2 立 v0.2.x / T1 不做 / v0.1.15 text-only；G-P1=无 signed 自动 unsigned+警告；G-P2=不默认 kill server，版本落后须提示；**O1b 开工**；**O-fix 认领** PRD 补 buffer 公开命令。agent 问决策 → 编排回写 §五 5.7 + §一 O |
-| 2026-08-06 | **v0.1.14 未完成 upsert → §一·五 L′**（L1–L7 可执行 + L8→C1）；`plan-v0.1.14.md` / `goal-v0.1.14.md` **归档**至 `plan/archive/`（已公开发布 tag `8ff2b5a`）；archive README 与引用指针改指向 archive 路径 + 在制 `plan-v0.1.15.md` |
+| 2026-08-05 | **编排拍板（不转嫁董事长）**：P-P1=T2 立 v0.2.x / T1 不做 / v0.1.15 text-only；G-P1=无 signed 自动 unsigned+警告；G-P2=不默认 kill server，版本落后须提示；**O1b 开工**；**O-fix 认领** PRD 补 buffer 公开命令。agent 问决策 → 编排回写 §5 5.7 + §1 O |
+| 2026-08-06 | **v0.1.14 未完成 upsert → §1.5 L′**（L1–L7 可执行 + L8→C1）；`plan-v0.1.14.md` / `goal-v0.1.14.md` **归档**至 `plan/archive/`（已公开发布 tag `8ff2b5a`）；archive README 与引用指针改指向 archive 路径 + 在制 `plan-v0.1.15.md` |
 | 2026-08-06 | **plan/ 卫生**：再归档已落地/superseded 专题（`plan-agenterm-server-mode`、`plan-skins-v1`、`plan-platform-facade-v4`、`osx-cpu-improve`、S′ goal、`platform-ui-ux-boundary-tree`）；新增 `plan/README.md` 现行索引；PRD/ARCHITECTURE 链接改指向 archive |
 | 2026-08-06 | **跨平台 shared-first 试跑**（用户：Win 先做再 OSX/Lnx 对齐太慢）：`AGENTS.md` 增「Cross-platform UI: shared-first」；`src/frontend/ui_action_catalog.rs` 立 SHARED + WINDOWS_ONLY + UNIX_ONLY 清单与 set-diff / 源码字面量单测；ARCHITECTURE L2 标 interim gate + agent 禁令 #7。**未做**完整 ui-action 表驱动——只挡「单端默默加动词」。可执行 goal：`plan/goal-crate-platform.md` |
 | 2026-08-06 | **CLI ui-input 交付**（远程 main）：见本文 §9；`operations` 登记 ui-input 与四枚孤儿 ui-action；Windows 侧 ui-input 仍为开放决策 |
 | 2026-08-06 | **goal-crate-platform 执行**：P0 边界 SSOT（platform README / ARCHITECTURE §1.0 / AGENTS Platform crate vs product UI）；P1 gap 表 `plan-platform-encapsulation-gap.md` + **G1 收口** `spawn_breakaway_visible_*`（去产品侧 `ERROR_ACCESS_DENIED=5`）；P2 catalog 纪律测；P3 执行句式 |
 | 2026-08-06 | **goal-crate-platform 加深**：G6 纠正 catalog——`control_dispatch` 已实现的 24 个动词从 WINDOWS_ONLY 升 SHARED（防「假 parity-gap」）；G7 `open-new-terminal` Win 接线并升 SHARED；G2 script/worker spawn 审计证伪；G1 回归测禁产品硬编码 `raw_os_error==5`；WINDOWS_ONLY 余 17 条按 strip/settings/font 分组 `parity-gap` |
 | 2026-08-06 | **goal-crate-platform 封装完结（contract）**：G8 `font-decrease`/`font-increase`/`toggle-locale` Unix 补 ui-action 并升 SHARED（方法本已存在）；gap 文写「完结定义」+ G3/G4 标 out-of-goal residual；WINDOWS_ONLY 余 14=strip/picker+settings-scope（产品叶非 OS 泄漏）；成功清单在 `goal-crate-platform.md` 勾选 |
-| 2026-08-06 | **三端并发派工写入本文 §二·二-b**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§一·五 与 §十一 指针回链 |
+| 2026-08-06 | **三端并发派工写入本文 §2.2.1**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§1.5 与 §11 指针回链 |
+| 2026-08-06 | **章节编号改为阿拉伯数字** `x.y.z`（废止「一、二·二-b」等中文章节号）；交叉引用同步为 `§2.2.1` 等形式；原 CLI 专节与结构 §9 撞号 → CLI 改为 **§12** |
 
 ---
 
-## 十一、macOS / OSX 本机 agent 作业规格（2026-08-05 派发）
+## 11. macOS / OSX 本机 agent 作业规格（2026-08-05 派发）
 
 > **给接手 agent 的完整上下文。** 用户本机：macOS aarch64（曾验证 macOS 26.5 + 微信输入法 TIS）。  
 > 仓库：`agenterm`，分支 `main`（派发时 HEAD 约 `b15b145`，开工前务必 `git pull`）。  
-> 目标树入口：**§一 O 组** + 收敛叶 **§一·五**；三端并行派工 **§二·二-b**（G-install + Unix-UX）。  
+> 目标树入口：**§1 O 组** + 收敛叶 **§1.5**；三端并行派工 **§2.2.1**（G-install + Unix-UX）。  
 > 契约 SSOT：`plan/ARCHITECTURE.md`；shared-first：`AGENTS.md` + `ui_action_catalog`。  
 > **不做**：Windows IME 文件、发布链 R/H 核心（归 CI-R 泳道）、S 组结构大重构（HOLD）、T2 粘贴。
 
@@ -1665,12 +1666,12 @@ O  macOS 本机泳道
 │  ├─ 状态栏 IME 读数截图/笔记（预期常为 off / 空，因 stub）
 │  ├─ **必做**：终端区 左键拖选 + Shift+鼠标选 + Cmd+C → 能否 `pbpaste` 见文
 │  ├─ 粘贴四例各一次：纯中文、emoji 行、截图、他终端大段 → 记成败文案
-│  └─ 产出：§十一 进度表「基线」行（含 O6 复现结果）
+│  └─ 产出：§11 进度表「基线」行（含 O6 复现结果）
 │
 ├─ O6 Shift/拖选无法复制（**优先修复 · 阻塞工作**）
-│  ├─ 复现并分类 a–d（§一 O6 疑点）
+│  ├─ 复现并分类 a–d（§1 O6 疑点）
 │  ├─ 修：静默 `let _ = copy` → 可见失败；gesture complete；Cmd+C has_selection
-│  ├─ 真机验收四条见 §一 O6
+│  ├─ 真机验收四条见 §1 O6
 │  └─ 与 O2 共享 clipboard 写路径时串行，先 O6 后 O2
 │
 ├─ O1 ImeStatus macOS（主交付 · 对齐 N1）
@@ -1681,7 +1682,7 @@ O  macOS 本机泳道
 │  └─ 提交 pathspec 精确；回写 N1 checkbox（macOS 半叶）+ O1
 │
 ├─ O2 粘贴 T0（真机诊断优先，小修可选）
-│  ├─ 按 §十 夹具复现；定位断裂点 A/B/C（§10.3）
+│  ├─ 按 §10 夹具复现；定位断裂点 A/B/C（§10.3）
 │  ├─ 最小可交：错误码/文案细分（image_only / empty / invalid_utf8）
 │  │     或书面报告「须跨平台改 ui_clipboard，本机只证」
 │  └─ 禁止：未批 T1 写 temp 图路径；禁止改 Win clipboard
@@ -1722,7 +1723,7 @@ pbpaste | head -c 200
 | **O6** | [x] **已修** `fb573f9` | O6a 止血 + O6b shift-extend；定因见 §11.8，交付见 §11.13 |
 | O1 | [x] **adapter 半叶** `28d6959` | 见 §11.6；**消费侧半叶未做（新发现，见 §11.7）** |
 | O2 | [x] **诊断完成，判定不改码** | 发现 `Ok("")` 三态重叠；须 T2 才能修，等 P-P1；见 §11.11 |
-| O3 | [x] `ee41cc6`（G7a 文案）| G2 无断链（§八 该条已过时）；G1 仅探测，等 G-P1；见 §11.12 |
+| O3 | [x] `ee41cc6`（G7a 文案）| G2 无断链（§8 该条已过时）；G1 仅探测，等 G-P1；见 §11.12 |
 | O4 | [x] **对照完成，无需改动** | 合成路径实现完好；见 §11.9 |
 | O5 | [x] **实测后判定无需开工** | 本机 idle 6.0% CPU；见 §11.10 |
 
@@ -1771,14 +1772,14 @@ N1 原叙述「Unix 状态栏永远 `IME: off`」**不够准确**——真实情
 - **O1a adapter 半叶** — 已交付（`28d6959`），单测与任意消费者可用；
 - **O1b 消费侧半叶** — 未做：Unix `StatusBarView` 加 ime 段 + 布局 + poll 刷新。
   须先对齐 Win 侧 `status_segments` 约定，否则两端 UI 不一致
-  ——**这属于 §一「多平台 UI/UX 对齐」主题，不是纯 macOS 私事**。
+  ——**这属于 §1「多平台 UI/UX 对齐」主题，不是纯 macOS 私事**。
 
 O1b **未擅自开工**：要动 `unix/frontend/render.rs` 状态栏布局（跨平台 UI 决策面），
 且 Win agent 正在同 crate 活动——先报用户再定。
 
 ### 11.8 O6 代码级定因（2026-08-05 · 诊断时未改代码；已由 `fb573f9` 落地，见 §11.13）
 
-按 §一 O6 的 a–d 分类逐条查证（诊断结论；实现状态见 §11.13）：
+按 §1 O6 的 a–d 分类逐条查证（诊断结论；实现状态见 §11.13）：
 
 | 疑点 | 结论 | 证据 |
 |------|------|------|
@@ -1801,7 +1802,7 @@ O1b **未擅自开工**：要动 `unix/frontend/render.rs` 状态栏布局（跨
 - **O6a 止血（小、纯收益、建议先做）**：把四处 `let _ = copy_terminal_selection()`
   改为失败时 `set_status_message`/feedback 带错误码。
   即使不实现 shift 扩展，用户至少能看到「no terminal text is selected」
-  而不是**静默无反应**。符合 §一 O6 验收第 4 条「禁止静默」。
+  而不是**静默无反应**。符合 §1 O6 验收第 4 条「禁止静默」。
 - **O6b 实现 shift-extend**：在 `begin_terminal_selection` 加分支——
   按住 Shift 且已有 `terminal_selection` 时，**扩展**锚点到当前 cell 而非新建手势。
   需先定：锚点取上次选区的 start 还是 end（xterm 取「较远端」）。
@@ -1905,11 +1906,11 @@ $ pbpaste | wc -c
 **G2 无事可做**：本机 `current` → `0.1.14-macos-aarch64` 存在，
 五个 bin 软链全部解析到真实文件，**零断链**。
 
-> ⚠️ **§八 有一条已过时**：§八 8.1/8.2 第 3 点称
+> ⚠️ **§8 有一条已过时**：§8 8.1/8.2 第 3 点称
 > 「旧 `agenterm-script` BIN 链断链残留，需手动 `rm`」——
 > **本机现已不存在该软链**（只在旧 local release 载荷目录里有同名文件，
 > 那是死重量，不是断链）。该条应标注为「已解决/会话特定」。
-> §八 其余条目（G1 命令、G3 `--version`、G7 默认）**复核仍准确**。
+> §8 其余条目（G1 命令、G3 `--version`、G7 默认）**复核仍准确**。
 
 **G1 仅探测，未动默认**（G-P1 未拍板）。实测：
 
@@ -2030,7 +2031,7 @@ prd_alignment_public_command_missing:delete-buffer
 
 ---
 
-## 十、粘贴失败问题树（2026-08-05 · 规划，未开工）
+## 10. 粘贴失败问题树（2026-08-05 · 规划，未开工）
 
 > 用户场景：在 **终端区** 或 **composer 输入区** 粘贴时经常失败。  
 > 两类主诉均标 **硬骨头**——跨 OS clipboard + 归一策略 + UX 诊断，忌「顺手改 is_control」无夹具。
@@ -2134,7 +2135,7 @@ tab 内进程（claude/codex/…）
 
 ---
 
-## 九、结构微重构预备树（HOLD · 2026-08-05）
+## 9. 结构微重构预备树（HOLD · 2026-08-05）
 
 > 状态：**等待**。多 agent 开工期间本泳道只读/只更本文档，**不写** `src/**` / `crates/**` / `install.sh`。  
 > 触发：用户说「可以 review 新一轮再开工」。  
@@ -2154,7 +2155,7 @@ HOLD 多 agent 并行
 │  ├─ 重读 ARCHITECTURE §1§4§8 与 boundary_tests 现状
 │  ├─ 跑 quick（或至少 boundary 相关 test）取基线绿
 │  ├─ 对照下表「候选刀」是否被他方占用 → 重排刀序
-│  └─ 产出：一页「可开 / 让路 / 延后」三列（聊天或 §九 补记）
+│  └─ 产出：一页「可开 / 让路 / 延后」三列（聊天或 §9 补记）
 │
 ├─ W2 安全带（结构文档↔代码 · 最小集，开工第一刀可选）
 │  ├─ S1 boundary_tests 扩：bins 必存在、禁复活路径、（可选）行数软预算
@@ -2205,7 +2206,7 @@ HOLD 多 agent 并行
 
 ---
 
-## 七、Linux 云桌面实测意见（2026-08-04）
+## 7. Linux 云桌面实测意见（2026-08-04）
 
 宿主：Cursor Cloud `DISPLAY=:1` TigerVNC + XFCE（非 CI Xvfb）。
 入口与 CI 同款：`AGENTERM_BOOTSTRAP_TASK=… ./scripts/bootstrap.sh`。
@@ -2252,7 +2253,7 @@ HOLD 多 agent 并行
 
 ---
 
-## 八、安装与更新实测（2026-08-05，macOS aarch64）
+## 8. 安装与更新实测（2026-08-05，macOS aarch64）
 
 > 场景：本机已装 `0.1.12-local-macos-aarch64`（`current` 指向
 > `~/.local/share/agenterm/releases/…`；BIN 链在 `~/.local/bin`），
@@ -2351,9 +2352,9 @@ ls -la ~/.local/bin/agenterm*
 # 期望：无断链；version=0.1.14；已开 GUI 需手动重开
 ```
 
-## 9. CLI 输入面（ui-input）——已交付
+## 12. CLI 输入面（ui-input）——已交付
 
-### 9.1 背景：能看见，但按不下去
+### 12.1 背景：能看见，但按不下去
 
 `ui-snapshot` 在 `projection: "embedded_gui"` 下早已输出几乎所有可点元素的像素
 bounds（toolbar 各按钮、tab 行、close/new_child、disclosure_hit、滚动条
@@ -2366,7 +2367,7 @@ thumb/track、sidebar resize_grip、composer input），并带 `focus`/`caret`/
 `-x col -y row`（终端单元格），本质是 tmux 的「往 PTY 写鼠标上报」，
 **不可能点到工具栏按钮**。结论：agent 能看见按钮，按不下去。
 
-### 9.2 交付内容
+### 12.2 交付内容
 
 ```
 ui-input pointer --x PX --y PX [--button left|right|middle]
@@ -2382,7 +2383,7 @@ ui-input wheel   --x PX --y PX --delta-y N [--units lines|pixels]
 press/release**，而不是去种 promotion 状态。理由是 composer 曾经在 Unix 有选区、
 Windows 没有，正是两份实现漂移的结果。
 
-### 9.3 实测证据（装进 `~/Applications/AgenTerm.app` 后跑）
+### 12.3 实测证据（装进 `~/Applications/AgenTerm.app` 后跑）
 
 | 手势 | 结果 |
 |---|---|
@@ -2395,7 +2396,7 @@ Windows 没有，正是两份实现漂移的结果。
 
 perceive→act 闭环成立。
 
-### 9.4 目录登记
+### 12.4 目录登记
 
 `ui.input.pointer` / `ui.input.wheel` 已入 `operations.rs` 与
 `prd/PRD_02_15_command_line.md`（alignment 计数 69/97）。顺带补登记了四个
@@ -2403,7 +2404,7 @@ perceive→act 闭环成立。
 ——它们此前只在 `control_dispatch.rs` 有实现、无 typed spec 无脚本面，
 与 `delete-buffer` 是同一类漂移。
 
-### 9.5 未决（决策项，待拍板）
+### 12.5 未决（决策项，待拍板）
 
 1. **Windows 侧 `ui-input` 未实现**。解析层 `frontend/pointer_input.rs` 是平台中立的，
    可直接复用；但 Windows 的 composer 是原生 `EDIT` 控件，合成 press 送到窗口
