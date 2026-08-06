@@ -343,4 +343,4 @@ Facade 读写作 **server 投影**；Rhai/pack **不得** 持久化 Fleet truth 
 | 内核能封给 Rhai 调吗？ | **能**，经 Facade |
 | 内核能放 Rhai 里吗？ | **不能**（B1） |
 | 关键是什么？ | **边界清晰、严格、可证明**（本文 B1–B8 + Tier + Evidence） |
-| JIT 会改变吗？ | 只放大 T2–T3 可迁范围，不改 B1/B5/B7 |
+| JIT 会改变吗？ | **只放大 L3 可迁范围**；**不** 改变 B1/B5/B7 与 §2.1 清单（见 `design-scripting-boundary-comparison.md` §6.1） |

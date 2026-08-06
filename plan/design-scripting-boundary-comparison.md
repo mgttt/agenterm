@@ -162,6 +162,64 @@ AgenTerm **不应** 对标 Redis 脚本模型做默认 pack；Fleet 权威与 GU
 
 ---
 
+## 6.1 假设：若 Rhai / App Pack 有 JIT，会更贴内核吗？
+
+**短答：性能上会更「敢写」L3 逻辑；架构上 **不会** 自动获得接管 L1 的正当性。**
+
+### JIT 会改变的
+
+| 方面 | 效果 |
+|------|------|
+| **L3 计算** | 路由、状态机、字符串/layout 生成 **更快** → pack 可 **更大** |
+| **L2 调用频率** | 仍跨界，但 **单次 pack 内** 循环可 JIT，减少解释开销 |
+| **Strangler 深度** | 更多 **产品语义** 从 Rust 迁 pack **更可行**（仍 T3，非 T0） |
+| **与 LuaJIT/V8 类比** | 游戏 **AI/规则** 更厚；**不是** 渲染进脚本 |
+
+### JIT 不会改变的
+
+| 方面 | 原因 |
+|------|------|
+| **Fleet 权威** | epoch/journal/receipt 仍在 **server**；JIT 不产生单一真相 |
+| **PTY/ConPTY** | OS 句柄与泵在 **native**；JIT 不能替代驱动 |
+| **Parser/grid 是否进 pack** | 瓶颈是 **数据布局 + 跨界 + 证据**，不是仅「解释慢」 |
+| **安全/热更信任** | OTA pack 仍要签名；JIT 代码 **同样** 不可 silent 进 server 进程 |
+| **Candidate 封印** | L1 Base 仍随 PE 发版；JIT 不改变 **何者随 pack 热更** |
+| **unrestricted Rhai** | JIT 不是 sandbox；**不能** 因「Compiled」就放宽 B1 |
+
+### 可能 **错误** 推导（需禁止）
+
+```text
+❌ 「JIT 后 parser 可以写 pack 里，够快了」
+   → 仍违反 B1/B3/B5；qualification 组合爆炸
+
+❌ 「JIT pack 可进 agenterm server 同进程当内核插件」
+   → 那是 Redis 模型；默认 **非目标**（见 BC-3）
+
+❌ 「JIT = 95% 原生，所以 L1/L3 边界可模糊」
+   → PyPy 也快，numpy 仍在 C；边界是 **职责** 不是 **MFLOPS**
+```
+
+### 合理推导（若投资 JIT）
+
+| 可做更多（L3↑） | 仍不做（L1） |
+|----------------|--------------|
+| CC 整屏 lines 生成、复杂 nav 状态机 | `terminal_runtime` / parser |
+| Hub 路由、LLM 映射、主题规则 | PTY 泵、blit、IPC 帧 |
+| 用户 automation 更重（非 pack） | tab 树、journal 实现 |
+
+### 与行业 JIT 对照
+
+| 运行时 | JIT | 内核仍在 native？ |
+|--------|-----|------------------|
+| **LuaJIT** | 是 | 是（渲染/物理 C++） |
+| **PyPy** | 是 | 是（numpy/C 扩展） |
+| **V8** | 是 | 是（Blink/libuv） |
+| **JIT Rhai（假设）** | — | **仍是**（§2.1 清单不变） |
+
+**结论：** JIT 是 **L3 能力放大器**，不是 **L1 迁移许可证**。是否投资 JIT 应单独做 **成本/收益**（Engine 复杂度、AOT 缓存、调试）；**不应** 作为「把内核搬进 pack」的前提。
+
+---
+
 ## 7. 可借鉴 vs 不借鉴
 
 | 来源 | 可借鉴 | 不借鉴 |
@@ -194,6 +252,7 @@ AgenTerm **不应** 对标 Redis 脚本模型做默认 pack；Fleet 权威与 GU
 | BC-1 | 是否需要 **Neovim 式**「用户插件 Rhai」与 **产品 pack** 分 channel？ |
 | BC-2 | 是否研究 **xterm.js 式** grid 在 Wasm（L1 仍 native blit）？ |
 | BC-3 | Fleet 内 **短脚本原子 op**（Redis 类）是否单独 PRD，默认 pack 禁止？ |
+| BC-4 | 是否投资 Rhai/AOT/JIT 仅放大 L3，**明确不** 作为 L1 迁移理由？ |
 
 ---
 
