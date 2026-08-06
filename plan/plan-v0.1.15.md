@@ -1562,6 +1562,8 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | **编排拍板（不转嫁董事长）**：P-P1=T2 立 v0.2.x / T1 不做 / v0.1.15 text-only；G-P1=无 signed 自动 unsigned+警告；G-P2=不默认 kill server，版本落后须提示；**O1b 开工**；**O-fix 认领** PRD 补 buffer 公开命令。agent 问决策 → 编排回写 §五 5.7 + §一 O |
 | 2026-08-06 | **v0.1.14 未完成 upsert → §一·五 L′**（L1–L7 可执行 + L8→C1）；`plan-v0.1.14.md` / `goal-v0.1.14.md` **归档**至 `plan/archive/`（已公开发布 tag `8ff2b5a`）；archive README 与引用指针改指向 archive 路径 + 在制 `plan-v0.1.15.md` |
 | 2026-08-06 | **plan/ 卫生**：再归档已落地/superseded 专题（`plan-agenterm-server-mode`、`plan-skins-v1`、`plan-platform-facade-v4`、`osx-cpu-improve`、S′ goal、`platform-ui-ux-boundary-tree`）；新增 `plan/README.md` 现行索引；PRD/ARCHITECTURE 链接改指向 archive |
+| 2026-08-06 | **跨平台 shared-first 试跑**（用户：Win 先做再 OSX/Lnx 对齐太慢）：`AGENTS.md` 增「Cross-platform UI: shared-first」；`src/frontend/ui_action_catalog.rs` 立 SHARED + WINDOWS_ONLY + UNIX_ONLY 清单与 set-diff / 源码字面量单测；ARCHITECTURE L2 标 interim gate + agent 禁令 #7。**未做**完整 ui-action 表驱动——只挡「单端默默加动词」。可执行 goal：`plan/goal-crate-platform.md` |
+| 2026-08-06 | **CLI ui-input 交付**（远程 main）：见本文 §9；`operations` 登记 ui-input 与四枚孤儿 ui-action；Windows 侧 ui-input 仍为开放决策 |
 
 ---
 

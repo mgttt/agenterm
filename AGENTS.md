@@ -335,6 +335,36 @@ behavior.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
  pane, and unsupported commands must fail explicitly.
 
+### Cross-platform UI: shared-first (Win / OSX / Lnx)
+
+Three-host UX parity fails when product semantics land only in the Windows
+remote frontend and OSX/Lnx agents re-implement later. Default path:
+
+1. **Product meaning first** in `src/frontend/*`, `src/ui_geometry.rs`, and
+   other shared modules (layout math, dialog state, action ids, focus gates,
+   snapshot fields). Host adapters (`windows/remote_frontend`,
+   `unix/frontend`) present, wake, IME, and native IPC only.
+2. **`ui-action` set gate**: `src/frontend/ui_action_catalog.rs` lists
+   `SHARED_UI_ACTIONS` plus intentional `WINDOWS_ONLY_*` / `UNIX_ONLY_*`
+   allowlists. Unit tests require host inventories to match after allowlists
+   and that catalog string literals still appear in the adapter sources.
+   Adding a one-host action without updating the catalog/allowlist fails
+   `cargo test --lib ui_action_catalog`.
+3. **Same change when possible**: for a product gesture both hosts must
+   expose, add the id to `SHARED_UI_ACTIONS` and wire both adapters in one
+   coherent increment. Do not ship Windows-only product behavior and leave
+   "Unix agent later" as the plan unless the entry is explicitly
+   host-only with a `parity-gap:` reason in the catalog comment.
+4. **Intentional host-only** is allowed for true platform surfaces (e.g.
+   current server-strip / instance-picker depth on Windows, Unix new-terminal
+   shell verb set). Document in the allowlist; promote to SHARED when the
+   peer host gains the surface.
+5. Do not grow dual-write match arms for new product policy when a shared
+   helper already exists (`new_terminal::dispatch_ui_action`, geometry,
+   interaction gates). ARCHITECTURE debt L2 tracks the remaining table-driven
+   migration; this catalog is the interim set-diff gate, not the final
+   ActionId enum.
+
 ## Cursor Cloud specific instructions
 
 The cloud VM is **Linux**, but the native Windows GUI/runtime (`windows-sys`,

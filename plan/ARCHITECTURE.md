@@ -103,7 +103,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 |----|------|------|
 | L1 | ~~`frontend.rs` `#[path]` 虚树~~ | **已收**：`platform::adapters::{windows,unix}` 正规 mod；`frontend` 只 `use` |
 | L1b | ~~`windows/frontend` 靠 sibling `#[path]`~~ | **已收**：同目录 `windows::{frontend,remote_frontend}` |
-| L2 | Win remote vs Unix embedded 双主机（selection/focus/wheel/scrollbar-drag 已共享；`ui-action` 大 match 与巨石 adapter 仍双写） | 共享交互语义单点；主机只 present/wake/IME；action 表驱动记版本 plan 讨论叶 |
+| L2 | Win remote vs Unix embedded 双主机（selection/focus/wheel/scrollbar-drag 已共享；`ui-action` 大 match 与巨石 adapter 仍双写；**interim set-diff gate**: `src/frontend/ui_action_catalog.rs`） | 共享交互语义单点；主机只 present/wake/IME；action 表驱动记版本 plan 讨论叶 |
 | L3 | `platform/mod.rs` 策略过肥（input/paths/control_center/runtime/test_fixtures/workspace 已拆 `policy/`；FrontendHost 与 facade 是剩余薄层）+ `allow(dead_code)` | `policy/*` 全拆收口；禁新顶层 `is_windows_host` 蔓延；半迁移 facade 二选一（全接线或删） |
 | L4 | **结构 SSOT 未机读双向**（本文 prose + 局部 `boundary_tests`；目录树/分层文案漂移靠人） | 见 §8.4；版本 plan **S 组**执行；本文只定契约 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
@@ -137,6 +137,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 4. 不要新增第二套 GUI 启动解析或第二套 server autostart 决策。  
 5. 不要把 net / WebView / 大 Control Center 内容写进「已 shipped」除非 owning PRD 已改。  
 6. 结构变更：更新本文；版本 plan 只记叶与证据，不重画全树。  
+7. 新 `ui-action` / 产品手势：**shared-first**（`src/frontend/*` + `ui_action_catalog.rs`）；单端落地须进 `WINDOWS_ONLY_*` / `UNIX_ONLY_*` 并写 `parity-gap:`，禁止默认同端双写后甩给另一平台 agent。  
 7. 不要把 rust-analyzer / 通用 LSP 当成「结构 SSOT 已对齐」的证据；LSP 不消费本文。  
 8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。
 

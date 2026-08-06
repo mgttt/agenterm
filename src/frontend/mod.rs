@@ -29,6 +29,7 @@ pub(crate) mod settings;
 pub(crate) mod tab_editor;
 pub(crate) mod text_selection;
 pub(crate) mod toolbar;
+pub(crate) mod ui_action_catalog;
 pub(crate) mod window;
 pub(crate) mod window_close;
 

@@ -17,6 +17,7 @@
 | [`plan-cc-automation-cli.md`](plan-cc-automation-cli.md) | CC 自动化 CLI 设计稿（未实现） |
 | [`plan-multiplatform-gui.md`](plan-multiplatform-gui.md) | Linux/macOS GUI 交付里程碑 |
 | [`plan-mobile.md`](plan-mobile.md) | 移动端占位（未授权开工） |
+| [`goal-crate-platform.md`](goal-crate-platform.md) | **/goal** 可执行：platform crate 跨平台封装收口（边界 SSOT + 机制 gap + catalog 闸） |
 
 ## 已归档（勿当任务单）
 
