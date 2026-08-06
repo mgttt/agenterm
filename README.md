@@ -150,9 +150,9 @@ versioned user installation, refreshes `~/.local/bin`, and creates the stable
 `~/Applications/AgenTerm.app` Dock entry. This explicit local path does not
 weaken signature verification for downloaded Release packages.
 
-The default build is an incremental development build. Use
-`.\build.bat release-fast` for repeated optimized local testing: it skips LTO,
-uses parallel code generation, and retains incremental state. Use
+The default build is **release-fast**: optimized PE staged into `dist/` (no
+LTO, parallel codegen, incremental under `target/release-fast/`). Debug PE
+stays in `target/debug/` (`cargo build` or `.\build.bat dev`). Use
 `.\build.bat release` only for a distributable build; it applies the
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch

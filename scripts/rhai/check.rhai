@@ -1160,7 +1160,9 @@ let build_gate = run_gate(
     [spec(
         "cmd.exe",
         final_build_arguments,
-        if release { 600000 } else { 60000 },
+        // Default build.bat is release-fast (optimized stage). Give cold
+        // optimized compile more room than the old 60s dev-only budget.
+        if release { 600000 } else { 300000 },
         build_environment
     )],
     repo,

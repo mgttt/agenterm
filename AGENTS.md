@@ -94,15 +94,16 @@ Use PowerShell from the repository root:
 
 ```powershell
 .\lint.cmd              # fast fail: Rust, JSON, text hygiene, and production Rhai
-.\build.bat             # fast incremental dev build -> .\dist\
-.\build.bat release-fast # optimized incremental local-test build -> .\dist\
+.\build.bat              # default: release-fast -> .\dist\ (optimized, incremental)
+.\build.bat release-fast # same as default; explicit alias
+.\build.bat dev          # debug PE -> .\dist\ (also lands in target/debug/)
+.\build.bat release      # size-optimized distributable -> .\dist\ (+ target-release/)
 .\check.cmd --quick      # static/PRD/fmt + all-target Clippy + lib tests
-.\check.cmd --skip-smoke # CI-grade fmt, all-target Clippy/tests, dev artifact
+.\check.cmd --skip-smoke # CI-grade fmt, all-target Clippy/tests, staged artifact
 .\check.cmd              # full public-interface regression
 .\check.cmd --release    # local release gate; skips event-journal load stress
 .\check.cmd --release --include-stress # exact qualification + receipt
 .\dist\agenterm-rhai.exe task run package-qualified --manifest .\agenterm.tasks.json
-.\build.bat release     # distributable release artifact
 .\release.cmd --rehearse # read-only release validation/rehearsal
 ```
 
@@ -221,17 +222,17 @@ diagnostic and black-box parity baseline.
 slower; that setting was removed. Do not restore a global job limit. The file
 itself still exists and is load-bearing — it carries the
 `aarch64-unknown-linux-gnu` linker setting the `lnx × aarch64` cell below
-depends on. Do not delete it. Keep the default dev path
-incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
-for repeated optimized local testing: it disables LTO, uses parallel codegen,
-and retains incremental state. A final `release` build uses the dedicated
-repo-local `target-release/` scratch directory, stages all distributable files
-in `dist/`, and then reclaims both `target-release/` and development `target/`.
-The reusable bootstrap worker is stored outside Cargo output so this is safe on
-Windows. Dev and `release-fast` loops retain target output for incremental
-feedback. Release-only size optimization belongs in `[profile.release]`. The
-staging path is one named Rhai task; do not split it back into one interpreter
-startup per artifact.
+depends on. Do not delete it. Default `build.bat` stages **release-fast** into
+`dist/` (optimized, no LTO, parallel codegen, incremental under
+`target/release-fast/`). Pure debug PE remains `target/debug/` via ordinary
+`cargo build` or explicit `build.bat dev`. A final `release` build uses the
+dedicated repo-local `target-release/` scratch directory, stages all
+distributable files in `dist/`, and then reclaims both `target-release/` and
+development `target/`. The reusable bootstrap worker is stored outside Cargo
+output so this is safe on Windows. Dev and `release-fast` loops retain target
+output for incremental feedback. Release-only size optimization belongs in
+`[profile.release]`. The staging path is one named Rhai task; do not split it
+back into one interpreter startup per artifact.
 Build-identity freezing first reuses an existing compatible Script worker and
 falls back to bootstrapping one only when it is absent or incompatible. Do not
 restore an unconditional pre-identity worker build: compile-time

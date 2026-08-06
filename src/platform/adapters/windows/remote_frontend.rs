@@ -202,6 +202,40 @@ const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
+/// Local HH:MM:SS for the top-left clock placeholder (Tabs column exclusive).
+fn sidebar_local_clock_text() -> String {
+    #[repr(C)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        milliseconds: u16,
+    }
+    // SAFETY: GetLocalTime only writes the provided SYSTEMTIME buffer.
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetLocalTime(time: *mut SystemTime);
+    }
+    let mut time = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        milliseconds: 0,
+    };
+    unsafe {
+        GetLocalTime(&raw mut time);
+    }
+    format!("{:02}:{:02}:{:02}", time.hour, time.minute, time.second)
+}
+
 /// First non-flag token after `ui-action <action>` (for `--name` alternatives).
 fn ui_action_trailing_name(args: &[String]) -> Option<&str> {
     // args[0] is the action id when dispatched from execute_client_command.
@@ -762,6 +796,8 @@ struct RemoteWindowState {
     /// Live/stale multi-server strip at the top of the window (product chrome).
     server_tabs: Vec<InstancePickerRow>,
     server_tabs_refresh_after: Instant,
+    /// Last painted sidebar clock label; tick redraws when the second changes.
+    last_sidebar_clock_text: String,
     no_activate: bool,
 }
 
@@ -969,6 +1005,7 @@ impl RemoteWindowState {
             relay_attach_after_completion: None,
             server_tabs: collect_instance_picker_rows().unwrap_or_default(),
             server_tabs_refresh_after: Instant::now() + SERVER_TABS_REFRESH,
+            last_sidebar_clock_text: sidebar_local_clock_text(),
             no_activate,
         })
     }
@@ -978,6 +1015,11 @@ impl RemoteWindowState {
         let resize_changed = self.process_terminal_resize_results();
         let paste_changed = self.process_terminal_paste_results();
         let server_tabs_changed = self.refresh_server_tabs_if_due();
+        let clock_text = sidebar_local_clock_text();
+        let clock_changed = clock_text != self.last_sidebar_clock_text;
+        if clock_changed {
+            self.last_sidebar_clock_text = clock_text;
+        }
         let result = self
             .client
             .as_mut()
@@ -1034,6 +1076,7 @@ impl RemoteWindowState {
                             || resize_changed
                             || paste_changed
                             || server_tabs_changed
+                            || clock_changed
                             || changed
                             || command_changed
                             || autoscroll_changed
@@ -2256,6 +2299,13 @@ impl RemoteWindowState {
                         "bounds": pixel_rect_json(strip),
                         "selected": current,
                         "tabs": tabs,
+                    })
+                }),
+                "sidebar_clock": layout.sidebar_clock.map(|clock| {
+                    serde_json::json!({
+                        "bounds": pixel_rect_json(clock),
+                        "text": self.sidebar_clock_text(),
+                        "placeholder": true,
                     })
                 }),
                 "sidebar": {
@@ -4500,6 +4550,32 @@ impl RemoteWindowState {
         self.window.request_redraw();
     }
 
+    fn sidebar_clock_text(&self) -> String {
+        // Local wall-clock placeholder above the exclusive Tabs column.
+        // Format is intentionally simple until a real status provider owns it.
+        sidebar_local_clock_text()
+    }
+
+    fn paint_sidebar_clock(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
+        let Some(clock) = self.workspace_geometry().sidebar_clock else {
+            return;
+        };
+        let clock = win_rect(clock);
+        fill(device, &clock, palette.status.canvas_rgb());
+        frame(device, &clock, palette.active_border.canvas_rgb());
+        draw_text(
+            device,
+            ProductPixelRect {
+                left: clock.left + MARGIN,
+                top: clock.top + 8,
+                right: clock.right - MARGIN,
+                bottom: clock.bottom - 6,
+            },
+            &self.sidebar_clock_text(),
+            palette.text.canvas_rgb(),
+        );
+    }
+
     fn paint_server_strip(&self, device: &mut dyn ControlCanvas, palette: &ThemePalette) {
         let Some(strip) = self.workspace_geometry().server_strip else {
             return;
@@ -6013,6 +6089,7 @@ impl RemoteWindowState {
                 .palette()
         };
         let (sidebar, terminal, composer, status) = self.layout_rects();
+        self.paint_sidebar_clock(device, palette);
         self.paint_server_strip(device, palette);
         fill(device, &sidebar, palette.sidebar.canvas_rgb());
         if let Some(toolbar) = self.workspace_geometry().workspace_toolbar {

@@ -1,15 +1,17 @@
 // Build and optionally stage AgenTerm through one manifest-owned lifecycle.
 //
 // Args:
-//   REPO [release|release-fast]
+//   REPO [release-fast|release|dev]
 //        [--target TRIPLE] [--driver cargo|cargo-xwin]
 //        [--os windows|linux|macos] [--arch x86_64|aarch64]
 //        [--clients-only] [--action build|clippy]
 //
-// Whole-root incremental manifest production belongs only to the existing
-// native Windows dev lane that reaches both stage-build and prune. Unix
-// bootstrap and cross-client lanes return after artifact listing and report
-// this producer as not applicable; they do not claim cleanup integration.
+// Default profile is release-fast: optimized PE staged to dist/, while
+// target/debug remains the pure debug cargo layout (only via explicit "dev").
+// Whole-root incremental manifest production belongs only to the native
+// Windows dev lane that reaches both stage-build and prune. Unix bootstrap
+// and cross-client lanes return after artifact listing and report this
+// producer as not applicable; they do not claim cleanup integration.
 
 import "scripts/rhai/lib/build_identity" as build_identity;
 import "scripts/rhai/lib/bootstrap_timing" as bootstrap_timing;
@@ -125,7 +127,11 @@ require(args.len >= 1, "expected: REPO [PROFILE] [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
 let bootstrap = bootstrap_timing::facts();
 print("AgenTerm bootstrap timing: " + rhai::json::stringify(bootstrap));
-let profile = "dev";
+// Stage optimized PE by default. Debug PE stays under target/debug unless the
+// caller explicitly asks for "dev" (still may stage to dist for rare debug
+// black-box cases).
+let profile = "release-fast";
+let profile_set = false;
 let target = "";
 let driver = "cargo";
 let os_name = "";
@@ -135,9 +141,10 @@ let action = "build";
 let index = 1;
 while index < args.len {
     let value = args[index];
-    if value == "release" || value == "release-fast" {
-        require(profile == "dev", "build_profile_duplicate");
+    if value == "release" || value == "release-fast" || value == "dev" {
+        require(!profile_set, "build_profile_duplicate");
         profile = value;
+        profile_set = true;
     } else if value == "--target" {
         target = option_value(args, index, value);
         index += 1;

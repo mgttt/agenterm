@@ -120,7 +120,8 @@ pub(crate) struct WorkspaceLayoutInput {
     pub(crate) configured_tabs_width: i32,
     pub(crate) composer_height: i32,
     pub(crate) status_height: i32,
-    /// Full-width strip at the top of the window for multi-server tabs (0 = off).
+    /// Height of the multi-server tab strip over the terminal column (0 = off).
+    /// The left Tabs column stays exclusive; matching top-left cell is the clock.
     pub(crate) server_strip_height: i32,
 }
 
@@ -166,11 +167,16 @@ pub(crate) struct WorkspaceLayout {
     pub(crate) tabs_visible: bool,
     pub(crate) configured_tabs_width: i32,
     pub(crate) effective_tabs_width: i32,
-    /// Full-width multi-server tab strip at the top of the client (None if height 0).
+    /// Multi-server tab strip over the **terminal column only** (None if height 0
+    /// or no width). Left edge aligns with the terminal / toolbar column so the
+    /// Tabs sidebar remains exclusive and easy to toggle.
     pub(crate) server_strip: Option<PixelRect>,
+    /// Top-left clock placeholder above the Tabs tree when the server strip is
+    /// on and Tabs are visible (None otherwise). Same height as `server_strip`.
+    pub(crate) sidebar_clock: Option<PixelRect>,
     pub(crate) sidebar: PixelRect,
-    /// Tree-owned sidebar surface. It spans the full client height and never
-    /// extends underneath the resize grip.
+    /// Tree-owned sidebar surface. Top aligns with the terminal column body
+    /// (toolbar top); never extends under the resize grip or the clock cell.
     pub(crate) sidebar_tree: PixelRect,
     /// Host-owned New/Tabs/Settings action surface above the terminal. It
     /// remains available when Tabs are hidden so the sidebar can be restored.
@@ -233,7 +239,14 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
     let chrome_top = body_top + toolbar_height;
 
     let client = rect(0, 0, width, height);
-    let server_strip = (server_strip_height > 0).then(|| rect(0, 0, width, server_strip_height));
+    // Server strip sits only over the terminal column (left-aligned with it).
+    // When Tabs are hidden, content_left is 0 and the strip spans full width.
+    let server_strip = (server_strip_height > 0 && content_left < width)
+        .then(|| rect(content_left, 0, width, server_strip_height));
+    // Matching top-left cell above the exclusive Tabs column.
+    let sidebar_clock = (server_strip_height > 0 && effective_tabs_width > 0)
+        .then(|| rect(0, 0, effective_tabs_width, server_strip_height));
+    // Tabs tree top aligns with the terminal-column body (toolbar top), not y=0.
     let sidebar = rect(0, body_top, effective_tabs_width, height);
     let terminal = rect(content_left, chrome_top, width, composer_top);
     let composer = rect(content_left, composer_top, width, status_top);
@@ -262,6 +275,7 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
         configured_tabs_width,
         effective_tabs_width,
         server_strip,
+        sidebar_clock,
         sidebar,
         sidebar_tree,
         workspace_toolbar,
@@ -1056,6 +1070,51 @@ mod tests {
         assert_eq!(clamp_configured_tabs_width(480), 480);
         assert_eq!(clamp_configured_tabs_width(i32::MAX), TABS_MAX_WIDTH);
         assert_eq!(reset_tabs_width(), 250);
+    }
+
+    #[test]
+    fn server_strip_aligns_with_terminal_column_and_leaves_clock_over_tabs() {
+        let layout = workspace_layout(WorkspaceLayoutInput {
+            client_width: 1000,
+            client_height: 700,
+            tabs_visible: true,
+            configured_tabs_width: 180,
+            composer_height: COMPOSER_HEIGHT,
+            status_height: 26,
+            server_strip_height: 32,
+        });
+        let strip = layout.server_strip.expect("server strip");
+        let clock = layout.sidebar_clock.expect("sidebar clock");
+        assert_eq!(strip.left, layout.terminal.left);
+        assert_eq!(strip.left, layout.effective_tabs_width);
+        assert_eq!(strip.top, 0);
+        assert_eq!(strip.bottom, 32);
+        assert_eq!(strip.right, layout.client.right);
+        assert_eq!(clock.left, 0);
+        assert_eq!(clock.right, layout.effective_tabs_width);
+        assert_eq!(clock.top, 0);
+        assert_eq!(clock.bottom, 32);
+        // Tabs tree sits under the clock, aligned with the toolbar/body top.
+        assert_eq!(layout.sidebar.top, 32);
+        assert_eq!(layout.sidebar_tree.top, 32);
+        assert_eq!(
+            layout.workspace_toolbar.expect("toolbar").bounds.top,
+            layout.sidebar.top
+        );
+        // Hidden Tabs: strip spans full width, no clock cell.
+        let hidden = workspace_layout(WorkspaceLayoutInput {
+            client_width: 1000,
+            client_height: 700,
+            tabs_visible: false,
+            configured_tabs_width: 180,
+            composer_height: COMPOSER_HEIGHT,
+            status_height: 26,
+            server_strip_height: 32,
+        });
+        let full = hidden.server_strip.expect("full-width strip");
+        assert_eq!(full.left, 0);
+        assert_eq!(full.right, 1000);
+        assert!(hidden.sidebar_clock.is_none());
     }
 
     #[test]
