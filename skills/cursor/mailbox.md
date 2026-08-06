@@ -24,7 +24,7 @@
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
 | auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 @ `5024e59`（待审合未催） |
-| `duty.lock` | （无） |
+| `duty.lock` | `bc-cd10ed9c-4c1d-4921-866c-ecf07551c1a1` / 直到 `2026-08-06T20:13Z` |
 
 ## 主控指令（未消化则分身不得另起炉灶）
 
@@ -63,11 +63,11 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T18:23Z
-- 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-f0d32ecc-309d-4ba9-82bb-097f072d2bb0`
-- URL: https://cursor.com/agents/bc-f0d32ecc-309d-4ba9-82bb-097f072d2bb0
-- 下一步: cron 下一轮再起
+### 舰队值班会话 · 2026-08-06T19:23Z
+- 状态: RUNNING — auto-dream duty 进行中
+- bcId: `bc-cd10ed9c-4c1d-4921-866c-ecf07551c1a1`
+- URL: https://cursor.com/agents/bc-cd10ed9c-4c1d-4921-866c-ecf07551c1a1
+- 下一步: 跑 fleet-duty 扫描
 - 阻塞: 无
 
 ### 分身3 · 2026-08-05
