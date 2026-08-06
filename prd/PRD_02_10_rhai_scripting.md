@@ -753,6 +753,33 @@ Migration ledger:
 - [ ] every slice records worker/CLI/GUI size, first-window/no-script startup,
   duration, limits, and orphan cleanup before its status changes to shipped.
 
+## Future (pre-v0.2.0; schedule after v0.1.15)
+
+Parallel **rh** AOT track is shipped on `main` for trial; full Rhai cutover and
+layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
+[`plan/design-rh-aot.md`](../plan/design-rh-aot.md).
+
+- [~] **rh execution backend** (`crates/agenterm-rh`, `agenterm-rh` CLI):
+  rh-0→rh-2 — subset check, transpile→rustc AOT, pack qualify, fleet native
+  shim, host eval (stdlib parity via `configure_engine`), source-hash AOT cache,
+  `AGENTERM_SCRIPT_BACKEND=rh` trial path, dedicated `./rh-check.sh` suite
+- [ ] **Rhai → rh migration** (incremental, no forced cutover):
+  task manifest and automation corpus remain `.rhai` until v0.1.15 delivery
+  completes; then per-script rh-2 validation, optional default backend switch,
+  and eventual deprecation of interpreter hot path for pack entry points only
+- [ ] **Layered deployment** (JVM / JAR analogue):
+  - **Base runtime** — stable PE family (`agenterm`, `agenterm-rhai`, …):
+    host Facade, broker, supervision, qualification; rebases rarely
+  - **Application layer** — signed **rh pack** (native artifact + manifest;
+    future Logic Pack / gateway pack): load in-process via `script_rh_pack`,
+    hot-swappable without rebuilding the base PE
+  - Control Center, gateway sidecar, and task runners consume the same host
+    C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
+
+Non-goals until v0.1.15 ships: default `AGENTERM_SCRIPT_BACKEND=rh` for the
+62-task automation manifest; npm-style remote rh imports; Cranelift direct
+codegen (transpile→rustc remains the production backend until a later gate).
+
 ## Explicitly deferred
 
 - npm compatibility, arbitrary remote imports, third-party package lifecycle,

@@ -638,6 +638,8 @@ INT, DUR, AUTO, ORCH, EXT, INF, REACH.
 | B7 | [explore] | MCP read-only bridge then governed tools | v0.1.10 gates | MCP orchestration |
 | B8 | [idea] | Headless server as **server-side fleet manager** (pm2-class uptime + tmux-class sessions) | Linux headless ship, B3 | Executable family, Fleet multiplexer |
 | B9 | [idea] | Supervisor policies (restart on exit, max restarts) as explicit typed ops | B8, receipt model | Agent control plane, Executable family |
+| B10 | [explore] | **Rhai → rh** incremental migration: rh AOT backend trial on `main`, per-script validation and optional default `AGENTERM_SCRIPT_BACKEND=rh` after v0.1.15 | B6, M15, rh-2 shipped | Rust host + Rhai scripting |
+| B11 | [explore] | **Layered pack deployment** (base PE ≈ JVM, signed rh pack ≈ JAR): in-process load, hot-swap application layer without rebasing host PEs | B10, M15, softmgr substrate | Rust host + Rhai scripting, Executable family |
 
 ### Lane C — Orchestration and multi-agent collaboration (ORCH · W3)
 
