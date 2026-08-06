@@ -6,6 +6,16 @@ facades, one private target selector, and Windows/Linux/macOS adapters. Product
 policy, UI state, Fleet behavior, and AgenTerm executable naming stay in the
 embedding application.
 
+## Scope (cross-platform encapsulation)
+
+| | |
+|--|--|
+| **In scope** | Typed OS contracts and adapters: window, input, IME, activation, clipboard, screenshot, font, webview probe, IPC, PTY, process/spawn/containment, filesystem, locking, shared memory, entropy, host facts, … — `Available` / `Unsupported` / `Failed` only. |
+| **Out of scope** | Product UI state, `ui-action` workbench scripts, tab/server-strip/instance-picker policy, Fleet, AgenTerm binary names, workspace/path product layout. Those live in the embedding app (`agenterm` uses `src/frontend/*` + host present adapters). |
+| **Consumers** | **agenterm** (workspace `path` dependency). **wbox** and other apps: `git` + **immutable full commit SHA** pin, `default-features = false`, enable only needed features. |
+
+Cross-platform encapsulation means: **OS differences stop inside this crate**. Cross-product workbench parity is the embedding app's job and must not drag AgenTerm product names into this library.
+
 The crate is under active development. Pin an exact Git revision when consuming
 it from another repository.
 

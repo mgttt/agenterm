@@ -81,6 +81,15 @@ pub fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), 
     crate::selected::process_spawn::configure_breakaway_visible_command(command)
 }
 
+/// Whether a spawn failure means the host denied Job breakaway (Windows
+/// `ERROR_ACCESS_DENIED` on breakaway flags). Other hosts always return false.
+///
+/// Prefer [`spawn_breakaway_visible_child`] over matching this in product code.
+#[must_use]
+pub fn is_breakaway_denied(error: &std::io::Error) -> bool {
+    crate::selected::process_spawn::is_breakaway_denied(error)
+}
+
 /// Spawn a detached child while retaining a handle for startup and exit
 /// observation.
 ///
@@ -88,12 +97,38 @@ pub fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), 
 /// child lifetime remain caller concerns. Windows retries inside the caller's
 /// job only when the host explicitly denies breakaway, and reports that
 /// fallback instead of claiming independence.
+///
+/// On Windows the fallback uses `CREATE_NO_WINDOW` (headless/server style).
+/// For a **visible GUI** sibling that must survive Job denial, use
+/// [`spawn_breakaway_visible_child`] instead.
 pub fn spawn_detached_child(command: &mut Command) -> std::io::Result<(Child, DetachedSpawnMode)> {
     configure_detached_command(command).map_err(std::io::Error::other)?;
     match crate::selected::process_spawn::spawn(command) {
         Ok(child) => Ok((child, DetachedSpawnMode::Independent)),
         Err(error) if crate::selected::process_spawn::is_breakaway_denied(&error) => {
             crate::selected::process_spawn::configure_caller_job_fallback(command)
+                .map_err(std::io::Error::other)?;
+            let child = crate::selected::process_spawn::spawn(command)?;
+            Ok((child, DetachedSpawnMode::CallerJobFallback))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Spawn a **visible** GUI sibling that prefers Job/session breakaway.
+///
+/// Unlike [`spawn_detached_child`], the Windows breakaway-denied fallback does
+/// **not** set `CREATE_NO_WINDOW` — the child keeps a normal desktop window
+/// (Control Center, extra agenterm GUI, …). Host denial classification stays
+/// inside this crate; embedding apps must not hard-code `ERROR_ACCESS_DENIED`.
+pub fn spawn_breakaway_visible_child(
+    command: &mut Command,
+) -> std::io::Result<(Child, DetachedSpawnMode)> {
+    configure_breakaway_visible_command(command).map_err(std::io::Error::other)?;
+    match crate::selected::process_spawn::spawn(command) {
+        Ok(child) => Ok((child, DetachedSpawnMode::Independent)),
+        Err(error) if crate::selected::process_spawn::is_breakaway_denied(&error) => {
+            crate::selected::process_spawn::configure_visible_in_caller_job(command)
                 .map_err(std::io::Error::other)?;
             let child = crate::selected::process_spawn::spawn(command)?;
             Ok((child, DetachedSpawnMode::CallerJobFallback))
@@ -112,6 +147,19 @@ pub fn spawn_detached_command(command: &mut Command) -> std::io::Result<Detached
     let (mut child, mode) = spawn_detached_child(command)?;
     std::thread::Builder::new()
         .name("agenterm-platform-child-reaper".to_owned())
+        .spawn(move || {
+            let _ = child.wait();
+        })?;
+    Ok(mode)
+}
+
+/// Fire-and-reap visible breakaway launch (see [`spawn_breakaway_visible_child`]).
+pub fn spawn_breakaway_visible_command(
+    command: &mut Command,
+) -> std::io::Result<DetachedSpawnMode> {
+    let (mut child, mode) = spawn_breakaway_visible_child(command)?;
+    std::thread::Builder::new()
+        .name("agenterm-platform-visible-child-reaper".to_owned())
         .spawn(move || {
             let _ = child.wait();
         })?;
@@ -200,6 +248,41 @@ mod tests {
             DetachedSpawnMode::Independent | DetachedSpawnMode::CallerJobFallback
         ));
         assert!(child.wait().expect("wait detached probe").success());
+    }
+
+    #[test]
+    fn is_breakaway_denied_is_windows_access_denied_only() {
+        let access_denied = std::io::Error::from_raw_os_error(5);
+        let not_found = std::io::Error::from_raw_os_error(2);
+        #[cfg(windows)]
+        {
+            assert!(is_breakaway_denied(&access_denied));
+            assert!(!is_breakaway_denied(&not_found));
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(!is_breakaway_denied(&access_denied));
+            assert!(!is_breakaway_denied(&not_found));
+        }
+    }
+
+    #[test]
+    fn breakaway_visible_child_can_be_observed_and_reaped() {
+        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
+        command
+            .arg("--exact")
+            .arg("process_spawn::tests::detached_child_probe")
+            .env(PROBE_ENV, "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let (mut child, mode) =
+            spawn_breakaway_visible_child(&mut command).expect("spawn visible breakaway probe");
+        assert!(matches!(
+            mode,
+            DetachedSpawnMode::Independent | DetachedSpawnMode::CallerJobFallback
+        ));
+        assert!(child.wait().expect("wait visible breakaway probe").success());
     }
 
     #[test]

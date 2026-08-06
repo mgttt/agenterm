@@ -37,6 +37,18 @@ pub(crate) fn configure_caller_job_fallback(command: &mut Command) -> Result<(),
     Ok(())
 }
 
+/// Visible GUI sibling that stays in the caller job after breakaway was denied.
+///
+/// Unlike [`configure_caller_job_fallback`], this must **not** set
+/// `CREATE_NO_WINDOW` — Control Center and extra agenterm windows need a real
+/// desktop window.
+pub(crate) fn configure_visible_in_caller_job(command: &mut Command) -> Result<(), String> {
+    use std::os::windows::process::CommandExt as _;
+    // `creation_flags` replaces prior bits (does not OR). Zero clears breakaway.
+    command.creation_flags(0);
+    Ok(())
+}
+
 pub(crate) fn spawn(command: &mut Command) -> std::io::Result<Child> {
     let _guard = StandardHandleInheritanceGuard::new()?;
     command.spawn()

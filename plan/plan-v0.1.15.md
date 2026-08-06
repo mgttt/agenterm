@@ -1564,6 +1564,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **plan/ 卫生**：再归档已落地/superseded 专题（`plan-agenterm-server-mode`、`plan-skins-v1`、`plan-platform-facade-v4`、`osx-cpu-improve`、S′ goal、`platform-ui-ux-boundary-tree`）；新增 `plan/README.md` 现行索引；PRD/ARCHITECTURE 链接改指向 archive |
 | 2026-08-06 | **跨平台 shared-first 试跑**（用户：Win 先做再 OSX/Lnx 对齐太慢）：`AGENTS.md` 增「Cross-platform UI: shared-first」；`src/frontend/ui_action_catalog.rs` 立 SHARED + WINDOWS_ONLY + UNIX_ONLY 清单与 set-diff / 源码字面量单测；ARCHITECTURE L2 标 interim gate + agent 禁令 #7。**未做**完整 ui-action 表驱动——只挡「单端默默加动词」。可执行 goal：`plan/goal-crate-platform.md` |
 | 2026-08-06 | **CLI ui-input 交付**（远程 main）：见本文 §9；`operations` 登记 ui-input 与四枚孤儿 ui-action；Windows 侧 ui-input 仍为开放决策 |
+| 2026-08-06 | **goal-crate-platform 执行**：P0 边界 SSOT（platform README / ARCHITECTURE §1.0 / AGENTS Platform crate vs product UI）；P1 gap 表 `plan-platform-encapsulation-gap.md` + **G1 收口** `spawn_breakaway_visible_*`（去产品侧 `ERROR_ACCESS_DENIED=5`）；P2 catalog 纪律测；P3 执行句式 |
 
 ---
 

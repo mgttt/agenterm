@@ -335,6 +335,27 @@ behavior.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
  pane, and unsupported commands must fail explicitly.
 
+### Platform crate vs product UI
+
+`crates/agenterm-platform` is the **cross-platform encapsulation library** for
+agenterm, wbox, and other embedding apps:
+
+| Layer | Owns | Must not own |
+|-------|------|--------------|
+| **platform crate** | Typed OS contracts (window, input, clipboard, process, IPC, PTY, …) | Product UI state, Fleet, `ui-action` workbench scripts, server-strip policy, AgenTerm binary names |
+| **`src/frontend/*` + `ui_*`** | Product gesture meaning, dialogs, geometry, action ids | Raw `windows_sys` / winit / x11 (boundary tests forbid this) |
+| **host adapters** | Present, wake, IME, native controls, IPC wiring | New product policy that only one host implements without catalog/`parity-gap` |
+
+- **Encapsulation success** = OS differences stop in the crate; consumers call
+  facades with feature flags (`path` for agenterm; `git`+full SHA for wbox).
+- **UX parity success** = shared product semantics + both host adapters wired.
+  Platform does **not** “own all UX alignment” by itself.
+- Do **not** ship product behavior only in the Windows remote adapter and leave
+  “Unix agent later” as the plan unless the action is host-only in
+  `ui_action_catalog` with an explicit `parity-gap:`.
+- Mechanism leak inventory: `plan/plan-platform-encapsulation-gap.md`.
+  Executable goal: `plan/goal-crate-platform.md`.
+
 ### Cross-platform UI: shared-first (Win / OSX / Lnx)
 
 Three-host UX parity fails when product semantics land only in the Windows

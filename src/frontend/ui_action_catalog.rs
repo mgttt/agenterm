@@ -5,11 +5,16 @@
 //! explicit host-only allowlists so a one-sided add fails the unit test until
 //! the peer host or the allowlist is updated intentionally.
 //!
-//! **Shared-first rule** (see `AGENTS.md`): new product UI semantics go in
-//! `src/frontend/*` / `ui_geometry` first; host adapters only present, wake,
-//! IME, and native IPC. Prefer adding to [`SHARED_UI_ACTIONS`] and both host
-//! inventories in the same change. Host-only entries require a short reason
-//! comment and a `parity-gap:` note when the peer is still planned.
+//! **Shared-first rule** (see `AGENTS.md` § Platform crate vs product UI):
+//! new product UI semantics go in `src/frontend/*` / `ui_geometry` first; host
+//! adapters only present, wake, IME, and native IPC. Prefer adding to
+//! [`SHARED_UI_ACTIONS`] and both host inventories in the same change.
+//! Host-only entries require a short reason comment and a `parity-gap:` note
+//! when the peer is still planned.
+//!
+//! **Discipline**: add or rename a product gesture → update this catalog
+//! **before** (or in the same commit as) adapter match arms. A one-host arm
+//! without an allowlist entry fails the set-diff tests below.
 
 /// Actions both hosts currently implement under the same public id.
 ///
@@ -105,15 +110,18 @@ pub const UNIX_ONLY_UI_ACTIONS: &[&str] = &[
 ];
 
 /// Full Windows host inventory = shared ∪ windows-only.
+#[allow(dead_code)] // used by unit tests and future parity tooling
 pub fn windows_ui_actions() -> Vec<&'static str> {
     merge_sorted(SHARED_UI_ACTIONS, WINDOWS_ONLY_UI_ACTIONS)
 }
 
 /// Full Unix host inventory = shared ∪ unix-only.
+#[allow(dead_code)] // used by unit tests and future parity tooling
 pub fn unix_ui_actions() -> Vec<&'static str> {
     merge_sorted(SHARED_UI_ACTIONS, UNIX_ONLY_UI_ACTIONS)
 }
 
+#[allow(dead_code)]
 fn merge_sorted(a: &[&'static str], b: &[&'static str]) -> Vec<&'static str> {
     let mut out = Vec::with_capacity(a.len() + b.len());
     out.extend_from_slice(a);
@@ -123,10 +131,12 @@ fn merge_sorted(a: &[&'static str], b: &[&'static str]) -> Vec<&'static str> {
     out
 }
 
+#[allow(dead_code)]
 fn is_strictly_sorted_unique(items: &[&str]) -> bool {
     items.windows(2).all(|pair| pair[0] < pair[1])
 }
 
+#[allow(dead_code)]
 fn set_diff<'a>(left: &[&'a str], right: &[&str]) -> Vec<&'a str> {
     left.iter()
         .copied()
@@ -243,5 +253,23 @@ mod tests {
                 "SHARED action {action} missing on Unix frontend surface"
             );
         }
+    }
+
+    #[test]
+    fn catalog_discipline_docs_point_at_agents_shared_first() {
+        // Keep a durable pointer so refactors cannot drop the process rule.
+        let agents = include_str!("../../AGENTS.md");
+        assert!(
+            agents.contains("Platform crate vs product UI"),
+            "AGENTS.md must document platform vs product boundary"
+        );
+        assert!(
+            agents.contains("ui_action_catalog"),
+            "AGENTS.md must name the ui-action catalog gate"
+        );
+        assert!(
+            agents.contains("shared-first") || agents.contains("Shared-first") || agents.contains("shared-first"),
+            "AGENTS.md must state shared-first UI discipline"
+        );
     }
 }

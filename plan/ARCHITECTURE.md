@@ -13,6 +13,22 @@
 
 ## 1. 分层（验收尺）
 
+### 1.0 三层边界（跨平台封装 SSOT）
+
+| 层 | 路径 | 装什么 | 不装什么 |
+|----|------|--------|----------|
+| **机制** | `crates/agenterm-platform` | 窗/键鼠/IME/激活/剪贴板/截图/字体/IPC/PTY/进程/FS/shm… typed Available/Unsupported/Failed；**无** AgenTerm 产品名 | 工作台剧本、Fleet、ui-action 表、instance/server strip 产品策略 |
+| **产品语义** | `src/frontend/*`、`src/ui_*.rs`、`src/ui_geometry.rs` | 手势含义、dialog 状态、geometry、action id、snapshot 字段 | 直接 `windows_sys` / winit / x11（boundary 闸禁止） |
+| **Host present** | `src/platform/adapters/{windows,unix}/**` | 怎么画、收事件、接线 IPC、原生控件映射 | 新产品策略仅单端落地且不登记 catalog/`parity-gap` |
+
+- **跨平台封装** = OS 差异停在 platform crate（agenterm + wbox 等 embedding 调用）。  
+- **三端工作台手感齐** = 产品语义单点 + 两端 adapter 接线；**不**把 AgenTerm 工作台塞进 platform。  
+- 产品 `ui-action` interim 集合闸：[`src/frontend/ui_action_catalog.rs`](../src/frontend/ui_action_catalog.rs)。  
+- 机制漏点表：[`plan/plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md)。  
+- 可执行 goal：[`plan/goal-crate-platform.md`](goal-crate-platform.md)。
+
+### 1.1 目录树
+
 ```text
 crates/agenterm-platform     机制：窗口/输入/截图/进程/IPC/PTY/字体/shm…
                              typed Unsupported / Failed；无 AgenTerm 产品名
@@ -34,6 +50,7 @@ src/platform/                产品平台 glue：FrontendHost、目录名、快�
 src/frontend/                产品 GUI 入口 + UI/UX 语义
   mod.rs                     parse / handoff / 统一结果码 / dispatch
   action.rs                  canonical action identities（toolbar/shortcut 共用）
+  ui_action_catalog.rs       ui-action SHARED/host-only 集合闸（interim）
   toolbar.rs                 toolbar action 映射（Win/Unix 共用）
   window.rs                  client-size / window semantic state（Win/Unix 共用）
   interaction.rs             focus navigation / wheel accumulation / wheel routing / scrollbar thumb drag / modal/focus state + modal surface priority/snapshot naming + FocusSurface canonical names/IPC aliases（FocusState + adapter focus_gate() + ModalSurface/modal_surface_from_gate() + FocusSurface::as_str()/from_ipc()，Win/Unix 共用）；raw-mouse arbitration/report outcome 策略与 xterm mouse report 编码器（Unix embedded 与 Windows remote 共用）；alternate-screen wheel fallback 用 commands::alternate_screen_wheel_bytes 单点编码
@@ -138,6 +155,16 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 5. 不要把 net / WebView / 大 Control Center 内容写进「已 shipped」除非 owning PRD 已改。  
 6. 结构变更：更新本文；版本 plan 只记叶与证据，不重画全树。  
 7. 新 `ui-action` / 产品手势：**shared-first**（`src/frontend/*` + `ui_action_catalog.rs`）；单端落地须进 `WINDOWS_ONLY_*` / `UNIX_ONLY_*` 并写 `parity-gap:`，禁止默认同端双写后甩给另一平台 agent。  
+8. 跨平台任务固定句式（机制 / 产品 / host present 判定 → 改对应层 → 证据）：见 [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) § Agent 执行句式。  
+
+### 6.1 跨平台任务固定执行句式
+
+1. 判定：platform **机制** / frontend **产品语义** / host **present**？  
+2. 机制 → 改 `crates/agenterm-platform`，feature 与 typed Unsupported **诚实**更新。  
+3. 产品 → 改 `src/frontend/*` + `ui_action_catalog`，再改 **两端** adapter。  
+4. 仅 host → 只动对应 adapter，并登记 catalog allowlist 或 gap 表。  
+5. 证据：相关 `cargo test -p agenterm-platform` + `cargo test --lib ui_action_catalog` + 直接单测；**无证据不宣称三端手感已齐**。  
+
 7. 不要把 rust-analyzer / 通用 LSP 当成「结构 SSOT 已对齐」的证据；LSP 不消费本文。  
 8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。
 

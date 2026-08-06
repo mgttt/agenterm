@@ -4951,12 +4951,10 @@ impl RemoteWindowState {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        // Escape the caller Job/session while keeping a visible GUI window.
-        crate::platform::process::configure_breakaway_visible_command(&mut command)
-            .map_err(|error| anyhow::anyhow!(error))?;
-        command
-            .spawn()
-            .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
+        // Breakaway + ACCESS_DENIED visible fallback: agenterm-platform only.
+        crate::platform::process::spawn_breakaway_visible_command(&mut command).map_err(
+            |error| anyhow::anyhow!("could not open instance `{short}`: {error}"),
+        )?;
         self.last_message = Some(format!("Opening instance `{short}` in a new window"));
         Ok(())
     }
@@ -4971,11 +4969,10 @@ impl RemoteWindowState {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        crate::platform::process::configure_breakaway_visible_command(&mut command)
-            .map_err(|error| anyhow::anyhow!(error))?;
-        command
-            .spawn()
-            .map_err(|error| anyhow::anyhow!("could not start server `{name}`: {error}"))?;
+        // Headless authority: NO_WINDOW detached path (not visible breakaway).
+        crate::platform::process::spawn_detached_command(&mut command).map_err(|error| {
+            anyhow::anyhow!("could not start server `{name}`: {error}")
+        })?;
         self.force_refresh_server_tabs();
         self.last_message = Some(format!("Started server `{name}`"));
         Ok(())

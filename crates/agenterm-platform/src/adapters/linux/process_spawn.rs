@@ -52,6 +52,11 @@ pub(crate) fn configure_caller_job_fallback(_command: &mut Command) -> Result<()
     Err("caller-job fallback exists only on Windows".to_owned())
 }
 
+pub(crate) fn configure_visible_in_caller_job(_command: &mut Command) -> Result<(), String> {
+    // Breakaway denial is Windows-only; leave the command unchanged.
+    Ok(())
+}
+
 pub(crate) fn spawn(command: &mut Command) -> std::io::Result<Child> {
     command.spawn()
 }
