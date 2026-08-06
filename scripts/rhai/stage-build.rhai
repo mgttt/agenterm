@@ -31,6 +31,12 @@ fn source_name_for_artifact(artifact_name) {
     if artifact_name == "agenterm-rhai" {
         return "agenterm-rhai";
     }
+    if artifact_name == "agenterm-rh.exe" {
+        return "agenterm-rh.exe";
+    }
+    if artifact_name == "agenterm-rh" {
+        return "agenterm-rh";
+    }
     artifact_name
 }
 

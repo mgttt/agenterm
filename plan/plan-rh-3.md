@@ -38,6 +38,7 @@
 | M22a | M22 预备：`caller-inventory` + `corpus-scan --tasks` 机器可读报告 | [x] |
 | M22b | worker parity：`RhRunContext` args/project_root、`host_eval`/`host_run_script` 注入、framed-worker 黑盒 | [x] |
 | M22c | check-many 薄转发兼容：rhai CLI/manifest kind、bootstrap.cmd 对称、forward 黑盒 | [x] |
+| M22d | lint.rhai 优先 `agenterm-rh` check-many；artifacts/stage-build 纳入 dev CLI | [x] |
 | M22 | 替换轨：`agenterm-rhai` → 薄转发或 rename（需全量 caller 清单 + Candidate 证据） | [ ] |
 
 ---

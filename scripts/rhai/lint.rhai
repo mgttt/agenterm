@@ -115,6 +115,51 @@ fn assert_text(paths, repo) {
     );
 }
 
+fn non_empty_file(path) {
+    std::fs::exists(path)
+        && std::fs::metadata(path).is_file
+        && std::fs::metadata(path).len > 0
+}
+
+fn resolve_rh_cli(repo, worker) {
+    if worker != "" {
+        let parent = std::path::parent(worker).display;
+        let adjacent_win = std::path::join(parent, "agenterm-rh.exe").display;
+        if non_empty_file(adjacent_win) {
+            return adjacent_win;
+        }
+        let adjacent = std::path::join(parent, "agenterm-rh").display;
+        if non_empty_file(adjacent) {
+            return adjacent;
+        }
+    }
+    let dist_win = std::path::join(repo, "dist/agenterm-rh.exe").display;
+    if non_empty_file(dist_win) {
+        return dist_win;
+    }
+    let dist = std::path::join(repo, "dist/agenterm-rh").display;
+    if non_empty_file(dist) {
+        return dist;
+    }
+    let target_win = std::path::join(repo, "target/debug/agenterm-rh.exe").display;
+    if non_empty_file(target_win) {
+        return target_win;
+    }
+    let target = std::path::join(repo, "target/debug/agenterm-rh").display;
+    if non_empty_file(target) {
+        return target;
+    }
+    ""
+}
+
+fn check_many_program(repo, worker) {
+    let rh = resolve_rh_cli(repo, worker);
+    if rh != "" {
+        return rh;
+    }
+    worker
+}
+
 fn assert_rhai(worker, paths, repo) {
     require(
         std::fs::exists(worker) && std::fs::metadata(worker).is_file,
@@ -137,7 +182,8 @@ fn assert_rhai(worker, paths, repo) {
             files: files
         }) + "\n"
     );
-    let command = std::process::command(worker);
+    let program = check_many_program(repo, worker);
+    let command = std::process::command(program);
     command.args([
         "check-many", "--manifest", manifest_path,
         "--profile", "local",
