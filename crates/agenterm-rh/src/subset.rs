@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use rhai::{BinaryExpr, OpAssignment, AST, ASTNode, Expr, FnCallExpr, Stmt};
+use rhai::{AST, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt, ASTFlags};
 
 use crate::RhError;
 use crate::expr_print::{is_pure_int_expr, uses_host_surface};
@@ -44,9 +44,9 @@ pub fn validate_ast(ast: &AST) -> Result<(), RhError> {
 
 fn reject_stmt(stmt: &Stmt) -> Option<RhError> {
     match stmt {
-        Stmt::Do(..) | Stmt::Switch(..) | Stmt::TryCatch(..) => Some(subset_error(
+        Stmt::Do(..) | Stmt::Switch(..) => Some(subset_error(
             "RH_SUBSET_NO_LOOP",
-            "do/switch/try are not in rh-3",
+            "do/switch are not in rh-3",
         )),
         Stmt::Import(..) | Stmt::Export(..) => Some(subset_error(
             "RH_SUBSET_NO_MODULE",
@@ -124,6 +124,17 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
             }
             validate_stmt_block(&flow.body)
         }
+        Stmt::TryCatch(boxed, ..) => {
+            let flow = boxed.as_ref();
+            if block_has_invalid_return(&flow.body) || block_has_invalid_return(&flow.branch) {
+                return Some(subset_error(
+                    "RH_SUBSET_TRY_RETURN",
+                    "return is not allowed inside try/catch in rh-3",
+                ));
+            }
+            validate_stmt_block(&flow.body)?;
+            validate_stmt_block(&flow.branch)
+        }
         Stmt::Block(block) => validate_stmt_block(block),
         Stmt::Assignment(boxed, ..) => validate_assignment(boxed),
         Stmt::FnCall(call, ..) => {
@@ -150,6 +161,13 @@ fn validate_stmt_block(block: &rhai::StmtBlock) -> Option<RhError> {
         }
     }
     None
+}
+
+fn block_has_invalid_return(block: &rhai::StmtBlock) -> bool {
+    block.iter().any(|stmt| match stmt {
+        Stmt::Return(_, flags, ..) => !flags.contains(ASTFlags::BREAK),
+        _ => false,
+    })
 }
 
 fn validate_root_expr(expr: &Expr) -> Option<RhError> {
@@ -205,7 +223,7 @@ fn subset_error(code: &'static str, detail: &str) -> RhError {
 
 #[cfg(test)]
 mod tests {
-    use rhai::Engine;
+    use rhai::{Engine, Stmt};
 
     use super::validate_ast;
 
@@ -253,6 +271,26 @@ mod tests {
     fn rejects_while_with_host_condition() {
         let ast = Engine::new()
             .compile("fn entry() { while std::fs::exists(`/tmp`) { 0 } 0 }")
+            .expect("compile");
+        assert!(validate_ast(&ast).is_err());
+    }
+
+    #[test]
+    fn accepts_try_catch_with_native_throw() {
+        let mut engine = rhai::Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile("fn entry() { try { throw 1; 0 } catch (e) { 99 } }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn rejects_return_inside_try() {
+        let mut engine = rhai::Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile("fn entry() { try { return 1; } catch (e) { 0 } }")
             .expect("compile");
         assert!(validate_ast(&ast).is_err());
     }

@@ -60,6 +60,26 @@ fn fleet_fixture_qualifies_and_calls_host_shim() {
 }
 
 #[test]
+fn try_catch_fixture_qualifies_with_native_catch() {
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-try-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let source = include_str!("../fixtures/rh/try-catch.rh");
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    assert_eq!(receipt.entry_value, 99);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn try_ok_fixture_qualifies_without_catch() {
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-try-ok-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let source = include_str!("../fixtures/rh/try-ok.rh");
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    assert_eq!(receipt.entry_value, 42);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn while_fixture_qualifies_with_native_loop() {
     let dir = std::env::temp_dir().join(format!("agenterm-rh-while-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

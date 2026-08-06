@@ -203,6 +203,6 @@ mod tests {
             "failures: {:?}",
             report.failures
         );
-        assert_eq!(report.checked_files, 5);
+        assert_eq!(report.checked_files, 7);
     }
 }

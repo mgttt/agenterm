@@ -82,6 +82,20 @@ fn print_stmt(out: &mut String, stmt: &Stmt, trailing_semi: bool) -> Result<(), 
             print_block(out, &flow.body, true)?;
             out.push('}');
         }
+        Stmt::TryCatch(boxed, ..) => {
+            let flow = boxed.as_ref();
+            out.push_str("try { ");
+            print_block(out, &flow.body, true)?;
+            out.push_str(" } catch (");
+            if flow.expr.is_unit() {
+                out.push('_');
+            } else {
+                print_expr(out, &flow.expr)?;
+            }
+            out.push_str(") { ");
+            print_block(out, &flow.branch, true)?;
+            out.push('}');
+        }
         Stmt::Assignment(boxed, ..) => {
             let (op, bin) = boxed.as_ref();
             print_expr(out, &bin.lhs)?;
@@ -302,6 +316,10 @@ fn stmt_uses_host(stmt: &Stmt) -> bool {
         Stmt::While(boxed, ..) => {
             let flow = boxed.as_ref();
             uses_host_surface(&flow.expr) || flow.body.iter().any(stmt_uses_host)
+        }
+        Stmt::TryCatch(boxed, ..) => {
+            let flow = boxed.as_ref();
+            flow.body.iter().any(stmt_uses_host) || flow.branch.iter().any(stmt_uses_host)
         }
         Stmt::Assignment(boxed, ..) => {
             let (_, bin) = boxed.as_ref();

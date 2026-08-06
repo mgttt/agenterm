@@ -1,6 +1,7 @@
 pub mod check;
 pub mod check_many;
 pub mod compile;
+pub mod corpus;
 pub mod error;
 pub mod expr_print;
 pub mod fleet;
@@ -14,8 +15,9 @@ pub mod transpile;
 
 pub use check::check;
 pub use check_many::{
-    run_check_many, CheckManyManifest, CheckManyOptions, CheckManyReport, read_manifest,
+    read_manifest, run_check_many, CheckManyManifest, CheckManyOptions, CheckManyReport,
 };
+pub use corpus::{scan_rhai_directory, scan_relative_files, CorpusScanOptions, CorpusScanReport};
 pub use compile::{
     CompileOutput, compile_native, compile_native_for_target, hash_bytes, hash_file,
 };

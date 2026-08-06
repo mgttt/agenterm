@@ -2,7 +2,8 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
     RH_VERSION, RhError, build_pack_dir, check, compile_native, hash_file, load_and_call_entry,
-    qualify_pack_dir, read_manifest, run_check_many, transpile, write_receipt, CheckManyOptions,
+    qualify_pack_dir, read_manifest, run_check_many, scan_rhai_directory, transpile, write_receipt,
+    CheckManyOptions, CorpusScanOptions,
 };
 
 fn main() -> ExitCode {
@@ -34,6 +35,9 @@ fn run() -> Result<(), RhError> {
         }
         "check-many" => {
             run_check_many_command(&mut args)?;
+        }
+        "corpus-scan" => {
+            run_corpus_scan_command(&mut args)?;
         }
         "transpile" => {
             let path = require_path(&mut args, "transpile")?;
@@ -141,7 +145,7 @@ fn run() -> Result<(), RhError> {
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | check-many | transpile | compile | eval | run-smoke | pack | qualify | hash | version"
+                "unknown command `{other}`; try check | check-many | corpus-scan | transpile | compile | eval | run-smoke | pack | qualify | hash | version"
             )));
         }
     }
@@ -206,6 +210,47 @@ fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<(),
     } else {
         Err(RhError::Parse("check-many reported failures".into()))
     }
+}
+
+fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
+    let mut project_root = PathBuf::from(".");
+    let mut relative_dir = "scripts/rhai".to_owned();
+    let mut json = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--root" => {
+                project_root = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| RhError::Parse("missing path after --root".into()))?,
+                );
+            }
+            "--dir" => {
+                relative_dir = args
+                    .next()
+                    .ok_or_else(|| RhError::Parse("missing path after --dir".into()))?;
+            }
+            "--json" => json = true,
+            other => return Err(RhError::Parse(format!("unknown corpus-scan option `{other}`"))),
+        }
+    }
+    let report = scan_rhai_directory(CorpusScanOptions {
+        project_root,
+        relative_dir,
+    })?;
+    if json {
+        let encoded = serde_json::to_string_pretty(&report)
+            .map_err(|err| RhError::Parse(err.to_string()))?;
+        println!("{encoded}");
+    } else {
+        println!(
+            "corpus-scan: {}/{} passed ({} failed)",
+            report.passed, report.scanned, report.failed
+        );
+        for entry in report.entries.iter().filter(|entry| entry.ok) {
+            println!("  OK  {}", entry.path);
+        }
+    }
+    Ok(())
 }
 
 fn read_source(path: &PathBuf) -> Result<String, RhError> {
@@ -276,6 +321,7 @@ fn print_usage() {
          commands:\n\
            check <file>                      validate rh subset\n\
            check-many --manifest FILE        bounded multi-file rh subset check\n\
+           corpus-scan [--root PATH] [--dir REL]  scan .rhai scripts for rh subset fit\n\
            transpile <file> [-o rs]            emit Rust source for AOT\n\
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
            eval <file>                         check + AOT pack + dlopen entry (dev loop)\n\

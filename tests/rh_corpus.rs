@@ -3,6 +3,18 @@
 use std::path::PathBuf;
 
 #[test]
+fn scripts_rhai_corpus_scan_from_integration_test() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let report = agenterm_rh::scan_rhai_directory(agenterm_rh::CorpusScanOptions {
+        project_root: repo.clone(),
+        relative_dir: "scripts/rhai".to_owned(),
+    })
+    .expect("scan");
+    assert!(report.scanned >= 50);
+    assert!(report.failed > 0);
+}
+
+#[test]
 fn fixture_check_many_manifest_is_valid() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let manifest_path = repo.join("fixtures/rh/check-many.json");
@@ -15,7 +27,7 @@ fn fixture_check_many_manifest_is_valid() {
         },
     );
     assert!(report.ok, "failures: {:?}", report.failures);
-    assert_eq!(report.checked_files, 5);
+    assert_eq!(report.checked_files, 7);
 }
 
 #[test]

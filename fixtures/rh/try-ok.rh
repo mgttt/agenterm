@@ -1,0 +1,11 @@
+fn entry() {
+    try {
+        42
+    } catch (e) {
+        0
+    }
+}
+
+fn cc_lines() {
+    ["rh-3 try-ok", "native"]
+}

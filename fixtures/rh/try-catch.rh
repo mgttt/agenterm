@@ -1,0 +1,12 @@
+fn entry() {
+    try {
+        throw 1;
+        0
+    } catch (e) {
+        99
+    }
+}
+
+fn cc_lines() {
+    ["rh-3 try-catch", "native-throw"]
+}

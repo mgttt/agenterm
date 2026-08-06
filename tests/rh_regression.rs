@@ -14,6 +14,8 @@ fn check_accepts_all_fixtures() {
         ("fleet", include_str!("../fixtures/rh/fleet.rh")),
         ("stdlib", include_str!("../fixtures/rh/stdlib.rh")),
         ("while", include_str!("../fixtures/rh/while.rh")),
+        ("try-catch", include_str!("../fixtures/rh/try-catch.rh")),
+        ("try-ok", include_str!("../fixtures/rh/try-ok.rh")),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -40,6 +42,14 @@ fn stdlib_fixture_transpile_uses_host_eval() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_host_eval_int"));
     assert!(rust.contains("std::fs::exists"));
+}
+
+#[test]
+fn try_catch_fixture_transpile_uses_result() {
+    let source = include_str!("../fixtures/rh/try-catch.rh");
+    let rust = transpile_cdylib(source).expect("transpile");
+    assert!(rust.contains("Result<INT, INT>"));
+    assert!(rust.contains("return Err("));
 }
 
 #[test]

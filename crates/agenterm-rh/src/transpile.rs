@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rhai::{AST, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
+use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
@@ -20,6 +20,7 @@ enum ValueKind {
 struct EmitCtx {
     cdylib: bool,
     scope: BTreeMap<String, ValueKind>,
+    try_depth: u32,
 }
 
 impl EmitCtx {
@@ -27,7 +28,17 @@ impl EmitCtx {
         Self {
             cdylib,
             scope: BTreeMap::new(),
+            try_depth: 0,
         }
+    }
+
+    fn in_try(&self) -> bool {
+        self.cdylib && self.try_depth > 0
+    }
+
+    fn enter_try(mut self) -> Self {
+        self.try_depth += 1;
+        self
     }
 
     fn value_type(&self) -> &'static str {
@@ -401,6 +412,28 @@ fn emit_stmt(
                 out.push_str(";\n");
             }
         }
+        Stmt::TryCatch(boxed, ..) if ctx.cdylib => {
+            let flow = boxed.as_ref();
+            out.push_str("    match (|| -> Result<INT, INT> {\n");
+            let mut try_ctx = ctx.clone().enter_try();
+            emit_try_block(out, &flow.body, &mut try_ctx)?;
+            out.push_str("    })() {\n");
+            out.push_str("        Ok(__rh_try_v) => __rh_try_v,\n");
+            out.push_str("        Err(_) => {\n");
+            emit_block_tail_expr(out, &flow.branch, ctx)?;
+            out.push_str("        }\n");
+            out.push_str("    }\n");
+        }
+        Stmt::TryCatch(..) => {
+            let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
+            out.push_str("    let _try = rh_host_eval_int(");
+            out.push_str(&format!("{:?}, ", snippet));
+            ctx.emit_scope_json_expr(out);
+            out.push_str(";\n");
+            if implicit_return {
+                out.push_str("    return _try;\n");
+            }
+        }
         Stmt::Block(boxed) => {
             out.push_str("    {\n");
             emit_block(out, boxed, ctx, implicit_return)?;
@@ -417,12 +450,7 @@ fn emit_stmt(
             out.push_str(";\n");
         }
         Stmt::FnCall(call, ..) if call.name == "throw" => {
-            let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
-            out.push_str("    let _throw = rh_host_eval_int(");
-            out.push_str(&format!("{:?}, ", snippet));
-            ctx.emit_scope_json_expr(out);
-            out.push_str(";\n");
-            out.push_str("    return _throw;\n");
+            emit_throw_stmt(out, call, ctx, implicit_return)?;
         }
         Stmt::FnCall(call, ..) if implicit_return => {
             out.push_str("    return ");
@@ -440,6 +468,150 @@ fn emit_stmt(
                 "unsupported statement in rh-2: {other:?}"
             )));
         }
+    }
+    Ok(())
+}
+
+fn emit_block_tail_expr(
+    out: &mut String,
+    block: &StmtBlock,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    let stmts: Vec<_> = block.iter().collect();
+    if stmts.is_empty() {
+        out.push_str("            0\n");
+        return Ok(());
+    }
+    for stmt in &stmts[..stmts.len() - 1] {
+        let mut inner = String::new();
+        emit_stmt(&mut inner, stmt, ctx, false)?;
+        for line in inner.lines() {
+            out.push_str("            ");
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    match stmts.last().expect("non-empty") {
+        Stmt::Expr(expr) => {
+            out.push_str("            ");
+            emit_expr(out, expr, ctx)?;
+            out.push('\n');
+        }
+        other => {
+            let mut inner = String::new();
+            emit_stmt(&mut inner, other, ctx, true)?;
+            for line in inner.lines() {
+                out.push_str("            ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_try_block(
+    out: &mut String,
+    block: &StmtBlock,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    let stmts: Vec<_> = block.iter().collect();
+    if stmts.is_empty() {
+        out.push_str("        Ok(0)\n");
+        return Ok(());
+    }
+    for (index, stmt) in stmts.iter().enumerate() {
+        let is_last = index + 1 == stmts.len();
+        emit_try_stmt(out, stmt, ctx, is_last)?;
+    }
+    Ok(())
+}
+
+fn emit_try_stmt(
+    out: &mut String,
+    stmt: &Stmt,
+    ctx: &mut EmitCtx,
+    implicit_ok: bool,
+) -> Result<(), RhError> {
+    match stmt {
+        Stmt::Expr(expr) if implicit_ok => {
+            out.push_str("        return Ok(");
+            emit_expr(out, expr, ctx)?;
+            out.push_str(");\n");
+        }
+        Stmt::Return(Some(expr), flags, ..) if flags.contains(ASTFlags::BREAK) => {
+            out.push_str("        return Err(");
+            emit_expr(out, expr, ctx)?;
+            out.push_str(");\n");
+        }
+        Stmt::FnCall(call, ..) if call.name == "throw" => {
+            out.push_str("        ");
+            emit_throw_expr(out, call, ctx)?;
+            out.push('\n');
+        }
+        other => {
+            let mut inner = String::new();
+            emit_stmt(&mut inner, other, ctx, false)?;
+            for line in inner.lines() {
+                out.push_str("        ");
+                out.push_str(line);
+                out.push('\n');
+            }
+            if implicit_ok {
+                out.push_str("        Ok(0)\n");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_throw_stmt(
+    out: &mut String,
+    call: &rhai::FnCallExpr,
+    ctx: &mut EmitCtx,
+    implicit_return: bool,
+) -> Result<(), RhError> {
+    if ctx.in_try() {
+        out.push_str("    ");
+        emit_throw_expr(out, call, ctx)?;
+        out.push('\n');
+    } else {
+        let snippet = format!(
+            "throw {};",
+            expr_to_rhai(&call.args[0]).unwrap_or_else(|_| "0".into())
+        );
+        out.push_str("    let _throw = rh_host_eval_int(");
+        out.push_str(&format!("{:?}, ", snippet));
+        ctx.emit_scope_json_expr(out);
+        out.push_str(";\n");
+        if implicit_return {
+            out.push_str("    return _throw;\n");
+        }
+    }
+    Ok(())
+}
+
+fn emit_throw_expr(
+    out: &mut String,
+    call: &rhai::FnCallExpr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    if call.args.len() != 1 {
+        return Err(RhError::Transpile("throw expects one argument".into()));
+    }
+    if ctx.in_try() && is_pure_int_expr(&call.args[0]) {
+        out.push_str("return Err(");
+        emit_expr(out, &call.args[0], ctx)?;
+        out.push_str(");");
+    } else {
+        let snippet = format!(
+            "throw {};",
+            expr_to_rhai(&call.args[0]).unwrap_or_else(|_| "0".into())
+        );
+        out.push_str("return Err(rh_host_eval_int(");
+        out.push_str(&format!("{:?}, ", snippet));
+        ctx.emit_scope_json_expr(out);
+        out.push_str(");");
     }
     Ok(())
 }
@@ -554,6 +726,9 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         return Ok(());
     }
     if call.name == "throw" && ctx.cdylib {
+        if ctx.in_try() {
+            return emit_throw_expr(out, call, ctx);
+        }
         let mut snippet = String::from("throw ");
         snippet.push_str(&expr_to_rhai(&call.args[0])?);
         out.push_str("rh_host_eval_int(");

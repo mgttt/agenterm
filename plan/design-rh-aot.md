@@ -61,7 +61,8 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M16 | 赋值/复合赋值 + while-count | [x] |
 | M18 | `agenterm-rh check-many` | [x] |
 | M19–M21 | bootstrap 构建、Run parity、fixture corpus | [x] |
-| M17 | `try`/`catch` 子集 | [ ] |
+| M17 | `try`/`catch` 子集 | [x] |
+| M21 | `corpus-scan` on scripts/rhai | [x] |
 
 执行计划：[`plan-rh-3.md`](plan-rh-3.md)。**JIT** 在本轨指 **T0–T1 分层 AOT**（源码缓存 + 原生扩面），Cranelift 仍在 RH-4。
 

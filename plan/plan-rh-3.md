@@ -30,11 +30,11 @@
 | M14 | rh-3a：`while` 纯 int 条件原生 AOT + fixture | [x] |
 | M15 | rh-3a：`agenterm-rh eval`（AOT + dlopen 一键 dev） | [x] |
 | M16 | rh-3b：赋值/复合赋值 + `while` 可变异计数 | [x] |
-| M17 | rh-3b：`try`/`catch` 子集 + 原生 throw 路径 | [ ] |
+| M17 | rh-3b：`try`/`catch` 子集 + 原生 throw 路径 | [x] |
 | M18 | rh-3c：`agenterm-rh check-many`（bounded manifest，对齐 lint.rhai） | [x] |
 | M19 | rh-3c：bootstrap / CI 默认构建 `agenterm-rh` 二进制 | [x] |
 | M20 | rh-3d：worker 路径 `Run`/`Eval` 黑盒 parity（rh_backend 扩展） | [x] |
-| M21 | rh-4：task corpus 扫描器（62 脚本 rh-2/3 校验报告，不强制迁移） | [~] |
+| M21 | rh-4：task corpus 扫描器（62 脚本 rh-2/3 校验报告，不强制迁移） | [x] |
 | M22 | 替换轨：`agenterm-rhai` → 薄转发或 rename（需全量 caller 清单 + Candidate 证据） | [ ] |
 
 ---

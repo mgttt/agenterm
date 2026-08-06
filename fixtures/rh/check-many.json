@@ -6,6 +6,8 @@
     "fixtures/rh/fleet.rh",
     "fixtures/rh/stdlib.rh",
     "fixtures/rh/while.rh",
-    "fixtures/rh/while-count.rh"
+    "fixtures/rh/while-count.rh",
+    "fixtures/rh/try-catch.rh",
+    "fixtures/rh/try-ok.rh"
   ]
 }
