@@ -5099,7 +5099,8 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
             "instance_discovery": true,
             "typed_operations": true,
             "typed_events": true
-        }
+        },
+        "script": crate::script_rh_pack::rh_pack_observability(),
     }))
     .unwrap_or_default()
 }

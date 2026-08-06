@@ -50,6 +50,10 @@ pub fn rh_run_smoke(native: &Path) -> Result<i64, agenterm_rh::RhError> {
     agenterm_rh::load_and_call_entry(native)
 }
 
+pub fn rh_load_pack(path: &Path) -> Result<crate::script_rh_pack::LoadedRhPack, agenterm_rh::RhError> {
+    crate::script_rh_pack::load_rh_pack(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::ScriptBackend;

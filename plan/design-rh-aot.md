@@ -48,9 +48,8 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 | M0 | `agenterm-rh check` — 子集校验 | [x] |
 | M1 | `agenterm-rh transpile` — AST → Rust 源 | [x] 纯函数子集 |
 | M2 | `script_backend` + `AGENTERM_SCRIPT_BACKEND` | [x] |
-| M3 | `transpile → rustc → .so` + manifest + dlopen smoke | [x] |
-| M4 | 六 cell CI + qualification hash | [ ] |
-| M5 | CC/gateway in-process `dlopen` | [ ]（`run-smoke` + `script_backend` 已可测） |
+| M5 | CC in-process `dlopen` + `cc_lines` 原生呈现 | [x] |
+| M6 | 六 cell CI + qualification hash | [ ] |
 
 ---
 

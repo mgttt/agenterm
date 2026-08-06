@@ -3,7 +3,11 @@ use std::process::{Command, Stdio};
 
 use sha2::{Digest, Sha256};
 
-use crate::{transpile::transpile_cdylib, RhError, RH_VERSION};
+use crate::{
+    manifest::{manifest_path_for, RhPackManifest},
+    transpile::{cc_line_count, transpile_cdylib},
+    RhError,
+};
 
 const GENERATED_CRATE: &str = "rh_pack_generated";
 
@@ -68,7 +72,7 @@ pub fn compile_native(source: &str, output_path: &Path) -> Result<CompileOutput,
 
     let native_hash = hash_file(output_path)?;
     let manifest_path = manifest_path_for(output_path);
-    write_manifest(
+    RhPackManifest::write(
         &manifest_path,
         source_hash.as_str(),
         native_hash.as_str(),
@@ -76,6 +80,7 @@ pub fn compile_native(source: &str, output_path: &Path) -> Result<CompileOutput,
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("rh_pack.so"),
+        cc_line_count(source),
     )?;
 
     Ok(CompileOutput {
@@ -94,27 +99,6 @@ pub fn hash_file(path: &Path) -> Result<String, RhError> {
 pub fn hash_bytes(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn write_manifest(
-    path: &Path,
-    source_hash: &str,
-    native_hash: &str,
-    native_file: &str,
-) -> Result<(), RhError> {
-    let json = format!(
-        "{{\n  \"schema\": \"agenterm.rh-pack-manifest/v1\",\n  \
-         \"rh_version\": \"{RH_VERSION}\",\n  \
-         \"source_hash\": \"{source_hash}\",\n  \
-         \"native_hash\": \"{native_hash}\",\n  \
-         \"native_file\": \"{native_file}\",\n  \
-         \"entry_symbol\": \"rh_entry\"\n}}\n"
-    );
-    std::fs::write(path, json).map_err(|err| RhError::Compile(err.to_string()))
-}
-
-fn manifest_path_for(native_path: &Path) -> PathBuf {
-    native_path.with_extension("manifest.json")
 }
 
 fn cargo_command() -> Command {

@@ -60,7 +60,7 @@ fn reject_expr(expr: &Expr) -> Option<RhError> {
         Expr::Property(..) | Expr::ThisPtr(..) | Expr::Dot(..) | Expr::Index(..) => Some(
             subset_error("RH_SUBSET_NO_OBJECT", "object property access is not in rh-0"),
         ),
-        Expr::Map(..) | Expr::Array(..) | Expr::InterpolatedString(..) => Some(subset_error(
+        Expr::Map(..) | Expr::InterpolatedString(..) => Some(subset_error(
             "RH_SUBSET_NO_COLLECTION",
             "collections and interpolation are not in rh-0",
         )),

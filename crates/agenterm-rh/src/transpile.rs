@@ -56,6 +56,14 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
         if meta.name == "entry" {
             has_entry = true;
         }
+        if ctx.cdylib && meta.name == "cc_lines" {
+            let Some(def) = find_fn_def(ast, meta.name) else {
+                return Err(RhError::Transpile("missing cc_lines body".into()));
+            };
+            emit_cc_lines_exports(&mut out, def)?;
+            wrote_fn = true;
+            continue;
+        }
         let Some(def) = find_fn_def(ast, meta.name) else {
             return Err(RhError::Transpile(format!(
                 "missing body for function `{}`",
@@ -85,6 +93,102 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
     }
 
     Ok(out)
+}
+
+pub fn cc_line_count(source: &str) -> Option<u32> {
+    let ast = parse(source).ok()?;
+    let def = find_fn_def(&ast, "cc_lines")?;
+    let lines = extract_cc_lines(def).ok()?;
+    u32::try_from(lines.len()).ok()
+}
+
+fn extract_cc_lines(def: &ScriptFuncDef) -> Result<Vec<String>, RhError> {
+    let expr = single_expression(&def.body)?;
+    extract_string_array_expr(expr)
+}
+
+fn extract_string_array_expr(expr: &Expr) -> Result<Vec<String>, RhError> {
+    match expr {
+        Expr::Array(items, ..) => items
+            .iter()
+            .map(string_literal_expr)
+            .collect(),
+        Expr::DynamicConstant(value, ..) => {
+            if !value.is_array() {
+                return Err(RhError::Transpile(
+                    "cc_lines must return a string array literal".into(),
+                ));
+            }
+            let array = value.clone().into_array().map_err(|_| {
+                RhError::Transpile("cc_lines must return a string array literal".into())
+            })?;
+            array.iter().map(dynamic_string).collect()
+        }
+        _ => Err(RhError::Transpile(
+            "cc_lines must return a string array literal".into(),
+        )),
+    }
+}
+
+fn string_literal_expr(expr: &Expr) -> Result<String, RhError> {
+    match expr {
+        Expr::StringConstant(value, ..) => Ok(value.to_string()),
+        _ => Err(RhError::Transpile(
+            "cc_lines array must contain string literals only".into(),
+        )),
+    }
+}
+
+fn dynamic_string(value: &rhai::Dynamic) -> Result<String, RhError> {
+    value
+        .clone()
+        .into_string()
+        .map_err(|_| RhError::Transpile("cc_lines array must contain strings only".into()))
+}
+
+pub(crate) fn single_expression(body: &StmtBlock) -> Result<&Expr, RhError> {
+    let mut iter = body.iter();
+    let Some(stmt) = iter.next() else {
+        return Err(RhError::Transpile("cc_lines must return a string array literal".into()));
+    };
+    if iter.next().is_some() {
+        return Err(RhError::Transpile(
+            "cc_lines must contain a single return expression".into(),
+        ));
+    }
+    match stmt {
+        Stmt::Expr(expr) => Ok(expr.as_ref()),
+        Stmt::Return(Some(expr), ..) => Ok(expr.as_ref()),
+        Stmt::Block(block) => single_expression(block),
+        _ => Err(RhError::Transpile(
+            "cc_lines must return a string array literal".into(),
+        )),
+    }
+}
+
+fn emit_cc_lines_exports(out: &mut String, def: &ScriptFuncDef) -> Result<(), RhError> {
+    let lines = extract_cc_lines(def)?;
+    let count = lines.len();
+    out.push_str("static RH_CC_LINES: [&str; ");
+    out.push_str(&count.to_string());
+    out.push_str("] = [");
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format!("{line:?}"));
+    }
+    out.push_str("];\n\n");
+    out.push_str("#[no_mangle]\npub extern \"C\" fn rh_cc_line_count() -> u32 {\n    ");
+    out.push_str(&count.to_string());
+    out.push_str("\n}\n\n");
+    out.push_str("#[no_mangle]\npub extern \"C\" fn rh_cc_line_len(i: u32) -> u32 {\n");
+    out.push_str("    if (i as usize) >= RH_CC_LINES.len() {\n        return 0;\n    }\n");
+    out.push_str("    RH_CC_LINES[i as usize].len() as u32\n}\n\n");
+    out.push_str("#[no_mangle]\npub extern \"C\" fn rh_cc_line_ptr(i: u32) -> *const u8 {\n");
+    out.push_str("    if (i as usize) >= RH_CC_LINES.len() {\n        return std::ptr::null();\n    }\n");
+    out.push_str("    RH_CC_LINES[i as usize].as_ptr()\n}\n\n");
+    Ok(())
 }
 
 fn find_fn_def<'a>(ast: &'a AST, name: &str) -> Option<&'a ScriptFuncDef> {
@@ -344,5 +448,12 @@ mod tests {
         let rust = transpile_cdylib("fn entry() { 42 }").expect("transpile");
         assert!(rust.contains("fn entry() -> INT"));
         assert!(rust.contains("#[no_mangle]"));
+    }
+
+    #[test]
+    fn cc_lines_exports_compile() {
+        let rust = transpile_cdylib("fn cc_lines() { [\"alpha\", \"beta\"] }").expect("transpile");
+        assert!(rust.contains("rh_cc_line_count"));
+        assert!(rust.contains("alpha"));
     }
 }

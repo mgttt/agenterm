@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use libloading::{Library, Symbol};
+use libloading::Library;
 
 use crate::{compile::hash_file, RhError};
 
@@ -16,12 +16,62 @@ impl RhNativeModule {
     }
 
     pub fn call_entry(&self) -> i64 {
-        let entry: Symbol<extern "C" fn() -> i64> = unsafe {
+        unsafe {
             self.library
-                .get(b"rh_entry")
-                .expect("rh_entry symbol missing from native pack")
-        };
-        entry()
+                .get::<extern "C" fn() -> i64>(b"rh_entry")
+                .map(|entry| entry())
+                .unwrap_or(-1)
+        }
+    }
+
+    pub fn api_version(&self) -> u32 {
+        unsafe {
+            self.library
+                .get::<extern "C" fn() -> u32>(b"rh_pack_api_version")
+                .map(|version| version())
+                .unwrap_or(0)
+        }
+    }
+
+    pub fn cc_lines(&self) -> Vec<String> {
+        unsafe {
+            let Ok(count_fn) = self
+                .library
+                .get::<extern "C" fn() -> u32>(b"rh_cc_line_count")
+            else {
+                return Vec::new();
+            };
+            let count = count_fn();
+            let Ok(len_fn) = self
+                .library
+                .get::<extern "C" fn(u32) -> u32>(b"rh_cc_line_len")
+            else {
+                return Vec::new();
+            };
+            let Ok(ptr_fn) = self
+                .library
+                .get::<extern "C" fn(u32) -> *const u8>(b"rh_cc_line_ptr")
+            else {
+                return Vec::new();
+            };
+
+            let mut lines = Vec::new();
+            for index in 0..count {
+                let length = len_fn(index) as usize;
+                if length == 0 {
+                    continue;
+                }
+                let pointer = ptr_fn(index);
+                if pointer.is_null() {
+                    continue;
+                }
+                let slice = std::slice::from_raw_parts(pointer, length);
+                if let Ok(text) = std::str::from_utf8(slice) {
+                    lines.push(text.to_owned());
+                }
+            }
+            lines
+        }
     }
 }
 
@@ -57,5 +107,21 @@ mod tests {
 
         let value = load_and_call_entry(&out).expect("load");
         assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn dlopen_reads_cc_lines() {
+        let dir = std::env::temp_dir().join(format!("agenterm-rh-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let output = crate::pack::build_pack_dir(
+            "fn entry() { 1 }\nfn cc_lines() { [\"alpha\", \"beta\"] }",
+            &dir,
+        )
+        .expect("build");
+        let pack = crate::RhPack::load(&dir).expect("load");
+        assert_eq!(pack.entry_value(), 1);
+        assert_eq!(pack.cc_lines(), vec!["alpha".to_owned(), "beta".to_owned()]);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = output;
     }
 }

@@ -1,7 +1,8 @@
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
-    check, compile_native, hash_file, load_and_call_entry, transpile, RhError, RH_VERSION,
+    build_pack_dir, check, compile_native, hash_file, load_and_call_entry, transpile, RhError,
+    RH_VERSION,
 };
 
 fn main() -> ExitCode {
@@ -63,10 +64,35 @@ fn run() -> Result<(), RhError> {
             let digest = hash_file(&path)?;
             println!("{digest}  {}", path.display());
         }
+        "pack" => {
+            let mut subargs = args;
+            let Some(subcommand) = subargs.next() else {
+                return Err(RhError::Parse(
+                    "usage: agenterm-rh pack build <file.rh> --dir PATH".into(),
+                ));
+            };
+            if subcommand != "build" {
+                return Err(RhError::Parse(format!(
+                    "unknown pack subcommand `{subcommand}`"
+                )));
+            }
+            let path = require_path(&mut subargs, "pack build")?;
+            let dir = pack_dir_flag(&mut subargs)?;
+            let source = read_source(&path)?;
+            let output = build_pack_dir(&source, &dir)?;
+            println!(
+                "rh pack build ok: {} -> {}\n  native={}\n  manifest={}\n  native_hash={}",
+                path.display(),
+                dir.display(),
+                output.native_path.display(),
+                output.manifest_path.display(),
+                output.compile.native_hash
+            );
+        }
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | transpile | compile | run-smoke | hash | version"
+                "unknown command `{other}`; try check | transpile | compile | run-smoke | pack | hash | version"
             )));
         }
     }
@@ -117,16 +143,33 @@ fn native_output_path(
     }))
 }
 
+fn pack_dir_flag(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, RhError> {
+    let mut dir = None;
+    while let Some(arg) = args.next() {
+        if arg == "--dir" {
+            dir = Some(
+                args.next()
+                    .map(PathBuf::from)
+                    .ok_or_else(|| RhError::Parse("missing path after --dir".into()))?,
+            );
+        } else {
+            return Err(RhError::Parse(format!("unexpected argument `{arg}`")));
+        }
+    }
+    dir.ok_or_else(|| RhError::Parse("pack build requires --dir PATH".into()))
+}
+
 fn print_usage() {
     eprintln!(
         "agenterm-rh {RH_VERSION}\n\
          \n\
          commands:\n\
-           check <file>                 validate rh-0 subset\n\
-           transpile <file> [-o rs]     emit Rust source for AOT\n\
-           compile <file> [-o native]   transpile + cargo -> .so/.dylib/.dll + manifest\n\
-           run-smoke <native>           dlopen and call rh_entry()\n\
-           hash <file>                  sha256 for source/native receipt\n\
+           check <file>                      validate rh-0 subset\n\
+           transpile <file> [-o rs]            emit Rust source for AOT\n\
+           compile <file> [-o native]          transpile + cargo -> native + manifest\n\
+           run-smoke <native>                  dlopen and call rh_entry()\n\
+           pack build <file> --dir PATH        build pack dir (native + manifest + entry.rh)\n\
+           hash <file>                         sha256 receipt\n\
            version\n"
     );
 }
