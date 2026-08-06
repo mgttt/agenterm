@@ -644,6 +644,12 @@ pub(crate) trait ControlHost {
     #[allow(dead_code)]
     fn preview_settings_preset(&mut self, _preset: AppearancePreset) {}
 
+    /// Attaches to, or opens a window on, a server instance shown in the
+    /// top strip.
+    fn select_server_tab(&mut self, _instance: &str) -> Result<(), String> {
+        Err("server strip is not supported on this host".to_owned())
+    }
+
     /// Switches the open settings dialog between global defaults and the
     /// active terminal's own overrides.
     fn switch_settings_scope(&mut self, _scope: SettingsScope) -> Result<(), String> {
@@ -1030,6 +1036,17 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
         // state machine has always lived in the shared settings dialog. Placing
         // them here rather than in one adapter gives both hosts the same
         // behaviour and keeps a third implementation from appearing later.
+        "select-server-tab" | "open-instance" => {
+            let Some(instance) = args.get(2).map(String::as_str) else {
+                return Some(IpcResponse::failure(
+                    "select-server-tab requires an instance name",
+                ));
+            };
+            match host.select_server_tab(instance) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
         "settings-defaults" => match host.switch_settings_scope(SettingsScope::Defaults) {
             Ok(()) => Some(ui_snapshot_response(host)),
             Err(error) => Some(IpcResponse::failure(error)),

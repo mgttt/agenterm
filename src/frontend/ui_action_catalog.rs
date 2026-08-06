@@ -45,8 +45,10 @@ pub const SHARED_UI_ACTIONS: &[&str] = &[
     "new-tab",
     "open-control-center",
     "open-cwd-editor",
+    "open-instance",
     "open-new-terminal",
     "open-settings",
+    "select-server-tab",
     "select-tab",
     "settings-apply",
     "settings-current",
@@ -94,9 +96,7 @@ pub const WINDOWS_ONLY_UI_ACTIONS: &[&str] = &[
     "instance-picker-next",
     "instance-picker-prev",
     "instance-picker-select",
-    "open-instance",
     "open-instance-picker",
-    "select-server-tab",
     // parity-gap: settings scope/inheritance chrome beyond shared presets/apply.
 ];
 

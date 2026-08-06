@@ -6,6 +6,11 @@
 //! - Trailing `[+]` stays right-aligned in the strip gutter.
 //! - Context menu is left-aligned under the chip, with consistent item padding.
 
+/// How often a host may re-scan the instance registry to refresh chips.
+///
+/// Shared so the two frontends cannot drift into different refresh rates.
+pub(crate) const SERVER_TABS_REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Preferred equal chip width when the strip has room.
 pub(crate) const SERVER_TAB_PREFERRED_WIDTH: i32 = 112;
 /// Floor so a short name like `main` still has a comfortable hit target.

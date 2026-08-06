@@ -74,6 +74,11 @@ use crate::frontend::close_confirmation::CloseConfirmation;
 use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
+use crate::frontend::instance_picker::{InstancePickerRow, collect_instance_picker_rows};
+use crate::frontend::server_strip_ui::{
+    SERVER_TABS_REFRESH, StripRect, layout_server_add_chip, layout_server_tab_chips,
+    server_tab_chip_label,
+};
 use crate::frontend::interaction::{
     ApplicationMouseMode, CancelTarget, ConfirmTarget, FocusDirection, FocusState, FocusSurface,
     FocusTransitionGate, ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
@@ -333,6 +338,29 @@ struct ComposerClick {
 
 /// Converts a parsed `--mods` list into the modifier state a window event
 /// carries, so synthetic gestures see the same shift/ctrl handling as real ones.
+/// Launches a new GUI process bound to `instance`.
+///
+/// Mirrors the Windows helper of the same name; stdio is null so the child
+/// never inherits this process's console.
+fn spawn_gui_for_instance(instance: &str, endpoint: Option<&str>) -> Result<u32, String> {
+    let exe = std::env::current_exe().map_err(|error| format!("resolve agenterm path: {error}"))?;
+    let short = instance.strip_prefix("custom:").unwrap_or(instance);
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("--instance")
+        .arg(short)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if let Some(endpoint) = endpoint {
+        command.arg("--endpoint").arg(endpoint);
+    }
+    command
+        .spawn()
+        .map(|child| child.id())
+        .map_err(|error| format!("launch `{short}`: {error}"))
+}
+
 fn modifier_state(modifiers: RequestedModifiers) -> agenterm_platform::input::ModifierState {
     agenterm_platform::input::ModifierState {
         control: modifiers.control,
@@ -646,6 +674,10 @@ struct UnixApp {
     /// offsets. Drives mouse selection, which `composer_select_all` alone
     /// could never express.
     composer_cursor: TextCursor,
+    /// Running server instances shown as chips in the top strip.
+    server_tabs: Vec<InstancePickerRow>,
+    /// Next time `refresh_server_tabs_if_due` may re-scan the registry.
+    server_tabs_refresh_after: Instant,
     /// Set while the pointer is down inside the composer text, so pointer
     /// motion extends the selection instead of being forwarded to the
     /// terminal's mouse protocol.
@@ -757,6 +789,8 @@ impl UnixApp {
             composer_buffer: String::new(),
             composer_select_all: false,
             composer_cursor: TextCursor::default(),
+            server_tabs: collect_instance_picker_rows().unwrap_or_default(),
+            server_tabs_refresh_after: Instant::now(),
             composer_selection_dragging: false,
             composer_click: None,
             text_field_select_all: false,
@@ -1231,6 +1265,111 @@ impl UnixApp {
     }
 
     /// Text currently selected in the composer, if any.
+    /// Re-scans running instances at most every `SERVER_TABS_REFRESH`.
+    ///
+    /// Returns whether the chip set changed, so the caller only repaints on a
+    /// real difference rather than on every frame.
+    fn refresh_server_tabs_if_due(&mut self) -> bool {
+        let now = Instant::now();
+        if now < self.server_tabs_refresh_after && !self.server_tabs.is_empty() {
+            return false;
+        }
+        self.server_tabs_refresh_after = now + SERVER_TABS_REFRESH;
+        let Ok(rows) = collect_instance_picker_rows() else {
+            return false;
+        };
+        if rows == self.server_tabs {
+            return false;
+        }
+        self.server_tabs = rows;
+        true
+    }
+
+    /// Chip rectangles paired with the instance each one represents.
+    fn server_tab_rects(&self) -> Vec<(crate::ui_geometry::PixelRect, &InstancePickerRow)> {
+        let Some(strip) = self.layout().server_strip else {
+            return Vec::new();
+        };
+        let strip = StripRect {
+            left: strip.left,
+            top: strip.top,
+            right: strip.right,
+            bottom: strip.bottom,
+        };
+        layout_server_tab_chips(strip, self.server_tabs.len())
+            .into_iter()
+            .zip(self.server_tabs.iter())
+            .map(|(chip, row)| {
+                (
+                    crate::ui_geometry::PixelRect {
+                        left: chip.left,
+                        top: chip.top,
+                        right: chip.right,
+                        bottom: chip.bottom,
+                    },
+                    row,
+                )
+            })
+            .collect()
+    }
+
+    /// Routes a click in the top strip to a chip or the add button.
+    ///
+    /// Returns whether the click was consumed, so the workbench below never
+    /// sees a press aimed at the strip.
+    fn handle_server_strip_click(&mut self, x: i32, y: i32) -> bool {
+        let Some(strip) = self.layout().server_strip else {
+            return false;
+        };
+        if !strip.contains(x, y) {
+            return false;
+        }
+        let instance = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(chip, _)| chip.contains(x, y))
+            .map(|(_, row)| row.instance.clone());
+        if let Some(instance) = instance {
+            if let Err(error) = self.select_server_tab_by_instance(&instance) {
+                self.set_status_message(error);
+            }
+            self.request_redraw();
+        }
+        // Clicks on the strip background (including the add button, which has
+        // no Unix dialog yet) are still consumed: the strip is chrome, and
+        // letting a press fall through to the terminal would be worse.
+        true
+    }
+
+    /// Opens a window on `instance`, the way clicking a Windows chip does.
+    ///
+    /// Unix does not rebind the current GUI's lease the way Windows does, so
+    /// this always spawns a window for the target rather than pretending to
+    /// switch in place; that keeps the visible behaviour honest.
+    fn select_server_tab_by_instance(&mut self, instance: &str) -> Result<(), String> {
+        let row = self
+            .server_tabs
+            .iter()
+            .find(|row| {
+                row.instance == instance
+                    || row.instance.strip_prefix("custom:") == Some(instance)
+                    || row.instance_label == instance
+            })
+            .cloned()
+            .ok_or_else(|| format!("server tab `{instance}` is not listed"))?;
+        if row.endpoint == crate::client::ipc_address() {
+            self.set_status_message(format!("Already on `{}`", row.instance));
+            return Ok(());
+        }
+        let short = row
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(row.instance.as_str());
+        let pid = spawn_gui_for_instance(short, Some(row.endpoint.as_str()))?;
+        self.set_status_message(format!("Opened `{}` in a new window (PID {pid})", row.instance));
+        Ok(())
+    }
+
     fn composer_selected_text(&self) -> Option<String> {
         text_selection::selected_text(&self.composer_buffer, self.composer_cursor)
     }
@@ -2475,6 +2614,42 @@ impl UnixApp {
                     "scrollbar": sidebar_scrollbar,
                 },
                 "toolbar": layout.workspace_toolbar.map(workspace_toolbar_snapshot_json),
+                // Chips carry their own bounds so an agent can click one the
+                // same way a human does, via `ui-input pointer`.
+                "server_strip": layout.server_strip.map(|strip| {
+                    serde_json::json!({
+                        "bounds": pixel_rect_json(strip),
+                        "tabs": self
+                            .server_tab_rects()
+                            .into_iter()
+                            .map(|(chip, row)| serde_json::json!({
+                                "instance": row.instance,
+                                "label": server_tab_chip_label(
+                                    &row.instance,
+                                    row.can_attach,
+                                ),
+                                "can_attach": row.can_attach,
+                                "pid": row.pid,
+                                "tab_count": row.tab_count,
+                                "bounds": pixel_rect_json(chip),
+                            }))
+                            .collect::<Vec<_>>(),
+                        "add": pixel_rect_json({
+                            let add = layout_server_add_chip(StripRect {
+                                left: strip.left,
+                                top: strip.top,
+                                right: strip.right,
+                                bottom: strip.bottom,
+                            });
+                            crate::ui_geometry::PixelRect {
+                                left: add.left,
+                                top: add.top,
+                                right: add.right,
+                                bottom: add.bottom,
+                            }
+                        }),
+                    })
+                }),
                 "terminal": {
                     "x": layout.terminal.left,
                     "y": layout.terminal.top,
@@ -2876,6 +3051,9 @@ impl UnixApp {
 
     fn handle_content_click(&mut self, x: f64, y: f64) {
         if self.handle_window_close_click(x, y) {
+            return;
+        }
+        if self.handle_server_strip_click(x as i32, y as i32) {
             return;
         }
         if self.tab_editor_dialog.is_open() {
@@ -4340,6 +4518,37 @@ impl UnixApp {
         };
 
         let modal_active = self.modal_surface_active();
+        // Chip geometry comes from the shared strip layout, so the painted
+        // chips and the snapshot bounds an agent clicks are the same rects.
+        let active_instance = crate::client::ipc_address();
+        let server_strip_view = layout.server_strip.map(|strip| {
+            let chips = self
+                .server_tab_rects()
+                .into_iter()
+                .map(|(chip, row)| render::ServerStripChipView {
+                    bounds: u32_rect(chip),
+                    label: server_tab_chip_label(&row.instance, row.can_attach),
+                    can_attach: row.can_attach,
+                    active: row.endpoint == active_instance,
+                })
+                .collect();
+            let add = layout_server_add_chip(StripRect {
+                left: strip.left,
+                top: strip.top,
+                right: strip.right,
+                bottom: strip.bottom,
+            });
+            render::ServerStripView {
+                bounds: u32_rect(strip),
+                chips,
+                add: u32_rect(crate::ui_geometry::PixelRect {
+                    left: add.left,
+                    top: add.top,
+                    right: add.right,
+                    bottom: add.bottom,
+                }),
+            }
+        });
         let workspace_toolbar = if !self.focus_gate().workspace_controls_visible() {
             None
         } else {
@@ -4465,6 +4674,7 @@ impl UnixApp {
                 editing_tab_id,
                 tab_editor,
                 workspace_toolbar,
+                server_strip: server_strip_view,
                 terminal_top: layout.terminal.top.max(0) as u32,
                 composer: composer_view,
                 scrollbar,
@@ -5002,6 +5212,16 @@ impl ControlHost for UnixApp {
         if self.settings_dialog.preview_preset(preset) {
             self.request_redraw();
         }
+    }
+
+    fn select_server_tab(&mut self, instance: &str) -> Result<(), String> {
+        // Always re-read on an explicit select: the 2s cache otherwise makes a
+        // click look dead right after a second server starts.
+        self.server_tabs = collect_instance_picker_rows().unwrap_or_default();
+        self.server_tabs_refresh_after = Instant::now() + SERVER_TABS_REFRESH;
+        self.select_server_tab_by_instance(instance)?;
+        self.request_redraw();
+        Ok(())
     }
 
     fn switch_settings_scope(&mut self, scope: settings::SettingsScope) -> Result<(), String> {

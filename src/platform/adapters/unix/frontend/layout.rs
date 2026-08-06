@@ -10,6 +10,8 @@ use crate::{
 
 pub(super) const UNIX_COMPOSER_HEIGHT: i32 = 64;
 pub(super) const UNIX_STATUS_HEIGHT: i32 = 26;
+/// Matches Windows `SERVER_STRIP_HEIGHT` so the two hosts agree.
+pub(super) const UNIX_SERVER_STRIP_HEIGHT: i32 = 34;
 pub(super) const SCROLLBAR_WIDTH: u32 = TERMINAL_SCROLLBAR_WIDTH as u32;
 
 pub(super) fn workspace_layout_for(
@@ -24,8 +26,9 @@ pub(super) fn workspace_layout_for(
         configured_tabs_width: i32::from(config.tabs_width),
         composer_height: UNIX_COMPOSER_HEIGHT,
         status_height: UNIX_STATUS_HEIGHT,
-        // Server strip is Windows-first product chrome (S′ top tabs).
-        server_strip_height: 0,
+        // Same height as the Windows strip so both hosts lay the chrome out
+        // identically; the chip math itself is shared in `server_strip_ui`.
+        server_strip_height: UNIX_SERVER_STRIP_HEIGHT,
     })
 }
 

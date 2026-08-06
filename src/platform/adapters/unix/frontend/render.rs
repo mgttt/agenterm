@@ -851,6 +851,9 @@ pub(super) struct FrameContent<'a> {
     pub(super) editing_tab_id: Option<u64>,
     pub(super) tab_editor: Option<TabEditorView>,
     pub(super) workspace_toolbar: Option<WorkspaceToolbarView>,
+    /// Top server strip: the band rect, one chip per running instance, and the
+    /// trailing add button. Empty when the strip is hidden.
+    pub(super) server_strip: Option<ServerStripView>,
     pub(super) terminal_top: u32,
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
@@ -908,6 +911,9 @@ pub(super) fn render_frame(
     }
     if let Some(toolbar) = content.workspace_toolbar {
         render_workspace_toolbar(buffer, stride, width, height, palette, toolbar);
+    }
+    if let Some(strip) = content.server_strip.as_ref() {
+        render_server_strip(buffer, stride, width, height, palette, strip);
     }
     if content.terminal_at_logical_resolution {
         render_terminal_grid(
@@ -1525,6 +1531,82 @@ fn render_window_close(
             palette.text,
         );
     }
+}
+
+/// One chip in the top server strip.
+pub(super) struct ServerStripChipView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) label: String,
+    /// Live instances read as selectable; stale ones are dimmed so leftover
+    /// registry debris stays visible rather than looking clickable.
+    pub(super) can_attach: bool,
+    pub(super) active: bool,
+}
+
+pub(super) struct ServerStripView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) chips: Vec<ServerStripChipView>,
+    pub(super) add: (u32, u32, u32, u32),
+}
+
+fn render_server_strip(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    strip: &ServerStripView,
+) {
+    let (sx, sy, sw, sh) = strip.bounds;
+    fill_rect(buffer, stride, sx, sy, sw, sh, rgb_to_pixel(palette.sidebar));
+    // Divider along the bottom edge separates the strip from the workbench.
+    fill_rect(
+        buffer,
+        stride,
+        sx,
+        sy + sh.saturating_sub(1),
+        sw,
+        1,
+        rgb_to_pixel(palette.divider),
+    );
+    for chip in &strip.chips {
+        let (cx, cy, cw, ch) = chip.bounds;
+        let fill = if chip.active {
+            palette.selection_background
+        } else {
+            palette.composer
+        };
+        fill_rect(buffer, stride, cx, cy, cw, ch, rgb_to_pixel(fill));
+        // Stale rows stay visible but dimmed, so leftover registry debris is
+        // obvious rather than looking like a live server you can click.
+        let text = if chip.can_attach {
+            palette.text
+        } else {
+            palette.divider
+        };
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            cx + 6,
+            cy + ch.saturating_sub(12) / 2,
+            &chip.label,
+            text,
+        );
+    }
+    let (ax, ay, aw, ah) = strip.add;
+    fill_rect(buffer, stride, ax, ay, aw, ah, rgb_to_pixel(palette.composer));
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        ax + aw / 2,
+        ay + ah.saturating_sub(12) / 2,
+        "+",
+        palette.text,
+    );
 }
 
 fn render_workspace_toolbar(

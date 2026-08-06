@@ -46,7 +46,8 @@ use crate::{
             remote_word_selection,
         },
         server_strip_ui::{
-            SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, StripRect, ServerCloseConfirm,
+            SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, SERVER_TABS_REFRESH, StripRect,
+            ServerCloseConfirm,
             ServerContextAction, ServerNewDialog, ServerTabContextMenu, layout_server_add_chip,
             layout_server_context_menu, layout_server_tab_chips, server_tab_chip_label,
         },
@@ -222,7 +223,6 @@ const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 /// U3: coalesce PTY regrids when the user flips tabs quickly.
 const TAB_PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
-const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
 /// Full sidebar clock chrome string (`YY-MM-DD Ddd\nHH:MM:SS`) for redraw ticks.
