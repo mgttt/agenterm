@@ -4,7 +4,7 @@ use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
-    expr_print::{expr_to_rhai, is_pure_int_expr, uses_host_surface},
+    expr_print::{expr_to_rhai, is_pure_int_expr, is_var_len_expr, uses_host_surface},
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
     host_api::{emit_host_runtime, rust_raw_string_literal},
     subset::{compat_validate, validate_ast},
@@ -419,18 +419,18 @@ fn emit_stmt(
                         out.push_str("    for ");
                         out.push_str(counter.name.as_str());
                         out.push_str(" in ");
-                        out.push_str(&start.to_string());
+                        emit_for_bound(out, &start, ctx)?;
                         out.push_str("..");
-                        out.push_str(&end.to_string());
+                        emit_for_bound(out, &end, ctx)?;
                         out.push_str(" {\n");
                     }
                     IntForPlan::Inclusive { start, end } => {
                         out.push_str("    for ");
                         out.push_str(counter.name.as_str());
                         out.push_str(" in ");
-                        out.push_str(&start.to_string());
+                        emit_for_bound(out, &start, ctx)?;
                         out.push_str("..=");
-                        out.push_str(&end.to_string());
+                        emit_for_bound(out, &end, ctx)?;
                         out.push_str(" {\n");
                     }
                 }
@@ -677,11 +677,41 @@ fn infer_binding_kind(expr: &Expr) -> ValueKind {
 
 const MAX_NATIVE_FOR_SPAN: i64 = 4096;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+enum IntForBound {
+    Const(i64),
+    Expr(Expr),
+}
+
+#[derive(Debug, Clone)]
 enum IntForPlan {
     Values(Vec<i64>),
-    Exclusive { start: i64, end: i64 },
-    Inclusive { start: i64, end: i64 },
+    Exclusive {
+        start: IntForBound,
+        end: IntForBound,
+    },
+    Inclusive {
+        start: IntForBound,
+        end: IntForBound,
+    },
+}
+
+fn int_for_bound(expr: &Expr) -> Option<IntForBound> {
+    int_const(expr)
+        .map(IntForBound::Const)
+        .or_else(|| is_pure_int_expr(expr).then(|| IntForBound::Expr(expr.clone())))
+}
+
+fn emit_for_bound(
+    out: &mut String,
+    bound: &IntForBound,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    match bound {
+        IntForBound::Const(value) => out.push_str(&value.to_string()),
+        IntForBound::Expr(expr) => emit_expr(out, expr, ctx)?,
+    }
+    Ok(())
 }
 
 fn int_const(expr: &Expr) -> Option<i64> {
@@ -721,16 +751,24 @@ fn int_for_plan(iterable: &Expr) -> Option<IntForPlan> {
     if call.args.len() != 2 {
         return None;
     }
-    let start = int_const(&call.args[0])?;
-    let end = int_const(&call.args[1])?;
-    if call.name.as_str() == Token::ExclusiveRange.literal_syntax() {
-        bounded_exclusive_span(start, end)?;
+    let start = int_for_bound(&call.args[0])?;
+    let end = int_for_bound(&call.args[1])?;
+    let is_exclusive = call.name.as_str() == Token::ExclusiveRange.literal_syntax();
+    let is_inclusive = call.name.as_str() == Token::InclusiveRange.literal_syntax();
+    if !is_exclusive && !is_inclusive {
+        return None;
+    }
+    if let (IntForBound::Const(start), IntForBound::Const(end)) = (&start, &end) {
+        if is_exclusive {
+            bounded_exclusive_span(*start, *end)?;
+        } else {
+            bounded_inclusive_span(*start, *end)?;
+        }
+    }
+    if is_exclusive {
         Some(IntForPlan::Exclusive { start, end })
-    } else if call.name.as_str() == Token::InclusiveRange.literal_syntax() {
-        bounded_inclusive_span(start, end)?;
-        Some(IntForPlan::Inclusive { start, end })
     } else {
-        None
+        Some(IntForPlan::Inclusive { start, end })
     }
 }
 
@@ -790,6 +828,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
         Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
+        Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
             out.push_str("{ ");
@@ -982,6 +1021,53 @@ mod tests {
             other => panic!("unexpected stmt: {other:?}"),
         };
         assert_eq!(call.operation_id, "protocol.info");
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_for_dyn_int_range() {
+        let source = include_str!("../../../fixtures/rh/for-dyn-range.rh");
+        let rust = transpile_cdylib(source).expect("transpile");
+        assert!(
+            rust.contains("for value in 1..limit"),
+            "expected native dynamic for-range in:\n{rust}"
+        );
+        assert!(!rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_for_var_len_range() {
+        let rust = transpile_cdylib(
+            "fn entry() { let total = 0; for index in 1..args.len { total += index; } total }",
+        )
+        .expect("transpile");
+        assert!(
+            rust.contains("for index in 1.."),
+            "expected native for-range in:\n{rust}"
+        );
+        assert!(
+            rust.contains("args.len"),
+            "expected args.len bound in:\n{rust}"
+        );
+        assert!(!rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn int_for_plan_skips_span_check_for_dynamic_bounds() {
+        let ast = super::parse("fn entry() { for i in 0..count { 0 } }").expect("parse");
+        let def = ast.iter_fn_def().next().expect("fn");
+        let stmt = def.body.iter().next().expect("stmt");
+        let rhai::Stmt::For(boxed, ..) = stmt else {
+            panic!("expected for stmt");
+        };
+        let (_, _, flow) = boxed.as_ref();
+        let plan = super::int_for_plan(&flow.expr).expect("plan");
+        assert!(matches!(
+            plan,
+            super::IntForPlan::Exclusive {
+                start: super::IntForBound::Const(0),
+                end: super::IntForBound::Expr(_),
+            }
+        ));
     }
 
     #[test]
