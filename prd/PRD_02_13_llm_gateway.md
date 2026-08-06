@@ -7,6 +7,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 This module records safety gates for an unassigned product hypothesis. It does
 not commit the gateway executable or a release version.
 
+Product design for **Web session providers** (Playwright/Camoufox → OpenAI-compatible)
+and **user BYOK** routing lives in
+[`plan/design-llm-bridge-web-to-api.md`](../plan/design-llm-bridge-web-to-api.md).
+Those adapters must terminate at this gateway, not bypass it.
+
 - Dependency and isolation
   - [ ] implementation begins only after Observable Fleet, the stable
     unrestricted Rhai API/runtime contract, MCP typed tools, credential

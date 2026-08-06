@@ -9,6 +9,7 @@
 | **目标版本** | L-CC · v0.2.0+（可视化/布局先行；数据契约分阶段落地） |
 | **SSOT 起点** | `prd/PRD_02_21_control_center.md`、`plan/plan-control-center-ux.md`、`plan/design-control-center-ux.md`、`plan/plan-cc-automation-cli.md`、`research/agenterm-webview/assets/` |
 | **关联 view ID** | 新增 `hyper_control`；保留 `cockpit` · `workflows` · `extensions` · `info_hub` · `diagnostics`（chrome） |
+| **LLM 供给** | `plan/design-llm-bridge-web-to-api.md`（免费 Web 会话桥 + BYOK；统一 OpenAI 兼容 loopback） |
 
 > **命名澄清：** UI 占位文案可能仍写「超级智能体」，产品概念是 **超控智能体**（Hyper-Control Agent / Meta-Agent）——人类可读的**元控制层**，用于编排与监督智能体、资源、远程会话与工作流，**不是**单个「更强的大模型」或第二 Fleet 权威。
 
@@ -227,6 +228,7 @@ flowchart TB
 |------|---------|----------|
 | 文本输入 | 本地 **draft only**；不落盘为 workflow | 提交到 orchestration「intent」契约（若存在） |
 | Palette | 静态命令列表：跳转 Cockpit、复制 endpoint、`agenterm-cli` 片段 | 可搜索动作 registry |
+| **Model 选择** | Phase A：`unavailable` + `llm_gateway_unavailable` | Phase B：`Model:` 下拉；状态见 `design-llm-bridge-web-to-api.md` |
 | Approval queue | 空状态；显示「无待批准项」 | 列出 server/orchestration 返回的 pending approvals |
 | 快捷键 | Host 仅 `ControlCenterKey` 子集；palette **Phase A 无全局 ⌘K**（标注 planned） | 平台 chord PR 之后启用 |
 
@@ -431,6 +433,9 @@ Human intent → [Draft] → (optional) Submit → Pending approval → Explicit
 | `session_plane_unavailable` | Session | SSH/RDP/VNC 平面未接入 | planned · L-CU |
 | `workflow_runtime_unavailable` | Workflow | 工作流运行时不可用 | 切换到 Workflows tab 查看详情 |
 | `orchestration_intent_unavailable` | Intent bar | 意图提交 API 未交付 | 本地草稿仅；复制到 CLI |
+| `llm_gateway_unavailable` | Intent bar · Model | LLM 网关 sidecar 未运行 | 链 `design-llm-bridge-web-to-api.md` 设置 |
+| `llm_no_provider_configured` | Intent bar · Model | 无 BYOK 且无 Web 登录 | 引导 Provider settings |
+| `provider_session_expired` | Model / Provider 卡片 | Web 会话过期 | **[Re-login]** |
 
 ### 6.3 降级态（有 partial 数据）
 
