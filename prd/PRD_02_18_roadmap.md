@@ -461,7 +461,7 @@ track remains planned, but every declared dependency must still pass.
   > runs v0.1.11 → v0.1.14. The evidence lines below are unchanged and remain
   > authoritative for the SHAs and runs they name; only the milestone's version
   > label was wrong. Current delivery history is owned by
-  > [the v0.1.14 public plan](../plan/plan-v0.1.14.md), and the in-flight
+  > [the v0.1.14 public plan](../plan/archive/plan-v0.1.14.md), and the in-flight
   > version is v0.1.15.
   - [x] converge the v0.1.11 native IPC foundation across Windows named pipes
     and Linux/macOS Unix sockets: logical main/dev isolation, stale authority
@@ -509,14 +509,14 @@ track remains planned, but every declared dependency must still pass.
     exercised for real: the first promotion attempts stopped before publication
     on a provenance SBOM mismatch and on manifest identity checks. See
     [Delivery and quality](PRD_02_17_delivery_quality.md) and
-    [the v0.1.14 public plan](../plan/plan-v0.1.14.md) for the eight
+    [the v0.1.14 public plan](../plan/archive/plan-v0.1.14.md) for the eight
     release-chain defects this first end-to-end execution exposed
   - [ ] measure queue, cache, compile, test, package, upload and promotion
     stages; correctly keyed Cargo/sccache experiments and optional paid runners
     may change latency but never eligibility, evidence or artifact identity
   - [ ] sequencing, runner experiments, release SLOs, risks and delivery
     history are owned by the current version plan —
-    [v0.1.14](../plan/plan-v0.1.14.md) for what shipped and the measured CI
+    [v0.1.14](../plan/archive/plan-v0.1.14.md) for what shipped and the measured CI
     analysis, [v0.1.15](../plan/plan-v0.1.15.md) for in-flight work; the
     superseded [v0.1.12 plan](../plan/archive/plan-v0.1.12.md) remains the record for
     that candidate. Canonical delivery requirements stay in

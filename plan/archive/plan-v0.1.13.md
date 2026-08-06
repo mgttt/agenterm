@@ -10,7 +10,7 @@
 > `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements
 > （已与 v0.1.14 新发现的八个缺陷合并去重）。本文保留叙事原文。
 >
-> - 当前发布状态与 CI 实测分析：`plan/plan-v0.1.14.md`
+> - 上一已发布版本复盘：`plan/archive/plan-v0.1.14.md`；在制：`plan/plan-v0.1.15.md`
 > - 在制版本：`plan/plan-v0.1.15.md`
 > - 结构 SSOT：`plan/ARCHITECTURE.md`
 
@@ -702,7 +702,7 @@ v0.1.13 Release 推进（2026-08-04 晚）
   ——与 c46eb70 轮的 toolbar 失败同类：该 smoke 从未被 release CI 跑通过，
   每前进一步暴露一个按开发机手感标定的紧超时。
 - 用户裁定：停止 v0.1.13 发布，直接发 v0.1.14（含 smoke 整体加固 +
-  instance 身份修复 + IME/状态栏工作）。见 plan-v0.1.14.md 发布节。
+  instance 身份修复 + IME/状态栏工作）。见 plan/archive/plan-v0.1.14.md 发布节。
 
 ```text
 已知坑（勿重复探索）

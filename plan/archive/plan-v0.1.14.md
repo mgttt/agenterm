@@ -1,9 +1,21 @@
 # AgenTerm v0.1.14 公开计划
 
-状态：**开工**（2026-08-04 由占位稿升级；升级时修正了占位稿中已过时的
-v0.1.13 Wave B 快照——该三项在 `plan/archive/plan-v0.1.13.md` §10.2 已全部 `[x]`）。
-本文件**不**改变 v0.1.12/v0.1.13 的授权状态，**不**创建 tag/Candidate/Release。
-v0.1.13 发布链（Candidate → Promotion）独立推进，不受本 plan 影响。
+> ## ⚠️ 已归档（2026-08-06）
+>
+> **v0.1.14 已公开发布**（2026-08-05）：tag `8ff2b5a`，23 资产，非 draft。  
+> 本文是发版期执行与复盘记录，**保留仅为追溯，不要作为执行依据**。
+>
+> - **未完成叶**（§一 目标树仍为 `[ ]` 者）已 **upsert** 至在制版本  
+>   [`plan/plan-v0.1.15.md`](../plan-v0.1.15.md) **§一·五 L′**（L1–L7；L8→C1）。
+> - 发布链要求（版本无关）：`prd/PRD_02_17_delivery_quality.md`  
+>   §Release-chain operating requirements
+> - 在制版本：`plan/plan-v0.1.15.md`
+> - 结构 SSOT：`plan/ARCHITECTURE.md`
+> - 历史交接快照：`plan/archive/goal-v0.1.14.md`
+
+状态（归档前）：**已发布**（原「开工」态结束于 2026-08-05 Promotion）。  
+升级背景（2026-08-04）：由占位稿升级；修正了占位稿中已过时的 v0.1.13 Wave B
+快照——该三项在 `plan/archive/plan-v0.1.13.md` §10.2 已全部 `[x]`。
 
 主题：**身份正确性 + 信任尾账**。不开大功能波次；巨型状态机拆解、
 snapshot 填充管线统一、net/WebView/大 CC 仍归 v0.2.0（plan-v0.1.13 §10.3）。

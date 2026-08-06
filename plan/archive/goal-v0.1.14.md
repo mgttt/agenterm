@@ -1,11 +1,11 @@
 # /goal 交接：发布 AgenTerm v0.1.14
 
-> ## ⚠️ 已完成并归档（2026-08-05 03:37 +0800）
+> ## ⚠️ 已完成并归档（2026-08-05 发布；2026-08-06 移入 plan/archive/）
 >
 > **v0.1.14 已发布**：tag `8ff2b5a`，23 个资产，非 draft。本文是当时的交接
 > 快照，**保留仅为历史记录，不要再作为执行依据**。
-> 权威结果与复盘见 **`plan/plan-v0.1.14.md`**（§发布结果 / §发布经验总结 /
-> §七 CI 日志实测分析）。
+> 权威结果与复盘见 **`plan/archive/plan-v0.1.14.md`**（§发布结果 / §发布经验总结 /
+> §七 CI 日志实测分析）。未完成产品叶见 **`plan/plan-v0.1.15.md` §一·五 L′**。
 >
 > **本文有一处结论已被实践证伪**，勿再引用：下方「收据是 windows gate 的
 > 最后一步，其后已无未验证环节」**不成立**。实际上 `release.yml` 在本次是
@@ -51,7 +51,7 @@
      -f candidate_run_id=<candidate run id> -f confirmation=publish-v0.1.14
    ```
 4. **验证**：`gh release view v0.1.14`（isDraft=false，资产含六平台包）。
-   完成后回写 plan/plan-v0.1.14.md §一.5 勾选 Promotion 项。
+   完成后回写 plan/archive/plan-v0.1.14.md §一.5 勾选 Promotion 项（历史）。
 
 ## 已知坑（全部踩过，勿重探）
 
@@ -76,10 +76,10 @@
 | 文档 | 内容 |
 |------|------|
 | prd/PRD_02_17_delivery_quality.md §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13 §10.2.1 + v0.1.14 八个缺陷合并去重） |
-| plan/plan-v0.1.14.md §一.5 | 本版发布推进记录（完成后回写处） |
-| plan/plan-v0.1.15.md | 提速路线（夜间彩排/自动派发/门瘦身） |
+| plan/archive/plan-v0.1.14.md §一.5 | 本版发布推进记录（历史） |
+| plan/plan-v0.1.15.md | 在制版本；含 L′ 从 0.1.14 迁入的未完成叶 |
 
 ## 完成定义
 
 `gh release view v0.1.14` 显示已发布（非 draft），六平台资产齐全；
-plan/plan-v0.1.14.md §一.5 已回写。
+plan/archive/plan-v0.1.14.md §一.5 已回写（发布完成）。

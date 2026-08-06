@@ -196,7 +196,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     promotion lane — the run-identity file being deleted by the checkout that
     follows it, an assertion on a `manifest.kind` field the sealer never wrote,
     and two GitHub read-after-write races (tag ref, releases list). See
-    `plan/plan-v0.1.14.md`. The dry-run capability that would have caught these
+    `plan/archive/plan-v0.1.14.md`. The dry-run capability that would have caught these
     in seconds is proposed as a v0.1.15 item
   - [x] Promotion is recoverable after a tag-only or partially uploaded draft
     interruption: an existing tag is accepted only when it resolves to the

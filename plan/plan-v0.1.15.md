@@ -13,7 +13,7 @@
 ## 数据来源与关键事实（全部实测，可复现）
 
 v0.1.14 发布日 ~10 轮 gate 级遥测，加 2026-08-05 对成功 Candidate
-`30942173420` 的逐门/逐 job 分析（详见 `plan/plan-v0.1.14.md` §七）：
+`30942173420` 的逐门/逐 job 分析（详见 `plan/archive/plan-v0.1.14.md` §七）：
 
 ```text
 单轮全绿路径 ≈ 30min：CI ~5min → Candidate ~15-18min → Promotion ~1min
@@ -940,21 +940,83 @@ M. 多 Agent 观察与交接
   - 不占本版工程工期；本条仅登记指针。与 **M 组**关系：M 的 handoff/
     observe 事实可被未来 Cockpit 投影，但 M **不依赖** CC UI 先落地
 
+### L′. 从 v0.1.14 迁入的未完成叶（**2026-08-06 upsert**；发版后归档）
+
+> 来源：`plan/archive/plan-v0.1.14.md` §一 目标树仍为 `[ ]` 的项。  
+> v0.1.14 **已发布**（tag `8ff2b5a`）；未完成项**不是**发布阻塞，而是信任/卫生尾账。  
+> 与 §一 C 组、§一·五 其它泳道重叠的，只保留指针，避免双排期。
+
+```text
+L′. v0.1.14 carry-forward
+├─ L1 身份真机回归（原 A 半叶）
+├─ L2 precision-audit item 22（HashSet 上限）
+├─ L3 precision-audit item 16（无 HOME 时 /tmp 共享）
+├─ L4 CC 矮窗 tab 条折叠（原 C）
+├─ L5 control-center-smoke 进 CI 评估（原 C）
+├─ L6 stale 注册记录体验（原 C；S′ strip 已部分缓解）
+├─ L7 多文件改动前置 cargo fmt 清单化（原 D）
+└─ L8 flaky child_wait → **并入 §一 C1**（不另开叶）
+```
+
+- [ ] **L1 身份真机回归**
+  - **来源**：plan-v0.1.14 A「`--instance custom:work` → server-list 显示 `<user>_work`」
+  - **现状**：代码侧 autostart 身份修复已 `[x]`；S′ strip / multi-instance 已大幅覆盖
+  - **验收**：干净二进制下 `agenterm --instance custom:work` + `server-list` INSTANCE 列为
+    用户 scope 的 work 标签（非误标 main）
+  - **成本**：极小（真机/隔离黑盒）；**依赖**：无
+- [ ] **L2 precision-audit item 22**
+  - **来源**：script_protocol / agenterm-rhai 三个 dedup `HashSet` 在 persistent worker
+    中只增不减
+  - **验收**：人工拍板上限/淘汰策略后落地；回填 `plan/precision-audit.md`
+  - **成本**：中（需拍板）；**依赖**：策略拍板
+- [ ] **L3 precision-audit item 16 剩余**
+  - **来源**：Linux/macOS 无 HOME/XDG 时 instances 目录静默退到共享 `/tmp`，未做
+    符号链接/祖先加固
+  - **验收**：决定是否复用 `protect_private_directory` / `metadata_is_real_directory`；
+    有/无 HOME 路径均有黑盒或文档边界
+  - **成本**：中；**依赖**：策略拍板
+- [ ] **L4 CC 矮窗（~480px）tab 条折叠**
+  - **来源**：plan-v0.1.13/14 — 三行 tab 条仅首行在 client 内
+  - **验收**：矮窗下导航可用（折叠/滚动/提前 strip）；Win smoke 有界
+  - **成本**：中；**依赖**：无；与 **X3 / L-CC** 对齐时优先做
+- [ ] **L5 control-center-smoke 进 CI 矩阵评估**
+  - **来源**：当前不在矩阵，同源缺口无门禁
+  - **验收**：书面评估（进/不进 + 墙钟预算）；若进则 push 或 release 车道声明一致
+  - **成本**：小–中；**依赖**：无；可挂 **A′** 反馈左移
+- [ ] **L6 stale 注册记录体验**
+  - **来源**：server-list 长期 stale 行；评估 cleanup 自动化或提示
+  - **现状**：S′ strip 对 stale 芯片可点「开新窗」；list 体验仍可能脏
+  - **验收**：`server-list`/`server-cleanup` 或明示引导；不误杀 live
+  - **成本**：小–中；**依赖**：无
+- [ ] **L7 多文件改动前置 `cargo fmt --check` 清单化**
+  - **来源**：v0.1.14 占位稿两次 rustfmt fail-closed 教训
+  - **验收**：agent/dev 清单或 lint 入口明确「改多文件先 fmt」；可与 `lint.cmd` 对齐
+  - **成本**：极小；**依赖**：无
+- **L8** → **§一 C1**（`child_wait_timeout_reaps_descendants` flaky 根因复核）。  
+  不再单开叶；C1 勾选即关闭 0.1.14 D 尾账。
+
+**L′ 砍叶顺序（工期紧）**：L7 → L1 → L5 → L6 → L4 → L2/L3（后两者要拍板）。
+
+> **规模影响**：L′ 最多 7 个可执行叶（+1 指针），其中多数为小/中修补；
+> **不**挤掉 R1/R2。C1 与 L8 合并后竞态组不增叶。
+
 > **规模影响**：X1+X2 已消耗的工期不小（约 2900 行入 main）。若把它们计入，
 > v0.1.15 实际范围已**超过**我在 §二 主张的「窄」。这不改变 R 组的排序理由
 > （cache 仍是最便宜的杠杆），但**应当据此更保守地对待 H1/H3**——
 > 见 §二·二 序 7 的「工期紧则优先砍」已预留该出口。
 > 2026-08-05 再补 **M 组 4 叶**（多 agent 观察/交接）与 **N1**：宽度继续
 > 上升，砍叶出口见上表与 M 组附注。
+> 2026-08-06 再补 **L′**（v0.1.14 未完成 upsert）+ **S′ 真机迭代已大部落地**。
 
-**规模自查（2026-08-05 补记后，含 M 组）**：
+**规模自查（2026-08-06，含 L′ / S′ 落地）**：
 
 | 泳道 | 叶数 | 性质 | 状态 |
 |------|-----|------|------|
 | R / A′ / G′ / H′ | 13 | 修补 · 降本 · 地基 | 待授权开工 |
 | **U′** | **4**（U1 代码已落） | **UX 假刷新止血** | U1 待合；U2–U4 待授权 |
-| **S′** | **4**（S4 默认后置） | **多 instance 可达/选择** | 待授权；S4 非 must-ship |
-| **B′** | **6**（B6 可选） | **tmux send-keys + buffer 兼容** | 待授权；不替代 M 发消息 |
+| **S′** | **4**（S1–S4 形态已落地） | **多 instance / 顶栏 strip** | 真机迭代完成；边角可回 L6 |
+| **B′** | **6**（B6 可选） | **tmux send-keys + buffer 兼容** | 工作区曾落地；待持续证据 |
+| **L′** | **7+1** | **v0.1.14 尾账** | 2026-08-06 迁入；L8→C1 |
 | **N** | **1** | **新功能（平台 facade）** | 待授权开工 |
 | **M** | **4** | **新功能（多 agent 控制面地基）** | 待授权开工 |
 | X（并发 agent） | 2 已完成 + 1 设计归 v0.2.0 | 功能 / 设计 | 约 2900 行已入 main |
@@ -1209,7 +1271,7 @@ click tab row
 
 | 文档 | 关系 |
 |------|------|
-| `plan/plan-v0.1.14.md` | 上一版执行记录；本文数据与止血项的出处 |
+| `plan/archive/plan-v0.1.14.md` | 上一版（已发布）执行记录；本文数据与止血项的出处；未完成叶已 upsert 为 **§一·五 L′** |
 | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements | 发布链坑清单权威处（v0.1.13/v0.1.14 两轮合并去重，版本无关；runbook 素材，E2 配套） |
 | `plan/ARCHITECTURE.md` | 结构 SSOT（含 §8 对齐机制/工具边界）；**S 组**执行叶指针；本文不重画结构树 |
 | `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟（§五 L-CC 的版本归口；原 plan-v0.2.0.md 已并入） |
@@ -1498,6 +1560,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-05 | 用户真机：AgenTerm **Shift+鼠标选区后复制不了**，阻塞工作 → **O6** 入 O 组/§十一，排序 **O0→O6→O1…**；疑点含 complete 后 `let _ = copy` 静默失败、Cmd+C has_selection、shift 手势未建选区、pbcopy 写失败 |
 | 2026-08-05 | **O6 关闭** `fb573f9`（O6a+O6b）；§11.8 定因全成立；agent(cc) 更正「pre-existing flake」归因 → 稳定红 `prd_alignment_public_command_missing:delete-buffer` |
 | 2026-08-05 | **编排拍板（不转嫁董事长）**：P-P1=T2 立 v0.2.x / T1 不做 / v0.1.15 text-only；G-P1=无 signed 自动 unsigned+警告；G-P2=不默认 kill server，版本落后须提示；**O1b 开工**；**O-fix 认领** PRD 补 buffer 公开命令。agent 问决策 → 编排回写 §五 5.7 + §一 O |
+| 2026-08-06 | **v0.1.14 未完成 upsert → §一·五 L′**（L1–L7 可执行 + L8→C1）；`plan-v0.1.14.md` / `goal-v0.1.14.md` **归档**至 `plan/archive/`（已公开发布 tag `8ff2b5a`）；archive README 与引用指针改指向 archive 路径 + 在制 `plan-v0.1.15.md` |
 
 ---
 
