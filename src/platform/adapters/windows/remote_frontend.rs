@@ -5031,14 +5031,20 @@ impl RemoteWindowState {
         let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
         let short = instance.strip_prefix("custom:").unwrap_or(instance);
         let mut command = std::process::Command::new(exe);
+        // --ui-client is mandatory for As Window: without it the launcher runs
+        // attempt_gui_handoff, focuses the already-attached GUI, and exits
+        // (GuiLaunchResult::Reused). That made "As Window" on the *active* tab
+        // look like a complete no-op while inactive tabs appeared to work.
         command
+            .arg("--ui-client")
             .arg("--instance")
             .arg(short)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         // Prefer the strip row's live endpoint so the child does not re-resolve
-        // to a different peer or invent a second server authority.
+        // to a different peer or invent a second server authority. Endpoint may
+        // pair with --instance for attach identity (IPC contract).
         if let Some(endpoint) = endpoint.filter(|value| !value.is_empty()) {
             command.arg("--endpoint").arg(endpoint);
         }
@@ -9041,6 +9047,17 @@ mod tests {
                 || source.contains("multi-lease")
                 || source.contains("concurrent interactive GUIs"),
             "product path must not reintroduce exclusive single-GUI messaging"
+        );
+        // Spawn must force a second replaceable UI. Without --ui-client the
+        // child hands off to the active window and exits (looks like no-op).
+        let spawn_fn = source
+            .split("fn spawn_gui_for_instance(")
+            .nth(1)
+            .and_then(|rest| rest.split("fn spawn_server_instance(").next())
+            .expect("spawn_gui_for_instance body");
+        assert!(
+            spawn_fn.contains("\"--ui-client\""),
+            "As Window child must pass --ui-client to skip launcher handoff"
         );
     }
 

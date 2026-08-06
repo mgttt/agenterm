@@ -173,12 +173,15 @@ mod tests {
             ],
             vec!["--address"],
             vec!["--address", "--no-activate"],
+            // --endpoint + --address remains exclusive (authority conflict).
             vec![
                 "--endpoint",
                 r"pipe:\\.\pipe\agenterm-test",
-                "--instance",
-                "dev",
+                "--address",
+                "127.0.0.1:48815",
             ],
+            // --address + --instance remains exclusive.
+            vec!["--address", "127.0.0.1:48815", "--instance", "dev"],
             vec!["--unknown"],
         ] {
             assert!(
@@ -189,6 +192,29 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn gui_launcher_accepts_endpoint_paired_with_instance_and_ui_client() {
+        // As Window spawns with --ui-client --instance NAME --endpoint ENDPOINT so
+        // a second GUI attaches to the live peer without handoff/reuse.
+        let options = parse_gui_launch_target(
+            &[
+                "--ui-client".to_owned(),
+                "--instance".to_owned(),
+                "dev".to_owned(),
+                "--endpoint".to_owned(),
+                r"pipe:\\.\pipe\agenterm-test".to_owned(),
+            ],
+            WINDOWS_GUI_LAUNCH_POLICY,
+        )
+        .expect("endpoint may pair with instance for attach identity");
+        assert!(options.ui_client);
+        assert_eq!(options.selectors.instance.as_deref(), Some("dev"));
+        assert_eq!(
+            options.selectors.endpoint.as_deref(),
+            Some(r"pipe:\\.\pipe\agenterm-test")
+        );
     }
 
     #[test]
