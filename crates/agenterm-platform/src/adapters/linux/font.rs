@@ -4,6 +4,15 @@ use crate::contract::font::{
     FontDiscovery, FontError, FontFileCandidate, FontMetrics, FontRequest, OpaqueWindowHandle,
 };
 
+/// Font files probed in order, by absolute path.
+///
+/// TODO(linux): query fontconfig (`fc-match monospace`) before falling back to
+/// this list. The paths below follow the Debian/Ubuntu layout; on Arch, Fedora,
+/// NixOS, Alpine and slim containers none of them may exist, and the frontend
+/// then silently drops to its built-in 8x8 bitmap face
+/// (`src/platform/adapters/unix/frontend/font.rs` `resolved_name`), which looks
+/// broken rather than merely unstyled. macOS does not share this risk: its
+/// candidates live at stable system paths.
 pub(crate) fn candidates() -> Vec<FontFileCandidate> {
     vec![
         FontFileCandidate {

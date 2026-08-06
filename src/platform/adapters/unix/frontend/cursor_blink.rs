@@ -2,7 +2,11 @@
 
 use std::time::{Duration, Instant};
 
-pub(super) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
+/// Caret blink half-period, owned by shared input policy because macOS and each
+/// Linux desktop expose their own user-visible setting for it.
+pub(super) fn cursor_blink_interval() -> Duration {
+    Duration::from_millis(crate::platform::caret_blink_interval_ms())
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CursorBlink {
@@ -14,7 +18,7 @@ impl CursorBlink {
     pub(super) fn new(now: Instant) -> Self {
         Self {
             visible: true,
-            next_toggle: now + CURSOR_BLINK_INTERVAL,
+            next_toggle: now + cursor_blink_interval(),
         }
     }
 
@@ -29,7 +33,7 @@ impl CursorBlink {
     pub(super) fn reset(&mut self, now: Instant) -> bool {
         let changed = !self.visible;
         self.visible = true;
-        self.next_toggle = now + CURSOR_BLINK_INTERVAL;
+        self.next_toggle = now + cursor_blink_interval();
         changed
     }
 
@@ -38,14 +42,14 @@ impl CursorBlink {
             return false;
         }
         self.visible = !self.visible;
-        self.next_toggle = now + CURSOR_BLINK_INTERVAL;
+        self.next_toggle = now + cursor_blink_interval();
         true
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CURSOR_BLINK_INTERVAL, CursorBlink};
+    use super::{CursorBlink, cursor_blink_interval};
     use std::time::Instant;
 
     #[test]
@@ -54,11 +58,11 @@ mod tests {
         let mut blink = CursorBlink::new(start);
 
         assert!(blink.visible());
-        assert!(!blink.tick(start + CURSOR_BLINK_INTERVAL / 2));
-        assert!(blink.tick(start + CURSOR_BLINK_INTERVAL));
+        assert!(!blink.tick(start + cursor_blink_interval() / 2));
+        assert!(blink.tick(start + cursor_blink_interval()));
         assert!(!blink.visible());
-        assert!(blink.reset(start + CURSOR_BLINK_INTERVAL));
+        assert!(blink.reset(start + cursor_blink_interval()));
         assert!(blink.visible());
-        assert_eq!(blink.next_toggle(), start + CURSOR_BLINK_INTERVAL * 2);
+        assert_eq!(blink.next_toggle(), start + cursor_blink_interval() * 2);
     }
 }

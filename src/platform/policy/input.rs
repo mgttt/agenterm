@@ -63,6 +63,24 @@ pub(crate) fn multi_click_interval_ms() -> u64 {
 /// Matches the historical Unix frontend constant and Windows' own default.
 const DEFAULT_MULTI_CLICK_INTERVAL_MS: u64 = 500;
 
+/// Caret blink half-period for text surfaces the app draws itself.
+///
+/// Host individuality again: macOS derives the rate from `NSTextInsertionPointBlinkPeriod`
+/// (On/Off defaults), and GNOME from `org.gnome.desktop.interface cursor-blink-time`,
+/// where a user can also disable blinking entirely. Windows has `GetCaretBlinkTime`.
+/// The shared default keeps today's behaviour until an adapter reads the real value.
+///
+/// TODO(macos): read `NSTextInsertionPointBlinkPeriodOn`/`Off`.
+/// TODO(linux): read `org.gnome.desktop.interface cursor-blink-time` and honour
+/// `cursor-blink = false` by never toggling.
+#[allow(dead_code)]
+pub(crate) fn caret_blink_interval_ms() -> u64 {
+    DEFAULT_CARET_BLINK_INTERVAL_MS
+}
+
+/// Matches the historical Unix frontend constant.
+const DEFAULT_CARET_BLINK_INTERVAL_MS: u64 = 600;
+
 #[cfg(test)]
 mod tests {
     use super::*;
