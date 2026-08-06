@@ -1633,7 +1633,7 @@ impl RemoteWindowState {
                     .context(
                         "open-instance requires --name NAME (global --instance selects the CLI endpoint)",
                     )?;
-                self.spawn_gui_for_instance(instance)?;
+                self.spawn_gui_for_instance(instance, None)?;
             }
             "select-server-tab" => {
                 let instance = option_value(&command.args, "--name")
@@ -4672,9 +4672,9 @@ impl RemoteWindowState {
         if !row.can_attach {
             // Dead registration: open a new GUI for that instance name so the
             // strip remains an "enter" control even with no live tabs/owner.
-            self.spawn_gui_for_instance(short)?;
+            let child_pid = self.spawn_gui_for_instance(short, Some(row.endpoint.as_str()))?;
             self.last_message = Some(format!(
-                "Server `{}` was {}; opened a new window for that instance",
+                "Server `{}` was {}; opened a new window (PID {child_pid})",
                 row.instance, row.classification
             ));
             self.window.request_redraw();
@@ -5007,27 +5007,31 @@ impl RemoteWindowState {
     }
 
     /// As Window: always open another interactive GUI for the instance.
-    /// Multiple concurrent GUI leases on one server are allowed.
+    /// Multiple concurrent GUI leases on one server are allowed — including
+    /// a second window for the *currently active* server tab.
     fn focus_existing_or_spawn_instance_gui(
         &mut self,
         instance: &str,
         endpoint: &str,
     ) -> Result<()> {
-        let short = instance.strip_prefix("custom:").unwrap_or(instance);
-        let _ = endpoint;
-        // Prefer a new window so the same server can be projected in multiple
-        // GUIs at once (multi-lease). Foreground existing owners only when spawn
-        // fails hard (e.g. process launch denied).
-        match self.spawn_gui_for_instance(short) {
-            Ok(()) => Ok(()),
+        match self.spawn_gui_for_instance(instance, Some(endpoint)) {
+            Ok(child_pid) => {
+                self.last_message = Some(format!(
+                    "Opened new GUI window (PID {child_pid}) for `{instance}`"
+                ));
+                self.last_error = None;
+                self.window.request_redraw();
+                Ok(())
+            }
             Err(spawn_error) => {
+                // Last resort: if spawn failed, try foregrounding any existing peer.
                 if let Some(pid) = Self::query_ui_lease_owner_pid(endpoint)
                     && pid != std::process::id()
                     && Self::activate_gui_process(pid).is_ok()
                 {
                     self.last_message = Some(format!(
                         "Could not start a new window ({spawn_error:#}); \
-                         brought existing GUI PID {pid} forward for `{short}`"
+                         brought existing GUI PID {pid} forward"
                     ));
                     self.window.request_redraw();
                     return Ok(());
@@ -5037,7 +5041,13 @@ impl RemoteWindowState {
         }
     }
 
-    fn spawn_gui_for_instance(&mut self, instance: &str) -> Result<()> {
+    /// Spawn a new replaceable GUI for `instance`, optionally pinned to `endpoint`.
+    /// Returns the child PID so the caller can surface/activate it.
+    fn spawn_gui_for_instance(
+        &mut self,
+        instance: &str,
+        endpoint: Option<&str>,
+    ) -> Result<u32> {
         let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
         let short = instance.strip_prefix("custom:").unwrap_or(instance);
         let mut command = std::process::Command::new(exe);
@@ -5047,16 +5057,50 @@ impl RemoteWindowState {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        // Human "As Window" / Open another should surface the new GUI. Only
-        // inherit --no-activate from automation environments so smokes stay quiet.
-        if crate::client::no_activate_from_environment() {
-            command.arg("--no-activate");
+        // Prefer the strip row's live endpoint so the child does not re-resolve
+        // to a different peer or invent a second server authority.
+        if let Some(endpoint) = endpoint.filter(|value| !value.is_empty()) {
+            command.arg("--endpoint").arg(endpoint);
+        }
+        // Never inherit automation/no-activate or sticky IPC env from the parent
+        // GUI — that is what made "As Window" on the active tab look like a no-op
+        // (child started hidden or attached the wrong way and exited).
+        for name in [
+            "AGENTERM_NO_ACTIVATE",
+            "AGENTERM_IPC_ADDRESS",
+            "AGENTERM_IPC_ENDPOINT",
+            "AGENTERM_INSTANCE",
+        ] {
+            command.env_remove(name);
         }
         // Breakaway + ACCESS_DENIED visible fallback: agenterm-platform only.
-        crate::platform::process::spawn_breakaway_visible_command(&mut command)
-            .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
-        self.last_message = Some(format!("Opening instance `{short}` in a new window"));
-        Ok(())
+        // Keep the child handle so we can activate its HWND after it maps.
+        let (mut child, _mode) =
+            crate::platform::process::spawn_breakaway_visible_child(&mut command).map_err(
+                |error| anyhow::anyhow!("could not open instance `{short}`: {error}"),
+            )?;
+        let child_pid = child.id();
+        std::thread::Builder::new()
+            .name("agenterm-as-window-activate".to_owned())
+            .spawn(move || {
+                // Give the child time to create its top-level window, then raise it.
+                for delay_ms in [150_u64, 350, 700, 1200] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    if agenterm_platform::process_window::activate(child_pid).is_ok() {
+                        break;
+                    }
+                    // Child may have exited (old exclusive server, bad args).
+                    if let Ok(Some(_)) = child.try_wait() {
+                        break;
+                    }
+                }
+                let _ = child.wait();
+            })
+            .map_err(|error| anyhow::anyhow!("could not start As Window waiter: {error}"))?;
+        self.last_message = Some(format!(
+            "Opening instance `{short}` in a new window (PID {child_pid})"
+        ));
+        Ok(child_pid)
     }
 
     fn spawn_server_instance(&mut self, name: &str) -> Result<()> {
