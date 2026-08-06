@@ -13,7 +13,7 @@
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
-| 执行计划 | App Pack → `agenterm-rhai-app.md`；**Rust↔Rhai 边界** → `design-rhai-rust-boundary.md` |
+| 执行计划 | Rust↔Rhai 边界 → `design-rhai-rust-boundary.md`；**行业对照** → `design-scripting-boundary-comparison.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
 | `origin/main` | tip `26dae49`；含 CC 超控设计稿 + mailbox 登记 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
