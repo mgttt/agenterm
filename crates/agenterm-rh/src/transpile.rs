@@ -1321,6 +1321,16 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             emit_rh_fail(out, message, ctx)?;
             return Ok(());
         }
+        if let Expr::FnCall(call, ..) = expr
+            && call.namespace.is_empty()
+            && call.name == "require"
+            && call.args.len() == 2
+        {
+            out.push_str("{\n");
+            emit_require_stmt(out, &call.args[0], &call.args[1], ctx)?;
+            out.push_str("    0\n}");
+            return Ok(());
+        }
         if let Some((program, arguments, timeout)) = process_status_args(expr)
             && emit_process_status(out, program, arguments, timeout, ctx)?
         {
