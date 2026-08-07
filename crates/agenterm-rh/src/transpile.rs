@@ -1229,7 +1229,12 @@ mod tests {
         let output =
             transpile_cdylib_with_mode("fn entry() { let first = args[0]; args.len + first.len }")
                 .expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         let entry = output
             .rust
             .split_once("pub fn entry() -> INT {")
