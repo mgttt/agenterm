@@ -121,6 +121,28 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             Some(host_utility_call),
             Some(host_json_call),
         )
+    } else if api >= 9 {
+        module.register_host_v9(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+            Some(host_args_len_call),
+            Some(host_arg_call),
+            Some(host_fs_read_call),
+            Some(host_utility_call),
+        )
+    } else if api >= 8 {
+        module.register_host_v8(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+            Some(host_args_len_call),
+            Some(host_arg_call),
+            Some(host_fs_read_call),
+            Some(host_utility_call),
+        )
     } else if api >= 7 {
         module.register_host_v7(
             host_fleet_call,
