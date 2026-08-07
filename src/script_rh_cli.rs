@@ -91,7 +91,7 @@ pub fn try_forward_dev_cli(arguments: &[String]) -> Option<std::io::Result<ExitS
 }
 
 pub fn check_many_requires_rh_error() -> String {
-    "check-many requires agenterm-rh; build with: cargo build -p agenterm-rh --bin agenterm-rh".into()
+    "check-many requires agenterm-rh; build with: cargo build --bin agenterm-rh".into()
 }
 
 fn forward_if_rh_path(arguments: &[String], path_index: usize, prefix: &[&str]) -> Option<Vec<String>> {

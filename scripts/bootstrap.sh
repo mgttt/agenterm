@@ -106,7 +106,7 @@ if [ "$CACHE_VALID" = true ]; then
 else
     AGENTERM_BOOTSTRAP_CARGO_START_MS=$(clock_ms)
     cargo build --quiet --locked --bin agenterm-rhai
-    cargo build --quiet --locked -p agenterm-rh --bin agenterm-rh
+    cargo build --quiet --locked --bin agenterm-rh
     AGENTERM_BOOTSTRAP_CARGO_END_MS=$(clock_ms)
     AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=$((
         AGENTERM_BOOTSTRAP_CARGO_END_MS - AGENTERM_BOOTSTRAP_CARGO_START_MS

@@ -6,7 +6,7 @@ ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "== build agenterm-rh binary =="
-cargo build -p agenterm-rh --locked --bin agenterm-rh
+cargo build --locked --bin agenterm-rh
 
 echo "== agenterm-rh crate =="
 cargo test -p agenterm-rh --locked

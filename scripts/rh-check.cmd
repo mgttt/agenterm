@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0.."
 echo == build agenterm-rh binary ==
-cargo build -p agenterm-rh --locked --bin agenterm-rh
+cargo build --locked --bin agenterm-rh
 if errorlevel 1 exit /b 1
 
 echo == agenterm-rh crate ==

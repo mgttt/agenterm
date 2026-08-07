@@ -34,7 +34,7 @@ call :validate_cache
 if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
 cargo build --quiet --locked --bin agenterm-rhai
-cargo build --quiet --locked -p agenterm-rh --bin agenterm-rh
+cargo build --quiet --locked --bin agenterm-rh
 if errorlevel 1 goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_CARGO_START_CS% %AGENTERM_BOOTSTRAP_CARGO_END_CS% AGENTERM_BOOTSTRAP_CARGO_CS

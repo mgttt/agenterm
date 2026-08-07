@@ -7,6 +7,10 @@ static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
 });
 static CLIENT_SMOKE: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rhai/client-smoke.rhai").replace("\r\n", "\n"));
+static ROOT_MANIFEST: &str = include_str!("../Cargo.toml");
+static RH_MANIFEST: &str = include_str!("../crates/agenterm-rh/Cargo.toml");
+static UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
+static WINDOWS_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
 static ARTIFACT_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../scripts/artifacts.json"))
         .expect("scripts/artifacts.json must be valid JSON")
@@ -57,6 +61,21 @@ fn macos_ci_cross_compiles_rh_reference_pack() {
     assert!(job.contains("AGENTERM_RH_QUALIFY_TARGET"));
     assert!(job.contains("cargo check -p agenterm-rh --locked"));
     assert!(job.contains("cross_compiles_reference_pack_when_target_env_set"));
+}
+
+#[test]
+fn rh_binary_is_owned_and_built_by_root_package() {
+    let root_bin = "[[bin]]\nname = \"agenterm-rh\"\npath = \"crates/agenterm-rh/src/main.rs\"";
+    assert!(ROOT_MANIFEST.contains(root_bin));
+    assert!(RH_MANIFEST.contains("autobins = false"));
+    assert!(!RH_MANIFEST.contains("[[bin]]"));
+
+    let root_build = "cargo build --quiet --locked --bin agenterm-rh";
+    let old_package_build = "-p agenterm-rh --bin agenterm-rh";
+    assert!(UNIX_BOOTSTRAP.contains(root_build));
+    assert!(WINDOWS_BOOTSTRAP.contains(root_build));
+    assert!(!UNIX_BOOTSTRAP.contains(old_package_build));
+    assert!(!WINDOWS_BOOTSTRAP.contains(old_package_build));
 }
 
 #[test]
