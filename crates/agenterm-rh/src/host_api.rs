@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 47;
+pub const RH_CODEGEN_REVISION: u32 = 48;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1134,6 +1134,32 @@ pub fn emit_host_runtime(out: &mut String) {
                  None => {\n\
                      let _ = rh_fail(\"json_array_push_target\");\n\
                      0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_array_push_path(\n\
+             target: &mut serde_json::Value,\n\
+             path: &[&str],\n\
+             item: serde_json::Value,\n\
+         ) -> INT {\n\
+             match rh_json_path_mut(target, path) {\n\
+                 Some(node) => rh_json_array_push(node, item),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_array_push_path: {}\", path.join(\".\")));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_get_path_key(\n\
+             value: &serde_json::Value,\n\
+             path: &[&str],\n\
+             key: &str,\n\
+         ) -> serde_json::Value {\n\
+             match rh_json_path(value, path).and_then(|node| node.get(key)) {\n\
+                 Some(item) => item.clone(),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_get_path_key: {}.{}\", path.join(\".\"), key));\n\
+                     serde_json::Value::Null\n\
                  }\n\
              }\n\
          }\n\n\

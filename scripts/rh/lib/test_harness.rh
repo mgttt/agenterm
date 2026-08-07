@@ -215,7 +215,8 @@ fn finalize_command_log(context) {
 }
 
 fn run_cli(context, cli, arguments, expected_failure, redactions) {
-    let command_arguments = ["--address", "" + context.address];
+    let address = "" + context.address;
+    let command_arguments = ["--address", address];
     let arg_idx = 0;
     while arg_idx < arguments.len {
         command_arguments.push("" + arguments[arg_idx]);

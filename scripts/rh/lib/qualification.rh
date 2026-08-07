@@ -152,13 +152,15 @@ fn add_process_observation(
     for process in observed_powershell {
         let process_text = "" + process;
         if terminal_compatibility != 0 {
-            if !context.process_observation
-                    .terminal_compatibility_payloads.contains(process_text) {
+            // Prefer `contains(...) == 0` over unary `!` so JSON-path contains
+            // stays on the native INT predicate lane.
+            if context.process_observation
+                    .terminal_compatibility_payloads.contains(process_text) == 0 {
                 context.process_observation
                     .terminal_compatibility_payloads.push(process_text);
             }
-        } else if !context.process_observation
-                .automation_processes.contains(process_text) {
+        } else if context.process_observation
+                .automation_processes.contains(process_text) == 0 {
             context.process_observation.automation_processes.push(process_text);
         }
     }

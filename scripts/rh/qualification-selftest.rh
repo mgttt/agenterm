@@ -47,24 +47,6 @@ fn remove_owned_scratch(root, path) {
     0
 }
 
-fn evidence_lines(evidence) {
-    // Take the evidence array path directly so the call site can pass
-    // `gate.evidence` (JSON path) even when the loop binding's Json kind is
-    // not yet visible at the typed local-fn boundary.
-    let output = [];
-    for id in evidence {
-        output.push("EVIDENCE " + "" + id);
-    }
-    output
-}
-
-fn would_reject_read_manifest(path) {
-    if std::fs::exists(path) == 0 || std::fs::metadata(path).is_file == 0 {
-        return 1;
-    }
-    0
-}
-
 fn would_reject_assert_results(context) {
     for gate in context.manifest.required_gates {
         let gate_id = "" + gate.id;
@@ -80,18 +62,26 @@ fn would_reject_assert_results(context) {
             return 1;
         }
     }
-    if context.stress_included == 0 || context.stress_included == false {
+    if context.stress_included == 0 {
         return 1;
     }
     0
 }
 
 fn would_reject_process_observation(context) {
-    if context.process_observation.owned_commands == 0
-            || context.process_observation.process_samples == 0 {
+    let owned_commands = 0 + context.process_observation.owned_commands;
+    let process_samples = 0 + context.process_observation.process_samples;
+    if owned_commands == 0 || process_samples == 0 {
         return 1;
     }
     if context.process_observation.automation_processes.len > 0 {
+        return 1;
+    }
+    0
+}
+
+fn would_reject_read_manifest(path) {
+    if std::fs::exists(path) == 0 || std::fs::metadata(path).is_file == 0 {
         return 1;
     }
     0
@@ -141,18 +131,20 @@ fn entry() {
         let working = context;
         for gate in working.manifest.required_gates {
             let gate_id = "" + gate.id;
-            let status =
-                if gate_id == "rustfmt" {
-                    rejected_status
-                } else {
-                    "passed"
-                };
+            let status = "passed";
+            if gate_id == "rustfmt" {
+                status = "" + rejected_status;
+            }
+            let evidence_output = [];
+            for evidence_id in gate.evidence {
+                evidence_output.push("EVIDENCE " + "" + evidence_id);
+            }
             working = qualification::add_result(
                 working,
                 gate_id,
                 status,
                 0,
-                evidence_lines(gate.evidence)
+                evidence_output
             );
         }
         expect_rejection(
@@ -169,12 +161,16 @@ fn entry() {
     let no_stress_ready = no_stress;
     for gate in no_stress_ready.manifest.required_gates {
         let gate_id = "" + gate.id;
+        let evidence_output = [];
+        for evidence_id in gate.evidence {
+            evidence_output.push("EVIDENCE " + "" + evidence_id);
+        }
         no_stress_ready = qualification::add_result(
             no_stress_ready,
             gate_id,
             "passed",
             0,
-            evidence_lines(gate.evidence)
+            evidence_output
         );
     }
     expect_rejection(
@@ -212,31 +208,58 @@ fn entry() {
     let check_source = std::fs::read_to_string(
         std::path::join(repo, "scripts/rh/check.rh").display
     );
-    let artifact_offset = check_source.index_of(
-        `"artifact-build",`
-    );
-    let lint_offset = check_source.index_of(
-        "let lint_gate = run_gate("
-    );
-    let rustfmt_offset = check_source.index_of(
-        "let rustfmt_gate = run_gate("
-    );
-    let declaration_offset = check_source.index_of(
-        "sequence = assert_declarations("
-    );
-    let smoke_offset = check_source.index_of(
-        `let smoke_ids = [`
-    );
+    let lint_marker = "let lint_gate = run_gate(";
+    let decl_marker = "sequence = assert_declarations(";
+    let rustfmt_marker = "let rustfmt_gate = run_gate(";
+    let artifact_marker = "\"artifact-build\",";
+    let smoke_marker = "let smoke_ids = [";
+    let order_ok = 0;
+    if check_source.contains(lint_marker) != 0
+            && check_source.contains(decl_marker) != 0
+            && check_source.contains(rustfmt_marker) != 0
+            && check_source.contains(artifact_marker) != 0
+            && check_source.contains(smoke_marker) != 0 {
+        let seen_lint = 0;
+        for part in check_source.split(lint_marker) {
+            if seen_lint != 0 && part.contains(decl_marker) != 0 {
+                seen_lint = 2;
+                break;
+            }
+            seen_lint = 1;
+        }
+        if seen_lint == 2 {
+            let seen_decl = 0;
+            for part in check_source.split(decl_marker) {
+                if seen_decl != 0 && part.contains(rustfmt_marker) != 0 {
+                    seen_decl = 2;
+                    break;
+                }
+                seen_decl = 1;
+            }
+            if seen_decl == 2 {
+                let seen_rustfmt = 0;
+                for part in check_source.split(rustfmt_marker) {
+                    if seen_rustfmt != 0 && part.contains(artifact_marker) != 0 {
+                        seen_rustfmt = 2;
+                        break;
+                    }
+                    seen_rustfmt = 1;
+                }
+                if seen_rustfmt == 2 {
+                    let seen_artifact = 0;
+                    for part in check_source.split(artifact_marker) {
+                        if seen_artifact != 0 && part.contains(smoke_marker) != 0 {
+                            order_ok = 1;
+                            break;
+                        }
+                        seen_artifact = 1;
+                    }
+                }
+            }
+        }
+    }
     assert_ok(
-        artifact_offset >= 0
-            && lint_offset >= 0
-            && rustfmt_offset >= 0
-            && declaration_offset >= 0
-            && smoke_offset >= 0
-            && lint_offset < declaration_offset
-            && declaration_offset < rustfmt_offset
-            && rustfmt_offset < artifact_offset
-            && artifact_offset < smoke_offset,
+        order_ok,
         "qualification_selftest_declaration_order"
     );
 
@@ -252,7 +275,8 @@ fn entry() {
             "" + std::process::id()
     ).display;
     std::fs::create_dir_all(scratch);
-    let harness_context = ();
+    let harness_active = 0;
+    let harness_context = #{ run_directory: "" };
     let failure = "";
     let cli_result = #{ success: 0, stdout: "", stderr: "" };
 
@@ -309,6 +333,7 @@ fn entry() {
             repo,
             "qualification-selftest"
         );
+        harness_active = 1;
         cli_result = test_harness::run_cli(
             harness_context,
             cli,
@@ -353,7 +378,7 @@ fn entry() {
         }
     }
 
-    if harness_context != () {
+    if harness_active != 0 {
         test_harness::remove_run(harness_context);
     }
     remove_owned_scratch(scratch_root, scratch);

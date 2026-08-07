@@ -1400,6 +1400,9 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
             .0
             .iter()
             .any(|(_, value)| expr_uses_json_param(value, param)),
+        Expr::And(args, ..) | Expr::Or(args, ..) => {
+            args.iter().any(|arg| expr_uses_json_param(arg, param))
+        }
         Expr::Dot(boxed, ..) => {
             if is_param_var(&boxed.lhs, param) {
                 match &boxed.rhs {
@@ -1411,8 +1414,14 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
                         false
                     }
                     Expr::MethodCall(call, ..) if is_stringish_method_name(call.name.as_str()) => {
+                        // Bare `param.contains` / `param.split` are string surfaces.
                         call.args.iter().any(|arg| expr_uses_json_param(arg, param))
                     }
+                    // Rhai may group `param.a.b` / `param.a.b.contains(x)` as
+                    // `param . (Property(a) . …)`. Nested rhs under a param root is
+                    // JSON path evidence (append_json_properties alone misses a
+                    // trailing MethodCall such as contains/push).
+                    Expr::Dot(..) => true,
                     _ => expr_uses_json_param(&boxed.rhs, param),
                 }
             } else {
@@ -4461,23 +4470,88 @@ fn json_path_int_plus_assign<'a>(
     matches!(target, JsonAssignTarget::Path { .. }).then_some((target, &bin.rhs))
 }
 
-fn json_array_push_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
+fn json_path_array_push_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
-    let Expr::Variable(ident, ..) = &boxed.lhs else {
+    let (binding, mut path) = json_value_path(&boxed.lhs, ctx)?;
+    let item = append_json_push(&boxed.rhs, &mut path)?;
+    Some((binding, path, item))
+}
+
+fn append_json_push<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> Option<&'a Expr> {
+    match expr {
+        Expr::MethodCall(call, ..) if call.name == "push" && call.args.len() == 1 => {
+            Some(&call.args[0])
+        }
+        Expr::Dot(boxed, ..) => {
+            if !append_json_properties(&boxed.lhs, path) {
+                return None;
+            }
+            append_json_push(&boxed.rhs, path)
+        }
+        _ => None,
+    }
+}
+
+fn json_path_key_get<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr)> {
+    if let Expr::Index(boxed, ..) = expr {
+        return json_path_key_get_index(boxed, ctx);
+    }
+    let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
-    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
-        return None;
-    }
-    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+    let (binding, mut path) = json_value_path(&boxed.lhs, ctx)?;
+    let Expr::Index(index_box, ..) = &boxed.rhs else {
         return None;
     };
-    if call.name != "push" || call.args.len() != 1 {
+    if !append_json_properties(&index_box.lhs, &mut path) {
         return None;
     }
-    Some((ident.1.as_str(), &call.args[0]))
+    Some((binding, path, &index_box.rhs))
+}
+
+fn json_path_key_get_index<'a>(
+    boxed: &'a BinaryExpr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr)> {
+    match &boxed.lhs {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            Some((ident.1.as_str(), Vec::new(), &boxed.rhs))
+        }
+        _ => {
+            let (binding, path) = json_value_path(&boxed.lhs, ctx)?;
+            if path.is_empty() {
+                return None;
+            }
+            Some((binding, path, &boxed.rhs))
+        }
+    }
+}
+
+fn emit_json_path_key_get(
+    out: &mut String,
+    binding: &str,
+    path: &[&str],
+    key: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("rh_json_get_path_key(&");
+    out.push_str(binding);
+    out.push_str(", ");
+    emit_json_path(out, path);
+    out.push_str(", &");
+    emit_json_map_key(out, key, ctx)?;
+    out.push(')');
+    Ok(())
 }
 
 fn std_time_system_time_now_unix_millis(expr: &Expr) -> bool {
@@ -6005,6 +6079,10 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push(')');
             return Ok(());
         }
+        if let Some((binding, path, key)) = json_path_key_get(expr, ctx) {
+            emit_json_path_key_get(out, binding, &path, key, ctx)?;
+            return Ok(());
+        }
         if let Some((receiver, json, separator)) = string_split_len_parts(expr, ctx) {
             out.push('(');
             emit_string_split_call(out, receiver, json, separator, ctx)?;
@@ -6303,14 +6381,29 @@ fn emit_json_array_push_stmt(
     expr: &Expr,
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
-    let Some((binding, item)) = json_array_push_call(expr, ctx) else {
+    let Some((binding, path, item)) = json_path_array_push_call(expr, ctx) else {
         return Ok(false);
     };
-    out.push_str("    let _ = rh_json_array_push(&mut ");
-    out.push_str(binding);
-    out.push_str(", ");
-    emit_json_value_expr(out, item, ctx)?;
-    out.push_str(");\n");
+    let mut item_rust = String::new();
+    if emit_json_value_expr(&mut item_rust, item, ctx).is_err() {
+        return Ok(false);
+    }
+    out.push_str("    let _ = ");
+    if path.is_empty() {
+        out.push_str("rh_json_array_push(&mut ");
+        out.push_str(binding);
+        out.push_str(", ");
+        out.push_str(&item_rust);
+        out.push_str(");\n");
+    } else {
+        out.push_str("rh_json_array_push_path(&mut ");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push_str(", ");
+        out.push_str(&item_rust);
+        out.push_str(");\n");
+    }
     Ok(true)
 }
 
@@ -6458,6 +6551,9 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
                 emit_json_path(out, &path);
                 out.push(')');
             }
+        }
+        _ if let Some((binding, path, key)) = json_path_key_get(expr, ctx) => {
+            emit_json_path_key_get(out, binding, &path, key, ctx)?;
         }
         _ if json_array_index(expr, ctx).is_some() => {
             emit_expr(out, expr, ctx)?;
@@ -9959,7 +10055,40 @@ fn entry() {
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
+    
     #[test]
+    fn cdylib_transpile_json_path_array_push_contains_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let context = rhai::json::parse("{\"process_observation\":{\"automation_processes\":[]}}");
+    let process_text = "powershell";
+    if context.process_observation.automation_processes.contains(process_text) == 0 {
+        context.process_observation.automation_processes.push(process_text);
+    }
+    context.process_observation.automation_processes.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_array_push_path(&mut context"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_contains_path(&context"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+#[test]
     fn cdylib_transpile_for_loop_json_rebind_string_field_native() {
         // Outer JSON null + assign from for-item must keep Json typing for
         // post-loop `"" + metadata_entry.sha256` (qualification artifact hash).
@@ -10744,6 +10873,149 @@ fn entry() {
         assert!(output.rust.contains("struct RhCommand"), "{}", output.rust);
         assert!(output.rust.contains("struct RhOutput"), "{}", output.rust);
         assert!(output.rust.contains("struct RhChild"), "{}", output.rust);
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn infer_context_param_as_json_from_nested_path_plus_assign() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn f(context) {
+    context.process_observation.owned_commands += 1;
+    context
+}
+fn entry() { 0 }"#,
+        )
+        .expect("transpile");
+        assert!(
+            output.rust.contains("pub fn f(context: serde_json::Value) -> serde_json::Value"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_path_contains_and_push_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn add_process_observation(context, observed_powershell, terminal_compatibility) {
+    context.process_observation.owned_commands += 1;
+    for process in observed_powershell {
+        let process_text = "" + process;
+        if terminal_compatibility != 0 {
+            if !context.process_observation
+                    .terminal_compatibility_payloads.contains(process_text) {
+                context.process_observation
+                    .terminal_compatibility_payloads.push(process_text);
+            }
+        } else if !context.process_observation
+                .automation_processes.contains(process_text) {
+            context.process_observation.automation_processes.push(process_text);
+        }
+    }
+    context
+}
+fn entry() { 0 }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_contains_path(&context, &[\"process_observation\", \"terminal_compatibility_payloads\"]"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_contains_path(&context, &[\"process_observation\", \"automation_processes\"]"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(
+            output.rust.matches("rh_json_array_push_path(&mut context").count(),
+            2,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_path_push_with_path_key_arg_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let receipt = rhai::json::parse("{\"gates\":[]}");
+    let context = rhai::json::parse("{\"results\":{\"a\":{\"id\":\"a\"}}}");
+    let gate_id = "a";
+    receipt.gates.push(context.results[gate_id]);
+    receipt.gates.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_array_push_path(&mut receipt, &[\"gates\"]")
+                && output.rust.contains("rh_json_get_path_key(&context, &[\"results\"]")
+                && output.rust.contains("gate_id"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_process_observation_int_reads_in_if_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn would_reject(context) {
+    if context.process_observation.owned_commands == 0
+            || context.process_observation.process_samples == 0 {
+        return 1;
+    }
+    if context.process_observation.automation_processes.len > 0 {
+        return 1;
+    }
+    0
+}
+fn entry() { 0 }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_int_path(&context, &[\"process_observation\", \"owned_commands\"])"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_int_path(&context, &[\"process_observation\", \"process_samples\"])"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_array_len(&context, &[\"process_observation\", \"automation_processes\"])"),
+            "{}",
+            output.rust
+        );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 }
