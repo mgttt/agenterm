@@ -93,13 +93,19 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
             "assignment lhs must be a simple variable in rh-3",
         ));
     }
-    if !is_pure_int_expr(&assign.1.rhs) && !uses_host_surface(&assign.1.rhs) {
-        return Some(subset_error(
-            "RH_SUBSET_ASSIGN_RHS",
-            "assignment rhs must be a pure int or native host expression in rh-3",
-        ));
+    if is_pure_int_expr(&assign.1.rhs)
+        || uses_host_surface(&assign.1.rhs)
+        || matches!(
+            assign.1.rhs,
+            Expr::BoolConstant(..) | Expr::StringConstant(..)
+        )
+    {
+        return None;
     }
-    None
+    Some(subset_error(
+        "RH_SUBSET_ASSIGN_RHS",
+        "assignment rhs must be a pure int, bool/string literal, or native host expression in rh-3",
+    ))
 }
 
 fn validate_stmt(stmt: &Stmt) -> Option<RhError> {

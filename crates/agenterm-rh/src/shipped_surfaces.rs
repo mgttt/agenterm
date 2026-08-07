@@ -74,6 +74,7 @@ pub const SHIPPED_SURFACE_PATHS: &[&str] = &[
     "rhai::json::parse_file",
     "rhai::json::stringify",
     "rhai::json::stringify_pretty",
+    "String.split",
     "rhai::runtime::append_sync",
     "rhai::runtime::append_sync_bytes",
     "rhai::runtime::atomic_write",

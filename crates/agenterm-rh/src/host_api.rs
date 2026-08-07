@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 19;
+pub const RH_CODEGEN_REVISION: u32 = 20;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -659,6 +659,50 @@ pub fn emit_host_runtime(out: &mut String) {
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"json_parse: {error}\"));\n\
                      serde_json::Value::Null\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_stringify_pretty(value: &serde_json::Value) -> String {\n\
+             match serde_json::to_string_pretty(value) {\n\
+                 Ok(text) => text,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"json_stringify: {error}\"));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_array_push(target: &mut serde_json::Value, item: serde_json::Value) -> INT {\n\
+             match target.as_array_mut() {\n\
+                 Some(items) => {\n\
+                     items.push(item);\n\
+                     0\n\
+                 }\n\
+                 None => {\n\
+                     let _ = rh_fail(\"json_array_push_target\");\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_array_get(value: &serde_json::Value, index: INT) -> serde_json::Value {\n\
+             match value.as_array().and_then(|items| {\n\
+                 usize::try_from(index).ok().and_then(|index| items.get(index))\n\
+             }) {\n\
+                 Some(item) => item.clone(),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_array_index: {index}\"));\n\
+                     serde_json::Value::Null\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_string_split(value: &str, separator: &str) -> Vec<String> {\n\
+             value.split(separator).map(str::to_owned).collect()\n\
+         }\n\n\
+         fn rh_string_list_get(items: &[String], index: INT) -> String {\n\
+             match usize::try_from(index).ok().and_then(|index| items.get(index)) {\n\
+                 Some(item) => item.clone(),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"string_list_index: {index}\"));\n\
+                     String::new()\n\
                  }\n\
              }\n\
          }\n\n\

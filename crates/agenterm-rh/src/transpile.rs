@@ -23,6 +23,7 @@ enum ValueKind {
     Char,
     Json,
     Set,
+    StringList,
     Metadata,
     DirEntry,
 }
@@ -130,7 +131,7 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
-                ValueKind::Set => {
+                ValueKind::Set | ValueKind::StringList => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
@@ -150,7 +151,7 @@ impl EmitCtx {
         out.push_str("}}}}\"");
         for (name, kind) in &self.scope {
             out.push_str(", ");
-            if matches!(kind, ValueKind::String | ValueKind::Json) {
+            if matches!(kind, ValueKind::String | ValueKind::Json | ValueKind::StringList) {
                 out.push_str("serde_json::to_string(&");
                 out.push_str(name);
                 out.push_str(").unwrap_or_else(|_| \"\\\"\\\"\".to_owned())");
@@ -667,6 +668,23 @@ fn emit_stmt(
                 out.push_str(", ");
                 emit_json_path(out, &path);
                 out.push(')');
+            } else if kind == ValueKind::Json && matches!(expr, Expr::Array(items, ..) if items.is_empty())
+            {
+                out.push_str("serde_json::Value::Array(Vec::new())");
+            } else if kind == ValueKind::Json && matches!(expr, Expr::Map(..)) {
+                emit_json_map_literal(out, expr, ctx)?;
+            } else if kind == ValueKind::StringList {
+                if let Some((source, separator)) = string_split_args(expr, ctx) {
+                    out.push_str("rh_string_split(&");
+                    emit_stringish(out, source, ctx)?;
+                    out.push_str(", ");
+                    emit_native_string(out, separator, ctx)?;
+                    out.push(')');
+                } else {
+                    return Err(RhError::Transpile(
+                        "string list binding requires .split(\"…\")".into(),
+                    ));
+                }
             } else if kind == ValueKind::Set {
                 out.push_str("std::collections::HashSet::<String>::new()");
             } else if kind == ValueKind::String && matches!(expr, Expr::StringConstant(..)) {
@@ -796,6 +814,32 @@ fn emit_stmt(
                     .with_binding(counter.name.as_str(), ValueKind::Json);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
+            } else if let Some((source, separator)) = string_split_args(&flow.expr, ctx) {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in rh_string_split(&");
+                emit_stringish(out, source, ctx)?;
+                out.push_str(", ");
+                emit_native_string(out, separator, ctx)?;
+                out.push_str(") {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::String);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
+            } else if let Expr::Variable(ident, ..) = &flow.expr
+                && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::StringList)
+            {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in ");
+                out.push_str(ident.1.as_str());
+                out.push_str(".iter().cloned() {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::String);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
             } else if let Some(binding) = string_for_binding(&flow.expr, ctx) {
                 out.push_str("    for ");
                 out.push_str(counter.name.as_str());
@@ -879,6 +923,8 @@ fn emit_stmt(
             out.push_str("    }\n");
         }
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr)
+            if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr)
             if ctx.cdylib
                 && let Expr::FnCall(call, ..) = expr.as_ref()
@@ -1146,6 +1192,8 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         Expr::BoolConstant(..) => ValueKind::Bool,
         Expr::StringConstant(..) => ValueKind::String,
         Expr::Map(map, ..) if map.0.is_empty() => ValueKind::Set,
+        Expr::Map(..) => ValueKind::Json,
+        Expr::Array(items, ..) if items.is_empty() => ValueKind::Json,
         Expr::Variable(ident, ..) => match ctx.scope.get(ident.1.as_str()).copied() {
             Some(kind) => kind,
             None => ValueKind::Int,
@@ -1154,6 +1202,10 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty()) => {
             ValueKind::Json
         }
+        _ if json_array_index(expr, ctx).is_some() => ValueKind::Json,
+        _ if string_list_index(expr, ctx).is_some() => ValueKind::String,
+        _ if string_split_args(expr, ctx).is_some() => ValueKind::StringList,
+        _ if json_stringify_pretty_arg(expr).is_some() => ValueKind::String,
         _ if string_concat_args(expr, ctx).is_some() => ValueKind::String,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
@@ -1474,6 +1526,103 @@ fn runtime_atomic_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
         return None;
     }
     Some((&call.args[0], &call.args[1]))
+}
+
+fn json_stringify_pretty_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::json"
+        || call.name != "stringify_pretty"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn string_split_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'a Expr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    if call.name != "split" || call.args.len() != 1 {
+        return None;
+    }
+    if !matches!(&call.args[0], Expr::StringConstant(..)) {
+        return None;
+    }
+    let receiver_ok = match &boxed.lhs {
+        Expr::Variable(ident, ..) => {
+            matches!(
+                ctx.scope.get(ident.1.as_str()).copied(),
+                Some(ValueKind::String)
+            )
+        }
+        Expr::StringConstant(..) => true,
+        _ => {
+            string_concat_args(&boxed.lhs, ctx).is_some()
+                || args_index_expr(&boxed.lhs).is_some()
+                || std_fs_read_to_string_arg(&boxed.lhs).is_some()
+                || std_env_get_arg(&boxed.lhs).is_some()
+                || crypto_sha256_file_arg(&boxed.lhs).is_some()
+                || json_stringify_pretty_arg(&boxed.lhs).is_some()
+        }
+    };
+    if !receiver_ok {
+        return None;
+    }
+    Some((&boxed.lhs, &call.args[0]))
+}
+
+fn string_list_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
+    let Expr::Index(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::StringList) {
+        return None;
+    }
+    Some((ident.1.as_str(), &boxed.rhs))
+}
+
+fn json_array_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
+    let Expr::Index(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
+        return None;
+    }
+    Some((ident.1.as_str(), &boxed.rhs))
+}
+
+fn json_array_push_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a Expr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
+        return None;
+    }
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    if call.name != "push" || call.args.len() != 1 {
+        return None;
+    }
+    Some((ident.1.as_str(), &call.args[0]))
 }
 
 fn std_time_system_time_now_unix_millis(expr: &Expr) -> bool {
@@ -1844,6 +1993,37 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str(&format!("\"{value}\""));
             out.push(')');
         }
+        _ if let Some((binding, index)) = string_list_index(expr, ctx) => {
+            out.push_str("rh_string_list_get(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, index, ctx)?;
+            out.push(')');
+        }
+        _ if let Some(value) = json_stringify_pretty_arg(expr) => {
+            if !emit_json_stringify_pretty(out, value, ctx)? {
+                return Err(RhError::Transpile(
+                    "stringify_pretty argument must be a JSON value".into(),
+                ));
+            }
+        }
+        _ if let Some(path) = crypto_sha256_file_arg(expr) => {
+            if !emit_crypto_sha256_file(out, path, ctx)? {
+                return Err(RhError::Transpile(
+                    "sha256_file argument must be a string path".into(),
+                ));
+            }
+        }
+        _ if let Some(name) = std_env_get_arg(expr) => {
+            if !emit_std_env_get(out, name, ctx)? {
+                return Err(RhError::Transpile(
+                    "env::get argument must be a string name".into(),
+                ));
+            }
+        }
+        _ if std_time_system_time_now_rfc3339(expr) => {
+            out.push_str("rh_system_time_now_rfc3339()");
+        }
         _ if is_pure_int_expr(expr) || is_native_json_int_expr(expr, ctx) => {
             out.push('(');
             emit_expr(out, expr, ctx)?;
@@ -2066,6 +2246,35 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some(value) = json_stringify_pretty_arg(expr)
+            && emit_json_stringify_pretty(out, value, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((binding, index)) = string_list_index(expr, ctx) {
+            out.push_str("rh_string_list_get(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, index, ctx)?;
+            out.push(')');
+            return Ok(());
+        }
+        if let Some((binding, index)) = json_array_index(expr, ctx) {
+            out.push_str("rh_json_array_get(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, index, ctx)?;
+            out.push(')');
+            return Ok(());
+        }
+        if let Some((source, separator)) = string_split_args(expr, ctx) {
+            out.push_str("rh_string_split(&");
+            emit_stringish(out, source, ctx)?;
+            out.push_str(", ");
+            emit_native_string(out, separator, ctx)?;
+            out.push(')');
+            return Ok(());
+        }
         if emit_dir_entry_property(out, expr, ctx)? {
             return Ok(());
         }
@@ -2147,6 +2356,22 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(var_len_name(expr).expect("checked string binding"));
             out.push_str(".chars().count() as INT)");
         }
+        Expr::Dot(..)
+            if var_len_name(expr)
+                .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::StringList)) =>
+        {
+            out.push('(');
+            out.push_str(var_len_name(expr).expect("checked string list binding"));
+            out.push_str(".len() as INT)");
+        }
+        Expr::Dot(..)
+            if var_len_name(expr)
+                .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::Json)) =>
+        {
+            out.push_str("rh_json_array_len(&");
+            out.push_str(var_len_name(expr).expect("checked json binding"));
+            out.push_str(", &[])");
+        }
         Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
@@ -2203,6 +2428,162 @@ fn emit_std_fs_exists_case_exact(
     out.push_str(&path_expr);
     out.push(')');
     Ok(true)
+}
+
+fn emit_json_stringify_pretty(
+    out: &mut String,
+    value: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    match value {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            out.push_str("rh_json_stringify_pretty(&");
+            out.push_str(ident.1.as_str());
+            out.push(')');
+            Ok(true)
+        }
+        Expr::Map(..) => {
+            out.push_str("rh_json_stringify_pretty(&");
+            emit_json_map_literal(out, value, ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_json_array_push_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, item)) = json_array_push_call(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str("    let _ = rh_json_array_push(&mut ");
+    out.push_str(binding);
+    out.push_str(", ");
+    emit_json_value_expr(out, item, ctx)?;
+    out.push_str(");\n");
+    Ok(true)
+}
+
+fn emit_json_map_literal(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    let Expr::Map(map, ..) = expr else {
+        return Err(RhError::Transpile(
+            "emit_json_map_literal expected map literal".into(),
+        ));
+    };
+    out.push_str("{\n");
+    out.push_str("        let mut __rh_map = serde_json::Map::new();\n");
+    for (key, value) in &map.0 {
+        out.push_str("        __rh_map.insert(");
+        out.push_str(&format!("{:?}.to_owned()", key.as_str()));
+        out.push_str(", ");
+        emit_json_value_expr(out, value, ctx)?;
+        out.push_str(");\n");
+    }
+    out.push_str("        serde_json::Value::Object(__rh_map)\n");
+    out.push_str("    }");
+    Ok(())
+}
+
+fn emit_json_value_expr(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    match expr {
+        Expr::StringConstant(value, ..) => {
+            out.push_str("serde_json::Value::String(String::from(");
+            out.push_str(&format!("{value:?}"));
+            out.push_str("))");
+        }
+        Expr::IntegerConstant(value, ..) => {
+            out.push_str("serde_json::json!(");
+            out.push_str(&value.to_string());
+            out.push(')');
+        }
+        Expr::BoolConstant(value, ..) => {
+            out.push_str("serde_json::json!(");
+            out.push_str(if *value { "true" } else { "false" });
+            out.push(')');
+        }
+        Expr::Map(..) => emit_json_map_literal(out, expr, ctx)?,
+        Expr::Array(items, ..) if items.is_empty() => {
+            out.push_str("serde_json::Value::Array(Vec::new())");
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone()");
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+        {
+            out.push_str("serde_json::Value::String(");
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone())");
+        }
+        Expr::Variable(ident, ..)
+            if matches!(
+                ctx.scope.get(ident.1.as_str()).copied(),
+                Some(ValueKind::Int | ValueKind::Bool)
+            ) =>
+        {
+            out.push_str("serde_json::json!(");
+            out.push_str(ident.1.as_str());
+            out.push(')');
+        }
+        _ if string_concat_args(expr, ctx).is_some()
+            || args_index_expr(expr).is_some()
+            || std_env_get_arg(expr).is_some()
+            || crypto_sha256_file_arg(expr).is_some()
+            || json_stringify_pretty_arg(expr).is_some()
+            || string_list_index(expr, ctx).is_some()
+            || std_time_system_time_now_rfc3339(expr) =>
+        {
+            out.push_str("serde_json::Value::String(");
+            emit_stringish(out, expr, ctx)?;
+            out.push(')');
+        }
+        _ if metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
+            || is_pure_int_expr(expr)
+            || is_native_json_int_expr(expr, ctx) =>
+        {
+            out.push_str("serde_json::json!(");
+            emit_expr(out, expr, ctx)?;
+            out.push(')');
+        }
+        _ if json_array_index(expr, ctx).is_some() => {
+            emit_expr(out, expr, ctx)?;
+        }
+        _ if let Some((binding, path)) = json_value_path(expr, ctx) => {
+            if path.is_empty() {
+                out.push_str(binding);
+                out.push_str(".clone()");
+            } else {
+                out.push_str("rh_json_get_path(&");
+                out.push_str(binding);
+                out.push_str(", ");
+                emit_json_path(out, &path);
+                out.push(')');
+            }
+        }
+        _ => {
+            return Err(RhError::Transpile(format!(
+                "unsupported json value expression: {expr:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn emit_std_env_has(
@@ -3572,6 +3953,43 @@ fn entry() {
         );
         assert!(output.rust.contains("\"--show-prefix\""), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_eval_int(\"std::process::command_stdout_file"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_builder_split_and_stringify() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let text = "a\nb";
+    let lines = text.split("\n");
+    let items = [];
+    for line in lines {
+        items.push(#{ name: line, size: 1 });
+    }
+    let manifest = #{ schema_version: 2, executables: items };
+    let pretty = rhai::json::stringify_pretty(manifest);
+    pretty.len + lines.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_string_split("), "{}", output.rust);
+        assert!(output.rust.contains("rh_json_array_push("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_json_stringify_pretty("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("serde_json::Map::new()"),
+            "{}",
+            output.rust
+        );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     }
 
