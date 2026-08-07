@@ -14,10 +14,15 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.fs.create_dir",
     "std.fs.read_dir",
     "std.fs.remove_file",
+    "std.fs.rename",
+    "std.fs.remove_dir_all",
+    "std.fs.symlink_metadata",
     // std.process
     "std.process.command",
     "std.process.status",
     "std.process.stdout_file",
+    "std.process.id",
+    "std.process.list",
     // std.path
     "std.path.absolute",
     "std.path.join",
@@ -32,6 +37,8 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     // std.time
     "std.time.now_unix_ms",
     "std.time.now_rfc3339",
+    "std.time.Duration.from_millis",
+    "std.time.Duration.from_secs",
     // std.json
     "std.json.parse",
     "std.json.stringify",
@@ -61,6 +68,8 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "os.difftime",
     // rhai compatibility
     "rhai.runtime.atomic_write",
+    "rhai.hash.fnv1a64",
+    "rh.fail",
 ];
 
 fn shipped(path: &str) -> bool {

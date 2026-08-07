@@ -30,9 +30,39 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
         })?,
     )?;
     rhai_table.set("runtime", runtime_table)?;
+
+    // rhai::hash table
+    let hash_table = lua.create_table()?;
+    hash_table.set(
+        "fnv1a64",
+        lua.create_function(|_lua, data: String| Ok(fnv1a64(&data)))?,
+    )?;
+    rhai_table.set("hash", hash_table)?;
+
     lua.globals().set("rhai", rhai_table)?;
 
+    // rh::fail global
+    lua.globals().set(
+        "rh",
+        lua.create_table_from([(
+            "fail",
+            lua.create_function(|_lua, msg: String| -> Result<(), mlua::Error> {
+                Err(mlua::Error::runtime(format!("rh_fail: {msg}")))
+            })?,
+        )])?,
+    )?;
+
     Ok(())
+}
+
+/// FNV-1a 64-bit hash, returns lowercase hex string.
+fn fnv1a64(data: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in data.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 /// Atomic file write: write to temp file, then rename (on same filesystem).
@@ -263,6 +293,41 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
+    // std.fs.rename(src, dst) → true | nil, err
+    fs.set(
+        "rename",
+        lua.create_function(|_lua, (src, dst): (String, String)| {
+            std::fs::rename(&src, &dst)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_rename: {e}")))
+        })?,
+    )?;
+
+    // std.fs.remove_dir_all(path) → true | nil, err
+    fs.set(
+        "remove_dir_all",
+        lua.create_function(|_lua, path: String| {
+            std::fs::remove_dir_all(&path)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_remove_dir_all: {e}")))
+        })?,
+    )?;
+
+    // std.fs.symlink_metadata(path) → {is_file, is_dir, is_symlink, len}
+    fs.set(
+        "symlink_metadata",
+        lua.create_function(|lua, path: String| {
+            let meta = std::fs::symlink_metadata(&path)
+                .map_err(|e| mlua::Error::runtime(format!("fs_symlink_metadata: {e}")))?;
+            let table = lua.create_table()?;
+            table.set("is_file", meta.is_file())?;
+            table.set("is_dir", meta.is_dir())?;
+            table.set("is_symlink", meta.file_type().is_symlink())?;
+            table.set("len", meta.len() as i64)?;
+            Ok(table)
+        })?,
+    )?;
+
     Ok(fs)
 }
 
@@ -317,6 +382,54 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
                 Ok(out)
             },
         )?,
+    )?;
+
+    // std.process.id() → int
+    process.set(
+        "id",
+        lua.create_function(|_lua, ()| Ok(std::process::id() as i64))?,
+    )?;
+
+    // std.process.list() → table of {name, pid}
+    process.set(
+        "list",
+        lua.create_function(|lua, ()| {
+            // Use tasklist on Windows, ps on Unix
+            let (prog, args) = if cfg!(windows) {
+                ("tasklist", vec!["/FO".to_string(), "CSV".to_string(), "/NH".to_string()])
+            } else {
+                ("ps", vec!["-eo".to_string(), "comm,pid".to_string(), "--no-headers".to_string()])
+            };
+            let output = std::process::Command::new(prog)
+                .args(&args)
+                .output()
+                .map_err(|e| mlua::Error::runtime(format!("process_list: {e}")))?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut entries = Vec::new();
+            for line in text.lines() {
+                let line = line.trim();
+                if line.is_empty() { continue; }
+                if cfg!(windows) {
+                    // tasklist CSV: "name.exe","pid",...
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() >= 2 {
+                        let name = parts[0].trim_matches('"').trim().to_string();
+                        if let Ok(pid) = parts[1].trim_matches('"').trim().parse::<i64>() {
+                            entries.push(serde_json::json!({"name": name, "pid": pid}));
+                        }
+                    }
+                } else {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let name = parts[0].to_string();
+                        if let Ok(pid) = parts[parts.len()-1].parse::<i64>() {
+                            entries.push(serde_json::json!({"name": name, "pid": pid}));
+                        }
+                    }
+                }
+            }
+            lua.to_value(&entries)
+        })?,
     )?;
 
     Ok(process)
@@ -462,6 +575,18 @@ fn build_time(lua: &Lua) -> Result<Table, mlua::Error> {
             ))
         })?,
     )?;
+
+    // std.time.Duration namespace
+    let duration = lua.create_table()?;
+    duration.set(
+        "from_millis",
+        lua.create_function(|_lua, n: i64| Ok(n))?,
+    )?;
+    duration.set(
+        "from_secs",
+        lua.create_function(|_lua, n: i64| Ok(n * 1000))?,
+    )?;
+    time.set("Duration", duration)?;
 
     Ok(time)
 }
@@ -1083,5 +1208,114 @@ mod tests {
         .expect("atomic_write");
         let content = std::fs::read_to_string(&p).expect("read");
         assert_eq!(content, "atomic content");
+    }
+
+    // ── fs: rename / remove_dir_all / symlink_metadata ──────────────
+
+    #[test]
+    fn fs_rename_moves_file() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src.txt");
+        let dst = dir.path().join("dst.txt");
+        std::fs::write(&src, "moved").unwrap();
+        let e = engine();
+        e.eval(
+            &format!("std.fs.rename([[{}]], [[{}]])", src.display(), dst.display()),
+            &host(),
+        ).expect("rename");
+        assert!(!src.exists());
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "moved");
+    }
+
+    #[test]
+    fn fs_remove_dir_all_deletes_tree() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("f.txt"), "x").unwrap();
+        let e = engine();
+        e.eval(
+            &format!("std.fs.remove_dir_all([[{}]])", sub.display()),
+            &host(),
+        ).expect("remove_dir_all");
+        assert!(!sub.exists());
+    }
+
+    #[test]
+    fn fs_symlink_metadata_file() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("sym.txt");
+        std::fs::write(&p, "data").unwrap();
+        let e = engine();
+        let r = e.eval(
+            &format!("local m = std.fs.symlink_metadata([[{}]]); return m.is_file and 1 or 0", p.display()),
+            &host(),
+        ).expect("symlink_metadata");
+        assert_eq!(r.value, 1);
+    }
+
+    // ── process: id / list ──────────────────────────────────────────
+
+    #[test]
+    fn process_id_returns_pid() {
+        let e = engine();
+        let r = e.eval("return std.process.id()", &host()).expect("id");
+        assert!(r.value > 0, "pid must be positive");
+    }
+
+    #[test]
+    fn process_list_returns_entries() {
+        let e = engine();
+        let r = e.eval("local lst = std.process.list(); return #lst", &host()).expect("list");
+        assert!(r.value > 0, "process list must not be empty");
+    }
+
+    // ── time: Duration ──────────────────────────────────────────────
+
+    #[test]
+    fn time_duration_from_millis() {
+        let e = engine();
+        let r = e.eval("return std.time.Duration.from_millis(5000)", &host()).expect("duration");
+        assert_eq!(r.value, 5000);
+    }
+
+    #[test]
+    fn time_duration_from_secs() {
+        let e = engine();
+        let r = e.eval("return std.time.Duration.from_secs(3)", &host()).expect("duration");
+        assert_eq!(r.value, 3000);
+    }
+
+    // ── rh::fail ────────────────────────────────────────────────────
+
+    #[test]
+    fn rh_fail_triggers_error() {
+        let e = engine();
+        let r = e.eval(
+            "local ok, err = pcall(function() rh.fail('test_failure') end); return ok and 0 or 1",
+            &host(),
+        );
+        if let Ok(r) = r {
+            assert_eq!(r.value, 1, "expected rh.fail to trigger error");
+        }
+    }
+
+    // ── fnv1a64 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn fnv1a64_deterministic() {
+        let e = engine();
+        let r = e.eval("return #rhai.hash.fnv1a64('hello')", &host()).expect("fnv");
+        assert_eq!(r.value, 16, "fnv1a64 hex must be 16 chars");
+    }
+
+    #[test]
+    fn fnv1a64_different_inputs() {
+        let e = engine();
+        let r = e.eval(
+            "local h1 = rhai.hash.fnv1a64('a'); local h2 = rhai.hash.fnv1a64('b'); return h1 ~= h2 and 1 or 0",
+            &host(),
+        ).expect("fnv compare");
+        assert_eq!(r.value, 1);
     }
 }
