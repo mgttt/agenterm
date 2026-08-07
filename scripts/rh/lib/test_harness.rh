@@ -1,0 +1,439 @@
+// Shared fail-closed foundations for repository-owned smoke journeys (INT-only).
+
+fn require(condition, message) {
+    if condition == 0 {
+        throw message;
+    } else {
+        0;
+    }
+}
+
+fn new_context(repo_value, suite) {
+    let suite_text = "" + suite;
+    require(suite_text != "", "test_harness_suite_empty");
+    let repo = std::path::absolute(repo_value).display;
+    let evidence_file = "";
+    if std::env::has("AGENTERM_TEST_EVIDENCE_PATH") {
+        let shared_evidence = std::env::get("AGENTERM_TEST_EVIDENCE_PATH");
+        let shared_evidence_text = "" + shared_evidence;
+        if shared_evidence_text != "" {
+            evidence_file =
+                std::path::absolute(shared_evidence_text).display;
+        }
+    }
+    let owned_root = std::path::join(
+        repo,
+        "target/smoke/test-runs"
+    ).display;
+    let run_id =
+        "" + std::time::SystemTime::now().unix_millis + "-" +
+        "" + std::process::id();
+    let run_directory = std::path::join(
+        owned_root,
+        suite_text + "-" + run_id
+    ).display;
+    let workspace_directory =
+        std::path::join(run_directory, "workspace").display;
+    let settings_directory =
+        std::path::join(run_directory, "settings").display;
+    let instance_directory =
+        std::path::join(run_directory, "instances").display;
+    let evidence_directory =
+        std::path::join(run_directory, "evidence").display;
+    for directory in [
+        workspace_directory,
+        settings_directory,
+        instance_directory,
+        evidence_directory
+    ] {
+        std::fs::create_dir_all(directory);
+    }
+    let millis = 0 + std::time::SystemTime::now().unix_millis;
+    let pid = 0 + std::process::id();
+    let port = 20000 + ((millis + pid * 97) % 40000);
+    let evidence_path = std::path::join(
+        evidence_directory,
+        "emitted.txt"
+    ).display;
+    if evidence_file != "" {
+        evidence_path = evidence_file;
+    }
+    #{
+        schema_version: 1,
+        suite: suite_text,
+        run_id: run_id,
+        address: "127.0.0.1:" + "" + port,
+        owned_root: owned_root,
+        run_directory: run_directory,
+        workspace_path: std::path::join(
+            workspace_directory,
+            "workspace.json"
+        ).display,
+        settings_path: std::path::join(
+            settings_directory,
+            "settings.json"
+        ).display,
+        instance_directory: instance_directory,
+        evidence_path: evidence_path,
+        failure_directory: std::path::join(
+            run_directory,
+            "failure"
+        ).display,
+        command_log_path: std::path::join(
+            run_directory,
+            "commands.json"
+        ).display,
+        command_journal_path: std::path::join(
+            run_directory,
+            "commands.jsonl"
+        ).display,
+        cleanup_path: std::path::join(
+            run_directory,
+            "cleanup.json"
+        ).display,
+        manifest_path: std::path::join(
+            run_directory,
+            "manifest.json"
+        ).display
+    }
+}
+
+fn assert_owned_run(context) {
+    let parent = std::path::parent(context.run_directory).display;
+    require(
+        parent.to_lower() == context.owned_root.to_lower(),
+        "test_harness_run_outside_owned_root"
+    );
+    0
+}
+
+fn redact_text(source, redactions) {
+    let safe = "" + source;
+    for value in redactions {
+        let redaction = "" + value;
+        if redaction != "" {
+            safe.replace(redaction, "<redacted>");
+        }
+    }
+    safe
+}
+
+fn bounded_record_text(source, maximum_characters) {
+    let source_text = "" + source;
+    let limit = 0 + maximum_characters;
+    if source_text.len <= limit {
+        return source_text;
+    }
+    source_text.sub_string(0, limit) +
+        "\n<agenterm-command-output-truncated>\n"
+}
+
+fn configured_command(context, program, arguments) {
+    let command = std::process::command("" + program);
+    command.args(arguments);
+    command.env("AGENTERM_IPC_ADDRESS", "" + context.address);
+    command.env("AGENTERM_WORKSPACE_PATH", "" + context.workspace_path);
+    command.env("AGENTERM_SETTINGS_PATH", "" + context.settings_path);
+    command.env(
+        "AGENTERM_INSTANCE_DIR",
+        "" + context.instance_directory
+    );
+    command.env("AGENTERM_NO_ACTIVATE", "1");
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    command
+}
+
+fn append_command_record(
+    context,
+    arguments,
+    output,
+    expected_failure,
+    redactions
+) {
+    let safe_arguments = [];
+    let arg_idx = 0;
+    while arg_idx < arguments.len {
+        safe_arguments.push(
+            redact_text(arguments[arg_idx], redactions)
+        );
+        arg_idx = arg_idx + 1;
+    }
+    let expected_failure_flag = 0;
+    if expected_failure != 0 {
+        expected_failure_flag = 1;
+    }
+    let combined_output =
+        redact_text(
+            output.stdout_text() + output.stderr_text(),
+            redactions
+        );
+    let record = #{
+        recorded_at_utc: std::time::SystemTime::now().rfc3339,
+        arguments: safe_arguments,
+        expected_failure: expected_failure_flag != 0,
+        exit_code: output.exit_code,
+        output: bounded_record_text(
+            combined_output,
+            512
+        )
+    };
+    rhai::runtime::append_sync(
+        context.command_journal_path,
+        rhai::json::stringify(record) + "\n"
+    );
+    rhai::runtime::atomic_write(
+        context.command_log_path,
+        rhai::json::stringify_pretty([record]) + "\n"
+    );
+    0
+}
+
+fn finalize_command_log(context) {
+    if !std::fs::exists(context.command_journal_path) {
+        return 0;
+    }
+    if std::fs::metadata(context.command_journal_path).len > 196608 {
+        return 0;
+    }
+    let records = [];
+    for source_line in std::fs::read_to_string(
+        context.command_journal_path
+    ).split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            records.push(rhai::json::parse(line));
+        }
+    }
+    rhai::runtime::atomic_write(
+        context.command_log_path,
+        rhai::json::stringify(records) + "\n"
+    );
+    std::fs::remove_file(context.command_journal_path);
+    0
+}
+
+fn run_cli(context, cli, arguments, expected_failure, redactions) {
+    let command_arguments = ["--address", "" + context.address];
+    let arg_idx = 0;
+    while arg_idx < arguments.len {
+        command_arguments.push("" + arguments[arg_idx]);
+        arg_idx = arg_idx + 1;
+    }
+    let command = configured_command(
+        context,
+        cli,
+        command_arguments
+    );
+    command.timeout(std::time::Duration::from_secs(60));
+    let output = command.output();
+    append_command_record(
+        context,
+        arguments,
+        output,
+        expected_failure,
+        redactions
+    );
+    #{
+        success: output.success,
+        exit_code: output.exit_code,
+        stdout: output.stdout_text(),
+        stderr: output.stderr_text()
+    }
+}
+
+fn invoke_cli(context, cli, arguments, expected_failure, redactions) {
+    let output = run_cli(
+        context,
+        cli,
+        arguments,
+        expected_failure,
+        redactions
+    );
+    if expected_failure != 0 {
+        require(
+            !output.success,
+            "test_harness_cli_unexpected_success"
+        );
+    } else {
+        require(
+            output.success,
+            "test_harness_cli_failed:" +
+                redact_text(output.stderr, redactions)
+        );
+    }
+    #{
+        exit_code: output.exit_code,
+        stdout: output.stdout,
+        stderr: output.stderr
+    }
+}
+
+fn emit_evidence(context, declared, id) {
+    let id_text = "" + id;
+    let declared_ok = 0;
+    for declared_id in declared {
+        let declared_text = "" + declared_id;
+        if declared_text == id_text {
+            declared_ok = 1;
+        }
+    }
+    require(
+        declared_ok != 0,
+        "test_harness_undeclared_evidence:" + id_text
+    );
+    let existing = "";
+    if std::fs::exists(context.evidence_path) {
+        existing = std::fs::read_to_string(context.evidence_path);
+    }
+    for line in existing.split("\n") {
+        let seen = line;
+        seen.trim();
+        if seen == id_text {
+            return 0;
+        }
+    }
+    rhai::runtime::atomic_write(
+        context.evidence_path,
+        existing + id_text + "\n"
+    );
+    print("EVIDENCE " + id_text);
+    0
+}
+
+fn scrub_retained_text(context, redactions) {
+    assert_owned_run(context);
+    // DFS walk without stack pop: index cursor plus tail push for subdirs.
+    let pending = [context.run_directory];
+    let pending_idx = 0;
+    while pending_idx < pending.len {
+        let directory = pending[pending_idx];
+        pending_idx = pending_idx + 1;
+        for entry in std::fs::read_dir(directory) {
+            if entry.is_dir && !entry.is_symlink {
+                pending.push(entry.path.display);
+            } else if entry.is_file
+                    && (
+                        entry.file_name.ends_with(".json")
+                            || entry.file_name.ends_with(".txt")
+                            || entry.file_name.ends_with(".log")
+                    ) {
+                let entry_path = entry.path.display;
+                let source = std::fs::read_to_string(entry_path);
+                let safe = redact_text(source, redactions);
+                if safe != source {
+                    rhai::runtime::atomic_write(entry_path, safe);
+                }
+            }
+        }
+    }
+    0
+}
+
+fn complete_impl(
+    context,
+    owned_children,
+    succeeded,
+    failure,
+    announce_failure
+) {
+    assert_owned_run(context);
+    let forced = [];
+    let completed = [];
+    for source_child in owned_children {
+        let child = source_child;
+        let pid = child.id;
+        if child.state == "running" {
+            child.kill();
+            forced.push(pid);
+        }
+        child.wait_with_output(std::time::Duration::from_secs(2));
+        completed.push(pid);
+    }
+    let cleanup = #{
+        schema_version: 1,
+        orphan_free: true,
+        owned_count: owned_children.len,
+        completed_pids: completed,
+        forced_pids: forced,
+        remaining_pids: [],
+        remaining_windows: [],
+        remaining_registrations: []
+    };
+    finalize_command_log(context);
+    let diagnostics = [];
+    if succeeded == 0 {
+        std::fs::create_dir_all(context.failure_directory);
+        for entry in std::fs::read_dir(context.failure_directory) {
+            if entry.is_file {
+                diagnostics.push("" + entry.file_name);
+            }
+        }
+    }
+    let result_class = "failure";
+    if succeeded != 0 {
+        result_class = "success";
+    }
+    let failure_text = "" + failure;
+    let manifest = #{
+        schema_version: 1,
+        suite: context.suite,
+        run_id: context.run_id,
+        result_class: result_class,
+        failure: failure_text,
+        cleanup: cleanup,
+        command_log: std::path::PathBuf::from(
+            context.command_log_path
+        ).file_name,
+        evidence: std::path::PathBuf::from(
+            context.evidence_path
+        ).file_name,
+        diagnostics: diagnostics,
+        privacy: #{
+            command_arguments: "known content-bearing arguments redacted",
+            output_limit_bytes: 65536,
+            pane_capture: "disabled for this suite"
+        }
+    };
+    rhai::runtime::atomic_write(
+        context.cleanup_path,
+        rhai::json::stringify_pretty(cleanup) + "\n"
+    );
+    rhai::runtime::atomic_write(
+        context.manifest_path,
+        rhai::json::stringify_pretty(manifest) + "\n"
+    );
+    if succeeded == 0 && announce_failure != 0 {
+        print("FAILURE BUNDLE " + context.run_directory);
+    }
+    #{ cleanup: cleanup, manifest: manifest }
+}
+
+fn complete(context, owned_children, succeeded, failure) {
+    complete_impl(
+        context,
+        owned_children,
+        succeeded,
+        failure,
+        1
+    )
+}
+
+fn complete_quiet(context, owned_children, succeeded, failure) {
+    complete_impl(
+        context,
+        owned_children,
+        succeeded,
+        failure,
+        0
+    )
+}
+
+fn remove_run(context) {
+    assert_owned_run(context);
+    if std::fs::exists(context.run_directory) {
+        std::fs::remove_dir_all(context.run_directory);
+    }
+    0
+}

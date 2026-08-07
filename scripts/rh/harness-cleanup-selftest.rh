@@ -1,0 +1,109 @@
+// Prove exact child ownership, cleanup evidence, and original-failure retention.
+//
+// Args:
+//   REPO
+
+import "scripts/rh/lib/test_harness" as test_harness;
+
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: REPO");
+    }
+
+    let context = test_harness::new_context(
+        args[0],
+        "harness-cleanup-selftest"
+    );
+    let owned_command = std::process::command("cmd.exe");
+    owned_command.args([
+        "/d", "/s", "/c",
+        "ping -n 60 127.0.0.1 >nul"
+    ]);
+    owned_command.timeout(std::time::Duration::from_secs(60));
+    let unowned_command = std::process::command("cmd.exe");
+    unowned_command.args([
+        "/d", "/s", "/c",
+        "ping -n 60 127.0.0.1 >nul"
+    ]);
+    unowned_command.timeout(std::time::Duration::from_secs(60));
+    let owned = owned_command.start();
+    let unowned = unowned_command.start();
+    let owned_pid = owned.id;
+    let unowned_pid = unowned.id;
+    let marker = "original-fixture-failure-must-survive-cleanup";
+    let succeeded = 0;
+    let failure = "";
+
+    if failure == "" {
+        let verbose_command = std::process::command("cmd.exe");
+        verbose_command.args([
+            "/d", "/s", "/c",
+            "for /L %i in (1,1,1000) do @echo diagnostic-line-%i-abcdefghijklmnopqrstuvwxyz"
+        ]);
+        verbose_command.capture_limit(65536);
+        let verbose = verbose_command.output();
+        if !verbose.success {
+            failure = "harness_verbose_fixture";
+        } else {
+            test_harness::append_command_record(
+                context,
+                ["verbose-diagnostic-fixture"],
+                verbose,
+                0,
+                []
+            );
+            let command_log =
+                std::fs::read_to_string(context.command_log_path);
+            if command_log.contains("<agenterm-command-output-truncated>")
+                    && std::fs::metadata(context.command_log_path).len < 8192 {
+                let proof = test_harness::complete_quiet(
+                    context,
+                    [owned],
+                    0,
+                    marker
+                );
+                if owned.state != "exited" {
+                    failure = "harness_owned_child_survived";
+                } else if unowned.state != "running" {
+                    failure = "harness_killed_unowned_child";
+                } else if !proof.cleanup.orphan_free
+                        || !proof.cleanup.forced_pids.contains(owned_pid)
+                        || proof.cleanup.forced_pids.contains(unowned_pid)
+                        || !proof.manifest.failure.contains(marker) {
+                    failure = "harness_cleanup_proof_incomplete";
+                } else {
+                    let cleanup =
+                        rhai::json::parse_file(context.cleanup_path);
+                    let manifest =
+                        rhai::json::parse_file(context.manifest_path);
+                    if !cleanup.orphan_free
+                            || !cleanup.forced_pids.contains(owned_pid)
+                            || cleanup.forced_pids.contains(unowned_pid)
+                            || !manifest.cleanup.orphan_free
+                            || !manifest.failure.contains(marker) {
+                        failure = "harness_persisted_proof_incomplete";
+                    } else {
+                        succeeded = 1;
+                    }
+                }
+            } else {
+                failure = "harness_command_record_not_bounded";
+            }
+        }
+    }
+
+    if unowned.state == "running" {
+        unowned.kill();
+        unowned.wait_with_output(std::time::Duration::from_secs(2));
+    }
+    if owned.state == "running" {
+        owned.kill();
+        owned.wait_with_output(std::time::Duration::from_secs(2));
+    }
+    test_harness::remove_run(context);
+    if succeeded == 0 {
+        throw failure;
+    }
+    print("PASS: harness cleanup ownership and orphan proof");
+    0
+}
