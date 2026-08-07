@@ -74,7 +74,9 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "rhai.runtime.atomic_write",
     "rhai.runtime.temp_dir",
     "rhai.hash.fnv1a64",
+    "rhai.task.sleep",
     "rh.fail",
+    "string_split",
 ];
 
 fn shipped(path: &str) -> bool {

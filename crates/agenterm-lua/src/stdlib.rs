@@ -45,6 +45,18 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     )?;
     rhai_table.set("hash", hash_table)?;
 
+    // rhai::task table
+    let task_table = lua.create_table()?;
+    task_table.set(
+        "sleep",
+        lua.create_function(|_lua, ms: i64| {
+            let duration = std::time::Duration::from_millis(ms.max(0) as u64);
+            std::thread::sleep(duration);
+            Ok(0)
+        })?,
+    )?;
+    rhai_table.set("task", task_table)?;
+
     lua.globals().set("rhai", rhai_table)?;
 
     // rh::fail global
@@ -56,6 +68,24 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
                 Err(mlua::Error::runtime(format!("rh_fail: {msg}")))
             })?,
         )])?,
+    )?;
+
+    // string.split(s, delim) → table (1-indexed array)
+    lua.globals().set(
+        "string_split",
+        lua.create_function(|lua, (s, delim): (String, String)| {
+            if delim.is_empty() {
+                let t = lua.create_table()?;
+                t.set(1, s)?;
+                return Ok(t);
+            }
+            let parts: Vec<&str> = s.split(&delim).collect();
+            let t = lua.create_table()?;
+            for (i, part) in parts.iter().enumerate() {
+                t.set(i + 1, *part)?;
+            }
+            Ok(t)
+        })?,
     )?;
 
     Ok(())
@@ -1358,6 +1388,76 @@ mod tests {
         if let Ok(r) = r {
             assert_eq!(r.value, 1, "expected rh.fail to trigger error");
         }
+    }
+
+    // ── sleep / split ──────────────────────────────────────────────
+
+    #[test]
+    fn task_sleep_returns_zero() {
+        let e = engine();
+        let r = e.eval("return rhai.task.sleep(10)", &host()).expect("sleep");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn task_sleep_respects_minimum_time() {
+        use std::time::Instant;
+        let e = engine();
+        let start = Instant::now();
+        let r = e.eval("return rhai.task.sleep(100)", &host()).expect("sleep");
+        let elapsed = start.elapsed().as_millis();
+        assert_eq!(r.value, 0);
+        assert!(elapsed >= 90, "sleep should take at least ~90ms, got {elapsed}ms");
+    }
+
+    #[test]
+    fn string_split_comma() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('a,b,c', ','); return #parts",
+            &host(),
+        ).expect("split");
+        assert_eq!(r.value, 3);
+    }
+
+    #[test]
+    fn string_split_no_delimiter() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('hello', ','); return #parts",
+            &host(),
+        ).expect("split");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_empty_delimiter() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('hello', ''); return #parts",
+            &host(),
+        ).expect("split empty delim");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_empty_string() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('', ','); return #parts",
+            &host(),
+        ).expect("split empty");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_index_access() {
+        let e = engine();
+        let r = e.eval(
+            "local p = string_split('x,y,z', ','); return p[2] == 'y' and 1 or 0",
+            &host(),
+        ).expect("split index");
+        assert_eq!(r.value, 1);
     }
 
     // ── fnv1a64 ─────────────────────────────────────────────────────
