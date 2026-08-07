@@ -243,8 +243,7 @@ fn main() {
         app.rows = rows.max(2);
     }
     let options = PixelWindowOptions::new("agenterm-con", LogicalSize::new(960.0, 600.0))
-        .with_no_activate(no_activate)
-        .with_ime_allowed(true);
+        .with_no_activate(no_activate);
 
     if let Err(error) = run_pixel_window(options, Box::new(app)) {
         let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
@@ -580,6 +579,8 @@ impl PixelWindowApplication for ConTerminal {
         self.recompute_metrics(scale);
         self.scale = scale;
         window.set_title(&format!("agenterm-con — {}", font::resolved_name()));
+        // Request keyboard focus so winit delivers KeyboardInput events on Windows.
+        window.focus();
         let (cols, rows) =
             Self::compute_grid(metrics.physical_width, metrics.physical_height, self.cell_w, self.cell_h);
         self.cols = cols;
