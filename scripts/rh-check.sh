@@ -21,6 +21,7 @@ cargo test --locked \
   --test rh_framed_worker \
   --test rh_cli_forward \
   --test rh_standalone_cli \
+  --test rh_native_task \
   --test script_check_many \
   --test performance_experiment_policy
 

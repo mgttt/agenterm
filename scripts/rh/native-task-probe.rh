@@ -1,0 +1,11 @@
+fn entry() {
+    let total = 0;
+    for value in 1..5 {
+        total += value;
+    }
+    total
+}
+
+fn cc_lines() {
+    ["rh native named-task probe"]
+}

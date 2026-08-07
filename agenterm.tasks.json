@@ -522,6 +522,13 @@
       "network": [],
       "evidence": ["task.rh-aot-smoke"]
     },
+    "rh-native-task-probe": {
+      "inputs": ["rh-native-task-runtime"],
+      "outputs": ["native-entry-value", "native-pack-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.rh-native-task-probe"]
+    },
     "package-client-release": {
       "inputs": ["target-client-binaries", "artifact-manifest", "platform-adapters"],
       "outputs": ["platform-release-archive", "archive-provenance", "archive-checksum"],
@@ -1208,6 +1215,16 @@
       "dependencies": ["client-build"],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
+      "id": "rh-native-task-probe",
+      "description": "Prove one manifest-owned .rh task executes as a native pack without whole-script compatibility",
+      "entry": "scripts/rh/native-task-probe.rh",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": []
     },
     {
       "id": "package-client-release",

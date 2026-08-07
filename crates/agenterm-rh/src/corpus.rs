@@ -1,4 +1,4 @@
-//! Scan production `.rhai` scripts for rh subset compatibility (report-only).
+//! Scan production `.rhai`/`.rh` scripts for rh subset compatibility (report-only).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -72,9 +72,9 @@ pub fn extract_task_entries(manifest_path: &Path) -> Result<Vec<String>, RhError
     }
     let mut entries = HashSet::new();
     for task in manifest.tasks {
-        if !task.entry.ends_with(".rhai") {
+        if !task.entry.ends_with(".rhai") && !task.entry.ends_with(".rh") {
             return Err(RhError::Parse(format!(
-                "task entry must be a .rhai path: {}",
+                "task entry must be a .rhai or .rh path: {}",
                 task.entry
             )));
         }

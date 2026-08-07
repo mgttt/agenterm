@@ -35,6 +35,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   invalid host registration fails closed, callback errors retain the shared
   typed host-error path, and older v2/v3 packs remain loadable. Dynamic path
   expressions and other `std::` APIs remain explicit migration work.
+- [x] named-task manifests and corpus checks accept `.rh` entries. The public
+  `agenterm-rh task run` path owns a native task probe whose transpiled Rust is
+  qualified to contain neither whole-script `rh_host_run_script` nor localized
+  `rh_host_eval_int`; production task migration must satisfy the same gate
+  before its `.rhai` entry is archived.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
