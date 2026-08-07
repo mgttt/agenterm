@@ -992,13 +992,25 @@ fn json_value_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'
         }
         Expr::Dot(boxed, ..) => {
             let (binding, mut path) = json_value_path(&boxed.lhs, ctx)?;
-            let Expr::Property(property, ..) = &boxed.rhs else {
+            if !append_json_properties(&boxed.rhs, &mut path) {
                 return None;
-            };
-            path.push(property.2.as_str());
+            }
             Some((binding, path))
         }
         _ => None,
+    }
+}
+
+fn append_json_properties<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> bool {
+    match expr {
+        Expr::Property(property, ..) => {
+            path.push(property.2.as_str());
+            true
+        }
+        Expr::Dot(boxed, ..) => {
+            append_json_properties(&boxed.lhs, path) && append_json_properties(&boxed.rhs, path)
+        }
+        _ => false,
     }
 }
 
@@ -1006,14 +1018,19 @@ fn json_array_len_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Ve
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
-    let is_len = matches!(
-        &boxed.rhs,
-        Expr::Property(property, ..) if property.2.as_str() == "len"
-    ) || matches!(
-        &boxed.rhs,
-        Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
-    );
-    is_len.then(|| json_value_path(&boxed.lhs, ctx)).flatten()
+    let (binding, mut path) = json_value_path(&boxed.lhs, ctx)?;
+    append_json_array_len(&boxed.rhs, &mut path).then_some((binding, path))
+}
+
+fn append_json_array_len<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> bool {
+    match expr {
+        Expr::Property(property, ..) if property.2.as_str() == "len" => true,
+        Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty() => true,
+        Expr::Dot(boxed, ..) => {
+            append_json_properties(&boxed.lhs, path) && append_json_array_len(&boxed.rhs, path)
+        }
+        _ => false,
+    }
 }
 
 fn emit_json_path(out: &mut String, path: &[&str]) {
