@@ -528,7 +528,6 @@ impl ConTerminal {
         }
 
         if let Some(bytes) = key_to_bytes(event) {
-            let _ = std::fs::OpenOptions::new().create(true).append(true).open("con-key.log").and_then(|mut f| std::io::Write::write_all(&mut f, format!("[key] {:?} mods={:?} -> {} bytes\n", event.logical, event.modifiers, bytes.len()).as_bytes()));
             if let Some(master) = &self.master {
                 let _ = master.write_all(&bytes);
             }

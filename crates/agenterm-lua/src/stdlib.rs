@@ -207,6 +207,37 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
+    // std.fs.read_dir(path) → array of {name, is_file, is_dir, path}
+    fs.set(
+        "read_dir",
+        lua.create_function(|lua, path: String| {
+            let entries: Vec<serde_json::Value> = std::fs::read_dir(&path)
+                .map_err(|e| mlua::Error::runtime(format!("fs_read_dir: {e}")))?
+                .filter_map(|entry| entry.ok())
+                .map(|entry| {
+                    let ft = entry.file_type().unwrap_or(std::fs::FileType::new());
+                    serde_json::json!({
+                        "name": entry.file_name().to_string_lossy(),
+                        "is_file": ft.is_file(),
+                        "is_dir": ft.is_dir(),
+                        "path": entry.path().to_string_lossy().into_owned(),
+                    })
+                })
+                .collect();
+            lua.to_value(&entries)
+        })?,
+    )?;
+
+    // std.fs.remove_file(path) → true | nil, err
+    fs.set(
+        "remove_file",
+        lua.create_function(|_lua, path: String| {
+            std::fs::remove_file(&path)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_remove_file: {e}")))
+        })?,
+    )?;
+
     Ok(fs)
 }
 

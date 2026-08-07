@@ -17,6 +17,22 @@
 //! "capability alignment" requires (see PRD "capability alignment" scope
 //! note). What both interpreted engines (lua, qjs) need instead is a
 //! same-shape *in-process callback* binding, which is what this module is.
+//!
+//! **Memory-safety note (found the hard way, not by inspection):** every
+//! bound closure below takes its `Ctx<'js>` as a *per-call parameter*
+//! (`rquickjs::function::Params`/`FromParam` supplies a fresh one on each
+//! invocation), never captured into the closure's environment. Capturing a
+//! `ctx.clone()` before `Function::new` — the first version of this file
+//! did exactly that, to have something to hand `Exception::throw_message`
+//! in the error path — creates a reference cycle QuickJS-ng's GC cannot
+//! collect: the closure lives inside the JS heap (as a Function value) and
+//! also holds a Rust-level handle back into the same context, so
+//! `Runtime::drop` finds objects still alive and hits
+//! `Assertion failed: list_empty(&rt->gc_obj_list)`, which crashes the
+//! *whole process* (`STATUS_STACK_BUFFER_OVERRUN`), not just the request.
+//! Reproduced with a 15-line minimal case during QJS-M2 before landing this
+//! fix — this is exactly why "unrestricted"/host-callback binding code
+//! needs real tests, not just "it compiled."
 
 use std::sync::{Arc, Mutex};
 
@@ -51,12 +67,10 @@ pub fn inject_host<'js>(
     let host_object = Object::new(ctx.clone()).map_err(js_err)?;
 
     if let Some(fleet_call) = host.fleet_call.clone() {
-        let bound_ctx = ctx.clone();
         let func = Function::new(
             ctx.clone(),
-            move |op_id: String, params: String| -> rquickjs::Result<String> {
-                fleet_call(&op_id, &params)
-                    .map_err(|err| Exception::throw_message(&bound_ctx, &err))
+            move |call_ctx: Ctx<'_>, op_id: String, params: String| -> rquickjs::Result<String> {
+                fleet_call(&op_id, &params).map_err(|err| Exception::throw_message(&call_ctx, &err))
             },
         )
         .map_err(js_err)?;
@@ -69,11 +83,10 @@ pub fn inject_host<'js>(
     }
 
     if let Some(arg) = host.arg.clone() {
-        let bound_ctx = ctx.clone();
         let func = Function::new(
             ctx.clone(),
-            move |index: i64| -> rquickjs::Result<String> {
-                arg(index).map_err(|err| Exception::throw_message(&bound_ctx, &err))
+            move |call_ctx: Ctx<'_>, index: i64| -> rquickjs::Result<String> {
+                arg(index).map_err(|err| Exception::throw_message(&call_ctx, &err))
             },
         )
         .map_err(js_err)?;
