@@ -69,7 +69,7 @@ fn print_stmt(out: &mut String, stmt: &Stmt, trailing_semi: bool) -> Result<(), 
                 out.push_str(index.name.as_str());
             }
             out.push_str(" in ");
-            print_expr(out, &flow.expr)?;
+            print_for_iterable(out, &flow.expr)?;
             out.push_str(" { ");
             print_block(out, &flow.body, true)?;
             out.push('}');
@@ -214,6 +214,23 @@ fn print_expr(out: &mut String, expr: &Expr) -> Result<(), RhError> {
     Ok(())
 }
 
+fn print_for_iterable(out: &mut String, expr: &Expr) -> Result<(), RhError> {
+    if let Expr::FnCall(call, ..) = expr
+        && call.args.len() == 2
+    {
+        match call.op_token {
+            Some(Token::ExclusiveRange) => {
+                return range_inner(out, "..", &call.args[0], &call.args[1]);
+            }
+            Some(Token::InclusiveRange) => {
+                return range_inner(out, "..=", &call.args[0], &call.args[1]);
+            }
+            _ => {}
+        }
+    }
+    print_expr(out, expr)
+}
+
 fn print_call(out: &mut String, call: &FnCallExpr) -> Result<(), RhError> {
     if let Some(op) = &call.op_token {
         return print_op(out, op, &call.args);
@@ -249,6 +266,8 @@ fn print_op(out: &mut String, op: &Token, args: &[Expr]) -> Result<(), RhError> 
         (Token::LessThanEqualsTo, 2) => binary(out, "<=", &args[0], &args[1]),
         (Token::And, 2) => binary(out, "&&", &args[0], &args[1]),
         (Token::Or, 2) => binary(out, "||", &args[0], &args[1]),
+        (Token::ExclusiveRange, 2) => range(out, "..", &args[0], &args[1]),
+        (Token::InclusiveRange, 2) => range(out, "..=", &args[0], &args[1]),
         (Token::Minus, 1) => {
             out.push_str("(-(");
             print_expr(out, &args[0])?;
@@ -275,6 +294,20 @@ fn binary(out: &mut String, op: &str, lhs: &Expr, rhs: &Expr) -> Result<(), RhEr
     out.push(' ');
     print_expr(out, rhs)?;
     out.push(')');
+    Ok(())
+}
+
+fn range(out: &mut String, op: &str, start: &Expr, end: &Expr) -> Result<(), RhError> {
+    out.push('(');
+    range_inner(out, op, start, end)?;
+    out.push(')');
+    Ok(())
+}
+
+fn range_inner(out: &mut String, op: &str, start: &Expr, end: &Expr) -> Result<(), RhError> {
+    print_expr(out, start)?;
+    out.push_str(op);
+    print_expr(out, end)?;
     Ok(())
 }
 
@@ -369,7 +402,7 @@ pub fn is_pure_int_expr(expr: &Expr) -> bool {
 mod tests {
     use rhai::Engine;
 
-    use super::{expr_to_rhai, is_pure_int_expr, is_var_len_expr, uses_host_surface};
+    use super::{expr_to_rhai, is_pure_int_expr, is_var_len_expr, stmt_to_rhai, uses_host_surface};
 
     fn parse_expr(source: &str) -> rhai::Expr {
         let wrapped = format!("fn probe() {{ {source} }}");
@@ -380,6 +413,34 @@ mod tests {
             rhai::Stmt::FnCall(call, ..) => rhai::Expr::FnCall(call.clone(), rhai::Position::NONE),
             other => panic!("unexpected stmt: {other:?}"),
         }
+    }
+
+    fn parse_stmt(source: &str) -> rhai::Stmt {
+        let wrapped = format!("fn probe() {{ {source} }}");
+        let ast = Engine::new().compile(wrapped).expect("compile");
+        let def = ast.iter_fn_def().next().expect("fn");
+        def.body.iter().next().expect("stmt").clone()
+    }
+
+    #[test]
+    fn prints_range_expressions_with_preserved_precedence() {
+        assert_eq!(
+            expr_to_rhai(&parse_expr("start + 2 .. end * 4")).expect("exclusive range"),
+            "((start + 2)..(end * 4))"
+        );
+        assert_eq!(
+            expr_to_rhai(&parse_expr("start + 2 ..= end * 4")).expect("inclusive range"),
+            "((start + 2)..=(end * 4))"
+        );
+    }
+
+    #[test]
+    fn prints_for_statement_with_range_expression() {
+        let stmt = parse_stmt("for n in 0..limit { print(n); }");
+        assert_eq!(
+            stmt_to_rhai(&stmt).expect("for statement"),
+            "for n in 0..limit { print(n)}"
+        );
     }
 
     #[test]
