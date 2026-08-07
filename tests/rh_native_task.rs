@@ -297,14 +297,34 @@ fn native_internal_version_policy_rejects_governed_git_tag() {
     ]);
     git(&["tag", "v0.1.7"]);
 
+    let mut manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("task manifest"),
+    )
+    .expect("task manifest JSON");
+    let task = manifest["tasks"]
+        .as_array_mut()
+        .expect("tasks")
+        .iter_mut()
+        .find(|task| task["id"] == "internal-version-policy")
+        .expect("internal version task");
+    task["args"] = serde_json::json!([fixture.to_string_lossy()]);
+    let test_manifest = repo.join(format!(
+        ".agenterm-internal-version-policy-test-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &test_manifest,
+        serde_json::to_vec_pretty(&manifest).expect("encode task manifest"),
+    )
+    .expect("write task manifest");
     let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(&repo)
-        .arg("run")
-        .arg(repo.join("scripts/rh/internal-version-policy.rh"))
-        .args(["--project-root", ".", "--json", "--"])
-        .arg(&fixture)
+        .args(["task", "run", "internal-version-policy", "--manifest"])
+        .arg(&test_manifest)
+        .arg("--json")
         .output()
         .expect("run governed version fixture");
+    let _ = std::fs::remove_file(&test_manifest);
     let _ = std::fs::remove_dir_all(&fixture);
     assert_eq!(
         output.status.code(),
