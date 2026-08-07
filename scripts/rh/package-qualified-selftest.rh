@@ -4,9 +4,17 @@
 
 import "scripts/rh/lib/package_qualified" as package_qualified;
 
+fn assert_ok(condition, message) {
+    if condition == 0 {
+        throw message;
+    } else {
+        0;
+    }
+}
+
 fn file_size(path, code) {
-    require(
-        std::fs::exists(path) && std::fs::metadata(path).is_file,
+    assert_ok(
+        std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
         code + ":" + path
     );
     std::fs::metadata(path).len
@@ -15,8 +23,8 @@ fn file_size(path, code) {
 fn cleanup_fixture(fixture, owned_root) {
     let resolved = std::path::absolute(fixture).display;
     let owned_absolute = std::path::absolute(owned_root).display;
-    require(
-        resolved.starts_with(owned_absolute),
+    assert_ok(
+        resolved.starts_with(owned_absolute) != 0,
         "package_selftest_fixture_outside_owned_root"
     );
     if std::fs::exists(resolved) {
@@ -34,7 +42,7 @@ fn cleanup_fixture(fixture, owned_root) {
             #{}
         );
         std::fs::try_remove_file(cleanup_stdout);
-        require(
+        assert_ok(
             cleanup_code == 0,
             "package_selftest_fixture_cleanup"
         );
@@ -113,7 +121,7 @@ fn entry() {
     );
     if init_code != 0 {
         let error_text = std::fs::read_to_string(init_stdout_path);
-        require(0, "package_fixture_init:" + error_text);
+        assert_ok(0, "package_fixture_init:" + error_text);
     }
     std::fs::try_remove_file(init_stdout_path);
 
@@ -127,7 +135,7 @@ fn entry() {
     );
     if add_code != 0 {
         let error_text = std::fs::read_to_string(add_stdout_path);
-        require(0, "package_fixture_add:" + error_text);
+        assert_ok(0, "package_fixture_add:" + error_text);
     }
     std::fs::try_remove_file(add_stdout_path);
 
@@ -146,7 +154,7 @@ fn entry() {
     );
     if commit_code != 0 {
         let error_text = std::fs::read_to_string(commit_stdout_path);
-        require(0, "package_fixture_commit:" + error_text);
+        assert_ok(0, "package_fixture_commit:" + error_text);
     }
     std::fs::try_remove_file(commit_stdout_path);
 
@@ -160,7 +168,7 @@ fn entry() {
     );
     if head_code != 0 {
         let error_text = std::fs::read_to_string(head_stdout_path);
-        require(0, "package_fixture_head:" + error_text);
+        assert_ok(0, "package_fixture_head:" + error_text);
     }
     let head = std::fs::read_to_string(head_stdout_path);
     head.trim();
@@ -277,9 +285,9 @@ fn entry() {
     let archive_exists = std::fs::exists(archive);
     let archive_hash = rhai::crypto::sha256_file(archive);
     let result_hash = "" + result.archive_sha256;
-    require(
+    assert_ok(
         result.dry_run == 1
-            && archive_exists == 1
+            && archive_exists != 0
             && result_hash == archive_hash,
         "package_selftest_result_incomplete"
     );
@@ -293,7 +301,7 @@ fn entry() {
     );
     if tar_code != 0 {
         let tar_error = std::fs::read_to_string(tar_stdout);
-        require(0, "package_selftest_archive_list:" + tar_error);
+        assert_ok(0, "package_selftest_archive_list:" + tar_error);
     }
     let listing = std::fs::read_to_string(tar_stdout);
     listing.trim();
@@ -318,8 +326,8 @@ fn entry() {
     expected_names.push("LICENSE-MIT");
     expected_names.push("THIRD_PARTY_NOTICES.md");
     expected_names.push("package-manifest.json");
-    require(
-        package_qualified::exact_values(expected_names, archive_names),
+    assert_ok(
+        package_qualified::exact_values(expected_names, archive_names) != 0,
         "package_selftest_archive_members"
     );
 
@@ -352,11 +360,11 @@ fn entry() {
     let release_archive_hash =
         rhai::crypto::sha256_file(release_archive);
     let release_result_hash = "" + release_result.archive_sha256;
-    require(
+    assert_ok(
         release_result.dry_run == 0
             && release_manifest.dry_run == 0
-            && !release_archive_name.contains("dry-run")
-            && release_archive_exists == 1
+            && release_archive_name.contains("dry-run") == 0
+            && release_archive_exists != 0
             && release_result_hash == release_archive_hash,
         "package_selftest_release_result_incomplete"
     );
@@ -388,7 +396,7 @@ fn entry() {
         "target/qualification/receipt.json",
         "target/qualification/rejected-cargo"
     );
-    require(
+    assert_ok(
         reject_cargo_code != 0,
         "package_selftest_expected_rejection:package_receipt_cargo_lock_hash"
     );
@@ -419,7 +427,7 @@ fn entry() {
         "target/qualification/receipt.json",
         "target/qualification/rejected-manifest"
     );
-    require(
+    assert_ok(
         reject_manifest_code != 0,
         "package_selftest_expected_rejection:package_receipt_artifact_manifest_hash"
     );
@@ -440,7 +448,7 @@ fn entry() {
         "target/qualification/receipt.json",
         "target/qualification/rejected-output"
     );
-    require(
+    assert_ok(
         reject_output_code != 0,
         "package_selftest_expected_rejection:package_executable_hash:" +
             first_name
@@ -471,7 +479,7 @@ fn entry() {
         "target/qualification/receipt.json",
         "target/qualification/rejected-head"
     );
-    require(
+    assert_ok(
         reject_head_code != 0,
         "package_selftest_expected_rejection:package_receipt_head_mismatch"
     );
@@ -494,32 +502,32 @@ fn entry() {
         std::fs::read_to_string(release_qualified_path);
     let source =
         lib_source + qualified_source + release_qualified_source;
-    require(
-        !source.contains("build.bat"),
+    assert_ok(
+        source.contains("build.bat") == 0,
         "package_selftest_forbidden_action:build.bat"
     );
-    require(
-        !source.contains("cargo build"),
+    assert_ok(
+        source.contains("cargo build") == 0,
         "package_selftest_forbidden_action:cargo build"
     );
-    require(
-        !source.contains("git tag"),
+    assert_ok(
+        source.contains("git tag") == 0,
         "package_selftest_forbidden_action:git tag"
     );
-    require(
-        !source.contains("git push"),
+    assert_ok(
+        source.contains("git push") == 0,
         "package_selftest_forbidden_action:git push"
     );
-    require(
-        !source.contains("gh release"),
+    assert_ok(
+        source.contains("gh release") == 0,
         "package_selftest_forbidden_action:gh release"
     );
-    require(
-        !source.contains("release.cmd"),
+    assert_ok(
+        source.contains("release.cmd") == 0,
         "package_selftest_forbidden_action:release.cmd"
     );
-    require(
-        !source.contains("scripts/rhai/release.rhai"),
+    assert_ok(
+        source.contains("scripts/rhai/release.rhai") == 0,
         "package_selftest_forbidden_action:scripts/rhai/release.rhai"
     );
 

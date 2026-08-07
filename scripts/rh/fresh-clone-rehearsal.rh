@@ -9,7 +9,7 @@
 // it from release qualification would recurse. It is a final, clean-checkout
 // delivery proof owned by the caller.
 
-fn require(condition, message) {
+fn assert_ok(condition, message) {
     if condition == 0 {
         throw message;
     } else {
@@ -40,7 +40,7 @@ fn checked_output(program, arguments, cwd, timeout_ms, code) {
     command.timeout(std::time::Duration::from_millis(timeout_ms));
     command.capture_limit(262144);
     let output = command.output();
-    require(
+    assert_ok(
         output.success,
         code + ":exit=" + output.exit_code
     );
@@ -64,7 +64,7 @@ fn package_version(repo) {
             in_package = line == "[package]";
         } else if in_package && line.starts_with("version") {
             let pieces = line.split("\"");
-            require(pieces.len >= 2, "fresh_clone_version_parse");
+            assert_ok(pieces.len >= 2, "fresh_clone_version_parse");
             return pieces[1];
         }
     }
@@ -125,7 +125,7 @@ fn observe_descendants(root_id, owned_ids, identities) {
         }
         let identity = process_key(process);
         if identities.contains(id) {
-            require(
+            assert_ok(
                 identities[id] == identity,
                 "fresh_clone_process_id_reused:" + id
             );
@@ -189,13 +189,13 @@ fn exact_terminal_payload(observed, typed) {
     let second = typed;
     first.sort();
     second.sort();
-    require(
+    assert_ok(
         first.len == second.len && first.len <= 1,
         "fresh_clone_terminal_payload_not_unique:" +
             first.len + ":" + second.len
     );
     if first.len == 1 {
-        require(
+        assert_ok(
             first[0] == second[0],
             "fresh_clone_untyped_powershell:" +
                 joined(first) + ":" + joined(second)
@@ -211,7 +211,7 @@ fn exact_terminal_payload(observed, typed) {
 fn release_archive_path(report) {
     let archive_name =
         std::path::PathBuf::from(report.archive).file_name;
-    require(
+    assert_ok(
         archive_name == report.archive,
         "fresh_clone_package_archive_name"
     );
@@ -221,7 +221,7 @@ fn release_archive_path(report) {
 fn remove_owned_clone(qualification_root, clone) {
     let owner = std::path::absolute(qualification_root).display;
     let target = std::path::absolute(clone).display;
-    require(
+    assert_ok(
         std::path::parent(target).display.to_lower() == owner.to_lower()
             && std::path::PathBuf::from(target).file_name.starts_with(
                 "fresh-clone-owned-"
@@ -231,7 +231,7 @@ fn remove_owned_clone(qualification_root, clone) {
     if std::fs::exists(target) {
         std::fs::remove_dir_all(target);
     }
-    require(!std::fs::exists(target), "fresh_clone_cleanup_failed:" + target);
+    assert_ok(!std::fs::exists(target), "fresh_clone_cleanup_failed:" + target);
 }
 
 fn terminate_observed_processes(identities) {
@@ -279,13 +279,13 @@ fn rejection_contains(expected, action) {
     try {
         action.call();
     } catch (error) {
-        require(
+        assert_ok(
             error.to_string().contains(expected),
             "fresh_clone_selftest_wrong_rejection:" + error
         );
         rejected = 1;
     }
-    require(rejected, "fresh_clone_selftest_expected_rejection:" + expected);
+    assert_ok(rejected, "fresh_clone_selftest_expected_rejection:" + expected);
 }
 
 fn entry() {
@@ -297,9 +297,9 @@ if self_test {
         [terminal_compatibility_executable() + ":101"],
         [terminal_compatibility_executable() + ":101"]
     );
-    require(accepted.observed.len == 1, "fresh_clone_selftest_accept");
+    assert_ok(accepted.observed.len == 1, "fresh_clone_selftest_accept");
     let absent = exact_terminal_payload([], []);
-    require(absent.observed.len == 0, "fresh_clone_selftest_absent");
+    assert_ok(absent.observed.len == 0, "fresh_clone_selftest_absent");
     rejection_contains(
         "fresh_clone_untyped_powershell",
         || exact_terminal_payload(
@@ -321,7 +321,7 @@ if self_test {
         archive: "candidate.zip",
         package_directory: std::env::current_dir().display
     });
-    require(
+    assert_ok(
         std::path::PathBuf::from(archive).file_name == "candidate.zip",
         "fresh_clone_selftest_archive"
     );
@@ -336,8 +336,8 @@ if self_test {
     return;
 }
 
-require(args.len <= 1, "expected: [REPO]");
-require(
+assert_ok(args.len <= 1, "expected: [REPO]");
+assert_ok(
     !std::env::has("AGENTERM_FRESH_CLONE_REHEARSAL_ACTIVE"),
     "fresh_clone_recursive_invocation"
 );
@@ -351,12 +351,12 @@ let source =
             std::env::current_dir().display
         }
     ).display;
-require(
+assert_ok(
     git(source, ["branch", "--show-current"], "fresh_clone_source_branch")
         == "main",
     "fresh_clone_source_not_main"
 );
-require(
+assert_ok(
     git(
         source,
         ["status", "--porcelain", "--untracked-files=all"],
@@ -495,7 +495,7 @@ try {
         ["remote", "set-url", "--push", "origin", push_origin],
         "fresh_clone_restore_push_origin"
     );
-    require(
+    assert_ok(
         git(clone, ["remote", "get-url", "origin"], "fresh_clone_origin_check")
             == origin
             && git(
@@ -506,7 +506,7 @@ try {
         "fresh_clone_origin_not_restored"
     );
     evidence.origin_restored = 1;
-    require(
+    assert_ok(
         git(clone, ["rev-parse", "HEAD"], "fresh_clone_head") == head
             && git(
                 clone,
@@ -527,7 +527,7 @@ try {
         !std::fs::exists(clone_target);
     evidence.initial_artifacts.dist_absent =
         !std::fs::exists(clone_dist);
-    require(
+    assert_ok(
         evidence.initial_artifacts.target_absent
             && evidence.initial_artifacts.dist_absent,
         "fresh_clone_preexisting_artifacts"
@@ -626,7 +626,7 @@ try {
     }
     let result =
         child.wait_with_output(std::time::Duration::from_secs(10));
-    require(
+    assert_ok(
         result.success,
         "fresh_clone_release_failed:" +
             if std::fs::exists(stderr_path) {
@@ -636,7 +636,7 @@ try {
             }
     );
 
-    require(
+    assert_ok(
         evidence.process_observation.scan_count > 0
             && unique.keys().len > 2
             && evidence.stage0.target_observed_at_ms != ()
@@ -655,7 +655,7 @@ try {
             clone_target,
             "qualification/release-rehearsal.json"
         ).display;
-    require(
+    assert_ok(
         std::fs::exists(receipt_path) && std::fs::exists(release_path),
         "fresh_clone_delivery_evidence_missing"
     );
@@ -673,7 +673,7 @@ try {
             evidence.qualification.all_passed = 0;
         }
     }
-    require(
+    assert_ok(
         receipt.gates.len == 34
             && evidence.qualification.all_passed
             && receipt.release
@@ -683,7 +683,7 @@ try {
         "fresh_clone_qualification_invalid"
     );
     evidence.delivery_sequence.push("qualification_34_of_34");
-    require(
+    assert_ok(
         receipt.process_observation.automation_processes.len == 0,
         "fresh_clone_inner_automation_powershell"
     );
@@ -693,14 +693,14 @@ try {
             receipt.process_observation.terminal_compatibility_payloads
         );
 
-    require(
+    assert_ok(
         release_report.mode == "rehearse"
             && release_report.source_commit == head
             && release_report.ready_to_publish,
         "fresh_clone_release_report_invalid"
     );
     let release_archive = release_archive_path(release_report);
-    require(std::fs::exists(release_archive),
+    assert_ok(std::fs::exists(release_archive),
         "fresh_clone_package_archive_missing");
     evidence.packaging.ready_to_publish = 1;
     evidence.packaging.mode = release_report.mode;
@@ -708,7 +708,7 @@ try {
         std::path::PathBuf::from(release_archive).file_name;
     evidence.packaging.archive_sha256 =
         rhai::crypto::sha256_file(release_archive);
-    require(
+    assert_ok(
         evidence.packaging.archive_sha256 ==
             release_report.archive_sha256,
         "fresh_clone_package_hash_mismatch"
@@ -737,7 +737,7 @@ try {
         remote_before == remote_after;
     evidence.mutation_proof.candidate_tag_absent_after =
         !remote_after.contains("refs/tags/" + tag);
-    require(
+    assert_ok(
         evidence.mutation_proof.local_tags_unchanged
             && evidence.mutation_proof.remote_refs_unchanged
             && evidence.mutation_proof.local_candidate_tag_absent_before
@@ -752,7 +752,7 @@ try {
             ["status", "--porcelain", "--untracked-files=all"],
             "fresh_clone_final_status"
         ) == "";
-    require(
+    assert_ok(
         evidence.clone_clean_after_rehearsal,
         "fresh_clone_worktree_mutated"
     );
@@ -788,7 +788,7 @@ try {
     terminate_observed_processes(identities);
     evidence.process_observation.remaining_after_cleanup =
         live_observed_processes(identities);
-    require(
+    assert_ok(
         evidence.process_observation.remaining_after_cleanup.len == 0,
         "fresh_clone_owned_process_cleanup_failed"
     );
@@ -818,7 +818,7 @@ try {
     }
     remove_owned_clone(clone_owner, clone);
     evidence.clone_removed = 1;
-    require(
+    assert_ok(
         evidence.origin_redacted_before_cleanup
             || !std::fs::exists(clone),
         "fresh_clone_origin_retained"

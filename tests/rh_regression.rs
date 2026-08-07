@@ -439,8 +439,12 @@ fn import_bundle_probe_fixture_executes_natively_without_interpreter() {
         "{}",
         output.rust
     );
-    assert!(output.rust.contains("pub fn add("), "{}", output.rust);
-    assert!(output.rust.contains("add(40, 2)"), "{}", output.rust);
+    assert!(
+        output.rust.contains("pub fn helper__add("),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("helper__add(40, 2)"), "{}", output.rust);
     assert!(!output.rust.contains("helper::"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);

@@ -30,14 +30,6 @@ let declared_evidence = [
     "script.audit"
 ];
 
-fn require(condition, message) {
-    if condition == 0 {
-        throw message;
-    } else {
-        0;
-    }
-}
-
 fn matching(entries, field, value) {
     let result = [];
     for entry in entries {
@@ -91,16 +83,16 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         ["script", "api", "--json"],
         audit_path
     );
-    require(api.ok, "script_api_envelope_failed");
+    test_harness::require(api.ok, "script_api_envelope_failed");
     let catalog = api.value;
-    require(
+    test_harness::require(
         catalog.api_version == 2
             && catalog.schema_version == 3
             && catalog.default_profile == "local"
             && catalog.execution_model == "unrestricted_local",
         "script_api_identity_mismatch"
     );
-    require(
+    test_harness::require(
         catalog.profiles.pure.ambient_authority
             .contains("ordinary_local_program")
             && catalog.profiles.observe.ambient_authority
@@ -108,7 +100,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             && catalog.profiles.local.status == "shipped",
         "script_api_profiles_are_not_unrestricted"
     );
-    require(
+    test_harness::require(
         catalog.limits.defaults.wall_time_ms == 2000
             && catalog.limits.hard_maximums.wall_time_ms == 3600000
             && catalog.limits.invocation_bytes == 2097152
@@ -118,7 +110,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             && catalog.supervisor.global_concurrency == 8,
         "script_api_runtime_contract_mismatch"
     );
-    require(
+    test_harness::require(
         catalog.exit_classes.limit == 3
             && catalog.exit_classes.child == 4
             && catalog.exit_classes.cancelled == 5
@@ -128,7 +120,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
                 .contains("std.process.Output.require_success"),
         "script_api_failure_contract_mismatch"
     );
-    require(
+    test_harness::require(
         matching(
             catalog.entries,
             "stable_id",
@@ -152,13 +144,13 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         if entry.operation_id != () {
             operation_entries += 1;
             operation_ids[entry.operation_id] = 1;
-            require(
+            test_harness::require(
                 entry.surface_path == entry.operation.script_surface
                     && entry.operation.id == entry.operation_id,
                 "script_api_operation_mapping_mismatch"
             );
         }
-        require(
+        test_harness::require(
             entry.comparisons.nodejs.reviewed_on == "2026-07-29"
                 && entry.comparisons.bun.reviewed_on == "2026-07-29"
                 && entry.comparisons.nodejs.semantic_note != ""
@@ -166,7 +158,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             "script_api_comparison_unreviewed"
         );
     }
-    require(
+    test_harness::require(
         operation_entries == 24 && operation_ids.keys().len == 24,
         "script_api_operation_mapping_not_bijective"
     );
@@ -188,7 +180,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     let pipe_output = pipe_child.wait_with_output(
         std::time::Duration::from_secs(5)
     );
-    require(
+    test_harness::require(
         pipe_output.success && prefix != "",
         "script_api_closed_pipe_failed"
     );
@@ -200,7 +192,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         ["api", "std::fs", "--status", "shipped", "--tree"],
         audit_path
     );
-    require(
+    test_harness::require(
         tree.contains("AgenTerm Script API v2")
             && tree.contains("module=std.fs")
             && tree.contains("read-to-string  [shipped]")
@@ -218,7 +210,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         ],
         audit_path
     );
-    require(
+    test_harness::require(
         planned.ok
             && planned.value.view["module"] == "fleet"
             && planned.value.view.status == "planned"
@@ -226,7 +218,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         "script_api_planned_fleet_view_mismatch"
     );
     for entry in planned.value.entries {
-        require(
+        test_harness::require(
             entry.status == "planned"
                 && entry.stable_id.starts_with("fleet."),
             "script_api_planned_view_leaked_other_status"
@@ -239,7 +231,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         2,
         audit_path
     );
-    require(
+    test_harness::require(
         invalid.contains("script_api_status_invalid"),
         "script_api_invalid_status_not_typed"
     );
@@ -278,7 +270,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         ],
         audit_path
     );
-    require(
+    test_harness::require(
         verified.starts_with("PASS: Rhai verified the Script API contract"),
         "script_api_dogfood_contract_failed:" + spec
     );
@@ -332,7 +324,7 @@ let output = command.output();
             audit_path
         )
     );
-    require(
+    test_harness::require(
         !process_result.success
             && process_result.exit_code == 7
             && trimmed(process_result.stdout) == "out:hello:argv-safe"
@@ -356,8 +348,8 @@ let output = command.output();
         ],
         audit_path
     );
-    require(timeout.contains("process_timeout"), "script_process_timeout_untyped");
-    require(
+    test_harness::require(timeout.contains("process_timeout"), "script_process_timeout_untyped");
+    test_harness::require(
         script_eval(context, cli, "6 * 7", audit_path) == "42",
         "script_process_timeout_recovery_failed"
     );
@@ -372,7 +364,7 @@ let output = command.output();
         4,
         audit_path
     );
-    require(
+    test_harness::require(
         spawn_failure.contains(`"code":"process_spawn"`)
             && spawn_failure.contains(`"exit_class":"child"`),
         "script_process_spawn_failure_untyped"
@@ -391,7 +383,7 @@ command.output().require_success("test-child");`;
         4,
         audit_path
     );
-    require(
+    test_harness::require(
         nonzero.contains(`"code":"child_nonzero"`)
             && nonzero.contains("test-child"),
         "script_process_nonzero_failure_untyped"
@@ -409,7 +401,7 @@ try {
 caught`,
         audit_path
     );
-    require(
+    test_harness::require(
         caught.ok
             && caught.value.class == "child"
             && caught.value.code == "child_nonzero"
@@ -434,7 +426,7 @@ let output = child.wait_with_output();
             audit_path
         )
     );
-    require(
+    test_harness::require(
         child.pid > 0 && child.state == "exited" && child.complete,
         "script_child_lifecycle_mismatch"
     );
@@ -472,7 +464,7 @@ let empty=stream.read(1);
             audit_path
         )
     );
-    require(
+    test_harness::require(
         stream.id > 0
             && stream.kind == "bytes"
             && stream.state == "closed"
@@ -504,7 +496,7 @@ let output=child.wait_with_output();
             audit_path
         )
     );
-    require(
+    test_harness::require(
         truncated.stdout == "agen"
             && truncated.truncated
             && !truncated.complete
@@ -532,7 +524,7 @@ let closed=stream.close(); child.kill(); let output=child.wait_with_output();
             audit_path
         )
     );
-    require(
+    test_harness::require(
         cancelled.timed_out
             && cancelled.closed
             && cancelled.state == "cancelled"
@@ -570,7 +562,7 @@ fast.wait(); let changed=slow.cancel();
             audit_path
         )
     );
-    require(
+    test_harness::require(
         task_result.winner == 1
             && task_result.fast_state == "completed"
             && task_result.fast_done
@@ -591,7 +583,7 @@ fast.wait(); let changed=slow.cancel();
         ],
         audit_path
     );
-    require(
+    test_harness::require(
         task_timeout.contains("task_wait_timeout"),
         "script_task_timeout_untyped"
     );
@@ -622,7 +614,7 @@ fast.wait(); let changed=slow.cancel();
     let http_error = "";
     try {
         let ready = helper::wait_http_ready(fixture, ready_path, 3000);
-        require(
+        test_harness::require(
             ready.schema_version == 1
                 && ready.pid > 0
                 && ready.url.starts_with("http://127.0.0.1:")
@@ -713,7 +705,7 @@ try {
                 audit_path
             )
         );
-        require(
+        test_harness::require(
             result.status == 201
                 && result.version == "HTTP/1.1"
                 && result.first_header == "one"
@@ -744,7 +736,7 @@ try {
             "PRIVATE_PATH_SECRET",
             "PROXY_CREDENTIAL_SECRET"
         ] {
-            require(
+            test_harness::require(
                 !safe_result.contains(secret),
                 "script_http_diagnostic_secret:" + secret
             );
@@ -753,7 +745,7 @@ try {
         let fixture_output = fixture.wait_with_output(
             std::time::Duration::from_secs(3)
         );
-        require(
+        test_harness::require(
             fixture_output.success,
             "script_http_fixture_exit:" + fixture_output.stderr_text()
         );
@@ -776,7 +768,7 @@ try {
         for request in requests {
             if request.path == "/echo" {
                 echo_count += 1;
-                require(
+                test_harness::require(
                     request.method == "POST"
                         && request.body_bytes == 7,
                     "script_http_echo_observation_mismatch"
@@ -789,7 +781,7 @@ try {
                 cancel_count += 1;
             }
         }
-        require(
+        test_harness::require(
             (requests.len == 8 || requests.len == 9)
                 && echo_count == 1
                 && tls_count == 1
@@ -803,8 +795,8 @@ try {
         fixture.kill();
         fixture.wait_with_output(std::time::Duration::from_secs(2));
     }
-    require(http_error == "", http_error);
-    require(
+    test_harness::require(http_error == "", http_error);
+    test_harness::require(
         script_eval(context, cli, "6 * 7", audit_path) == "42",
         "script_http_recovery_failed"
     );
@@ -830,7 +822,7 @@ try {
     let ready = matching(catalog.tasks, "id", "daily-check");
     let missing = matching(catalog.tasks, "id", "missing-entry");
     let unknown = matching(catalog.tasks, "id", "unknown-field");
-    require(
+    test_harness::require(
         catalog.schema_version == 2
             && catalog.script_api_version == 2
             && catalog.script_catalog_schema_version == 3
@@ -854,13 +846,13 @@ try {
         ],
         audit_path
     );
-    require(
+    test_harness::require(
         shown.project_version == "1.0.0"
             && shown.tasks.len == 1
             && shown.tasks[0].entry == "main.rhai",
         "script_task_show_mismatch"
     );
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -885,7 +877,7 @@ try {
         2,
         audit_path
     );
-    require(
+    test_harness::require(
         bad_version.contains("task_manifest_version"),
         "script_task_bad_version_untyped"
     );
@@ -902,7 +894,7 @@ try {
         ],
         audit_path
     );
-    require(
+    test_harness::require(
         !incompatible_list.compatible
             && incompatible_list.compatibility_reason ==
                 "capability_unknown: future.capability"
@@ -920,7 +912,7 @@ try {
             2,
             audit_path
         );
-        require(
+        test_harness::require(
             rejected.contains(
                 "task_project_incompatible: capability_unknown: future.capability"
             ),
@@ -941,7 +933,7 @@ try {
             []
         ).stdout
     );
-    require(
+    test_harness::require(
         named.ok
             && named.value.answer == 42
             && named.value.environment == "fixture-ok"
@@ -960,7 +952,7 @@ try {
         #{"AGENTERM_TASK_FIXTURE": ()},
         []
     );
-    require(
+    test_harness::require(
         (
             missing_environment.stdout +
             missing_environment.stderr
@@ -977,7 +969,7 @@ try {
         ],
         audit_path
     );
-    require(module_ok == "OK", "script_module_check_failed");
+    test_harness::require(module_ok == "OK", "script_module_check_failed");
     for fixture in [
         ["missing-module.rhai", "script_module_missing"],
         ["escape-module.rhai", "script_module_root_escape"],
@@ -995,7 +987,7 @@ try {
             1,
             audit_path
         );
-        require(
+        test_harness::require(
             failure.contains(fixture[1]),
             "script_module_failure_untyped:" + fixture[1]
         );
@@ -1039,7 +1031,7 @@ fn assert_runtime_and_framing(
     let target = rhai::json::parse(target_envelope.stdout);
     let root_profile = matching(target.profiles, "name", "(root)");
     let debug_profile = matching(target.profiles, "name", "debug");
-    require(
+    test_harness::require(
         target_envelope.ok
             && target.schema_version == 1
             && target.exists
@@ -1055,7 +1047,7 @@ fn assert_runtime_and_framing(
     );
 
     print("STEP pure eval, file run, arguments, and check");
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -1071,7 +1063,7 @@ fn assert_runtime_and_framing(
         source_file,
         `print("hello"); args[0] + args[1]`
     );
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -1083,7 +1075,7 @@ fn assert_runtime_and_framing(
         ) == "hello\nsafe-script",
         "script_file_run_mismatch"
     );
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -1092,7 +1084,7 @@ fn assert_runtime_and_framing(
         ) == "OK",
         "script_file_check_failed"
     );
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -1110,7 +1102,7 @@ fn assert_runtime_and_framing(
     ).display;
     let data_literal = json_literal(data_file);
     let data_text_literal = json_literal(`{"answer":42}`);
-    require(
+    test_harness::require(
         script_eval(
             context,
             cli,
@@ -1142,7 +1134,7 @@ fn assert_runtime_and_framing(
         `std::fs::write(${json_literal(fs_source)}, "Unicode lifecycle: 目录")`,
         audit_path
     );
-    require(
+    test_harness::require(
         script_eval(
             context,
             cli,
@@ -1157,7 +1149,7 @@ fn assert_runtime_and_framing(
         `std::fs::rename(${json_literal(fs_copy)}, ${json_literal(fs_renamed)})`,
         audit_path
     );
-    require(
+    test_harness::require(
         script_eval(
             context,
             cli,
@@ -1178,14 +1170,14 @@ fn assert_runtime_and_framing(
         `std::fs::remove_dir_all(${json_literal(fs_tree)})`,
         audit_path
     );
-    require(!std::fs::exists(fs_tree), "script_fs_tree_survived");
+    test_harness::require(!std::fs::exists(fs_tree), "script_fs_tree_survived");
     let temp_root = script_eval(
         context,
         cli,
         "rhai::runtime::temp_dir().display",
         audit_path
     );
-    require(
+    test_harness::require(
         temp_root != "" && !std::fs::exists(temp_root),
         "script_invocation_temp_survived"
     );
@@ -1202,7 +1194,7 @@ fn assert_runtime_and_framing(
             json_literal(`{"state":"新"}`) + ")",
         audit_path
     );
-    require(
+    test_harness::require(
         std::fs::read_to_string(atomic_path) == `{"state":"新"}`,
         "script_atomic_write_mismatch"
     );
@@ -1213,8 +1205,8 @@ fn assert_runtime_and_framing(
             staging_count += 1;
         }
     }
-    require(staging_count == 0, "script_atomic_staging_survived");
-    require(
+    test_harness::require(staging_count == 0, "script_atomic_staging_survived");
+    test_harness::require(
         script_eval(
             context,
             cli,
@@ -1230,14 +1222,14 @@ fn assert_runtime_and_framing(
              #{len:b.len,first:b.get(0),last:b.get(2)}`,
             audit_path
         );
-    require(
+    test_harness::require(
         arbitrary_bytes.ok
             && arbitrary_bytes.value.len == 3
             && arbitrary_bytes.value.first == 0
             && arbitrary_bytes.value.last == 255,
         "script_arbitrary_bytes_mismatch"
     );
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -1266,12 +1258,12 @@ fn assert_runtime_and_framing(
             1,
             audit_path
         );
-        require(
+        test_harness::require(
             failure.contains(fixture[1]),
             "script_static_failure_untyped:" + fixture[1]
         );
         if fixture[1] == "script_api_migrated" {
-            require(
+            test_harness::require(
                 failure.contains("fleet.workspace.info()"),
                 "script_static_migration_target_missing"
             );
@@ -1279,7 +1271,7 @@ fn assert_runtime_and_framing(
     }
 
     print("STEP unrestricted legacy spellings and operation budget");
-    require(
+    test_harness::require(
         helper::cli_text(
             context,
             cli,
@@ -1301,7 +1293,7 @@ fn assert_runtime_and_framing(
         3,
         audit_path
     );
-    require(
+    test_harness::require(
         operation_limit.contains(`"code":"limit_operations"`),
         "script_operation_limit_untyped"
     );
@@ -1316,7 +1308,7 @@ fn assert_runtime_and_framing(
         3,
         audit_path
     );
-    require(
+    test_harness::require(
         wall_limit.contains(`"code":"limit_wall_time"`)
             && wall_limit.contains(`"exit_class":"limit"`),
         "script_wall_limit_untyped"
@@ -1331,7 +1323,7 @@ fn assert_runtime_and_framing(
         3,
         audit_path
     );
-    require(
+    test_harness::require(
         source_limit.contains("262144 byte limit"),
         "script_source_limit_untyped"
     );
@@ -1344,7 +1336,7 @@ fn assert_runtime_and_framing(
     );
     malformed_command.stdin_text("{");
     let malformed = malformed_command.output();
-    require(
+    test_harness::require(
         malformed.exit_code == 1
             && malformed.stdout_text().contains(
                 `"code":"protocol_invalid_invocation"`
@@ -1362,14 +1354,14 @@ fn assert_runtime_and_framing(
     );
     oversized_command.stdin_text(oversized_text);
     let oversized = oversized_command.output();
-    require(
+    test_harness::require(
         oversized.exit_code == 1
             && oversized.stdout_text().contains(
                 `"code":"protocol_invocation_too_large"`
             ),
         "script_worker_oversized_untyped"
     );
-    require(
+    test_harness::require(
         script_eval(context, cli, "6 * 7", audit_path) == "42",
         "script_worker_protocol_recovery_failed"
     );
@@ -1429,7 +1421,7 @@ fn assert_runtime_and_framing(
             codes.push(frame.payload.failure.code);
         }
     }
-    require(
+    test_harness::require(
         frames.len == 5
             && codes.contains("protocol_malformed_frame")
             && codes.contains("protocol_frame_too_large")
@@ -1463,7 +1455,7 @@ fn assert_runtime_and_framing(
         script,
         cancel_bytes
     );
-    require(
+    test_harness::require(
         cancel_frames.len == 1
             && cancel_frames[0].frame_id == "cancel-invoke"
             && cancel_frames[0].payload.failure.code ==
@@ -1496,7 +1488,7 @@ fn assert_supervisor(
     let hard_output = hard_timeout.wait_with_output(
         std::time::Duration::from_secs(5)
     );
-    require(
+    test_harness::require(
         hard_output.exit_code == 3
             && hard_output.stderr_text().contains(
                 `"code":"host_hard_timeout"`
@@ -1524,7 +1516,7 @@ fn assert_supervisor(
     let crash_output = crash_client.wait_with_output(
         std::time::Duration::from_secs(5)
     );
-    require(
+    test_harness::require(
         crash_output.exit_code == 1
             && crash_output.stderr_text().contains(
                 `"code":"host_worker_crash"`
@@ -1560,13 +1552,13 @@ fn assert_supervisor(
             ).parse_int();
             break;
         }
-        require(
+        test_harness::require(
             interrupted.state == "running",
             "script_supervisor_parent_fixture_early_exit"
         );
         rhai::task::sleep(std::time::Duration::from_millis(5));
     }
-    require(nested_pid > 0, "script_supervisor_nested_pid_missing");
+    test_harness::require(nested_pid > 0, "script_supervisor_nested_pid_missing");
     interrupted.kill();
     interrupted.wait_with_output(std::time::Duration::from_secs(2));
     helper::wait_process_gone(nested_pid, 3000);
@@ -1597,15 +1589,15 @@ fn assert_supervisor(
             break;
         }
     }
-    require(
+    test_harness::require(
         holders.len > 0,
         "script_supervisor_no_holder_acquired"
     );
-    require(
+    test_harness::require(
         denied_output != (),
         "script_supervisor_global_limit_not_enforced"
     );
-    require(
+    test_harness::require(
         denied_output.exit_code == 2
             && denied_output.stderr_text().contains(
                 `"code":"host_concurrency_limit"`
@@ -1625,7 +1617,7 @@ fn assert_supervisor(
         audit_path
     );
     rhai::task::sleep(std::time::Duration::from_millis(150));
-    require(
+    test_harness::require(
         replacement.state == "running",
         "script_supervisor_slot_not_recovered"
     );
@@ -1639,7 +1631,7 @@ fn assert_supervisor(
     }
     replacement.kill();
     replacement.wait_with_output(std::time::Duration::from_secs(2));
-    require(
+    test_harness::require(
         script_eval(context, cli, "6 * 7", audit_path) == "42",
         "script_supervisor_recovery_failed"
     );
@@ -1662,13 +1654,13 @@ fn wait_script_gui(context, cli, gui_child) {
         if probe.success
                 && gui_child.platform_facts.top_level_window_present {
             let snapshot = rhai::json::parse(probe.stdout_text());
-            require(
+            test_harness::require(
                 snapshot.client_pid == gui_child.id,
                 "script_fleet_gui_lease_owner"
             );
             return snapshot;
         }
-        require(
+        test_harness::require(
             gui_child.state == "running",
             "script_fleet_gui_early_exit"
         );
@@ -1763,7 +1755,7 @@ fn assert_persistent_repl_supervision(
         `std::fs::write(${json_literal(cooperative_pid_path)}, std::process::id().to_string()); loop {}`,
         audit_path
     );
-    require(
+    test_harness::require(
         wait_repl_pid_file(cooperative_pid_path, 5000) == initial_pid,
         "script_repl_cooperative_fixture_changed_worker"
     );
@@ -1787,7 +1779,7 @@ fn assert_persistent_repl_supervision(
         audit_path
     );
     let recovered_pid = wait_repl_pid_file(recovered_pid_path, 5000);
-    require(
+    test_harness::require(
         recovered_pid == initial_pid,
         "script_repl_cooperative_cancel_replaced_worker"
     );
@@ -1809,7 +1801,7 @@ fn assert_persistent_repl_supervision(
     );
     let hard_worker_pid = wait_repl_pid_file(hard_worker_path, 5000);
     let nested_pid = wait_repl_pid_file(nested_pid_path, 5000);
-    require(
+    test_harness::require(
         hard_worker_pid == initial_pid,
         "script_repl_hard_fixture_changed_worker"
     );
@@ -1834,7 +1826,7 @@ fn assert_persistent_repl_supervision(
         audit_path
     );
     let fresh_pid = wait_repl_pid_file(fresh_pid_path, 5000);
-    require(
+    test_harness::require(
         fresh_pid != initial_pid,
         "script_repl_hard_cancel_reused_worker"
     );
@@ -1908,7 +1900,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         );
-        require(
+        test_harness::require(
             public_capture.max_bytes == 5
                 && public_capture.bytes <= 5,
             "script_fleet_public_capture_mismatch"
@@ -1923,7 +1915,7 @@ fn assert_fleet_and_north_star(
             1,
             audit_path
         );
-        require(
+        test_harness::require(
             invalid_capture.contains("must be from 1 to 1048576"),
             "script_fleet_invalid_capture_accepted"
         );
@@ -1937,7 +1929,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         ).parse_int();
-        require(
+        test_harness::require(
             observed >= snapshot.event_position.sequence,
             "script_fleet_snapshot_position_regressed"
         );
@@ -1978,7 +1970,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         );
-        require(
+        test_harness::require(
             workspace.ok
                 && workspace.value.event_position.epoch != ""
                 && tabs.ok
@@ -2002,7 +1994,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         );
-        require(
+        test_harness::require(
             batch.ok && batch.value.position != (),
             "script_fleet_event_read_mismatch"
         );
@@ -2017,7 +2009,7 @@ fn assert_fleet_and_north_star(
             6,
             audit_path
         );
-        require(
+        test_harness::require(
             restart.contains(`"code":"server_restart"`)
                 && restart.contains(`"exit_class":"fleet"`),
             "script_fleet_restart_untyped"
@@ -2038,12 +2030,12 @@ fn assert_fleet_and_north_star(
         );
         let wait_elapsed =
             std::time::SystemTime::now().unix_millis - wait_started;
-        require(
+        test_harness::require(
             wait_failure.contains("event_wait_timeout")
                 && wait_elapsed < 500,
             "script_fleet_wait_deadline_mismatch"
         );
-        require(
+        test_harness::require(
             helper::cli_text(
                 context,
                 cli,
@@ -2085,7 +2077,7 @@ fn assert_fleet_and_north_star(
             }
             rhai::task::sleep(std::time::Duration::from_millis(50));
         }
-        require(
+        test_harness::require(
             baseline_visible != (),
             "script_fleet_sidebar_baseline_unavailable"
         );
@@ -2119,7 +2111,7 @@ let receipt=fleet.ui.tabs.toggle();
             }
             rhai::task::sleep(std::time::Duration::from_millis(50));
         }
-        require(
+        test_harness::require(
             mutation.ok
                 && mutation.value.request_id != ""
                 && mutation.value.operation_id == "ui.tabs.toggle"
@@ -2134,7 +2126,7 @@ let receipt=fleet.ui.tabs.toggle();
                 && mutated_visible_flipped,
             "script_fleet_mutation_receipt_mismatch"
         );
-        require(
+        test_harness::require(
             script_eval(
                 context,
                 cli,
@@ -2160,7 +2152,7 @@ let receipt=fleet.ui.tabs.toggle();
             }
             rhai::task::sleep(std::time::Duration::from_millis(50));
         }
-        require(
+        test_harness::require(
             restored_visible_back,
             "script_fleet_visibility_not_restored"
         );
@@ -2170,7 +2162,7 @@ let receipt=fleet.ui.tabs.toggle();
                 active_tab = tab;
             }
         }
-        require(active_tab != (), "script_fleet_active_tab_missing");
+        test_harness::require(active_tab != (), "script_fleet_active_tab_missing");
         let note = "Script API v2 目录 " + std::process::id();
         let note_mutation = script_eval_json(
             context,
@@ -2188,7 +2180,7 @@ let receipt=fleet.tabs.set_note(
 }`,
             audit_path
         );
-        require(
+        test_harness::require(
             note_mutation.ok
                 && note_mutation.value.operation_id == "tabs.set-note"
                 && note_mutation.value.event_count >= 1
@@ -2198,7 +2190,7 @@ let receipt=fleet.tabs.set_note(
                 && note_mutation.value.note == note,
             "script_fleet_note_receipt_mismatch"
         );
-        require(
+        test_harness::require(
             script_eval(
                 context,
                 cli,
@@ -2288,7 +2280,7 @@ let receipt=fleet.tabs.set_note(
                 north_tab = tab;
             }
         }
-        require(north_tab != (), "script_north_star_tab_missing");
+        test_harness::require(north_tab != (), "script_north_star_tab_missing");
         std::fs::write(
             std::path::join(project, "config.json").display,
             rhai::json::stringify_pretty(#{
@@ -2308,7 +2300,7 @@ let receipt=fleet.tabs.set_note(
             ["--help"],
             audit_path
         );
-        require(
+        test_harness::require(
             (
                 direct_help.contains("AgenTerm Script Runtime")
                     && direct_help.contains("agenterm-rhai task run")
@@ -2318,7 +2310,7 @@ let receipt=fleet.tabs.set_note(
             ),
             "script_direct_help_mismatch"
         );
-        require(
+        test_harness::require(
             helper::direct_text(
                 context,
                 script,
@@ -2348,7 +2340,7 @@ let receipt=fleet.tabs.set_note(
             ],
             audit_path
         );
-        require(
+        test_harness::require(
             direct_catalog.project_id ==
                 "agenterm-rhai-daily-check"
                 && direct_catalog.schema_version == 3
@@ -2362,7 +2354,7 @@ let receipt=fleet.tabs.set_note(
                 && direct_show.tasks[0].entry == "daily-check.rhai",
             "script_north_star_catalog_mismatch"
         );
-        require(
+        test_harness::require(
             helper::direct_text(
                 context,
                 script,
@@ -2387,7 +2379,7 @@ let receipt=fleet.tabs.set_note(
             audit_path
         );
         let north = north_envelope.value;
-        require(
+        test_harness::require(
             north_envelope.ok
                 && north.schema_version == 1
                 && north.target == "smoke-target"
@@ -2408,23 +2400,23 @@ let receipt=fleet.tabs.set_note(
                 && north.fleet.verified,
             "script_north_star_result_mismatch"
         );
-        require(
+        test_harness::require(
             !std::fs::exists(north.temp_root)
                 && std::fs::exists(result_path),
             "script_north_star_lifecycle_mismatch"
         );
         let persisted = rhai::json::parse_file(result_path);
-        require(
+        test_harness::require(
             persisted.target == north.target
                 && persisted.fleet.note == north.fleet.note,
             "script_north_star_persisted_result_mismatch"
         );
-        require(
+        test_harness::require(
             !helper::process_exists(north.child_a.pid)
                 && !helper::process_exists(north.child_b.pid),
             "script_north_star_child_survived"
         );
-        require(
+        test_harness::require(
             script_eval(
                 context,
                 cli,
@@ -2440,7 +2432,7 @@ let receipt=fleet.tabs.set_note(
         let http_output = http_child.wait_with_output(
             std::time::Duration::from_secs(3)
         );
-        require(
+        test_harness::require(
             http_output.success,
             "script_north_star_http_exit"
         );
@@ -2452,7 +2444,7 @@ let receipt=fleet.tabs.set_note(
             ["ui-action", "close-window"],
             audit_path
         );
-        require(
+        test_harness::require(
             close_state.modal.actions.contains(
                 "stop-server-and-exit"
             ),
@@ -2499,7 +2491,7 @@ let receipt=fleet.tabs.set_note(
             std::time::Duration::from_secs(2)
         );
     }
-    require(journey_error == "", journey_error);
+    test_harness::require(journey_error == "", journey_error);
 }
 
 fn assert_audit(
@@ -2524,7 +2516,7 @@ fn assert_audit(
         ],
         audit_path
     );
-    require(
+    test_harness::require(
         secret_result.contains("AUDIT_STDOUT_SECRET")
             && secret_result.contains(
                 "AUDIT_ARG_SECRETAUDIT_SOURCE_SECRET"
@@ -2541,7 +2533,7 @@ fn assert_audit(
         "PRIVATE_PATH_SECRET",
         "PROXY_CREDENTIAL_SECRET"
     ] {
-        require(
+        test_harness::require(
             !audit_text.contains(secret),
             "script_audit_secret_leak:" + secret
         );
@@ -2556,7 +2548,7 @@ fn assert_audit(
         `"clipboard":`,
         `"credentials":`
     ] {
-        require(
+        test_harness::require(
             !audit_text.contains(field),
             "script_audit_forbidden_field:" + field
         );
@@ -2567,7 +2559,7 @@ fn assert_audit(
             records.push(rhai::json::parse(line));
         }
     }
-    require(records.len >= 10, "script_audit_record_count");
+    test_harness::require(records.len >= 10, "script_audit_record_count");
     let failure_codes = #{};
     let timeout_record = 0;
     let crash_record = 0;
@@ -2602,7 +2594,7 @@ fn assert_audit(
                     .contains("unrestricted_local") {
             pure_record = 1;
         }
-        require(
+        test_harness::require(
             record.source_fingerprint.starts_with("fnv1a128:")
                 && record.source_fingerprint.len == 41,
             "script_audit_fingerprint_mismatch"
@@ -2615,12 +2607,12 @@ fn assert_audit(
         "host_worker_crash",
         "host_concurrency_limit"
     ] {
-        require(
+        test_harness::require(
             failure_codes[required_code] == 1,
             "script_audit_failure_code_missing:" + required_code
         );
     }
-    require(
+    test_harness::require(
         timeout_record
             && crash_record
             && concurrency_record
@@ -2637,7 +2629,7 @@ fn assert_audit(
         #{},
         []
     );
-    require(
+    test_harness::require(
         (
             audit_failure.stdout +
             audit_failure.stderr
@@ -2667,7 +2659,7 @@ if args.len == 1 && args[0] == "--list-evidence" {
     return;
 }
 
-require(
+test_harness::require(
     args.len == 4 || (
         args.len == 5
             && args[4] == "--internal-failure-bundle-probe"
@@ -2680,7 +2672,7 @@ let script = prefer_rh_worker(std::path::absolute(args[2]).display);
 let gui = std::path::absolute(args[3]).display;
 let internal_failure_probe = args.len == 5;
 for executable in [cli, script, gui] {
-    require(std::fs::exists(executable), "script_smoke_executable_missing");
+    test_harness::require(std::fs::exists(executable), "script_smoke_executable_missing");
 }
 
 let context = test_harness::new_context(repo, "script");
@@ -2772,7 +2764,7 @@ try {
         runtime_dir
     );
     emit(context, declared_evidence, "script.audit");
-    require(catalog.api_version == 2, "script_smoke_catalog_lost");
+    test_harness::require(catalog.api_version == 2, "script_smoke_catalog_lost");
     succeeded = 1;
     print(
         "PASS: unrestricted scripting API, supervision, audit privacy, and budgets"

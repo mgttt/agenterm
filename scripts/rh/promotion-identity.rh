@@ -3,28 +3,36 @@
 //
 // Args: CANDIDATE_MANIFEST CANDIDATE_RUN_ID SOURCE_SHA OUTPUT_JSON
 
-fn lowercase_hex(value, length) {
+fn assert_ok(condition, message) {
+    if condition == 0 {
+        throw message;
+    } else {
+        0;
+    }
+}
+
+fn promotion_lowercase_hex(value, length) {
     if type_of(value) != "string" || value.len != length {
-        return false;
+        return 0;
     }
     for character in value {
         if !"0123456789abcdef".contains(character.to_string()) {
-            return false;
+            return 0;
         }
     }
-    true
+    1
 }
 
-fn decimal(value) {
+fn promotion_decimal(value) {
     if type_of(value) != "string" || value == "" {
-        return false;
+        return 0;
     }
     for character in value {
         if !"0123456789".contains(character.to_string()) {
-            return false;
+            return 0;
         }
     }
-    true
+    1
 }
 
 fn entry() {
@@ -35,23 +43,23 @@ fn entry() {
     let candidate_run_id = args[1];
     let source_sha = args[2];
     let output = std::path::absolute(args[3]).display;
-    require(
+    assert_ok(
         std::fs::exists(manifest_path)
             && std::fs::metadata(manifest_path).is_file,
         "promotion_identity_manifest_missing"
     );
-    require(
-        decimal(candidate_run_id),
+    assert_ok(
+        promotion_decimal(candidate_run_id),
         "promotion_identity_run_id"
     );
-    require(
-        lowercase_hex(source_sha, 40),
+    assert_ok(
+        promotion_lowercase_hex(source_sha, 40),
         "promotion_identity_source_sha"
     );
 
     let manifest = rhai::json::parse_file(manifest_path);
     let run_id = 0 + manifest.run.id;
-    require(
+    assert_ok(
         manifest.schema_version == 1
             && manifest.product == "AgenTerm"
             && manifest.source_sha == source_sha
@@ -65,13 +73,13 @@ fn entry() {
     for asset in manifest.assets {
         let asset_os = "" + asset.os;
         let asset_channel = "" + asset.channel;
-        if asset_os == "macos" && !channels.contains(asset_channel) {
+        if asset_os == "macos" && channels.contains(asset_channel) == 0 {
             channels.push(asset_channel);
         }
     }
-    require(channels.len == 1, "promotion_identity_macos_channels");
+    assert_ok(channels.len == 1, "promotion_identity_macos_channels");
     let mac_channel = channels[0];
-    require(
+    assert_ok(
         ["release", "macos-unsigned-preview"].contains(mac_channel),
         "promotion_identity_macos_channel"
     );

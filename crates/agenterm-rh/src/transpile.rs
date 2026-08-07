@@ -4686,6 +4686,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(var_len_name(expr).expect("checked json binding"));
             out.push_str(", &[])");
         }
+        Expr::Dot(..)
+            if var_len_name(expr).is_some_and(|name| {
+                ctx.scope.get(name).copied() == Some(ValueKind::ChildList)
+            }) =>
+        {
+            out.push('(');
+            out.push_str(var_len_name(expr).expect("checked child list binding"));
+            out.push_str(".len() as INT)");
+        }
         Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
@@ -4921,6 +4930,37 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str("serde_json::json!(");
             out.push_str(ident.1.as_str());
             out.push(')');
+        }
+        _ if output_property_binding(expr, ctx).is_some() => {
+            let (binding, property) = output_property_binding(expr, ctx).expect("checked output");
+            match property {
+                "stdout" | "stderr" => {
+                    out.push_str("serde_json::Value::String(");
+                    out.push_str(binding);
+                    out.push('.');
+                    out.push_str(property);
+                    out.push_str(".clone())");
+                }
+                _ => {
+                    out.push_str("serde_json::json!(");
+                    out.push_str(binding);
+                    out.push('.');
+                    out.push_str(property);
+                    out.push(')');
+                }
+            }
+        }
+        _ if output_stdout_text_call(expr, ctx).is_some() => {
+            let binding = output_stdout_text_call(expr, ctx).expect("checked stdout_text");
+            out.push_str("serde_json::Value::String(rh_output_stdout_text(&");
+            out.push_str(binding);
+            out.push_str("))");
+        }
+        _ if output_stderr_text_call(expr, ctx).is_some() => {
+            let binding = output_stderr_text_call(expr, ctx).expect("checked stderr_text");
+            out.push_str("serde_json::Value::String(rh_output_stderr_text(&");
+            out.push_str(binding);
+            out.push_str("))");
         }
         _ if string_concat_args(expr, ctx).is_some()
             || args_index_expr(expr).is_some()
@@ -6737,8 +6777,12 @@ mod tests {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("pub fn add("), "{}", output.rust);
-        assert!(output.rust.contains("add(40, 2)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("pub fn helper__add("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("helper__add(40, 2)"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }

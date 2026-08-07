@@ -4,9 +4,11 @@
 
 import "scripts/rh/lib/package_qualified" as package_qualified;
 
-fn require(condition, message) {
-    if !condition {
+fn assert_ok(condition, message) {
+    if condition == 0 {
         throw message;
+    } else {
+        0;
     }
 }
 
@@ -43,61 +45,64 @@ fn git_output(repo, arguments, code) {
         stdout_path,
         #{ current_dir: repo }
     );
-    require(exit_code == 0, code);
+    assert_ok(exit_code == 0, code);
     trimmed(std::fs::read_to_string(stdout_path));
 }
 
-fn valid_identifier(value) {
+fn release_valid_identifier(value) {
     if value == "" {
-        return false;
+        return 0;
     }
     for character in value {
         let text = character.to_string();
         if !"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-"
                 .contains(text) {
-            return false;
+            return 0;
         }
     }
-    true
+    1
 }
 
-fn valid_numeric(value) {
+fn release_valid_numeric(value) {
     if value == "" || (value.len > 1 && value.starts_with("0")) {
-        return false;
+        return 0;
     }
     for character in value {
         if !"0123456789".contains(character.to_string()) {
-            return false;
+            return 0;
         }
     }
-    true
+    1
 }
 
-fn valid_version(value) {
+fn release_valid_version(value) {
     let build_parts = value.split("+");
     if build_parts.len > 2
             || (build_parts.len == 2
-                && !valid_identifier(build_parts[1])) {
-        return false;
+                && release_valid_identifier(build_parts[1]) == 0) {
+        return 0;
     }
     let public_version = build_parts[0];
     let prerelease_parts = public_version.split("-");
     if prerelease_parts.len > 2
             || (prerelease_parts.len == 2
-                && !valid_identifier(prerelease_parts[1])) {
-        return false;
+                && release_valid_identifier(prerelease_parts[1]) == 0) {
+        return 0;
     }
     let core = prerelease_parts[0].split(".");
-    core.len == 3
-        && valid_numeric(core[0])
-        && valid_numeric(core[1])
-        && valid_numeric(core[2])
+    if core.len == 3
+            && release_valid_numeric(core[0])
+            && release_valid_numeric(core[1])
+            && release_valid_numeric(core[2]) {
+        return 1;
+    }
+    0
 }
 
 fn package_version(repo) {
     let cargo =
         std::fs::read_to_string(std::path::join(repo, "Cargo.toml").display);
-    let in_package = false;
+    let in_package = 0;
     let version = "";
     for source_line in cargo.split("\n") {
         let line = source_line;
@@ -114,20 +119,20 @@ fn package_version(repo) {
             }
         }
     }
-    require(
-        valid_version(version),
+    assert_ok(
+        release_valid_version(version),
         "release_version_invalid:" + version
     );
     version
 }
 
 fn assert_clean_main(repo) {
-    require(
+    assert_ok(
         git_output(repo, ["branch", "--show-current"], "release_git_branch")
             == "main",
         "release_branch_not_main"
     );
-    require(
+    assert_ok(
         git_output(
             repo,
             ["status", "--porcelain", "--untracked-files=normal"],
@@ -144,7 +149,7 @@ fn assert_workflow(repo) {
         std::path::join(repo, ".github/workflows/candidate.yml").display;
     let promotion = std::fs::read_to_string(promotion_path);
     let candidate = std::fs::read_to_string(candidate_path);
-    require(
+    assert_ok(
         candidate.contains("workflow_dispatch:")
             && candidate.contains("source_sha:")
             && candidate.contains("check.cmd --release --include-stress")
@@ -152,15 +157,15 @@ fn assert_workflow(repo) {
             && candidate.contains("release-candidate-${{ github.run_id }}"),
         "release_candidate_workflow_contract"
     );
-    require(
+    assert_ok(
         promotion.contains("workflow_dispatch:")
             && promotion.contains("candidate_run_id:")
             && promotion.contains("confirmation:")
             && promotion.contains("environment: release")
             && promotion.contains("contents: write")
-            && !promotion.contains("--clobber")
-            && !promotion.contains("cargo build")
-            && !promotion.contains("check.cmd --release"),
+            && promotion.contains("--clobber") == 0
+            && promotion.contains("cargo build") == 0
+            && promotion.contains("check.cmd --release") == 0,
         "release_workflow_contract"
     );
     #{
@@ -177,7 +182,7 @@ fn run_quality(repo) {
         std::path::join(output_root, "release-check.stdout").display;
     let stderr_path =
         std::path::join(output_root, "release-check.stderr").display;
-    require(
+    assert_ok(
         std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
         "release_bootstrap_worker_missing"
     );
@@ -194,7 +199,7 @@ fn run_quality(repo) {
     command.stdout_file(stdout_path);
     command.stderr_file(stderr_path);
     let output = command.output();
-    if !output.success {
+    if output.success == 0 {
         let diagnostic =
             if std::fs::exists(stderr_path) {
                 std::fs::read_to_string(stderr_path)
@@ -214,7 +219,7 @@ fn run_quality(repo) {
 }
 
 fn entry() {
-require(args.len <= 2, "expected: [REPO] [--rehearse]");
+assert_ok(args.len <= 2, "expected: [REPO] [--rehearse]");
 let repo = std::env::current_dir().display;
 let mode = "publish";
 if args.len == 1 {
@@ -241,23 +246,23 @@ let unix_bootstrap =
 if unix_bootstrap && args.len == 0 {
     mode = "validate";
 }
-require(
-    !unix_bootstrap || mode == "validate",
+assert_ok(
+    unix_bootstrap == 0 || mode == "validate",
     "release_package_requires_windows"
 );
-require(
+assert_ok(
     mode == "validate" || mode == "rehearse" || mode == "publish",
     "release_mode:" + mode
 );
 
 assert_clean_main(repo);
 let version = package_version(repo);
-require(
+assert_ok(
     version != "0.1.7",
     "release_internal_version_0.1.7"
 );
 let tag = "v" + version;
-require(
+assert_ok(
     git_output(repo, ["tag", "--list", tag], "release_git_tags") == "",
     "release_tag_exists:" + tag
 );
@@ -274,7 +279,7 @@ if mode == "validate" {
                     rhai::crypto::sha256_file(workflows.candidate_path),
                 promotion_workflow_sha256:
                     rhai::crypto::sha256_file(workflows.promotion_path),
-                mutation: false
+                mutation: 0
             })
     );
     return 0;
@@ -289,7 +294,7 @@ if mode == "publish" {
 print("QUALIFY AgenTerm " + version + " from main@" + head);
 run_quality(repo);
 assert_clean_main(repo);
-require(
+assert_ok(
     git_output(repo, ["rev-parse", "HEAD"], "release_git_head_after_check")
         == head,
     "release_head_changed_during_quality"
@@ -328,7 +333,7 @@ let report = #{
         rhai::crypto::sha256_file(package_manifest),
     archive: result.archive,
     archive_sha256: result.archive_sha256,
-    ready_to_publish: true
+    ready_to_publish: 1
 };
 let report_path =
     std::path::join(repo, "target/qualification/release-rehearsal.json").display;
