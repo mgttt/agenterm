@@ -31,7 +31,7 @@ use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::window_host::{
     run_pixel_window, GeometryChange, LogicalSize, PixelWindow, PixelWindowApplication,
     PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions,
-    PointerButton, PointerButtonState, XrgbPixelFrame,
+    PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
 };
 
 use palette::Rgb;
@@ -174,6 +174,11 @@ struct ConTerminal {
     /// Set when the reader thread exits (PTY EOF or error).
     child_gone: bool,
     exit: bool,
+
+    /// Scrollback scroll offset (0 = bottom/live). Positive = scrolled up.
+    scroll_offset: usize,
+    /// Accumulated wheel delta (fractional lines pending application).
+    wheel_accumulator: f32,
 }
 
 impl ConTerminal {
@@ -200,6 +205,8 @@ impl ConTerminal {
             default_bg: Rgb(0x00, 0x00, 0x00),
             child_gone: false,
             exit: false,
+            scroll_offset: 0,
+            wheel_accumulator: 0.0,
         }
     }
 
@@ -281,15 +288,24 @@ impl ConTerminal {
     }
 
     fn drain_pty(&mut self) {
+        let mut got_output = false;
         loop {
             match self.pty_rx.try_recv() {
-                Ok(bytes) => self.parser.process(&bytes),
+                Ok(bytes) => {
+                    self.parser.process(&bytes);
+                    got_output = true;
+                }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.child_gone = true;
                     break;
                 }
             }
+        }
+        // New output snaps scrollback to bottom.
+        if got_output && self.scroll_offset > 0 {
+            self.scroll_offset = 0;
+            self.parser.screen_mut().set_scrollback(0);
         }
     }
 
@@ -368,10 +384,25 @@ impl PixelWindowApplication for ConTerminal {
                 self.forward_key(&key);
                 Ok(PixelWindowDirective::Continue)
             }
-            PixelWindowEvent::MouseWheel { delta, .. } => {
-                // C1 does not scroll scrollback yet; forward vertical line deltas
-                // to the shell only on the alternate screen in a later increment.
-                let _ = delta;
+            PixelWindowEvent::MouseWheel { delta, modifiers, .. } => {
+                // Ctrl+wheel adjusts font size (wave 4); plain wheel scrolls.
+                if !modifiers.control {
+                    let lines = match delta {
+                        WheelDelta::Lines { y, .. } => y,
+                        WheelDelta::LogicalPixels { y, .. } => y as f32 / (self.cell_h as f32).max(1.0),
+                        _ => 0.0,
+                    };
+                    self.wheel_accumulator += lines;
+                    let whole = self.wheel_accumulator.trunc();
+                    self.wheel_accumulator -= whole;
+                    if whole != 0.0 && !self.parser.screen().alternate_screen() {
+                        let max_sb = self.parser.screen().scrollback() + self.scroll_offset;
+                        let target = self.scroll_offset.saturating_add(whole.round() as usize);
+                        self.scroll_offset = target.min(max_sb);
+                        self.parser.screen_mut().set_scrollback(self.scroll_offset);
+                        window.request_redraw();
+                    }
+                }
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::PointerButton {
@@ -452,10 +483,8 @@ impl PixelWindowApplication for ConTerminal {
             }
         }
 
-        // Solid block cursor at the current position. Guard against the
-        // resize-debounce window where the VT grid can be larger than the
-        // live frame (the frame shrank but apply_resize hasn't fired yet).
-        if !cursor_hidden {
+        // Solid block cursor at the current position. Hide when scrolled back.
+        if !cursor_hidden && self.scroll_offset == 0 {
             let cx = u32::from(cursor.1) * self.cell_w;
             let cy = u32::from(cursor.0) * self.cell_h;
             if cx < fw && cy < fh {
