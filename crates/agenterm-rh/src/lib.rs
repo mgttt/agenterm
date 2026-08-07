@@ -1,3 +1,4 @@
+pub mod api_validate;
 pub mod caller_inventory;
 pub mod check;
 pub mod check_many;
@@ -10,7 +11,9 @@ pub mod host_api;
 pub mod load;
 pub mod manifest;
 pub mod pack;
+pub mod project_import;
 pub mod qualify;
+pub mod shipped_surfaces;
 pub mod subset;
 pub mod transpile;
 
@@ -18,6 +21,7 @@ pub use caller_inventory::{
     scan_caller_inventory, CallerHit, CallerInventoryOptions, CallerInventoryReport,
 };
 pub use check::check;
+pub use check::{check_with_project_validation, RH_MAX_EXPR_DEPTH};
 pub use check_many::{
     parse_check_many_cli, read_manifest, run_check_many, CheckManyManifest, CheckManyOptions,
     CheckManyReport, ParsedCheckManyCli,

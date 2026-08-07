@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{check, RhError};
+use crate::{check_with_project_validation, RhError};
 
 pub const MANIFEST_MAX_BYTES: usize = 64 * 1024;
 pub const FILES_MAX: usize = 256;
@@ -151,12 +151,8 @@ pub fn run_check_many(
         }
         total_source_bytes = next_total;
         checked_files += 1;
-        if let Err(error) = check(&source) {
-            failures.push(failure(
-                label,
-                "rh_subset",
-                error.to_string(),
-            ));
+        if let Err(error) = check_with_project_validation(&source, Some(&root)) {
+            failures.push(check_failure(label, &error));
             let _ = ordinal;
         }
     }
@@ -187,6 +183,21 @@ fn failure(path: String, code: &str, message: String) -> CheckManyFailure {
         path,
         code: code.to_owned(),
         message,
+    }
+}
+
+fn check_failure(path: String, error: &RhError) -> CheckManyFailure {
+    match error {
+        RhError::Parse(message) => failure(path, "rh_subset", message.clone()),
+        RhError::Subset { code, detail } => failure(path, code, detail.clone()),
+        RhError::Compile(message) => {
+            let (code, detail) = message
+                .split_once(": ")
+                .filter(|(code, _)| !code.is_empty())
+                .unwrap_or(("rh_check", message.as_str()));
+            failure(path, code, detail.to_owned())
+        }
+        RhError::Transpile(message) => failure(path, "rh_transpile", message.clone()),
     }
 }
 
@@ -306,5 +317,31 @@ mod tests {
             report.failures
         );
         assert_eq!(report.checked_files, 8);
+    }
+
+    #[test]
+    fn check_many_rejects_unknown_api() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fixture_dir = repo.join("fixtures/rh/check-many-tmp");
+        std::fs::create_dir_all(&fixture_dir).expect("create temp dir");
+        std::fs::write(
+            fixture_dir.join("unknown-api.rhai"),
+            "fn entry() { std::fs::not_shipped(`x`) }\n",
+        )
+        .expect("write temp script");
+        let report = run_check_many(
+            super::CheckManyManifest {
+                schema_version: 1,
+                kind: super::RH_CHECK_MANIFEST_KIND.to_owned(),
+                files: vec!["unknown-api.rhai".to_owned()],
+            },
+            CheckManyOptions {
+                project_root: fixture_dir.clone(),
+                ..CheckManyOptions::default()
+            },
+        );
+        let _ = std::fs::remove_dir_all(fixture_dir);
+        assert!(!report.ok, "expected failure: {:?}", report.failures);
+        assert_eq!(report.failures[0].code, "script_api_unknown");
     }
 }

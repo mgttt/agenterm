@@ -140,27 +140,7 @@ fn rh_check_with_project_validation(
     source: &str,
     options: &RhInvocationOptions,
 ) -> Result<(), agenterm_rh::RhError> {
-    rh_check(source)?;
-    if let Some(project_root) = options.project_root.as_deref() {
-        let mut engine = rhai::Engine::new();
-        let budgets = options.budgets.clone().unwrap_or_default();
-        crate::script_runtime::configure_engine(&mut engine, &budgets);
-        let module_sources = crate::script_project::validate_project_imports(
-            &engine,
-            project_root,
-            source,
-        )
-        .map_err(|error| agenterm_rh::RhError::Compile(error.to_string()))?;
-        for module_source in module_sources {
-            crate::script_api_validate::validate_available_apis(&module_source)
-                .map_err(script_failure_to_rh_error)?;
-        }
-    }
-    crate::script_api_validate::validate_available_apis(source).map_err(script_failure_to_rh_error)
-}
-
-fn script_failure_to_rh_error(failure: crate::script_protocol::ScriptFailure) -> agenterm_rh::RhError {
-    agenterm_rh::RhError::Compile(format!("{}: {}", failure.code, failure.message))
+    agenterm_rh::check_with_project_validation(source, options.project_root.as_deref())
 }
 
 pub fn rh_transpile(source: &str) -> Result<String, agenterm_rh::RhError> {

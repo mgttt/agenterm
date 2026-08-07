@@ -2257,6 +2257,9 @@ fn failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agenterm::script_api_validate::{
+        agent_method_calls, external_function_calls, fleet_method_calls,
+    };
     use std::io::{Cursor, Read, Write};
 
     struct ChannelReader {
