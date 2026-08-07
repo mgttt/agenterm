@@ -34,11 +34,8 @@ pub fn check_with_project_validation(
 ) -> Result<(), RhError> {
     check(source)?;
     if let Some(root) = project_root {
-        let mut engine = Engine::new();
-        engine.set_optimization_level(OptimizationLevel::None);
-        engine.set_max_expr_depths(RH_MAX_EXPR_DEPTH, RH_MAX_EXPR_DEPTH);
-        let module_sources = validate_project_imports(&engine, root, source)
-            .map_err(|error| RhError::Compile(error))?;
+        let module_sources =
+            validate_project_imports(root, source).map_err(|error| RhError::Compile(error))?;
         for module_source in module_sources {
             validate_available_apis(&module_source).map_err(api_validate_error_to_rh)?;
         }

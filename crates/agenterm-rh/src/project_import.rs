@@ -4,20 +4,16 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use rhai::Engine;
+use crate::RhError;
+use crate::check::parse_rh_ast;
 
-pub fn validate_project_imports(
-    engine: &Engine,
-    root: &Path,
-    source: &str,
-) -> Result<Vec<String>, String> {
+pub fn validate_project_imports(root: &Path, source: &str) -> Result<Vec<String>, String> {
     let root = fs::canonicalize(root)
         .map_err(|error| format!("script_project_root: {}: {error}", root.display()))?;
     let mut visiting = HashSet::new();
     let mut visited = HashSet::new();
     let mut module_sources = Vec::new();
     validate_import_tree(
-        engine,
         &root,
         source,
         &mut visiting,
@@ -28,7 +24,6 @@ pub fn validate_project_imports(
 }
 
 fn validate_import_tree(
-    engine: &Engine,
     root: &Path,
     source: &str,
     visiting: &mut HashSet<PathBuf>,
@@ -52,17 +47,11 @@ fn validate_import_tree(
         }
         let module_source = String::from_utf8(bytes)
             .map_err(|error| format!("script_module_encoding: {import}: {error}"))?;
-        engine
-            .compile(&module_source)
-            .map_err(|error| format!("script_module_parse: {import}: {error}"))?;
-        validate_import_tree(
-            engine,
-            root,
-            &module_source,
-            visiting,
-            visited,
-            module_sources,
-        )?;
+        parse_rh_ast(&module_source).map_err(|error| match error {
+            RhError::Parse(message) => format!("script_module_parse: {import}: {message}"),
+            error => format!("script_module_parse: {import}: {error}"),
+        })?;
+        validate_import_tree(root, &module_source, visiting, visited, module_sources)?;
         module_sources.push(module_source);
         visiting.remove(&path);
         visited.insert(path);
@@ -181,4 +170,83 @@ fn skip_script_string(bytes: &[u8], index: &mut usize) -> Result<(), String> {
         *index += 1;
     }
     Err("script_parse: unterminated string while scanning imports".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_project_imports;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn fixture() -> PathBuf {
+        let test_name = std::thread::current()
+            .name()
+            .unwrap_or("test")
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>();
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-rh-project-import-{}-{test_name}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("modules")).unwrap();
+        root
+    }
+
+    #[test]
+    fn validates_nested_imports_in_dependency_order() {
+        let root = fixture();
+        fs::write(
+            root.join("modules/middle.rhai"),
+            "import \"modules/leaf\" as leaf;\nexport const middle = leaf::value;",
+        )
+        .unwrap();
+        fs::write(root.join("modules/leaf.rhai"), "export const value = 42;").unwrap();
+
+        let sources =
+            validate_project_imports(&root, "import \"modules/middle\" as middle;").unwrap();
+        assert_eq!(
+            sources,
+            [
+                "export const value = 42;",
+                "import \"modules/leaf\" as leaf;\nexport const middle = leaf::value;",
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_missing_import() {
+        let root = fixture();
+        let error = validate_project_imports(&root, "import \"missing\" as missing;").unwrap_err();
+        assert!(error.starts_with("script_module_missing: missing:"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_import_cycle() {
+        let root = fixture();
+        fs::write(root.join("modules/a.rhai"), "import \"modules/b\" as b;").unwrap();
+        fs::write(root.join("modules/b.rhai"), "import \"modules/a\" as a;").unwrap();
+
+        let error = validate_project_imports(&root, "import \"modules/a\" as a;").unwrap_err();
+        assert_eq!(error, "script_module_cycle: modules/a");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_import_root_escape() {
+        let root = fixture();
+        let error =
+            validate_project_imports(&root, "import \"../outside\" as outside;").unwrap_err();
+        assert_eq!(error, "script_module_root_escape: ../outside");
+        fs::remove_dir_all(root).unwrap();
+    }
 }
