@@ -1,13 +1,14 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 17;
+pub const RH_CODEGEN_REVISION: u32 = 18;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
 pub const RH_HOST_UTILITY_EXISTS_CASE_EXACT: u32 = 2;
 pub const RH_HOST_UTILITY_PROCESS_STATUS: u32 = 3;
 pub const RH_HOST_UTILITY_PRINT: u32 = 4;
+pub const RH_HOST_UTILITY_PROCESS_STDOUT_FILE: u32 = 5;
 
 pub type RhHostFleetCall = extern "C" fn(
     operation_id: *const u8,
@@ -495,6 +496,20 @@ pub fn emit_host_runtime(out: &mut String) {
                  \"timeout_ms\": timeout_ms,\n\
              });\n\
              rh_utility(3, &request.to_string())\n\
+         }\n\n\
+         fn rh_process_stdout_file(\n\
+             program: &str,\n\
+             args: &[String],\n\
+             timeout_ms: INT,\n\
+             stdout_path: &str,\n\
+         ) -> INT {\n\
+             let request = serde_json::json!({\n\
+                 \"program\": program,\n\
+                 \"args\": args,\n\
+                 \"timeout_ms\": timeout_ms,\n\
+                 \"stdout_path\": stdout_path,\n\
+             });\n\
+             rh_utility(5, &request.to_string())\n\
          }\n\n\
          fn rh_json_parse(source: &str) -> serde_json::Value {\n\
              match serde_json::from_str(source) {\n\

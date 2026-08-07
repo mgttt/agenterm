@@ -1550,6 +1550,22 @@ fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr)> {
     Some((&call.args[0], arguments, &call.args[2]))
 }
 
+fn process_stdout_file_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, &Expr)> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::process"
+        || call.name != "command_stdout_file"
+        || call.args.len() != 4
+    {
+        return None;
+    }
+    let Expr::Array(arguments, ..) = &call.args[1] else {
+        return None;
+    };
+    Some((&call.args[0], arguments, &call.args[2], &call.args[3]))
+}
+
 fn json_parse_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
@@ -1848,6 +1864,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some((program, arguments, timeout, stdout_path)) = process_stdout_file_args(expr)
+            && emit_process_stdout_file(out, program, arguments, timeout, stdout_path, ctx)?
+        {
+            return Ok(());
+        }
         if let Some(source) = json_parse_arg(expr)
             && emit_json_parse(out, source, ctx)?
         {
@@ -2123,6 +2144,49 @@ fn emit_process_status(
     }
     out.push_str("], ");
     emit_expr(out, timeout, ctx)?;
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_process_stdout_file(
+    out: &mut String,
+    program: &Expr,
+    arguments: &[Expr],
+    timeout: &Expr,
+    stdout_path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut program_expr = String::new();
+    let mut stdout_path_expr = String::new();
+    if !emit_native_string(&mut program_expr, program, ctx)?
+        || !is_pure_int_expr(timeout)
+        || !emit_native_string(&mut stdout_path_expr, stdout_path, ctx)?
+    {
+        return Ok(false);
+    }
+    let mut argument_exprs = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        let mut argument_expr = String::new();
+        if !emit_native_string(&mut argument_expr, argument, ctx)? {
+            return Ok(false);
+        }
+        argument_exprs.push(argument_expr);
+    }
+    out.push_str("rh_process_stdout_file(");
+    out.push_str(&program_expr);
+    out.push_str(", &vec![");
+    for (index, argument) in argument_exprs.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str("String::from(");
+        out.push_str(argument);
+        out.push(')');
+    }
+    out.push_str("], ");
+    emit_expr(out, timeout, ctx)?;
+    out.push_str(", ");
+    out.push_str(&stdout_path_expr);
     out.push(')');
     Ok(true)
 }
@@ -3320,6 +3384,32 @@ fn entry() {
         let rust = transpile_cdylib("fn entry() { fleet.protocol.info(); 9 }").expect("transpile");
         assert!(rust.contains("rh_fleet_call"));
         assert!(rust.contains("protocol.info"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_stdout_file_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let repo = args[0];
+    let out = args[1];
+    std::process::command_stdout_file("git", ["-C", repo, "rev-parse", "--show-prefix"], 10000, out)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_stdout_file("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("\"--show-prefix\""), "{}", output.rust);
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::process::command_stdout_file"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **M42d–M42f4 已落地**（`validate-artifact-manifest` / `clean-locked-artifacts` / `stage-artifact` 原生 `.rh`；codegen 17）。**下一切片 M42f5：`stage-build` + 共享 artifact 编排**（PRD：`stage-build` 仍挂 Rhai `artifact_files`/`artifact_manifest` lib） |
+| **状态** | **M42d–M42f4 已落地**（codegen 17）。**进行中 M42f5：`stage-build` 无损原生迁移**——M42f5a `command_stdout_file`（cg18）已落地；仍阻塞于 M42f5b metadata 宿主面 + M42f5c 任务切入口 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -105,6 +105,11 @@
 | M42f3 | 原生 `std::time::SystemTime::now().unix_millis`；codegen revision 17 | [x] |
 | M42f4 | 无损迁移 `stage-artifact`（INT-only `stage`/`stage_as`，try_copy/try_rename，无 try 内 return） | [x] |
 | M42f5 | 无损迁移 `stage-build`：复用原生 `stage`/`stage_as`/`clean_locked`，收口仍挂 Rhai 的共享 artifact 编排；任务入口切 `.rh` 并归档旧 `.rhai` | [ ] |
+| M42f5a | 原生 `std::process::command_stdout_file(program, args, timeout_ms, path) -> INT`（utility op 5；无命令白名单；stdout 落盘后由 `read_to_string` 消费）；codegen 18；解锁 git `--show-prefix` 等需 stdout 的检查 | [x] |
+| M42f5b | 原生 `build_metadata` 前置面：`env::get/has`、`sha256_file`、`atomic_write`、`json::stringify_pretty`、`SystemTime.rfc3339`、`to_lower` / `split` 线迭代（可再拆 commit） | [ ] |
+| M42f5c | `scripts/rh/stage-build.rh` + `scripts/rh/lib/build_metadata.rh` INT-only 写盘；任务 entry 切 `.rh`；归档旧 `.rhai`；`stage`/`stage_as` 只读 INT 0/1，不假设 map | [ ] |
+
+**M42f5 依赖说明：** `stage-build.rhai` 本身编排（clean → stage/stage_as 循环 → metadata → clean）在 M42f4 后已大半可复用原生 `artifact_files`；真正阻塞是 (1) `git rev-parse --show-prefix` 需要 stdout（仅有 `command_status` 不够），(2) 内联 `build_metadata::write` 需要哈希/原子写/环境/RFC3339/JSON 序列化。禁止用 shell 包装或 `host_eval` 假迁移；禁止把 metadata 改成子进程调 Rhai 任务冒充原生入口。
 
 **M42f4 park 后缀说明：** M42f3 已接线 `unix_millis`，但 `park_running_destination` 仍用 **`0..4096` 的 `try_rename` 序号**（`stem.locked-<n>.exe`），不取 wall-clock millis。原因：序号在同一目录内对冲突做确定性探测、不依赖时钟单调/并发同毫秒碰撞，且 `while` + INT 计数保持纯原生；millis API 留给其它需要墙钟戳的调用方。`stage`/`stage_as` 成功返回 **0**（直拷）/ **1**（park 后替换）；`stage-artifact` 任务入口丢弃该 INT。旧 Rhai 返回 `#{ destination, parked }` map——原生 INT 边界下，依赖 map 形返回的调用方（如未来的 `stage-build`）必须改为读 INT 或 print 侧效应，不得假设 map。
 

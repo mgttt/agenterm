@@ -39,7 +39,8 @@ pub use error::RhError;
 pub use host_api::{
     RH_CODEGEN_REVISION, RH_HOST_API_VERSION, RH_HOST_FLEET_OUT_CAP, RH_HOST_FS_READ_CAP,
     RH_HOST_OUT_CAP, RH_HOST_UTILITY_EXISTS_CASE_EXACT, RH_HOST_UTILITY_FAIL,
-    RH_HOST_UTILITY_PRINT, RH_HOST_UTILITY_PROCESS_STATUS, RhHostArgCall, RhHostArgsLenCall,
+    RH_HOST_UTILITY_PRINT, RH_HOST_UTILITY_PROCESS_STATUS,
+    RH_HOST_UTILITY_PROCESS_STDOUT_FILE, RhHostArgCall, RhHostArgsLenCall,
     RhHostEvalCall,
     RhHostFleetCall, RhHostFsReadCall, RhHostStdFsExistsCall, RhHostUtilityCall, emit_host_runtime,
 };

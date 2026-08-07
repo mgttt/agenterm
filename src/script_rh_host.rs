@@ -199,6 +199,15 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
                 -5
             }
         },
+        agenterm_rh::RH_HOST_UTILITY_PROCESS_STDOUT_FILE => {
+            match host_process_stdout_file(&input) {
+                Ok(code) => code,
+                Err(error) => {
+                    record_host_error("rh_process_stdout_file", &error);
+                    -5
+                }
+            }
+        }
         agenterm_rh::RH_HOST_UTILITY_PRINT => {
             if let Some(capture) = crate::script_rh_run::current_run_context()
                 .and_then(|context| context.output_capture)
@@ -214,12 +223,15 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
     }
 }
 
-fn host_process_status(request: &str) -> Result<i32, String> {
+fn host_process_request(
+    request: &str,
+) -> Result<(String, Vec<String>, u64, Option<String>), String> {
     let request: serde_json::Value =
         serde_json::from_str(request).map_err(|error| format!("process_request_json: {error}"))?;
     let program = request["program"]
         .as_str()
-        .ok_or_else(|| "process_program_type: expected string".to_owned())?;
+        .ok_or_else(|| "process_program_type: expected string".to_owned())?
+        .to_owned();
     let arguments = request["args"]
         .as_array()
         .ok_or_else(|| "process_arguments_type: expected array".to_owned())?;
@@ -246,7 +258,40 @@ fn host_process_status(request: &str) -> Result<i32, String> {
         .map_or(requested_timeout, |budgets| {
             requested_timeout.min(budgets.wall_time_ms)
         });
-    let code = crate::script_process::command_status(program, &arguments, timeout_ms)?;
+    let stdout_path = match request.get("stdout_path") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => {
+            let path = value
+                .as_str()
+                .ok_or_else(|| "process_stdout_path_type: expected string".to_owned())?;
+            if path.is_empty() {
+                return Err("process_stdout_path_empty".to_owned());
+            }
+            if path.len() > 4096 {
+                return Err("process_stdout_path_too_large: maximum is 4096 bytes".to_owned());
+            }
+            Some(path.to_owned())
+        }
+    };
+    Ok((program, arguments, timeout_ms, stdout_path))
+}
+
+fn host_process_status(request: &str) -> Result<i32, String> {
+    let (program, arguments, timeout_ms, _) = host_process_request(request)?;
+    let code = crate::script_process::command_status(&program, &arguments, timeout_ms)?;
+    i32::try_from(code).map_err(|_| format!("process_exit_code_overflow: {code}"))
+}
+
+fn host_process_stdout_file(request: &str) -> Result<i32, String> {
+    let (program, arguments, timeout_ms, stdout_path) = host_process_request(request)?;
+    let stdout_path =
+        stdout_path.ok_or_else(|| "process_stdout_path_type: expected string".to_owned())?;
+    let code = crate::script_process::command_stdout_file(
+        &program,
+        &arguments,
+        timeout_ms,
+        &stdout_path,
+    )?;
     i32::try_from(code).map_err(|_| format!("process_exit_code_overflow: {code}"))
 }
 
@@ -802,6 +847,28 @@ mod tests {
                 .expect_err("missing process")
                 .contains("process_spawn")
         );
+    }
+
+    #[test]
+    fn host_process_stdout_file_writes_captured_stdout() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-rh-stdout-file-{}.txt",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let request = serde_json::json!({
+            "program": "git",
+            "args": ["--version"],
+            "timeout_ms": 2000,
+            "stdout_path": path.to_string_lossy(),
+        });
+        assert_eq!(
+            super::host_process_stdout_file(&request.to_string()).expect("git stdout"),
+            0
+        );
+        let text = std::fs::read_to_string(&path).expect("stdout file");
+        let _ = std::fs::remove_file(&path);
+        assert!(text.to_ascii_lowercase().contains("git"), "{text}");
     }
 
     #[test]

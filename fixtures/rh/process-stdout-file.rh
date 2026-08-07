@@ -1,0 +1,28 @@
+// Probe: capture child stdout to a file then read it back (M42f5a).
+//
+// Args:
+//   OUTPUT_PATH
+
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: OUTPUT_PATH");
+    }
+    let out = args[0];
+    let code = std::process::command_stdout_file(
+        "git",
+        ["--version"],
+        2000,
+        out
+    );
+    if code != 0 {
+        return rh::fail("process_stdout_file_exit");
+    }
+    let text = std::fs::read_to_string(out);
+    if text.contains("git") {
+        return 1;
+    }
+    if text.contains("Git") {
+        return 1;
+    }
+    rh::fail("process_stdout_file_missing_git_banner")
+}
