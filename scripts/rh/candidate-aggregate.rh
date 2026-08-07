@@ -1,0 +1,923 @@
+// Build and validate one exact-SHA Candidate manifest from a closed payload.
+//
+// Usage:
+//   agenterm-rh task run candidate-aggregate -- \
+//     SOURCE_ROOT METADATA_JSON ASSET_DIRECTORY OUTPUT_MANIFEST
+//
+// METADATA_JSON schema v1 fields:
+//   source_sha, version, expected_tag, workflow_path, workflow_sha256,
+//   run_id, run_attempt, run_event, created_at_unix_ms, expires_at_unix_ms.
+//
+// Native note: build/validate helpers are inlined here until
+// scripts/rh/lib/release_candidate.rh ships as a bundled native module.
+
+fn file_hash(path, code) {
+    require(
+        std::fs::exists(path) && std::fs::metadata(path).is_file,
+        code + ":" + path
+    );
+    rhai::crypto::sha256_file(path)
+}
+
+fn file_size(path, code) {
+    require(
+        std::fs::exists(path) && std::fs::metadata(path).is_file,
+        code + ":" + path
+    );
+    std::fs::metadata(path).len
+}
+
+fn payload_path(root, name) {
+    require(
+        name != ""
+            && std::path::PathBuf::from(name).file_name == name
+            && !name.contains("/")
+            && !name.contains("\\"),
+        "candidate_asset_name:" + name
+    );
+    std::path::join(root, name).display
+}
+
+fn valid_sha256(value) {
+    value.len == 64
+}
+
+fn valid_source_sha(value) {
+    value.len == 40
+}
+
+fn valid_version(value) {
+    if value == "" || value.contains("/") || value.contains("\\") {
+        return false;
+    }
+    let build_parts = value.split("+");
+    if build_parts.len > 2 {
+        return false;
+    }
+    let public_version = build_parts[0];
+    let prerelease_parts = public_version.split("-");
+    if prerelease_parts.len > 2 {
+        return false;
+    }
+    let core = prerelease_parts[0];
+    let parts = core.split(".");
+    if parts.len != 3 {
+        return false;
+    }
+    if parts[0] == "" || parts[1] == "" || parts[2] == "" {
+        return false;
+    }
+    true
+}
+
+fn exact_values(expected, actual) {
+    if expected.len != actual.len {
+        return false;
+    }
+    for value in expected {
+        let found = 0;
+        for candidate in actual {
+            if candidate == value {
+                found = 1;
+                break;
+            }
+        }
+        if found == 0 {
+            return false;
+        }
+    }
+    for value in actual {
+        let found = 0;
+        for candidate in expected {
+            if candidate == value {
+                found = 1;
+                break;
+            }
+        }
+        if found == 0 {
+            return false;
+        }
+    }
+    true
+}
+
+fn file_names(root) {
+    require(
+        std::fs::exists(root) && std::fs::metadata(root).is_dir,
+        "candidate_asset_root:" + root
+    );
+    let names = [];
+    for entry in std::fs::read_dir(root) {
+        let file_name = "" + entry.file_name;
+        require(
+            entry.is_file,
+            "candidate_asset_not_file:" + file_name
+        );
+        names.push(file_name);
+    }
+    names
+}
+
+fn expected_archive_name(spec, asset_root) {
+    let spec_os = "" + spec.os;
+    let spec_arch = "" + spec.arch;
+    let release_name = "" + spec.release_name;
+    let preview_name = "" + spec.preview_name;
+    let release_path = std::path::join(asset_root, release_name).display;
+    let release_exists = std::fs::exists(release_path);
+    let preview_exists = 0;
+    if preview_name != "" {
+        let preview_path = std::path::join(asset_root, preview_name).display;
+        preview_exists = std::fs::exists(preview_path);
+    }
+    require(
+        release_exists != preview_exists,
+        "candidate_platform_archive_count:" + spec_os + "-" + spec_arch
+    );
+    if release_exists != 0 {
+        return release_name;
+    }
+    return preview_name;
+}
+
+fn parent_dir(path) {
+    std::path::join(path, "..").display
+}
+
+fn verify_checksum(path, hash, name) {
+    let text = std::fs::read_to_string(path);
+    text.trim();
+    require(
+        text == hash + "  " + name,
+        "candidate_checksum_content:" + name
+    );
+}
+
+fn validate_receipt(
+    receipt,
+    source_sha,
+    cargo_hash,
+    artifact_hash,
+    gate_hash,
+    sbom_hash,
+    gate_spec
+) {
+    require(
+        receipt.schema_version == 1
+            && receipt.product == "AgenTerm"
+            && receipt.release
+            && receipt.stress_included,
+        "candidate_receipt_profile"
+    );
+    require(
+        receipt.provenance.git_head == source_sha
+            && !receipt.provenance.source_dirty,
+        "candidate_receipt_source"
+    );
+    require(
+        receipt.provenance.cargo_lock_sha256 == cargo_hash,
+        "candidate_receipt_cargo_lock"
+    );
+    require(
+        receipt.provenance.artifact_manifest_sha256 == artifact_hash,
+        "candidate_receipt_artifact_manifest"
+    );
+    require(
+        receipt.gate_manifest.sha256 == gate_hash,
+        "candidate_receipt_gate_manifest"
+    );
+    require(
+        receipt.provenance.sbom_sha256 == sbom_hash,
+        "candidate_receipt_sbom"
+    );
+    let required = [];
+    for gate in gate_spec.required_gates {
+        required.push("" + gate.id);
+    }
+    let actual = [];
+    let seen = #{};
+    for gate in receipt.gates {
+        let gate_id = "" + gate.id;
+        require(
+            gate_id != "" && !seen.contains(gate_id),
+            "candidate_receipt_gate_duplicate:" + gate_id
+        );
+        seen[gate_id] = true;
+        require(
+            gate.status == "passed",
+            "candidate_receipt_gate_status:" + gate_id
+        );
+        let expected_evidence = [];
+        let found_gate = 0;
+        for declared in gate_spec.required_gates {
+            if declared.id == gate.id {
+                found_gate = 1;
+                for evidence in declared.evidence {
+                    let evidence_id = "" + evidence;
+                    expected_evidence.push(evidence_id);
+                }
+            }
+        }
+        require(
+            found_gate != 0,
+            "candidate_receipt_gate_unknown:" + gate_id
+        );
+        let evidence_seen = #{};
+        let actual_evidence = [];
+        for evidence in gate.evidence {
+            let evidence_id = "" + evidence;
+            require(
+                !evidence_seen.contains(evidence_id),
+                "candidate_receipt_evidence_duplicate:" + gate_id
+            );
+            evidence_seen[evidence_id] = true;
+            actual_evidence.push(evidence_id);
+        }
+        require(
+            exact_values(expected_evidence, actual_evidence),
+            "candidate_receipt_evidence_set:" + gate_id
+        );
+        actual.push("" + gate.id);
+    }
+    require(
+        exact_values(required, actual),
+        "candidate_receipt_gate_set"
+    );
+}
+
+fn validate_provenance(
+    provenance,
+    name,
+    hash,
+    source_sha,
+    version,
+    expected_tag,
+    os_name,
+    arch,
+    cargo_hash,
+    artifact_hash,
+    sbom_hash
+) {
+    require(
+        provenance.schema_version == 1
+            && provenance.product == "AgenTerm"
+            && provenance.version == version
+            && provenance.artifact == name
+            && provenance.sha256 == hash,
+        "candidate_provenance_artifact:" + name
+    );
+    require(
+        provenance.source_commit == source_sha,
+        "candidate_provenance_source_commit:" + name
+    );
+    require(
+        provenance.source_tag == expected_tag,
+        "candidate_provenance_source_tag:" + name
+    );
+    require(
+        provenance.cargo_lock_sha256 == cargo_hash,
+        "candidate_provenance_cargo_lock:" + name
+    );
+    require(
+        provenance.artifact_manifest_sha256 == artifact_hash,
+        "candidate_provenance_artifact_manifest:" + name
+    );
+    require(
+        provenance.os == os_name && provenance.arch == arch,
+        "candidate_provenance_platform:" + name
+    );
+    if os_name == "macos" {
+        require(
+            provenance.sbom_sha256 == sbom_hash,
+            "candidate_provenance_sbom:" + name
+        );
+        require(
+            (
+                provenance.channel == "release"
+                    && provenance.signed
+                    && provenance.notarized
+            ) || (
+                provenance.channel == "macos-unsigned-preview"
+                    && !provenance.signed
+                    && !provenance.notarized
+            ),
+            "candidate_provenance_macos_channel:" + name
+        );
+    } else {
+        require(
+            provenance.channel == "release"
+                && !provenance.signed
+                && !provenance.notarized,
+            "candidate_provenance_release_channel:" + name
+        );
+    }
+}
+
+fn validate_manifest(source_root_value, manifest, asset_root_value, now_ms) {
+    let source_root = std::path::absolute(source_root_value).display;
+    let asset_root = std::path::absolute(asset_root_value).display;
+    let source_sha = "" + manifest.source_sha;
+    let version = "" + manifest.version;
+    let expected_tag = "" + manifest.expected_tag;
+    let workflow_path_rel = "" + manifest.workflow.path;
+    let workflow_sha256 = "" + manifest.workflow.sha256;
+    let run_event = "" + manifest.run.event;
+    let sbom_manifest_name = "" + manifest.sbom.name;
+    let sbom_manifest_sha256 = "" + manifest.sbom.sha256;
+    let qualification_name = "" + manifest.qualification.name;
+    let qualification_sha256 = "" + manifest.qualification.sha256;
+    let inputs_cargo = "" + manifest.inputs.cargo_lock_sha256;
+    let inputs_artifact = "" + manifest.inputs.artifact_manifest_sha256;
+    let inputs_gate = "" + manifest.inputs.gate_manifest_sha256;
+    require(
+        manifest.schema_version == 1 && manifest.product == "AgenTerm",
+        "candidate_schema"
+    );
+    require(valid_source_sha(source_sha), "candidate_source_sha");
+    require(valid_version(version), "candidate_version");
+    require(
+        expected_tag == "v" + version
+            && expected_tag != "v0.1.7",
+        "candidate_expected_tag"
+    );
+    require(
+        workflow_path_rel == ".github/workflows/candidate.yml"
+            && valid_sha256(workflow_sha256),
+        "candidate_workflow_identity"
+    );
+    require(
+        manifest.run.id > 0
+            && manifest.run.attempt > 0
+            && run_event == "workflow_dispatch",
+        "candidate_run_identity"
+    );
+    require(
+        manifest.created_at_unix_ms > 0
+            && manifest.expires_at_unix_ms > manifest.created_at_unix_ms
+            && now_ms >= manifest.created_at_unix_ms
+            && now_ms <= manifest.expires_at_unix_ms,
+        "candidate_expired"
+    );
+
+    let workflow_path =
+        std::path::join(source_root, workflow_path_rel).display;
+    let workflow_hash =
+        file_hash(workflow_path, "candidate_workflow_missing");
+    require(
+        workflow_hash == workflow_sha256,
+        "candidate_workflow_hash"
+    );
+    let cargo_path = std::path::join(source_root, "Cargo.lock").display;
+    let artifact_path =
+        std::path::join(source_root, "scripts/artifacts.json").display;
+    let gate_path =
+        std::path::join(
+            source_root,
+            "scripts/qualification-gates.json"
+        ).display;
+    let cargo_hash = file_hash(cargo_path, "candidate_cargo_lock_missing");
+    let artifact_hash =
+        file_hash(artifact_path, "candidate_artifact_manifest_missing");
+    let gate_hash = file_hash(gate_path, "candidate_gate_manifest_missing");
+    require(
+        inputs_cargo == cargo_hash
+            && inputs_artifact == artifact_hash
+            && inputs_gate == gate_hash,
+        "candidate_source_input_hash"
+    );
+
+    let sbom_name =
+        "agenterm-" + version + "-sbom.spdx.json";
+    require(
+        sbom_manifest_name == sbom_name,
+        "candidate_sbom_name"
+    );
+    let sbom_path = payload_path(asset_root, sbom_name);
+    let sbom_hash = file_hash(sbom_path, "candidate_sbom_missing");
+    let sbom_size = file_size(sbom_path, "candidate_sbom_missing");
+    require(
+        sbom_manifest_sha256 == sbom_hash
+            && manifest.sbom.size == sbom_size,
+        "candidate_sbom_identity"
+    );
+
+    let receipt_name = "qualification-receipt.json";
+    require(
+        qualification_name == receipt_name,
+        "candidate_receipt_name"
+    );
+    let receipt_path = payload_path(asset_root, receipt_name);
+    let receipt_hash =
+        file_hash(receipt_path, "candidate_receipt_missing");
+    let receipt_size =
+        file_size(receipt_path, "candidate_receipt_missing");
+    require(
+        qualification_sha256 == receipt_hash
+            && manifest.qualification.size == receipt_size,
+        "candidate_receipt_identity"
+    );
+    validate_receipt(
+        rhai::json::parse_file(receipt_path),
+        source_sha,
+        cargo_hash,
+        artifact_hash,
+        gate_hash,
+        sbom_hash,
+        rhai::json::parse_file(gate_path)
+    );
+
+    require(manifest.assets.len == 6, "candidate_asset_count");
+    let expected_files = [receipt_name, sbom_name];
+    let mac_channel = "";
+    let specs = [
+        #{
+            os: "windows",
+            arch: "x86_64",
+            release_name:
+                "agenterm-" + version + "-windows-x86_64.zip",
+            preview_name: ""
+        },
+        #{
+            os: "windows",
+            arch: "aarch64",
+            release_name:
+                "agenterm-" + version + "-windows-aarch64.zip",
+            preview_name: ""
+        },
+        #{
+            os: "linux",
+            arch: "x86_64",
+            release_name:
+                "agenterm-" + version + "-linux-x86_64.tar.gz",
+            preview_name: ""
+        },
+        #{
+            os: "linux",
+            arch: "aarch64",
+            release_name:
+                "agenterm-" + version + "-linux-aarch64.tar.gz",
+            preview_name: ""
+        },
+        #{
+            os: "macos",
+            arch: "aarch64",
+            release_name:
+                "agenterm-" + version + "-macos-aarch64.zip",
+            preview_name:
+                "agenterm-" + version +
+                    "-macos-aarch64-unsigned-preview.zip"
+        },
+        #{
+            os: "macos",
+            arch: "x86_64",
+            release_name:
+                "agenterm-" + version + "-macos-x86_64.zip",
+            preview_name:
+                "agenterm-" + version +
+                    "-macos-x86_64-unsigned-preview.zip"
+        }
+    ];
+    for spec in specs {
+        let spec_os = "" + spec.os;
+        let spec_arch = "" + spec.arch;
+        let spec_release_name = "" + spec.release_name;
+        let spec_preview_name = "" + spec.preview_name;
+        let asset_name = "";
+        let asset_channel = "";
+        let asset_sha256 = "";
+        let asset_checksum_name = "";
+        let asset_checksum_sha256 = "";
+        let asset_provenance_name = "";
+        let asset_provenance_sha256 = "";
+        let asset_size = 0;
+        let asset_checksum_size = 0;
+        let asset_provenance_size = 0;
+        let asset_signed = 0;
+        let asset_notarized = 0;
+        let asset_found = 0;
+        for asset in manifest.assets {
+            let asset_os = "" + asset.os;
+            let asset_arch = "" + asset.arch;
+            if asset_os == spec_os && asset_arch == spec_arch {
+                require(
+                    asset_found == 0,
+                    "candidate_platform_duplicate:" + spec_os + "-" + spec_arch
+                );
+                asset_found = 1;
+                asset_name = "" + asset.name;
+                asset_channel = "" + asset.channel;
+                asset_sha256 = "" + asset.sha256;
+                asset_checksum_name = "" + asset.checksum.name;
+                asset_checksum_sha256 = "" + asset.checksum.sha256;
+                asset_provenance_name = "" + asset.provenance.name;
+                asset_provenance_sha256 = "" + asset.provenance.sha256;
+                asset_size = asset.size;
+                asset_checksum_size = asset.checksum.size;
+                asset_provenance_size = asset.provenance.size;
+                asset_signed = asset.signed;
+                asset_notarized = asset.notarized;
+            }
+        }
+        require(
+            asset_found == 1,
+            "candidate_platform_missing:" + spec_os + "-" + spec_arch
+        );
+        require(
+            asset_name == spec_release_name
+                || (
+                    spec_preview_name != ""
+                        && asset_name == spec_preview_name
+                ),
+            "candidate_archive_name:" + spec_os + "-" + spec_arch
+        );
+        let archive_path = payload_path(asset_root, asset_name);
+        let archive_hash =
+            file_hash(archive_path, "candidate_archive_missing");
+        let archive_size =
+            file_size(archive_path, "candidate_archive_missing");
+        require(
+            asset_sha256 == archive_hash
+                && asset_size == archive_size,
+            "candidate_archive_identity:" + asset_name
+        );
+        let checksum_name = asset_name + ".sha256";
+        let provenance_name = asset_name + ".provenance.json";
+        let checksum_path = payload_path(asset_root, checksum_name);
+        let provenance_path = payload_path(asset_root, provenance_name);
+        let checksum_hash =
+            file_hash(checksum_path, "candidate_checksum_missing");
+        let checksum_size =
+            file_size(checksum_path, "candidate_checksum_missing");
+        require(
+            asset_checksum_name == checksum_name
+                && asset_checksum_sha256 == checksum_hash
+                && asset_checksum_size == checksum_size,
+            "candidate_checksum_identity:" + asset_name
+        );
+        verify_checksum(checksum_path, archive_hash, asset_name);
+        let provenance_hash =
+            file_hash(provenance_path, "candidate_provenance_missing");
+        let provenance_size =
+            file_size(provenance_path, "candidate_provenance_missing");
+        require(
+            asset_provenance_name == provenance_name
+                && asset_provenance_sha256 == provenance_hash
+                && asset_provenance_size == provenance_size,
+            "candidate_provenance_identity:" + asset_name
+        );
+        let provenance = rhai::json::parse_file(provenance_path);
+        validate_provenance(
+            provenance,
+            asset_name,
+            archive_hash,
+            source_sha,
+            version,
+            expected_tag,
+            spec_os,
+            spec_arch,
+            cargo_hash,
+            artifact_hash,
+            sbom_hash
+        );
+        let provenance_channel = "" + provenance.channel;
+        require(
+            asset_channel == provenance_channel
+                && asset_signed == provenance.signed
+                && asset_notarized == provenance.notarized,
+            "candidate_asset_channel:" + asset_name
+        );
+        if spec_os == "macos" {
+            if mac_channel == "" {
+                mac_channel = asset_channel;
+            } else {
+                require(
+                    mac_channel == asset_channel,
+                    "candidate_macos_mixed_channels"
+                );
+            }
+        }
+        expected_files.push(asset_name);
+        expected_files.push(checksum_name);
+        expected_files.push(provenance_name);
+    }
+
+    let readmes = [
+        "MACOS_UNSIGNED_PREVIEW_README.md",
+        "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
+    ];
+    if mac_channel == "macos-unsigned-preview" {
+        for name in readmes {
+            let path = payload_path(asset_root, name);
+            let hash = file_hash(path, "candidate_preview_readme_missing");
+            let readme_sha256 = "";
+            let readme_size = 0;
+            let entry_found = 0;
+            for candidate in manifest.unsigned_macos_readmes {
+                if ("" + candidate.name) == name {
+                    require(
+                        entry_found == 0,
+                        "candidate_preview_readme_duplicate:" + name
+                    );
+                    entry_found = 1;
+                    readme_sha256 = "" + candidate.sha256;
+                    readme_size = candidate.size;
+                }
+            }
+            let readme_bytes =
+                file_size(path, "candidate_preview_readme_missing");
+            require(
+                entry_found == 1
+                    && readme_sha256 == hash
+                    && readme_size == readme_bytes,
+                "candidate_preview_readme_identity:" + name
+            );
+            expected_files.push(name);
+        }
+        require(
+            manifest.unsigned_macos_readmes.len == 2,
+            "candidate_preview_readme_count"
+        );
+    } else {
+        require(
+            manifest.unsigned_macos_readmes.len == 0,
+            "candidate_preview_readme_unexpected"
+        );
+    }
+    let payload_names = file_names(asset_root);
+    require(
+        exact_values(expected_files, payload_names),
+        "candidate_payload_file_set"
+    );
+    0
+}
+
+fn build_manifest(
+    source_root_value,
+    metadata_path_value,
+    asset_root_value,
+    output_path_value
+) {
+    let source_root = std::path::absolute(source_root_value).display;
+    let metadata_path = std::path::absolute(metadata_path_value).display;
+    let asset_root = std::path::absolute(asset_root_value).display;
+    let output_path = std::path::absolute(output_path_value).display;
+    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata_source_sha = "" + metadata.source_sha;
+    let metadata_version = "" + metadata.version;
+    let metadata_expected_tag = "" + metadata.expected_tag;
+    let metadata_workflow_path = "" + metadata.workflow_path;
+    let metadata_workflow_sha256 = "" + metadata.workflow_sha256;
+    require(metadata.schema_version == 1, "candidate_metadata_schema");
+    require(valid_source_sha(metadata_source_sha), "candidate_source_sha");
+    require(valid_version(metadata_version), "candidate_version");
+    require(
+        metadata_expected_tag == "v" + metadata_version,
+        "candidate_expected_tag"
+    );
+
+    let workflow_path =
+        std::path::join(source_root, metadata_workflow_path).display;
+    let workflow_hash =
+        file_hash(workflow_path, "candidate_workflow_missing");
+    require(
+        valid_sha256(metadata_workflow_sha256)
+            && metadata_workflow_sha256 == workflow_hash,
+        "candidate_metadata_workflow_hash"
+    );
+    let cargo_path = std::path::join(source_root, "Cargo.lock").display;
+    let artifact_path =
+        std::path::join(source_root, "scripts/artifacts.json").display;
+    let gate_path =
+        std::path::join(
+            source_root,
+            "scripts/qualification-gates.json"
+        ).display;
+    let sbom_name =
+        "agenterm-" + metadata_version + "-sbom.spdx.json";
+    let receipt_name = "qualification-receipt.json";
+    let sbom_path = payload_path(asset_root, sbom_name);
+    let receipt_path = payload_path(asset_root, receipt_name);
+    let cargo_hash = file_hash(cargo_path, "candidate_cargo_lock_missing");
+    let artifact_hash =
+        file_hash(artifact_path, "candidate_artifact_manifest_missing");
+    let sbom_hash = file_hash(sbom_path, "candidate_sbom_missing");
+
+    let assets = [];
+    let mac_channel = "";
+    let specs = [
+        #{
+            os: "windows",
+            arch: "x86_64",
+            release_name:
+                "agenterm-" + metadata_version + "-windows-x86_64.zip",
+            preview_name: ""
+        },
+        #{
+            os: "windows",
+            arch: "aarch64",
+            release_name:
+                "agenterm-" + metadata_version + "-windows-aarch64.zip",
+            preview_name: ""
+        },
+        #{
+            os: "linux",
+            arch: "x86_64",
+            release_name:
+                "agenterm-" + metadata_version + "-linux-x86_64.tar.gz",
+            preview_name: ""
+        },
+        #{
+            os: "linux",
+            arch: "aarch64",
+            release_name:
+                "agenterm-" + metadata_version + "-linux-aarch64.tar.gz",
+            preview_name: ""
+        },
+        #{
+            os: "macos",
+            arch: "aarch64",
+            release_name:
+                "agenterm-" + metadata_version + "-macos-aarch64.zip",
+            preview_name:
+                "agenterm-" + metadata_version +
+                    "-macos-aarch64-unsigned-preview.zip"
+        },
+        #{
+            os: "macos",
+            arch: "x86_64",
+            release_name:
+                "agenterm-" + metadata_version + "-macos-x86_64.zip",
+            preview_name:
+                "agenterm-" + metadata_version +
+                    "-macos-x86_64-unsigned-preview.zip"
+        }
+    ];
+    for spec in specs {
+        let spec_os = "" + spec.os;
+        let spec_arch = "" + spec.arch;
+        let name = expected_archive_name(spec, asset_root);
+        let archive_path = payload_path(asset_root, name);
+        let hash = file_hash(archive_path, "candidate_archive_missing");
+        let checksum_name = name + ".sha256";
+        let provenance_name = name + ".provenance.json";
+        let checksum_path = payload_path(asset_root, checksum_name);
+        let provenance_path = payload_path(asset_root, provenance_name);
+        let checksum_hash =
+            file_hash(checksum_path, "candidate_checksum_missing");
+        let provenance_hash =
+            file_hash(provenance_path, "candidate_provenance_missing");
+        verify_checksum(checksum_path, hash, name);
+        let provenance = rhai::json::parse_file(provenance_path);
+        let archive_size =
+            file_size(archive_path, "candidate_archive_missing");
+        let checksum_size =
+            file_size(checksum_path, "candidate_checksum_missing");
+        let provenance_size =
+            file_size(provenance_path, "candidate_provenance_missing");
+        validate_provenance(
+            provenance,
+            name,
+            hash,
+            metadata_source_sha,
+            metadata_version,
+            metadata_expected_tag,
+            spec_os,
+            spec_arch,
+            cargo_hash,
+            artifact_hash,
+            sbom_hash
+        );
+        let provenance_channel = "" + provenance.channel;
+        if spec_os == "macos" {
+            if mac_channel == "" {
+                mac_channel = provenance_channel;
+            } else {
+                require(
+                    mac_channel == provenance_channel,
+                    "candidate_macos_mixed_channels"
+                );
+            }
+        }
+        assets.push(#{
+            name: name,
+            os: spec_os,
+            arch: spec_arch,
+            channel: provenance.channel,
+            signed: provenance.signed,
+            notarized: provenance.notarized,
+            size: archive_size,
+            sha256: hash,
+            checksum: #{
+                name: checksum_name,
+                size: checksum_size,
+                sha256: checksum_hash
+            },
+            provenance: #{
+                name: provenance_name,
+                size: provenance_size,
+                sha256: provenance_hash
+            }
+        });
+    }
+
+    let readme_entries = [];
+    if mac_channel == "macos-unsigned-preview" {
+        for name in [
+            "MACOS_UNSIGNED_PREVIEW_README.md",
+            "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
+        ] {
+            let path = payload_path(asset_root, name);
+            let readme_size =
+                file_size(path, "candidate_preview_readme_missing");
+            let readme_hash =
+                file_hash(path, "candidate_preview_readme_missing");
+            readme_entries.push(#{
+                name: name,
+                size: readme_size,
+                sha256: readme_hash
+            });
+        }
+    }
+
+    let gate_hash = file_hash(gate_path, "candidate_gate_manifest_missing");
+    let receipt_size =
+        file_size(receipt_path, "candidate_receipt_missing");
+    let receipt_hash =
+        file_hash(receipt_path, "candidate_receipt_missing");
+    let sbom_size = file_size(sbom_path, "candidate_sbom_missing");
+
+    let manifest = #{
+        schema_version: 1,
+        kind: "agenterm-release-candidate",
+        product: "AgenTerm",
+        source_sha: metadata.source_sha,
+        version: metadata.version,
+        expected_tag: metadata.expected_tag,
+        workflow: #{
+            path: metadata.workflow_path,
+            sha256: workflow_hash
+        },
+        run: #{
+            id: metadata.run_id,
+            attempt: metadata.run_attempt,
+            event: metadata.run_event
+        },
+        created_at_unix_ms: metadata.created_at_unix_ms,
+        expires_at_unix_ms: metadata.expires_at_unix_ms,
+        inputs: #{
+            cargo_lock_sha256: cargo_hash,
+            artifact_manifest_sha256: artifact_hash,
+            gate_manifest_sha256: gate_hash
+        },
+        qualification: #{
+            name: receipt_name,
+            size: receipt_size,
+            sha256: receipt_hash
+        },
+        sbom: #{
+            name: sbom_name,
+            size: sbom_size,
+            sha256: sbom_hash
+        },
+        assets: assets,
+        unsigned_macos_readmes: readme_entries
+    };
+    validate_manifest(
+        source_root,
+        manifest,
+        asset_root,
+        std::time::SystemTime::now().unix_millis
+    );
+    std::fs::create_dir_all(parent_dir(output_path));
+    rhai::runtime::atomic_write(
+        output_path,
+        rhai::json::stringify_pretty(manifest) + "\n"
+    );
+    print(
+        "CANDIDATE " + metadata_source_sha + " " + metadata_expected_tag +
+            " " + output_path
+    );
+    0
+}
+
+fn entry() {
+    if args.len == 1 && (args[0] == "--help" || args[0] == "-h") {
+        print(
+            "usage: candidate-aggregate SOURCE_ROOT METADATA_JSON " +
+                "ASSET_DIRECTORY OUTPUT_MANIFEST"
+        );
+        print(
+            "creates schema-v1 exact-SHA Candidate metadata; validates the " +
+                "closed six-platform payload before writing"
+        );
+        return 0;
+    }
+    if args.len != 4 {
+        return rh::fail(
+            "candidate_aggregate_arguments: expected SOURCE_ROOT " +
+                "METADATA_JSON ASSET_DIRECTORY OUTPUT_MANIFEST"
+        );
+    }
+    build_manifest(args[0], args[1], args[2], args[3]);
+    0
+}
