@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M40 原生进程状态与发布策略 task 迁移** |
+| **状态** | **M41 顶层 task fail-closed 修复完成；通用 JSON 原生能力待推进** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -86,6 +86,8 @@
 | M38a | host API v8 提供 typed native failure 与 case-exact 文件检查；`verify-docs-site` 从活跃 `.rhai` 迁至零回退 `.rh` 并归档旧实现 | [x] |
 | M39a | Candidate、Promotion 与发布索引步骤统一通过 `agenterm-rh` 执行脚本；工作流静态门禁止恢复 `agenterm-rhai` 活跃入口 | [x] |
 | M40a | host API v9 通过通用 utility ABI 提供无命令白名单、带超时和进程树清理的 `std::process::command_status`；`internal-version-policy` 零回退迁移并归档旧实现 | [x] |
+| M41a | 无显式 `fn entry()` 的顶层 `.rhai` 强制整脚本 compatibility execution，禁止生成返回 0 的 Native stub；无 entry 的 `.rh` named task 由资格门 fail-closed 拒绝，codegen cache revision 同步失效旧包 | [x] |
+| M41b | 为无损迁移 `validate-artifact-manifest` 提供通用 JSON/对象/数组原生能力；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [ ] |
 
 ---
 

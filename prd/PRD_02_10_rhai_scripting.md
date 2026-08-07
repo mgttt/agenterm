@@ -72,6 +72,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   failures remain robustness controls. `internal-version-policy` uses Git's
   authoritative `show-ref --verify` path in a zero-fallback `.rh` task and its
   interpreted implementation is archived.
+- [x] top-level compatibility scripts without an explicit `fn entry()` can no
+  longer qualify as a native zero-return stub. `.rhai` entries execute the
+  complete source through the compatibility boundary; `.rh` named tasks without
+  an entry point fail qualification. The cache revision invalidates affected
+  packs, and public task regression coverage proves invalid arguments no longer
+  succeed silently.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
