@@ -3,8 +3,8 @@
 use agenterm_rh::{RH_HOST_API_VERSION, check, transpile_cdylib};
 
 #[test]
-fn rh_host_api_version_is_three() {
-    assert_eq!(RH_HOST_API_VERSION, 3);
+fn rh_host_api_version_is_four() {
+    assert_eq!(RH_HOST_API_VERSION, 4);
 }
 
 #[test]
@@ -60,15 +60,15 @@ fn cdylib_transpile_emits_host_runtime_and_entry() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_entry"));
     assert!(rust.contains("rh_host_api_version"));
-    assert!(rust.contains("rh_register_host_v3") || rust.contains("rh_register_host_v2"));
+    assert!(rust.contains("rh_register_host_v4"));
 }
 
 #[test]
-fn stdlib_fixture_transpile_uses_host_eval() {
+fn stdlib_fixture_transpile_uses_std_exists_fast_path() {
     let source = include_str!("../fixtures/rh/stdlib.rh");
     let rust = transpile_cdylib(source).expect("transpile");
-    assert!(rust.contains("rh_host_eval_int"));
-    assert!(rust.contains("std::fs::exists"));
+    assert!(rust.contains("rh_std_fs_exists(\"/tmp\")"));
+    assert!(!rust.contains("rh_host_eval_int(\"std::fs::exists"));
 }
 
 #[test]

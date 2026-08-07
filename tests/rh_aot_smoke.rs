@@ -122,7 +122,7 @@ fn native_for_fixtures_qualify_with_expected_entry_values() {
 }
 
 #[test]
-fn stdlib_fixture_qualifies_with_host_eval() {
+fn stdlib_fixture_qualifies_with_std_exists_fast_path() {
     let dir = std::env::temp_dir().join(format!("agenterm-rh-stdlib-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let source = include_str!("../fixtures/rh/stdlib.rh");

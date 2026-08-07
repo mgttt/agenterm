@@ -7,5 +7,5 @@ fn entry() {
 }
 
 fn cc_lines() {
-    ["rh-2 stdlib", "host-eval"]
+    ["rh-2 stdlib", "std-fast-path"]
 }

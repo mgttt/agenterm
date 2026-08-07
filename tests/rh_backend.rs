@@ -89,7 +89,7 @@ fn rh_backend_eval_runs_source_without_prebuilt_pack() {
 }
 
 #[test]
-fn rh_backend_eval_stdlib_fixture_via_host_eval() {
+fn rh_backend_eval_stdlib_fixture_via_std_exists_fast_path() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/stdlib.rh");
         let result = try_execute_rh_invocation(
@@ -101,6 +101,7 @@ fn rh_backend_eval_stdlib_fixture_via_host_eval() {
         .expect("eval")
         .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(42)));
+        assert!(result.stdout.contains("std-fast-path"));
     });
 }
 

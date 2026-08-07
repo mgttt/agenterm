@@ -797,8 +797,27 @@ fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), Rh
     Ok(())
 }
 
+fn std_fs_exists_literal(expr: &Expr) -> Option<&str> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::fs" || call.name != "exists" || call.args.len() != 1 {
+        return None;
+    }
+    match &call.args[0] {
+        Expr::StringConstant(path, ..) => Some(path.as_str()),
+        _ => None,
+    }
+}
+
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
+        if let Some(path) = std_fs_exists_literal(expr) {
+            out.push_str("rh_std_fs_exists(");
+            out.push_str(&format!("{path:?}"));
+            out.push(')');
+            return Ok(());
+        }
         if let Some(call) = parse_fleet_call(expr) {
             validate_fleet_call(&call)?;
             let params = fleet_params_json(&call)?;
@@ -1019,6 +1038,14 @@ mod tests {
         let source = include_str!("../../../fixtures/rh/while.rh");
         let rust = transpile_cdylib(source).expect("transpile");
         assert!(rust.contains("while "), "expected while in:\n{rust}");
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_exists_literal_fast_path() {
+        let source = include_str!("../../../fixtures/rh/stdlib.rh");
+        let rust = transpile_cdylib(source).expect("transpile");
+        assert!(rust.contains("rh_std_fs_exists(\"/tmp\")"));
+        assert!(!rust.contains("rh_host_eval_int(\"std::fs::exists"));
     }
 
     #[test]

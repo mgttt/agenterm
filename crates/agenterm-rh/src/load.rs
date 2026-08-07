@@ -5,7 +5,7 @@ use libloading::{Library, Symbol};
 use crate::{
     RhError,
     compile::hash_file,
-    host_api::{RhHostEvalCall, RhHostFleetCall, RhHostRunScriptCall},
+    host_api::{RhHostEvalCall, RhHostFleetCall, RhHostRunScriptCall, RhHostStdFsExistsCall},
 };
 
 pub struct RhNativeModule {
@@ -28,7 +28,7 @@ impl RhNativeModule {
         fleet_call: RhHostFleetCall,
         eval_call: Option<RhHostEvalCall>,
     ) -> Result<(), RhError> {
-        self.register_host_v3(fleet_call, eval_call, None)
+        self.register_host_v4(fleet_call, eval_call, None, None)
     }
 
     pub fn register_host_v3(
@@ -37,7 +37,34 @@ impl RhNativeModule {
         eval_call: Option<RhHostEvalCall>,
         run_script_call: Option<RhHostRunScriptCall>,
     ) -> Result<(), RhError> {
+        self.register_host_v4(fleet_call, eval_call, run_script_call, None)
+    }
+
+    pub fn register_host_v4(
+        &self,
+        fleet_call: RhHostFleetCall,
+        eval_call: Option<RhHostEvalCall>,
+        run_script_call: Option<RhHostRunScriptCall>,
+        std_fs_exists_call: Option<RhHostStdFsExistsCall>,
+    ) -> Result<(), RhError> {
         unsafe {
+            if let Ok(register_v4) = self.library.get::<Symbol<
+                extern "C" fn(
+                    RhHostFleetCall,
+                    RhHostEvalCall,
+                    RhHostRunScriptCall,
+                    RhHostStdFsExistsCall,
+                ),
+            >>(b"rh_register_host_v4")
+            {
+                register_v4(
+                    fleet_call,
+                    eval_call.unwrap_or(dummy_eval_call),
+                    run_script_call.unwrap_or(dummy_run_script_call),
+                    std_fs_exists_call.unwrap_or(dummy_std_fs_exists_call),
+                );
+                return Ok(());
+            }
             if let Ok(register_v3) = self.library.get::<Symbol<
                 extern "C" fn(RhHostFleetCall, RhHostEvalCall, RhHostRunScriptCall),
             >>(b"rh_register_host_v3")
@@ -151,6 +178,10 @@ extern "C" fn dummy_run_script_call(
     _out_buf: *mut u8,
     _out_cap: u32,
 ) -> i32 {
+    -4
+}
+
+extern "C" fn dummy_std_fs_exists_call(_path: *const u8, _path_len: u32) -> i32 {
     -4
 }
 

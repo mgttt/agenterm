@@ -110,6 +110,13 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
+        module.register_host_v4(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+        )
+    } else if api >= 3 {
         module.register_host_v3(
             host_fleet_call,
             Some(host_eval_call),
@@ -121,6 +128,24 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
         Err(RhError::Compile(format!(
             "rh pack host api {api} is older than the minimum supported version 2"
         )))
+    }
+}
+
+extern "C" fn host_std_fs_exists_call(path: *const u8, path_len: u32) -> i32 {
+    if path.is_null() {
+        return -1;
+    }
+    let path = match unsafe { read_utf8(path, path_len) } {
+        Ok(value) => value,
+        Err(()) => return -2,
+    };
+    match Path::new(&path).try_exists() {
+        Ok(true) => 1,
+        Ok(false) => 0,
+        Err(error) => {
+            record_host_error("rh_std_fs_exists", &error.to_string());
+            -5
+        }
     }
 }
 
@@ -408,6 +433,41 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["kind"], "bool");
         assert!(value["value"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn host_std_fs_exists_call_reports_present_and_missing_paths() {
+        let present = std::env::temp_dir();
+        let present = present.to_string_lossy();
+        assert_eq!(
+            super::host_std_fs_exists_call(present.as_ptr(), present.len() as u32),
+            1
+        );
+
+        let missing = present.to_string() + "/agenterm-rh-definitely-missing";
+        assert_eq!(
+            super::host_std_fs_exists_call(missing.as_ptr(), missing.len() as u32),
+            0
+        );
+    }
+
+    #[test]
+    fn native_pack_uses_std_fs_exists_fast_path() {
+        let dir =
+            std::env::temp_dir().join(format!("agenterm-rh-host-exists-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create");
+        let source = format!(
+            "fn entry() {{ if std::fs::exists(`{}`) {{ 42 }} else {{ 0 }} }}",
+            dir.display()
+        );
+        agenterm_rh::build_pack_dir(&source, &dir).expect("build");
+        let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
+        let value =
+            call_pack_entry_with_host(&native, None, crate::script_rh_run::RhRunContext::default())
+                .expect("entry");
+        assert_eq!(value, 42);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
