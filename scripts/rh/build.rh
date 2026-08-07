@@ -256,12 +256,6 @@ fn entry() {
 
     let identity = build_identity::facts(repo, profile);
     let environment = build_identity::environment(identity);
-    if external_target == 0
-            && profile == "release"
-            && cross_client == 0
-            && unix_bootstrap == 0 {
-        environment.CARGO_TARGET_DIR = cargo_output;
-    }
 
     let incremental_producer = 0;
     let incremental_invocation = "";
@@ -307,14 +301,6 @@ fn entry() {
                 // RUSTC_WRAPPER deliberately names the stable bootstrap cache
                 // worker. The per-run task copy must never enter Cargo's compiler
                 // identity or turn a hot build into a rebuild.
-                environment.RUSTC_WRAPPER = stable_wrapper;
-                environment.AGENTERM_INTERNAL_RUSTC_WRAPPER =
-                    "agenterm-incremental-manifest-v1";
-                environment.AGENTERM_INCREMENTAL_INVOCATION_ID =
-                    incremental_invocation;
-                environment.AGENTERM_INCREMENTAL_TARGET = cargo_output;
-                environment.AGENTERM_INCREMENTAL_ROOT = incremental_root;
-                environment.AGENTERM_INCREMENTAL_STATE = incremental_state;
                 incremental_producer = 1;
                 print(
                     "AgenTerm incremental root cleanup: " +
@@ -336,6 +322,25 @@ fn entry() {
         print(
             "AgenTerm incremental root cleanup: producer_state=not-applicable, " +
                 "lane does not own stage-and-prune"
+        );
+    }
+
+    if incremental_producer != 0 {
+        environment = build_identity::environment_with_incremental(
+            identity,
+            stable_wrapper,
+            incremental_invocation,
+            cargo_output,
+            incremental_root,
+            incremental_state
+        );
+    } else if external_target == 0
+            && profile == "release"
+            && cross_client == 0
+            && unix_bootstrap == 0 {
+        environment = build_identity::environment_with_cargo_target(
+            identity,
+            cargo_output
         );
     }
 

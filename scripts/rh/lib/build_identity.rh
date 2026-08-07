@@ -26,7 +26,7 @@ fn is_git_commit(value) {
     0
 }
 
-fn write(repo_value, profile, output_path_value) {
+fn facts(repo_value, profile) {
     let repo = std::path::absolute(repo_value).display;
     require(
         profile == "dev"
@@ -99,26 +99,102 @@ fn write(repo_value, profile, output_path_value) {
         "build_identity_artifact_manifest_hash_invalid"
     );
 
-    let dirty_label = "false";
-    if dirty {
-        dirty_label = "true";
-    }
-    let batch =
-        "set \"AGENTERM_BUILD_IDENTITY_VERSION=1\"\n" +
-        "set \"AGENTERM_BUILD_GIT_COMMIT=" + commit + "\"\n" +
-        "set \"AGENTERM_BUILD_GIT_DIRTY=" + dirty_label + "\"\n" +
-        "set \"AGENTERM_BUILD_CARGO_LOCK_SHA256=" +
-            cargo_lock_sha256 + "\"\n" +
-        "set \"AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256=" +
-            artifact_manifest_sha256 + "\"\n" +
-        "set \"AGENTERM_BUILD_PROFILE=" + profile + "\"\n";
-
-    let output_path = std::path::absolute(output_path_value).display;
-    rhai::runtime::atomic_write(output_path, batch);
     std::fs::try_remove_file(stdout_path);
 
+    #{
+        schema_version: 1,
+        commit: commit,
+        dirty: dirty,
+        cargo_lock_sha256: cargo_lock_sha256,
+        artifact_manifest_sha256: artifact_manifest_sha256,
+        profile: profile
+    }
+}
+
+fn environment(identity) {
+    let dirty_label = "false";
+    if identity.dirty {
+        dirty_label = "true";
+    }
+    #{
+        AGENTERM_BUILD_IDENTITY_VERSION: identity.schema_version.to_string(),
+        AGENTERM_BUILD_GIT_COMMIT: identity.commit,
+        AGENTERM_BUILD_GIT_DIRTY: dirty_label,
+        AGENTERM_BUILD_CARGO_LOCK_SHA256: identity.cargo_lock_sha256,
+        AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256:
+            identity.artifact_manifest_sha256,
+        AGENTERM_BUILD_PROFILE: identity.profile
+    }
+}
+
+fn environment_with_cargo_target(identity, cargo_target_dir) {
+    let base = environment(identity);
+    #{
+        AGENTERM_BUILD_IDENTITY_VERSION: base.AGENTERM_BUILD_IDENTITY_VERSION,
+        AGENTERM_BUILD_GIT_COMMIT: base.AGENTERM_BUILD_GIT_COMMIT,
+        AGENTERM_BUILD_GIT_DIRTY: base.AGENTERM_BUILD_GIT_DIRTY,
+        AGENTERM_BUILD_CARGO_LOCK_SHA256: base.AGENTERM_BUILD_CARGO_LOCK_SHA256,
+        AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256:
+            base.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256,
+        AGENTERM_BUILD_PROFILE: base.AGENTERM_BUILD_PROFILE,
+        CARGO_TARGET_DIR: cargo_target_dir
+    }
+}
+
+fn environment_with_incremental(
+    identity,
+    stable_wrapper,
+    incremental_invocation,
+    cargo_output,
+    incremental_root,
+    incremental_state
+) {
+    let base = environment(identity);
+    #{
+        AGENTERM_BUILD_IDENTITY_VERSION: base.AGENTERM_BUILD_IDENTITY_VERSION,
+        AGENTERM_BUILD_GIT_COMMIT: base.AGENTERM_BUILD_GIT_COMMIT,
+        AGENTERM_BUILD_GIT_DIRTY: base.AGENTERM_BUILD_GIT_DIRTY,
+        AGENTERM_BUILD_CARGO_LOCK_SHA256: base.AGENTERM_BUILD_CARGO_LOCK_SHA256,
+        AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256:
+            base.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256,
+        AGENTERM_BUILD_PROFILE: base.AGENTERM_BUILD_PROFILE,
+        RUSTC_WRAPPER: stable_wrapper,
+        AGENTERM_INTERNAL_RUSTC_WRAPPER: "agenterm-incremental-manifest-v1",
+        AGENTERM_INCREMENTAL_INVOCATION_ID: incremental_invocation,
+        AGENTERM_INCREMENTAL_TARGET: cargo_output,
+        AGENTERM_INCREMENTAL_ROOT: incremental_root,
+        AGENTERM_INCREMENTAL_STATE: incremental_state
+    }
+}
+
+fn batch_environment(identity) {
+    let env = environment(identity);
+    "set \"AGENTERM_BUILD_IDENTITY_VERSION=" +
+        env.AGENTERM_BUILD_IDENTITY_VERSION + "\"\n" +
+    "set \"AGENTERM_BUILD_GIT_COMMIT=" +
+        env.AGENTERM_BUILD_GIT_COMMIT + "\"\n" +
+    "set \"AGENTERM_BUILD_GIT_DIRTY=" +
+        env.AGENTERM_BUILD_GIT_DIRTY + "\"\n" +
+    "set \"AGENTERM_BUILD_CARGO_LOCK_SHA256=" +
+        env.AGENTERM_BUILD_CARGO_LOCK_SHA256 + "\"\n" +
+    "set \"AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256=" +
+        env.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256 + "\"\n" +
+    "set \"AGENTERM_BUILD_PROFILE=" +
+        env.AGENTERM_BUILD_PROFILE + "\"\n"
+}
+
+fn write(repo_value, profile, output_path_value) {
+    let identity = facts(repo_value, profile);
+    let batch = batch_environment(identity);
+    let output_path = std::path::absolute(output_path_value).display;
+    rhai::runtime::atomic_write(output_path, batch);
+
+    let dirty_label = "false";
+    if identity.dirty {
+        dirty_label = "true";
+    }
     print(
-        "Prepared build identity for " + commit +
+        "Prepared build identity for " + identity.commit +
         " (" + profile + ", dirty=" + dirty_label + ")"
     );
     0
