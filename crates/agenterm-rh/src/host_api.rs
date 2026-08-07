@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 42;
+pub const RH_CODEGEN_REVISION: u32 = 43;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1284,6 +1284,120 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
                  Some(_) | None => {\n\
                      let _ = rh_fail(&format!(\"json_contains_path: {}\", path.join(\".\")));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_path_mut<'a>(\n\
+             value: &'a mut serde_json::Value,\n\
+             path: &[&str],\n\
+         ) -> Option<&'a mut serde_json::Value> {\n\
+             match path.split_first() {\n\
+                 None => Some(value),\n\
+                 Some((segment, rest)) => {\n\
+                     let next = value.get_mut(*segment)?;\n\
+                     rh_json_path_mut(next, rest)\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_set_path(\n\
+             target: &mut serde_json::Value,\n\
+             path: &[&str],\n\
+             value: serde_json::Value,\n\
+         ) -> INT {\n\
+             match path.split_last() {\n\
+                 None => {\n\
+                     *target = value;\n\
+                     0\n\
+                 }\n\
+                 Some((field, parent_path)) => match rh_json_path_mut(target, parent_path) {\n\
+                     Some(parent) => match parent.as_object_mut() {\n\
+                         Some(map) => {\n\
+                             map.insert((*field).to_string(), value);\n\
+                             0\n\
+                         }\n\
+                         None => {\n\
+                             let _ = rh_fail(&format!(\"json_set_path: {}\", path.join(\".\")));\n\
+                             0\n\
+                         }\n\
+                     },\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_set_path: {}\", path.join(\".\")));\n\
+                         0\n\
+                     }\n\
+                 },\n\
+             }\n\
+         }\n\n\
+         fn rh_json_set_path_key(\n\
+             target: &mut serde_json::Value,\n\
+             path: &[&str],\n\
+             key: &str,\n\
+             value: serde_json::Value,\n\
+         ) -> INT {\n\
+             match rh_json_path_mut(target, path) {\n\
+                 Some(node) => match node.as_object_mut() {\n\
+                     Some(map) => {\n\
+                         map.insert(key.to_string(), value);\n\
+                         0\n\
+                     }\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_set_path_key: {}\", path.join(\".\")));\n\
+                         0\n\
+                     }\n\
+                 },\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_set_path_key: {}\", path.join(\".\")));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_set_path_index_field(\n\
+             target: &mut serde_json::Value,\n\
+             path: &[&str],\n\
+             index: INT,\n\
+             field: &str,\n\
+             value: serde_json::Value,\n\
+         ) -> INT {\n\
+             match rh_json_path_mut(target, path) {\n\
+                 Some(node) => match node.as_array_mut() {\n\
+                     Some(items) => match usize::try_from(index)\n\
+                         .ok()\n\
+                         .and_then(|index| items.get_mut(index))\n\
+                     {\n\
+                         Some(item) => match item.as_object_mut() {\n\
+                             Some(map) => {\n\
+                                 map.insert(field.to_string(), value);\n\
+                                 0\n\
+                             }\n\
+                             None => {\n\
+                                 let _ = rh_fail(&format!(\n\
+                                     \"json_set_path_index_field: {}[{index}].{field}\",\n\
+                                     path.join(\".\")\n\
+                                 ));\n\
+                                 0\n\
+                             }\n\
+                         },\n\
+                         None => {\n\
+                             let _ = rh_fail(&format!(\n\
+                                 \"json_set_path_index_field: {}[{index}].{field}\",\n\
+                                 path.join(\".\")\n\
+                             ));\n\
+                             0\n\
+                         }\n\
+                     },\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\n\
+                             \"json_set_path_index_field: {}[{index}].{field}\",\n\
+                             path.join(\".\")\n\
+                         ));\n\
+                         0\n\
+                     }\n\
+                 },\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\n\
+                         \"json_set_path_index_field: {}[{index}].{field}\",\n\
+                         path.join(\".\")\n\
+                     ));\n\
                      0\n\
                  }\n\
              }\n\

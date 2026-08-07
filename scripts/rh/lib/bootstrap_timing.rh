@@ -1,33 +1,87 @@
 // Parse the stage-0 bootstrap timing facts inherited by named native tasks.
 
+fn null_json() {
+    rhai::json::parse("null")
+}
+
 fn unavailable(reason) {
+    let json_null = null_json();
     #{
         schema_version: 1,
         kind: "agenterm-bootstrap-timing",
         state: "unavailable",
         reason: reason,
-        setup_ms: (),
-        cargo_build_ms: (),
-        worker_copy_ms: (),
-        other_setup_ms: (),
-        clock_resolution_ms: (),
+        setup_ms: json_null,
+        cargo_build_ms: json_null,
+        worker_copy_ms: json_null,
+        other_setup_ms: json_null,
+        clock_resolution_ms: json_null,
         worker: #{
             state: "unavailable",
-            compatibility_fingerprint: ()
+            compatibility_fingerprint: json_null
         },
         cargo_lock_wait: #{
             state: "unavailable",
-            duration_ms: (),
-            included_in: ()
+            duration_ms: json_null,
+            included_in: json_null
         }
     }
 }
 
-fn duration_value(name) {
-    if !std::env::has(name) || std::env::get(name) == "" {
+fn read_setup_ms() {
+    if !std::env::has("AGENTERM_BOOTSTRAP_SETUP_MS")
+            || std::env::get("AGENTERM_BOOTSTRAP_SETUP_MS") == "" {
         return -1;
     }
-    let value = std::env::get(name).parse_int();
+    let value = std::env::get("AGENTERM_BOOTSTRAP_SETUP_MS").parse_int();
+    if value < 0 {
+        return -1;
+    }
+    value
+}
+
+fn read_cargo_build_ms() {
+    if !std::env::has("AGENTERM_BOOTSTRAP_CARGO_BUILD_MS")
+            || std::env::get("AGENTERM_BOOTSTRAP_CARGO_BUILD_MS") == "" {
+        return -1;
+    }
+    let value = std::env::get("AGENTERM_BOOTSTRAP_CARGO_BUILD_MS").parse_int();
+    if value < 0 {
+        return -1;
+    }
+    value
+}
+
+fn read_worker_copy_ms() {
+    if !std::env::has("AGENTERM_BOOTSTRAP_WORKER_COPY_MS")
+            || std::env::get("AGENTERM_BOOTSTRAP_WORKER_COPY_MS") == "" {
+        return -1;
+    }
+    let value = std::env::get("AGENTERM_BOOTSTRAP_WORKER_COPY_MS").parse_int();
+    if value < 0 {
+        return -1;
+    }
+    value
+}
+
+fn read_other_setup_ms() {
+    if !std::env::has("AGENTERM_BOOTSTRAP_OTHER_SETUP_MS")
+            || std::env::get("AGENTERM_BOOTSTRAP_OTHER_SETUP_MS") == "" {
+        return -1;
+    }
+    let value = std::env::get("AGENTERM_BOOTSTRAP_OTHER_SETUP_MS").parse_int();
+    if value < 0 {
+        return -1;
+    }
+    value
+}
+
+fn read_clock_resolution_ms() {
+    if !std::env::has("AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS")
+            || std::env::get("AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS") == "" {
+        return -1;
+    }
+    let value = std::env::get("AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS").parse_int();
     if value < 0 {
         return -1;
     }
@@ -54,12 +108,11 @@ fn facts() {
         return unavailable("invalid_environment:bootstrap_timing_schema");
     }
 
-    let setup_ms = duration_value("AGENTERM_BOOTSTRAP_SETUP_MS");
-    let cargo_build_ms = duration_value("AGENTERM_BOOTSTRAP_CARGO_BUILD_MS");
-    let worker_copy_ms = duration_value("AGENTERM_BOOTSTRAP_WORKER_COPY_MS");
-    let other_setup_ms = duration_value("AGENTERM_BOOTSTRAP_OTHER_SETUP_MS");
-    let resolution_ms =
-        duration_value("AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS");
+    let setup_ms = read_setup_ms();
+    let cargo_build_ms = read_cargo_build_ms();
+    let worker_copy_ms = read_worker_copy_ms();
+    let other_setup_ms = read_other_setup_ms();
+    let resolution_ms = read_clock_resolution_ms();
     if setup_ms < 0
             || cargo_build_ms < 0
             || worker_copy_ms < 0
@@ -90,16 +143,35 @@ fn facts() {
         return unavailable("invalid_environment:bootstrap_timing_lock_state");
     }
 
-    let included_in = ();
+    let json_null = null_json();
     if lock_state == "included_not_separable" {
-        included_in = "cargo_build_ms";
+        return #{
+            schema_version: 1,
+            kind: "agenterm-bootstrap-timing",
+            state: "measured",
+            reason: json_null,
+            setup_ms: setup_ms,
+            cargo_build_ms: cargo_build_ms,
+            worker_copy_ms: worker_copy_ms,
+            other_setup_ms: other_setup_ms,
+            clock_resolution_ms: resolution_ms,
+            worker: #{
+                state: worker_state,
+                compatibility_fingerprint: fingerprint
+            },
+            cargo_lock_wait: #{
+                state: lock_state,
+                duration_ms: json_null,
+                included_in: "cargo_build_ms"
+            }
+        };
     }
 
     #{
         schema_version: 1,
         kind: "agenterm-bootstrap-timing",
         state: "measured",
-        reason: (),
+        reason: json_null,
         setup_ms: setup_ms,
         cargo_build_ms: cargo_build_ms,
         worker_copy_ms: worker_copy_ms,
@@ -111,18 +183,20 @@ fn facts() {
         },
         cargo_lock_wait: #{
             state: lock_state,
-            duration_ms: (),
-            included_in: included_in
+            duration_ms: json_null,
+            included_in: json_null
         }
     }
 }
 
 fn wall_time(bootstrap, task_ms) {
     if bootstrap.state == "measured" {
+        let setup_ms = bootstrap.setup_ms;
+        let accounted_ms = setup_ms + task_ms;
         return #{
             state: "partial",
             task_ms: task_ms,
-            accounted_ms: 0 + bootstrap.setup_ms + task_ms,
+            accounted_ms: accounted_ms,
             accounted_scope:
                 "bootstrap-timing-start-through-worker-setup plus timed-task-body",
             unmeasured_intervals: [

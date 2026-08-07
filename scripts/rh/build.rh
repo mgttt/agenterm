@@ -16,6 +16,40 @@
 import "scripts/rh/lib/build_identity" as build_identity;
 import "scripts/rh/lib/bootstrap_timing" as bootstrap_timing;
 
+fn bootstrap_facts() {
+    bootstrap_timing::facts()
+}
+
+fn frozen_identity(repo_value, profile) {
+    build_identity::facts(repo_value, profile)
+}
+
+fn frozen_environment(identity) {
+    build_identity::environment(identity)
+}
+
+fn frozen_environment_with_incremental(
+    identity,
+    stable_wrapper,
+    incremental_invocation,
+    cargo_output,
+    incremental_root,
+    incremental_state
+) {
+    build_identity::environment_with_incremental(
+        identity,
+        stable_wrapper,
+        incremental_invocation,
+        cargo_output,
+        incremental_root,
+        incremental_state
+    )
+}
+
+fn frozen_environment_with_cargo_target(identity, cargo_target_dir) {
+    build_identity::environment_with_cargo_target(identity, cargo_target_dir)
+}
+
 fn require(condition, message) {
     if condition == 0 {
         throw message;
@@ -68,40 +102,32 @@ fn cleanup_incremental_state(path) {
     0
 }
 
-fn option_value(values, index, name) {
-    require(index + 1 < values.len, "build_option_value_missing:" + name);
-    values[index + 1]
+fn target_arch(target) {
+    // Bind before map literal — native packs reject if-expr as JSON values.
+    if target.starts_with("aarch64") {
+        return "aarch64";
+    }
+    "x86_64"
 }
 
 fn target_facts(target) {
+    let arch = target_arch(target);
     if target.contains("windows") {
         return #{
             os: "windows",
-            arch: if target.starts_with("aarch64") {
-                "aarch64"
-            } else {
-                "x86_64"
-            }
+            arch: arch
         };
     }
     if target.contains("apple") {
         return #{
             os: "macos",
-            arch: if target.starts_with("aarch64") {
-                "aarch64"
-            } else {
-                "x86_64"
-            }
+            arch: arch
         };
     }
     if target.contains("linux") {
         return #{
             os: "linux",
-            arch: if target.starts_with("aarch64") {
-                "aarch64"
-            } else {
-                "x86_64"
-            }
+            arch: arch
         };
     }
     #{ os: "", arch: "" }
@@ -134,7 +160,7 @@ fn cargo_binary(name) {
 fn entry() {
     require(args.len >= 1, "expected: REPO [PROFILE] [OPTIONS]");
     let repo = std::path::absolute(args[0]).display;
-    let bootstrap = bootstrap_timing::facts();
+    let bootstrap = bootstrap_facts();
     print("AgenTerm bootstrap timing: " + rhai::json::stringify(bootstrap));
     // Stage optimized PE by default. Debug PE stays under target/debug unless the
     // caller explicitly asks for "dev" (still may stage to dist for rare debug
@@ -149,25 +175,30 @@ fn entry() {
     let action = "build";
     let index = 1;
     while index < args.len {
-        let value = args[index];
+        let value = "" + args[index];
         if value == "release" || value == "release-fast" || value == "dev" {
             require(profile_set == 0, "build_profile_duplicate");
             profile = value;
             profile_set = 1;
         } else if value == "--target" {
-            target = option_value(args, index, value);
+            require(index + 1 < args.len, "build_option_value_missing:" + value);
+            target = args[index + 1];
             index += 1;
         } else if value == "--driver" {
-            driver = option_value(args, index, value);
+            require(index + 1 < args.len, "build_option_value_missing:" + value);
+            driver = args[index + 1];
             index += 1;
         } else if value == "--os" {
-            os_name = option_value(args, index, value);
+            require(index + 1 < args.len, "build_option_value_missing:" + value);
+            os_name = args[index + 1];
             index += 1;
         } else if value == "--arch" {
-            arch = option_value(args, index, value);
+            require(index + 1 < args.len, "build_option_value_missing:" + value);
+            arch = args[index + 1];
             index += 1;
         } else if value == "--action" {
-            action = option_value(args, index, value);
+            require(index + 1 < args.len, "build_option_value_missing:" + value);
+            action = args[index + 1];
             index += 1;
         } else if value == "--clients-only" {
             clients_only = 1;
@@ -192,10 +223,10 @@ fn entry() {
         let facts = target_facts(target);
         require(facts.os != "", "build_target_unsupported:" + target);
         if os_name == "" {
-            os_name = facts.os;
+            os_name = "" + facts.os;
         }
         if arch == "" {
-            arch = facts.arch;
+            arch = "" + facts.arch;
         }
         require(
             os_name == facts.os && arch == facts.arch,
@@ -244,18 +275,19 @@ fn entry() {
         cargo_output = std::path::join(repo, "target-release").display;
     }
     let development_target = std::path::join(repo, "target").display;
-    let profile_name = if profile == "dev" { "debug" } else { profile };
-    let profile_directory = std::path::join(
-        if target == "" {
-            cargo_output
-        } else {
-            std::path::join(cargo_output, target).display
-        },
-        profile_name
-    ).display;
+    let profile_name = profile;
+    if profile == "dev" {
+        profile_name = "debug";
+    }
+    let cargo_profile_root = cargo_output;
+    if target != "" {
+        cargo_profile_root = std::path::join(cargo_output, target).display;
+    }
+    let profile_directory =
+        std::path::join(cargo_profile_root, profile_name).display;
 
-    let identity = build_identity::facts(repo, profile);
-    let environment = build_identity::environment(identity);
+    let identity = frozen_identity(repo, profile);
+    let environment = frozen_environment(identity);
 
     let incremental_producer = 0;
     let incremental_invocation = "";
@@ -326,7 +358,7 @@ fn entry() {
     }
 
     if incremental_producer != 0 {
-        environment = build_identity::environment_with_incremental(
+        environment = frozen_environment_with_incremental(
             identity,
             stable_wrapper,
             incremental_invocation,
@@ -338,7 +370,7 @@ fn entry() {
             && profile == "release"
             && cross_client == 0
             && unix_bootstrap == 0 {
-        environment = build_identity::environment_with_cargo_target(
+        environment = frozen_environment_with_cargo_target(
             identity,
             cargo_output
         );
@@ -400,10 +432,16 @@ fn entry() {
     std::fs::try_remove_file(stdout_path);
 
     if action == "clippy" {
-        print(
-            "PASS client Clippy " + os_name + "-" + arch +
-                if target == "" { "" } else { " (" + target + ")" }
-        );
+        if target != "" {
+            print(
+                "PASS client Clippy " + os_name + "-" + arch +
+                    " (" + target + ")"
+            );
+        } else {
+            print(
+                "PASS client Clippy " + os_name + "-" + arch
+            );
+        }
         return 0;
     }
     if cross_client != 0 || unix_bootstrap != 0 {

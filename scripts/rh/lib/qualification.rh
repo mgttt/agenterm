@@ -228,11 +228,12 @@ fn add_result(context, gate_id, status, duration_ms, output) {
         gate_by_id(context.manifest, gate_key) != (),
         "qualification_result_undeclared:" + gate_key
     );
+    let evidence = evidence_from_output(output);
     context.results[gate_key] = #{
         id: gate_key,
         status: status_text,
-        duration_ms: 0 + duration_ms,
-        evidence: evidence_from_output(output)
+        duration_ms: duration_ms,
+        evidence: evidence
     };
     context
 }
@@ -334,18 +335,19 @@ fn new_timing(
         parameters: workload,
         gate_manifest_sha256: sha256(manifest)
     };
+    let json_null = bootstrap_timing::null_json();
+    let started_at_unix_ms = std::time::SystemTime::now().unix_millis;
     #{
         schema_version: 2,
         kind: "agenterm-quality-timing",
         output_path: std::path::absolute(output_path).display,
         started_at_utc: std::time::SystemTime::now().rfc3339,
-        started_at_unix_ms:
-            0 + std::time::SystemTime::now().unix_millis,
-        completed_at_utc: (),
+        started_at_unix_ms: started_at_unix_ms,
+        completed_at_utc: json_null,
         status: "running",
         total_wall_ms: 0,
         bootstrap: bootstrap_timing::facts(),
-        wall_time: (),
+        wall_time: json_null,
         lane: lane_text,
         profile: profile_text,
         source: timing_source(root),
@@ -361,7 +363,7 @@ fn new_timing(
                 )
             )
         },
-        first_failure: (),
+        first_failure: json_null,
         gates: gates
     }
 }
@@ -374,7 +376,7 @@ fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
         allowed.contains(status_text),
         "quality_timing_gate_status:" + status_text
     );
-    q_require(0 + duration_ms >= 0, "quality_timing_gate_duration");
+    q_require(duration_ms >= 0, "quality_timing_gate_duration");
     let found = 0;
     let index = 0;
     while index < timing.gates.len {
@@ -386,20 +388,22 @@ fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
                 "quality_timing_gate_transition:" + gate_key
             );
             timing.gates[index].status = status_text;
-            timing.gates[index].duration_ms = 0 + duration_ms;
+            timing.gates[index].duration_ms = duration_ms;
             found = 1;
         }
         index = index + 1;
     }
     q_require(found != 0, "quality_timing_gate_undeclared:" + gate_key);
-    if status_text == "failed" && timing.first_failure == () {
+    if status_text == "failed"
+            && timing.first_failure == bootstrap_timing::null_json() {
+        let elapsed_ms =
+            std::time::SystemTime::now().unix_millis
+                - timing.started_at_unix_ms;
         timing.first_failure = #{
             kind: "gate",
             gate_id: gate_key,
-            elapsed_ms:
-                0 + std::time::SystemTime::now().unix_millis
-                    - timing.started_at_unix_ms,
-            exit_code: 0 + exit_code,
+            elapsed_ms: elapsed_ms,
+            exit_code: exit_code,
             timed_out: timed_out
         };
     }
@@ -412,13 +416,14 @@ fn timing_fail_stage(timing, stage_id) {
         valid_id(stage_text, 0) != 0,
         "quality_timing_failure_stage:" + stage_text
     );
-    if timing.first_failure == () {
+    if timing.first_failure == bootstrap_timing::null_json() {
+        let elapsed_ms =
+            std::time::SystemTime::now().unix_millis
+                - timing.started_at_unix_ms;
         timing.first_failure = #{
             kind: "stage",
             stage_id: stage_text,
-            elapsed_ms:
-                0 + std::time::SystemTime::now().unix_millis
-                    - timing.started_at_unix_ms
+            elapsed_ms: elapsed_ms
         };
     }
     timing_finish(timing, "failed")
@@ -433,7 +438,7 @@ fn timing_finish(timing, status) {
     timing.status = status_text;
     timing.completed_at_utc = std::time::SystemTime::now().rfc3339;
     timing.total_wall_ms =
-        0 + std::time::SystemTime::now().unix_millis
+        std::time::SystemTime::now().unix_millis
             - timing.started_at_unix_ms;
     timing.wall_time = bootstrap_timing::wall_time(
         timing.bootstrap,
@@ -599,8 +604,9 @@ fn write_receipt(context, repo, output_path) {
     assert_results(context);
     assert_process_observation(context);
     let root = std::path::absolute(repo).display;
+    let schema_version = context.manifest.receipt_schema_version;
     let receipt = #{
-        schema_version: 0 + context.manifest.receipt_schema_version,
+        schema_version: schema_version,
         product: "AgenTerm",
         completed_at_utc: std::time::SystemTime::now().rfc3339,
         started_at_utc: context.started_at_utc,

@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use rhai::{AST, ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt};
+use rhai::{AST, ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt, Token};
 
 use crate::RhError;
 use crate::expr_print::{is_pure_int_expr, uses_host_surface};
@@ -70,6 +70,17 @@ fn reject_expr(expr: &Expr) -> Option<RhError> {
 
 fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
     if let Expr::Index(boxed, ..) = &assign.1.lhs {
+        if matches!(&boxed.lhs, Expr::Dot(inner, ..) if is_json_access_path(&inner.lhs))
+            && !matches!(&boxed.lhs, Expr::Variable(..))
+        {
+            return validate_json_assignment(assign);
+        }
+        if matches!(&boxed.lhs, Expr::Variable(..))
+            && assign.0.get_op_assignment_info().is_none()
+            && !matches!(assign.1.rhs, Expr::BoolConstant(true, ..))
+        {
+            return validate_json_assignment(assign);
+        }
         if assign.0.get_op_assignment_info().is_some() {
             return Some(subset_error(
                 "RH_SUBSET_ASSIGN_LHS",
@@ -87,6 +98,9 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
         }
         return validate_root_expr(&boxed.rhs);
     }
+    if is_json_assign_lhs(&assign.1.lhs) {
+        return validate_json_assignment(assign);
+    }
     if !matches!(assign.1.lhs, Expr::Variable(..)) {
         return Some(subset_error(
             "RH_SUBSET_ASSIGN_LHS",
@@ -95,6 +109,9 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
     }
     if is_pure_int_expr(&assign.1.rhs)
         || uses_host_surface(&assign.1.rhs)
+        || is_string_concat_assign_rhs(&assign.1.rhs)
+        || is_string_method_assign_rhs(&assign.1.rhs)
+        || is_int_method_assign_rhs(&assign.1.rhs)
         || matches!(
             assign.1.rhs,
             Expr::BoolConstant(..) | Expr::StringConstant(..)
@@ -111,10 +128,83 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
     {
         return None;
     }
+    let pos = assign.1.rhs.position();
     Some(subset_error(
         "RH_SUBSET_ASSIGN_RHS",
-        "assignment rhs must be a pure int, bool/string literal, or native host expression in rh-3",
+        &format!(
+            "assignment rhs must be a pure int, bool/string literal, or native host expression in rh-3 (at {}:{})",
+            pos.line().unwrap_or(0),
+            pos.position().unwrap_or(0)
+        ),
     ))
+}
+
+fn validate_json_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
+    if let Some((_, _, _, syntax, _, _)) = assign.0.get_op_assignment_info() {
+        if syntax == "+=" {
+            if !is_json_assign_lhs(&assign.1.lhs) {
+                return Some(subset_error(
+                    "RH_SUBSET_ASSIGN_LHS",
+                    "json += assignment lhs must be a JSON path",
+                ));
+            }
+            if is_pure_int_expr(&assign.1.rhs) || matches!(assign.1.rhs, Expr::Variable(..)) {
+                return None;
+            }
+            return Some(subset_error(
+                "RH_SUBSET_ASSIGN_RHS",
+                "json += assignment rhs must be an int expression in rh-3",
+            ));
+        }
+        return Some(subset_error(
+            "RH_SUBSET_ASSIGN_LHS",
+            "json assignment must use plain `=` in rh-3",
+        ));
+    }
+    if !is_json_assign_lhs(&assign.1.lhs) {
+        return Some(subset_error(
+            "RH_SUBSET_ASSIGN_LHS",
+            "json assignment lhs must be a JSON path or index",
+        ));
+    }
+    if is_json_assign_rhs(&assign.1.rhs) {
+        return None;
+    }
+    Some(subset_error(
+        "RH_SUBSET_ASSIGN_RHS",
+        "json assignment rhs must be a supported JSON value expression in rh-3",
+    ))
+}
+
+fn is_json_assign_lhs(expr: &Expr) -> bool {
+    match expr {
+        Expr::Index(boxed, ..) => is_json_access_path(&boxed.lhs),
+        Expr::Dot(..) => is_json_access_path(expr),
+        _ => false,
+    }
+}
+
+fn is_json_access_path(expr: &Expr) -> bool {
+    match expr {
+        Expr::Variable(..) => true,
+        Expr::Dot(boxed, ..) => match &boxed.rhs {
+            Expr::Property(..) | Expr::Dot(..) => is_json_access_path(&boxed.lhs),
+            Expr::Index(index_box, ..) => {
+                matches!(&index_box.lhs, Expr::Property(..)) && is_json_access_path(&boxed.lhs)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_json_assign_rhs(expr: &Expr) -> bool {
+    if validate_root_expr(expr).is_none() {
+        return true;
+    }
+    matches!(expr, Expr::Variable(..))
+        || is_json_access_path(expr)
+        || matches!(expr, Expr::Index(boxed, ..) if is_json_access_path(&boxed.lhs))
 }
 
 fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
@@ -152,9 +242,14 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
         Stmt::While(boxed, ..) => {
             let flow = boxed.as_ref();
             if !is_pure_int_expr(&flow.expr) {
+                let pos = flow.expr.position();
                 return Some(subset_error(
                     "RH_SUBSET_WHILE_COND",
-                    "while condition must be a pure int expression in rh-3",
+                    &format!(
+                        "while condition must be a pure int expression in rh-3 (at {}:{})",
+                        pos.line().unwrap_or(0),
+                        pos.position().unwrap_or(0)
+                    ),
                 ));
             }
             validate_stmt_block(&flow.body)
@@ -287,6 +382,51 @@ fn reject_call(call: &FnCallExpr) -> Option<RhError> {
         ));
     }
     None
+}
+
+
+
+
+fn is_int_method_assign_rhs(expr: &Expr) -> bool {
+    match expr {
+        Expr::Dot(boxed, ..) => matches!(
+            &boxed.rhs,
+            Expr::MethodCall(call, ..)
+                if matches!(
+                    call.name.as_str(),
+                    "index_of" | "parse_int" | "len" | "unix_millis"
+                )
+        ),
+        _ => false,
+    }
+}
+
+fn is_string_method_assign_rhs(expr: &Expr) -> bool {
+    match expr {
+        Expr::Dot(boxed, ..) => matches!(
+            &boxed.rhs,
+            Expr::MethodCall(call, ..)
+                if call.args.is_empty()
+                    && matches!(call.name.as_str(), "to_string" | "to_lower" | "trim")
+        ),
+        _ => false,
+    }
+}
+
+fn is_string_concat_assign_rhs(expr: &Expr) -> bool {
+    match expr {
+        Expr::StringConstant(..) | Expr::Variable(..) => true,
+        Expr::FnCall(call, ..)
+            if matches!(call.op_token.as_ref(), Some(Token::Plus)) && call.args.len() == 2 =>
+        {
+            call.args.iter().all(is_string_concat_assign_rhs)
+        }
+        other => uses_host_surface(other) || args_index_like(other),
+    }
+}
+
+fn args_index_like(expr: &Expr) -> bool {
+    matches!(expr, Expr::Index(boxed, ..) if matches!(&boxed.lhs, Expr::Variable(ident, ..) if ident.1.as_str() == "args"))
 }
 
 fn subset_error(code: &'static str, detail: &str) -> RhError {
@@ -453,6 +593,43 @@ mod tests {
     }
 
     #[test]
+    fn accepts_json_path_plus_assignment() {
+        let mut engine = Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile(
+                r#"fn entry() {
+                    let context = rhai::json::parse("{\"process_observation\":{\"owned_commands\":0}}");
+                    context.process_observation.owned_commands += 1;
+                    context.process_observation.owned_commands
+                }"#,
+            )
+            .expect("compile");
+        validate_ast(&ast).expect("json path +=");
+    }
+
+    #[test]
+    fn accepts_json_path_key_and_index_field_assignment() {
+        let mut engine = Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile(
+                r#"fn entry() {
+                    let context = rhai::json::parse("{\"results\":{}}");
+                    let timing = rhai::json::parse("{\"gates\":[{\"id\":\"a\",\"status\":\"not_run\",\"duration_ms\":0}]}");
+                    let gate_key = "a";
+                    let index = 0;
+                    context.results[gate_key] = #{ id: gate_key, status: "passed" };
+                    timing.gates[index].status = "passed";
+                    timing.gates[index].duration_ms = 0;
+                    0
+                }"#,
+            )
+            .expect("compile");
+        validate_ast(&ast).expect("json path assignment");
+    }
+
+    #[test]
     fn accepts_map_set_membership_assignment() {
         let mut engine = Engine::new();
         engine.set_optimization_level(rhai::OptimizationLevel::None);
@@ -467,5 +644,58 @@ mod tests {
             )
             .expect("compile");
         validate_ast(&ast).expect("map set membership");
+    }
+
+    #[test]
+    fn owned_scripts_have_pure_int_while_conditions() {
+        use std::path::PathBuf;
+        use rhai::{ASTNode, Engine, OptimizationLevel, Stmt};
+
+        use crate::expr_print::is_pure_int_expr;
+
+        fn while_cond_errors(source: &str) -> Vec<String> {
+            let mut engine = Engine::new();
+            engine.set_optimization_level(OptimizationLevel::None);
+            engine.set_max_expr_depths(crate::check::RH_MAX_EXPR_DEPTH, crate::check::RH_MAX_EXPR_DEPTH);
+            let ast = engine.compile(source).expect("compile");
+            let mut errors = Vec::new();
+            ast.walk(&mut |path| {
+                if let Some(ASTNode::Stmt(Stmt::While(boxed, ..))) = path.last() {
+                    let cond = &boxed.as_ref().expr;
+                    if !is_pure_int_expr(cond) {
+                        let pos = cond.position();
+                        errors.push(format!(
+                            "{}:{}",
+                            pos.line().unwrap_or(0),
+                            pos.position().unwrap_or(0)
+                        ));
+                    }
+                }
+                true
+            });
+            errors
+        }
+
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        for rel in [
+            "scripts/rh/qualification-selftest.rh",
+            "scripts/rh/check.rh",
+            "scripts/rh/lib/qualification.rh",
+            "scripts/rh/lib/test_harness.rh",
+        ] {
+            let source = std::fs::read_to_string(root.join(rel)).expect("read");
+            assert!(
+                while_cond_errors(&source).is_empty(),
+                "{rel} standalone while errors"
+            );
+            let bundled = crate::bundle_project_source(&root, &source).expect("bundle");
+            assert!(
+                while_cond_errors(&bundled).is_empty(),
+                "{rel} bundled while errors"
+            );
+        }
     }
 }

@@ -381,8 +381,39 @@ fn stmt_uses_host(stmt: &Stmt) -> bool {
 }
 
 pub fn is_var_len_expr(expr: &Expr) -> bool {
+    // Rhai prints `a.b.len` as Dot { lhs: Variable(a), rhs: Dot { Property(b), Property(len) } }.
     match expr {
-        Expr::Dot(boxed, ..) => matches!(&boxed.lhs, Expr::Variable(..)) && is_len_rhs(&boxed.rhs),
+        Expr::Dot(boxed, ..) => {
+            if is_len_rhs(&boxed.rhs) {
+                return is_len_access_base(&boxed.lhs);
+            }
+            is_len_access_base(&boxed.lhs) && is_property_chain_ending_with_len(&boxed.rhs)
+        }
+        _ => false,
+    }
+}
+
+fn is_len_access_base(expr: &Expr) -> bool {
+    match expr {
+        Expr::Variable(..) => true,
+        Expr::Index(boxed, ..) => is_len_access_base(&boxed.lhs),
+        Expr::Dot(boxed, ..) if matches!(&boxed.rhs, Expr::Property(..)) => {
+            is_len_access_base(&boxed.lhs)
+        }
+        _ => false,
+    }
+}
+
+fn is_property_chain_ending_with_len(expr: &Expr) -> bool {
+    match expr {
+        Expr::Dot(boxed, ..) => {
+            if is_len_rhs(&boxed.rhs) {
+                matches!(&boxed.lhs, Expr::Property(..))
+            } else {
+                matches!(&boxed.lhs, Expr::Property(..))
+                    && is_property_chain_ending_with_len(&boxed.rhs)
+            }
+        }
         _ => false,
     }
 }
@@ -472,6 +503,13 @@ mod tests {
         let ast = Engine::new().compile(wrapped).expect("compile");
         let def = ast.iter_fn_def().next().expect("fn");
         def.body.iter().next().expect("stmt").clone()
+    }
+
+    #[test]
+    fn path_len_is_pure_int_for_while_conds() {
+        assert!(is_pure_int_expr(&parse_expr("timing.gates.len")));
+        assert!(is_pure_int_expr(&parse_expr("index < timing.gates.len")));
+        assert!(is_var_len_expr(&parse_expr("timing.gates.len")));
     }
 
     #[test]
