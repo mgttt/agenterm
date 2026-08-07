@@ -265,7 +265,7 @@ lua 雏形来去规避这个风险。
 | **Rh-M23** | AOT 扩面 + check parity + caller wave 1 + shim 硬化（[`plan-rh-3.md`](plan-rh-3.md) §5） |
 | **Rh-default** | [x] **M22f 已默认** `AGENTERM_SCRIPT_BACKEND=rh`；显式 `=rhai` 可回退 |
 | **Lua-proto** | FYI；Win 现场 grok.ds 实现中，目标能力对齐 rh；无本 plan 验收叶 |
-| **QJS-M0** | [ ] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型 + 最小 eval 跑通 |
+| **QJS-M0** | [x] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型（`rquickjs` 0.12.2，bundled quickjs-ng，MSVC `cc` 自动探测编译）+ 最小 eval 跑通（算术/字符串/语法错误捕获，3 单测绿）；**暂未接入根 workspace**——lua 侧当时在同一工作树有未提交的 `Cargo.toml`/`Cargo.lock` 改动，用嵌套空 `[workspace]` 表隔离，避免撞车；lua 已提交（`8b3764f5`），接入根 workspace 留给 QJS-M1 |
 | **QJS-M1** | [ ] CLI 动词对齐 `agenterm-rh`（check/eval/pack/check-many/task 皮子） |
 | **QJS-M2** | [ ] L2 facade/catalog 接入（`fleet.*`/`std.*`，对齐 rh 语义） |
 

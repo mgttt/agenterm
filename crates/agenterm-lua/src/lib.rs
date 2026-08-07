@@ -3,6 +3,8 @@
 //! Wraps mlua + LuaJIT to provide `eval` and `check` operations,
 //! with host function injection for fleet/args/print callbacks.
 
+mod stdlib;
+
 use std::sync::Arc;
 
 use mlua::{Lua, Value};
@@ -74,6 +76,8 @@ impl LuaEngine {
         lua.globals()
             .set("load", mlua::Value::Nil)
             .map_err(|e| LuaError::Engine(e.to_string()))?;
+        // Inject std library.
+        stdlib::inject(&lua).map_err(|e| LuaError::Engine(e.to_string()))?;
         Ok(Self { lua })
     }
 
