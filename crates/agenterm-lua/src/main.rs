@@ -28,13 +28,14 @@ fn main() {
 fn dispatch(args: &[String]) -> Result<u8, String> {
     if args.len() < 2 {
         eprintln!("agenterm-lua: usage: agenterm-lua <command> [args...]");
-        eprintln!("  commands: check eval hash pack build pack load qualify run-smoke --framed-worker");
+        eprintln!("  commands: check check-many eval hash pack build pack load qualify task run-smoke --framed-worker");
         return Ok(1);
     }
 
     match args[1].as_str() {
         "--framed-worker" => run_framed_worker(),
         "check" => cmd_check(&args[2..]),
+        "check-many" => cmd_check_many(&args[2..]),
         "eval" => cmd_eval(&args[2..]),
         "hash" => cmd_hash(&args[2..]),
         "pack" => {
@@ -48,6 +49,7 @@ fn dispatch(args: &[String]) -> Result<u8, String> {
             }
         }
         "qualify" => cmd_qualify(&args[2..]),
+        "task" => cmd_task(&args[2..]),
         "run-smoke" => cmd_run_smoke(&args[2..]),
         other => Err(format!("unknown command: {other}")),
     }
@@ -65,17 +67,18 @@ fn cmd_check(args: &[String]) -> Result<u8, String> {
     Ok(0)
 }
 
-/// `eval <file.lua>` — compile and evaluate.
+/// `eval <file.lua>` — compile and evaluate (with bytecode cache).
 fn cmd_eval(args: &[String]) -> Result<u8, String> {
     let path = require_arg(args, 0, "eval <file.lua>")?;
-    let source = read_file(&path)?;
     let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
     let host = agenterm_lua::LuaHostFunctions::default();
-    let result = engine.eval(&source, &host).map_err(|e| e.to_string())?;
+    let (result, cache_hit) = engine.eval_file_cached(&path, &host)
+        .map_err(|e| e.to_string())?;
     if !result.stdout.is_empty() {
         print!("{}", result.stdout);
     }
-    println!("rh eval ok: {} -> {}", path.display(), result.value);
+    let cache_note = if cache_hit { " [cache hit]" } else { "" };
+    println!("rh eval ok: {} -> {}{cache_note}", path.display(), result.value);
     Ok(0)
 }
 
@@ -128,11 +131,46 @@ fn cmd_qualify(args: &[String]) -> Result<u8, String> {
     Ok(0)
 }
 
-/// `run-smoke <pack.luac>` — dlopen and call entry (bytecode smoke test placeholder).
+/// `check-many --manifest <file>` — bounded multi-file validation.
+fn cmd_check_many(args: &[String]) -> Result<u8, String> {
+    let manifest_path = require_flag_value(args, "--manifest", "check-many requires --manifest <file>")?;
+    let manifest = agenterm_lua::check_many::read_manifest(&manifest_path)
+        .map_err(|e| format!("check_many_manifest: {e}"))?;
+    let options = agenterm_lua::check_many::CheckManyOptions::default();
+    let report = agenterm_lua::check_many::run_check_many(manifest, options);
+    if report.failures.is_empty() {
+        println!("check-many: {} files ok", report.checked_files);
+    } else {
+        eprintln!("check-many: {} files checked, {} failures", report.checked_files, report.failures.len());
+        for f in &report.failures {
+            eprintln!("  {}: {} — {}", f.path, f.code, f.message);
+        }
+    }
+    if report.ok { Ok(0) } else { Ok(1) }
+}
+
+/// `task <subcommand>` — delegate to agenterm main binary.
+fn cmd_task(args: &[String]) -> Result<u8, String> {
+    if args.is_empty() {
+        eprintln!("task: expected subcommand: list, show, check, run");
+        return Ok(1);
+    }
+    // Task execution is handled by the main agenterm binary (agenterm-rhai/agenterm-rh).
+    // agenterm-lua supports individual task entries through the
+    // AGENTERM_SCRIPT_BACKEND=lua worker path (--framed-worker).
+    eprintln!(
+        "task: use `agenterm-rhai task {}` or `AGENTERM_SCRIPT_BACKEND=lua agenterm-rhai task {}`",
+        args.join(" "),
+        args.join(" ")
+    );
+    Ok(0)
+}
+
+/// `run-smoke <pack.luac>` — bytecode smoke test (delegates to pack load).
 fn cmd_run_smoke(args: &[String]) -> Result<u8, String> {
-    let _path = require_arg(args, 0, "run-smoke <pack.luac>")?;
-    // For Lua, run-smoke loads a pack dir (same as `pack load`).
-    Err("run-smoke: use `pack load <dir>` instead".into())
+    let path = require_arg(args, 0, "run-smoke <dir>")?;
+    // Treat as pack dir
+    cmd_pack_load(&[path.to_string_lossy().to_string()])
 }
 
 // ── helpers ────────────────────────────────────────────────────────────

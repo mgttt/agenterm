@@ -6,6 +6,7 @@
 mod stdlib;
 pub mod check;
 pub mod cache;
+pub mod check_many;
 pub mod compile;
 pub mod manifest;
 pub mod pack;
@@ -152,6 +153,18 @@ impl LuaEngine {
             .map_err(LuaError::Engine)?;
         let result = self.eval(source, host)?;
         Ok((result, cached.cache_hit))
+    }
+
+    /// Evaluate a Lua file with bytecode caching.
+    /// Returns `(LuaEvalResult, cache_hit: bool)`.
+    pub fn eval_file_cached(
+        &self,
+        path: &std::path::Path,
+        host: &LuaHostFunctions,
+    ) -> Result<(LuaEvalResult, bool), LuaError> {
+        let source =
+            std::fs::read_to_string(path).map_err(|e| LuaError::Engine(format!("read_file: {e}")))?;
+        self.eval_cached(&source, host)
     }
 
     /// Compute SHA256 hash of Lua source.
