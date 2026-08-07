@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M36 原生文件内容 fast-path 进行中**（动态 `read_to_string`/`contains` 脱离 Rhai host-eval） |
+| **状态** | **M37 原生路径组合进行中**（`std::path::join(...).display` 脱离 Rhai host-eval） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -82,6 +82,7 @@
 | M34a | host API v6 以 bounded UTF-8 callback 暴露 `args[index]`；原生字符串长度按 Unicode scalar 计数，越界返回 typed host failure | [x] |
 | M35a | `std::fs::exists` 接受 native UTF-8 参数绑定并直接调用 typed Rust callback；named task 以真实 `Cargo.toml` 路径资格验证 | [x] |
 | M36a | host API v7 提供 bounded UTF-8 文件读取；native 字符串绑定支持字面量 `contains`，named task 验证真实 manifest 内容 | [x] |
+| M37a | native pack 直接使用 Rust `Path::join` 生成 UTF-8 路径；组合结果可供 exists/read callback 使用且不触发解释器 | [x] |
 
 ---
 

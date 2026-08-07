@@ -745,6 +745,7 @@ fn infer_binding_kind(expr: &Expr) -> ValueKind {
         Expr::BoolConstant(..) => ValueKind::Bool,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
+        _ if path_join_display_args(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
@@ -870,6 +871,29 @@ fn std_fs_single_arg<'a>(expr: &'a Expr, name: &str) -> Option<&'a Expr> {
     Some(&call.args[0])
 }
 
+fn path_join_display_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let display = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    if !display {
+        return None;
+    }
+    let Expr::FnCall(call, ..) = &boxed.lhs else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::path" || call.name != "join" || call.args.len() != 2 {
+        return None;
+    }
+    Some((&call.args[0], &call.args[1]))
+}
+
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
         if let Some(index) = args_index_expr(expr) {
@@ -887,6 +911,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_string_contains(out, expr, ctx) {
+            return Ok(());
+        }
+        if let Some((base, child)) = path_join_display_args(expr)
+            && emit_path_join(out, base, child, ctx)?
+        {
             return Ok(());
         }
         if let Some(call) = parse_fleet_call(expr) {
@@ -1028,6 +1057,27 @@ fn emit_string_contains(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> bool {
     out.push_str(&format!("{needle:?}"));
     out.push_str(") as INT)");
     true
+}
+
+fn emit_path_join(
+    out: &mut String,
+    base: &Expr,
+    child: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut base_expr = String::new();
+    let mut child_expr = String::new();
+    if !emit_native_string(&mut base_expr, base, ctx)?
+        || !emit_native_string(&mut child_expr, child, ctx)?
+    {
+        return Ok(false);
+    }
+    out.push_str("rh_path_join(");
+    out.push_str(&base_expr);
+    out.push_str(", ");
+    out.push_str(&child_expr);
+    out.push(')');
+    Ok(true)
 }
 
 fn emit_args_index(out: &mut String, index: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -1238,6 +1288,22 @@ mod tests {
         );
         assert!(output.rust.contains("rh_std_fs_read_to_string(&path)"));
         assert!(output.rust.contains("text.contains(\"agenterm\") as INT"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_path_join_display_fast_path() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let root = args[0]; let path = std::path::join(root, \"Cargo.toml\").display; std::fs::exists(path) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_path_join(&root, \"Cargo.toml\")"));
+        assert!(output.rust.contains("rh_std_fs_exists(&path)"));
     }
 
     #[test]

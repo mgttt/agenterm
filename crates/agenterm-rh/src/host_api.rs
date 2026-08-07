@@ -279,6 +279,9 @@ pub fn emit_host_runtime(out: &mut String) {
              scratch.truncate((wrote as usize).min(scratch.len()));\n\
              String::from_utf8(scratch).unwrap_or_default()\n\
          }\n\n\
+         fn rh_path_join(base: &str, child: &str) -> String {\n\
+             std::path::Path::new(base).join(child).to_string_lossy().into_owned()\n\
+         }\n\n\
          fn rh_host_run_script(source: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\
                  return -4;\n\

@@ -56,6 +56,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   argument bindings. Native string values support literal substring checks;
   missing, invalid UTF-8, or oversized files retain typed host failures, and
   v2-v6 pack registration remains backward compatible.
+- [x] `std::path::join(base, child).display` lowers to native Rust path
+  composition when both operands are native strings. The result remains a typed
+  string binding consumable by filesystem callbacks without host evaluation.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

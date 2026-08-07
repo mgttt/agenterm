@@ -42,12 +42,13 @@ fn manifest_native_task_transpiles_without_interpreter_fallback() {
     assert!(!entry.contains("rh_host_eval_int"), "{entry}");
     assert!(entry.contains("rh_args_len()"), "{entry}");
     assert!(entry.contains("rh_arg(0)"), "{entry}");
-    assert!(entry.contains("first.chars().count() as INT"), "{entry}");
-    assert!(entry.contains("rh_std_fs_exists(&first)"), "{entry}");
+    assert!(entry.contains("root.chars().count() as INT"), "{entry}");
     assert!(
-        entry.contains("rh_std_fs_read_to_string(&first)"),
+        entry.contains("rh_path_join(&root, \"Cargo.toml\")"),
         "{entry}"
     );
+    assert!(entry.contains("rh_std_fs_exists(&path)"), "{entry}");
+    assert!(entry.contains("rh_std_fs_read_to_string(&path)"), "{entry}");
     assert!(entry.contains("content.contains("), "{entry}");
     assert!(entry.contains("for value in 1..5"), "{entry}");
 }
@@ -80,7 +81,7 @@ fn public_cli_runs_manifest_native_task() {
         .args(["task", "run", "rh-native-task-probe", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
         .arg("--json")
-        .args(["--", "Cargo.toml", "beta"])
+        .args(["--", ".", "beta"])
         .output()
         .expect("run native task");
     assert!(
@@ -93,7 +94,7 @@ fn public_cli_runs_manifest_native_task() {
     let envelope: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("native task JSON");
     assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["value"], 24);
+    assert_eq!(envelope["value"], 15);
     assert!(
         envelope["stdout"]
             .as_str()

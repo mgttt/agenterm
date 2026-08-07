@@ -1,9 +1,10 @@
 fn entry() {
-    let first = args[0];
-    let present = std::fs::exists(first);
-    let content = std::fs::read_to_string(first);
+    let root = args[0];
+    let path = std::path::join(root, "Cargo.toml").display;
+    let present = std::fs::exists(path);
+    let content = std::fs::read_to_string(path);
     let marker = content.contains("name = \"agenterm\"");
-    let total = args.len + first.len + present + marker;
+    let total = args.len + root.len + present + marker;
     for value in 1..5 {
         total += value;
     }
