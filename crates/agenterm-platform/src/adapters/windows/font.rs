@@ -11,22 +11,59 @@ use crate::contract::font::{
 };
 
 pub(crate) fn candidates() -> Vec<FontFileCandidate> {
-    Vec::new()
+    // Windows monospace font files. Ordered by preference; the first readable
+    // file wins. Cascadia Code ships on Windows 10+, Consolas on all supported
+    // versions. Paths are absolute and use backslashes on Windows.
+    vec![
+        FontFileCandidate {
+            name: "Cascadia Code",
+            components: &["C:", "Windows", "Fonts", "cascadia.ttf"],
+        },
+        FontFileCandidate {
+            name: "Cascadia Mono",
+            components: &["C:", "Windows", "Fonts", "cascadiamono.ttf"],
+        },
+        FontFileCandidate {
+            name: "Consolas",
+            components: &["C:", "Windows", "Fonts", "consola.ttf"],
+        },
+        FontFileCandidate {
+            name: "Courier New",
+            components: &["C:", "Windows", "Fonts", "cour.ttf"],
+        },
+    ]
 }
 
 pub(crate) fn probe() -> FontDiscovery {
+    let families: Vec<&'static str> = candidates()
+        .iter()
+        .map(|c| c.name)
+        .collect();
     FontDiscovery {
-        available_families: Vec::new(),
-        primary_family: None,
+        primary_family: families.first().copied(),
+        available_families: families,
     }
 }
 
 pub(crate) fn primary_family_name() -> Result<&'static str, FontError> {
-    Err(FontError::Unsupported)
+    candidates()
+        .first()
+        .map(|c| c.name)
+        .ok_or(FontError::Unavailable)
 }
 
-pub(crate) fn primary_metrics(_size_px: u16) -> Result<FontMetrics, FontError> {
-    Err(FontError::Unsupported)
+pub(crate) fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
+    // Approximate metrics for the primary system monospace font at the given
+    // pixel size. Used when a native HFONT is not available (e.g. pixel-buffer
+    // renderers). Cell width ≈ 0.55×height for typical monospace fonts.
+    let h = f32::from(size_px);
+    Ok(FontMetrics {
+        family: Some("Consolas"),
+        size_px,
+        cell_width: (h * 0.55).round().max(1.0),
+        cell_height: h,
+        ascent: (h * 0.8).round().max(1.0),
+    })
 }
 
 pub(crate) fn probe_capability() -> Result<(), FontError> {
