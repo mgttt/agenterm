@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 56;
+pub const RH_CODEGEN_REVISION: u32 = 57;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1327,6 +1327,11 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_json_intish(value: &serde_json::Value) -> Option<INT> {\n\
              if let Some(number) = value.as_i64() {\n\
                  return Some(number as INT);\n\
+             }\n\
+             if let Some(number) = value.as_f64() {\n\
+                 if number.is_finite() && number >= INT::MIN as f64 && number <= INT::MAX as f64 {\n\
+                     return Some(number as INT);\n\
+                 }\n\
              }\n\
              // INT-only packs treat JSON booleans as 0/1 so `require(doc.flag)` works.\n\
              if let Some(flag) = value.as_bool() {\n\

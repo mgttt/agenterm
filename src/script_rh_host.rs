@@ -651,6 +651,11 @@ extern "C" fn host_json_call(
             .map(crate::script_process::process_platform_facts_json)
             .ok_or(-5),
         "process.list" => crate::script_process::process_list_json().map_err(|_| -5),
+        "image.inspect_png" => input
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(-5)
+            .and_then(|path| crate::script_image::inspect_png_json(Path::new(path)).map_err(|_| -5)),
         _ => Err(-4),
     }
     .and_then(|value| serde_json::to_string(&value).map_err(|_| -5));

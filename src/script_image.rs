@@ -159,6 +159,19 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     })
 }
 
+pub(crate) fn inspect_png_json(path: &Path) -> Result<serde_json::Value, String> {
+    let info = inspect_png(path).map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "width": info.width,
+        "height": info.height,
+        "samples": info.samples,
+        "red": info.red,
+        "green": info.green,
+        "blue": info.blue,
+        "luminance": info.luminance,
+    }))
+}
+
 fn image_error(
     code: &'static str,
     operation: &'static str,
@@ -202,6 +215,12 @@ mod tests {
         assert_eq!(info.green, 127.5);
         assert_eq!(info.blue, 0.0);
         assert!((info.luminance - 118.2945).abs() < 0.001);
+        let json = inspect_png_json(&path).unwrap();
+        assert_eq!(json["width"], 2);
+        assert_eq!(json["height"], 1);
+        assert!(
+            (json["luminance"].as_f64().unwrap() - 118.2945).abs() < 0.001
+        );
         std::fs::remove_file(path).unwrap();
     }
 }
