@@ -26,7 +26,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agenterm_platform::input::{KeyPressState, LogicalKey, NamedKey, NormalizedKeyEvent};
-use agenterm_platform::pty::{ChildCommand, PtyMaster, TerminalSize};
+use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::window_host::{
     run_pixel_window, GeometryChange, LogicalSize, PixelWindow, PixelWindowApplication,
     PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions,
@@ -129,9 +129,13 @@ struct CmdTerminal {
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser,
 
-    /// PTY master (input writes + resize). `None` until `opened` spawns it,
-    /// and after a spawn failure.
+    /// PTY master (input writes + resize). `None` until `opened` spawns it.
     master: Option<PtyMaster>,
+
+    /// PTY child handle. MUST stay alive for the session lifetime: dropping it
+    /// closes the rmux_pty Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE),
+    /// which kills the shell process immediately.
+    child: Option<PtyChild>,
 
     /// Receives PTY output chunks from the reader thread.
     pty_rx: mpsc::Receiver<Vec<u8>>,
@@ -169,6 +173,7 @@ impl CmdTerminal {
             working_dir,
             parser: vt100::Parser::new(24, 80, SCROLLBACK),
             master: None,
+            child: None,
             pty_rx: rx,
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
@@ -256,14 +261,8 @@ impl CmdTerminal {
             .map_err(|error| PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}")))?;
 
         self.master = Some(master);
+        self.child = Some(child);
         self.pty_rx = rx;
-
-        // Detach the child handle so its resources are released when the
-        // process exits. The reader thread's Disconnected signal drives exit.
-        thread::Builder::new()
-            .name("agenterm-cmd-reaper".into())
-            .spawn(move || drop(child))
-            .ok();
 
         Ok(())
     }
