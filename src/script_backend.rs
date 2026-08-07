@@ -3,7 +3,10 @@
 //! Pack execution defaults to the rh AOT backend. Set `AGENTERM_SCRIPT_BACKEND=rhai`
 //! to force the legacy Rhai interpreter path.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use serde_json::Value;
 
@@ -65,10 +68,16 @@ pub fn try_execute_rh_invocation(
         return Ok(None);
     }
 
+    let output_limit = options.budgets.as_ref().map_or_else(
+        || ScriptBudgets::default().output_bytes,
+        |budgets| budgets.output_bytes,
+    );
+    let output_capture = Arc::new(crate::script_rh_run::RhOutputCapture::new(output_limit));
     let run_context = RhRunContext {
         project_root: options.project_root.clone(),
         arguments: options.arguments.clone(),
         budgets: options.budgets.clone(),
+        output_capture: Some(Arc::clone(&output_capture)),
     };
 
     match operation {
@@ -94,8 +103,13 @@ pub fn try_execute_rh_invocation(
                 fleet_bridge,
                 run_context,
             )?;
-            let mut stdout = String::new();
+            let mut stdout = output_capture.finish()?;
             for line in &pack.cc_lines {
+                if stdout.len().saturating_add(line.len()).saturating_add(1) > output_limit {
+                    return Err(agenterm_rh::RhError::Compile(
+                        "rh invocation output exceeds its byte budget".into(),
+                    ));
+                }
                 stdout.push_str(line);
                 stdout.push('\n');
             }
@@ -166,7 +180,9 @@ pub fn rh_load_pack(
 
 #[cfg(test)]
 mod tests {
-    use super::{ScriptBackend, rh_backend_enabled, try_execute_rh_invocation, RhInvocationOptions};
+    use super::{
+        RhInvocationOptions, ScriptBackend, rh_backend_enabled, try_execute_rh_invocation,
+    };
     use crate::script_protocol::ScriptOperation;
 
     #[test]

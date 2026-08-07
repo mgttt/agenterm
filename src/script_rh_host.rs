@@ -37,7 +37,11 @@ pub fn clear_fleet_bridge() {
 pub fn call_cached_pack_entry_with_fleet(bridge: FleetBridgeFn) -> Result<i64, RhError> {
     let native_path = crate::script_rh_pack::cached_native_path()
         .ok_or_else(|| RhError::Compile("AGENTERM_RH_PACK native path is unavailable".into()))?;
-    call_pack_entry_with_fleet(native_path, bridge, crate::script_rh_run::RhRunContext::default())
+    call_pack_entry_with_fleet(
+        native_path,
+        bridge,
+        crate::script_rh_run::RhRunContext::default(),
+    )
 }
 
 pub fn call_pack_entry_with_fleet(
@@ -108,6 +112,7 @@ fn host_run_script_source(source: &str) -> Result<String, String> {
     let context = crate::script_rh_run::current_run_context().unwrap_or_default();
     let project_root = context
         .project_root
+        .clone()
         .or_else(|| {
             std::env::var("AGENTERM_WORKSPACE_PATH")
                 .ok()
@@ -115,27 +120,22 @@ fn host_run_script_source(source: &str) -> Result<String, String> {
         })
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| "project root unavailable".to_owned())?;
-    let budgets = context
-        .budgets
-        .clone()
-        .unwrap_or_default();
+    let budgets = context.budgets.clone().unwrap_or_default();
     let mut engine = Engine::new();
     crate::script_runtime::configure_engine(&mut engine, &budgets);
+    capture_compat_print(&mut engine, &context);
     let resolver = crate::script_project::ProjectModuleResolver::new(&project_root)
         .map_err(|error| error.to_string())?;
     engine.set_module_resolver(resolver);
     let mut scope = Scope::new();
     if let Some(arguments) = context.arguments {
-        let dynamic = rhai::serde::to_dynamic(&arguments)
-            .map_err(|error| error.to_string())?;
+        let dynamic = rhai::serde::to_dynamic(&arguments).map_err(|error| error.to_string())?;
         scope.push_dynamic("args", dynamic);
     }
     let ast = engine
         .compile_into_self_contained(&scope, source)
         .map_err(|error| error.to_string())?;
-    let has_entry = ast
-        .iter_functions()
-        .any(|meta| meta.name == "entry");
+    let has_entry = ast.iter_functions().any(|meta| meta.name == "entry");
     let value = if has_entry {
         engine
             .call_fn::<Dynamic>(&mut scope, &ast, "entry", ())
@@ -209,6 +209,7 @@ fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> 
     let mut engine = Engine::new();
     let budgets = context.budgets.clone().unwrap_or_default();
     crate::script_runtime::configure_engine(&mut engine, &budgets);
+    capture_compat_print(&mut engine, &context);
     if let Some(project_root) = context
         .project_root
         .or_else(|| {
@@ -224,8 +225,7 @@ fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> 
     }
     let mut scope = Scope::new();
     if let Some(arguments) = context.arguments {
-        let dynamic = rhai::serde::to_dynamic(&arguments)
-            .map_err(|error| error.to_string())?;
+        let dynamic = rhai::serde::to_dynamic(&arguments).map_err(|error| error.to_string())?;
         scope.push_dynamic("args", dynamic);
     }
     if let Some(vars) = scope_value.get("vars").and_then(|value| value.as_object()) {
@@ -249,6 +249,15 @@ fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> 
         .eval_with_scope::<Dynamic>(&mut scope, snippet)
         .map_err(|error| error.to_string())?;
     encode_host_result(&result)
+}
+
+fn capture_compat_print(engine: &mut rhai::Engine, context: &crate::script_rh_run::RhRunContext) {
+    let capture = context.output_capture.clone();
+    engine.on_print(move |text| {
+        if let Some(capture) = &capture {
+            capture.push_line(text);
+        }
+    });
 }
 
 fn encode_host_result(value: &rhai::Dynamic) -> Result<String, String> {
@@ -356,12 +365,9 @@ mod tests {
 fn entry() { 42 }"#;
         agenterm_rh::build_pack_dir(source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-        let value = call_pack_entry_with_host(
-            &native,
-            None,
-            crate::script_rh_run::RhRunContext::default(),
-        )
-        .expect("entry");
+        let value =
+            call_pack_entry_with_host(&native, None, crate::script_rh_run::RhRunContext::default())
+                .expect("entry");
         assert_eq!(value, 42);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -388,8 +394,7 @@ fn entry() { 42 }"#;
         let mut scope = Scope::new();
         scope.push_dynamic(
             "args",
-            rhai::serde::to_dynamic(&vec!["alpha".to_owned(), "beta".to_owned()])
-                .expect("args"),
+            rhai::serde::to_dynamic(&vec!["alpha".to_owned(), "beta".to_owned()]).expect("args"),
         );
         let source = "fn entry() { args.len() }";
         let ast = engine
@@ -453,10 +458,8 @@ fn entry() { 42 }"#;
 
     #[test]
     fn native_pack_honors_run_context_arguments() {
-        let dir = std::env::temp_dir().join(format!(
-            "agenterm-rh-host-args-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("agenterm-rh-host-args-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let source = "fn entry() { args.len() }";
         agenterm_rh::build_pack_dir(source, &dir).expect("build");
@@ -492,12 +495,9 @@ fn entry() { 42 }"#;
         );
         agenterm_rh::build_pack_dir(&source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-        let value = call_pack_entry_with_host(
-            &native,
-            None,
-            crate::script_rh_run::RhRunContext::default(),
-        )
-        .expect("entry");
+        let value =
+            call_pack_entry_with_host(&native, None, crate::script_rh_run::RhRunContext::default())
+                .expect("entry");
         assert_eq!(value, 42);
         let _ = std::fs::remove_dir_all(&dir);
     }
