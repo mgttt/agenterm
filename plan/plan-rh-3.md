@@ -153,6 +153,8 @@
 | M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [~] |
 | M42f8e | 仓库痕迹清扫：`scripts/rhai` 引用、`agenterm-rhai` 运营串、测试 pin、AGENTS/PRD | [~] |
 
+**主控在 main 硬切换（2026-08-07）：** tip `f4a66d4` 已合入并推送 `origin/main`（rev40–42 flips）。并行背景任务推进 qualification JSON mutate 与 smoke/orch 探针。
+
 **M42f7g / M42f8 进度（2026-08-07 tip +rev42）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip（仍约 28 条 `.rhai`）。**rev 42**：`path.display.to_lower`（含嵌套 parent/absolute）；`split` 变量分隔符 + JSON 路径 + `.len`；`for` 本地 Json/StringList 返回；`String += stringish`→`push_str`；Child/Command 形参 `mut`；显式字符串表达式优先于 host-surface。**已 flip**：`harness-cleanup-selftest`、`build-identity`、`diagnostic-bundle-selftest`（Native he=1+pack）。**仍 Compat/阻塞**：`qualification-selftest`（JSON 字段/下标赋值：`timing.gates[i].status=…` 等，需原生 JSON mutate）。M42f8a–d 草稿齐。M42f8e 审计已落盘；Phase A 切线门禁 = Native+pack。
 
 
