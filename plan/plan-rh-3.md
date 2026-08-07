@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg28 + g13–g17）：含 `preflight` 已切 `.rh`。余叶 `prune`/`target-report`/`candidate-*` 仍属后续 |
+| **状态** | **进行中 M42f6**（cg29 + g13–g18）：`target-report` 已切 `.rh`；`PathBuf.file_name` 原生。余叶 `prune`/`candidate-*`/`package-*` 仍属后续 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---

@@ -1,0 +1,190 @@
+// Deterministic Cargo target inventory.
+//
+// Usage:
+//   agenterm-rh run scripts/rh/target-report.rh -- REPO [TARGET] [--json]
+
+fn entry() {
+    if args.len < 1 {
+        return rh::fail("expected: REPO [TARGET] [--json]");
+    }
+    if args.len > 3 {
+        return rh::fail("expected: REPO [TARGET] [--json]");
+    }
+
+    let repo_path = std::path::absolute(args[0]).display;
+    let repo_target_path = std::path::join(repo_path, "target").display;
+    let repo_release_target_path = std::path::join(
+        repo_path,
+        "target-release"
+    ).display;
+
+    let target_argument = "target";
+    if args.len >= 2 {
+        if args[1] != "" {
+            target_argument = args[1];
+        }
+    }
+    let target_candidate = std::path::PathBuf::from(target_argument);
+    let target_path = std::path::join(repo_path, target_argument).display;
+    if target_candidate.is_absolute != 0 {
+        target_path = std::path::absolute(target_argument).display;
+    }
+
+    let json_output = 0;
+    if args.len == 3 {
+        if args[2] != "--json" {
+            return rh::fail("unknown target-report option");
+        }
+        json_output = 1;
+    }
+
+    let target_lower = target_path;
+    target_lower.to_lower();
+    let repo_target_lower = repo_target_path;
+    repo_target_lower.to_lower();
+    let repo_release_lower = repo_release_target_path;
+    repo_release_lower.to_lower();
+
+    let repo_local = 0;
+    if target_lower == repo_target_lower {
+        repo_local = 1;
+    }
+    if target_lower == repo_release_lower {
+        repo_local = 1;
+    }
+    let target_kind = "external";
+    if target_lower == repo_release_lower {
+        target_kind = "release-scratch";
+    }
+    if target_lower == repo_target_lower {
+        target_kind = "development";
+    }
+
+    let exists = std::fs::exists(target_path);
+    if exists != 0 {
+        if std::fs::metadata(target_path).is_dir == 0 {
+            return rh::fail("Cargo target path is not a directory");
+        }
+    }
+
+    let pending = rhai::json::parse("[]");
+    if exists != 0 {
+        let root_path = "" + target_path;
+        let root_profile = "(root)";
+        pending.push(#{ queue_root: root_path, queue_profile: root_profile });
+    }
+
+    let seen_profiles = #{};
+    let file_rows = [];
+    let file_count = 0;
+    let total_bytes = 0;
+    let oldest_millis = 0;
+    let oldest_text = "";
+    let newest_millis = 0;
+    let newest_text = "";
+    let head = 0;
+    while head < pending.len {
+        let item = pending[head];
+        let item_path = "" + item.queue_root;
+        let item_profile = "" + item.queue_profile;
+        let scan_path = std::path::absolute(item_path).display;
+        head += 1;
+        for dir_entry in std::fs::read_dir(scan_path) {
+            if dir_entry.is_dir != 0 {
+                let child = "" + dir_entry.path.display;
+                let child_profile = "" + item_profile;
+                if item_profile == "(root)" {
+                    let fname = "" + dir_entry.file_name;
+                    child_profile = fname;
+                }
+                pending.push(#{ queue_root: child, queue_profile: child_profile });
+            }
+            if dir_entry.is_file != 0 {
+                let metadata = dir_entry.metadata;
+                let modified = metadata.modified;
+                let modified_millis = modified.unix_millis;
+                let bytes = metadata.len;
+
+                file_count += 1;
+                total_bytes += bytes;
+                if file_count == 1 {
+                    oldest_millis = modified_millis;
+                    oldest_text = modified.rfc3339;
+                    newest_millis = modified_millis;
+                    newest_text = modified.rfc3339;
+                }
+                if modified_millis < oldest_millis {
+                    oldest_millis = modified_millis;
+                    oldest_text = modified.rfc3339;
+                }
+                if modified_millis > newest_millis {
+                    newest_millis = modified_millis;
+                    newest_text = modified.rfc3339;
+                }
+
+                if seen_profiles.contains(item_profile) == 0 {
+                    seen_profiles[item_profile] = true;
+                }
+                file_rows.push(#{ profile: item_profile, bytes: bytes });
+            }
+        }
+    }
+
+    let now_millis = std::time::SystemTime::now().unix_millis;
+    let oldest_age_thousandths = 0;
+    if file_count > 0 {
+        let diff_millis = now_millis - oldest_millis;
+        oldest_age_thousandths = (diff_millis * 1000 + 43200000) / 86400000;
+    }
+    let oldest_age_whole = oldest_age_thousandths / 1000;
+    let oldest_age_frac = oldest_age_thousandths % 1000;
+
+    let profile_reports = [];
+    for name in seen_profiles.keys() {
+        let files = 0;
+        let bytes = 0;
+        for row in file_rows {
+            if row.profile == name {
+                files += 1;
+                bytes += row.bytes;
+            }
+        }
+        profile_reports.push(#{ name: name, files: files, bytes: bytes });
+    }
+
+    let report = #{
+        schema_version: 1,
+        target_path: target_path,
+        exists: exists,
+        repo_local: repo_local,
+        cleanup_allowed: repo_local,
+        target_kind: target_kind,
+        files: file_count,
+        bytes: total_bytes,
+        oldest_write_utc: oldest_text,
+        oldest_age_thousandths: oldest_age_thousandths,
+        newest_write_utc: newest_text,
+        profiles: profile_reports
+    };
+
+    if json_output != 0 {
+        print(rhai::json::stringify_pretty(report));
+    } else {
+        print(
+            "Cargo target: " + target_path +
+            "; kind=" + target_kind +
+            "; repo_local=" + repo_local +
+            "; files=" + file_count +
+            "; bytes=" + total_bytes +
+            "; oldest_age_days=" + oldest_age_whole + "." + oldest_age_frac
+        );
+        for profile in profile_reports {
+            print(
+                "  " + profile.name +
+                ": files=" + profile.files +
+                ", bytes=" + profile.bytes
+            );
+        }
+    }
+    0
+}

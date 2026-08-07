@@ -1110,7 +1110,7 @@
     {
       "id": "target-report",
       "description": "Report bounded Cargo target inventory and cleanup eligibility",
-      "entry": "scripts/rhai/target-report.rhai",
+      "entry": "scripts/rh/target-report.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],
