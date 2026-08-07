@@ -236,6 +236,10 @@ fn rust_lint(repo) {
 }
 
 fn default_worker(repo) {
+    let rh = resolve_rh_cli(repo, "");
+    if rh != "" {
+        return rh;
+    }
     let windows = std::path::join(
         repo,
         "target/debug/agenterm-rhai.exe"

@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M22 执行轨完成**（rh 默认；`agenterm-rhai` 薄壳）；**M23 扩面轨进行中** |
+| **状态** | **M24 扩面轨完成**（break/continue AOT；check-many host 校验；bootstrap rh CLI 注入） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -46,6 +46,9 @@
 | M23b | rh `check` parity：`import`/project root + API catalog 对齐 rhai lint 语义 | [x] |
 | M23c | caller wave 1：CI / bootstrap 运营引用清单化迁移（`caller-inventory` 基线 guard） | [x] |
 | M23d | `agenterm-rhai` shim 硬化：剩余 dev forward 路径（check/eval/run/version/worker） | [x] |
+| M24a | 原生 `break`/`continue` in for/while（reject try 内与带值 break） | [x] |
+| M24b | check-many host 校验：project imports + shipped API catalog（`api_validate`/`project_import`） | [x] |
+| M24c | bootstrap wave 1：`AGENTERM_BOOTSTRAP_RH_CLI` 注入；check.rhai 优先 rh CLI | [x] |
 
 ---
 

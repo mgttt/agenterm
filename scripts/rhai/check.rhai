@@ -364,6 +364,19 @@ fn run_step(label, specs, repo, scratch, sequence) {
     sequence
 }
 
+fn lint_cli_worker(fallback) {
+    if std::env::has("AGENTERM_BOOTSTRAP_RH_CLI") {
+        let path =
+            std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_RH_CLI")).display;
+        if std::fs::exists(path)
+            && std::fs::metadata(path).is_file
+            && std::fs::metadata(path).len > 0 {
+            return path;
+        }
+    }
+    fallback
+}
+
 fn task(worker, manifest, id, timeout_ms, extra) {
     let arguments = [
         "task", "run", id,
@@ -539,6 +552,7 @@ require(
 );
 let bootstrap_worker =
     std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
+let lint_worker = lint_cli_worker(bootstrap_worker);
 let quick = false;
 let release = false;
 let skip_smoke = false;
@@ -703,7 +717,7 @@ if quick {
             manifest,
             "lint",
             120000,
-            [bootstrap_worker, "static"]
+            [lint_worker, "static"]
         )],
         repo,
         scratch,
@@ -954,14 +968,14 @@ let lint_gate = run_gate(
             manifest,
             "lint",
             120000,
-            [bootstrap_worker, "--self-test"]
+            [lint_worker, "--self-test"]
         ),
         task(
             bootstrap_worker,
             manifest,
             "lint",
             120000,
-            [bootstrap_worker, "static"]
+            [lint_worker, "static"]
         )
     ],
     repo,
@@ -1159,6 +1173,15 @@ context = build_gate.context;
 sequence = build_gate.sequence;
 let worker =
     std::path::join(repo, "dist/agenterm-rhai.exe").display;
+let dist_rh_cli_win =
+    std::path::join(repo, "dist/agenterm-rh.exe").display;
+let dist_rh_cli = if std::fs::exists(dist_rh_cli_win)
+    && std::fs::metadata(dist_rh_cli_win).is_file
+    && std::fs::metadata(dist_rh_cli_win).len > 0 {
+    dist_rh_cli_win
+} else {
+    std::path::join(repo, "dist/agenterm-rh").display
+};
 
 let ordinary_gates = [
     #{
@@ -1170,7 +1193,7 @@ let ordinary_gates = [
         id:"rhai-lint",
         label:"production Rhai source lint",
         specs:[task(
-            worker, manifest, "lint", 120000, [worker, "rhai"]
+            worker, manifest, "lint", 120000, [dist_rh_cli, "rhai"]
         )]
     },
     #{
