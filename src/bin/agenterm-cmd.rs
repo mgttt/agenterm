@@ -11,7 +11,10 @@
 //! (never blocking the render path), and the VT parser is the same one the
 //! product terminal already hardened. See `plan/plan-v0.1.16.md` §C.
 
-#![cfg_attr(windows, windows_subsystem = "windows")]
+// NOTE: windows_subsystem = "windows" is intentionally omitted. The ConPTY
+// child (cmd.exe) needs a console-capable host process; a GUI-subsystem binary
+// can cause the child to silently exit(0) without producing any output. The
+// extra console window is acceptable for a fallback terminal.
 
 #[path = "agenterm-cmd/font.rs"]
 mod font;
