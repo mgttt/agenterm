@@ -63,9 +63,10 @@ fn json(context, cli, arguments) {
 fn wait_sidebar_snapshot(context, cli, configured_width) {
     for attempt in 0..200 {
         let snapshot = json(context, cli, ["ui-snapshot"]);
-        if type_of(snapshot.layout.sidebar) != "()"
-            && snapshot.layout.sidebar.configured_width == configured_width
-            && snapshot.layout.sidebar.visible
+        let sidebar = snapshot.layout.sidebar;
+        if json_is_present(sidebar)
+            && sidebar.configured_width == configured_width
+            && sidebar.visible
         {
             return snapshot;
         }
@@ -216,10 +217,11 @@ try {
     ];
     let first_receipt = json(context, cli, receipt_args);
     let replayed_receipt = json(context, cli, receipt_args);
+    let resolved_tab_id = first_receipt.resolved.tab_id;
     test_harness::require(
         first_receipt.outcome == "committed"
             && first_receipt.request_id == request_id
-            && type_of(first_receipt.resolved.tab_id) != "()"
+            && json_is_present(resolved_tab_id)
             && first_receipt.after_position.sequence ==
                 replayed_receipt.after_position.sequence,
         "cli_smoke_receipt_replay"
@@ -731,9 +733,11 @@ try {
     );
     let hide_event =
         event_by_kind(visibility_events.events, "layout.tabs.visibility");
+    let hide_payload = hide_event.payload;
+    let hide_operation_id = "" + hide_payload.operation_id;
     test_harness::require(
         json_is_present(hide_event)
-            && hide_event.payload.operation_id == "ui.tabs.hide",
+            && hide_operation_id == "ui.tabs.hide",
         "cli_smoke_tabs_hide_event"
     );
     test_harness::require(
@@ -780,9 +784,11 @@ try {
     );
     let width_event =
         event_by_kind(width_events.events, "layout.tabs.width");
+    let width_payload = width_event.payload;
+    let width_operation_id = "" + width_payload.operation_id;
     test_harness::require(
         json_is_present(width_event)
-            && width_event.payload.operation_id == "ui.tabs.set-width"
+            && width_operation_id == "ui.tabs.set-width"
             && width_event.payload.configured_width == 480,
         "cli_smoke_width_event"
     );
