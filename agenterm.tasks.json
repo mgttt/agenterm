@@ -678,7 +678,7 @@
     {
       "id": "build-identity",
       "description": "Freeze source revision, dirty state, and build-input hashes into a batch environment",
-      "entry": "scripts/rhai/build-identity.rhai",
+      "entry": "scripts/rh/build-identity.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
@@ -688,7 +688,7 @@
     {
       "id": "harness-cleanup-selftest",
       "description": "Prove exact Rhai smoke-harness child ownership, cleanup evidence, and original-failure retention",
-      "entry": "scripts/rhai/harness-cleanup-selftest.rhai",
+      "entry": "scripts/rh/harness-cleanup-selftest.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],
@@ -699,7 +699,7 @@
     {
       "id": "diagnostic-bundle-selftest",
       "description": "Prove retained CLI, GUI, and Script failure bundles are bounded, private, identity-checked, and orphan-free",
-      "entry": "scripts/rhai/diagnostic-bundle-selftest.rhai",
+      "entry": "scripts/rh/diagnostic-bundle-selftest.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-rhai.exe", "dist/agenterm.exe"],

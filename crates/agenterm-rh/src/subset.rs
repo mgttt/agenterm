@@ -99,6 +99,15 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
             assign.1.rhs,
             Expr::BoolConstant(..) | Expr::StringConstant(..)
         )
+        // Local helper calls (`assert_bounded_bundle(...)`, `start_task_probe(...)`)
+        // are first-class INT/.rh values once emit lands; allow them as assign RHS.
+        || matches!(
+            &assign.1.rhs,
+            Expr::FnCall(call, ..)
+                if call.namespace.is_empty()
+                    && call.op_token.is_none()
+                    && call.name != "throw"
+        )
     {
         return None;
     }

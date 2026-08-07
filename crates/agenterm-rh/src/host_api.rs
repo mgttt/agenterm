@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 39;
+pub const RH_CODEGEN_REVISION: u32 = 42;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -767,6 +767,7 @@ pub fn emit_host_runtime(out: &mut String) {
              capture_limit: usize,\n\
              current_dir: Option<String>,\n\
          }\n\n\
+         #[derive(Clone)]\n\
          struct RhOutput {\n\
              success: INT,\n\
              exit_code: INT,\n\
@@ -1262,6 +1263,28 @@ pub fn emit_host_runtime(out: &mut String) {
                  None => {\n\
                      let _ = rh_fail(&format!(\"json_string_path: {}\", path.join(\".\")));\n\
                      String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_contains_path(\n\
+             value: &serde_json::Value,\n\
+             path: &[&str],\n\
+             needle: &serde_json::Value,\n\
+         ) -> INT {\n\
+             match rh_json_path(value, path) {\n\
+                 Some(serde_json::Value::String(text)) => match needle.as_str() {\n\
+                     Some(needle) => text.contains(needle) as INT,\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_string_contains: {}\", path.join(\".\")));\n\
+                         0\n\
+                     }\n\
+                 },\n\
+                 Some(serde_json::Value::Array(items)) => {\n\
+                     items.iter().any(|item| item == needle) as INT\n\
+                 }\n\
+                 Some(_) | None => {\n\
+                     let _ = rh_fail(&format!(\"json_contains_path: {}\", path.join(\".\")));\n\
+                     0\n\
                  }\n\
              }\n\
          }\n\n\

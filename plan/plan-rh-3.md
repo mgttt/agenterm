@@ -145,15 +145,15 @@
 | M42f7d | codegen 33：`std::fs::remove_dir_all`；fixture `remove-dir-all-probe.rh` | [x] |
 | M42f7e | codegen 34：`Command` builder + `Command.output`/`Output`（success/exit_code/stdout_text/stderr_text/require_success）；timeout 用 INT ms（不引 Duration）；fixture `process-output-probe.rh` | [x] |
 | M42f7f | codegen 35：`Command.start`/`Child`（id/state/kill/wait_with_output）；fixture `child-lifecycle-probe.rh` | [x] |
-| M42f7g | INT-only `scripts/rh/lib/test_harness.rh` + `harness-cleanup-selftest` native+pack；entry 切线 + 归档；回归 | [~] |
+| M42f7g | INT-only `scripts/rh/lib/test_harness.rh` + `harness-cleanup-selftest` native+pack；entry 切线 + 归档；回归 | [x] |
 | M42f8 | **硬切换收口（无兼容）**：Rhai 准备归档；不保留 `.rhai` 运行面。Phase A 清零 manifest/工作流/测试中的 `.rhai` 入口并全部改 `.rh`；Phase B 删除或归档 `scripts/rhai/**` 与 `agenterm-rhai` 业务路径，痕迹清扫（AGENTS/PRD/tests/workflows）；Phase C 移除主库 Rhai `Engine`/`script_rh_host` compat 与 `rh_host_run_script` 整脚本回退。compat-delegating 只是迁移期诊断，不是产品兼容承诺 | [ ] |
 | M42f8a | 剩余 lib：`qualification`/`release_candidate`/`bootstrap_timing`/`script_smoke_helpers` → `scripts/rh/lib/*.rh` | [~] |
 | M42f8b | orch：`build`/`check`/`release`/`fresh-clone-rehearsal` → `.rh` + entry 切线 + 归档 | [~] |
-| M42f8c | selftest：`qualification-selftest`/`diagnostic-bundle-selftest`/`harness-cleanup-selftest` flip | [ ] |
+| M42f8c | selftest：`qualification-selftest`/`diagnostic-bundle-selftest`/`harness-cleanup-selftest` flip | [~] |
 | M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [~] |
 | M42f8e | 仓库痕迹清扫：`scripts/rhai` 引用、`agenterm-rhai` 运营串、测试 pin、AGENTS/PRD | [~] |
 
-**M42f7g / M42f8 进度（2026-08-07 tip `096fb15`+）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip `agenterm.tasks.json`（仍约 30 条 `.rhai`；`build-identity` 已回退 `.rhai` 直至 Native）。**rev 37**：bundler 将模块函数前缀为 `alias__name`，双 import 不再 `script_module_fn_conflict`。M42f7g：bundled `test_harness`/`output-fn-arg-probe` 已达 **Native**（rev 39；he_count=1）。下一步：`harness-cleanup-selftest` 等叶在 pack 证明后 flip。M42f8a–d 草稿齐。M42f8e **只读审计已落盘** [`plan/rhai-trace-m42f8e.md`](rhai-trace-m42f8e.md)（约 153 命中文件；Phase A 前必改：30 条 manifest、`release.yml` promotion-identity、若干测试 pin）；清扫本体仍待 Native+pack 后门禁。Phase A 切线门禁 = 目标叶 `execution_mode=native` 且 pack 通过。
+**M42f7g / M42f8 进度（2026-08-07 tip +rev42）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip（仍约 28 条 `.rhai`）。**rev 42**：`path.display.to_lower`（含嵌套 parent/absolute）；`split` 变量分隔符 + JSON 路径 + `.len`；`for` 本地 Json/StringList 返回；`String += stringish`→`push_str`；Child/Command 形参 `mut`；显式字符串表达式优先于 host-surface。**已 flip**：`harness-cleanup-selftest`、`build-identity`、`diagnostic-bundle-selftest`（Native he=1+pack）。**仍 Compat/阻塞**：`qualification-selftest`（JSON 字段/下标赋值：`timing.gates[i].status=…` 等，需原生 JSON mutate）。M42f8a–d 草稿齐。M42f8e 审计已落盘；Phase A 切线门禁 = Native+pack。
 
 
 **M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。

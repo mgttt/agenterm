@@ -117,7 +117,7 @@ fn environment(identity) {
         dirty_label = "true";
     }
     #{
-        AGENTERM_BUILD_IDENTITY_VERSION: identity.schema_version.to_string(),
+        AGENTERM_BUILD_IDENTITY_VERSION: "" + identity.schema_version,
         AGENTERM_BUILD_GIT_COMMIT: identity.commit,
         AGENTERM_BUILD_GIT_DIRTY: dirty_label,
         AGENTERM_BUILD_CARGO_LOCK_SHA256: identity.cargo_lock_sha256,
