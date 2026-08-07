@@ -24,7 +24,11 @@ let declared_evidence = [
     "ux-parity.window-focus-contract"
 ];
 
-let evidence_profiles = [
+let evidence_profile_count = 10;
+let declared_evidence_count = 10;
+
+fn evidence_profiles_data() {
+    [
     #{
         id: "ux-parity.startup",
         branch: "startup",
@@ -125,41 +129,46 @@ let evidence_profiles = [
         macos_supported: true,
         unsupported_root_cause: ""
     }
-];
+    ]
+}
 
-fn init_evidence_states() {
+fn init_evidence_states(profiles) {
     let states = #{
         failed: false
     };
-    for profile in evidence_profiles {
-        let profile_id = profile.id;
+    let profile_index = 0;
+    while profile_index < evidence_profile_count {
+        let profile = profiles[profile_index];
+        let profile_id = "" + profile.id;
         states[profile_id] = #{
             executed: false,
             failed: false,
             root_cause: "",
             observed: false
         };
+        profile_index = profile_index + 1;
     }
     states
 }
 
 fn set_evidence_state(states, evidence_id, failure_message) {
-    let has = states.contains(evidence_id);
-    if !has {
+    let evidence_key = "" + evidence_id;
+    let failure_text = "" + failure_message;
+    if states.contains(evidence_key) == 0 {
         return states;
     }
-    if failure_message == "" {
-        states[evidence_id] = #{
+    if failure_text == "" {
+        states[evidence_key] = #{
             executed: true,
             failed: false,
             root_cause: "",
             observed: true
         };
     } else {
-        states[evidence_id] = #{
+        states[evidence_key] = #{
             executed: true,
             failed: true,
-            root_cause: classify_failure_root(failure_message),
+            root_cause: classify_failure_root(failure_text),
             observed: true
         };
         states.failed = true;
@@ -168,9 +177,15 @@ fn set_evidence_state(states, evidence_id, failure_message) {
 }
 
 fn mark_evidence_state(states, evidence_ids, failure_message) {
-    let _evidence_id_count = evidence_ids.len;
-    for evidence_id in evidence_ids {
-        states = set_evidence_state(states, evidence_id, failure_message);
+    let evidence_count = evidence_ids.len;
+    let evidence_index = 0;
+    while evidence_index < evidence_count {
+        states = set_evidence_state(
+            states,
+            evidence_ids[evidence_index],
+            failure_message
+        );
+        evidence_index = evidence_index + 1;
     }
     states
 }
@@ -180,83 +195,101 @@ fn aggregate_failure_message(failure_messages) {
         return "";
     }
     let joined = "";
-    for message in failure_messages {
+    let message_index = 0;
+    while message_index < failure_messages.len {
+        let message = failure_messages[message_index];
         if joined != "" {
             joined += "\n";
         }
         joined += message;
+        message_index = message_index + 1;
     }
     joined
 }
 
 fn classify_failure_root(failure) {
-    if failure == "" {
+    let failure_text = "" + failure;
+    if failure_text == "" {
         return "";
     }
 
-    if failure.contains("startup_gui_early_exit") {
+    if failure_text.contains("startup_gui_early_exit") {
         return "infra/startup-gui-early-exit";
     }
-    if failure.contains("startup_window_discovery_timeout") {
+    if failure_text.contains("startup_window_discovery_timeout") {
         return "infra/startup-no-window";
     }
-    if failure.contains("startup_stream_text_timeout") {
+    if failure_text.contains("startup_stream_text_timeout") {
         return "infra/startup-stream-timeout";
     }
-    if failure.contains("startup_first_window_budget") {
+    if failure_text.contains("startup_first_window_budget") {
         return "ux/startup-latency-budget";
     }
-    if failure.contains("wake_smoke") || failure.contains("ux-parity wake contract") {
+    if failure_text.contains("wake_smoke") || failure_text.contains("ux-parity wake contract") {
         return "ux/wake-contract";
     }
-    if failure.contains("runtime_error") || failure.contains("script_runtime") {
+    if failure_text.contains("runtime_error") || failure_text.contains("script_runtime") {
         return "infra/rhai-runtime";
     }
-    if failure.contains("unsupported platform") {
+    if failure_text.contains("unsupported platform") {
         return "infra/unsupported-platform";
     }
-    if failure.contains("remote_ui_control_missing") {
+    if failure_text.contains("remote_ui_control_missing") {
         return "ui/control-missing";
     }
-    if failure.contains("platform_gui_missing") ||
-            failure.contains("platform_cli_missing") ||
-            failure.contains("platform_script_missing") {
+    if failure_text.contains("platform_gui_missing") ||
+            failure_text.contains("platform_cli_missing") ||
+            failure_text.contains("platform_script_missing") {
         return "infra/platform-binary-missing";
     }
-    if failure.contains("script_not_found") || failure.contains("task_not_found") {
+    if failure_text.contains("script_not_found") || failure_text.contains("task_not_found") {
         return "infra/script-task-mapping";
     }
     "bug/unknown"
 }
 
-fn fail_supported_profiles_for_platform(evidence_states, platform, message) {
+fn fail_supported_profiles_for_platform(evidence_states, platform, message, profiles) {
+    let platform_text = "" + platform;
     let ids = [];
-    for profile in evidence_profiles {
-        let supported = if platform == "windows" {
-            profile.windows_supported
-        } else if platform == "linux" {
-            profile.linux_supported
+    let profile_index = 0;
+    while profile_index < evidence_profile_count {
+        let profile = profiles[profile_index];
+        let supported = 0;
+        if platform_text == "windows" {
+            if profile.windows_supported != 0 {
+                supported = 1;
+            }
+        } else if platform_text == "linux" {
+            if profile.linux_supported != 0 {
+                supported = 1;
+            }
         } else {
-            profile.macos_supported
-        };
-        if supported {
-            ids.push(profile.id);
+            if profile.macos_supported != 0 {
+                supported = 1;
+            }
         }
+        if supported != 0 {
+            ids.push("" + profile.id);
+        }
+        profile_index = profile_index + 1;
     }
     mark_evidence_state(evidence_states, ids, message)
 }
 
 fn list_contains(items, needle) {
-    for item in items {
-        if item == needle {
+    let needle_text = "" + needle;
+    let item_index = 0;
+    while item_index < items.len {
+        if ("" + items[item_index]) == needle_text {
             return true;
         }
+        item_index = item_index + 1;
     }
     false
 }
 
 fn read_task_evidence(context) {
-    if !std::fs::exists(context.evidence_path) {
+    if std::fs::exists(context.evidence_path) == 0 {
         return [];
     }
     let observed = [];
@@ -271,7 +304,8 @@ fn read_task_evidence(context) {
 }
 
 fn profile_evidence_state(emitted, profile_id) {
-    if !emitted.contains(profile_id) {
+    let profile_key = "" + profile_id;
+    if emitted.contains(profile_key) == 0 {
         return #{
             executed: false,
             failed: false,
@@ -279,69 +313,100 @@ fn profile_evidence_state(emitted, profile_id) {
             observed: false
         };
     }
-    emitted[profile_id]
+    let state_value = emitted[profile_key];
+    state_value
 }
 
-fn platform_state_for(profile, run_platform, emitted) {
-    let profile_id = profile.id;
-    let state = profile_evidence_state(emitted, profile_id);
-    let pending = "not-executed-yet";
-    let emitted_for_profile = state.executed;
-    let windows_state = if !profile.windows_supported {
-        "Unsupported"
-    } else if run_platform == "windows" && emitted_for_profile && !state.failed {
-        "Supported"
-    } else if run_platform == "windows" && emitted_for_profile && state.failed {
-        "Failed"
-    } else if run_platform == "windows" && !emitted_for_profile {
-        "not-executed-yet"
-    } else {
-        pending
-    };
-    let linux_state = if !profile.linux_supported {
-        "Unsupported"
-    } else if run_platform == "linux" && emitted_for_profile && !state.failed {
-        "Supported"
-    } else if run_platform == "linux" && emitted_for_profile && state.failed {
-        "Failed"
-    } else if run_platform == "linux" && !emitted_for_profile {
-        "not-executed-yet"
-    } else {
-        pending
-    };
-    let macos_state = if !profile.macos_supported {
-        "Unsupported"
-    } else if run_platform == "macos" && emitted_for_profile && !state.failed {
-        "Supported"
-    } else if run_platform == "macos" && emitted_for_profile && state.failed {
-        "Failed"
-    } else if run_platform == "macos" && !emitted_for_profile {
-        "not-executed-yet"
-    } else {
-        pending
-    };
+fn single_platform_state(
+    platform_supported,
+    run_platform,
+    target_platform,
+    executed,
+    failed,
+    pending_label
+) {
+    if platform_supported == 0 {
+        return "Unsupported";
+    }
+    let run_text = "" + run_platform;
+    if run_text != target_platform {
+        return pending_label;
+    }
+    if executed == 0 {
+        return "not-executed-yet";
+    }
+    if failed != 0 {
+        return "Failed";
+    }
+    "Supported"
+}
 
-    let windows_root = if windows_state == "Unsupported" {
-        profile.unsupported_root_cause
-    } else if windows_state == "Failed" {
-        state.root_cause
-    } else {
-        ""
-    };
-    let linux_root = if linux_state == "Unsupported" {
-        profile.unsupported_root_cause
-    } else if linux_state == "Failed" {
-        state.root_cause
-    } else {
-        ""
-    };
-    let macos_root = if macos_state == "Unsupported" {
-        profile.unsupported_root_cause
-    } else if macos_state == "Failed" {
-        state.root_cause
-    } else {
-        ""
-    };
+fn single_platform_root(state_label, unsupported_root, failure_root) {
+    let label = "" + state_label;
+    if label == "Unsupported" {
+        return "" + unsupported_root;
+    }
+    if label == "Failed" {
+        return "" + failure_root;
+    }
+    ""
+}
+
+fn platform_state_for(
+    windows_supported,
+    linux_supported,
+    macos_supported,
+    unsupported_root,
+    profile_id,
+    run_platform,
+    emitted
+) {
+    let profile_key = "" + profile_id;
+    let unsupported_root_text = "" + unsupported_root;
+    let state_value = profile_evidence_state(emitted, profile_key);
+    let pending = "not-executed-yet";
+    let executed = state_value.executed;
+    let failed = state_value.failed;
+    let failure_root_text = "" + state_value.root_cause;
+    let windows_state = single_platform_state(
+        windows_supported,
+        run_platform,
+        "windows",
+        executed,
+        failed,
+        pending
+    );
+    let linux_state = single_platform_state(
+        linux_supported,
+        run_platform,
+        "linux",
+        executed,
+        failed,
+        pending
+    );
+    let macos_state = single_platform_state(
+        macos_supported,
+        run_platform,
+        "macos",
+        executed,
+        failed,
+        pending
+    );
+    let windows_root = single_platform_root(
+        windows_state,
+        unsupported_root_text,
+        failure_root_text
+    );
+    let linux_root = single_platform_root(
+        linux_state,
+        unsupported_root_text,
+        failure_root_text
+    );
+    let macos_root = single_platform_root(
+        macos_state,
+        unsupported_root_text,
+        failure_root_text
+    );
 
     #{
         windows: windows_state,
@@ -353,11 +418,34 @@ fn platform_state_for(profile, run_platform, emitted) {
     }
 }
 
-fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
-    if !emit_matrix {
+fn current_platform_state(per_platform, platform) {
+    let platform_text = "" + platform;
+    if platform_text == "windows" {
+        return per_platform.windows;
+    }
+    if platform_text == "linux" {
+        return per_platform.linux;
+    }
+    per_platform.macos
+}
+
+fn current_platform_root(per_platform, platform) {
+    let platform_text = "" + platform;
+    if platform_text == "windows" {
+        return per_platform.windows_root;
+    }
+    if platform_text == "linux" {
+        return per_platform.linux_root;
+    }
+    per_platform.macos_root
+}
+
+fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profiles) {
+    if emit_matrix == 0 {
         return;
     }
 
+    let platform_text = "" + platform;
     let suite = "platform-ux-parity-smoke";
     let timestamp = std::time::SystemTime::now().rfc3339;
     let report_path_json = std::path::join(
@@ -370,151 +458,129 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
     ).display;
 
     let matrix_result = [];
-    for profile in evidence_profiles {
-        let per_platform = platform_state_for(profile, platform, evidence_states);
-        let row_state = if platform == "windows" {
-            per_platform.windows
-        } else if platform == "linux" {
-            per_platform.linux
-        } else {
-            per_platform.macos
-        };
-        let row_root = if platform == "windows" {
-            per_platform.windows_root
-        } else if platform == "linux" {
-            per_platform.linux_root
-        } else {
-            per_platform.macos_root
-        };
+    let profile_index = 0;
+    while profile_index < evidence_profile_count {
+        let profile = profiles[profile_index];
+        let profile_branch = "" + profile.branch;
+        let profile_scenario = "" + profile.scenario;
+        let profile_id = "" + profile.id;
+        let profile_owner = "" + profile.owner;
+        let per_platform = platform_state_for(
+            profile.windows_supported,
+            profile.linux_supported,
+            profile.macos_supported,
+            profile.unsupported_root_cause,
+            profile_id,
+            platform_text,
+            evidence_states
+        );
+        let row_state = current_platform_state(per_platform, platform_text);
+        let row_root = current_platform_root(per_platform, platform_text);
         let record = #{
-            branch: profile.branch,
-            scenario: profile.scenario,
-            evidence_id: profile.id,
+            branch: profile_branch,
+            scenario: profile_scenario,
+            evidence_id: profile_id,
             windows: per_platform.windows,
             linux: per_platform.linux,
             macos: per_platform.macos,
             state: row_state,
             root_cause: row_root,
-            owner: profile.owner
+            owner: profile_owner
         };
         matrix_result.push(record);
+        profile_index = profile_index + 1;
     }
 
-    if emit_matrix {
-        let json_payload = #{
-            run_id: context.run_id,
-            timestamp_utc: timestamp,
-            suite: suite,
-            platform: platform,
-            environment: #{
-                branch: "",
-                commit: "",
-                runner: ""
-            },
-            result: matrix_result
-        };
-        rhai::runtime::atomic_write(
-            report_path_json,
-            rhai::json::stringify_pretty(json_payload) + "\n"
+    let json_payload = #{
+        run_id: context.run_id,
+        timestamp_utc: timestamp,
+        suite: suite,
+        platform: platform_text,
+        environment: #{
+            branch: "",
+            commit: "",
+            runner: ""
+        },
+        result: matrix_result
+    };
+    rhai::runtime::atomic_write(
+        report_path_json,
+        rhai::json::stringify_pretty(json_payload) + "\n"
+    );
+
+    let csv_rows = [
+        "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
+    ];
+    profile_index = 0;
+    while profile_index < evidence_profile_count {
+        let profile = profiles[profile_index];
+        let profile_branch = "" + profile.branch;
+        let profile_scenario = "" + profile.scenario;
+        let profile_id = "" + profile.id;
+        let profile_owner = "" + profile.owner;
+        let per_platform = platform_state_for(
+            profile.windows_supported,
+            profile.linux_supported,
+            profile.macos_supported,
+            profile.unsupported_root_cause,
+            profile_id,
+            platform_text,
+            evidence_states
         );
-
-        let csv_rows = [
-            "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
-        ];
-        for profile in evidence_profiles {
-        let per_platform = platform_state_for(profile, platform, evidence_states);
-            let row_state = if platform == "windows" {
-                per_platform.windows
-            } else if platform == "linux" {
-                per_platform.linux
-            } else {
-                per_platform.macos
-            };
-            let row_root = if platform == "windows" {
-                per_platform.windows_root
-            } else if platform == "linux" {
-                per_platform.linux_root
-            } else {
-                per_platform.macos_root
-            };
-            let row = context.run_id + "," + timestamp + "," + suite + "," +
-                profile.branch + "," + profile.scenario + "," + profile.id + "," +
-                platform + "," + row_state + "," + row_root + "," + profile.owner;
-            csv_rows.push(row);
-        }
-        let csv_body = "";
-        for row in csv_rows {
-            if csv_body != "" {
-                csv_body += "\n";
-            }
-            csv_body += row;
-        }
-        rhai::runtime::atomic_write(report_path_csv, csv_body + "\n");
+        let row_state = current_platform_state(per_platform, platform_text);
+        let row_root = current_platform_root(per_platform, platform_text);
+        let row = context.run_id + "," + timestamp + "," + suite + "," +
+            profile_branch + "," + profile_scenario + "," + profile_id + "," +
+            platform_text + "," + row_state + "," + row_root + "," + profile_owner;
+        csv_rows.push(row);
+        profile_index = profile_index + 1;
     }
+    let csv_body = "";
+    let row_index = 0;
+    while row_index < csv_rows.len {
+        if csv_body != "" {
+            csv_body += "\n";
+        }
+        csv_body += csv_rows[row_index];
+        row_index = row_index + 1;
+    }
+    rhai::runtime::atomic_write(report_path_csv, csv_body + "\n");
 }
-
-
 
 fn absolute(value) {
     std::path::absolute(value).display
 }
 
 fn resolve_script_binary(script_exe, repository) {
+    let script_exe_text = "" + script_exe;
+    let repository_path = "" + repository;
     let candidates = [
-        script_exe,
-        std::path::join(repository, "dist/agenterm-rh.exe").display,
-        std::path::join(repository, "dist/agenterm-rh").display,
-        std::path::join(repository, "dist/agenterm-rhai.exe").display,
-        std::path::join(repository, "dist/agenterm-rhai").display
+        script_exe_text,
+        std::path::join(repository_path, "dist/agenterm-rh.exe").display,
+        std::path::join(repository_path, "dist/agenterm-rh").display,
+        std::path::join(repository_path, "dist/agenterm-rhai.exe").display,
+        std::path::join(repository_path, "dist/agenterm-rhai").display
     ];
 
-    for candidate in candidates {
-        if std::fs::exists(candidate) {
-            return candidate;
+    let candidate_index = 0;
+    while candidate_index < candidates.len {
+        let candidate = candidates[candidate_index];
+        let candidate_path = "" + candidate;
+        if std::fs::exists(candidate_path) != 0 {
+            return candidate_path;
         }
+        candidate_index = candidate_index + 1;
     }
     throw "no_available_script_runtime";
-}
-
-fn run_script_task(context, script_bin, repository, task_file, task_args, task_label, use_separator) {
-    let command = std::process::command(script_bin);
-    command.current_dir(repository);
-    let invoked = ["task", "run", task_file, repository];
-    command.args(invoked);
-    if use_separator {
-        command.args(["--"]);
-    }
-    command.args(task_args);
-    command.timeout(std::time::Duration::from_secs(300));
-    command.capture_limit(262144);
-    command.env("AGENTERM_IPC_ADDRESS", context.address);
-    command.env("AGENTERM_WORKSPACE_PATH", context.workspace_path);
-    command.env("AGENTERM_SETTINGS_PATH", context.settings_path);
-    command.env("AGENTERM_INSTANCE_DIR", context.instance_directory);
-    command.env("AGENTERM_TEST_EVIDENCE_PATH", context.evidence_path);
-    command.env("AGENTERM_NO_ACTIVATE", "1");
-
-    let output = command.output();
-    let record_arguments = [];
-    for argument in invoked {
-        record_arguments.push(argument);
-    }
-    for argument in task_args {
-        record_arguments.push(argument);
-    }
-    test_harness::append_command_record(context, record_arguments, output, false, []);
-    if !output.success {
-        throw task_label + "_failed:" + output.stderr_text();
-    }
-    print("TASK " + task_label + "_PASS");
-    return output;
 }
 
 fn parse_platform_args(positional_args) {
     let args_len = positional_args.len;
     test_harness::require(args_len >= 4, "expected: REPO GUI_EXE [SCRIPT_EXE] CLI_EXE PLATFORM");
 
-    let platform = positional_args[args_len - 1].to_lower();
+    let last_index = args_len - 1;
+    let platform_arg = positional_args[last_index];
+    let platform = platform_arg.to_lower();
 
     let attempt_repo = absolute(positional_args[args_len - 4]);
     let attempt_gui = absolute(positional_args[args_len - 3]);
@@ -531,9 +597,12 @@ fn parse_platform_args(positional_args) {
         let maybe_gui = absolute(positional_args[args_len - 4]);
         let maybe_script = absolute(positional_args[args_len - 3]);
         let maybe_cli = absolute(positional_args[args_len - 2]);
-        if maybe_script.to_lower().contains("agenterm-rh") &&
-                maybe_gui.ends_with("agenterm.exe") &&
-                maybe_cli.ends_with("agenterm-cli.exe") {
+        let maybe_script_text = "" + maybe_script;
+        let maybe_gui_text = "" + maybe_gui;
+        let maybe_cli_text = "" + maybe_cli;
+        if maybe_script_text.to_lower().contains("agenterm-rh") &&
+                maybe_gui_text.ends_with("agenterm.exe") &&
+                maybe_cli_text.ends_with("agenterm-cli.exe") {
             short.repository = maybe_repo;
             short.gui_exe = maybe_gui;
             short.script_exe = maybe_script;
@@ -544,20 +613,34 @@ fn parse_platform_args(positional_args) {
 }
 
 fn emit_phase_evidence(context, evidence_id) {
+    let declared = [
+        "ux-parity.startup",
+        "ux-parity.startup-title",
+        "ux-parity.wake-coalescing",
+        "ux-parity.linux.unix-frontend.workbench",
+        "ux-parity.linux.unix-frontend.clipboard",
+        "ux-parity.macos.unix-frontend.workbench",
+        "ux-parity.macos.unix-frontend.clipboard",
+        "ux-parity.remote-ui.replaceable-client",
+        "ux-parity.remote-ui.selection",
+        "ux-parity.window-focus-contract"
+    ];
     let id_text = "" + evidence_id;
     let declared_ok = 0;
-    for declared_id in declared_evidence {
-        let declared_text = "" + declared_id;
-        if declared_text == id_text {
+    let declared_index = 0;
+    while declared_index < declared_evidence_count {
+        let declared_id = declared[declared_index];
+        if declared_id == id_text {
             declared_ok = 1;
         }
+        declared_index = declared_index + 1;
     }
     test_harness::require(
         declared_ok != 0,
         "test_harness_undeclared_evidence:" + id_text
     );
     let existing = "";
-    if std::fs::exists(context.evidence_path) {
+    if std::fs::exists(context.evidence_path) != 0 {
         existing = std::fs::read_to_string(context.evidence_path);
     }
     for line in existing.split("\n") {
@@ -575,70 +658,119 @@ fn emit_phase_evidence(context, evidence_id) {
     0
 }
 
-fn apply_partial_phase_evidence(states, evidence_ids, phase_emitted, failure) {
-    for evidence_id in evidence_ids {
-        if phase_emitted.contains(evidence_id) {
-            states = set_evidence_state(states, evidence_id, "");
-        } else {
-            states = set_evidence_state(states, evidence_id, failure);
-        }
-    }
-    states
-}
-
 fn execute_phase(
     context,
     runtime_script,
     repository,
-    task_file,
-    task_args,
+    task_name,
     task_label,
     evidence_ids,
     evidence_states,
-    use_separator
+    extra1,
+    extra2,
+    extra3,
+    extra4,
+    extra5,
+    extra_count
 ) {
-    let _phase_evidence_failed = evidence_states.failed;
-    let _phase_task_arg_count = task_args.len;
+    let script_path = "" + runtime_script;
+    let repo_path = "" + repository;
+    let task_name_text = "" + task_name;
+    let label_text = "" + task_label;
+    let extra1_text = "" + extra1;
+    let extra2_text = "" + extra2;
+    let extra3_text = "" + extra3;
+    let extra4_text = "" + extra4;
+    let extra5_text = "" + extra5;
+    let native_evidence_ids = [];
+    let evidence_index = 0;
+    while evidence_index < evidence_ids.len {
+        native_evidence_ids.push("" + evidence_ids[evidence_index]);
+        evidence_index = evidence_index + 1;
+    }
+    let id_count = native_evidence_ids.len;
+    let _phase_states_failed = evidence_states.failed;
     let evidence_before = read_task_evidence(context);
     let success = true;
     let failure = "";
+    let command = std::process::command(script_path);
+    command.current_dir(repo_path);
+    if extra_count == 2 {
+        command.args([
+            "task", "run", task_name_text, repo_path,
+            extra1_text, extra2_text
+        ]);
+    } else if extra_count == 3 {
+        command.args([
+            "task", "run", task_name_text, repo_path,
+            extra1_text, extra2_text, extra3_text
+        ]);
+    } else if extra_count == 5 {
+        command.args([
+            "task", "run", task_name_text, repo_path,
+            extra1_text, extra2_text, extra3_text, extra4_text, extra5_text
+        ]);
+    } else {
+        throw label_text + "_invalid_task_args";
+    }
+    command.timeout(std::time::Duration::from_secs(300));
+    command.capture_limit(262144);
+    command.env("AGENTERM_IPC_ADDRESS", context.address);
+    command.env("AGENTERM_WORKSPACE_PATH", context.workspace_path);
+    command.env("AGENTERM_SETTINGS_PATH", context.settings_path);
+    command.env("AGENTERM_INSTANCE_DIR", context.instance_directory);
+    command.env("AGENTERM_TEST_EVIDENCE_PATH", context.evidence_path);
+    command.env("AGENTERM_NO_ACTIVATE", "1");
     try {
-        let command = std::process::command(runtime_script);
-        command.current_dir(repository);
-        let invoked = ["task", "run", task_file, repository];
-        command.args(invoked);
-        if use_separator {
-            command.args(["--"]);
-        }
-        command.args(task_args);
-        command.timeout(std::time::Duration::from_secs(300));
-        command.capture_limit(262144);
-        command.env("AGENTERM_IPC_ADDRESS", context.address);
-        command.env("AGENTERM_WORKSPACE_PATH", context.workspace_path);
-        command.env("AGENTERM_SETTINGS_PATH", context.settings_path);
-        command.env("AGENTERM_INSTANCE_DIR", context.instance_directory);
-        command.env("AGENTERM_TEST_EVIDENCE_PATH", context.evidence_path);
-        command.env("AGENTERM_NO_ACTIVATE", "1");
-
         let output = command.output();
-        let record_arguments = [];
-        for argument in invoked {
-            record_arguments.push(argument);
+        if extra_count == 2 {
+            test_harness::append_command_record(
+                context,
+                [
+                    "task", "run", task_name_text, repo_path,
+                    extra1_text, extra2_text
+                ],
+                output,
+                false,
+                []
+            );
+        } else if extra_count == 3 {
+            test_harness::append_command_record(
+                context,
+                [
+                    "task", "run", task_name_text, repo_path,
+                    extra1_text, extra2_text, extra3_text
+                ],
+                output,
+                false,
+                []
+            );
+        } else {
+            test_harness::append_command_record(
+                context,
+                [
+                    "task", "run", task_name_text, repo_path,
+                    extra1_text, extra2_text, extra3_text, extra4_text, extra5_text
+                ],
+                output,
+                false,
+                []
+            );
         }
-        for argument in task_args {
-            record_arguments.push(argument);
+        if output.success == 0 {
+            throw label_text + "_failed:" + output.stderr_text();
         }
-        test_harness::append_command_record(context, record_arguments, output, false, []);
-        if !output.success {
-            throw task_label + "_failed:" + output.stderr_text();
-        }
-        print("TASK " + task_label + "_PASS");
+        print("TASK " + label_text + "_PASS");
         let emitted_ids = [];
-        for evidence_id in evidence_ids {
-            if evidence_id != "" {
-                emit_phase_evidence(context, evidence_id);
-                emitted_ids.push(evidence_id);
+        evidence_index = 0;
+        while evidence_index < id_count {
+            let evidence_id = native_evidence_ids[evidence_index];
+            let id_text = "" + evidence_id;
+            if id_text != "" {
+                emit_phase_evidence(context, id_text);
+                emitted_ids.push(id_text);
             }
+            evidence_index = evidence_index + 1;
         }
         evidence_states = mark_evidence_state(
             evidence_states,
@@ -647,31 +779,57 @@ fn execute_phase(
         );
     } catch (error) {
         success = false;
-        failure = error.to_string();
+        failure = "" + error;
         let observed = read_task_evidence(context);
         let phase_emitted = [];
-        for evidence_id in evidence_ids {
+        evidence_index = 0;
+        while evidence_index < id_count {
+            let evidence_id = native_evidence_ids[evidence_index];
             let seen = list_contains(evidence_before, evidence_id);
-            let newly_seen = false;
-            if !seen {
-                newly_seen = list_contains(observed, evidence_id);
+            let newly_seen = 0;
+            if seen == 0 {
+                if list_contains(observed, evidence_id) != 0 {
+                    newly_seen = 1;
+                }
             }
-            if newly_seen {
+            if newly_seen != 0 {
                 phase_emitted.push(evidence_id);
             }
+            evidence_index = evidence_index + 1;
         }
-        evidence_states = if phase_emitted.len == 0 {
-            mark_evidence_state(evidence_states, evidence_ids, failure)
+        if phase_emitted.len == 0 {
+            let fail_index = 0;
+            while fail_index < id_count {
+                let evidence_id = native_evidence_ids[fail_index];
+                evidence_states = set_evidence_state(
+                    evidence_states,
+                    evidence_id,
+                    failure
+                );
+                fail_index = fail_index + 1;
+            }
         } else {
-            apply_partial_phase_evidence(
-                evidence_states,
-                evidence_ids,
-                phase_emitted,
-                failure
-            )
-        };
+            let partial_index = 0;
+            while partial_index < id_count {
+                let evidence_id = native_evidence_ids[partial_index];
+                if phase_emitted.contains(evidence_id) != 0 {
+                    evidence_states = set_evidence_state(
+                        evidence_states,
+                        evidence_id,
+                        ""
+                    );
+                } else {
+                    evidence_states = set_evidence_state(
+                        evidence_states,
+                        evidence_id,
+                        failure
+                    );
+                }
+                partial_index = partial_index + 1;
+            }
+        }
     }
-    if success {
+    if success != 0 {
         return #{
             success: true,
             error: "",
@@ -686,111 +844,134 @@ fn execute_phase(
 }
 
 fn entry() {
-    let emit_matrix = args.contains("--emit-matrix");
+    let emit_matrix = 0;
+    let list_evidence = 0;
     let positional_args = [];
-    for argument in args {
+    let arg_index = 0;
+    while arg_index < args.len {
+        let argument = args[arg_index];
+        if argument == "--emit-matrix" {
+            emit_matrix = 1;
+        }
+        if argument == "--list-evidence" {
+            list_evidence = 1;
+        }
         if argument != "--list-evidence" && argument != "--emit-matrix" {
             positional_args.push(argument);
         }
+        arg_index = arg_index + 1;
     }
 
-    if args.contains("--list-evidence") {
-        for id in declared_evidence {
-            print(id);
-        }
+    if list_evidence != 0 {
+        print("ux-parity.startup");
+        print("ux-parity.startup-title");
+        print("ux-parity.wake-coalescing");
+        print("ux-parity.linux.unix-frontend.workbench");
+        print("ux-parity.linux.unix-frontend.clipboard");
+        print("ux-parity.macos.unix-frontend.workbench");
+        print("ux-parity.macos.unix-frontend.clipboard");
+        print("ux-parity.remote-ui.replaceable-client");
+        print("ux-parity.remote-ui.selection");
+        print("ux-parity.window-focus-contract");
         return;
     }
 
     let parsed = parse_platform_args(positional_args);
-    let repository = parsed.repository;
-    let gui_exe = parsed.gui_exe;
-    let script_exe = parsed.script_exe;
-    let cli_exe = parsed.cli_exe;
-    let platform = parsed.platform;
+    let repository = "" + parsed.repository;
+    let gui_exe = "" + parsed.gui_exe;
+    let script_exe = "" + parsed.script_exe;
+    let cli_exe = "" + parsed.cli_exe;
+    let platform = "" + parsed.platform;
 
-    let evidence_states = init_evidence_states();
+    let profiles = evidence_profiles_data();
+    let evidence_states = init_evidence_states(profiles);
     let failure_messages = [];
     let succeeded = true;
-    let is_supported_platform = platform == "windows" || platform == "linux" || platform == "macos";
-    let preflight_message = if !is_supported_platform {
-        "unsupported platform (windows|linux|macos)"
-    } else if std::fs::exists(gui_exe) {
-        if std::fs::exists(cli_exe) {
-            let runtime_script = resolve_script_binary(script_exe, repository);
-            if std::fs::exists(runtime_script) {
-                ""
-            } else {
-                "platform_script_missing"
-            }
-        } else {
-            "platform_cli_missing"
-        }
+    let platform_text = platform;
+    let is_supported_platform = platform_text == "windows" ||
+        platform_text == "linux" ||
+        platform_text == "macos";
+    let preflight_message = "";
+    if is_supported_platform == 0 {
+        preflight_message = "unsupported platform (windows|linux|macos)";
+    } else if std::fs::exists(gui_exe) == 0 {
+        preflight_message = "platform_gui_missing";
+    } else if std::fs::exists(cli_exe) == 0 {
+        preflight_message = "platform_cli_missing";
     } else {
-        "platform_gui_missing"
-    };
+        let runtime_probe = resolve_script_binary(script_exe, repository);
+        if std::fs::exists(runtime_probe) == 0 {
+            preflight_message = "platform_script_missing";
+        }
+    }
 
     if preflight_message != "" {
         evidence_states = fail_supported_profiles_for_platform(
             evidence_states,
-            platform,
-            preflight_message
+            platform_text,
+            preflight_message,
+            profiles
         );
         failure_messages.push(preflight_message);
         succeeded = false;
     }
 
-    let runtime_script = if preflight_message == "" {
-        resolve_script_binary(script_exe, repository)
-    } else {
-        ""
-    };
+    let runtime_script = "";
+    if preflight_message == "" {
+        runtime_script = resolve_script_binary(script_exe, repository);
+    }
 
     let context = test_harness::new_context(repository, "platform-ux-parity");
 
     if preflight_message == "" {
         print("STEP startup contract and first-window behavior");
-        let startup_task_args = [gui_exe, cli_exe, "1000"];
         let startup_evidence = ["ux-parity.startup", "ux-parity.startup-title"];
         let startup_result = execute_phase(
             context,
             runtime_script,
             repository,
             "startup-smoke",
-            startup_task_args,
             "startup",
             startup_evidence,
             evidence_states,
-            false
+            gui_exe,
+            cli_exe,
+            "1000",
+            "",
+            "",
+            3
         );
-        if !startup_result.success {
+        if startup_result.success == 0 {
             succeeded = false;
             failure_messages.push(startup_result.error);
         }
         evidence_states = startup_result.evidence_states;
 
         print("STEP wake contract");
-        let wake_task_args = [gui_exe, cli_exe];
         let wake_evidence = ["ux-parity.wake-coalescing"];
         let wake_result = execute_phase(
             context,
             runtime_script,
             repository,
             "wake-smoke",
-            wake_task_args,
             "wake-contract",
             wake_evidence,
             evidence_states,
-            false
+            gui_exe,
+            cli_exe,
+            "",
+            "",
+            "",
+            2
         );
-        if !wake_result.success {
+        if wake_result.success == 0 {
             succeeded = false;
             failure_messages.push(wake_result.error);
         }
         evidence_states = wake_result.evidence_states;
 
-        if platform == "windows" {
+        if platform_text == "windows" {
             print("STEP windows remote-ui behavior (replaceable client + selection + clipboard)");
-            let remote_task_args = [gui_exe, cli_exe];
             let remote_evidence = [
                 "ux-parity.remote-ui.replaceable-client",
                 "ux-parity.remote-ui.selection",
@@ -801,21 +982,24 @@ fn entry() {
                 runtime_script,
                 repository,
                 "remote-ui-smoke",
-                remote_task_args,
                 "remote-ui",
                 remote_evidence,
                 evidence_states,
-                false
+                gui_exe,
+                cli_exe,
+                "",
+                "",
+                "",
+                2
             );
-            if !remote_result.success {
+            if remote_result.success == 0 {
                 succeeded = false;
                 failure_messages.push(remote_result.error);
             }
             evidence_states = remote_result.evidence_states;
         } else {
-            let workbench_evidence = "ux-parity." + platform + ".unix-frontend.workbench";
-            let clipboard_evidence = "ux-parity." + platform + ".unix-frontend.clipboard";
-            let unix_task_args = [gui_exe, cli_exe, "--platform", platform];
+            let workbench_evidence = "ux-parity." + platform_text + ".unix-frontend.workbench";
+            let clipboard_evidence = "ux-parity." + platform_text + ".unix-frontend.clipboard";
             let unix_evidence = [
                 workbench_evidence,
                 clipboard_evidence,
@@ -827,13 +1011,17 @@ fn entry() {
                 runtime_script,
                 repository,
                 "unix-frontend-smoke",
-                unix_task_args,
                 "unix-frontend",
                 unix_evidence,
                 evidence_states,
-                true
+                "--",
+                gui_exe,
+                cli_exe,
+                "--platform",
+                platform_text,
+                5
             );
-            if !unix_result.success {
+            if unix_result.success == 0 {
                 succeeded = false;
                 failure_messages.push(unix_result.error);
             }
@@ -843,12 +1031,12 @@ fn entry() {
 
     let failure = aggregate_failure_message(failure_messages);
 
-
     write_matrix_reports(
         context,
-        platform,
+        platform_text,
         evidence_states,
-        emit_matrix
+        emit_matrix,
+        profiles
     );
     test_harness::complete(context, [], succeeded, failure);
 }
