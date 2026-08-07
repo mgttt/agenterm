@@ -321,7 +321,7 @@ fn entry() {
             repo,
             std::path::join(
                 repo,
-                "scripts/rhai/theme-smoke.rhai"
+                "scripts/rh/theme-smoke.rh"
             ).display,
             [repo, gui, cli],
             "60000",
@@ -335,7 +335,7 @@ fn entry() {
             repo,
             std::path::join(
                 repo,
-                "scripts/rhai/script-smoke.rhai"
+                "scripts/rh/script-smoke.rh"
             ).display,
             [repo, cli, script, gui],
             "120000",
