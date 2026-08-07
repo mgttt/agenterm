@@ -1,7 +1,7 @@
 // Enforce the frozen v0.1.10 PowerShell migration ledger.
 //
 // Named task:
-//   agenterm-rhai task run migration-audit --json
+//   agenterm-rh task run migration-audit --json
 
 fn require(condition, message) {
     if !condition {
@@ -276,6 +276,8 @@ let expected_batch = [
     "check.cmd",
     "lint.cmd",
     "release.cmd",
+    "rh-check.cmd",
+    "scripts/rh-check.cmd",
     "scripts/bootstrap.cmd"
 ];
 require(
@@ -304,6 +306,26 @@ for path in aliases.keys() {
         `" && call "%~dp0scripts\bootstrap.cmd" %*`;
     require(source == expected, "migration_batch_alias_not_thin:" + path);
 }
+let rh_check_alias = std::fs::read_to_string(
+    std::path::join(repo, "rh-check.cmd").display
+);
+rh_check_alias.replace("\r\n", "\n");
+rh_check_alias.trim();
+require(
+    rh_check_alias == "@echo off\n\"%~dp0scripts\\rh-check.cmd\" %*",
+    "migration_rh_check_alias_not_thin"
+);
+let rh_check_source = std::fs::read_to_string(
+    std::path::join(repo, "scripts/rh-check.cmd").display
+);
+rh_check_source = rh_check_source.to_lower();
+require(
+    rh_check_source.contains("cargo build --locked --bin agenterm-rh")
+        && rh_check_source.contains("cargo test -p agenterm-rh --locked")
+        && !rh_check_source.contains("powershell")
+        && !rh_check_source.contains("pwsh"),
+    "migration_rh_check_not_native"
+);
 let bootstrap_source = std::fs::read_to_string(
     std::path::join(repo, "scripts/bootstrap.cmd").display
 );
@@ -333,7 +355,7 @@ require(
 );
 require(
     bootstrap_source.contains(
-        "cargo build --quiet --locked --bin agenterm-rhai"
+        "cargo build --quiet --locked --bin agenterm-rh"
     ),
     "migration_batch_bootstrap_worker_build"
 );
@@ -405,7 +427,7 @@ require(
         `task run "$agenterm_bootstrap_task"`
     )
         && shell_bootstrap.contains(
-            "cargo build --quiet --locked --bin agenterm-rhai"
+            "cargo build --quiet --locked --bin agenterm-rh"
         )
         && shell_bootstrap_operational_lines <= 160,
     "migration_shell_bootstrap_not_generic"
@@ -422,7 +444,7 @@ for timing_fact in [
     "agenterm_bootstrap_fingerprint",
     "included_not_separable",
     "not_applicable",
-    "compatibility.stamp",
+    "worker.stamp",
     "git hash-object",
     "rustc -vv",
     "cargo -vv",
