@@ -743,7 +743,6 @@ fn emit_throw_expr(
 fn infer_binding_kind(expr: &Expr) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
-        Expr::StringConstant(..) => ValueKind::String,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
@@ -867,6 +866,10 @@ fn std_fs_exists_literal(expr: &Expr) -> Option<&str> {
 
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
+        if let Some(index) = args_index_expr(expr) {
+            emit_args_index(out, index, ctx)?;
+            return Ok(());
+        }
         if let Some(path) = std_fs_exists_literal(expr) {
             out.push_str("rh_std_fs_exists(");
             out.push_str(&format!("{path:?}"));
@@ -910,11 +913,6 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
                 out.push(')');
             }
         }
-        Expr::StringConstant(value, ..) if ctx.cdylib => {
-            out.push_str("String::from(");
-            out.push_str(&format!("{value:?}"));
-            out.push(')');
-        }
         Expr::StringConstant(value, ..) => {
             out.push_str("Dynamic::from(");
             out.push_str(&format!("{value:?}"));
@@ -941,9 +939,6 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(".chars().count() as INT)");
         }
         Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
-        Expr::Index(..) if args_index_expr(expr).is_some() => {
-            emit_args_index(out, args_index_expr(expr).expect("checked args index"), ctx)?;
-        }
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
             out.push_str("{ ");
