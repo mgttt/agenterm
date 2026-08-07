@@ -80,12 +80,11 @@ fn write_timing(path: &Path, total_wall_ms: u64, fingerprint: &str) {
 
 fn summarize(root: &Path, cache: &str, samples: &[PathBuf; 3]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
-        .arg("run")
-        .arg(repo.join("scripts/rhai/performance-summary.rhai"))
-        .args(["--project-root"])
-        .arg(repo)
+        .args(["task", "run", "performance-summary", "--manifest"])
+        .arg(manifest)
         .args(["--"])
         .arg(root.join("summary.json"))
         .arg("standard")

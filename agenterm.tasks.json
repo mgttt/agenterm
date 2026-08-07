@@ -607,7 +607,7 @@
     {
       "id": "performance-summary",
       "description": "Validate and aggregate three isolated Quick timing samples without claiming release qualification",
-      "entry": "scripts/rhai/performance-summary.rhai",
+      "entry": "scripts/rh/performance-summary.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

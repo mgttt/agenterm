@@ -1,0 +1,288 @@
+// Validate three ordered AgenTerm Quick timing samples and emit one typed
+// cold-to-warm comparison. This describes the Quick lane only; it must not be
+// used alone to claim Candidate release/stress runner speedups.
+//
+// Args:
+//   OUTPUT_JSON RUNNER_CLASS CACHE_STRATEGY SAMPLE_1 SAMPLE_2 SAMPLE_3
+//     SCCACHE_1 SCCACHE_2 SCCACHE_3
+
+fn entry() {
+    if args.len != 9 {
+        return rh::fail("performance_summary_arguments");
+    }
+
+    let output = std::path::absolute(args[0]).display;
+    let runner_class = args[1];
+    let cache_strategy = args[2];
+    require(
+        runner_class == "standard" || runner_class == "trial",
+        "performance_summary_runner"
+    );
+    require(
+        cache_strategy == "target"
+            || cache_strategy == "sccache"
+            || cache_strategy == "none",
+        "performance_summary_cache"
+    );
+
+    let samples = [];
+    let sccache_samples = [];
+    let cold_total = 0;
+    let warm_one = 0;
+    let warm_two = 0;
+    let source_commit = "";
+    let workload_fingerprint = "";
+    for index in 0..3 {
+        // Native packs cannot append INT onto String; bind a literal tag.
+        let sample_tag = "1";
+        if index == 1 {
+            sample_tag = "2";
+        }
+        if index == 2 {
+            sample_tag = "3";
+        }
+
+        let path = std::path::absolute(args[index + 3]).display;
+        require(
+            std::fs::exists(path) && std::fs::symlink_metadata(path).is_file,
+            "performance_summary_sample_missing:" + sample_tag
+        );
+        let report_text = std::fs::read_to_string(path);
+        let report = rhai::json::parse(report_text);
+        require(
+            report.schema_version == 2
+                && report.kind == "agenterm-quality-timing"
+                && report.lane == "quick"
+                && report.profile == "quick"
+                && report.status == "passed"
+                && report.total_wall_ms >= 0
+                && (
+                    report.wall_time.state == "partial"
+                        || report.wall_time.state == "unavailable"
+                )
+                && report.wall_time.task_ms == report.total_wall_ms
+                && report.wall_time.accounted_ms >= report.total_wall_ms,
+            "performance_summary_sample_schema:" + sample_tag
+        );
+        if source_commit == "" {
+            source_commit = "" + report.source.commit;
+            workload_fingerprint = "" + report.workload.fingerprint;
+        } else {
+            require(
+                source_commit == report.source.commit
+                    && workload_fingerprint == report.workload.fingerprint,
+                "performance_summary_identity:" + sample_tag
+            );
+        }
+
+        let timing_path = "";
+        for part in path.split("/") {
+            if part != "" {
+                timing_path = part;
+            }
+        }
+        for part in path.split("\\") {
+            if part != "" {
+                timing_path = part;
+            }
+        }
+        let accounted_ms = 0;
+        accounted_ms = report.wall_time.accounted_ms;
+        let task_wall_ms = 0;
+        task_wall_ms = report.total_wall_ms;
+        let phase = "";
+        if index == 0 {
+            phase = "cold";
+        } else {
+            phase = "warm";
+        }
+        samples.push(#{
+            ordinal: index + 1,
+            phase: phase,
+            total_wall_ms: accounted_ms,
+            task_wall_ms: task_wall_ms,
+            bootstrap: report.bootstrap,
+            timing_path: timing_path
+        });
+        if index == 0 {
+            cold_total = accounted_ms;
+        }
+        if index == 1 {
+            warm_one = accounted_ms;
+        }
+        if index == 2 {
+            warm_two = accounted_ms;
+        }
+
+        if cache_strategy == "sccache" {
+            let stats_path = std::path::absolute(args[index + 6]).display;
+            require(
+                std::fs::exists(stats_path)
+                    && std::fs::symlink_metadata(stats_path).is_file,
+                "performance_summary_sccache_missing:" + sample_tag
+            );
+            let stats_text = std::fs::read_to_string(stats_path);
+            let stats = rhai::json::parse(stats_text);
+
+            // Live `sccache --show-stats --stats-format json` nests counters under
+            // `.stats`. Missing JSON paths fail `type_of`, so do not probe optional
+            // top-level keys; full map-key iteration remains M42f6h `keys()`.
+            let bucket = stats.stats;
+            let compile_requests = bucket.compile_requests;
+            let cache_hits = 0;
+            let cache_misses = 0;
+            let cache_errors = 0;
+            if type_of(bucket.cache_hits) == "i64" {
+                cache_hits = bucket.cache_hits;
+            } else if type_of(bucket.cache_hits) == "map" {
+                cache_hits = bucket.cache_hits.Rust;
+            }
+            if type_of(bucket.cache_misses) == "i64" {
+                cache_misses = bucket.cache_misses;
+            } else if type_of(bucket.cache_misses) == "map" {
+                cache_misses = bucket.cache_misses.Rust;
+            }
+            cache_errors += bucket.cache_read_errors;
+            cache_errors += bucket.cache_write_errors;
+
+            let stats_name = "";
+            for part in stats_path.split("/") {
+                if part != "" {
+                    stats_name = part;
+                }
+            }
+            for part in stats_path.split("\\") {
+                if part != "" {
+                    stats_name = part;
+                }
+            }
+            sccache_samples.push(#{
+                ordinal: index + 1,
+                compile_requests: compile_requests,
+                cache_hits: cache_hits,
+                cache_misses: cache_misses,
+                cache_errors: cache_errors,
+                raw_sha256: rhai::crypto::sha256_file(stats_path),
+                stats_path: stats_name
+            });
+        }
+    }
+    require(
+        source_commit.len == 40 && workload_fingerprint != "",
+        "performance_summary_source"
+    );
+
+    let warm_min = warm_one;
+    if warm_two < warm_min {
+        warm_min = warm_two;
+    }
+    let warm_max = warm_one;
+    if warm_two > warm_max {
+        warm_max = warm_two;
+    }
+    let warm_median = (warm_one + warm_two) / 2;
+
+    let all_min = cold_total;
+    if warm_one < all_min {
+        all_min = warm_one;
+    }
+    if warm_two < all_min {
+        all_min = warm_two;
+    }
+    let all_max = cold_total;
+    if warm_one > all_max {
+        all_max = warm_one;
+    }
+    if warm_two > all_max {
+        all_max = warm_two;
+    }
+
+    let warm_speedup_percent = 0;
+    if cold_total > 0 {
+        warm_speedup_percent = ((cold_total - warm_median) * 100) / cold_total;
+    }
+
+    let cache_namespace_scope = "runner_local";
+    if cache_strategy == "sccache" {
+        cache_namespace_scope = "unique_per_workflow_run";
+    }
+
+    let sample_model = "three_same_runner_clean_target_samples";
+    if cache_strategy == "target" {
+        sample_model = "cold_then_same_runner_incremental_warm";
+    } else if cache_strategy == "sccache" {
+        sample_model = "cold_then_same_runner_sccache_warm_with_clean_target";
+    }
+
+    // Bool map fields need a Bool binding (comparison INT serializes as Number).
+    // `sccache_samples` stays empty unless the sccache branch filled it.
+    let sccache_available = false;
+    if cache_strategy == "sccache" {
+        sccache_available = true;
+    }
+    let sccache_block = #{
+        available: sccache_available,
+        samples: sccache_samples
+    };
+
+    let summary = #{
+        schema_version: 2,
+        kind: "agenterm-performance-experiment",
+        workload_scope: "quick",
+        runner_class: runner_class,
+        cache_strategy: cache_strategy,
+        source_commit: source_commit,
+        workload_fingerprint: workload_fingerprint,
+        cache_namespace_scope: cache_namespace_scope,
+        sample_model: sample_model,
+        samples: samples,
+        cold_total_wall_ms: cold_total,
+        warm_median_total_wall_ms: warm_median,
+        warm_min_total_wall_ms: warm_min,
+        warm_max_total_wall_ms: warm_max,
+        all_sample_min_total_wall_ms: all_min,
+        all_sample_max_total_wall_ms: all_max,
+        warm_speedup_percent: warm_speedup_percent,
+        sccache: sccache_block
+    };
+    rhai::runtime::atomic_write(
+        output,
+        rhai::json::stringify_pretty(summary) + "\n"
+    );
+
+    let markdown =
+        "## AgenTerm CI performance experiment\n\n" +
+        "- Scope: **Quick lane only**\n" +
+        "- Runner: `" + runner_class + "`\n" +
+        "- Cache: `" + cache_strategy + "`\n" +
+        "- Cold / warm / warm: `" + cold_total + " / " + warm_one +
+            " / " + warm_two + " ms`\n" +
+        "- Cold: **" + cold_total + " ms**\n" +
+        "- Warm median/range: **" + warm_median + " ms** (`" +
+            warm_min + ".." + warm_max + "`)\n" +
+        "- Sample model: `" + sample_model + "`\n\n" +
+        "Runner-purchase decisions also require real Candidate release/stress " +
+        "timing evidence.\n";
+    if std::env::has("GITHUB_STEP_SUMMARY") {
+        let summary_value = std::env::get("GITHUB_STEP_SUMMARY");
+        if summary_value != "" {
+            let summary_path = std::path::absolute(summary_value).display;
+            let previous = "";
+            if std::fs::exists(summary_path) {
+                let summary_meta = std::fs::symlink_metadata(summary_path);
+                require(
+                    summary_meta.len <= 1048576,
+                    "performance_summary_previous_too_large"
+                );
+                previous = std::fs::read_to_string(summary_path);
+            }
+            rhai::runtime::atomic_write(summary_path, previous + markdown);
+        } else {
+            print(markdown);
+        }
+    } else {
+        print(markdown);
+    }
+
+    0
+}
