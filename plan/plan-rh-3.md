@@ -146,7 +146,12 @@
 | M42f7e | codegen 34：`Command` builder + `Command.output`/`Output`（success/exit_code/stdout_text/stderr_text/require_success）；timeout 用 INT ms（不引 Duration）；fixture `process-output-probe.rh` | [ ] |
 | M42f7f | codegen 35：`Command.start`/`Child`（id/state/kill/wait_with_output）；fixture `child-lifecycle-probe.rh` | [ ] |
 | M42f7g | INT-only `scripts/rh/lib/test_harness.rh` + `harness-cleanup-selftest` native+pack；entry 切线 + 归档；回归 | [ ] |
-| M42f8 | **Shim 收口顺序（非并行捷径）**：Phase A 先清零 manifest `.rhai` 入口与工作流硬编码 `.rhai`；Phase B 才把 `agenterm-rhai` 收成纯 forwarder（含 `run *.rhai`/`task`）；Phase C 再拆主库 Rhai `Engine`/`script_rh_host` compat。禁止在 A 未完成时宣称 rhai 已归档——compat-delegating 仍是 Rhai | [ ] |
+| M42f8 | **硬切换收口（无兼容）**：Rhai 准备归档；不保留 `.rhai` 运行面。Phase A 清零 manifest/工作流/测试中的 `.rhai` 入口并全部改 `.rh`；Phase B 删除或归档 `scripts/rhai/**` 与 `agenterm-rhai` 业务路径，痕迹清扫（AGENTS/PRD/tests/workflows）；Phase C 移除主库 Rhai `Engine`/`script_rh_host` compat 与 `rh_host_run_script` 整脚本回退。compat-delegating 只是迁移期诊断，不是产品兼容承诺 | [ ] |
+| M42f8a | 剩余 lib：`qualification`/`release_candidate`/`bootstrap_timing`/`script_smoke_helpers` → `scripts/rh/lib/*.rh` | [ ] |
+| M42f8b | orch：`build`/`check`/`release`/`fresh-clone-rehearsal` → `.rh` + entry 切线 + 归档 | [ ] |
+| M42f8c | selftest：`qualification-selftest`/`diagnostic-bundle-selftest`/`harness-cleanup-selftest` flip | [ ] |
+| M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [ ] |
+| M42f8e | 仓库痕迹清扫：`scripts/rhai` 引用、`agenterm-rhai` 运营串、测试 pin、AGENTS/PRD | [ ] |
 
 **M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。
 
