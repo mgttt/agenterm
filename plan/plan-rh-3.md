@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg21）：M42f6d `timing-summary` + M42f6e `command_*` cwd/env 已落地。**下一步**：继续 M42f6 剩余 `.rhai` 任务入口 |
+| **状态** | **进行中 M42f6**（cg21）：M42f6a–e 已落地。**下一步**：M42f6f 路径/元数据原语 → 易切叶任务（`mcp-conformance`/`performance-samples`/`agenterm-net-research`）；`test_harness` 烟雾与 `check` 编排仍延后 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -116,6 +116,12 @@
 | M42f6c | INT-only `scripts/rh/bootstrap-info.rh`（`command_stdout_file`+JSON report）；entry 切 `.rh` 并归档 | [x] |
 | M42f6d | INT-only `scripts/rh/timing-summary.rh`（`read_to_string`+JSON validate、`atomic_write` summary）；entry 切 `.rh` 并归档 | [x] |
 | M42f6e | 原生 `command_status`/`command_stdout_file` 可选 trailing options map（`current_dir`/`env`/`env_remove`）；codegen 21 | [x] |
+| M42f6f | 原生 `std::fs::metadata`（或与 `symlink_metadata` 对齐的 `.is_file/.is_dir/.len`）、`std::env::current_dir`、`PathBuf.is_absolute`、`json::parse_file` 糖 → `parse(read_to_string)`；解锁 `artifact-verification` 文件侧与审计叶任务 | [ ] |
+| M42f6g | 易切叶任务 cutover（依赖 6e/6f）：`mcp-conformance`、`performance-samples`、`agenterm-net-research`；INT-only `.rh` + entry 切线 + 归档 | [ ] |
+| M42f6h | JSON 集合迭代加强（`for` over JSON array / object keys 已部分具备则补缺口）+ `release_candidate`/`qualification`/`package_qualified` lib 原生移植 | [ ] |
+| M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |
+
+**M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。
 
 **M42f5 依赖说明：** `stage-build.rhai` 本身编排（clean → stage/stage_as 循环 → metadata → clean）在 M42f4 后已大半可复用原生 `artifact_files`；真正阻塞是 (1) `git rev-parse --show-prefix` 需要 stdout（仅有 `command_status` 不够），(2) 内联 `build_metadata::write` 需要哈希/原子写/环境/RFC3339/JSON 序列化。禁止用 shell 包装或 `host_eval` 假迁移；禁止把 metadata 改成子进程调 Rhai 任务冒充原生入口。
 
