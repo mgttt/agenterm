@@ -627,7 +627,7 @@
     {
       "id": "candidate-aggregate",
       "description": "Seal one exact-SHA six-platform release Candidate manifest from a closed payload",
-      "entry": "scripts/rhai/candidate-aggregate.rhai",
+      "entry": "scripts/rh/candidate-aggregate.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": ["supply-chain"],

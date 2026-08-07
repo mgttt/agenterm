@@ -1,8 +1,9 @@
 // Build and validate one exact-SHA Candidate manifest from a closed payload.
+// Archived after cutover to scripts/rh/candidate-aggregate.rh.
 //
-// Usage:
-//   agenterm-rhai run scripts/rhai/candidate-aggregate.rhai \
-//     -- SOURCE_ROOT METADATA_JSON ASSET_DIRECTORY OUTPUT_MANIFEST
+// Named task (historical):
+//   agenterm-rhai task run candidate-aggregate -- \
+//     SOURCE_ROOT METADATA_JSON ASSET_DIRECTORY OUTPUT_MANIFEST
 //
 // METADATA_JSON schema v1 fields:
 //   source_sha, version, expected_tag, workflow_path, workflow_sha256,

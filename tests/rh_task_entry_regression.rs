@@ -450,6 +450,22 @@ fn package_qualified_uses_native_bundled_execution() {
 }
 
 #[test]
+fn candidate_aggregate_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/candidate-aggregate.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
+    assert!(output.rust.contains("pub fn build_manifest("), "{}", output.rust);
+    assert!(output.rust.contains("pub fn validate_manifest("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_parse(&rh_std_fs_read_to_string("), "{}", output.rust);
+    assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
+    assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
+    assert!(output.rust.contains("serde_json::Value::Bool("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
 fn candidate_verify_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/candidate-verify.rh");
     assert!(source.contains("fn entry("));
