@@ -68,365 +68,134 @@
   },
   "contracts": {
     "build": {
-      "inputs": [
-        "source-tree",
-        "cargo-lock",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "native-binaries",
-        "build-metadata"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch"
-      ],
-      "evidence": [
-        "task.build"
-      ]
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest"],
+      "outputs": ["native-binaries", "build-metadata"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.build"]
     },
     "clean-locked-artifacts": {
-      "inputs": [
-        "artifact-manifest",
-        "staging-directory"
-      ],
-      "outputs": [
-        "clean-staging-directory"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["artifact-manifest", "staging-directory"],
+      "outputs": ["clean-staging-directory"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.clean-locked-artifacts"
-      ]
+      "evidence": ["task.clean-locked-artifacts"]
     },
     "check": {
-      "inputs": [
-        "source-tree",
-        "task-manifest",
-        "qualification-gate-manifest"
-      ],
-      "outputs": [
-        "gate-results",
-        "quality-timing",
-        "qualification-receipt"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch",
-        "loopback"
-      ],
-      "evidence": [
-        "task.check"
-      ]
+      "inputs": ["source-tree", "task-manifest", "qualification-gate-manifest"],
+      "outputs": ["gate-results", "quality-timing", "qualification-receipt"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.check"]
     },
     "timing-summary": {
-      "inputs": [
-        "quality-timing"
-      ],
-      "outputs": [
-        "quality-timing-markdown"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["quality-timing"],
+      "outputs": ["quality-timing-markdown"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.timing-summary"
-      ]
+      "evidence": ["task.timing-summary"]
     },
     "performance-samples": {
-      "inputs": [
-        "exact-source",
-        "compiler-cache-strategy"
-      ],
-      "outputs": [
-        "three-ordered-quick-samples",
-        "compiler-cache-statistics"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch"
-      ],
-      "evidence": [
-        "task.performance-samples"
-      ]
+      "inputs": ["exact-source", "compiler-cache-strategy"],
+      "outputs": ["three-ordered-quick-samples", "compiler-cache-statistics"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.performance-samples"]
     },
     "performance-summary": {
-      "inputs": [
-        "three-ordered-quick-samples",
-        "compiler-cache-statistics"
-      ],
-      "outputs": [
-        "typed-performance-summary"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["three-ordered-quick-samples", "compiler-cache-statistics"],
+      "outputs": ["typed-performance-summary"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.performance-summary"
-      ]
+      "evidence": ["task.performance-summary"]
     },
     "release": {
-      "inputs": [
-        "clean-source",
-        "qualification-receipt",
-        "candidate-workflow",
-        "promotion-workflow"
-      ],
-      "outputs": [
-        "release-rehearsal",
-        "promotion-instructions"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch",
-        "loopback"
-      ],
-      "evidence": [
-        "task.release"
-      ]
+      "inputs": ["clean-source", "qualification-receipt", "candidate-workflow", "promotion-workflow"],
+      "outputs": ["release-rehearsal", "promotion-instructions"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.release"]
     },
     "candidate-aggregate": {
-      "inputs": [
-        "exact-source",
-        "candidate-metadata",
-        "six-platform-assets",
-        "qualification-receipt"
-      ],
-      "outputs": [
-        "candidate-manifest"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["exact-source", "candidate-metadata", "six-platform-assets", "qualification-receipt"],
+      "outputs": ["candidate-manifest"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.candidate-aggregate"
-      ]
+      "evidence": ["task.candidate-aggregate"]
     },
     "candidate-verify": {
-      "inputs": [
-        "exact-source",
-        "candidate-manifest",
-        "sealed-candidate-assets"
-      ],
-      "outputs": [
-        "verified-candidate-identity"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["exact-source", "candidate-manifest", "sealed-candidate-assets"],
+      "outputs": ["verified-candidate-identity"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.candidate-verify"
-      ]
+      "evidence": ["task.candidate-verify"]
     },
     "build-releases-index": {
-      "inputs": [
-        "candidate-manifest",
-        "sealed-candidate-assets"
-      ],
-      "outputs": [
-        "releases-index"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["candidate-manifest", "sealed-candidate-assets"],
+      "outputs": ["releases-index"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.build-releases-index"
-      ]
+      "evidence": ["task.build-releases-index"]
     },
     "bootstrap-info": {
-      "inputs": [
-        "source-tree",
-        "toolchain"
-      ],
-      "outputs": [
-        "bootstrap-facts"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "toolchain"],
+      "outputs": ["bootstrap-facts"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.bootstrap-info"
-      ]
+      "evidence": ["task.bootstrap-info"]
     },
     "artifact-verification": {
-      "inputs": [
-        "staged-binaries",
-        "build-metadata",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "artifact-verification-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["staged-binaries", "build-metadata", "artifact-manifest"],
+      "outputs": ["artifact-verification-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.artifact-verification"
-      ]
+      "evidence": ["task.artifact-verification"]
     },
     "build-identity": {
-      "inputs": [
-        "source-tree",
-        "cargo-lock",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "build-identity"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest"],
+      "outputs": ["build-identity"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.build-identity"
-      ]
+      "evidence": ["task.build-identity"]
     },
     "harness-cleanup-selftest": {
-      "inputs": [
-        "script-runtime"
-      ],
-      "outputs": [
-        "cleanup-proof"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["script-runtime"],
+      "outputs": ["cleanup-proof"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.harness-cleanup-selftest"
-      ]
+      "evidence": ["task.harness-cleanup-selftest"]
     },
     "diagnostic-bundle-selftest": {
-      "inputs": [
-        "staged-binaries",
-        "script-runtime"
-      ],
-      "outputs": [
-        "diagnostic-proof"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.diagnostic-bundle-selftest"
-      ]
+      "inputs": ["staged-binaries", "script-runtime"],
+      "outputs": ["diagnostic-proof"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.diagnostic-bundle-selftest"]
     },
     "qualification-selftest": {
-      "inputs": [
-        "qualification-gate-manifest",
-        "script-runtime"
-      ],
-      "outputs": [
-        "qualification-boundary-proof"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["qualification-gate-manifest", "script-runtime"],
+      "outputs": ["qualification-boundary-proof"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.qualification-selftest"
-      ]
+      "evidence": ["task.qualification-selftest"]
     },
     "package-qualified": {
-      "inputs": [
-        "qualification-receipt",
-        "qualified-binaries",
-        "sbom"
-      ],
-      "outputs": [
-        "dry-run-archive",
-        "package-manifest"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["qualification-receipt", "qualified-binaries", "sbom"],
+      "outputs": ["dry-run-archive", "package-manifest"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.package-qualified"
-      ]
+      "evidence": ["task.package-qualified"]
     },
     "package-release-qualified": {
-      "inputs": [
-        "qualification-receipt",
-        "qualified-binaries",
-        "sbom"
-      ],
-      "outputs": [
-        "release-archive",
-        "package-manifest"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["qualification-receipt", "qualified-binaries", "sbom"],
+      "outputs": ["release-archive", "package-manifest"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.package-release-qualified"
-      ]
+      "evidence": ["task.package-release-qualified"]
     },
     "package-qualified-selftest": {
-      "inputs": [
-        "package-module",
-        "script-runtime"
-      ],
-      "outputs": [
-        "package-boundary-proof"
-      ],
+      "inputs": ["package-module", "script-runtime"],
+      "outputs": ["package-boundary-proof"],
       "budget": {
         "timeout_ms": 120000,
         "max_operations": 10000000,
@@ -434,605 +203,219 @@
         "max_string_bytes": 8388608
       },
       "network": [],
-      "evidence": [
-        "task.package-qualified-selftest"
-      ]
+      "evidence": ["task.package-qualified-selftest"]
     },
     "working-context-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "working-context-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.working-context-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["working-context-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.working-context-smoke"]
     },
     "theme-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "theme-evidence",
-        "png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.theme-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["theme-evidence", "png-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.theme-smoke"]
     },
     "workbench-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "workbench-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.workbench-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["workbench-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.workbench-smoke"]
     },
     "control-center-smoke": {
-      "inputs": [
-        "staged-control-center",
-        "isolated-settings"
-      ],
-      "outputs": [
-        "control-center-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["staged-control-center", "isolated-settings"],
+      "outputs": ["control-center-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.control-center-smoke"
-      ]
+      "evidence": ["task.control-center-smoke"]
     },
     "control-center-macos-smoke": {
-      "inputs": [
-        "staged-control-center",
-        "isolated-settings",
-        "isolated-native-ipc"
-      ],
-      "outputs": [
-        "control-center-macos-evidence",
-        "retina-png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["staged-control-center", "isolated-settings", "isolated-native-ipc"],
+      "outputs": ["control-center-macos-evidence", "retina-png-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.control-center-macos-smoke"
-      ]
+      "evidence": ["task.control-center-macos-smoke"]
     },
     "control-center-linux-smoke": {
-      "inputs": [
-        "built-control-center",
-        "isolated-settings",
-        "isolated-native-ipc",
-        "display-session"
-      ],
-      "outputs": [
-        "control-center-linux-evidence",
-        "renderer-owned-png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 180000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["built-control-center", "isolated-settings", "isolated-native-ipc", "display-session"],
+      "outputs": ["control-center-linux-evidence", "renderer-owned-png-evidence"],
+      "budget": {"timeout_ms": 180000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.control-center-linux-smoke"
-      ]
+      "evidence": ["task.control-center-linux-smoke"]
     },
     "unix-frontend-linux-smoke": {
-      "inputs": [
-        "built-unix-frontend",
-        "isolated-workspace",
-        "isolated-native-ipc",
-        "x11-session"
-      ],
-      "outputs": [
-        "unix-frontend-linux-evidence",
-        "renderer-owned-png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 180000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["built-unix-frontend", "isolated-workspace", "isolated-native-ipc", "x11-session"],
+      "outputs": ["unix-frontend-linux-evidence", "renderer-owned-png-evidence"],
+      "budget": {"timeout_ms": 180000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.unix-frontend-linux-smoke"
-      ]
+      "evidence": ["task.unix-frontend-linux-smoke"]
     },
     "unix-frontend-macos-smoke": {
-      "inputs": [
-        "built-unix-frontend",
-        "isolated-workspace",
-        "isolated-native-ipc",
-        "desktop-session"
-      ],
-      "outputs": [
-        "unix-frontend-macos-evidence",
-        "renderer-owned-png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 180000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["built-unix-frontend", "isolated-workspace", "isolated-native-ipc", "desktop-session"],
+      "outputs": ["unix-frontend-macos-evidence", "renderer-owned-png-evidence"],
+      "budget": {"timeout_ms": 180000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.unix-frontend-macos-smoke"
-      ]
+      "evidence": ["task.unix-frontend-macos-smoke"]
     },
     "agenterm-net-research": {
-      "inputs": [
-        "research-source",
-        "research-cargo-lock"
-      ],
-      "outputs": [
-        "libp2p-cid-block-store-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch",
-        "loopback"
-      ],
-      "evidence": [
-        "task.agenterm-net-research"
-      ]
+      "inputs": ["research-source", "research-cargo-lock"],
+      "outputs": ["libp2p-cid-block-store-evidence"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.agenterm-net-research"]
     },
     "fleet-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "fleet-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.fleet-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["fleet-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.fleet-smoke"]
     },
     "server-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "server-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.server-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["server-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.server-smoke"]
     },
     "native-ipc-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace",
-        "isolated-instance-directory"
-      ],
-      "outputs": [
-        "native-ipc-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.native-ipc-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace", "isolated-instance-directory"],
+      "outputs": ["native-ipc-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.native-ipc-smoke"]
     },
     "native-ipc-compat-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "published-release-hash-catalog",
-        "isolated-workspace",
-        "isolated-instance-directory"
-      ],
-      "outputs": [
-        "published-native-ipc-compatibility-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 360000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch",
-        "loopback"
-      ],
-      "evidence": [
-        "task.native-ipc-compat-smoke"
-      ]
+      "inputs": ["staged-binaries", "published-release-hash-catalog", "isolated-workspace", "isolated-instance-directory"],
+      "outputs": ["published-native-ipc-compatibility-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.native-ipc-compat-smoke"]
     },
     "wake-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "wake-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "fleet.wake-coalescing",
-        "ux-parity.wake-coalescing"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["wake-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["fleet.wake-coalescing", "ux-parity.wake-coalescing"]
     },
     "startup-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "startup-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.startup-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["startup-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.startup-smoke"]
     },
     "cli-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "cli-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.cli-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["cli-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.cli-smoke"]
     },
     "script-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "script-evidence"
-      ],
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["script-evidence"],
       "budget": {
         "timeout_ms": 300000,
         "max_operations": 100000000,
         "max_output_bytes": 1048576,
         "max_string_bytes": 8388608
       },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.script-smoke"
-      ]
+      "network": ["loopback"],
+      "evidence": ["task.script-smoke"]
     },
     "remote-ui-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "remote-ui-evidence",
-        "png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.remote-ui-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["remote-ui-evidence", "png-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.remote-ui-smoke"]
     },
     "remote-ui-upgrade-smoke": {
-      "inputs": [
-        "current-gui",
-        "alternate-gui",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "upgrade-evidence",
-        "png-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.remote-ui-upgrade-smoke"
-      ]
+      "inputs": ["current-gui", "alternate-gui", "isolated-workspace"],
+      "outputs": ["upgrade-evidence", "png-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.remote-ui-upgrade-smoke"]
     },
     "platform-ux-parity-smoke": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "platform-ux-parity-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 360000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.platform-ux-parity-smoke"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["platform-ux-parity-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.platform-ux-parity-smoke"]
     },
     "platform-ux-parity-smoke-linux": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "platform-ux-parity-linux-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 360000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.platform-ux-parity-smoke-linux"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["platform-ux-parity-linux-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.platform-ux-parity-smoke-linux"]
     },
     "platform-ux-parity-smoke-macos": {
-      "inputs": [
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "platform-ux-parity-macos-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 360000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.platform-ux-parity-smoke-macos"
-      ]
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["platform-ux-parity-macos-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.platform-ux-parity-smoke-macos"]
     },
     "mcp-conformance": {
-      "inputs": [
-        "candidate-mcp",
-        "staged-binaries",
-        "isolated-workspace"
-      ],
-      "outputs": [
-        "mcp-conformance-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "loopback"
-      ],
-      "evidence": [
-        "task.mcp-conformance"
-      ]
+      "inputs": ["candidate-mcp", "staged-binaries", "isolated-workspace"],
+      "outputs": ["mcp-conformance-evidence"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.mcp-conformance"]
     },
     "migration-audit": {
-      "inputs": [
-        "source-tree",
-        "migration-ledger"
-      ],
-      "outputs": [
-        "migration-audit-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "migration-ledger"],
+      "outputs": ["migration-audit-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.migration-audit"
-      ]
+      "evidence": ["task.migration-audit"]
     },
     "lint": {
-      "inputs": [
-        "source-tree",
-        "task-manifest"
-      ],
-      "outputs": [
-        "lint-results"
-      ],
-      "budget": {
-        "timeout_ms": 600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576,
-        "max_string_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch"
-      ],
-      "evidence": [
-        "task.lint"
-      ]
+      "inputs": ["source-tree", "task-manifest"],
+      "outputs": ["lint-results"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576, "max_string_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.lint"]
     },
     "prepare-target-clean": {
-      "inputs": [
-        "source-tree",
-        "cargo-target"
-      ],
-      "outputs": [
-        "cleanup-authorization"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "cargo-target"],
+      "outputs": ["cleanup-authorization"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.prepare-target-clean"
-      ]
+      "evidence": ["task.prepare-target-clean"]
     },
     "prune-target-incremental": {
-      "inputs": [
-        "source-tree",
-        "cargo-target",
-        "rustc-session-locks"
-      ],
-      "outputs": [
-        "incremental-cache-prune-report"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "cargo-target", "rustc-session-locks"],
+      "outputs": ["incremental-cache-prune-report"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.prune-target-incremental"
-      ]
+      "evidence": ["task.prune-target-incremental"]
     },
     "preflight": {
-      "inputs": [
-        "source-tree",
-        "release-remote",
-        "release-workflow"
-      ],
-      "outputs": [
-        "preflight-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "release-remote", "release-workflow"],
+      "outputs": ["preflight-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.preflight"
-      ]
+      "evidence": ["task.preflight"]
     },
     "preflight-benchmark": {
-      "inputs": [
-        "source-tree",
-        "preflight-task"
-      ],
-      "outputs": [
-        "preflight-benchmark-report"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "preflight-task"],
+      "outputs": ["preflight-benchmark-report"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.preflight-benchmark"
-      ]
+      "evidence": ["task.preflight-benchmark"]
     },
     "prd-alignment": {
-      "inputs": [
-        "prd-tree",
-        "alignment-contract",
-        "public-catalogs"
-      ],
-      "outputs": [
-        "prd-alignment-report"
-      ],
+      "inputs": ["prd-tree", "alignment-contract", "public-catalogs"],
+      "outputs": ["prd-alignment-report"],
       "budget": {
         "timeout_ms": 120000,
         "max_operations": 10000000,
@@ -1040,38 +423,18 @@
         "max_string_bytes": 1048576
       },
       "network": [],
-      "evidence": [
-        "task.prd-alignment"
-      ]
+      "evidence": ["task.prd-alignment"]
     },
     "stage-artifact": {
-      "inputs": [
-        "source-artifact",
-        "staging-directory"
-      ],
-      "outputs": [
-        "staged-artifact"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-artifact", "staging-directory"],
+      "outputs": ["staged-artifact"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.stage-artifact"
-      ]
+      "evidence": ["task.stage-artifact"]
     },
     "supply-chain": {
-      "inputs": [
-        "cargo-lock",
-        "cargo-metadata",
-        "license-policy"
-      ],
-      "outputs": [
-        "sbom",
-        "supply-chain-report"
-      ],
+      "inputs": ["cargo-lock", "cargo-metadata", "license-policy"],
+      "outputs": ["sbom", "supply-chain-report"],
       "budget": {
         "timeout_ms": 300000,
         "max_operations": 100000000,
@@ -1079,302 +442,113 @@
         "max_collection_items": 100000,
         "max_string_bytes": 8388608
       },
-      "network": [
-        "dependency_fetch"
-      ],
-      "evidence": [
-        "task.supply-chain"
-      ]
+      "network": ["dependency_fetch"],
+      "evidence": ["task.supply-chain"]
     },
     "stage-build": {
-      "inputs": [
-        "built-binaries",
-        "build-identity",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "staged-binaries",
-        "build-metadata"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["built-binaries", "build-identity", "artifact-manifest"],
+      "outputs": ["staged-binaries", "build-metadata"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.stage-build"
-      ]
+      "evidence": ["task.stage-build"]
     },
     "target-report": {
-      "inputs": [
-        "cargo-target"
-      ],
-      "outputs": [
-        "target-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["cargo-target"],
+      "outputs": ["target-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.target-report"
-      ]
+      "evidence": ["task.target-report"]
     },
     "validate-artifact-manifest": {
-      "inputs": [
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "manifest-validation"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["artifact-manifest"],
+      "outputs": ["manifest-validation"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.validate-artifact-manifest"
-      ]
+      "evidence": ["task.validate-artifact-manifest"]
     },
     "write-build-metadata": {
-      "inputs": [
-        "build-identity",
-        "staged-binaries",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "build-metadata"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["build-identity", "staged-binaries", "artifact-manifest"],
+      "outputs": ["build-metadata"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.write-build-metadata"
-      ]
+      "evidence": ["task.write-build-metadata"]
     },
     "internal-version-policy": {
-      "inputs": [
-        "source-tree",
-        "release-version"
-      ],
-      "outputs": [
-        "version-policy-result"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["source-tree", "release-version"],
+      "outputs": ["version-policy-result"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.internal-version-policy"
-      ]
+      "evidence": ["task.internal-version-policy"]
     },
     "verify-docs-site": {
-      "inputs": [
-        "docs-site",
-        "product-metadata"
-      ],
-      "outputs": [
-        "docs-site-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["docs-site", "product-metadata"],
+      "outputs": ["docs-site-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.verify-docs-site"
-      ]
+      "evidence": ["task.verify-docs-site"]
     },
     "readme-examples": {
-      "inputs": [
-        "readme",
-        "staged-binaries",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "readme-example-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["readme", "staged-binaries", "artifact-manifest"],
+      "outputs": ["readme-example-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.readme-examples"
-      ]
+      "evidence": ["task.readme-examples"]
     },
     "client-build": {
-      "inputs": [
-        "source-tree",
-        "cargo-lock",
-        "artifact-manifest",
-        "target-triple"
-      ],
-      "outputs": [
-        "target-client-binaries"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch"
-      ],
-      "evidence": [
-        "task.client-build"
-      ]
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest", "target-triple"],
+      "outputs": ["target-client-binaries"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.client-build"]
     },
     "client-clippy": {
-      "inputs": [
-        "source-tree",
-        "cargo-lock",
-        "artifact-manifest",
-        "target-triple"
-      ],
-      "outputs": [
-        "target-clippy-result"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch"
-      ],
-      "evidence": [
-        "task.client-clippy"
-      ]
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest", "target-triple"],
+      "outputs": ["target-clippy-result"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.client-clippy"]
     },
     "client-smoke": {
-      "inputs": [
-        "target-client-binaries",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "client-entrypoint-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["target-client-binaries", "artifact-manifest"],
+      "outputs": ["client-entrypoint-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.client-smoke"
-      ]
+      "evidence": ["task.client-smoke"]
     },
     "rh-aot-smoke": {
-      "inputs": [
-        "target-client-binaries",
-        "rh-fixture"
-      ],
-      "outputs": [
-        "rh-aot-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 300000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["target-client-binaries", "rh-fixture"],
+      "outputs": ["rh-aot-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.rh-aot-smoke"
-      ]
+      "evidence": ["task.rh-aot-smoke"]
     },
     "rh-native-task-probe": {
-      "inputs": [
-        "rh-native-task-runtime"
-      ],
-      "outputs": [
-        "native-entry-value",
-        "native-pack-evidence"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["rh-native-task-runtime"],
+      "outputs": ["native-entry-value", "native-pack-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.rh-native-task-probe"
-      ]
+      "evidence": ["task.rh-native-task-probe"]
     },
     "package-client-release": {
-      "inputs": [
-        "target-client-binaries",
-        "artifact-manifest",
-        "platform-adapters"
-      ],
-      "outputs": [
-        "platform-release-archive",
-        "archive-provenance",
-        "archive-checksum"
-      ],
-      "budget": {
-        "timeout_ms": 600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["target-client-binaries", "artifact-manifest", "platform-adapters"],
+      "outputs": ["platform-release-archive", "archive-provenance", "archive-checksum"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.package-client-release"
-      ]
+      "evidence": ["task.package-client-release"]
     },
     "cross-platform-automation-audit": {
-      "inputs": [
-        "workflow-sources",
-        "shell-adapters",
-        "artifact-manifest"
-      ],
-      "outputs": [
-        "automation-ownership-report"
-      ],
-      "budget": {
-        "timeout_ms": 120000,
-        "max_operations": 10000000,
-        "max_output_bytes": 1048576
-      },
+      "inputs": ["workflow-sources", "shell-adapters", "artifact-manifest"],
+      "outputs": ["automation-ownership-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
       "network": [],
-      "evidence": [
-        "task.cross-platform-automation-audit"
-      ]
+      "evidence": ["task.cross-platform-automation-audit"]
     },
     "fresh-clone-rehearsal": {
-      "inputs": [
-        "clean-main-source",
-        "origin-remote",
-        "release-entrypoint",
-        "qualification-receipt-contract"
-      ],
-      "outputs": [
-        "fresh-clone-rehearsal-evidence",
-        "qualified-package-facts"
-      ],
-      "budget": {
-        "timeout_ms": 3600000,
-        "max_operations": 100000000,
-        "max_output_bytes": 1048576
-      },
-      "network": [
-        "dependency_fetch",
-        "loopback"
-      ],
-      "evidence": [
-        "task.fresh-clone-rehearsal"
-      ]
+      "inputs": ["clean-main-source", "origin-remote", "release-entrypoint", "qualification-receipt-contract"],
+      "outputs": ["fresh-clone-rehearsal-evidence", "qualified-package-facts"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.fresh-clone-rehearsal"]
     }
   },
   "tasks": [
@@ -1384,25 +558,10 @@
       "entry": "scripts/rhai/build.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "build-identity",
-        "stage-build",
-        "target-report",
-        "prepare-target-clean",
-        "prune-target-incremental"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": ["."],
+      "dependencies": ["build-identity", "stage-build", "target-report", "prepare-target-clean", "prune-target-incremental"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "clean-locked-artifacts",
@@ -1411,12 +570,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "check",
@@ -1424,30 +579,10 @@
       "entry": "scripts/rhai/check.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "lint",
-        "migration-audit",
-        "prd-alignment",
-        "artifact-verification",
-        "mcp-conformance",
-        "supply-chain",
-        "verify-docs-site",
-        "readme-examples"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "args": ["."],
+      "dependencies": ["lint", "migration-audit", "prd-alignment", "artifact-verification", "mcp-conformance", "supply-chain", "verify-docs-site", "readme-examples"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "timing-summary",
@@ -1456,14 +591,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "performance-samples",
@@ -1472,13 +601,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "performance-summary",
@@ -1487,12 +611,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "release",
@@ -1500,20 +620,9 @@
       "entry": "scripts/rhai/release.rhai",
       "profile": "local",
       "cwd": ".",
-      "dependencies": [
-        "check",
-        "preflight",
-        "package-release-qualified"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "dependencies": ["check", "preflight", "package-release-qualified"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "candidate-aggregate",
@@ -1521,17 +630,9 @@
       "entry": "scripts/rhai/candidate-aggregate.rhai",
       "profile": "local",
       "cwd": ".",
-      "dependencies": [
-        "supply-chain"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "dependencies": ["supply-chain"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "candidate-verify",
@@ -1540,11 +641,7 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": []
     },
     {
@@ -1554,14 +651,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "bootstrap-info",
@@ -1570,14 +661,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "artifact-verification",
@@ -1585,18 +670,10 @@
       "entry": "scripts/rhai/artifact-verification.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "validate-artifact-manifest"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "args": ["."],
+      "dependencies": ["validate-artifact-manifest"],
+      "platforms": ["windows"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "build-identity",
@@ -1605,15 +682,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "harness-cleanup-selftest",
@@ -1621,17 +691,10 @@
       "entry": "scripts/rhai/harness-cleanup-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "diagnostic-bundle-selftest",
@@ -1639,25 +702,10 @@
       "entry": "scripts/rhai/diagnostic-bundle-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cli.exe",
-        "dist/agenterm-rhai.exe",
-        "dist/agenterm.exe"
-      ],
-      "dependencies": [
-        "theme-smoke",
-        "script-smoke"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-rhai.exe", "dist/agenterm.exe"],
+      "dependencies": ["theme-smoke", "script-smoke"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "qualification-selftest",
@@ -1665,18 +713,10 @@
       "entry": "scripts/rhai/qualification-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-qualified",
@@ -1684,21 +724,10 @@
       "entry": "scripts/rhai/package-qualified.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "target/qualification/receipt.json",
-        "target/qualification/package-dry-run"
-      ],
-      "dependencies": [
-        "check"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": [".", "target/qualification/receipt.json", "target/qualification/package-dry-run"],
+      "dependencies": ["check"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-release-qualified",
@@ -1706,21 +735,10 @@
       "entry": "scripts/rhai/package-release-qualified.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "target/qualification/receipt.json",
-        "dist"
-      ],
-      "dependencies": [
-        "check"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": [".", "target/qualification/receipt.json", "dist"],
+      "dependencies": ["check"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-qualified-selftest",
@@ -1728,17 +746,10 @@
       "entry": "scripts/rhai/package-qualified-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "working-context-smoke",
@@ -1746,21 +757,10 @@
       "entry": "scripts/rhai/working-context-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "theme-smoke",
@@ -1768,21 +768,10 @@
       "entry": "scripts/rhai/theme-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "workbench-smoke",
@@ -1790,21 +779,10 @@
       "entry": "scripts/rhai/workbench-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "control-center-smoke",
@@ -1812,19 +790,10 @@
       "entry": "scripts/rhai/control-center-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cc.exe"
-      ],
+      "args": [".", "dist/agenterm-cc.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {
       "id": "control-center-macos-smoke",
@@ -1832,21 +801,10 @@
       "entry": "scripts/rhai/control-center-macos-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cc",
-        "dist/agenterm",
-        "dist/agenterm-cli"
-      ],
+      "args": [".", "dist/agenterm-cc", "dist/agenterm", "dist/agenterm-cli"],
       "dependencies": [],
-      "platforms": [
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn"
-      ]
+      "platforms": ["macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {
       "id": "control-center-linux-smoke",
@@ -1854,21 +812,10 @@
       "entry": "scripts/rhai/control-center-linux-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "target/x86_64-unknown-linux-gnu/debug/agenterm-cc",
-        "target/x86_64-unknown-linux-gnu/debug/agenterm",
-        "target/x86_64-unknown-linux-gnu/debug/agenterm-cli"
-      ],
+      "args": [".", "target/x86_64-unknown-linux-gnu/debug/agenterm-cc", "target/x86_64-unknown-linux-gnu/debug/agenterm", "target/x86_64-unknown-linux-gnu/debug/agenterm-cli"],
       "dependencies": [],
-      "platforms": [
-        "linux"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn"
-      ]
+      "platforms": ["linux"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {
       "id": "unix-frontend-linux-smoke",
@@ -1876,18 +823,10 @@
       "entry": "scripts/rhai/unix-frontend-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "linux"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn"
-      ]
+      "platforms": ["linux"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {
       "id": "unix-frontend-macos-smoke",
@@ -1895,18 +834,10 @@
       "entry": "scripts/rhai/unix-frontend-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn"
-      ]
+      "platforms": ["macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {
       "id": "agenterm-net-research",
@@ -1914,20 +845,10 @@
       "entry": "scripts/rhai/agenterm-net-research.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "fleet-smoke",
@@ -1935,20 +856,10 @@
       "entry": "scripts/rhai/fleet-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cli.exe",
-        "--skip-event-load"
-      ],
+      "args": [".", "dist/agenterm-cli.exe", "--skip-event-load"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "server-smoke",
@@ -1956,20 +867,10 @@
       "entry": "scripts/rhai/server-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "native-ipc-smoke",
@@ -1977,22 +878,10 @@
       "entry": "scripts/rhai/native-ipc-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "native-ipc-compat-smoke",
@@ -2000,20 +889,10 @@
       "entry": "scripts/rhai/native-ipc-compat-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "wake-smoke",
@@ -2021,20 +900,10 @@
       "entry": "scripts/rhai/wake-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "startup-smoke",
@@ -2042,22 +911,10 @@
       "entry": "scripts/rhai/startup-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe",
-        "1000"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe", "1000"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "cli-smoke",
@@ -2065,21 +922,10 @@
       "entry": "scripts/rhai/cli-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "script-smoke",
@@ -2087,22 +933,10 @@
       "entry": "scripts/rhai/script-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cli.exe",
-        "dist/agenterm-rhai.exe",
-        "dist/agenterm.exe"
-      ],
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-rhai.exe", "dist/agenterm.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "remote-ui-smoke",
@@ -2110,21 +944,10 @@
       "entry": "scripts/rhai/remote-ui-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-cli.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "remote-ui-upgrade-smoke",
@@ -2132,23 +955,10 @@
       "entry": "scripts/rhai/remote-ui-upgrade-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "target/release-fast/agenterm.exe",
-        "dist/agenterm-cli.exe",
-        "dist/agenterm.exe"
-      ],
+      "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm.exe"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "platform-ux-parity-smoke",
@@ -2156,23 +966,10 @@
       "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm.exe",
-        "dist/agenterm-rhai.exe",
-        "dist/agenterm-cli.exe",
-        "windows"
-      ],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-rhai.exe", "dist/agenterm-cli.exe", "windows"],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "platform-ux-parity-smoke-linux",
@@ -2180,23 +977,10 @@
       "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm",
-        "dist/agenterm-rhai",
-        "dist/agenterm-cli",
-        "linux"
-      ],
+      "args": [".", "dist/agenterm", "dist/agenterm-rhai", "dist/agenterm-cli", "linux"],
       "dependencies": [],
-      "platforms": [
-        "linux"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["linux"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "platform-ux-parity-smoke-macos",
@@ -2204,23 +988,10 @@
       "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm",
-        "dist/agenterm-rhai",
-        "dist/agenterm-cli",
-        "macos"
-      ],
+      "args": [".", "dist/agenterm", "dist/agenterm-rhai", "dist/agenterm-cli", "macos"],
       "dependencies": [],
-      "platforms": [
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "mcp-conformance",
@@ -2228,19 +999,10 @@
       "entry": "scripts/rhai/mcp-conformance.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "migration-audit",
@@ -2249,14 +1011,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "lint",
@@ -2264,21 +1020,10 @@
       "entry": "scripts/rhai/lint.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "migration-audit"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": ["."],
+      "dependencies": ["migration-audit"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "prepare-target-clean",
@@ -2287,14 +1032,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "prune-target-incremental",
@@ -2304,14 +1043,8 @@
       "cwd": ".",
       "args": [],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "preflight",
@@ -2319,19 +1052,9 @@
       "entry": "scripts/rhai/preflight.rhai",
       "profile": "local",
       "cwd": ".",
-      "dependencies": [
-        "migration-audit",
-        "validate-artifact-manifest"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "dependencies": ["migration-audit", "validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "preflight-benchmark",
@@ -2339,18 +1062,9 @@
       "entry": "scripts/rhai/preflight-benchmark.rhai",
       "profile": "local",
       "cwd": ".",
-      "dependencies": [
-        "preflight"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "dependencies": ["preflight"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "prd-alignment",
@@ -2358,19 +1072,10 @@
       "entry": "scripts/rhai/prd-alignment.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "dist/agenterm-cli"
-      ],
+      "args": [".", "dist/agenterm-cli"],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "stage-artifact",
@@ -2379,12 +1084,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "supply-chain",
@@ -2393,15 +1094,8 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "stage-build",
@@ -2409,19 +1103,9 @@
       "entry": "scripts/rhai/stage-build.rhai",
       "profile": "local",
       "cwd": ".",
-      "dependencies": [
-        "build-identity",
-        "clean-locked-artifacts",
-        "stage-artifact",
-        "write-build-metadata"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "dependencies": ["build-identity", "clean-locked-artifacts", "stage-artifact", "write-build-metadata"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "target-report",
@@ -2429,18 +1113,10 @@
       "entry": "scripts/rhai/target-report.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "validate-artifact-manifest",
@@ -2448,15 +1124,9 @@
       "entry": "scripts/rh/validate-artifact-manifest.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "scripts/artifacts.json"
-      ],
+      "args": ["scripts/artifacts.json"],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": []
     },
     {
@@ -2465,19 +1135,9 @@
       "entry": "scripts/rhai/write-build-metadata.rhai",
       "profile": "local",
       "cwd": ".",
-      "dependencies": [
-        "build-identity",
-        "validate-artifact-manifest"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "dependencies": ["build-identity", "validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "internal-version-policy",
@@ -2485,15 +1145,9 @@
       "entry": "scripts/rh/internal-version-policy.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": []
     },
     {
@@ -2502,15 +1156,9 @@
       "entry": "scripts/rh/verify-docs-site.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "docs"
-      ],
+      "args": ["docs"],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": []
     },
     {
@@ -2519,18 +1167,10 @@
       "entry": "scripts/rhai/readme-examples.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "dist"
-      ],
-      "dependencies": [
-        "artifact-verification"
-      ],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "args": ["dist"],
+      "dependencies": ["artifact-verification"],
+      "platforms": ["windows"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "client-build",
@@ -2538,23 +1178,10 @@
       "entry": "scripts/rhai/build.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "--clients-only"
-      ],
-      "dependencies": [
-        "build-identity",
-        "validate-artifact-manifest"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": [".", "--clients-only"],
+      "dependencies": ["build-identity", "validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "client-clippy",
@@ -2562,24 +1189,10 @@
       "entry": "scripts/rhai/build.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        ".",
-        "--clients-only",
-        "--action",
-        "clippy"
-      ],
-      "dependencies": [
-        "validate-artifact-manifest"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": [".", "--clients-only", "--action", "clippy"],
+      "dependencies": ["validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "client-smoke",
@@ -2587,20 +1200,10 @@
       "entry": "scripts/rhai/client-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "client-build"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "args": ["."],
+      "dependencies": ["client-build"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "rh-aot-smoke",
@@ -2608,21 +1211,10 @@
       "entry": "scripts/rhai/rh-aot-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "client-build"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": ["."],
+      "dependencies": ["client-build"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "rh-native-task-probe",
@@ -2631,11 +1223,7 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": []
     },
     {
@@ -2644,22 +1232,10 @@
       "entry": "scripts/rhai/package-client-release.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
-      "dependencies": [
-        "client-build",
-        "supply-chain"
-      ],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn"
-      ]
+      "args": ["."],
+      "dependencies": ["client-build", "supply-chain"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "cross-platform-automation-audit",
@@ -2667,18 +1243,10 @@
       "entry": "scripts/rhai/cross-platform-automation-audit.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ],
-      "side_effects": [
-        "process_spawn"
-      ]
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "fresh-clone-rehearsal",
@@ -2686,20 +1254,10 @@
       "entry": "scripts/rhai/fresh-clone-rehearsal.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
+      "args": ["."],
       "dependencies": [],
-      "platforms": [
-        "windows"
-      ],
-      "side_effects": [
-        "artifact_write",
-        "process_spawn",
-        "gui_spawn",
-        "network_loopback",
-        "git_mutation"
-      ]
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation"]
     }
   ]
 }
