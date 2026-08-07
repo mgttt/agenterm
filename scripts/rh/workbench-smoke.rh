@@ -14,12 +14,6 @@ let declared_evidence = [
     "ux.workbench-proxy-archived"
 ];
 
-fn require(condition, message) {
-    if condition == 0 {
-        throw message;
-    }
-}
-
 fn json_cli(context, cli, arguments) {
     rhai::json::parse(
         test_harness::invoke_cli(
@@ -207,7 +201,7 @@ fn double_click_point(gui_child, x, y) {
 fn set_tab_editor_text(gui_child, name, note) {
     let title_editor = gui_child.window_control(2105);
     let note_editor = gui_child.window_control(2106);
-    require(
+    test_harness::require(
         title_editor.visible != 0 && note_editor.visible != 0,
         "workbench_tab_editor_controls_hidden"
     );
@@ -223,7 +217,7 @@ fn assert_editor_closed(snapshot, target, label) {
             && type_of(tab.actions.save) == "()"
             && type_of(tab.actions.cancel) == "()");
     let render_closed = type_of(tab.render) == "()" || tab.render.mode == "normal";
-    require(
+    test_harness::require(
         type_of(snapshot.tab_editor) == "()"
             && render_closed != 0
             && actions_closed != 0,
@@ -234,7 +228,7 @@ fn assert_editor_closed(snapshot, target, label) {
 
 fn assert_editor_open(snapshot, target, label) {
     let tab = find_tab(snapshot, target);
-    require(
+    test_harness::require(
         type_of(snapshot.tab_editor) != "()"
             && snapshot.tab_editor.target == target
             && tab.render.mode == "editing"
@@ -256,7 +250,7 @@ fn retain_png_evidence(context, cli, name) {
         "evidence/" + name + ".png"
     ).display;
     text_cli(context, cli, ["screenshot", "-o", path]);
-    require(
+    test_harness::require(
         std::fs::metadata(path).len >= 1000,
         "workbench_screenshot_too_small:" + name
     );
@@ -264,7 +258,7 @@ fn retain_png_evidence(context, cli, name) {
 }
 
 fn assert_inside(outer, inner, label) {
-    require(
+    test_harness::require(
         inner.left >= outer.left
             && inner.top >= outer.top
             && inner.right <= outer.right
@@ -303,12 +297,12 @@ fn entry() {
         return 0;
     }
 
-    require(args.len == 3, "expected: REPO GUI_EXE CLI_EXE");
+    test_harness::require(args.len == 3, "expected: REPO GUI_EXE CLI_EXE");
     let repo = std::path::absolute(args[0]).display;
     let gui = std::path::absolute(args[1]).display;
     let cli = std::path::absolute(args[2]).display;
-    require(std::fs::exists(gui) != 0, "workbench_gui_missing");
-    require(std::fs::exists(cli) != 0, "workbench_cli_missing");
+    test_harness::require(std::fs::exists(gui) != 0, "workbench_gui_missing");
+    test_harness::require(std::fs::exists(cli) != 0, "workbench_cli_missing");
 
     let context = test_harness::new_context(repo, "workbench");
     let owned_children = [];
@@ -458,7 +452,7 @@ fn entry() {
             cli,
             ["show-composer", "-t", root]
         );
-        require(
+        test_harness::require(
             root_tab.name == saved_name
                 && root_tab.note == saved_note
                 && type_of(root_tab.actions.edit) == "()"
@@ -482,7 +476,7 @@ fn entry() {
         click_bounds(gui_child, root_tab.actions.cancel.bounds);
         let snapshot = wait_for_editor(context, cli, root, 0);
         let root_tab = find_tab(snapshot, root);
-        require(
+        test_harness::require(
             root_tab.name == saved_name && root_tab.note == saved_note,
             "workbench_cancel_persisted_draft"
         );
@@ -503,7 +497,7 @@ fn entry() {
         assert_editor_open(public_snapshot, root, "public-edit-tab");
         let f2_actions = find_tab(f2_snapshot, root).actions;
         let public_actions = find_tab(public_snapshot, root).actions;
-        require(
+        test_harness::require(
             f2_actions.mode == public_actions.mode
                 && f2_actions.density == public_actions.density
                 && f2_actions.save.id == public_actions.save.id
@@ -534,7 +528,7 @@ fn entry() {
             json_cli(context, cli, ["ui-snapshot"]),
             root
         );
-        require(
+        test_harness::require(
             root_tab.name == saved_name && root_tab.note == saved_note,
             "workbench_tab_switch_persisted_draft"
         );
@@ -557,7 +551,7 @@ fn entry() {
         );
         json_cli(context, cli, ["ui-action", "tabs-show"]);
         let root_tab = wait_tab_render(context, cli, root);
-        require(
+        test_harness::require(
             root_tab.name == saved_name && root_tab.note == saved_note,
             "workbench_tabs_hide_persisted_draft"
         );
@@ -606,8 +600,8 @@ fn entry() {
             }
             rhai::task::sleep(std::time::Duration::from_millis(50));
         }
-        require(type_of(proxy) != "()", "workbench_proxy_surface_unavailable");
-        require(
+        test_harness::require(type_of(proxy) != "()", "workbench_proxy_surface_unavailable");
+        test_harness::require(
             proxy.archived != 0
                 && proxy.available == 0
                 && proxy.bounds.width == 0
@@ -670,7 +664,7 @@ fn entry() {
             }
             rhai::task::sleep(std::time::Duration::from_millis(25));
         }
-        require(
+        test_harness::require(
             type_of(scroll_snapshot) != "()",
             "workbench_sidebar_scrollbar_timeout"
         );
@@ -682,7 +676,7 @@ fn entry() {
                 first_visible = tab;
             }
         }
-        require(type_of(first_visible) != "()", "workbench_visible_scroll_tab_missing");
+        test_harness::require(type_of(first_visible) != "()", "workbench_visible_scroll_tab_missing");
         click_bounds(gui_child, first_visible.render.text);
         let scrollbar = scroll_snapshot.layout.sidebar.scrollbar;
         let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
@@ -703,12 +697,12 @@ fn entry() {
             }
             rhai::task::sleep(std::time::Duration::from_millis(25));
         }
-        require(
+        test_harness::require(
             type_of(scrolled) != "()",
             "workbench_sidebar_scroll_did_not_move"
         );
         double_click_message(gui_child, first_visible.render.text);
-        require(
+        test_harness::require(
             type_of(
                 wait_for_editor(context, cli, first_visible.id, 0).tab_editor
             ) == "()",
@@ -757,7 +751,7 @@ fn entry() {
                 "close:" + width
             );
             let density = if width < 300 { "compact" } else { "full" };
-            require(
+            test_harness::require(
                 tab.actions.density == density
                     && type_of(tab.actions.edit) == "()"
                     && tab.render.node.x >= tab.bounds.left

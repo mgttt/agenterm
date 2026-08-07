@@ -12,14 +12,8 @@ let declared_evidence = [
     "ux.persistent-workspace"
 ];
 
-fn require(condition, message) {
-    if condition == 0 {
-        throw message;
-    }
-}
-
 fn require_no_secret(text, secret, location) {
-    require(
+    test_harness::require(
         text.contains(secret) == 0,
         "working_context_secret_leak:" + location
     );
@@ -102,15 +96,15 @@ fn entry() {
         return 0;
     }
 
-    require(
+    test_harness::require(
         args.len == 3,
         "expected: REPO GUI_EXE CLI_EXE"
     );
     let repo = std::path::absolute(args[0]).display;
     let gui = std::path::absolute(args[1]).display;
     let cli = std::path::absolute(args[2]).display;
-    require(std::fs::exists(gui) != 0, "working_context_gui_missing");
-    require(std::fs::exists(cli) != 0, "working_context_cli_missing");
+    test_harness::require(std::fs::exists(gui) != 0, "working_context_gui_missing");
+    test_harness::require(std::fs::exists(cli) != 0, "working_context_cli_missing");
 
     let context = test_harness::new_context(repo, "working-context");
     let secret =
@@ -154,7 +148,7 @@ fn entry() {
         require_no_secret(snapshot_text, secret, "launch_ui_snapshot");
         let snapshot = rhai::json::parse(snapshot_text);
         let tab = active_tab(snapshot);
-        require(
+        test_harness::require(
             tab.working_context.proxy.configured != 0
                 && tab.working_context.proxy.source == "launch"
                 && tab.working_context.proxy.endpoint_visible == 0
@@ -174,7 +168,7 @@ fn entry() {
         );
         let input_writes = launch_pane.windows[0].input_writes;
         let proxy_status = snapshot.layout.status_bar.proxy;
-        require(
+        test_harness::require(
             proxy_status.archived != 0
                 && proxy_status.available == 0
                 && proxy_status.bounds.width == 0
@@ -195,7 +189,7 @@ fn entry() {
             secret,
             "archived_proxy_action"
         );
-        require(
+        test_harness::require(
             (archived.stdout + archived.stderr).contains(
                 "proxy workbench controls are archived"
             ),
@@ -210,7 +204,7 @@ fn entry() {
         ).stdout;
         require_no_secret(pane_text, secret, "archived_pane_snapshot");
         let pane = rhai::json::parse(pane_text);
-        require(
+        test_harness::require(
             pane.windows[0].input_writes == input_writes
                 && pane.windows[0].composer_sensitive == 0
                 && pane.windows[0].composer == "",
@@ -352,12 +346,12 @@ fn entry() {
         require_no_secret(restored_text, secret, "restart_ui_snapshot");
         let restored_snapshot = rhai::json::parse(restored_text);
         let restored_tab = active_tab(restored_snapshot);
-        require(
+        test_harness::require(
             restored_tab.working_context.proxy.configured == 0
                 && restored_tab.working_context.proxy.source == "off",
             "working_context_proxy_persisted"
         );
-        require(
+        test_harness::require(
             restored_tab.id == persistent_id
                 && restored_tab.name == persistent_name
                 && restored_tab.note == persistent_note

@@ -10,12 +10,6 @@ import "scripts/rh/lib/test_harness" as test_harness;
 
 let declared_evidence = ["ux.theme-settings"];
 
-fn require(condition, message) {
-    if condition == 0 {
-        throw message;
-    }
-}
-
 fn json_cli(context, cli, arguments) {
     rhai::json::parse(
         test_harness::invoke_cli(
@@ -120,7 +114,7 @@ fn start_gui(context, gui, cli) {
         cli,
         ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"]
     );
-    require(
+    test_harness::require(
         snapshot.client_pid == child.id,
         "theme_ui_lease_wrong_process"
     );
@@ -129,7 +123,7 @@ fn start_gui(context, gui, cli) {
 
 fn only_tab(context, cli) {
     let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    require(snapshot.tabs.len == 1, "theme_expected_one_tab");
+    test_harness::require(snapshot.tabs.len == 1, "theme_expected_one_tab");
     snapshot.tabs[0]
 }
 
@@ -139,7 +133,7 @@ fn only_pane(context, cli, target) {
         cli,
         ["pane-snapshot", "-t", target]
     );
-    require(snapshot.windows.len == 1, "theme_expected_one_pane");
+    test_harness::require(snapshot.windows.len == 1, "theme_expected_one_pane");
     snapshot.windows[0]
 }
 
@@ -167,7 +161,7 @@ fn assert_theme_options(snapshot) {
         "fancy-day",
         "fancy-night",
     ];
-    require(
+    test_harness::require(
         snapshot.settings.theme_options.len == 4,
         "theme_options_count_mismatch"
     );
@@ -178,14 +172,14 @@ fn assert_theme_options(snapshot) {
                 found = 1;
             }
         }
-        require(found != 0, "theme_option_missing:" + id);
+        test_harness::require(found != 0, "theme_option_missing:" + id);
     }
-    require(
+    test_harness::require(
         theme_option_field(snapshot, "classic-day", "accent")
             != theme_option_field(snapshot, "fancy-day", "accent"),
         "fancy_classic_accent_not_distinct"
     );
-    require(
+    test_harness::require(
         theme_option_field(snapshot, "fancy-day", "metrics")
             .corner_radius_control_px > 0,
         "fancy_metrics_missing"
@@ -200,17 +194,17 @@ fn draft_matches(value, draft) {
 }
 
 fn assert_theme(snapshot, saved_preset, draft, open) {
-    require(
+    test_harness::require(
         snapshot.settings.appearance_preset == saved_preset,
         "appearance_preset_saved_mismatch"
     );
-    require(
+    test_harness::require(
         snapshot.settings.color_theme == derived_color_theme(saved_preset),
         "color_theme_saved_mismatch"
     );
     assert_theme_options(snapshot);
     if open != 0 {
-        require(
+        test_harness::require(
             type_of(snapshot.modal) != "()"
                 && snapshot.modal.kind == "settings"
                 && draft_matches(snapshot.settings.theme_draft, draft)
@@ -218,7 +212,7 @@ fn assert_theme(snapshot, saved_preset, draft, open) {
             "theme_open_draft_mismatch"
         );
     } else {
-        require(
+        test_harness::require(
             type_of(snapshot.modal) == "()"
                 && type_of(snapshot.settings.theme_draft) == "()"
                 && type_of(snapshot.settings.appearance_preset_draft) == "()",
@@ -252,7 +246,7 @@ fn entry() {
         return 0;
     }
 
-    require(
+    test_harness::require(
         args.len == 3 || (
             args.len == 4
                 && args[3] == "--internal-failure-bundle-probe"
@@ -262,8 +256,8 @@ fn entry() {
     let repo = std::path::absolute(args[0]).display;
     let gui = std::path::absolute(args[1]).display;
     let cli = std::path::absolute(args[2]).display;
-    require(std::fs::exists(gui) != 0, "theme_gui_missing");
-    require(std::fs::exists(cli) != 0, "theme_cli_missing");
+    test_harness::require(std::fs::exists(gui) != 0, "theme_gui_missing");
+    test_harness::require(std::fs::exists(cli) != 0, "theme_cli_missing");
     let internal_failure_probe = 0;
     if args.len == 4 {
         internal_failure_probe = 1;
@@ -308,7 +302,7 @@ fn entry() {
         wait_for_exit(migration_gui, "theme_migration_gui_exit_timeout");
         wait_for_server_stop(context, cli);
         let migrated = rhai::json::parse_file(context.settings_path);
-        require(
+        test_harness::require(
             migrated.appearance_preset == "classic-day",
             "legacy_light_migration_failed"
         );
@@ -421,7 +415,7 @@ fn entry() {
         );
         assert_theme(snapshot, "classic-day", (), 0);
         let persisted = rhai::json::parse_file(context.settings_path);
-        require(
+        test_harness::require(
             persisted.appearance_preset == "classic-day",
             "theme_apply_not_persisted"
         );
@@ -432,7 +426,7 @@ fn entry() {
         text_cli(context, cli, ["screenshot", "-o", fancy_day_png]);
         let fancy_preview = json_cli(context, cli, ["ui-snapshot"]);
         assert_theme(fancy_preview, "classic-day", "fancy-day", 1);
-        require(
+        test_harness::require(
             theme_option_field(fancy_preview, "fancy-day", "accent")
                 != theme_option_field(fancy_preview, "classic-day", "accent"),
             "fancy_preview_accent_not_distinct"
@@ -440,13 +434,13 @@ fn entry() {
         text_cli(context, cli, ["ui-action", "settings-apply"]);
         let fancy_applied = json_cli(context, cli, ["ui-snapshot"]);
         assert_theme(fancy_applied, "fancy-day", (), 0);
-        require(
+        test_harness::require(
             rhai::json::parse_file(context.settings_path).appearance_preset == "fancy-day",
             "fancy_apply_not_persisted"
         );
         let classic_shot = rhai::image::inspect_png(day_png);
         let fancy_shot = rhai::image::inspect_png(fancy_day_png);
-        require(
+        test_harness::require(
             classic_shot.width == fancy_shot.width
                 && classic_shot.height == fancy_shot.height,
             "fancy_screenshot_geometry_mismatch"
@@ -455,7 +449,7 @@ fn entry() {
         if fancy_delta < 0.0 {
             fancy_delta = -fancy_delta;
         }
-        require(fancy_delta >= 1.0, "fancy_render_not_visibly_distinct");
+        test_harness::require(fancy_delta >= 1.0, "fancy_render_not_visibly_distinct");
         let token_after =
             "AGENTERM_THEME_AFTER_" + std::process::id();
         text_cli(
@@ -475,7 +469,7 @@ fn entry() {
             cli,
             ["capture-pane", "-p", "-t", tab.id]
         );
-        require(
+        test_harness::require(
             pane_after.pid == pane_before.pid
                 && pane_after.dead == 0
                 && pane_after.output_bytes >= pane_before.output_bytes
@@ -485,7 +479,7 @@ fn entry() {
         );
 
         print("STEP classic-day and classic-night previews have distinct rendered pixels");
-        require(
+        test_harness::require(
             std::fs::metadata(night_png).len >= 1000
                 && std::fs::metadata(day_png).len >= 1000,
             "theme_screenshot_too_small"
@@ -496,7 +490,7 @@ fn entry() {
         if luminance_delta < 0.0 {
             luminance_delta = -luminance_delta;
         }
-        require(
+        test_harness::require(
             dark.width == light.width
                 && dark.height == light.height
                 && luminance_delta >= 20.0,

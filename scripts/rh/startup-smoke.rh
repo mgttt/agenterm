@@ -12,12 +12,6 @@ let declared_evidence = [
     "ux.no-activate-launch"
 ];
 
-fn require(condition, message) {
-    if condition == 0 {
-        throw message;
-    }
-}
-
 fn executable_matches(value, expected) {
     let normalized = value.to_lower();
     normalized == expected || normalized == expected + ".exe"
@@ -133,7 +127,7 @@ fn entry() {
         return 0;
     }
 
-    require(
+    test_harness::require(
         args.len == 3 || args.len == 4,
         "expected: REPO GUI_EXE CLI_EXE [MAX_WINDOW_MS]"
     );
@@ -145,9 +139,9 @@ fn entry() {
     } else {
         1000
     };
-    require(std::fs::exists(gui_exe) != 0, "startup_gui_missing");
-    require(std::fs::exists(cli_exe) != 0, "startup_cli_missing");
-    require(maximum_window_ms > 0, "startup_window_budget_invalid");
+    test_harness::require(std::fs::exists(gui_exe) != 0, "startup_gui_missing");
+    test_harness::require(std::fs::exists(cli_exe) != 0, "startup_cli_missing");
+    test_harness::require(maximum_window_ms > 0, "startup_window_budget_invalid");
 
     let context = test_harness::new_context(repo, "startup");
     let owned_children = [];
@@ -163,13 +157,13 @@ fn entry() {
         let gui = gui_command.start();
         owned_children.push(gui);
         let window = wait_for_window(gui, launch_started, 5000);
-        require(
+        test_harness::require(
             window.elapsed_ms <= maximum_window_ms,
             "startup_first_window_budget:" + window.elapsed_ms +
                 "ms>" + maximum_window_ms + "ms"
         );
         let launch_window_facts = gui.platform_facts;
-        require(
+        test_harness::require(
             launch_window_facts.foreground_window_id == 0
                 || launch_window_facts.top_level_window_is_foreground == 0,
             "startup_no_activate_stole_foreground"
@@ -180,7 +174,7 @@ fn entry() {
             "More CLI commands: agenterm-cli.exe -h",
             5000
         );
-        require(
+        test_harness::require(
             normalized_output(initial_guidance) ==
                 expected_guidance(gui.id, context.address),
             "startup_inherited_stderr_guidance:" + initial_guidance
@@ -215,7 +209,7 @@ fn entry() {
             0
         );
         let live_window = gui.platform_facts;
-        require(
+        test_harness::require(
             live_window.top_level_window_title ==
                 "AgenTerm " + version + " — main",
             "startup_window_title:" + live_window.top_level_window_title
@@ -231,8 +225,8 @@ fn entry() {
             1000,
             "startup_second_gui_handoff_timeout"
         );
-        require(second_output.success != 0, "startup_second_gui_exit");
-        require(
+        test_harness::require(second_output.success != 0, "startup_second_gui_exit");
+        test_harness::require(
             normalized_output(second_output.stderr_text()) ==
                 expected_guidance(second.id, context.address),
             "startup_second_gui_guidance:" + second_output.stderr_text()
@@ -252,7 +246,7 @@ fn entry() {
             "startup_cli_guidance_timeout"
         );
         let guidance_stderr = guidance_output.stderr_text();
-        require(
+        test_harness::require(
             guidance_output.success == 0
                 && guidance_output.stdout_text() == ""
                 && guidance_stderr.contains("No CLI command was executed")
@@ -275,7 +269,7 @@ fn entry() {
             "startup_argument_error_timeout"
         );
         let argument_stderr = argument_output.stderr_text();
-        require(
+        test_harness::require(
             argument_output.success == 0
                 && argument_output.stdout_text() == ""
                 && argument_stderr.contains("AgenTerm GUI argument error")
@@ -288,7 +282,7 @@ fn entry() {
 
         let worker_ids_after = script_worker_ids();
         for id in worker_ids_after {
-            require(
+            test_harness::require(
                 worker_ids_before.contains(id) != 0,
                 "startup_nested_script_worker:" + id
             );
@@ -302,7 +296,7 @@ fn entry() {
                 0
             ).stdout
         );
-        require(
+        test_harness::require(
             close_state.modal.kind == "confirm-window-close"
                 && close_state.modal.default_action == "keep-server-running"
                 && close_state.modal.actions.contains("stop-server-and-exit") != 0,

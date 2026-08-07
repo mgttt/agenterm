@@ -9,12 +9,6 @@ import "scripts/rh/lib/test_harness" as test_harness;
 
 let declared_evidence = ["server.headless-authority"];
 
-fn require(condition, message) {
-    if condition == 0 {
-        throw message;
-    }
-}
-
 fn command(context, cli, arguments, expected_failure) {
     test_harness::invoke_cli(
         context,
@@ -30,7 +24,7 @@ fn command_text(context, cli, arguments) {
     output.stdout + output.stderr
 }
 
-fn command_text(context, cli, arguments, expected_failure) {
+fn command_text_expect(context, cli, arguments, expected_failure) {
     let output = command(
         context,
         cli,
@@ -110,12 +104,12 @@ fn entry() {
         return 0;
     }
 
-    require(args.len == 3, "expected: REPO SERVER_EXE CLI_EXE");
+    test_harness::require(args.len == 3, "expected: REPO SERVER_EXE CLI_EXE");
     let repo = std::path::absolute(args[0]).display;
     let server_exe = std::path::absolute(args[1]).display;
     let cli = std::path::absolute(args[2]).display;
-    require(std::fs::exists(server_exe) != 0, "server_smoke_server_missing");
-    require(std::fs::exists(cli) != 0, "server_smoke_cli_missing");
+    test_harness::require(std::fs::exists(server_exe) != 0, "server_smoke_server_missing");
+    test_harness::require(std::fs::exists(cli) != 0, "server_smoke_cli_missing");
 
     let context = test_harness::new_context(repo, "server");
     let worker_pid = std::process::id();
@@ -134,7 +128,7 @@ fn entry() {
         owned_children.push(server);
         let protocol = wait_for_server(context, cli, server);
         let server_facts = server.platform_facts;
-        require(
+        test_harness::require(
             server_facts.top_level_window_supported != 0
                 && server_facts.top_level_window_present == 0
                 && protocol.pid == server.id
@@ -166,7 +160,7 @@ fn entry() {
             ],
             1
         );
-        require(
+        test_harness::require(
             lease.lease_id.starts_with("ui-")
                 && same_lease.lease_id == lease.lease_id
                 && same_lease.expires_unix_ms >= lease.expires_unix_ms
@@ -183,7 +177,7 @@ fn entry() {
             ],
             0
         );
-        require(
+        test_harness::require(
             heartbeat.lease_id == lease.lease_id
                 && heartbeat.client_pid == worker_pid,
             "server_smoke_ui_lease_heartbeat"
@@ -268,7 +262,7 @@ fn entry() {
             interaction_tab,
             "server_smoke_interaction_tab_missing"
         );
-        require(
+        test_harness::require(
             unauthorized.contains("does not match the current owner")
                 && selected.action == "select"
                 && selected.tab_id == interaction_tab
@@ -302,7 +296,7 @@ fn entry() {
             ],
             1
         );
-        require(
+        test_harness::require(
             acknowledged.observed_sequence
                     == interaction_bootstrap.position.sequence
                 && regression.contains("advance monotonically"),
@@ -324,7 +318,7 @@ fn entry() {
             ["ui-lease", "status"],
             0
         );
-        require(
+        test_harness::require(
             detached.detached != 0 && lease_status.attached == 0,
             "server_smoke_ui_lease_detach"
         );
@@ -347,7 +341,7 @@ fn entry() {
             "lease_owned_client_commands",
             "in_place_reconnect"
         ] {
-            require(
+            test_harness::require(
                 hello.capabilities.contains(capability) != 0,
                 "server_smoke_capability_missing:" + capability
             );
@@ -362,7 +356,7 @@ fn entry() {
             ]
         );
         tab_id.trim();
-        require(tab_id.starts_with("@"), "server_smoke_stable_tab_id");
+        test_harness::require(tab_id.starts_with("@"), "server_smoke_stable_tab_id");
         command_text(
             context,
             cli,
@@ -377,7 +371,7 @@ fn entry() {
             cli,
             ["capture-pane", "-p", "-t", tab_id, "--max-bytes", "16384"]
         );
-        require(
+        test_harness::require(
             capture.contains("AGENTERM_HEADLESS_OK"),
             "server_smoke_terminal_capture"
         );
@@ -399,7 +393,7 @@ fn entry() {
             ],
             1
         );
-        require(
+        test_harness::require(
             first_receipt.outcome == "committed"
                 && first_receipt.request_id == receipt_request_id
                 && first_receipt.after_position.sequence
@@ -430,7 +424,7 @@ fn entry() {
             submission_args,
             0
         );
-        require(
+        test_harness::require(
             accepted_receipt.outcome == "accepted"
                 && accepted_receipt.wait.condition == "submission_complete",
             "server_smoke_receipt_acceptance"
@@ -450,7 +444,7 @@ fn entry() {
             submission_args,
             0
         );
-        require(
+        test_harness::require(
             committed_receipt.outcome == "committed"
                 && type_of(committed_receipt.wait) == "()"
                 && committed_receipt.after_position.sequence
@@ -487,7 +481,7 @@ fn entry() {
             tab_id,
             "server_smoke_delta_tab_missing"
         );
-        require(
+        test_harness::require(
             hello.server_pid == server.id
                 && bootstrap.server_pid == server.id
                 && tab.note == note
@@ -504,7 +498,7 @@ fn entry() {
 
         print("STEP persist and stop server without a GUI process");
         command_text(context, cli, ["save-workspace"]);
-        require(
+        test_harness::require(
             std::fs::exists(context.workspace_path) != 0,
             "server_smoke_workspace_missing"
         );
@@ -518,7 +512,7 @@ fn entry() {
             server,
             "server_smoke_shutdown_timeout"
         );
-        require(
+        test_harness::require(
             server_output.success != 0,
             "server_smoke_server_exit_failure"
         );
