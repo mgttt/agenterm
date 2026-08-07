@@ -1,2 +1,14 @@
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
+
+# This repo builds on 8-core / 8 GB developer machines, and its test suites can
+# spawn nested `cargo build` runs (rh AOT compiles a generated crate per
+# source). Uncapped, those multiply into one rustc per core *per build* and
+# exhaust CPU and memory, which stalls the whole host rather than just running
+# slowly.
+#
+# 6 of 8 cores leaves headroom for the editor, the GUI under test, and the
+# nested builds. Override per-invocation with `cargo build -j N` or CARGO_BUILD_JOBS
+# when a machine can afford more.
+[build]
+jobs = 6

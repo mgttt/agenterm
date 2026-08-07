@@ -50,6 +50,8 @@ pub fn compile_native_for_target(
     command
         .arg("build")
         .arg("--release")
+        .arg("--jobs")
+        .arg(aot_build_jobs().to_string())
         .arg("--target-dir")
         .arg(&target_dir);
     if let Some(triple) = target {
@@ -124,6 +126,29 @@ pub fn hash_file(path: &Path) -> Result<String, RhError> {
 pub fn hash_bytes(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Parallelism for one generated-crate build.
+///
+/// Every AOT compile builds a fresh crate in its own temp target dir, so
+/// nothing is shared between them and each one defaults to a rustc per core.
+/// A test suite compiling several sources at once therefore multiplies into
+/// cores × concurrent-compiles, which on an 8-core / 8 GB machine exhausts CPU
+/// and memory and stalls the host rather than merely running slowly. Observed
+/// directly: five concurrent release builds of the old rhai-dependent
+/// generated crate saturated the machine.
+///
+/// 822befd dropped `rhai` from the generated crate, so each build is far
+/// lighter now, but the multiplication is structural and returns with any
+/// heavier dependency. Two jobs keeps a single compile responsive while
+/// leaving room for its siblings and the editor; `AGENTERM_RH_BUILD_JOBS`
+/// overrides it for hosts that can afford more.
+fn aot_build_jobs() -> usize {
+    std::env::var("AGENTERM_RH_BUILD_JOBS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|jobs| *jobs > 0)
+        .unwrap_or(2)
 }
 
 fn cargo_command() -> Command {
