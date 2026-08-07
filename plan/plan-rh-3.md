@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg22）：M42f6a–f 已落地。**下一步**：M42f6g 易切叶（`mcp-conformance`/`performance-samples`/`agenterm-net-research`）；`test_harness` 烟雾与 `check` 编排仍延后 |
+| **状态** | **进行中 M42f6**（cg22）：M42f6g 四叶已切。**下一步**：Wave2 审计叶 / `target-report`（需 DirEntry.metadata.modified）/ M42f6h libs；烟雾与 `check` 编排仍延后 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -117,7 +117,7 @@
 | M42f6d | INT-only `scripts/rh/timing-summary.rh`（`read_to_string`+JSON validate、`atomic_write` summary）；entry 切 `.rh` 并归档 | [x] |
 | M42f6e | 原生 `command_status`/`command_stdout_file` 可选 trailing options map（`current_dir`/`env`/`env_remove`）；codegen 21 | [x] |
 | M42f6f | 原生 `std::fs::metadata`（与 `symlink_metadata` 对齐的 `.is_file/.is_dir/.len`）、`std::env::current_dir().display`、`PathBuf::from`+`.is_absolute`/`.display`、`json::parse_file` 糖 → `parse(read_to_string)`；codegen 22；fixture `path-metadata-sugar.rh` | [x] |
-| M42f6g | 易切叶任务 cutover（依赖 6e/6f）：`mcp-conformance`、`performance-samples`、`agenterm-net-research`；INT-only `.rh` + entry 切线 + 归档 | [ ] |
+| M42f6g | 易切叶任务 cutover（依赖 6e/6f）：`mcp-conformance`、`performance-samples`、`agenterm-net-research`、`readme-examples`；INT-only `.rh` + entry 切线 + 归档；全改 `command_*`+options，禁止假兼容 | [x] |
 | M42f6h | JSON 集合迭代加强（`for` over JSON array / object keys 已部分具备则补缺口）+ `release_candidate`/`qualification`/`package_qualified` lib 原生移植 | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |

@@ -1109,7 +1109,7 @@
       "group": "deleted",
       "responsibility": "README command and artifact alignment",
       "replacement_task": "readme-examples",
-      "replacement": "scripts/rhai/readme-examples.rhai",
+      "replacement": "scripts/rh/readme-examples.rh",
       "evidence": "a20655a plus exact live stdout parity on 2026-07-29",
       "status": "deleted",
       "callers": [

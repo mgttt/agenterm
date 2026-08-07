@@ -1,0 +1,86 @@
+// Run one ordered cold-to-warm Windows Quick experiment. The workflow owns
+// runner selection and sccache setup; this native script owns sample semantics.
+//
+// Args: CACHE_STRATEGY EVIDENCE_DIRECTORY
+
+fn entry() {
+    if args.len != 2 {
+        return rh::fail("performance_samples_arguments");
+    }
+
+    let cache = args[0];
+    require(
+        cache == "target" || cache == "sccache" || cache == "none",
+        "performance_samples_cache"
+    );
+    let evidence = std::path::absolute(args[1]).display;
+    std::fs::create_dir_all(evidence);
+
+    for sample in 1..4 {
+        let sample_tag = "";
+        sample_tag += sample;
+
+        if sample == 1 || cache != "target" {
+            let clean_code = std::process::command_status(
+                "cargo",
+                ["clean"],
+                300000
+            );
+            require(clean_code == 0, "performance_samples_clean:" + sample_tag);
+        }
+        if cache == "sccache" {
+            let reset_code = std::process::command_status(
+                "sccache",
+                ["--zero-stats"],
+                30000
+            );
+            require(
+                reset_code == 0,
+                "performance_samples_sccache_reset:" + sample_tag
+            );
+        }
+
+        let timing_name = "performance-" + sample_tag + ".json";
+        let timing = std::path::join(evidence, timing_name).display;
+        let quick_cmdline =
+            "check.cmd --quick --timing \"" + timing + "\"";
+        let quick_code = std::process::command_status(
+            "cmd.exe",
+            ["/d", "/s", "/c", quick_cmdline],
+            900000
+        );
+        require(quick_code == 0, "performance_samples_quick:" + sample_tag);
+
+        if cache == "sccache" {
+            let stats_name = "sccache-" + sample_tag + ".json";
+            let stderr_name = "sccache-" + sample_tag + ".stderr";
+            let stats_path = std::path::absolute(stats_name).display;
+            let stderr_path = std::path::absolute(stderr_name).display;
+            let stats_code = std::process::command_stdout_file(
+                "sccache",
+                ["--show-stats", "--stats-format", "json"],
+                30000,
+                stats_path
+            );
+            if std::fs::exists(stderr_path) {
+                let stderr = std::fs::read_to_string(stderr_path);
+                if stderr != "" {
+                    print(stderr);
+                }
+                std::fs::try_remove_file(stderr_path);
+            }
+            require(
+                stats_code == 0 && std::fs::exists(stats_path),
+                "performance_samples_sccache_stats:" + sample_tag
+            );
+        }
+    }
+
+    let report = #{
+        cache_strategy: cache,
+        samples: 3,
+        evidence_directory: evidence
+    };
+    print(rhai::json::stringify_pretty(report));
+    0
+}

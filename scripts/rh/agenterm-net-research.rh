@@ -1,0 +1,110 @@
+// Validate the isolated agenterm-net research workspace without linking it
+// into the AgenTerm product graph or stable artifact manifest.
+//
+// Args: REPO
+
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: REPO");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let research = std::path::join(repo, "research/agenterm-net").display;
+    let lock_path = std::path::join(research, "Cargo.lock").display;
+    require(std::fs::exists(lock_path), "agenterm_net_lock_missing");
+
+    let stdout_path = research + ".agenterm-net-research.stdout.tmp";
+
+    let clippy_code = std::process::command_stdout_file(
+        "cargo",
+        ["clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
+        300000,
+        stdout_path,
+        #{
+            current_dir: research,
+            env: #{ "CARGO_TERM_COLOR": "never" }
+        }
+    );
+    if clippy_code != 0 {
+        let output = std::fs::read_to_string(stdout_path);
+        print(output);
+        std::fs::try_remove_file(stdout_path);
+        return rh::fail("agenterm_net_clippy");
+    }
+    std::fs::try_remove_file(stdout_path);
+
+    let test_code = std::process::command_stdout_file(
+        "cargo",
+        ["test", "--locked", "--quiet"],
+        300000,
+        stdout_path,
+        #{
+            current_dir: research,
+            env: #{ "CARGO_TERM_COLOR": "never" }
+        }
+    );
+    if test_code != 0 {
+        let output = std::fs::read_to_string(stdout_path);
+        print(output);
+        std::fs::try_remove_file(stdout_path);
+        return rh::fail("agenterm_net_tests");
+    }
+    std::fs::try_remove_file(stdout_path);
+
+    let self_test_code = std::process::command_stdout_file(
+        "cargo",
+        ["run", "--locked", "--quiet", "--", "self-test", "--json"],
+        120000,
+        stdout_path,
+        #{
+            current_dir: research,
+            env: #{ "CARGO_TERM_COLOR": "never" }
+        }
+    );
+    if self_test_code != 0 {
+        let output = std::fs::read_to_string(stdout_path);
+        print(output);
+        std::fs::try_remove_file(stdout_path);
+        return rh::fail("agenterm_net_self_test");
+    }
+    let receipt_text = std::fs::read_to_string(stdout_path);
+    std::fs::try_remove_file(stdout_path);
+    let receipt = rhai::json::parse(receipt_text);
+
+    require(receipt.schema == "agenterm-net/result/v1", "agenterm_net_schema");
+    require(
+        receipt.state == "complete" && receipt.result.status == "research-pass",
+        "agenterm_net_state"
+    );
+    require(
+        receipt.result.process.child_exit_clean
+            && receipt.result.process.orphan_cleanup_armed
+            && receipt.result.process.forced_cleanup_reaped
+            && receipt.result.process.forced_cleanup_pid > 0
+            && receipt.result.process.listener_pid != receipt.result.process.connector_pid
+            && receipt.result.process.listener_peer_id
+                != receipt.result.process.connector_peer_id
+            && receipt.result.process.handshake
+            && receipt.result.process.bounded_ping
+            && receipt.result.process.listener_lifecycle_observed,
+        "agenterm_net_process_isolation"
+    );
+    require(
+        receipt.result.resources.measurement_complete
+            && receipt.result.resources.peak_child_rss_bytes > 0
+            && receipt.result.resources.max_observed_child_threads > 0
+            && receipt.result.resources.process_samples.len == 2,
+        "agenterm_net_resource_evidence"
+    );
+    require(
+        receipt.result.block.round_trip_verified
+            && receipt.result.block.corruption_rejected
+            && receipt.result.block.store_removed,
+        "agenterm_net_block_evidence"
+    );
+
+    print(
+        "PASS: isolated agenterm-net libp2p/CID/block-store research contract"
+    );
+    0
+}

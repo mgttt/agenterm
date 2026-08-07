@@ -1,0 +1,47 @@
+// Run the public MCP executable conformance and isolation suite.
+//
+// Args:
+//   [REPO]
+
+fn entry() {
+    if args.len > 1 {
+        return rh::fail("expected: [REPO]");
+    }
+
+    let repo = std::env::current_dir().display;
+    if args.len == 1 {
+        repo = std::path::absolute(args[0]).display;
+    }
+
+    // MCP is hosted only under agenterm-cli (agenterm-mcp PE removed).
+    let candidate = std::path::join(repo, "dist/agenterm-cli.exe").display;
+    require(
+        std::fs::exists(candidate) && std::fs::metadata(candidate).is_file,
+        "mcp_candidate_missing:" + candidate
+    );
+
+    let stdout_path = repo + ".mcp-conformance.stdout.tmp";
+    let code = std::process::command_stdout_file(
+        "cargo",
+        ["test", "--quiet", "--locked", "--test", "mcp_stdio", "--", "--nocapture"],
+        600000,
+        stdout_path,
+        #{
+            current_dir: repo,
+            env: #{
+                "AGENTERM_NO_ACTIVATE": "1",
+                "AGENTERM_MCP_CLI": candidate,
+            }
+        }
+    );
+    require(code == 0, "mcp-conformance");
+    let stdout = std::fs::read_to_string(stdout_path);
+    std::fs::try_remove_file(stdout_path);
+    if stdout != "" {
+        print(stdout);
+    }
+    print(
+        "PASS: candidate-bound public MCP lifecycle, same-source, wait, fault, privacy, and isolation"
+    );
+    0
+}

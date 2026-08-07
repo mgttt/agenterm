@@ -7,7 +7,7 @@ static TASK_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../agenterm.tasks.json")).expect("task manifest")
 });
 static SAMPLES: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../scripts/rhai/performance-samples.rhai").replace("\r\n", "\n")
+    include_str!("../scripts/rh/performance-samples.rh").replace("\r\n", "\n")
 });
 
 #[test]
@@ -64,7 +64,7 @@ fn cache_strategies_are_isolated_fail_safe_and_observable() {
     assert!(WORKFLOW.contains("CARGO_INCREMENTAL:"));
     assert!(WORKFLOW.contains("RUSTC_WRAPPER:"));
     assert!(SAMPLES.contains("sample == 1 || cache != \"target\""));
-    assert!(SAMPLES.contains("run(\"cargo\", [\"clean\"]"));
+    assert!(SAMPLES.contains("command_status(\n                \"cargo\",\n                [\"clean\"]"));
     assert!(SAMPLES.contains("[\"--zero-stats\"]"));
     assert!(SAMPLES.contains("[\"--show-stats\", \"--stats-format\", \"json\"]"));
     assert!(
@@ -74,8 +74,8 @@ fn cache_strategies_are_isolated_fail_safe_and_observable() {
     assert!(!WORKFLOW.contains("uses: actions/cache/"));
     assert!(WORKFLOW.contains("task run performance-summary"));
     assert!(WORKFLOW.contains("performance-summary.json"));
-    assert!(SAMPLES.contains("\"performance-\" + sample + \".json\""));
-    assert!(SAMPLES.contains("\"sccache-\" + sample + \".json\""));
+    assert!(SAMPLES.contains("\"performance-\" + sample_tag + \".json\""));
+    assert!(SAMPLES.contains("\"sccache-\" + sample_tag + \".json\""));
     assert!(!SAMPLES.contains("target\\qualification\\performance-"));
 }
 

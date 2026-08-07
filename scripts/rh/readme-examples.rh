@@ -1,0 +1,182 @@
+// Verify that README artifact roles and public command examples agree with
+// offline machine-readable product catalogs.
+
+fn entry() {
+    let repo = std::env::current_dir().display;
+    let artifact_root = std::path::join(repo, "dist").display;
+    if args.len > 0 {
+        artifact_root = std::path::absolute(args[0]).display;
+    }
+    let skip_probes = 0;
+    if args.len > 1 && args[1] == "--skip-executable-probes" {
+        skip_probes = 1;
+    }
+
+    let manifest_path = std::path::join(repo, "scripts/artifacts.json").display;
+    let manifest_text = std::fs::read_to_string(manifest_path);
+    let manifest = rhai::json::parse(manifest_text);
+    require(manifest.schema_version == 2, "readme_artifact_manifest_schema");
+
+    let readme_path = std::path::join(repo, "README.md").display;
+    let readme = std::fs::read_to_string(readme_path);
+    let normalized_readme = readme;
+    normalized_readme.replace("\r", " ");
+    normalized_readme.replace("\n", " ");
+    normalized_readme.replace("\t", " ");
+    // Bounded collapse of runs of spaces (README roles are short phrases).
+    for space_pass in 1..=16 {
+        normalized_readme.replace("  ", " ");
+    }
+    normalized_readme.trim();
+
+    for artifact in manifest.executables {
+        let artifact_name = "" + artifact.name;
+        require(
+            readme.contains(artifact_name),
+            "README does not name manifest artifact '" + artifact_name + "'"
+        );
+        let role = "" + artifact.documentation_role;
+        role.replace("\r", " ");
+        role.replace("\n", " ");
+        role.replace("\t", " ");
+        for role_space in 1..=8 {
+            role.replace("  ", " ");
+        }
+        role.trim();
+        require(
+            normalized_readme.contains(role),
+            "README does not describe '" + artifact_name + "' as '" + role + "'"
+        );
+    }
+
+    require(
+        readme.contains(".\\build.bat"),
+        "README is missing required executable example '.\\build.bat'"
+    );
+    require(
+        readme.contains(".\\check.cmd"),
+        "README is missing required executable example '.\\check.cmd'"
+    );
+    require(
+        readme.contains(".\\dist\\agenterm.exe"),
+        "README is missing required executable example '.\\dist\\agenterm.exe'"
+    );
+
+    if skip_probes == 0 {
+        let no_activate = #{ env: #{ "AGENTERM_NO_ACTIVATE": "1" } };
+        for artifact in manifest.executables {
+            let probe_len = 0;
+            probe_len = artifact.offline_probe.len;
+            if probe_len == 0 {
+                continue;
+            }
+            let artifact_name = "" + artifact.name;
+            let executable = std::path::join(artifact_root, artifact_name).display;
+            require(
+                std::fs::exists(executable),
+                "README probe artifact is missing: " + executable
+            );
+            let probe_code = 1;
+            if artifact_name == "agenterm-rh.exe" {
+                probe_code = std::process::command_status(
+                    executable,
+                    ["version"],
+                    10000,
+                    no_activate
+                );
+            } else {
+                probe_code = std::process::command_status(
+                    executable,
+                    ["--version"],
+                    10000,
+                    no_activate
+                );
+            }
+            require(
+                probe_code == 0,
+                "Offline README probe failed for '" + artifact_name + "'"
+            );
+        }
+
+        let stdout_path =
+            std::path::join(repo, ".readme-examples.stdout.tmp").display;
+        let cli_path = std::path::join(artifact_root, "agenterm-cli.exe").display;
+        let cli_code = std::process::command_stdout_file(
+            cli_path,
+            ["list-commands"],
+            10000,
+            stdout_path,
+            no_activate
+        );
+        require(cli_code == 0, "readme-cli-command-catalog");
+        let cli_stdout = std::fs::read_to_string(stdout_path);
+        let cli_names = #{};
+        for source_line in cli_stdout.split("\n") {
+            let line = source_line;
+            line.trim();
+            if line == "" {
+                continue;
+            }
+            let fields = line.split(" ");
+            require(fields.len > 0, "readme-cli-command-catalog-line");
+            let command_key = fields[0];
+            cli_names[command_key] = true;
+        }
+
+        for source_line in readme.split("\n") {
+            let line = source_line;
+            line.trim();
+            if !line.starts_with("& $r ") {
+                continue;
+            }
+            let fields = [];
+            for source_field in line.split(" ") {
+                let field = source_field;
+                field.trim();
+                if field != "" {
+                    fields.push(field);
+                }
+            }
+            require(fields.len >= 3, "README contains an invalid agenterm-cli example");
+            let command_index = 2;
+            let maybe_address = fields[2];
+            if maybe_address == "--address" {
+                command_index = 4;
+            }
+            require(
+                fields.len > command_index,
+                "README contains an incomplete agenterm-cli example"
+            );
+            let command_name = fields[command_index];
+            command_name.replace("\"", "");
+            require(
+                cli_names.contains(command_name),
+                "README references unknown agenterm-cli command '" + command_name + "'"
+            );
+        }
+
+        let mux_code = std::process::command_stdout_file(
+            cli_path,
+            ["mux", "compatibility", "--json"],
+            10000,
+            stdout_path,
+            no_activate
+        );
+        require(mux_code == 0, "readme-mux-compatibility");
+        let mux_text = std::fs::read_to_string(stdout_path);
+        let compatibility = rhai::json::parse(mux_text);
+        require(
+            compatibility.schema_version > 0,
+            "README mux compatibility example returned an invalid catalog"
+        );
+        std::fs::try_remove_file(stdout_path);
+    }
+
+    let executable_count = 0;
+    executable_count = manifest.executables.len;
+    print(
+        "PASS: README names " + executable_count +
+        " manifest artifacts and its command examples match the offline catalogs."
+    );
+    0
+}
