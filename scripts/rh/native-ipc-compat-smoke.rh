@@ -16,14 +16,13 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
+fn catch_text(error) {
+    "" + error
+}
+
 let declared_evidence = [
     "control.native-ipc-published-compatibility"
 ];
-
-if args.len == 1 && args[0] == "--list-evidence" {
-    print("control.native-ipc-published-compatibility");
-    return;
-}
 
 
 fn command_output(context, program, arguments, expected_failure, seconds) {
@@ -149,13 +148,14 @@ fn acquire_release(context, catalog, release, asset, facts) {
     let url = "https://github.com/" + catalog.repository +
         "/releases/download/" + release.tag + "/" + asset.name;
     let curl = if facts.os == "windows" { "curl.exe" } else { "curl" };
+    let max_filesize = "" + asset.size;
     command_output(
         context,
         curl,
         [
             "--fail", "--location", "--silent", "--show-error",
             "--max-time", "120",
-            "--max-filesize", asset.size.to_string(),
+            "--max-filesize", max_filesize,
             "--output", archive,
             url
         ],
@@ -483,7 +483,13 @@ fn shutdown(
     test_harness::require(wait_exit(server, code).success, code + "_failure");
 }
 
-test_harness::require(args.len >= 1, "expected: REPO [OPTIONS]");
+fn entry() {
+    if args.len == 1 && args[0] == "--list-evidence" {
+        print("control.native-ipc-published-compatibility");
+        return;
+    }
+
+    test_harness::require(args.len >= 1, "expected: REPO [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
 let catalog_path = std::path::join(
     repo,
@@ -1009,14 +1015,14 @@ try {
     );
     succeeded = true;
 } catch (error) {
-    failure = error.to_string();
+    failure = catch_text(error);
 }
 
 let completion_failure = "";
 try {
     test_harness::complete(context, owned_children, succeeded, failure);
 } catch (error) {
-    completion_failure = error.to_string();
+    completion_failure = catch_text(error);
 }
 if facts.os != "windows" && std::fs::exists(runtime_directory) {
     std::fs::remove_dir_all(runtime_directory);
@@ -1029,4 +1035,5 @@ if failure != "" {
 }
 if completion_failure != "" {
     throw completion_failure;
+}
 }

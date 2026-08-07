@@ -12,6 +12,10 @@ let declared_evidence = [
     "ux.no-activate-launch"
 ];
 
+fn process_stderr(output) {
+    output.stderr_text();
+}
+
 fn executable_matches(value, expected) {
     let normalized = value.to_lower();
     normalized == expected || normalized == expected + ".exe"
@@ -33,44 +37,22 @@ fn script_worker_ids() {
     result
 }
 
-fn wait_for_window(child, started, maximum_discovery_ms) {
-    for attempt in 0..1000 {
-        let facts = child.platform_facts;
-        if facts.top_level_window_supported != 0
-                && facts.top_level_window_present != 0
-                && facts.top_level_window_id != 0 {
-            return #{
-                elapsed_ms:
-                    std::time::SystemTime::now().unix_millis - started,
-                window_id: facts.top_level_window_id
-            };
-        }
-        if child.state == "exited" {
-            let output = child.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
-            throw "startup_gui_early_exit:" + output.stderr_text();
-        }
-        if std::time::SystemTime::now().unix_millis - started
-                >= maximum_discovery_ms {
-            break;
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(5));
-    }
-    throw "startup_window_discovery_timeout";
+fn append_stream_text(base, chunk) {
+    base + chunk.to_text();
 }
 
 fn read_until(stream, needle, timeout_ms) {
     let started = std::time::SystemTime::now().unix_millis;
     let text = "";
-    while std::time::SystemTime::now().unix_millis - started < timeout_ms {
+    let keep_waiting = 1;
+    while (keep_waiting != 0) {
         try {
             let chunk = stream.read(
                 65536,
                 std::time::Duration::from_millis(100)
             );
             if chunk.len > 0 {
-                text += chunk.to_text();
+                text = append_stream_text(text, chunk);
                 if text.contains(needle) {
                     return text;
                 }
@@ -80,6 +62,11 @@ fn read_until(stream, needle, timeout_ms) {
             if message.contains("stream_read_timeout") == 0 {
                 throw message;
             }
+        }
+        keep_waiting = 0;
+        let now = std::time::SystemTime::now().unix_millis;
+        if ((now - started) < timeout_ms) {
+            keep_waiting = 1;
         }
     }
     throw "startup_stream_text_timeout:" + needle;
@@ -156,10 +143,34 @@ fn entry() {
         let launch_started = std::time::SystemTime::now().unix_millis;
         let gui = gui_command.start();
         owned_children.push(gui);
-        let window = wait_for_window(gui, launch_started, 5000);
+        let window_ms = 0;
+        for attempt in 0..1000 {
+            let facts = gui.platform_facts;
+            if facts.top_level_window_supported != 0
+                    && facts.top_level_window_present != 0
+                    && facts.top_level_window_id != 0 {
+                window_ms =
+                    std::time::SystemTime::now().unix_millis - launch_started;
+                break;
+            }
+            if gui.state == "exited" {
+                let output = gui.wait_with_output(
+                    std::time::Duration::from_secs(2)
+                );
+                throw "startup_gui_early_exit:" + process_stderr(output);
+            }
+            if std::time::SystemTime::now().unix_millis - launch_started
+                    >= 5000 {
+                break;
+            }
+            rhai::task::sleep(std::time::Duration::from_millis(5));
+        }
+        if window_ms == 0 {
+            throw "startup_window_discovery_timeout";
+        }
         test_harness::require(
-            window.elapsed_ms <= maximum_window_ms,
-            "startup_first_window_budget:" + window.elapsed_ms +
+            window_ms <= maximum_window_ms,
+            "startup_first_window_budget:" + window_ms +
                 "ms>" + maximum_window_ms + "ms"
         );
         let launch_window_facts = gui.platform_facts;
@@ -227,9 +238,9 @@ fn entry() {
         );
         test_harness::require(second_output.success != 0, "startup_second_gui_exit");
         test_harness::require(
-            normalized_output(second_output.stderr_text()) ==
+            normalized_output(process_stderr(second_output)) ==
                 expected_guidance(second.id, context.address),
-            "startup_second_gui_guidance:" + second_output.stderr_text()
+            "startup_second_gui_guidance:" + process_stderr(second_output)
         );
 
         print("STEP GUI-style CLI arguments return nonblocking guidance");
@@ -245,7 +256,7 @@ fn entry() {
             1000,
             "startup_cli_guidance_timeout"
         );
-        let guidance_stderr = guidance_output.stderr_text();
+        let guidance_stderr = process_stderr(guidance_output);
         test_harness::require(
             guidance_output.success == 0
                 && guidance_output.stdout_text() == ""
@@ -268,7 +279,7 @@ fn entry() {
             1000,
             "startup_argument_error_timeout"
         );
-        let argument_stderr = argument_output.stderr_text();
+        let argument_stderr = process_stderr(argument_output);
         test_harness::require(
             argument_output.success == 0
                 && argument_output.stdout_text() == ""
@@ -314,7 +325,7 @@ fn entry() {
             test_harness::emit_evidence(context, declared_evidence, id);
         }
         print(
-            "PASS: first window in " + window.elapsed_ms +
+            "PASS: first window in " + window_ms +
                 " ms; terminal loaded asynchronously"
         );
         succeeded = 1;

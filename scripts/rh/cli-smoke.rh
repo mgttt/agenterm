@@ -7,26 +7,32 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = [
-    "cli.backspace-del-one",
-    "cli.named-buffer-paste",
-    "cli.remain-on-exit",
-    "cli.stable-create-id",
-    "cli.observable-events",
-    "cli.typed-tabs-operations",
-    "cli.control-receipts",
-    "cli.ui-bridge-contracts",
-    "cli.ui-bootstrap",
-    "cli.ui-follow"
-];
-
-if args.len == 1 && args[0] == "--list-evidence" {
-    for id in declared_evidence {
-        print(id);
-    }
-    return;
+fn declared_evidence_ids() {
+    [
+        "cli.backspace-del-one",
+        "cli.named-buffer-paste",
+        "cli.remain-on-exit",
+        "cli.stable-create-id",
+        "cli.observable-events",
+        "cli.typed-tabs-operations",
+        "cli.control-receipts",
+        "cli.ui-bridge-contracts",
+        "cli.ui-bootstrap",
+        "cli.ui-follow"
+    ]
 }
 
+fn catch_text(error) {
+    "" + error
+}
+
+fn null_json() {
+    rhai::json::parse("null")
+}
+
+fn json_is_present(value) {
+    value != null_json()
+}
 
 fn invoke(context, cli, arguments, expected_failure) {
     test_harness::invoke_cli(
@@ -57,7 +63,7 @@ fn json(context, cli, arguments) {
 fn wait_sidebar_snapshot(context, cli, configured_width) {
     for attempt in 0..200 {
         let snapshot = json(context, cli, ["ui-snapshot"]);
-        if snapshot.layout.sidebar != ()
+        if type_of(snapshot.layout.sidebar) != "()"
             && snapshot.layout.sidebar.configured_width == configured_width
             && snapshot.layout.sidebar.visible
         {
@@ -86,34 +92,42 @@ fn direct(context, program, arguments, expected_failure) {
     if expected_failure {
         test_harness::require(!output.success, "cli_smoke_direct_unexpected_success");
     } else {
+        let stderr_text = output.stderr_text();
         test_harness::require(
             output.success,
-            "cli_smoke_direct_failure:" + output.stderr_text()
+            "cli_smoke_direct_failure:" + stderr_text
         );
     }
-    output.stdout_text() + output.stderr_text()
+    let stdout_text = output.stdout_text();
+    let stderr_text = output.stderr_text();
+    stdout_text + stderr_text
 }
 
-fn tab_by_name(tabs, name) {
-    for tab in tabs {
-        if tab.name == name || (tab.contains("title") && tab.title == name) {
-            return tab;
+fn tab_by_name(tab_entries, name) {
+    for index in 0..tab_entries.len() {
+        let window_entry = tab_entries[index];
+        if window_entry.name == name
+                || (window_entry.contains("title")
+                    && window_entry.title == name) {
+            return window_entry;
         }
     }
-    ()
+    rhai::json::parse("null")
 }
 
-fn tab_by_id(tabs, id) {
-    for tab in tabs {
-        if tab.id == id {
-            return tab;
+fn tab_by_id(tab_entries, id) {
+    for index in 0..tab_entries.len() {
+        let window_entry = tab_entries[index];
+        let entry_id = "" + window_entry.id;
+        if entry_id == id {
+            return window_entry;
         }
     }
-    ()
+    rhai::json::parse("null")
 }
 
 fn event_by_kind(events, kind) {
-    let result = ();
+    let result = rhai::json::parse("null");
     for event in events {
         if event.kind == kind {
             result = event;
@@ -123,7 +137,7 @@ fn event_by_kind(events, kind) {
 }
 
 fn event_for_tab(events, kind, tab_id) {
-    let result = ();
+    let result = rhai::json::parse("null");
     for event in events {
         if event.kind == kind && event.tab_id == tab_id {
             result = event;
@@ -132,13 +146,15 @@ fn event_for_tab(events, kind, tab_id) {
     result
 }
 
-fn operation_by_id(operations, id) {
-    for operation in operations {
-        if operation.id == id {
-            return operation;
+fn operation_by_id(catalog_operations, id) {
+    for index in 0..catalog_operations.len() {
+        let catalog_entry = catalog_operations[index];
+        let entry_id = "" + catalog_entry.id;
+        if entry_id == id {
+            return catalog_entry;
         }
     }
-    ()
+    rhai::json::parse("null")
 }
 
 fn stable_tab_id(value) {
@@ -146,7 +162,7 @@ fn stable_tab_id(value) {
 }
 
 fn parse_integer(value) {
-    let text = value.to_string();
+    let text = "" + value;
     text.trim();
     text.parse_int()
 }
@@ -159,41 +175,15 @@ fn require_file(path, minimum_bytes) {
     );
 }
 
-fn wait_for_gui(context, cli, gui) {
-    for attempt in 0..400 {
-        let probe = test_harness::run_cli(
-            context,
-            cli,
-            [
-                "wait-ui", "--window-state", "restored",
-                "--timeout-ms", "100"
-            ],
-            false,
-            []
-        );
-        let facts = gui.platform_facts;
-        if probe.success
-                && facts.top_level_window_supported
-                && facts.top_level_window_present {
-            let snapshot = rhai::json::parse(probe.stdout);
-            test_harness::require(
-                snapshot.client_pid == gui.id,
-                "cli_smoke_gui_lease_owner"
-            );
-            return snapshot;
+fn entry() {
+    if args.len == 1 && args[0] == "--list-evidence" {
+        for id in declared_evidence_ids() {
+            print(id);
         }
-        if gui.state == "exited" {
-            let output = gui.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
-            throw "cli_smoke_gui_early_exit:" + output.stderr_text();
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        return 0;
     }
-    throw "cli_smoke_gui_ready_timeout";
-}
 
-test_harness::require(args.len == 3, "expected: REPO GUI_EXE CLI_EXE");
+    test_harness::require(args.len == 3, "expected: REPO GUI_EXE CLI_EXE");
 let repo = std::path::absolute(args[0]).display;
 let gui_exe = std::path::absolute(args[1]).display;
 let cli = std::path::absolute(args[2]).display;
@@ -211,9 +201,9 @@ let pane_png = std::path::join(
     context.run_directory,
     name + "-pane.png"
 ).display;
-let owned_children = [];
-let succeeded = false;
-let failure = "";
+    let owned_children = [];
+    let succeeded = 0;
+    let failure = "";
 
 try {
     print("STEP create tab and prove request receipt replay");
@@ -229,7 +219,7 @@ try {
     test_harness::require(
         first_receipt.outcome == "committed"
             && first_receipt.request_id == request_id
-            && first_receipt.resolved.tab_id != ()
+            && type_of(first_receipt.resolved.tab_id) != "()"
             && first_receipt.after_position.sequence ==
                 replayed_receipt.after_position.sequence,
         "cli_smoke_receipt_replay"
@@ -259,38 +249,42 @@ try {
     ];
     let created = json(context, cli, create_args);
     let created_replay = json(context, cli, create_args);
+    let create_replay_snapshot = json(context, cli, ["ui-snapshot"]);
     let retry_tab = tab_by_name(
-        json(context, cli, ["ui-snapshot"]).tabs,
+        create_replay_snapshot.tabs,
         retry_name
     );
     test_harness::require(
         created.outcome == "committed"
             && created.after_position.sequence ==
                 created_replay.after_position.sequence
-            && retry_tab != ()
-            && stable_tab_id(retry_tab.id),
+            && json_is_present(retry_tab)
+            && stable_tab_id("" + retry_tab.id),
         "cli_smoke_create_replay"
     );
+    let retry_tab_id = "" + retry_tab.id;
     let kill_request = "receipt-kill-" + context.run_id;
     let kill_args = [
         "--request-id", kill_request, "--receipt-json",
-        "kill-window", "-t", retry_tab.id
+        "kill-window", "-t", retry_tab_id
     ];
     let killed = json(context, cli, kill_args);
     let killed_replay = json(context, cli, kill_args);
+    let kill_replay_snapshot = json(context, cli, ["ui-snapshot"]);
+    let killed_tab = tab_by_id(
+        kill_replay_snapshot.tabs,
+        retry_tab_id
+    );
     test_harness::require(
         killed.outcome == "committed"
             && killed.after_position.sequence ==
                 killed_replay.after_position.sequence
-            && tab_by_id(
-                json(context, cli, ["ui-snapshot"]).tabs,
-                retry_tab.id
-            ) == (),
+            && !json_is_present(killed_tab),
         "cli_smoke_kill_replay"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.control-receipts"
     );
 
@@ -380,7 +374,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.ui-bridge-contracts"
     );
 
@@ -405,33 +399,37 @@ try {
         "cli_smoke_bootstrap_identity"
     );
     for tab in bootstrap.tabs {
-        let window = tab_by_id(inspect.windows, tab.id);
+        let tab_id = "" + tab.id;
+        let composer_text = tab.composer.text;
+        let window = tab_by_id(inspect.windows, tab_id);
         test_harness::require(
-            window != ()
+            json_is_present(window)
                 && tab.parent_id == window.parent_id
                 && tab.title == window.name
                 && tab.note == window.note
                 && tab.process_id == window.pid
                 && tab.dead == window.dead
                 && tab.exit_code == window.exit_code
-                && tab.screen.tab_id == tab.id
+                && tab.screen.tab_id == tab_id
                 && tab.screen.rows == window.rows
                 && tab.screen.columns == window.cols
                 && tab.screen.scrollback_offset == window.scrollback_offset
                 && tab.screen.complete
                 && !tab.screen.truncated
                 && tab.screen.runs.len > 0,
-            "cli_smoke_bootstrap_tab:" + tab.id
+            "cli_smoke_bootstrap_tab:" + tab_id
         );
         if tab.composer.sensitive {
             test_harness::require(
-                tab.composer.text == (),
+                composer_text == null_json(),
                 "cli_smoke_sensitive_composer_disclosed"
             );
         } else {
+            let composer_text_string = "" + composer_text;
+            let composer_byte_length =
+                rhai::bytes::from_text(composer_text_string).len;
             test_harness::require(
-                tab.composer.byte_length ==
-                    rhai::bytes::from_text(tab.composer.text).len,
+                tab.composer.byte_length == composer_byte_length,
                 "cli_smoke_composer_byte_identity"
             );
         }
@@ -443,7 +441,7 @@ try {
     }
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.ui-bootstrap"
     );
 
@@ -457,20 +455,19 @@ try {
         artifact_manifest_sha256:
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     };
-    let hello = json(
-        context,
-        cli,
-        [
-            "ui-hello", "--minimum", "1", "--maximum", "1",
-            "--client-id", "cli-smoke-" + context.run_id,
-            "--client-build-json", rhai::json::stringify(hello_build)
-        ]
-    );
+    let hello_client_id = "cli-smoke-" + context.run_id;
+    let hello_build_json = rhai::json::stringify(hello_build);
+    let hello_args = [
+        "ui-hello", "--minimum", "1", "--maximum", "1",
+        "--client-id", hello_client_id,
+        "--client-build-json", hello_build_json
+    ];
+    let hello = json(context, cli, hello_args);
     test_harness::require(
         hello.schema_version == 1
             && hello.accepted
             && hello.compatibility == "compatible"
-            && hello.client_id == "cli-smoke-" + context.run_id
+            && hello.client_id == hello_client_id
             && hello.protocol_version == 1
             && hello.server_pid == running_protocol.pid
             && hello.client_build.profile == "black-box"
@@ -483,36 +480,36 @@ try {
             && hello.capabilities.contains("ordered_delta_poll"),
         "cli_smoke_hello_contract"
     );
-    let too_new = json(
-        context,
-        cli,
-        [
-            "ui-hello", "--minimum", "2", "--maximum", "2",
-            "--client-id", "future-renderer-" + context.run_id
-        ]
-    );
+    let future_client_id = "future-renderer-" + context.run_id;
+    let too_new_args = [
+        "ui-hello", "--minimum", "2", "--maximum", "2",
+        "--client-id", future_client_id
+    ];
+    let too_new = json(context, cli, too_new_args);
     test_harness::require(
         !too_new.accepted
             && too_new.compatibility == "client_too_new",
         "cli_smoke_future_renderer_contract"
     );
     let follow_tab = tab_by_name(bootstrap.tabs, name);
-    test_harness::require(follow_tab != (), "cli_smoke_follow_tab_missing");
+    test_harness::require(
+        json_is_present(follow_tab),
+        "cli_smoke_follow_tab_missing"
+    );
+    let follow_tab_id = "" + follow_tab.id;
     let follow_note = "ui-follow-" + context.run_id;
     text(
         context,
         cli,
-        ["set-tab-note", "-t", follow_tab.id, follow_note]
+        ["set-tab-note", "-t", follow_tab_id, follow_note]
     );
-    let deltas = json(
-        context,
-        cli,
-        [
-            "ui-deltas", "--epoch", hello.position.server_epoch,
-            "--after", hello.position.sequence.to_string(),
-            "--limit", "64"
-        ]
-    );
+    let hello_after_sequence = "" + hello.position.sequence;
+    let deltas_args = [
+        "ui-deltas", "--epoch", hello.position.server_epoch,
+        "--after", hello_after_sequence,
+        "--limit", "64"
+    ];
+    let deltas = json(context, cli, deltas_args);
     let previous = hello.position.sequence;
     for event in deltas.events {
         test_harness::require(
@@ -522,10 +519,10 @@ try {
         previous = event.sequence;
     }
     let follow_event =
-        event_for_tab(deltas.events, "tab.note", follow_tab.id);
-    let follow_update = tab_by_id(deltas.tab_updates, follow_tab.id);
+        event_for_tab(deltas.events, "tab.note", follow_tab_id);
+    let follow_update = tab_by_id(deltas.tab_updates, follow_tab_id);
     let post_bootstrap = json(context, cli, ["ui-bootstrap"]);
-    let post_tab = tab_by_id(post_bootstrap.tabs, follow_tab.id);
+    let post_tab = tab_by_id(post_bootstrap.tabs, follow_tab_id);
     test_harness::require(
         deltas.schema_version == 2
             && deltas.server_epoch == hello.position.server_epoch
@@ -533,12 +530,12 @@ try {
             && deltas.through_sequence == deltas.current_sequence
             && deltas.complete
             && !deltas.truncated
-            && follow_event != ()
-            && follow_update != ()
+            && json_is_present(follow_event)
+            && json_is_present(follow_update)
             && follow_update.note == follow_note
             && follow_update.screen.generation == deltas.current_sequence
             && post_bootstrap.position.sequence == deltas.current_sequence
-            && post_tab != ()
+            && json_is_present(post_tab)
             && post_tab.note == follow_update.note
             && post_tab.screen.generation ==
                 follow_update.screen.generation,
@@ -552,12 +549,13 @@ try {
             "--after", "0"
         ]
     );
+    let future_after_sequence = "" + (deltas.current_sequence + 1);
     let future_error = failure_text(
         context,
         cli,
         [
             "ui-deltas", "--epoch", deltas.server_epoch,
-            "--after", (deltas.current_sequence + 1).to_string()
+            "--after", future_after_sequence
         ]
     );
     test_harness::require(
@@ -569,7 +567,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.ui-follow"
     );
 
@@ -587,11 +585,12 @@ try {
     };
     let seen_operations = #{};
     for operation in operation_catalog.operations {
+        let operation_id = "" + operation.id;
         test_harness::require(
-            !seen_operations.contains(operation.id),
-            "cli_smoke_duplicate_operation:" + operation.id
+            !seen_operations.contains(operation_id),
+            "cli_smoke_duplicate_operation:" + operation_id
         );
-        seen_operations[operation.id] = true;
+        seen_operations[operation_id] = true;
         for field in [
             "id", "class", "command", "aliases", "parameters",
             "result_type", "errors", "events", "destructive",
@@ -599,7 +598,7 @@ try {
         ] {
             test_harness::require(
                 operation.contains(field),
-                "cli_smoke_operation_field:" + operation.id + ":" + field
+                "cli_smoke_operation_field:" + operation_id + ":" + field
             );
         }
         test_harness::require(
@@ -610,14 +609,16 @@ try {
                     (operation.class == "destructive") ==
                         operation.destructive
                 ),
-            "cli_smoke_operation_metadata:" + operation.id
+            "cli_smoke_operation_metadata:" + operation_id
         );
     }
     for id in expected_operations.keys() {
         let operation =
             operation_by_id(operation_catalog.operations, id);
+        let expected_class = "" + expected_operations[id];
         test_harness::require(
-            operation != () && operation.class == expected_operations[id],
+            json_is_present(operation)
+                && operation.class == expected_class,
             "cli_smoke_operation_class:" + id
         );
     }
@@ -668,7 +669,40 @@ try {
     );
     let gui = gui_command.start();
     owned_children.push(gui);
-    wait_for_gui(context, cli, gui);
+    let gui_ready = 0;
+    for attempt in 0..400 {
+        let probe = test_harness::run_cli(
+            context,
+            cli,
+            [
+                "wait-ui", "--window-state", "restored",
+                "--timeout-ms", "100"
+            ],
+            false,
+            []
+        );
+        let gui_facts = gui.platform_facts;
+        if probe.success
+                && gui_facts.top_level_window_supported
+                && gui_facts.top_level_window_present {
+            let snapshot = rhai::json::parse(probe.stdout);
+            test_harness::require(
+                snapshot.client_pid == gui.id,
+                "cli_smoke_gui_lease_owner"
+            );
+            gui_ready = 1;
+            break;
+        }
+        if gui.state == "exited" {
+            let output = gui.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            let stderr_text = output.stderr_text();
+            throw "cli_smoke_gui_early_exit:" + stderr_text;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    test_harness::require(gui_ready != 0, "cli_smoke_gui_ready_timeout");
 
     print("STEP typed Tabs actions preserve layout and event attribution");
     let tabs_baseline = json(context, cli, ["ui-snapshot"]);
@@ -685,19 +719,20 @@ try {
             && hidden.layout.sidebar.configured_width == configured_width,
         "cli_smoke_tabs_hide"
     );
+    let tabs_after_sequence = "" + tabs_baseline.event_position.sequence;
     let visibility_events = json(
         context,
         cli,
         [
             "read-events",
             "--epoch", tabs_baseline.event_position.epoch,
-            "--after", tabs_baseline.event_position.sequence.to_string()
+            "--after", tabs_after_sequence
         ]
     );
     let hide_event =
         event_by_kind(visibility_events.events, "layout.tabs.visibility");
     test_harness::require(
-        hide_event != ()
+        json_is_present(hide_event)
             && hide_event.payload.operation_id == "ui.tabs.hide",
         "cli_smoke_tabs_hide_event"
     );
@@ -718,50 +753,53 @@ try {
     );
     let width_baseline = json(context, cli, ["ui-snapshot"]);
     for width in [180, 480] {
+        let width_text = "" + width;
         let sized = json(
             context,
             cli,
             [
                 "ui-action", "tabs-set-width",
-                "--width", width.to_string()
+                "--width", width_text
             ]
         );
         test_harness::require(
             sized.layout.sidebar.configured_width == width
                 && sized.settings.tabs_width == width,
-            "cli_smoke_width_boundary:" + width
+            "cli_smoke_width_boundary:" + width_text
         );
     }
+    let width_after_sequence = "" + width_baseline.event_position.sequence;
     let width_events = json(
         context,
         cli,
         [
             "read-events",
             "--epoch", width_baseline.event_position.epoch,
-            "--after", width_baseline.event_position.sequence.to_string()
+            "--after", width_after_sequence
         ]
     );
     let width_event =
         event_by_kind(width_events.events, "layout.tabs.width");
     test_harness::require(
-        width_event != ()
+        json_is_present(width_event)
             && width_event.payload.operation_id == "ui.tabs.set-width"
             && width_event.payload.configured_width == 480,
         "cli_smoke_width_event"
     );
     for width in [179, 481] {
+        let invalid_width_text = "" + width;
         test_harness::require(
             failure_text(
                 context,
                 cli,
                 [
                     "ui-action", "tabs-set-width",
-                    "--width", width.to_string()
+                    "--width", invalid_width_text
                 ]
             ).contains(
                 "operation_invalid_arguments[ui.tabs.set-width]"
             ),
-            "cli_smoke_invalid_width:" + width
+            "cli_smoke_invalid_width:" + invalid_width_text
         );
     }
     test_harness::require(
@@ -773,17 +811,18 @@ try {
         "cli_smoke_unknown_tabs_action"
     );
     let after_invalid = wait_sidebar_snapshot(context, cli, 480);
+    let restore_width_text = "" + configured_width;
     text(
         context,
         cli,
         [
             "ui-action", "tabs-set-width",
-            "--width", configured_width.to_string()
+            "--width", restore_width_text
         ]
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.typed-tabs-operations"
     );
 
@@ -791,33 +830,35 @@ try {
     let event_baseline = json(context, cli, ["ui-snapshot"]);
     let event_name = "event-" + context.run_id;
     text(context, cli, ["new-window", "-d", "-n", event_name]);
+    let event_after_sequence = "" + event_baseline.event_position.sequence;
     let event_batch = json(
         context,
         cli,
         [
             "read-events",
             "--epoch", event_baseline.event_position.epoch,
-            "--after", event_baseline.event_position.sequence.to_string()
+            "--after", event_after_sequence
         ]
     );
     let created_event =
         event_by_kind(event_batch.events, "tab.created");
     test_harness::require(
-        created_event != ()
+        json_is_present(created_event)
             && created_event.sequence >
                 event_baseline.event_position.sequence
             && created_event.payload.index >= 0,
         "cli_smoke_created_event"
     );
+    let created_tab_id = "" + created_event.tab_id;
     let waited = json(
         context,
         cli,
         [
             "wait-events",
             "--epoch", event_baseline.event_position.epoch,
-            "--after", event_baseline.event_position.sequence.to_string(),
+            "--after", event_after_sequence,
             "--kind", "tab.created",
-            "--tab", "@" + created_event.tab_id,
+            "--tab", "@" + created_tab_id,
             "--timeout-ms", "1000"
         ]
     );
@@ -825,6 +866,7 @@ try {
         waited.sequence == created_event.sequence,
         "cli_smoke_waited_event"
     );
+    let timeout_after_sequence = "" + event_batch.position.sequence;
     test_harness::require(
         failure_text(
             context,
@@ -832,7 +874,7 @@ try {
             [
                 "wait-events",
                 "--epoch", event_batch.position.epoch,
-                "--after", event_batch.position.sequence.to_string(),
+                "--after", timeout_after_sequence,
                 "--kind", "never.test-event",
                 "--timeout-ms", "20"
             ]
@@ -841,15 +883,16 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.observable-events"
     );
 
     print("STEP composer, PTY, Backspace, viewport, and screenshots");
+    let composer_command = "echo " + token;
     text(
         context,
         cli,
-        ["set-composer", "-t", name, "echo " + token]
+        ["set-composer", "-t", name, composer_command]
     );
     let before_submit = json(context, cli, ["inspect", "-t", name]);
     test_harness::require(
@@ -894,21 +937,23 @@ try {
                 accepted.after_position.sequence,
         "cli_smoke_submit_committed"
     );
+    let submit_after_sequence = "" + submit_baseline.event_position.sequence;
     let submit_events = json(
         context,
         cli,
         [
             "read-events",
             "--epoch", submit_baseline.event_position.epoch,
-            "--after", submit_baseline.event_position.sequence.to_string()
+            "--after", submit_after_sequence
         ]
     );
-    let submit_completion = ();
+    let submit_completion = rhai::json::parse("null");
     let submit_count = 0;
+    let committed_operation_id = "" + committed.operation_id;
     for event in submit_events.events {
         if event.kind == "composer.submission-finished"
                 && event.request_id == submit_request
-                && event.operation_id == committed.operation_id {
+                && event.operation_id == committed_operation_id {
             submit_completion = event;
             submit_count += 1;
         }
@@ -932,12 +977,13 @@ try {
 
     let backspace_prefix =
         "AGENTERM_BACKSPACE_" + context.run_id;
+    let backspace_command = "echo " + backspace_prefix + "X";
     text(
         context,
         cli,
         [
             "send-keys", "-t", name, "-l",
-            "echo " + backspace_prefix + "X"
+            backspace_command
         ]
     );
     text(context, cli, ["send-keys", "-t", name, "Backspace"]);
@@ -964,7 +1010,7 @@ try {
     test_harness::require(exact_backspace, "cli_smoke_backspace_contract");
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.backspace-del-one"
     );
 
@@ -1033,7 +1079,7 @@ try {
     text(context, cli, ["delete-buffer", "-b", "empty"]);
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.named-buffer-paste"
     );
 
@@ -1166,7 +1212,7 @@ try {
     text(context, cli, ["kill-window", "-t", stable_root]);
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.stable-create-id"
     );
 
@@ -1187,10 +1233,12 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    let finalized_first =
-        json(context, cli, ["inspect", "-t", name]).windows[0];
-    let finalized_second =
-        json(context, cli, ["inspect", "-t", name]).windows[0];
+    let finalized_first_inspect =
+        json(context, cli, ["inspect", "-t", name]);
+    let finalized_first = finalized_first_inspect.windows[0];
+    let finalized_second_inspect =
+        json(context, cli, ["inspect", "-t", name]);
+    let finalized_second = finalized_second_inspect.windows[0];
     test_harness::require(
         finalized_first.reader_closed
             && finalized_first.parser_drained
@@ -1227,30 +1275,35 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "cli.remain-on-exit"
     );
 
     let close_baseline = json(context, cli, ["ui-snapshot"]);
     let closing_tab = tab_by_name(close_baseline.tabs, name);
-    test_harness::require(closing_tab != (), "cli_smoke_closing_tab_missing");
+    test_harness::require(
+        json_is_present(closing_tab),
+        "cli_smoke_closing_tab_missing"
+    );
     text(context, cli, ["kill-window", "-t", name]);
+    let close_after_sequence = "" + close_baseline.event_position.sequence;
     let close_events = json(
         context,
         cli,
         [
             "read-events",
             "--epoch", close_baseline.event_position.epoch,
-            "--after", close_baseline.event_position.sequence.to_string()
+            "--after", close_after_sequence
         ]
     );
+    let closing_tab_id = "" + closing_tab.id;
     let closing_numeric = parse_integer(
-        closing_tab.id.sub_string(1)
+        closing_tab_id.sub_string(1)
     );
     let closed_event =
         event_for_tab(close_events.events, "tab.closed", closing_numeric);
     test_harness::require(
-        closed_event != ()
+        json_is_present(closed_event)
             && closed_event.payload.terminal_shutdown_complete,
         "cli_smoke_explicit_close"
     );
@@ -1276,9 +1329,9 @@ try {
         "PASS: typed control, UI bridge, PTY, screenshots, " +
             "remain-on-exit, and explicit close"
     );
-    succeeded = true;
+    succeeded = 1;
 } catch (error) {
-    failure = error.to_string();
+    failure = catch_text(error);
 }
 
 let completion_failure = "";
@@ -1290,9 +1343,9 @@ try {
         failure
     );
 } catch (error) {
-    completion_failure = error.to_string();
+    completion_failure = catch_text(error);
 }
-if succeeded && completion_failure == "" {
+if succeeded != 0 && completion_failure == "" {
     test_harness::remove_run(context);
 }
 if failure != "" {
@@ -1300,4 +1353,6 @@ if failure != "" {
 }
 if completion_failure != "" {
     throw completion_failure;
+}
+0
 }

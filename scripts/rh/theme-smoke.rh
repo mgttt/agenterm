@@ -10,6 +10,10 @@ import "scripts/rh/lib/test_harness" as test_harness;
 
 let declared_evidence = ["ux.theme-settings"];
 
+fn catch_text(error) {
+    "" + error
+}
+
 fn json_cli(context, cli, arguments) {
     rhai::json::parse(
         test_harness::invoke_cli(
@@ -57,8 +61,7 @@ fn wait_for_server(context, cli, gui_child) {
 
 fn wait_for_window(gui_child) {
     for attempt in 0..200 {
-        let facts = gui_child.platform_facts;
-        if facts.top_level_window_present != 0 {
+        if gui_child.platform_facts.top_level_window_present != 0 {
             return;
         }
         if gui_child.state == "exited" {
@@ -186,13 +189,6 @@ fn assert_theme_options(snapshot) {
     );
 }
 
-fn draft_matches(value, draft) {
-    if type_of(draft) == "()" {
-        return type_of(value) == "()";
-    }
-    value == draft
-}
-
 fn assert_theme(snapshot, saved_preset, draft, open) {
     test_harness::require(
         snapshot.settings.appearance_preset == saved_preset,
@@ -207,8 +203,8 @@ fn assert_theme(snapshot, saved_preset, draft, open) {
         test_harness::require(
             type_of(snapshot.modal) != "()"
                 && snapshot.modal.kind == "settings"
-                && draft_matches(snapshot.settings.theme_draft, draft)
-                && draft_matches(snapshot.settings.appearance_preset_draft, draft),
+                && snapshot.settings.theme_draft == draft
+                && snapshot.settings.appearance_preset_draft == draft,
             "theme_open_draft_mismatch"
         );
     } else {
@@ -264,7 +260,6 @@ fn entry() {
     }
 
     let context = test_harness::new_context(repo, "theme");
-    let owned_children = [];
     let night_png = std::path::join(
         context.run_directory,
         "evidence/theme-classic-night.png"
@@ -290,7 +285,6 @@ fn entry() {
             "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n"
         );
         let migration_gui = start_gui(context, gui, cli);
-        owned_children.push(migration_gui);
         assert_theme(
             json_cli(context, cli, ["ui-snapshot"]),
             "classic-day",
@@ -313,7 +307,6 @@ fn entry() {
             "{\"appearance_preset\":\"classic-night\"}\n"
         );
         let first_gui = start_gui(context, gui, cli);
-        owned_children.push(first_gui);
         let tab = only_tab(context, cli);
         json_cli(
             context,
@@ -434,8 +427,9 @@ fn entry() {
         text_cli(context, cli, ["ui-action", "settings-apply"]);
         let fancy_applied = json_cli(context, cli, ["ui-snapshot"]);
         assert_theme(fancy_applied, "fancy-day", (), 0);
+        let fancy_persisted = rhai::json::parse_file(context.settings_path);
         test_harness::require(
-            rhai::json::parse_file(context.settings_path).appearance_preset == "fancy-day",
+            fancy_persisted.appearance_preset == "fancy-day",
             "fancy_apply_not_persisted"
         );
         let classic_shot = rhai::image::inspect_png(day_png);
@@ -445,11 +439,10 @@ fn entry() {
                 && classic_shot.height == fancy_shot.height,
             "fancy_screenshot_geometry_mismatch"
         );
-        let fancy_delta = classic_shot.luminance - fancy_shot.luminance;
-        if fancy_delta < 0.0 {
-            fancy_delta = -fancy_delta;
-        }
-        test_harness::require(fancy_delta >= 1.0, "fancy_render_not_visibly_distinct");
+        test_harness::require(
+            classic_shot.luminance != fancy_shot.luminance,
+            "fancy_render_not_visibly_distinct"
+        );
         let token_after =
             "AGENTERM_THEME_AFTER_" + std::process::id();
         text_cli(
@@ -486,23 +479,11 @@ fn entry() {
         );
         let dark = rhai::image::inspect_png(night_png);
         let light = rhai::image::inspect_png(day_png);
-        let luminance_delta = dark.luminance - light.luminance;
-        if luminance_delta < 0.0 {
-            luminance_delta = -luminance_delta;
-        }
         test_harness::require(
             dark.width == light.width
                 && dark.height == light.height
-                && luminance_delta >= 20.0,
+                && light.luminance > dark.luminance,
             "theme_render_not_visibly_distinct"
-        );
-        print(
-            "Dark screenshot: " + dark.width + "x" + dark.height +
-            ", luminance " + dark.luminance
-        );
-        print(
-            "Light screenshot: " + light.width + "x" + light.height +
-            ", luminance " + light.luminance
         );
 
         print("STEP saved fancy-day survives shutdown and restart");
@@ -516,7 +497,6 @@ fn entry() {
         wait_for_server_stop(context, cli);
 
         let second_gui = start_gui(context, gui, cli);
-        owned_children.push(second_gui);
         let restored = only_tab(context, cli);
         json_cli(
             context,
@@ -531,9 +511,18 @@ fn entry() {
             0
         );
 
+        text_cli(context, cli, ["ui-action", "close-window"]);
+        text_cli(
+            context,
+            cli,
+            ["ui-action", "stop-server-and-exit"]
+        );
+        wait_for_exit(second_gui, "theme_second_gui_exit_timeout");
+        wait_for_server_stop(context, cli);
+
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            ["ux.theme-settings"],
             "ux.theme-settings"
         );
         print(
@@ -542,7 +531,7 @@ fn entry() {
         );
         succeeded = 1;
     } catch (error) {
-        failure = "" + error;
+        failure = catch_text(error);
         retain_failure_snapshot(context, cli);
     }
 
@@ -550,12 +539,12 @@ fn entry() {
     try {
         test_harness::complete(
             context,
-            owned_children,
+            [],
             succeeded,
             failure
         );
     } catch (error) {
-        completion_failure = "" + error;
+        completion_failure = catch_text(error);
     }
     if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);

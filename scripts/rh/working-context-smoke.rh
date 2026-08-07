@@ -20,12 +20,16 @@ fn require_no_secret(text, secret, location) {
 }
 
 fn active_tab(snapshot) {
+    let found = rhai::json::parse("{}");
     for tab in snapshot.tabs {
         if tab.active != 0 {
-            return tab;
+            found = tab;
         }
     }
-    throw "working_context_active_tab_missing";
+    if found.active == 0 {
+        throw "working_context_active_tab_missing";
+    }
+    rhai::json::parse(rhai::json::stringify(found))
 }
 
 fn wait_for_server(context, cli, gui_child, redactions) {
@@ -74,11 +78,10 @@ fn wait_for_exit(child, code) {
 fn start_gui(context, gui, proxy) {
     let command = test_harness::configured_command(context, gui, []);
     if proxy == "" {
-        for name in [
-            "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"
-        ] {
-            command.env_remove(name);
-        }
+        command.env_remove("HTTP_PROXY");
+        command.env_remove("HTTPS_PROXY");
+        command.env_remove("http_proxy");
+        command.env_remove("https_proxy");
     } else {
         command.env("HTTP_PROXY", proxy);
         command.env("HTTPS_PROXY", proxy);
@@ -114,13 +117,13 @@ fn entry() {
         "https://alice:" + secret +
         "@proxy.example:8443/private?token=" + secret + "#fragment";
     let redactions = [proxy, secret];
-    let owned_children = [];
+    let first_gui = start_gui(context, gui, proxy);
+    let second_gui = first_gui;
+    let second_started = 0;
     let succeeded = 0;
     let failure = "";
 
     try {
-        let first_gui = start_gui(context, gui, proxy);
-        owned_children.push(first_gui);
         wait_for_server(context, cli, first_gui, redactions);
         test_harness::invoke_cli(
             context,
@@ -138,35 +141,38 @@ fn entry() {
             redactions
         );
 
-        let snapshot_text = test_harness::invoke_cli(
+        let snapshot_result = test_harness::invoke_cli(
             context,
             cli,
             ["ui-snapshot"],
             0,
             redactions
-        ).stdout;
+        );
+        let snapshot_text = "" + snapshot_result.stdout;
         require_no_secret(snapshot_text, secret, "launch_ui_snapshot");
         let snapshot = rhai::json::parse(snapshot_text);
         let tab = active_tab(snapshot);
+        let proxy_source = "" + tab.working_context.proxy.source;
         test_harness::require(
             tab.working_context.proxy.configured != 0
-                && tab.working_context.proxy.source == "launch"
+                && proxy_source == "launch"
                 && tab.working_context.proxy.endpoint_visible == 0
                 && tab.working_context.proxy.credential_revealed == 0,
             "working_context_launch_proxy_facts"
         );
-        let tab_id = tab.id;
-        let epoch = snapshot.event_position.epoch;
-        let launch_pane = rhai::json::parse(
-            test_harness::invoke_cli(
-                context,
-                cli,
-                ["pane-snapshot", "-t", tab_id],
-                0,
-                redactions
-            ).stdout
+        let tab_id = "" + tab.id;
+        let epoch = "" + snapshot.event_position.epoch;
+        let launch_pane_result = test_harness::invoke_cli(
+            context,
+            cli,
+            ["pane-snapshot", "-t", tab_id],
+            0,
+            redactions
         );
-        let input_writes = launch_pane.windows[0].input_writes;
+        let launch_pane_text = "" + launch_pane_result.stdout;
+        let launch_pane = rhai::json::parse(launch_pane_text);
+        let launch_window = launch_pane.windows[0];
+        let input_writes = launch_window.input_writes;
         let proxy_status = snapshot.layout.status_bar.proxy;
         test_harness::require(
             proxy_status.archived != 0
@@ -184,30 +190,36 @@ fn entry() {
             1,
             redactions
         );
+        let archived_stdout = "" + archived.stdout;
+        let archived_stderr = "" + archived.stderr;
+        let archived_text = archived_stdout + archived_stderr;
         require_no_secret(
-            archived.stdout + archived.stderr,
+            archived_text,
             secret,
             "archived_proxy_action"
         );
         test_harness::require(
-            (archived.stdout + archived.stderr).contains(
+            archived_text.contains(
                 "proxy workbench controls are archived"
             ),
             "working_context_archived_status_missing"
         );
-        let pane_text = test_harness::invoke_cli(
+        let pane_result = test_harness::invoke_cli(
             context,
             cli,
             ["pane-snapshot", "-t", tab_id],
             0,
             redactions
-        ).stdout;
+        );
+        let pane_text = "" + pane_result.stdout;
         require_no_secret(pane_text, secret, "archived_pane_snapshot");
         let pane = rhai::json::parse(pane_text);
+        let pane_window = pane.windows[0];
+        let composer = "" + pane_window.composer;
         test_harness::require(
-            pane.windows[0].input_writes == input_writes
-                && pane.windows[0].composer_sensitive == 0
-                && pane.windows[0].composer == "",
+            pane_window.input_writes == input_writes
+                && pane_window.composer_sensitive == 0
+                && composer == "",
             "working_context_archived_surface_mutated_terminal"
         );
 
@@ -215,7 +227,7 @@ fn entry() {
         let persistent_name = "persistent-" + context.run_id;
         let persistent_note = "restored note";
         let persistent_draft = "restored draft";
-        let persistent_id = test_harness::invoke_cli(
+        let persistent_result = test_harness::invoke_cli(
             context,
             cli,
             [
@@ -224,7 +236,8 @@ fn entry() {
             ],
             0,
             redactions
-        ).stdout;
+        );
+        let persistent_id = "" + persistent_result.stdout;
         persistent_id.trim();
         test_harness::invoke_cli(
             context,
@@ -291,14 +304,15 @@ fn entry() {
         );
         let workspace_text = std::fs::read_to_string(context.workspace_path);
         require_no_secret(workspace_text, secret, "workspace");
-        let events = test_harness::invoke_cli(
+        let events_result = test_harness::invoke_cli(
             context,
             cli,
             ["read-events", "--epoch", epoch, "--after", "0",
              "--limit", "1024"],
             0,
             redactions
-        ).stdout;
+        );
+        let events = "" + events_result.stdout;
         require_no_secret(events, secret, "event_journal");
 
         test_harness::invoke_cli(
@@ -308,9 +322,12 @@ fn entry() {
             0,
             redactions
         );
-        let first_output = wait_for_exit(
+        wait_for_exit(
             first_gui,
             "working_context_first_gui_shutdown_timeout"
+        );
+        let first_output = first_gui.wait_with_output(
+            std::time::Duration::from_secs(2)
         );
         require_no_secret(
             first_output.stderr_text(),
@@ -318,8 +335,8 @@ fn entry() {
             "first_gui_stderr"
         );
 
-        let second_gui = start_gui(context, gui, "");
-        owned_children.push(second_gui);
+        second_gui = start_gui(context, gui, "");
+        second_started = 1;
         wait_for_server(context, cli, second_gui, redactions);
         test_harness::invoke_cli(
             context,
@@ -336,32 +353,40 @@ fn entry() {
             0,
             redactions
         );
-        let restored_text = test_harness::invoke_cli(
+        let restored_result = test_harness::invoke_cli(
             context,
             cli,
             ["ui-snapshot"],
             0,
             redactions
-        ).stdout;
+        );
+        let restored_text = "" + restored_result.stdout;
         require_no_secret(restored_text, secret, "restart_ui_snapshot");
         let restored_snapshot = rhai::json::parse(restored_text);
         let restored_tab = active_tab(restored_snapshot);
+        let restored_proxy_source = "" + restored_tab.working_context.proxy.source;
+        let restored_id = "" + restored_tab.id;
+        let restored_name = "" + restored_tab.name;
+        let restored_note = "" + restored_tab.note;
+        let restored_cwd_source = "" + restored_tab.working_context.cwd.source;
+        let restored_cwd_path = "" + restored_tab.working_context.cwd.path;
+        let restored_cwd_confirmed =
+            "" + restored_tab.working_context.cwd.confirmed_path;
         test_harness::require(
             restored_tab.working_context.proxy.configured == 0
-                && restored_tab.working_context.proxy.source == "off",
+                && restored_proxy_source == "off",
             "working_context_proxy_persisted"
         );
         test_harness::require(
-            restored_tab.id == persistent_id
-                && restored_tab.name == persistent_name
-                && restored_tab.note == persistent_note
+            restored_id == persistent_id
+                && restored_name == persistent_name
+                && restored_note == persistent_note
                 && restored_tab.draft != 0
                 && restored_tab.active != 0
-                && restored_tab.working_context.cwd.source == "launch"
+                && restored_cwd_source == "launch"
                 && restored_tab.working_context.cwd.pending == 0
-                && restored_tab.working_context.cwd.path
-                    == restored_tab.working_context.cwd.confirmed_path
-                && restored_tab.working_context.cwd.path
+                && restored_cwd_path == restored_cwd_confirmed
+                && restored_cwd_path
                     != "C:\\restart-request-must-not-persist"
                 && restored_snapshot.layout.sidebar.configured_width == 250
                 && restored_snapshot.layout.sidebar.visible != 0,
@@ -374,9 +399,12 @@ fn entry() {
             0,
             redactions
         );
-        let second_output = wait_for_exit(
+        wait_for_exit(
             second_gui,
             "working_context_second_gui_shutdown_timeout"
+        );
+        let second_output = second_gui.wait_with_output(
+            std::time::Duration::from_secs(2)
         );
         require_no_secret(
             second_output.stderr_text(),
@@ -399,12 +427,21 @@ fn entry() {
     test_harness::scrub_retained_text(context, redactions);
     let completion_failure = "";
     try {
-        test_harness::complete(
-            context,
-            owned_children,
-            succeeded,
-            failure
-        );
+        if second_started != 0 {
+            test_harness::complete(
+                context,
+                [first_gui, second_gui],
+                succeeded,
+                failure
+            );
+        } else {
+            test_harness::complete(
+                context,
+                [first_gui],
+                succeeded,
+                failure
+            );
+        }
     } catch (error) {
         completion_failure =
             test_harness::redact_text("" + error, redactions);
