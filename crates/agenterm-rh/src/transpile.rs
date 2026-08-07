@@ -1880,6 +1880,16 @@ fn emit_process_status(
 }
 
 fn emit_json_parse(out: &mut String, source: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    if let Some(path) = std_fs_read_to_string_arg(source) {
+        let mut path_expr = String::new();
+        if !emit_native_string(&mut path_expr, path, ctx)? {
+            return Ok(false);
+        }
+        out.push_str("rh_json_parse(&rh_std_fs_read_to_string(");
+        out.push_str(&path_expr);
+        out.push_str("))");
+        return Ok(true);
+    }
     let mut source_expr = String::new();
     if !emit_native_string(&mut source_expr, source, ctx)? {
         return Ok(false);
@@ -2685,6 +2695,27 @@ mod tests {
         assert!(output.rust.contains("add(40, 2)"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_nested_json_parse_read_to_string() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let path = args[0]; let doc = rhai::json::parse(std::fs::read_to_string(path)); doc.schema_version }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_parse(&rh_std_fs_read_to_string(&path))"),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]

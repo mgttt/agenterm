@@ -38,7 +38,8 @@ fn validate(path) {
         "artifact_manifest_path_invalid:" + manifest_path
     );
 
-    let manifest = rhai::json::parse(std::fs::read_to_string(manifest_path));
+    let text = std::fs::read_to_string(manifest_path);
+    let manifest = rhai::json::parse(text);
     require(
         manifest.schema_version == 2,
         "artifact_manifest_schema_unsupported"

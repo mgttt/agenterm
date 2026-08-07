@@ -98,7 +98,7 @@
 | M42e1 | Json 字符串绑定可走 `.starts_with`/`.trim`/`MapSet` key；本地 fn 按体推断 `String` 形参；原生 `print`（utility op 4）；任务编译缓存可按 `project_root` 打包 import；`string-fn-bundle.rh` 资格门 | [x] |
 | M42d | 无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [x] |
 | M42e2 | `project_import` / corpus 原生门优先解析 `.rh` 模块，并对任务入口使用 `transpile_cdylib_with_project` | [x] |
-| M42e3 | 语句位置 `if` 不再强制分支尾 `return`；`require` 在 `Stmt::Expr` 下按语句发射；codegen revision 13；`validate-artifact-manifest` 真实执行返回可执行文件计数 | [x] |
+| M42e3 | 语句位置 `if` 不再强制分支尾 `return`；`require` 在 `Stmt::Expr` 下按语句发射；codegen revision 14；原生嵌套 `json::parse(read_to_string(...))`；`validate-artifact-manifest` 真实执行返回可执行文件计数 | [x] |
 
 ---
 
