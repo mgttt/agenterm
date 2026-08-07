@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**舰队值班会话**刷新：2026-08-07T06:23Z（duty 结束；noop）
+最后由**舰队值班会话**刷新：2026-08-07T07:26Z（duty 结束；noop）
 
 ## 共享事实
 
@@ -15,8 +15,8 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `2193ff01`（duty handoff bc-4e98c735） |
-| 待审合 | （无；`cursor/1-0e37`@`915fc2d5` ahead=0） |
+| `origin/main` | tip `f9842005`（duty handoff bc-444dc392） |
+| 待审合 | （无；`cursor/1-0e37`@`f9842005` ahead=0） |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
@@ -63,10 +63,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-07T06:23Z
+### 舰队值班会话 · 2026-08-07T07:26Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-4e98c735-0920-45b6-a49d-bdcd59316d2b`
-- URL: https://cursor.com/agents/bc-4e98c735-0920-45b6-a49d-bdcd59316d2b
+- bcId: `bc-444dc392-c7f0-4d57-bf4a-e79b60898952`
+- URL: https://cursor.com/agents/bc-444dc392-c7f0-4d57-bf4a-e79b60898952
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -82,6 +82,7 @@
 
 ## 交接日志
 
+- 2026-08-07T07:26Z · 舰队值班会话(`bc-444dc392-…`) · duty: noop findings=0 main=f9842005；待审合=无；nudge=0 未 apply；lock 已清
 - 2026-08-07T06:23Z · 舰队值班会话(`bc-4e98c735-…`) · duty: noop findings=0 main=915fc2d5；`cursor/1-0e37`@915fc2d5 ahead=0；nudge=0 未 apply；lock 已清
 - 2026-08-07T05:26Z · 舰队值班会话(`bc-742ed67a-…`) · duty: findings=1 待审合 `cursor/1-0e37`@92a39a7a ahead=12 main=1e3ff476；nudge=0 未 apply；tip 05:24Z 新鲜未催主控；lock 已清
 - 2026-08-07T04:24Z · 舰队值班会话(`bc-e196c9e9-…`) · duty: findings=1 待审合 `cursor/1-0e37`@20b050de ahead=26 main=c25a733；nudge=0 未 apply；tip 04:07Z 新鲜未催主控；lock 已清
