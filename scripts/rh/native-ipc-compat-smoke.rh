@@ -20,9 +20,9 @@ fn catch_text(error) {
     "" + error
 }
 
-let declared_evidence = [
-    "control.native-ipc-published-compatibility"
-];
+fn declared_evidence_ids() {
+    ["control.native-ipc-published-compatibility"]
+}
 
 
 fn command_output(context, program, arguments, expected_failure, seconds) {
@@ -59,23 +59,23 @@ fn command_output(context, program, arguments, expected_failure, seconds) {
 }
 
 fn host_facts(context) {
-    let os_name = if std::env::has("AGENTERM_HOST_OS") {
-        std::env::get("AGENTERM_HOST_OS")
+    let os_name = "windows";
+    if std::env::has("AGENTERM_HOST_OS") {
+        os_name = std::env::get("AGENTERM_HOST_OS");
     } else if std::fs::exists("/System/Library/CoreServices") {
-        "macos"
+        os_name = "macos";
     } else if std::fs::exists("/proc") {
-        "linux"
-    } else {
-        "windows"
-    };
-    let arch = if std::env::has("AGENTERM_HOST_ARCH") {
-        std::env::get("AGENTERM_HOST_ARCH")
+        os_name = "linux";
+    }
+    let arch = "x86_64";
+    if std::env::has("AGENTERM_HOST_ARCH") {
+        arch = std::env::get("AGENTERM_HOST_ARCH");
     } else if std::env::has("PROCESSOR_ARCHITECTURE") {
-        let value = std::env::get("PROCESSOR_ARCHITECTURE").to_lower();
+        let arch_env = std::env::get("PROCESSOR_ARCHITECTURE");
+        let value = "" + arch_env;
+        value = value.to_lower();
         if value.contains("arm64") {
-            "aarch64"
-        } else {
-            "x86_64"
+            arch = "aarch64";
         }
     } else {
         let output = command_output(
@@ -85,14 +85,12 @@ fn host_facts(context) {
             false,
             2
         );
-        let value = output.stdout;
+        let value = "" + output.stdout;
         value.trim();
         if value == "arm64" || value == "aarch64" {
-            "aarch64"
-        } else {
-            "x86_64"
+            arch = "aarch64";
         }
-    };
+    }
     test_harness::require(
         os_name == "windows" || os_name == "linux" || os_name == "macos",
         "native_ipc_compat_host_os:" + os_name
@@ -147,7 +145,10 @@ fn acquire_release(context, catalog, release, asset, facts) {
     let archive = std::path::join(downloads, asset.name).display;
     let url = "https://github.com/" + catalog.repository +
         "/releases/download/" + release.tag + "/" + asset.name;
-    let curl = if facts.os == "windows" { "curl.exe" } else { "curl" };
+    let curl = "curl";
+    if facts.os == "windows" {
+        curl = "curl.exe";
+    }
     let max_filesize = "" + asset.size;
     command_output(
         context,
@@ -162,15 +163,22 @@ fn acquire_release(context, catalog, release, asset, facts) {
         false,
         130
     );
+    // Hoist INT locals: comparing metadata.len to a JSON field otherwise
+    // selects the string-ops lane via prefers_string_ops and breaks emit.
+    let archive_len = std::fs::metadata(archive).len;
+    let asset_size = 0 + asset.size;
     test_harness::require(
-        std::fs::metadata(archive).len == asset.size,
+        archive_len == asset_size,
         "native_ipc_compat_archive_size:" + release.version
     );
     test_harness::require(
         rhai::crypto::sha256_file(archive) == asset.sha256,
         "native_ipc_compat_archive_hash:" + release.version
     );
-    let tar = if facts.os == "windows" { "tar.exe" } else { "tar" };
+    let tar = "tar";
+    if facts.os == "windows" {
+        tar = "tar.exe";
+    }
     command_output(
         context,
         tar,
@@ -178,7 +186,10 @@ fn acquire_release(context, catalog, release, asset, facts) {
         false,
         30
     );
-    let suffix = if facts.os == "windows" { ".exe" } else { "" };
+    let suffix = "";
+    if facts.os == "windows" {
+        suffix = ".exe";
+    }
     // Historical releases ship agenterm-server; HEAD consolidated to agenterm.
     let legacy_server = std::path::join(
         extracted,
@@ -188,11 +199,10 @@ fn acquire_release(context, catalog, release, asset, facts) {
         extracted,
         "agenterm" + suffix
     ).display;
-    let server = if std::fs::exists(legacy_server) {
-        legacy_server
-    } else {
-        consolidated_server
-    };
+    let server = consolidated_server;
+    if std::fs::exists(legacy_server) {
+        server = legacy_server;
+    }
     let cli = std::path::join(
         extracted,
         "agenterm-cli" + suffix
@@ -212,11 +222,12 @@ fn acquire_release(context, catalog, release, asset, facts) {
         false,
         5
     );
+    // command_output returns a JSON map, not RhOutput.
+    let version_text = "" + version_output.stdout + version_output.stderr;
+    let release_version = "" + release.version;
     test_harness::require(
-        (version_output.stdout + version_output.stderr).contains(
-            release.version
-        ),
-        "native_ipc_compat_published_version:" + release.version
+        version_text.contains(release_version),
+        "native_ipc_compat_published_version:" + release_version
     );
     #{ server: server, cli: cli }
 }
@@ -252,7 +263,8 @@ fn executable_hash(metadata, path) {
         matches.len == 1,
         "native_ipc_compat_head_metadata_entry:" + name
     );
-    matches[0].sha256
+    let entry = matches[0];
+    "" + entry.sha256
 }
 
 fn verify_head(context, repo, server, cli, metadata_path) {
@@ -284,8 +296,12 @@ fn authority_argv(program, arguments) {
     let name = std::path::PathBuf::from(program).file_name;
     if name == "agenterm" || name == "agenterm.exe" {
         let server_args = ["server"];
-        for argument in arguments {
-            server_args.push(argument);
+        // while+index keeps `arguments` typed as StringList for native emit
+        // (bare `for x in arguments` is not string-list evidence).
+        let arg_idx = 0;
+        while arg_idx < arguments.len {
+            server_args.push(arguments[arg_idx]);
+            arg_idx = arg_idx + 1;
         }
         return server_args;
     }
@@ -301,18 +317,16 @@ fn configured(
     workspace,
     legacy_address
 ) {
+    // Hoist: emit_string_list_arg accepts StringList variables, not local FnCalls.
+    let argv = authority_argv(program, arguments);
     let command = test_harness::configured_command(
         context,
         program,
-        authority_argv(program, arguments)
+        argv
     );
-    for name in [
-        "AGENTERM_IPC_ENDPOINT",
-        "AGENTERM_IPC_ADDRESS",
-        "AGENTERM_INSTANCE"
-    ] {
-        command.env_remove(name);
-    }
+    command.env_remove("AGENTERM_IPC_ENDPOINT");
+    command.env_remove("AGENTERM_IPC_ADDRESS");
+    command.env_remove("AGENTERM_INSTANCE");
     if legacy_address != "" {
         command.env("AGENTERM_IPC_ADDRESS", legacy_address);
     }
@@ -393,7 +407,8 @@ fn invoke_json(
         workspace,
         legacy_address
     );
-    rhai::json::parse(output.stdout + output.stderr)
+    let text = "" + output.stdout + output.stderr;
+    rhai::json::parse(text)
 }
 
 fn wait_protocol(
@@ -407,7 +422,15 @@ fn wait_protocol(
     server
 ) {
     for attempt in 0..200 {
-        let arguments = selector;
+        // Rebuild argv as a JSON string array: `let arguments = selector`
+        // leaves Int typing when selector has no body-level StringList
+        // evidence, which breaks append_command_record's JSON boundary.
+        let arguments = [];
+        let idx = 0;
+        while idx < selector.len {
+            arguments.push("" + selector[idx]);
+            idx = idx + 1;
+        }
         arguments.push("protocol-info");
         arguments.push("--running");
         let command = configured(
@@ -429,9 +452,8 @@ fn wait_protocol(
             []
         );
         if output.success {
-            return rhai::json::parse(
-                output.stdout_text() + output.stderr_text()
-            );
+            let text = output.stdout_text() + output.stderr_text();
+            return rhai::json::parse(text);
         }
         if server.state == "exited" {
             let ended = server.wait_with_output(
@@ -443,6 +465,8 @@ fn wait_protocol(
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "native_ipc_compat_server_ready_timeout";
+    // Unreachable: keep return kind Json (bare `throw` otherwise infers String).
+    #{ pid: 0 }
 }
 
 fn wait_exit(child, code) {
@@ -455,6 +479,8 @@ fn wait_exit(child, code) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
+    // Unreachable: keep return kind Output for `.success` at call sites.
+    child.wait_with_output(std::time::Duration::from_secs(0))
 }
 
 fn shutdown(
@@ -468,7 +494,12 @@ fn shutdown(
     server,
     code
 ) {
-    let arguments = selector;
+    let arguments = [];
+    let idx = 0;
+    while idx < selector.len {
+        arguments.push("" + selector[idx]);
+        idx = idx + 1;
+    }
     arguments.push("shutdown");
     invoke(
         context,
@@ -480,7 +511,8 @@ fn shutdown(
         workspace,
         legacy_address
     );
-    test_harness::require(wait_exit(server, code).success, code + "_failure");
+    let ended = wait_exit(server, code);
+    test_harness::require(ended.success, code + "_failure");
 }
 
 fn entry() {
@@ -525,7 +557,10 @@ while index < args.len {
 
 let context = test_harness::new_context(repo, "native-ipc-compat");
 let facts = host_facts(context);
-let suffix = if facts.os == "windows" { ".exe" } else { "" };
+let suffix = "";
+if facts.os == "windows" {
+    suffix = ".exe";
+}
 if head_server == "" {
     head_server = std::path::join(
         repo,
@@ -557,17 +592,15 @@ test_harness::require(
 let release_110 = release_by_version(catalog, "0.1.10");
 let release_111 = release_by_version(catalog, "0.1.11");
 let asset_111 = platform_asset(release_111, facts);
-let runtime_directory = if facts.os == "windows" {
-    std::path::join(context.run_directory, "runtime").display
-} else {
-    let root = if std::fs::exists("/private/tmp") {
-        "/private/tmp"
-    } else {
-        "/tmp"
-    };
-    root + "/agt-compat-" + std::process::id() + "-" +
-        std::time::SystemTime::now().unix_millis
-};
+let runtime_directory = std::path::join(context.run_directory, "runtime").display;
+if facts.os != "windows" {
+    let root = "/tmp";
+    if std::fs::exists("/private/tmp") {
+        root = "/private/tmp";
+    }
+    runtime_directory = root + "/agt-compat-" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis;
+}
 let config_directory = std::path::join(
     context.run_directory,
     "config"
@@ -1006,7 +1039,7 @@ try {
 
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "control.native-ipc-published-compatibility"
     );
     print(
