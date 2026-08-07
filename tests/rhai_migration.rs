@@ -72,7 +72,7 @@ fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     command
         .current_dir(repo)
         .args(["task", "run", "prepare-target-clean", "--manifest"])

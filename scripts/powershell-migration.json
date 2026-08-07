@@ -458,7 +458,7 @@
       "group": "deleted",
       "responsibility": "safe target cleanup preparation",
       "replacement_task": "prepare-target-clean",
-      "replacement": "scripts/rhai/prepare-target-clean.rhai",
+      "replacement": "scripts/rh/prepare-target-clean.rh",
       "evidence": "public CLI black-box coverage in tests/rhai_migration.rs",
       "status": "deleted",
       "callers": [

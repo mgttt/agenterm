@@ -1,0 +1,93 @@
+// Validate an exact repository-local Cargo target and install CACHEDIR.TAG.
+//
+// Args:
+//   REPO [TARGET]
+
+fn entry() {
+    if args.len < 1 || args.len > 2 {
+        return rh::fail("expected: REPO [TARGET]");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let toplevel = std::process::command_status(
+        "git",
+        ["-C", repo, "rev-parse", "--show-toplevel"],
+        10000
+    );
+    require(toplevel == 0, "target-clean-git-root");
+
+    // Git resolves Windows 8.3 aliases to a long path for --show-toplevel.
+    // Comparing those spellings would reject the same directory on hosted runners.
+    // An empty Git-relative prefix proves that -C itself names the repository root.
+    let stdout_path = repo + ".prepare-target-clean.stdout.tmp";
+    let prefix_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "rev-parse", "--show-prefix"],
+        10000,
+        stdout_path
+    );
+    require(prefix_code == 0, "target-clean-git-prefix");
+    let prefix = std::fs::read_to_string(stdout_path);
+    prefix.trim();
+    std::fs::try_remove_file(stdout_path);
+    require(
+        prefix == "",
+        "target_clean_repo_not_exact_git_root:" + repo
+    );
+
+    let target_argument = "target";
+    if args.len == 2 && args[1] != "" {
+        target_argument = args[1];
+    }
+    // Path::join replaces the base when the child is absolute, so relative and
+    // absolute TARGET arguments both normalize correctly.
+    let target_joined = std::path::join(repo, target_argument).display;
+    let target = std::path::absolute(target_joined).display;
+    let development_joined = std::path::join(repo, "target").display;
+    let development_target = std::path::absolute(development_joined).display;
+    let release_joined = std::path::join(repo, "target-release").display;
+    let release_target = std::path::absolute(release_joined).display;
+    let target_lower = target;
+    target_lower.to_lower();
+    let development_lower = development_target;
+    development_lower.to_lower();
+    let release_lower = release_target;
+    release_lower.to_lower();
+    require(
+        target_lower == development_lower || target_lower == release_lower,
+        "target_clean_path_not_allowed:" + target
+    );
+    require(std::fs::exists(target), "target_clean_path_missing:" + target);
+    let metadata = std::fs::symlink_metadata(target);
+    require(metadata.is_dir, "target_clean_path_not_directory:" + target);
+    require(
+        !metadata.is_symlink && !metadata.is_reparse_point,
+        "target_clean_path_indirect:" + target
+    );
+
+    let signature = "Signature: 8a477f597d28d172789f06886806bc55";
+    let content =
+        signature + "\n" +
+        "# This file is a cache directory tag created by cargo.\n" +
+        "# For information about cache directory tags see https://bford.info/cachedir/\n";
+    let tag = std::path::join(target, "CACHEDIR.TAG").display;
+    if std::fs::exists(tag) {
+        let tag_meta = std::fs::symlink_metadata(tag);
+        require(
+            tag_meta.is_file,
+            "target_clean_cache_tag_not_file:" + tag
+        );
+        let tag_text = std::fs::read_to_string(tag);
+        let expected_prefix = signature + "\n";
+        require(
+            tag_text.starts_with(expected_prefix),
+            "target_clean_cache_tag_invalid:" + tag
+        );
+    } else {
+        // atomic_write returns 0 on success and typed failure (fail-on-error).
+        rhai::runtime::atomic_write(tag, content);
+    }
+
+    print("Prepared Cargo cache tag for exact repo target: " + target);
+    0
+}

@@ -1028,7 +1028,7 @@
     {
       "id": "prepare-target-clean",
       "description": "Validate an exact repository-local Cargo target and install its cache tag",
-      "entry": "scripts/rhai/prepare-target-clean.rhai",
+      "entry": "scripts/rh/prepare-target-clean.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

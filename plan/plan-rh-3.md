@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **M42f5 完成**（cg20）：`stage-build` / `write-build-metadata` 已切原生 `.rh` 入口；旧 `.rhai` 归档。下一步另开里程碑 |
+| **状态** | **进行中 M42f6**（cg20）：M42f6a `prepare-target-clean` 已切 `.rh`。**下一步 M42f6b**：`build-identity` |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -110,6 +110,9 @@
 | M42f5b2 | JSON 对象构建 / `stringify_pretty`、字符串 `split` 线迭代、`json_array_push`/`json_array_get`；codegen 20；bool 字面量赋值放行 | [x] |
 | M42f5b3 | INT-only `scripts/rh/lib/build_metadata.rh`（`write`/`write_platform` 返回 0；过程调用改 `command_stdout_file`/`command_status`；transpile 收紧 JSON 形参推断 + join/read_to_string JSON 子路径；资格门覆盖 stringify+atomic_write+sha256） | [x] |
 | M42f5c | `scripts/rh/stage-build.rh`；任务 entry 切 `write-build-metadata`/`stage-build` → `.rh`；归档旧 `.rhai`；`stage`/`stage_as` 只读 INT 0/1，不假设 map；黑盒串起真实写盘 | [x] |
+| M42f6 | rh 全面替换剩余 `.rhai` 任务入口（不保留解释兼容为目标）；按可验证切片推进并归档旧脚本 | [ ] |
+| M42f6a | INT-only `scripts/rh/prepare-target-clean.rh`；`command_status`/`command_stdout_file`+`atomic_write`；entry 切 `.rh` 并归档 | [x] |
+| M42f6b | INT-only `scripts/rh/lib/build_identity.rh` + `build-identity.rh`（写 batch env，返回 0）；entry 切 `.rh` 并归档 | [ ] |
 
 **M42f5 依赖说明：** `stage-build.rhai` 本身编排（clean → stage/stage_as 循环 → metadata → clean）在 M42f4 后已大半可复用原生 `artifact_files`；真正阻塞是 (1) `git rev-parse --show-prefix` 需要 stdout（仅有 `command_status` 不够），(2) 内联 `build_metadata::write` 需要哈希/原子写/环境/RFC3339/JSON 序列化。禁止用 shell 包装或 `host_eval` 假迁移；禁止把 metadata 改成子进程调 Rhai 任务冒充原生入口。
 
