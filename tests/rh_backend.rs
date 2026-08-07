@@ -65,8 +65,8 @@ fn rh_backend_check_accepts_entry_fixture() {
             RhInvocationOptions::default(),
             None,
         )
-            .expect("check")
-            .expect("rh handled");
+        .expect("check")
+        .expect("rh handled");
         assert!(result.value.is_none());
     });
 }
@@ -81,8 +81,8 @@ fn rh_backend_eval_runs_source_without_prebuilt_pack() {
             RhInvocationOptions::default(),
             None,
         )
-            .expect("eval")
-            .expect("rh handled");
+        .expect("eval")
+        .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(42)));
         assert!(result.stdout.contains("rh-aot fixture"));
     });
@@ -98,8 +98,8 @@ fn rh_backend_eval_stdlib_fixture_via_host_eval() {
             RhInvocationOptions::default(),
             None,
         )
-            .expect("eval")
-            .expect("rh handled");
+        .expect("eval")
+        .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(42)));
     });
 }
@@ -114,16 +114,16 @@ fn rh_backend_run_matches_eval_for_entry_fixture() {
             RhInvocationOptions::default(),
             None,
         )
-            .expect("eval")
-            .expect("rh handled");
+        .expect("eval")
+        .expect("rh handled");
         let run = try_execute_rh_invocation(
             ScriptOperation::Run,
             source,
             RhInvocationOptions::default(),
             None,
         )
-            .expect("run")
-            .expect("rh handled");
+        .expect("run")
+        .expect("rh handled");
         assert_eq!(run.value, eval.value);
         assert_eq!(run.stdout, eval.stdout);
     });
@@ -193,8 +193,8 @@ fn rh_backend_run_while_count_fixture() {
             RhInvocationOptions::default(),
             None,
         )
-            .expect("run")
-            .expect("rh handled");
+        .expect("run")
+        .expect("rh handled");
         assert_eq!(result.value, Some(serde_json::json!(0)));
     });
 }
