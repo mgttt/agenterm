@@ -1288,10 +1288,7 @@ fn param_used_as_string_list(def: &ScriptFuncDef, param: &str) -> bool {
 fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
     if let Expr::Dot(boxed, ..) = expr {
         if let Expr::MethodCall(call, ..) = &boxed.rhs {
-            if call.name == "args"
-                && call.args.len() == 1
-                && is_param_var(&call.args[0], param)
-            {
+            if call.name == "args" && call.args.len() == 1 && is_param_var(&call.args[0], param) {
                 return true;
             }
             if call.name == "push" && is_param_var(&boxed.lhs, param) {
@@ -1719,7 +1716,8 @@ fn emit_stmt(
                     out.push(']');
                 } else {
                     return Err(RhError::Transpile(
-                        "string list binding requires .split(\"…\") or a string array literal".into(),
+                        "string list binding requires .split(\"…\") or a string array literal"
+                            .into(),
                     ));
                 }
             } else if kind == ValueKind::Set {
@@ -1787,10 +1785,10 @@ fn emit_stmt(
                 return Ok(());
             }
             if json_assign_target(&bin.lhs, ctx).is_some() {
-                let rendered = crate::expr_print::expr_to_rhai(&bin.lhs)
-                    .unwrap_or_else(|_| "<lhs>".into());
-                let rhs = crate::expr_print::expr_to_rhai(&bin.rhs)
-                    .unwrap_or_else(|_| "<rhs>".into());
+                let rendered =
+                    crate::expr_print::expr_to_rhai(&bin.lhs).unwrap_or_else(|_| "<lhs>".into());
+                let rhs =
+                    crate::expr_print::expr_to_rhai(&bin.rhs).unwrap_or_else(|_| "<rhs>".into());
                 return Err(RhError::Transpile(format!(
                     "unsupported json assignment value: {rendered} = {rhs}"
                 )));
@@ -2439,11 +2437,7 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
     }
 }
 
-fn emit_fail_return(
-    out: &mut String,
-    message: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<(), RhError> {
+fn emit_fail_return(out: &mut String, message: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if let Some(default) = fail_return_default(ctx.current_return_kind) {
         out.push_str("    let _ = ");
         emit_rh_fail(out, message, ctx)?;
@@ -2526,10 +2520,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             ValueKind::ChildList
         }
         Expr::Array(items, ..)
-            if !items.is_empty()
-                && items
-                    .iter()
-                    .all(|item| is_stringish_array_item(item, ctx)) =>
+            if !items.is_empty() && items.iter().all(|item| is_stringish_array_item(item, ctx)) =>
         {
             ValueKind::StringList
         }
@@ -2599,6 +2590,11 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if output_stdout_text_call(expr, ctx).is_some() => ValueKind::String,
         _ if output_stderr_text_call(expr, ctx).is_some() => ValueKind::String,
         _ if char_to_string_binding(expr, ctx).is_some() => ValueKind::String,
+        _ if child_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "platform_facts") =>
+        {
+            ValueKind::Json
+        }
         _ if child_property_binding(expr, ctx).is_some_and(|(_, property)| property == "id") => {
             ValueKind::Int
         }
@@ -3290,9 +3286,7 @@ fn hash_fnv1a64_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::hash"
-        || call.name != "fnv1a64"
-        || call.args.len() != 1
+    if call.namespace.to_string() != "rhai::hash" || call.name != "fnv1a64" || call.args.len() != 1
     {
         return None;
     }
@@ -3420,7 +3414,6 @@ fn resolve_local_fn_name(name: &str, ctx: &EmitCtx) -> Option<String> {
         .cloned()
 }
 
-
 fn string_list_push_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
@@ -3452,8 +3445,10 @@ fn emit_string_list_push_stmt(
     out.push_str(binding);
     out.push_str(".push(");
     emit_stringish(out, item, ctx)?;
-    out.push_str(");
-");
+    out.push_str(
+        ");
+",
+    );
     Ok(true)
 }
 
@@ -3738,7 +3733,7 @@ fn child_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str,
         return None;
     }
     let property = dot_property_name(&boxed.rhs)?;
-    matches!(property, "id" | "state").then_some((ident.1.as_str(), property))
+    matches!(property, "id" | "state" | "platform_facts").then_some((ident.1.as_str(), property))
 }
 
 fn child_state_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
@@ -3802,11 +3797,7 @@ fn task_sleep_arg(expr: &Expr) -> Option<&Expr> {
     }
 }
 
-fn emit_task_sleep_stmt(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_task_sleep_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some(duration) = task_sleep_arg(expr) else {
         return Ok(false);
     };
@@ -4107,6 +4098,10 @@ fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
         out.push_str("rh_child_state(&mut ");
         out.push_str(binding);
         out.push(')');
+    } else if property == "platform_facts" {
+        out.push_str("rh_child_platform_facts(&mut ");
+        out.push_str(binding);
+        out.push(')');
     } else if property == "id" {
         out.push_str(binding);
         out.push_str(".inner.borrow().pid");
@@ -4173,8 +4168,7 @@ fn string_split_parts<'a>(
     };
     // Shape A: Dot(receiver, MethodCall(split))
     if let Expr::MethodCall(call, ..) = &boxed.rhs {
-        if call.name != "split" || call.args.len() != 1 || !split_separator_ok(&call.args[0], ctx)
-        {
+        if call.name != "split" || call.args.len() != 1 || !split_separator_ok(&call.args[0], ctx) {
             return None;
         }
         if let Some((binding, path)) = json_value_path(&boxed.lhs, ctx) {
@@ -4365,15 +4359,17 @@ fn is_stringish_array_item(expr: &Expr, ctx: &EmitCtx) -> bool {
             ctx.scope.get(ident.1.as_str()),
             Some(ValueKind::String | ValueKind::Path)
         ),
-        _ => json_value_path(expr, ctx).is_some()
-            || path_join_display_args(expr).is_some()
-            || path_parent_display_arg(expr).is_some()
-            || path_absolute_display_arg(expr).is_some()
-            || path_buf_from_display_arg(expr).is_some()
-            || string_concat_args(expr, ctx).is_some()
-            || args_index_expr(expr).is_some()
-            || std_env_get_arg(expr).is_some()
-            || dir_entry_path_display_binding(expr, ctx).is_some(),
+        _ => {
+            json_value_path(expr, ctx).is_some()
+                || path_join_display_args(expr).is_some()
+                || path_parent_display_arg(expr).is_some()
+                || path_absolute_display_arg(expr).is_some()
+                || path_buf_from_display_arg(expr).is_some()
+                || string_concat_args(expr, ctx).is_some()
+                || args_index_expr(expr).is_some()
+                || std_env_get_arg(expr).is_some()
+                || dir_entry_path_display_binding(expr, ctx).is_some()
+        }
     }
 }
 
@@ -5458,8 +5454,7 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || output_stdout_text_call(expr, ctx).is_some()
         || output_stderr_text_call(expr, ctx).is_some()
         || parse_string_method_call(expr, ctx).is_some_and(|(_, call)| {
-            call.args.is_empty()
-                && matches!(call.name.as_str(), "to_lower" | "trim" | "to_string")
+            call.args.is_empty() && matches!(call.name.as_str(), "to_lower" | "trim" | "to_string")
         })
         || string_method_on_path_display(expr, ctx).is_some()
         || (json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
@@ -5602,6 +5597,10 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         out.push_str(", ");
         emit_stringish(out, rhs, ctx)?;
         out.push(')');
+        return Ok(());
+    }
+    if let Some(path) = path_buf_from_arg(expr) {
+        emit_stringish(out, path, ctx)?;
         return Ok(());
     }
     if let Some(argument) = type_of_arg(expr) {
@@ -6297,9 +6296,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
-        if hash_fnv1a64_arg(expr).is_some()
-            && emit_hash_fnv1a64(out, expr, ctx)?
-        {
+        if hash_fnv1a64_arg(expr).is_some() && emit_hash_fnv1a64(out, expr, ctx)? {
             return Ok(());
         }
         if let Some((path, value)) = runtime_atomic_write_args(expr)
@@ -6488,9 +6485,8 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(".len() as INT)");
         }
         Expr::Dot(..)
-            if var_len_name(expr).is_some_and(|name| {
-                ctx.scope.get(name).copied() == Some(ValueKind::ChildList)
-            }) =>
+            if var_len_name(expr)
+                .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::ChildList)) =>
         {
             out.push('(');
             out.push_str(var_len_name(expr).expect("checked child list binding"));
@@ -6878,9 +6874,8 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
         _ if json_array_index(expr, ctx).is_some() => {
             emit_expr(out, expr, ctx)?;
         }
-        _ if var_len_name(expr).is_some_and(|name| {
-            ctx.scope.get(name).copied() == Some(ValueKind::ChildList)
-        }) =>
+        _ if var_len_name(expr)
+            .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::ChildList)) =>
         {
             out.push_str("serde_json::json!(");
             out.push('(');
@@ -6910,8 +6905,8 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
                 && call.namespace.is_empty()
                 && is_local_fn_call(call.name.as_str(), ctx) =>
         {
-            let resolved = resolve_local_fn_name(call.name.as_str(), ctx)
-                .expect("checked local fn call");
+            let resolved =
+                resolve_local_fn_name(call.name.as_str(), ctx).expect("checked local fn call");
             let return_kind = ctx
                 .local_fn_return_kinds
                 .get(resolved.as_str())
@@ -7078,11 +7073,7 @@ fn emit_hash_fnv1a64_bytes_input(
     Ok(true)
 }
 
-fn emit_hash_fnv1a64(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_hash_fnv1a64(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some(bytes_arg) = hash_fnv1a64_arg(expr) else {
         return Ok(false);
     };
@@ -7848,7 +7839,11 @@ fn emit_string_sub_string(
     Ok(true)
 }
 
-fn emit_string_method_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+fn emit_string_method_expr(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
     if emit_string_method_on_path_display(out, expr, ctx)? {
         return Ok(true);
     }
@@ -8582,9 +8577,7 @@ fn emit_string_list_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
         {
             // JSON string arrays (common harness argv vectors) coerce at the
             // typed StringList boundary.
-            out.push_str(
-                "rh_json_array_items(&",
-            );
+            out.push_str("rh_json_array_items(&");
             out.push_str(ident.1.as_str());
             out.push_str(", &[]).into_iter().map(|value| rh_json_as_str(&value)).collect()");
             Ok(())
@@ -8874,7 +8867,9 @@ fn entry() {
             output.rust
         );
         assert!(
-            output.rust.contains("let mut piece = character.to_string();"),
+            output
+                .rust
+                .contains("let mut piece = character.to_string();"),
             "{}",
             output.rust
         );
@@ -9136,7 +9131,11 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("helper__add(40, 2)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("helper__add(40, 2)"),
+            "{}",
+            output.rust
+        );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
@@ -9481,8 +9480,12 @@ fn entry() {
             output.rust
         );
         assert!(
-            output.rust.contains("rh_process_status(&worker, &prune_arguments,")
-                || output.rust.contains("rh_process_status(&worker, &prune_arguments, "),
+            output
+                .rust
+                .contains("rh_process_status(&worker, &prune_arguments,")
+                || output
+                    .rust
+                    .contains("rh_process_status(&worker, &prune_arguments, "),
             "{}",
             output.rust
         );
@@ -9517,8 +9520,12 @@ fn entry() {
             output.rust
         );
         assert!(
-            output.rust.contains("rh_process_status(\"worker\", &arguments,")
-                || output.rust.contains("rh_process_status(\"worker\", &arguments, "),
+            output
+                .rust
+                .contains("rh_process_status(\"worker\", &arguments,")
+                || output
+                    .rust
+                    .contains("rh_process_status(\"worker\", &arguments, "),
             "{}",
             output.rust
         );
@@ -9631,10 +9638,7 @@ fn entry() {
     };
     timing.workload.fingerprint
 }"#;
-        let probe_path = format!(
-            "/tmp/rh_probe_hash_{}.rh",
-            std::process::id()
-        );
+        let probe_path = format!("/tmp/rh_probe_hash_{}.rh", std::process::id());
         let _ = std::fs::write(&probe_path, probe);
         let output = transpile_cdylib_with_mode(probe).expect("transpile");
         assert_eq!(
@@ -9644,7 +9648,9 @@ fn entry() {
             output.rust
         );
         assert!(
-            output.rust.contains("rh_hash_fnv1a64(&rh_json_stringify(&workload_identity))"),
+            output
+                .rust
+                .contains("rh_hash_fnv1a64(&rh_json_stringify(&workload_identity))"),
             "{}",
             output.rust
         );
@@ -9674,16 +9680,8 @@ fn entry() { env_value("AGENTERM_BOOTSTRAP_SETUP_MS") }"#,
             "{}",
             output.rust
         );
-        assert!(
-            output.rust.contains("rh_env_has(&name)"),
-            "{}",
-            output.rust
-        );
-        assert!(
-            output.rust.contains("rh_env_get(&name)"),
-            "{}",
-            output.rust
-        );
+        assert!(output.rust.contains("rh_env_has(&name)"), "{}", output.rust);
+        assert!(output.rust.contains("rh_env_get(&name)"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     }
 
@@ -9700,14 +9698,16 @@ fn entry() { env_value("AGENTERM_BOOTSTRAP_SETUP_MS") }"#,
             output.rust
         );
         assert!(
-            output.rust.contains("rh_env_parse_int(\"AGENTERM_BOOTSTRAP_SETUP_MS\")"),
+            output
+                .rust
+                .contains("rh_env_parse_int(\"AGENTERM_BOOTSTRAP_SETUP_MS\")"),
             "{}",
             output.rust
         );
         assert!(
-            !output
-                .rust
-                .contains("rh_host_eval_int(\"std::env::get(`AGENTERM_BOOTSTRAP_SETUP_MS`).parse_int()"),
+            !output.rust.contains(
+                "rh_host_eval_int(\"std::env::get(`AGENTERM_BOOTSTRAP_SETUP_MS`).parse_int()"
+            ),
             "{}",
             output.rust
         );
@@ -9765,7 +9765,9 @@ fn entry() { read_ms("AGENTERM_BOOTSTRAP_SETUP_MS") }"#,
             output.rust
         );
         assert!(
-            !output.rust.contains("rh_host_eval_int(\"std::env::get(name).parse_int()"),
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::env::get(name).parse_int()"),
             "{}",
             output.rust
         );
@@ -9818,7 +9820,9 @@ fn entry() {
             output.rust
         );
         assert!(
-            !output.rust.contains("rh_host_eval_int(\"bootstrap.setup_ms"),
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"bootstrap.setup_ms"),
             "{}",
             output.rust
         );
@@ -9840,7 +9844,9 @@ fn entry() {
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
         assert!(
-            !output.rust.contains("rh_host_eval_int(\"std::process::command_"),
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_"),
             "{}",
             output.rust
         );
@@ -9868,18 +9874,12 @@ fn entry() {
             "AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS",
         ] {
             assert!(
-                output
-                    .rust
-                    .contains(&format!("rh_env_parse_int({name:?})")),
+                output.rust.contains(&format!("rh_env_parse_int({name:?})")),
                 "{}",
                 output.rust
             );
         }
-        assert!(
-            !output.rust.contains(".parse_int()"),
-            "{}",
-            output.rust
-        );
+        assert!(!output.rust.contains(".parse_int()"), "{}", output.rust);
         assert!(
             output
                 .rust
@@ -10127,12 +10127,16 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
-            output
-                .rust
-                .contains("rh_create_dir_all(&rh_path_parent(&String::from(\"target/tmp/out.json\")))")
-                || output.rust.contains("rh_create_dir_all(&rh_path_parent("),
+            output.rust.contains(
+                "rh_create_dir_all(&rh_path_parent(&String::from(\"target/tmp/out.json\")))"
+            ) || output.rust.contains("rh_create_dir_all(&rh_path_parent("),
             "{}",
             output.rust
         );
@@ -10161,7 +10165,12 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("rh_create_dir_all(&rh_path_parent(")
                 && output.rust.contains("rh_atomic_write("),
@@ -10187,7 +10196,12 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("rh_create_dir_all(&rh_path_parent(")
                 && output.rust.contains("rh_atomic_write("),
@@ -10390,12 +10404,16 @@ fn entry() { stage_copy(args[0], args[1]) }
             output.rust
         );
         assert!(
-            output.rust.contains("rh_json_set_path(&mut metadata, &[\"git_commit\"]"),
+            output
+                .rust
+                .contains("rh_json_set_path(&mut metadata, &[\"git_commit\"]"),
             "{}",
             output.rust
         );
         assert!(
-            output.rust.contains("rh_json_set_path(&mut metadata, &[\"git_dirty\"]"),
+            output
+                .rust
+                .contains("rh_json_set_path(&mut metadata, &[\"git_dirty\"]"),
             "{}",
             output.rust
         );
@@ -10534,12 +10552,12 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
+        assert!(output.rust.contains("rh_hash_fnv1a64("), "{}", output.rust);
         assert!(
-            output.rust.contains("rh_hash_fnv1a64("),
-            "{}",
-            output.rust
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"rhai::hash::fnv1a64")
         );
-        assert!(!output.rust.contains("rh_host_eval_int(\"rhai::hash::fnv1a64"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
@@ -10565,9 +10583,9 @@ fn entry() { stage_copy(args[0], args[1]) }
             2
         );
         assert!(
-            output
-                .rust
-                .contains("rh_json_int_path(&context, &[\"process_observation\", \"owned_commands\"]) + "),
+            output.rust.contains(
+                "rh_json_int_path(&context, &[\"process_observation\", \"owned_commands\"]) + "
+            ),
             "{}",
             output.rust
         );
@@ -10610,7 +10628,6 @@ fn entry() {
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
-    
     #[test]
     fn cdylib_transpile_json_path_array_push_contains_native() {
         let output = transpile_cdylib_with_mode(
@@ -10643,7 +10660,7 @@ fn entry() {
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
-#[test]
+    #[test]
     fn cdylib_transpile_for_loop_json_rebind_string_field_native() {
         // Outer JSON null + assign from for-item must keep Json typing for
         // post-loop `"" + metadata_entry.sha256` (qualification artifact hash).
@@ -10855,11 +10872,7 @@ fn entry() {
             output.rust
         );
         assert!(output.rust.contains("rh_path_parent("), "{}", output.rust);
-        assert!(
-            output.rust.contains("rh_path_absolute("),
-            "{}",
-            output.rust
-        );
+        assert!(output.rust.contains("rh_path_absolute("), "{}", output.rust);
         assert!(
             output.rust.contains(".to_ascii_lowercase()"),
             "{}",
@@ -11052,9 +11065,16 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_project(&root, source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
-            output.rust.contains("let mut context = test_harness__new_context(rh_arg(0)"),
+            output
+                .rust
+                .contains("let mut context = test_harness__new_context(rh_arg(0)"),
             "{}",
             output.rust
         );
@@ -11074,7 +11094,12 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("let _ = rh_fail(")
                 && output.rust.contains("return serde_json::Value::Null;"),
@@ -11095,17 +11120,18 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("return rh_fail(&failure);"),
             "{}",
             output.rust
         );
-        assert!(
-            !output.rust.contains("return failure;"),
-            "{}",
-            output.rust
-        );
+        assert!(!output.rust.contains("return failure;"), "{}", output.rust);
     }
 
     #[test]
@@ -11125,7 +11151,12 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         let entry = output
             .rust
             .split("pub fn entry()")
@@ -11156,7 +11187,12 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("let _ = rh_fail(&code);")
                 && output.rust.contains("return RhOutput {"),
@@ -11186,7 +11222,12 @@ fn entry() {
 }
 "#;
         let output = transpile_cdylib_with_mode(source).expect("transpile");
-        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
         assert!(
             output
                 .rust
@@ -11221,7 +11262,9 @@ fn entry() {
             return;
         }
         assert!(
-            output.rust.contains("pub fn test_harness__append_command_record("),
+            output
+                .rust
+                .contains("pub fn test_harness__append_command_record("),
             "{}",
             output.rust
         );
@@ -11245,12 +11288,38 @@ fn entry() {
             output.rust
         );
         assert!(
-            matches!(
-                output.execution_mode,
-                CdylibExecutionMode::Native
-            ),
+            matches!(output.execution_mode, CdylibExecutionMode::Native),
             "{:?}\n{}",
             output.execution_mode,
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn child_platform_facts_use_structured_native_host_call() {
+        let source = r#"
+fn entry() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    let facts = child.platform_facts;
+    require(facts.top_level_window_supported >= 0, "facts");
+    child.kill();
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("let mut facts = rh_child_platform_facts(&mut child);"),
+            "{}",
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
@@ -11329,11 +11398,7 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(
-            output.rust.contains("&prune_arguments"),
-            "{}",
-            output.rust
-        );
+        assert!(output.rust.contains("&prune_arguments"), "{}", output.rust);
         assert!(
             output.rust.contains("Some(&command_options)"),
             "{}",
@@ -11372,7 +11437,11 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_process_status("),
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("Some(&command_options)"),
             "{}",
@@ -11504,7 +11573,9 @@ fn entry() { 0 }"#,
         )
         .expect("transpile");
         assert!(
-            output.rust.contains("pub fn f(context: serde_json::Value) -> serde_json::Value"),
+            output
+                .rust
+                .contains("pub fn f(context: serde_json::Value) -> serde_json::Value"),
             "{}",
             output.rust
         );
@@ -11554,7 +11625,10 @@ fn entry() { 0 }"#,
             output.rust
         );
         assert_eq!(
-            output.rust.matches("rh_json_array_push_path(&mut context").count(),
+            output
+                .rust
+                .matches("rh_json_array_push_path(&mut context")
+                .count(),
             2,
             "{}",
             output.rust
@@ -11581,8 +11655,12 @@ fn entry() { 0 }"#,
             output.rust
         );
         assert!(
-            output.rust.contains("rh_json_array_push_path(&mut receipt, &[\"gates\"]")
-                && output.rust.contains("rh_json_get_path_key(&context, &[\"results\"]")
+            output
+                .rust
+                .contains("rh_json_array_push_path(&mut receipt, &[\"gates\"]")
+                && output
+                    .rust
+                    .contains("rh_json_get_path_key(&context, &[\"results\"]")
                 && output.rust.contains("gate_id"),
             "{}",
             output.rust
@@ -11613,23 +11691,23 @@ fn entry() { 0 }"#,
             output.rust
         );
         assert!(
-            output
-                .rust
-                .contains("rh_json_int_path(&context, &[\"process_observation\", \"owned_commands\"])"),
+            output.rust.contains(
+                "rh_json_int_path(&context, &[\"process_observation\", \"owned_commands\"])"
+            ),
             "{}",
             output.rust
         );
         assert!(
-            output
-                .rust
-                .contains("rh_json_int_path(&context, &[\"process_observation\", \"process_samples\"])"),
+            output.rust.contains(
+                "rh_json_int_path(&context, &[\"process_observation\", \"process_samples\"])"
+            ),
             "{}",
             output.rust
         );
         assert!(
-            output
-                .rust
-                .contains("rh_json_array_len(&context, &[\"process_observation\", \"automation_processes\"])"),
+            output.rust.contains(
+                "rh_json_array_len(&context, &[\"process_observation\", \"automation_processes\"])"
+            ),
             "{}",
             output.rust
         );
@@ -11701,16 +11779,16 @@ fn entry() {
             output.rust
         );
         assert!(
-            output
-                .rust
-                .contains("rh_command_env_remove(&mut command, &String::from(\"AGENTERM_IPC_ADDRESS\"));"),
+            output.rust.contains(
+                "rh_command_env_remove(&mut command, &String::from(\"AGENTERM_IPC_ADDRESS\"));"
+            ),
             "{}",
             output.rust
         );
         assert!(
-            output
-                .rust
-                .contains("std::thread::sleep(std::time::Duration::from_millis((1).max(0) as u64));"),
+            output.rust.contains(
+                "std::thread::sleep(std::time::Duration::from_millis((1).max(0) as u64));"
+            ),
             "{}",
             output.rust
         );

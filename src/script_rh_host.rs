@@ -110,7 +110,7 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
-        module.register_host_v9(
+        module.register_host_v10(
             host_fleet_call,
             Some(host_eval_call),
             Some(host_run_script_call),
@@ -119,6 +119,7 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             Some(host_arg_call),
             Some(host_fs_read_call),
             Some(host_utility_call),
+            Some(host_json_call),
         )
     } else if api >= 7 {
         module.register_host_v7(
@@ -312,7 +313,9 @@ fn host_process_request(
             if value.len() > 4096 {
                 return Err("process_env_value_too_large: maximum is 4096 bytes".to_owned());
             }
-            options.environment.insert(name.clone(), Some(value.to_owned()));
+            options
+                .environment
+                .insert(name.clone(), Some(value.to_owned()));
         }
     }
     if let Some(removes) = request.get("env_remove") {
@@ -597,6 +600,40 @@ extern "C" fn host_fleet_call(
     write_response(response, out_buf, out_cap)
 }
 
+extern "C" fn host_json_call(
+    operation: *const u8,
+    operation_len: u32,
+    input_json: *const u8,
+    input_json_len: u32,
+    out_buf: *mut u8,
+    out_cap: u32,
+) -> i32 {
+    if operation.is_null() || input_json.is_null() || out_buf.is_null() || out_cap == 0 {
+        return -1;
+    }
+    let operation = match unsafe { read_utf8(operation, operation_len) } {
+        Ok(value) => value,
+        Err(()) => return -2,
+    };
+    let input: serde_json::Value = match unsafe { read_utf8(input_json, input_json_len) }
+        .and_then(|value| serde_json::from_str(&value).map_err(|_| ()))
+    {
+        Ok(value) => value,
+        Err(()) => return -3,
+    };
+    let response = match operation.as_str() {
+        "process.platform_facts" => input
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok())
+            .map(crate::script_process::process_platform_facts_json)
+            .ok_or(-5),
+        _ => Err(-4),
+    }
+    .and_then(|value| serde_json::to_string(&value).map_err(|_| -5));
+    write_response(response, out_buf, out_cap)
+}
+
 extern "C" fn host_eval_call(
     snippet: *const u8,
     snippet_len: u32,
@@ -846,6 +883,27 @@ mod tests {
     }
 
     #[test]
+    fn host_json_call_returns_process_platform_facts() {
+        let operation = "process.platform_facts";
+        let input = format!(r#"{{"pid":{}}}"#, std::process::id());
+        let mut output = vec![0_u8; agenterm_rh::RH_HOST_OUT_CAP as usize];
+        let wrote = super::host_json_call(
+            operation.as_ptr(),
+            operation.len() as u32,
+            input.as_ptr(),
+            input.len() as u32,
+            output.as_mut_ptr(),
+            output.len() as u32,
+        );
+        assert!(wrote > 0);
+        let value: serde_json::Value =
+            serde_json::from_slice(&output[..wrote as usize]).expect("platform facts JSON");
+        assert!(value.get("top_level_window_supported").is_some());
+        assert!(value.get("top_level_window_present").is_some());
+        assert!(value.get("top_level_window_title").is_some());
+    }
+
+    #[test]
     fn host_utility_reports_failure_and_case_exact_file_names() {
         let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         let file = file.to_string_lossy();
@@ -934,10 +992,8 @@ mod tests {
     #[test]
     fn host_process_stdout_file_honors_current_dir_and_env() {
         let repo = std::env::current_dir().expect("cwd");
-        let path = std::env::temp_dir().join(format!(
-            "agenterm-rh-stdout-env-{}.txt",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("agenterm-rh-stdout-env-{}.txt", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let request = serde_json::json!({
             "program": "git",

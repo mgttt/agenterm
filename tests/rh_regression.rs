@@ -3,8 +3,8 @@
 use agenterm_rh::{RH_HOST_API_VERSION, check, transpile_cdylib};
 
 #[test]
-fn rh_host_api_version_is_nine() {
-    assert_eq!(RH_HOST_API_VERSION, 9);
+fn rh_host_api_version_is_ten() {
+    assert_eq!(RH_HOST_API_VERSION, 10);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn cdylib_transpile_emits_host_runtime_and_entry() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_entry"));
     assert!(rust.contains("rh_host_api_version"));
-    assert!(rust.contains("rh_register_host_v9"));
+    assert!(rust.contains("rh_register_host_v10"));
 }
 
 #[test]
@@ -392,11 +392,7 @@ fn path_metadata_probe_fixture_executes_natively_without_interpreter() {
         "{}",
         output.rust
     );
-    assert!(
-        output.rust.contains("rh_path_absolute("),
-        "{}",
-        output.rust
-    );
+    assert!(output.rust.contains("rh_path_absolute("), "{}", output.rust);
     assert!(
         output.rust.contains("rh_symlink_metadata("),
         "{}",
@@ -404,11 +400,7 @@ fn path_metadata_probe_fixture_executes_natively_without_interpreter() {
     );
     assert!(output.rust.contains(".is_file"), "{}", output.rust);
     assert!(output.rust.contains(".is_symlink"), "{}", output.rust);
-    assert!(
-        output.rust.contains(".is_reparse_point"),
-        "{}",
-        output.rust
-    );
+    assert!(output.rust.contains(".is_reparse_point"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 
@@ -444,7 +436,11 @@ fn import_bundle_probe_fixture_executes_natively_without_interpreter() {
         "{}",
         output.rust
     );
-    assert!(output.rust.contains("helper__add(40, 2)"), "{}", output.rust);
+    assert!(
+        output.rust.contains("helper__add(40, 2)"),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("helper::"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
@@ -475,16 +471,14 @@ fn string_fn_bundle_fixture_executes_natively_without_interpreter() {
         output.rust
     );
     assert!(
-        output.rust.contains("pub fn is_artifact_name(name: String)"),
+        output
+            .rust
+            .contains("pub fn is_artifact_name(name: String)"),
         "{}",
         output.rust
     );
     assert!(output.rust.contains("rh_print(&"), "{}", output.rust);
-    assert!(
-        output.rust.contains("rh_json_as_str(&"),
-        "{}",
-        output.rust
-    );
+    assert!(output.rust.contains("rh_json_as_str(&"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 

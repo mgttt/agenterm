@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 54;
+pub const RH_HOST_API_VERSION: u32 = 10;
+pub const RH_CODEGEN_REVISION: u32 = 55;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -37,6 +37,14 @@ pub type RhHostArgCall = extern "C" fn(index: u32, out_buf: *mut u8, out_cap: u3
 pub type RhHostFsReadCall =
     extern "C" fn(path: *const u8, path_len: u32, out_buf: *mut u8, out_cap: u32) -> i32;
 pub type RhHostUtilityCall = extern "C" fn(operation: u32, input: *const u8, input_len: u32) -> i32;
+pub type RhHostJsonCall = extern "C" fn(
+    operation: *const u8,
+    operation_len: u32,
+    input_json: *const u8,
+    input_json_len: u32,
+    out_buf: *mut u8,
+    out_cap: u32,
+) -> i32;
 
 pub fn rust_raw_string_literal(source: &str) -> String {
     let mut hashes = 0_usize;
@@ -60,6 +68,7 @@ pub fn emit_host_runtime(out: &mut String) {
          type RhHostArgCall = extern \"C\" fn(u32, *mut u8, u32) -> i32;\n\n\
          type RhHostFsReadCall = extern \"C\" fn(*const u8, u32, *mut u8, u32) -> i32;\n\n\
          type RhHostUtilityCall = extern \"C\" fn(u32, *const u8, u32) -> i32;\n\n\
+         type RhHostJsonCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\n\
          static mut RH_HOST_FLEET_CALL: Option<RhHostFleetCall> = None;\n\
          static mut RH_HOST_EVAL_CALL: Option<RhHostEvalCall> = None;\n\
          static mut RH_HOST_RUN_SCRIPT_CALL: Option<RhHostRunScriptCall> = None;\n\
@@ -68,6 +77,7 @@ pub fn emit_host_runtime(out: &mut String) {
          static mut RH_HOST_ARG_CALL: Option<RhHostArgCall> = None;\n\
          static mut RH_HOST_FS_READ_CALL: Option<RhHostFsReadCall> = None;\n\
          static mut RH_HOST_UTILITY_CALL: Option<RhHostUtilityCall> = None;\n\
+         static mut RH_HOST_JSON_CALL: Option<RhHostJsonCall> = None;\n\
          static mut RH_HOST_OUT_LEN: usize = 0;\n\
          static RH_HOST_OUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();\n\n\
          #[no_mangle]\n\
@@ -214,6 +224,30 @@ pub fn emit_host_runtime(out: &mut String) {
                  utility_call,\n\
              );\n\
          }\n\n\
+         #[no_mangle]\n\
+         pub extern \"C\" fn rh_register_host_v10(\n\
+             fleet_call: RhHostFleetCall,\n\
+             eval_call: RhHostEvalCall,\n\
+             run_script_call: RhHostRunScriptCall,\n\
+             std_fs_exists_call: RhHostStdFsExistsCall,\n\
+             args_len_call: RhHostArgsLenCall,\n\
+             arg_call: RhHostArgCall,\n\
+             fs_read_call: RhHostFsReadCall,\n\
+             utility_call: RhHostUtilityCall,\n\
+             json_call: RhHostJsonCall,\n\
+         ) {\n\
+             rh_register_host_v9(\n\
+                 fleet_call,\n\
+                 eval_call,\n\
+                 run_script_call,\n\
+                 std_fs_exists_call,\n\
+                 args_len_call,\n\
+                 arg_call,\n\
+                 fs_read_call,\n\
+                 utility_call,\n\
+             );\n\
+             unsafe { RH_HOST_JSON_CALL = Some(json_call); }\n\
+         }\n\n\
          fn rh_host_store(wrote: i32, scratch: Vec<u8>) -> i32 {\n\
              if wrote <= 0 {\n\
                  return wrote;\n\
@@ -246,6 +280,28 @@ pub fn emit_host_runtime(out: &mut String) {
                  scratch.len() as u32,\n\
              );\n\
              rh_host_store(wrote, scratch)\n\
+         }\n\n\
+         fn rh_host_json_call(operation: &str, input: &serde_json::Value) -> serde_json::Value {\n\
+             let Some(call) = (unsafe { RH_HOST_JSON_CALL }) else {\n\
+                 let _ = rh_fail(\"host_json_call_unavailable\");\n\
+                 return serde_json::Value::Null;\n\
+             };\n\
+             let input_json = rh_json_stringify(input);\n\
+             let mut scratch = vec![0u8; 65536usize];\n\
+             let wrote = call(\n\
+                 operation.as_ptr(),\n\
+                 operation.len() as u32,\n\
+                 input_json.as_ptr(),\n\
+                 input_json.len() as u32,\n\
+                 scratch.as_mut_ptr(),\n\
+                 scratch.len() as u32,\n\
+             );\n\
+             if wrote <= 0 {\n\
+                 let _ = rh_fail(&format!(\"host_json_call_failed: {operation}: {wrote}\"));\n\
+                 return serde_json::Value::Null;\n\
+             }\n\
+             serde_json::from_slice(&scratch[..(wrote as usize).min(scratch.len())])\n\
+                 .unwrap_or(serde_json::Value::Null)\n\
          }\n\n\
          fn rh_host_eval_raw(snippet: &str, scope_json: &str) -> i32 {\n\
              let Some(call) = (unsafe { RH_HOST_EVAL_CALL }) else {\n\
@@ -1036,6 +1092,10 @@ pub fn emit_host_runtime(out: &mut String) {
                  inner.state = String::from(\"exited\");\n\
              }\n\
              inner.state.clone()\n\
+         }\n\n\
+         fn rh_child_platform_facts(child: &mut RhChild) -> serde_json::Value {\n\
+             let pid = child.inner.borrow().pid;\n\
+             rh_host_json_call(\"process.platform_facts\", &serde_json::json!({ \"pid\": pid }))\n\
          }\n\n\
          fn rh_child_kill(child: &mut RhChild) -> INT {\n\
              let mut inner = child.inner.borrow_mut();\n\

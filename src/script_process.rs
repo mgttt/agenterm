@@ -611,8 +611,7 @@ pub(crate) fn apply_host_options(
     for (name, value) in &options.environment {
         validate_env_name(name).map_err(|error| error.to_string())?;
         if let Some(value) = value {
-            validate_text(value, "process_environment_value")
-                .map_err(|error| error.to_string())?;
+            validate_text(value, "process_environment_value").map_err(|error| error.to_string())?;
             command
                 .environment
                 .insert(name.clone(), Some(value.clone()));
@@ -798,6 +797,18 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
         foreground_window_id: facts.foreground_window_id,
         top_level_window_is_foreground: facts.is_foreground,
     }
+}
+
+pub(crate) fn process_platform_facts_json(id: u32) -> serde_json::Value {
+    let facts = crate::platform::services::script_window::facts(id);
+    serde_json::json!({
+        "top_level_window_supported": facts.supported,
+        "top_level_window_present": facts.present,
+        "top_level_window_id": facts.window_id,
+        "top_level_window_title": facts.title,
+        "foreground_window_id": facts.foreground_window_id,
+        "top_level_window_is_foreground": facts.is_foreground,
+    })
 }
 
 fn child_stdout(child: &mut ScriptChild) -> Result<ScriptStream, Box<EvalAltResult>> {

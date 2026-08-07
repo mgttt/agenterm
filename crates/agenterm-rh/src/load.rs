@@ -7,7 +7,7 @@ use crate::{
     compile::hash_file,
     host_api::{
         RhHostArgCall, RhHostArgsLenCall, RhHostEvalCall, RhHostFleetCall, RhHostFsReadCall,
-        RhHostRunScriptCall, RhHostStdFsExistsCall, RhHostUtilityCall,
+        RhHostJsonCall, RhHostRunScriptCall, RhHostStdFsExistsCall, RhHostUtilityCall,
     },
 };
 
@@ -326,6 +326,60 @@ impl RhNativeModule {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_host_v10(
+        &self,
+        fleet_call: RhHostFleetCall,
+        eval_call: Option<RhHostEvalCall>,
+        run_script_call: Option<RhHostRunScriptCall>,
+        std_fs_exists_call: Option<RhHostStdFsExistsCall>,
+        args_len_call: Option<RhHostArgsLenCall>,
+        arg_call: Option<RhHostArgCall>,
+        fs_read_call: Option<RhHostFsReadCall>,
+        utility_call: Option<RhHostUtilityCall>,
+        json_call: Option<RhHostJsonCall>,
+    ) -> Result<(), RhError> {
+        unsafe {
+            if let Ok(register_v10) = self.library.get::<Symbol<
+                extern "C" fn(
+                    RhHostFleetCall,
+                    RhHostEvalCall,
+                    RhHostRunScriptCall,
+                    RhHostStdFsExistsCall,
+                    RhHostArgsLenCall,
+                    RhHostArgCall,
+                    RhHostFsReadCall,
+                    RhHostUtilityCall,
+                    RhHostJsonCall,
+                ),
+            >>(b"rh_register_host_v10")
+            {
+                register_v10(
+                    fleet_call,
+                    eval_call.unwrap_or(dummy_eval_call),
+                    run_script_call.unwrap_or(dummy_run_script_call),
+                    std_fs_exists_call.unwrap_or(dummy_std_fs_exists_call),
+                    args_len_call.unwrap_or(dummy_args_len_call),
+                    arg_call.unwrap_or(dummy_arg_call),
+                    fs_read_call.unwrap_or(dummy_fs_read_call),
+                    utility_call.unwrap_or(dummy_utility_call),
+                    json_call.unwrap_or(dummy_json_call),
+                );
+                return Ok(());
+            }
+        }
+        self.register_host_v9(
+            fleet_call,
+            eval_call,
+            run_script_call,
+            std_fs_exists_call,
+            args_len_call,
+            arg_call,
+            fs_read_call,
+            utility_call,
+        )
+    }
+
     pub fn host_api_version(&self) -> u32 {
         unsafe {
             self.library
@@ -437,6 +491,17 @@ extern "C" fn dummy_fs_read_call(
 }
 
 extern "C" fn dummy_utility_call(_operation: u32, _input: *const u8, _input_len: u32) -> i32 {
+    -4
+}
+
+extern "C" fn dummy_json_call(
+    _operation: *const u8,
+    _operation_len: u32,
+    _input: *const u8,
+    _input_len: u32,
+    _out_buf: *mut u8,
+    _out_cap: u32,
+) -> i32 {
     -4
 }
 
