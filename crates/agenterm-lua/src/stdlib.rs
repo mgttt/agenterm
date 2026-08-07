@@ -11,6 +11,9 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     let std_table = lua.create_table()?;
     std_table.set("fs", build_fs(lua)?)?;
     std_table.set("process", build_process(lua)?)?;
+    std_table.set("path", build_path(lua)?)?;
+    std_table.set("env", build_env(lua)?)?;
+    std_table.set("time", build_time(lua)?)?;
     lua.globals().set("std", std_table)?;
     Ok(())
 }
@@ -261,6 +264,151 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
     Ok(process)
 }
 
+// ── std.path ────────────────────────────────────────────────────────────
+
+fn build_path(lua: &Lua) -> Result<Table, mlua::Error> {
+    let path = lua.create_table()?;
+
+    // std.path.absolute(p) → string
+    path.set(
+        "absolute",
+        lua.create_function(|_lua, p: String| {
+            std::path::absolute(&p)
+                .map(|abs| abs.to_string_lossy().into_owned())
+                .map_err(|e| mlua::Error::runtime(format!("path_absolute: {e}")))
+        })?,
+    )?;
+
+    // std.path.join(base, child) → string
+    path.set(
+        "join",
+        lua.create_function(|_lua, (base, child): (String, String)| {
+            let joined = Path::new(&base).join(&child);
+            Ok(joined.to_string_lossy().into_owned())
+        })?,
+    )?;
+
+    // std.path.parent(p) → string
+    path.set(
+        "parent",
+        lua.create_function(|_lua, p: String| {
+            let parent = Path::new(&p)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(parent)
+        })?,
+    )?;
+
+    // std.path.file_name(p) → string
+    path.set(
+        "file_name",
+        lua.create_function(|_lua, p: String| {
+            let name = Path::new(&p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(name)
+        })?,
+    )?;
+
+    // std.path.is_absolute(p) → bool
+    path.set(
+        "is_absolute",
+        lua.create_function(|_lua, p: String| Ok(Path::new(&p).is_absolute()))?,
+    )?;
+
+    Ok(path)
+}
+
+// ── std.env ─────────────────────────────────────────────────────────────
+
+fn build_env(lua: &Lua) -> Result<Table, mlua::Error> {
+    let env = lua.create_table()?;
+
+    // std.env.get(name) → string | nil
+    env.set(
+        "get",
+        lua.create_function(|_lua, name: String| Ok(std::env::var(&name).ok()))?,
+    )?;
+
+    // std.env.has(name) → bool
+    env.set(
+        "has",
+        lua.create_function(|_lua, name: String| Ok(std::env::var_os(&name).is_some()))?,
+    )?;
+
+    // std.env.current_dir() → string
+    env.set(
+        "current_dir",
+        lua.create_function(|_lua, ()| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .map_err(|e| mlua::Error::runtime(format!("env_current_dir: {e}")))
+        })?,
+    )?;
+
+    Ok(env)
+}
+
+// ── std.time ────────────────────────────────────────────────────────────
+
+fn build_time(lua: &Lua) -> Result<Table, mlua::Error> {
+    let time = lua.create_table()?;
+
+    // std.time.now_unix_ms() → int (millis since Unix epoch)
+    time.set(
+        "now_unix_ms",
+        lua.create_function(|_lua, ()| {
+            let dur = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| mlua::Error::runtime(format!("system_time: {e}")))?;
+            let millis = i64::try_from(dur.as_millis()).unwrap_or(0);
+            Ok(millis)
+        })?,
+    )?;
+
+    // std.time.now_rfc3339() → string
+    time.set(
+        "now_rfc3339",
+        lua.create_function(|_lua, ()| {
+            let now = std::time::SystemTime::now();
+            let dur = now
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| mlua::Error::runtime(format!("system_time: {e}")))?;
+            let seconds = i64::try_from(dur.as_secs()).unwrap_or(0);
+            let subsec = dur.subsec_millis();
+            let days = seconds / 86_400;
+            let day_seconds = seconds % 86_400;
+            let (year, month, day) = civil_date_from_unix_days(days);
+            let hour = day_seconds / 3_600;
+            let minute = (day_seconds % 3_600) / 60;
+            let second = day_seconds % 60;
+            Ok(format!(
+                "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{subsec:03}Z"
+            ))
+        })?,
+    )?;
+
+    Ok(time)
+}
+
+/// Calendar date from Unix epoch days (port of Howard Hinnant's algorithm).
+fn civil_date_from_unix_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    (year, month, day)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::*;
@@ -493,5 +641,142 @@ mod tests {
         .expect("eval");
         let content = std::fs::read_to_string(&out_file).expect("read");
         assert!(content.trim().contains("saved"));
+    }
+
+    // ── std.path ────────────────────────────────────────────────────
+
+    #[test]
+    fn path_join() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local p = std.path.join('/foo', 'bar'); return #p",
+                &host(),
+            )
+            .expect("eval");
+        // "/foo/bar" or "/foo\\bar" on Windows
+        assert!(r.value >= 7);
+    }
+
+    #[test]
+    fn path_parent() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local p = std.path.parent('/foo/bar/baz.txt'); return #p",
+                &host(),
+            )
+            .expect("eval");
+        assert!(r.value > 0);
+    }
+
+    #[test]
+    fn path_file_name() {
+        let e = engine();
+        let r = e
+            .eval(
+                "print(std.path.file_name('/foo/bar/baz.txt')); return 1",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+        assert_eq!(r.stdout.trim(), "baz.txt");
+    }
+
+    #[test]
+    fn path_is_absolute() {
+        let e = engine();
+        // On Windows absolute needs drive letter; on Unix "/" is absolute
+        let abs_path = if cfg!(windows) { r"C:\" } else { "/" };
+        let r = e
+            .eval(
+                &format!("return std.path.is_absolute([[{}]]) and 1 or 0", abs_path),
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    // ── std.env ─────────────────────────────────────────────────────
+
+    #[test]
+    fn env_has_path() {
+        let e = engine();
+        let r = e
+            .eval("return std.env.has('PATH') and 1 or 0", &host())
+            .expect("eval");
+        assert_eq!(r.value, 1, "PATH should always exist");
+    }
+
+    #[test]
+    fn env_has_missing() {
+        let e = engine();
+        let r = e
+            .eval("return std.env.has('AGENTERM_NONEXISTENT_VAR') and 1 or 0", &host())
+            .expect("eval");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn env_get_path() {
+        let e = engine();
+        let r = e
+            .eval("return #(std.env.get('PATH') or '')", &host())
+            .expect("eval");
+        assert!(r.value > 0, "PATH should be non-empty");
+    }
+
+    #[test]
+    fn env_get_missing_is_nil() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local v = std.env.get('AGENTERM_NONEXISTENT_VAR'); return v == nil and 1 or 0",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn env_current_dir() {
+        let e = engine();
+        let r = e
+            .eval("local d = std.env.current_dir(); return #d", &host())
+            .expect("eval");
+        assert!(r.value > 0);
+    }
+
+    // ── std.time ────────────────────────────────────────────────────
+
+    #[test]
+    fn time_now_unix_ms() {
+        let e = engine();
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let r = e
+            .eval("return std.time.now_unix_ms()", &host())
+            .expect("eval");
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        assert!(r.value >= before, "{} >= {}", r.value, before);
+        assert!(r.value <= after, "{} <= {}", r.value, after);
+    }
+
+    #[test]
+    fn time_now_rfc3339() {
+        let e = engine();
+        let r = e
+            .eval("local s = std.time.now_rfc3339(); print(s); return #s", &host())
+            .expect("eval");
+        assert_eq!(r.value, 24, "RFC3339 with ms = 24 chars");
+        // Check format: YYYY-MM-DDTHH:MM:SS.sssZ
+        let s = r.stdout.trim();
+        assert!(s.contains('T'), "missing T separator");
+        assert!(s.ends_with('Z'), "missing Z suffix");
     }
 }
