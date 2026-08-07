@@ -18,8 +18,8 @@ pub mod mcp_stdio;
 mod named_buffer;
 pub mod operations;
 mod protocol;
-pub mod script_api_view;
 pub mod script_api_validate;
+pub mod script_api_view;
 pub mod script_backend;
 pub mod script_catalog;
 pub mod script_clipboard;
@@ -92,8 +92,8 @@ pub use platform::{
 #[allow(unused_imports)]
 pub use frontend::run_gui_entry;
 
-pub use server_app::{run_server_entry, run_server_entry_with_args};
 pub use script_worker::{run_framed_worker_stdio, run_legacy_worker_stdio};
+pub use server_app::{run_server_entry, run_server_entry_with_args};
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
