@@ -185,7 +185,7 @@
       "group": "deleted",
       "responsibility": "source and build identity derivation",
       "replacement_task": "build-identity",
-      "replacement": "scripts/rhai/build-identity.rhai",
+      "replacement": "scripts/rh/build-identity.rh",
       "evidence": "public CLI black-box coverage in tests/rhai_migration.rs",
       "status": "deleted",
       "callers": [

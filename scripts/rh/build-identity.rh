@@ -1,0 +1,13 @@
+// Freeze truthful source inputs into a batch-importable build environment.
+//
+// Args:
+//   REPO PROFILE OUTPUT_PATH
+
+import "scripts/rh/lib/build_identity" as build_identity;
+
+fn entry() {
+    if args.len != 3 {
+        return rh::fail("expected: REPO PROFILE OUTPUT_PATH");
+    }
+    build_identity::write(args[0], args[1], args[2])
+}

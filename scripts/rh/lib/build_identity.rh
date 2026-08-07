@@ -1,0 +1,125 @@
+// Shared build identity freeze (INT-only native pack).
+//
+// write returns 0 on success. atomic_write also returns 0 on both success and
+// typed failure (fail-on-error); callers must not treat it as try_*.
+
+fn is_lower_hex(value, expected_length) {
+    if value.len != expected_length {
+        return 0;
+    }
+    for character in value {
+        if !"0123456789abcdef".contains(character.to_string()) {
+            return 0;
+        }
+    }
+    1
+}
+
+fn is_git_commit(value) {
+    let n = value.len;
+    if n == 40 {
+        return is_lower_hex(value, 40);
+    }
+    if n == 64 {
+        return is_lower_hex(value, 64);
+    }
+    0
+}
+
+fn write(repo_value, profile, output_path_value) {
+    let repo = std::path::absolute(repo_value).display;
+    require(
+        profile == "dev"
+            || profile == "release-fast"
+            || profile == "release",
+        "build_identity_profile_invalid:" + profile
+    );
+
+    let stdout_path = repo + ".build-identity.stdout.tmp";
+
+    let prefix_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "rev-parse", "--show-prefix"],
+        10000,
+        stdout_path
+    );
+    require(prefix_code == 0, "build-identity-git-root");
+    let prefix = std::fs::read_to_string(stdout_path);
+    prefix.trim();
+    require(prefix == "", "build_identity_repo_not_exact_git_root:" + repo);
+
+    let commit_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "rev-parse", "--verify", "HEAD"],
+        10000,
+        stdout_path
+    );
+    require(commit_code == 0, "build-identity-git-commit");
+    let commit = std::fs::read_to_string(stdout_path);
+    commit.trim();
+    commit.to_lower();
+    require(is_git_commit(commit), "build_identity_git_commit_invalid");
+
+    let status_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "status", "--porcelain=v1", "--untracked-files=normal"],
+        10000,
+        stdout_path
+    );
+    require(status_code == 0, "build-identity-git-status");
+    let status = std::fs::read_to_string(stdout_path);
+    status.trim();
+
+    let dirty = 0;
+    if status != "" {
+        dirty = 1;
+    }
+
+    let cargo_lock_joined = std::path::join(repo, "Cargo.lock").display;
+    let cargo_lock = std::path::absolute(cargo_lock_joined).display;
+    let artifact_manifest_joined =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    let artifact_manifest =
+        std::path::absolute(artifact_manifest_joined).display;
+    require(std::fs::exists(cargo_lock), "build_identity_cargo_lock_missing");
+    require(
+        std::fs::exists(artifact_manifest),
+        "build_identity_artifact_manifest_missing"
+    );
+
+    let cargo_lock_sha256 = rhai::crypto::sha256_file(cargo_lock);
+    let artifact_manifest_sha256 =
+        rhai::crypto::sha256_file(artifact_manifest);
+    require(
+        is_lower_hex(cargo_lock_sha256, 64),
+        "build_identity_cargo_lock_hash_invalid"
+    );
+    require(
+        is_lower_hex(artifact_manifest_sha256, 64),
+        "build_identity_artifact_manifest_hash_invalid"
+    );
+
+    let dirty_label = "false";
+    if dirty {
+        dirty_label = "true";
+    }
+    let batch =
+        "set \"AGENTERM_BUILD_IDENTITY_VERSION=1\"\n" +
+        "set \"AGENTERM_BUILD_GIT_COMMIT=" + commit + "\"\n" +
+        "set \"AGENTERM_BUILD_GIT_DIRTY=" + dirty_label + "\"\n" +
+        "set \"AGENTERM_BUILD_CARGO_LOCK_SHA256=" +
+            cargo_lock_sha256 + "\"\n" +
+        "set \"AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256=" +
+            artifact_manifest_sha256 + "\"\n" +
+        "set \"AGENTERM_BUILD_PROFILE=" + profile + "\"\n";
+
+    let output_path = std::path::absolute(output_path_value).display;
+    rhai::runtime::atomic_write(output_path, batch);
+    std::fs::try_remove_file(stdout_path);
+
+    print(
+        "Prepared build identity for " + commit +
+        " (" + profile + ", dirty=" + dirty_label + ")"
+    );
+    0
+}

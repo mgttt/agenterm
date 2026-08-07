@@ -154,7 +154,7 @@ fn run_build_identity(repo_under_test: &Path, profile: &str, output_path: &Path)
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .args(["task", "run", "build-identity", "--manifest"])
         .arg(manifest)
@@ -163,7 +163,7 @@ fn run_build_identity(repo_under_test: &Path, profile: &str, output_path: &Path)
         .arg(profile)
         .arg(output_path)
         .output()
-        .expect("run Rhai build-identity task")
+        .expect("run native build-identity task")
 }
 
 fn run_write_build_metadata(
