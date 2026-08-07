@@ -986,6 +986,24 @@ fn json_int_property<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     Some((ident.1.as_str(), property.2.as_str()))
 }
 
+fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
+    if json_int_property(expr, ctx).is_some() {
+        return true;
+    }
+    match expr {
+        Expr::IntegerConstant(..) | Expr::BoolConstant(..) => true,
+        Expr::Variable(ident, ..) => matches!(
+            ctx.scope.get(ident.1.as_str()),
+            Some(ValueKind::Int | ValueKind::Bool)
+        ),
+        Expr::FnCall(call, ..) if call.op_token.is_some() => call
+            .args
+            .iter()
+            .all(|argument| is_native_json_int_expr(argument, ctx)),
+        _ => false,
+    }
+}
+
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
         if let Some(index) = args_index_expr(expr) {
@@ -1048,6 +1066,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if !is_pure_int_expr(expr)
+            && !is_native_json_int_expr(expr, ctx)
             && (uses_host_surface(expr)
                 || !matches!(
                     expr,
