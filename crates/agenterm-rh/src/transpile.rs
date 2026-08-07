@@ -1008,6 +1008,12 @@ fn emit_stmt(
                 && matches!(expr, Expr::Array(items, ..) if items.is_empty())
             {
                 out.push_str("serde_json::Value::Array(Vec::new())");
+            } else if kind == ValueKind::Json
+                && let Expr::Array(items, ..) = expr
+                && !items.is_empty()
+                && items.iter().all(|item| is_native_json_value_item(item, ctx))
+            {
+                emit_json_array_value_literal(out, items, ctx)?;
             } else if kind == ValueKind::Json && matches!(expr, Expr::Map(..)) {
                 emit_json_map_literal(out, expr, ctx)?;
             } else if kind == ValueKind::StringList {
@@ -1571,6 +1577,12 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         Expr::Map(map, ..) if map.0.is_empty() => ValueKind::Set,
         Expr::Map(..) => ValueKind::Json,
         Expr::Array(items, ..) if items.is_empty() => ValueKind::Json,
+        Expr::Array(items, ..)
+            if !items.is_empty()
+                && items.iter().all(|item| is_native_json_value_item(item, ctx)) =>
+        {
+            ValueKind::Json
+        }
         Expr::Variable(ident, ..) => match ctx.scope.get(ident.1.as_str()).copied() {
             Some(kind) => kind,
             None => ValueKind::Int,
@@ -2106,6 +2118,44 @@ fn string_split_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'a
     Some((&boxed.lhs, &call.args[0]))
 }
 
+fn is_len_property(expr: &Expr) -> bool {
+    matches!(expr, Expr::Property(prop, ..) if prop.2.as_str() == "len")
+        || matches!(
+            expr,
+            Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
+        )
+}
+
+/// Rhai parses `parts[0].len` as `parts[0.len]`; recover the intended element length.
+fn string_list_index_misparse_len<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, i64)> {
+    let Expr::Index(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::StringList) {
+        return None;
+    }
+    let Expr::Dot(inner, ..) = &boxed.rhs else {
+        return None;
+    };
+    let Expr::IntegerConstant(index, ..) = &inner.lhs else {
+        return None;
+    };
+    is_len_property(&inner.rhs).then_some((ident.1.as_str(), *index))
+}
+
+fn string_list_index_rhs<'a>(rhs: &'a Expr) -> Option<&'a Expr> {
+    if let Expr::Dot(inner, ..) = rhs
+        && matches!(&inner.lhs, Expr::IntegerConstant(..))
+        && is_len_property(&inner.rhs)
+    {
+        return None;
+    }
+    Some(rhs)
+}
+
 fn string_list_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
     let Expr::Index(boxed, ..) = expr else {
         return None;
@@ -2116,7 +2166,80 @@ fn string_list_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::StringList) {
         return None;
     }
-    Some((ident.1.as_str(), &boxed.rhs))
+    let rhs = string_list_index_rhs(&boxed.rhs)?;
+    Some((ident.1.as_str(), rhs))
+}
+
+fn is_native_json_value_item(expr: &Expr, ctx: &EmitCtx) -> bool {
+    match expr {
+        Expr::StringConstant(..)
+        | Expr::IntegerConstant(..)
+        | Expr::BoolConstant(..)
+        | Expr::Map(..)
+        | Expr::Unit(..) => true,
+        Expr::Array(items, ..) if items.is_empty() => true,
+        Expr::Array(items, ..) => {
+            !items.is_empty() && items.iter().all(|item| is_native_json_value_item(item, ctx))
+        }
+        Expr::Variable(ident, ..) => matches!(
+            ctx.scope.get(ident.1.as_str()),
+            Some(ValueKind::Json | ValueKind::String | ValueKind::Bool | ValueKind::Int)
+        ),
+        _ => {
+            json_parse_arg(expr).is_some()
+                || json_value_path(expr, ctx).is_some()
+                || json_array_index(expr, ctx).is_some()
+                || json_path_array_index(expr, ctx).is_some()
+        }
+    }
+}
+
+fn emit_json_array_value_literal(
+    out: &mut String,
+    items: &[Expr],
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("serde_json::Value::Array(vec![");
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        emit_json_value_expr(out, item, ctx)?;
+    }
+    out.push_str("])");
+    Ok(())
+}
+
+fn emit_string_list_index(
+    out: &mut String,
+    binding: &str,
+    index: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("rh_string_list_get(&");
+    out.push_str(binding);
+    out.push_str(", ");
+    if let Some(value) = int_const(index) {
+        out.push_str(&value.to_string());
+    } else {
+        emit_expr(out, index, ctx)?;
+    }
+    out.push(')');
+    Ok(())
+}
+
+fn emit_string_list_index_misparse_len(
+    out: &mut String,
+    binding: &str,
+    index: i64,
+) -> Result<(), RhError> {
+    out.push_str("(");
+    out.push_str("rh_string_list_get(&");
+    out.push_str(binding);
+    out.push_str(", ");
+    out.push_str(&index.to_string());
+    out.push_str(").chars().count() as INT)");
+    Ok(())
 }
 
 fn json_array_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
@@ -2790,6 +2913,7 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || dir_entry_metadata_len(expr, ctx).is_some()
         || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
         || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
+        || string_list_index_misparse_len(expr, ctx).is_some()
         || type_of_arg(expr).is_some_and(|argument| {
             json_value_path(argument, ctx).is_some()
                 || matches!(
@@ -2919,12 +3043,11 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str(&format!("\"{value}\""));
             out.push(')');
         }
+        _ if let Some((binding, index)) = string_list_index_misparse_len(expr, ctx) => {
+            emit_string_list_index_misparse_len(out, binding, index)?;
+        }
         _ if let Some((binding, index)) = string_list_index(expr, ctx) => {
-            out.push_str("rh_string_list_get(&");
-            out.push_str(binding);
-            out.push_str(", ");
-            emit_expr(out, index, ctx)?;
-            out.push(')');
+            emit_string_list_index(out, binding, index, ctx)?;
         }
         _ if let Some(value) = json_stringify_pretty_arg(expr) => {
             if !emit_json_stringify_pretty(out, value, ctx)? {
@@ -3322,12 +3445,12 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some((binding, index)) = string_list_index_misparse_len(expr, ctx) {
+            emit_string_list_index_misparse_len(out, binding, index)?;
+            return Ok(());
+        }
         if let Some((binding, index)) = string_list_index(expr, ctx) {
-            out.push_str("rh_string_list_get(&");
-            out.push_str(binding);
-            out.push_str(", ");
-            emit_expr(out, index, ctx)?;
-            out.push(')');
+            emit_string_list_index(out, binding, index, ctx)?;
             return Ok(());
         }
         if let Some((binding, index)) = json_array_index(expr, ctx) {
@@ -3604,23 +3727,10 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str("serde_json::Value::Array(Vec::new())");
         }
         Expr::Array(items, ..)
-            if items
-                .iter()
-                .all(|item| matches!(item, Expr::StringConstant(..))) =>
+            if !items.is_empty()
+                && items.iter().all(|item| is_native_json_value_item(item, ctx)) =>
         {
-            out.push_str("serde_json::Value::Array(vec![");
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(", ");
-                }
-                let Expr::StringConstant(value, ..) = item else {
-                    unreachable!("checked string constants");
-                };
-                out.push_str("serde_json::Value::String(String::from(");
-                out.push_str(&format!("{value:?}"));
-                out.push_str("))");
-            }
-            out.push_str("])");
+            emit_json_array_value_literal(out, items, ctx)?;
         }
         Expr::Variable(ident, ..)
             if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
@@ -4064,7 +4174,7 @@ fn char_to_string_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a st
     (call.name == "to_string" && call.args.is_empty()).then_some(ident.1.as_str())
 }
 
-fn emit_string_needle(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+fn emit_string_needle(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     match expr {
         Expr::StringConstant(value, ..) => {
             out.push_str(&format!("{value:?}"));
@@ -4091,6 +4201,16 @@ fn emit_string_needle(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bo
             out.push('&');
             out.push_str(binding);
             out.push_str(".to_string()");
+            Ok(true)
+        }
+        _ if string_concat_args(expr, ctx).is_some()
+            || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
+            || json_path_array_index(expr, ctx).is_some()
+            || string_list_index(expr, ctx).is_some()
+            || args_index_expr(expr).is_some() =>
+        {
+            out.push('&');
+            emit_stringish(out, expr, ctx)?;
             Ok(true)
         }
         _ => Ok(false),
@@ -4144,7 +4264,7 @@ fn set_insert_assignment<'a>(
     matches!(bin.rhs, Expr::BoolConstant(true, ..)).then_some((ident.1.as_str(), &boxed.rhs))
 }
 
-fn emit_set_key(out: &mut String, key: &Expr, ctx: &EmitCtx) -> Result<(), RhError> {
+fn emit_set_key(out: &mut String, key: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     match key {
         Expr::StringConstant(value, ..) => {
             out.push_str("String::from(");
@@ -4167,8 +4287,16 @@ fn emit_set_key(out: &mut String, key: &Expr, ctx: &EmitCtx) -> Result<(), RhErr
             out.push(')');
             Ok(())
         }
+        _ if string_concat_args(key, ctx).is_some()
+            || json_value_path(key, ctx).is_some_and(|(_, path)| !path.is_empty())
+            || json_path_array_index(key, ctx).is_some()
+            || string_list_index(key, ctx).is_some()
+            || args_index_expr(key).is_some() =>
+        {
+            emit_stringish(out, key, ctx)
+        }
         _ => Err(RhError::Transpile(
-            "set index key must be a string binding or literal".into(),
+            "set index key must be a string binding, literal, or stringish path".into(),
         )),
     }
 }
@@ -5940,6 +6068,110 @@ fn entry() { stage_copy(args[0], args[1]) }
         );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         // Host API always defines `fn rh_host_eval_int`; Native packs must not call it.
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_array_push_in_loop_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let doc = rhai::json::parse(args[0]);
+    let names = [];
+    for item in doc.items {
+        names.push(item.name);
+    }
+    let assets = [];
+    assets.push(#{ name: "tail", size: names.len });
+    names.len + assets.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_json_array_push(&mut").count(), 2);
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_array_literal_from_json_locals_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let doc = rhai::json::parse(args[0]);
+    let pair = [doc.a, doc.b];
+    pair.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("serde_json::Value::Array(vec!["),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_get_path(&doc, &[\"a\"])"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_string_list_index_misparse_len_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let parts = "a.b".split(".");
+    parts[0].len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_string_list_get(&parts, 0).chars().count() as INT)"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_set_key_from_json_path_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let doc = rhai::json::parse(args[0]);
+    let seen = #{};
+    seen[doc.id] = true;
+    seen.contains(doc.id)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_string_path(&doc, &[\"id\"])"),
+            "{}",
+            output.rust
+        );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 }

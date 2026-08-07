@@ -1,0 +1,12 @@
+fn entry() {
+    let doc = rhai::json::parse(
+        "{\"items\":[{\"name\":\"alpha\"},{\"name\":\"beta\"}]}"
+    );
+    let names = [];
+    for item in doc.items {
+        names.push(item.name);
+    }
+    let assets = [];
+    assets.push(#{ name: "tail", count: names.len });
+    names.len + assets.len
+}

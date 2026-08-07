@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg27）：Wave2 易切叶含 `artifact-verification` 已切 `.rh`。其后（M42f6h）`candidate-*` → `migration-audit`；`target-report` 仍缺 `pop`/float |
+| **状态** | **进行中 M42f6**（cg28）：`for` 内 `array.push`、JSON 数组字面量（含 locals/path）、`parts[0].len` 误解析、MapSet JSON 路径键已原生。其后（M42f6h）`candidate-*` / Wave3 叶探测后切；`target-report` 仍缺 `pop`/float |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -130,7 +130,8 @@
 | M42f6g9 | INT-only `scripts/rh/preflight-benchmark.rh`；entry 切线 + 归档 | [x] |
 | M42f6g10 | INT-only `scripts/rh/cross-platform-automation-audit.rh`；entry 切线 + 归档 | [x] |
 | M42f6g11 | INT-only `scripts/rh/artifact-verification.rh`；entry 切线 + 归档 | [x] |
-| M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + 剩余叶（`candidate-*`、`migration-audit`）；`target-report` 仍缺 `pop`/float。**候选叶探测（2026-08-07）**：薄包装 cutover 被 codegen 挡住——`for` 内 `array.push`、变量拼 JSON 数组字面量、`path.parent` 仍非 Native；入口仍停 `.rhai`，待本里程碑补 emit 后再切 | [ ] |
+| M42f6g12 | codegen 28：`for` 内 `array.push`（既有 emit 固化单测）、异构 JSON 数组字面量 `[doc.a, doc.b]`、`parts[0].len` 误解析恢复、MapSet `seen[doc.id]=true` stringish 键；fixture `json-array-*-probe.rh` / `string-list-index-probe.rh` | [x] |
+| M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + 剩余叶（`candidate-*`、`migration-audit`、Wave3：`supply-chain`/`prd-alignment`/`prune`/`powershell`/`lint`/`preflight`）；`target-report` 仍缺 `pop`/float。**codegen 28 后**：`array.push`/JSON 数组字面量已解；`path.parent` 与 Child/sleep 仍属后续；入口仍停 `.rhai` 直至叶达 Native | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |
 | M42f8 | **Shim 收口顺序（非并行捷径）**：Phase A 先清零 manifest `.rhai` 入口与工作流硬编码 `.rhai`；Phase B 才把 `agenterm-rhai` 收成纯 forwarder（含 `run *.rhai`/`task`）；Phase C 再拆主库 Rhai `Engine`/`script_rh_host` compat。禁止在 A 未完成时宣称 rhai 已归档——compat-delegating 仍是 Rhai | [ ] |

@@ -1,0 +1,7 @@
+fn entry() {
+    let parts = "alpha.beta".split(".");
+    if parts[0] != "alpha" {
+        return rh::fail("string_list_index_prefix");
+    }
+    parts[0].len
+}
