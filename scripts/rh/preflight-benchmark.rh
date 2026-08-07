@@ -1,0 +1,160 @@
+// Benchmark the public preflight task, including worker process startup.
+//
+// Args:
+//   WORKER MANIFEST REPO OUTPUT_PATH ITERATIONS
+
+fn cleanup_run_reports(run_directory, iterations) {
+    for iteration in 1..(iterations + 1) {
+        let tag = "";
+        tag += iteration;
+        let report_name = tag + ".json";
+        let report = std::path::join(run_directory, report_name).display;
+        if std::fs::exists(report) {
+            std::fs::try_remove_file(report);
+        }
+    }
+    0
+}
+
+fn entry() {
+    if args.len != 5 {
+        return rh::fail("expected: WORKER MANIFEST REPO OUTPUT_PATH ITERATIONS");
+    }
+
+    let worker = std::path::absolute(args[0]).display;
+    let task_manifest = std::path::absolute(args[1]).display;
+    let repo = std::path::absolute(args[2]).display;
+    let output_arg = args[3];
+    let output_buf = std::path::PathBuf::from(output_arg);
+    let output_path = std::path::join(repo, output_arg).display;
+    if output_buf.is_absolute {
+        output_path = output_buf.display;
+    }
+
+    let iterations_raw = args[4];
+    let iterations = 0;
+    let iterations_found = 0;
+    for candidate in 5..101 {
+        let tag = "";
+        tag += candidate;
+        if tag == iterations_raw {
+            iterations = candidate;
+            iterations_found = 1;
+        }
+    }
+    require(iterations_found != 0, "preflight_benchmark_iterations_range");
+
+    require(std::fs::exists(worker), "preflight_benchmark_worker_missing");
+    require(std::fs::exists(task_manifest), "preflight_benchmark_manifest_missing");
+
+    let run_stamp = std::time::SystemTime::now().unix_millis;
+    let run_rel = "target/preflight-benchmark-runs-" + run_stamp;
+    let run_directory = std::path::join(repo, run_rel).display;
+    std::fs::create_dir_all(run_directory);
+
+    let runs = [];
+    let all_passed = 1;
+
+    for offset in 0..iterations {
+        let iteration = offset + 1;
+        let iteration_tag = "";
+        iteration_tag += iteration;
+        let report_name = iteration_tag + ".json";
+        let run_report =
+            std::path::join(run_directory, report_name).display;
+        let started = std::time::SystemTime::now().unix_millis;
+        let exit_code = std::process::command_status(
+            worker,
+            [
+                "task", "run", "preflight", "--manifest", task_manifest,
+                "--timeout-ms", "10000", "--max-operations", "10000000",
+                "--", repo, run_report, "--quiet"
+            ],
+            10000
+        );
+        let wall_duration =
+            std::time::SystemTime::now().unix_millis - started;
+        require(
+            std::fs::exists(run_report),
+            "preflight_benchmark_report_missing:" + iteration_tag
+        );
+        let preflight_text = std::fs::read_to_string(run_report);
+        let preflight = rhai::json::parse(preflight_text);
+        let passed = preflight.passed;
+        if passed == 0 || exit_code != 0 {
+            all_passed = 0;
+        }
+        runs.push(#{
+            iteration: iteration,
+            passed: passed,
+            exit_code: exit_code,
+            preflight_duration_ms: preflight.duration_ms,
+            wall_duration_ms: wall_duration
+        });
+    }
+
+    let p95_index = ((95 * iterations + 99) / 100) - 1;
+    let p95 = 0;
+    let target_met = 0;
+    let sorted = [];
+    let picked = #{};
+
+    for pick in 0..iterations {
+        let min_value = -1;
+        let min_tag = "";
+        for run in runs {
+            let iter_tag = "";
+            iter_tag += run.iteration;
+            if picked.contains(iter_tag) {
+                continue;
+            }
+            let value = 0;
+            value = run.wall_duration_ms;
+            if min_value < 0 || value < min_value {
+                min_value = value;
+                min_tag = iter_tag;
+            }
+        }
+        sorted.push(min_value);
+        if pick == p95_index {
+            p95 = min_value;
+        }
+        picked[min_tag] = true;
+    }
+
+    if p95 <= 15000 {
+        target_met = 1;
+    }
+
+    let benchmark = #{
+        schema_version: 1,
+        kind: "agenterm-read-only-preflight-benchmark",
+        iterations: iterations,
+        p95_wall_duration_ms: p95,
+        target_ms: 15000,
+        target_met: target_met,
+        all_preflights_passed: all_passed,
+        excludes_network_and_interactive_auth: true,
+        runs: runs
+    };
+    rhai::runtime::atomic_write(
+        output_path,
+        rhai::json::stringify_pretty(benchmark) + "\n"
+    );
+    print(
+        "PREFLIGHT BENCHMARK iterations=" + iterations +
+        " p95_ms=" + p95 +
+        " target_ms=15000 target_met=" + target_met
+    );
+    print("PREFLIGHT BENCHMARK JSON " + output_path);
+
+    cleanup_run_reports(run_directory, iterations);
+
+    require(all_passed != 0, "One or more benchmark preflight runs failed.");
+    require(
+        target_met != 0,
+        "Preflight p95 " + p95 + " ms exceeds the 15000 ms target."
+    );
+
+    0
+}

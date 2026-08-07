@@ -1,0 +1,364 @@
+// Reject duplicated Cargo executable lists and packaging rules outside Rhai.
+//
+// Args: REPO
+
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: REPO");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let stdout_path = repo + ".cross-platform-automation-audit.stdout.tmp";
+
+    let inventory_code = std::process::command_stdout_file(
+        "git",
+        [
+            "-C",
+            repo,
+            "ls-files",
+            "--",
+            ".github/workflows/*.yml",
+            "scripts/*.sh",
+            "build.sh",
+            "check.sh",
+            "lint.sh",
+            "release.sh"
+        ],
+        10000,
+        stdout_path
+    );
+    require(inventory_code == 0, "cross_platform_audit_inventory");
+    let inventory_text = std::fs::read_to_string(stdout_path);
+
+    let checked = 0;
+    for source_line in inventory_text.split("\n") {
+        let relative = source_line;
+        relative.trim();
+        if relative == "" {
+            continue;
+        }
+        let path = std::path::join(repo, relative).display;
+        if std::fs::exists(path) == 0 {
+            continue;
+        }
+        checked += 1;
+        let source = std::fs::read_to_string(path);
+        source.to_lower();
+        require(
+            source.contains("--bin agenterm --bin") == 0,
+            "cross_platform_rule_duplicate:" + relative + ":--bin agenterm --bin"
+        );
+        require(
+            source.contains("bins=(") == 0,
+            "cross_platform_rule_duplicate:" + relative + ":bins=("
+        );
+        require(
+            source.contains("cargo build --locked --release --target") == 0,
+            "cross_platform_rule_duplicate:" +
+                relative +
+                ":cargo build --locked --release --target"
+        );
+        require(
+            source.contains("cargo xwin build --locked --target") == 0,
+            "cross_platform_rule_duplicate:" +
+                relative +
+                ":cargo xwin build --locked --target"
+        );
+        require(
+            source.contains("python3 - ./scripts/artifacts.json") == 0,
+            "cross_platform_rule_duplicate:" +
+                relative +
+                ":python3 - ./scripts/artifacts.json"
+        );
+        require(
+            source.contains("package-client-release.sh") == 0,
+            "cross_platform_rule_duplicate:" +
+                relative +
+                ":package-client-release.sh"
+        );
+        require(
+            source.contains("./scripts/build-") == 0,
+            "cross_platform_rule_duplicate:" +
+                relative +
+                ":./scripts/build-"
+        );
+    }
+    require(checked >= 9, "cross_platform_audit_inventory_too_small");
+
+    let batch_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "ls-files", "--", "*.bat", "*.cmd"],
+        10000,
+        stdout_path
+    );
+    require(batch_code == 0, "cross_platform_batch_inventory");
+    let batch_text = std::fs::read_to_string(stdout_path);
+
+    let actual_batch = #{};
+    let batch_count = 0;
+    for source_line in batch_text.split("\n") {
+        let relative = source_line;
+        relative.trim();
+        if relative != "" {
+            actual_batch[relative] = true;
+            batch_count += 1;
+        }
+    }
+    require(
+        batch_count == 5,
+        "cross_platform_batch_inventory_count:" + batch_count
+    );
+    require(
+        actual_batch.contains("build.bat"),
+        "cross_platform_batch_inventory_missing:build.bat"
+    );
+    require(
+        actual_batch.contains("check.cmd"),
+        "cross_platform_batch_inventory_missing:check.cmd"
+    );
+    require(
+        actual_batch.contains("lint.cmd"),
+        "cross_platform_batch_inventory_missing:lint.cmd"
+    );
+    require(
+        actual_batch.contains("release.cmd"),
+        "cross_platform_batch_inventory_missing:release.cmd"
+    );
+    require(
+        actual_batch.contains("scripts/bootstrap.cmd"),
+        "cross_platform_batch_inventory_missing:scripts/bootstrap.cmd"
+    );
+
+    // Closed alias set: build/check/lint/release (plus bootstrap.cmd below).
+    let windows_source = std::fs::read_to_string(
+        std::path::join(repo, "build.bat").display
+    );
+    let unix_source = std::fs::read_to_string(
+        std::path::join(repo, "build.sh").display
+    );
+    let windows_lower = windows_source;
+    windows_lower.to_lower();
+    require(
+        windows_lower.contains("agenterm_bootstrap_task=build"),
+        "cross_platform_windows_alias:build.bat"
+    );
+    require(
+        unix_source.contains("AGENTERM_BOOTSTRAP_TASK=build")
+            && unix_source.contains("scripts/bootstrap.sh"),
+        "cross_platform_unix_alias:build.sh"
+    );
+
+    windows_source = std::fs::read_to_string(
+        std::path::join(repo, "check.cmd").display
+    );
+    unix_source = std::fs::read_to_string(
+        std::path::join(repo, "check.sh").display
+    );
+    windows_lower = windows_source;
+    windows_lower.to_lower();
+    require(
+        windows_lower.contains("agenterm_bootstrap_task=check"),
+        "cross_platform_windows_alias:check.cmd"
+    );
+    require(
+        unix_source.contains("AGENTERM_BOOTSTRAP_TASK=check")
+            && unix_source.contains("scripts/bootstrap.sh"),
+        "cross_platform_unix_alias:check.sh"
+    );
+
+    windows_source = std::fs::read_to_string(
+        std::path::join(repo, "lint.cmd").display
+    );
+    unix_source = std::fs::read_to_string(
+        std::path::join(repo, "lint.sh").display
+    );
+    windows_lower = windows_source;
+    windows_lower.to_lower();
+    require(
+        windows_lower.contains("agenterm_bootstrap_task=lint"),
+        "cross_platform_windows_alias:lint.cmd"
+    );
+    require(
+        unix_source.contains("AGENTERM_BOOTSTRAP_TASK=lint")
+            && unix_source.contains("scripts/bootstrap.sh"),
+        "cross_platform_unix_alias:lint.sh"
+    );
+
+    windows_source = std::fs::read_to_string(
+        std::path::join(repo, "release.cmd").display
+    );
+    unix_source = std::fs::read_to_string(
+        std::path::join(repo, "release.sh").display
+    );
+    windows_lower = windows_source;
+    windows_lower.to_lower();
+    require(
+        windows_lower.contains("agenterm_bootstrap_task=release"),
+        "cross_platform_windows_alias:release.cmd"
+    );
+    require(
+        unix_source.contains("AGENTERM_BOOTSTRAP_TASK=release")
+            && unix_source.contains("scripts/bootstrap.sh"),
+        "cross_platform_unix_alias:release.sh"
+    );
+
+    let windows_bootstrap = std::fs::read_to_string(
+        std::path::join(repo, "scripts/bootstrap.cmd").display
+    );
+    let unix_bootstrap = std::fs::read_to_string(
+        std::path::join(repo, "scripts/bootstrap.sh").display
+    );
+    let windows_bootstrap_lower = windows_bootstrap;
+    windows_bootstrap_lower.to_lower();
+    require(
+        windows_bootstrap_lower.contains(
+            "task run \"%agenterm_bootstrap_task%\""
+        )
+            && unix_bootstrap.contains(
+                "task run \"$AGENTERM_BOOTSTRAP_TASK\""
+            ),
+        "cross_platform_bootstrap_pair"
+    );
+    require(
+        unix_bootstrap.contains("chmod +x \"$WORKER\"")
+            && unix_bootstrap.contains("chmod +x -- \"$WORKER\"") == 0,
+        "cross_platform_macos_bsd_chmod"
+    );
+
+    let check_source = std::fs::read_to_string(
+        std::path::join(repo, "scripts/rhai/check.rhai").display
+    );
+    require(
+        check_source.contains("\"native public catalog clients\"")
+            && check_source.contains("\"client-build\"")
+            && check_source.contains("\"agenterm-cli\""),
+        "cross_platform_unix_prd_catalog_bootstrap"
+    );
+
+    let manifest_path = std::path::join(repo, "agenterm.tasks.json").display;
+    let manifest = rhai::json::parse_file(manifest_path);
+    let check_task_count = 0;
+    for task in manifest.tasks {
+        if task.id == "check" {
+            check_task_count += 1;
+            let has_windows = 0;
+            let has_linux = 0;
+            let has_macos = 0;
+            for platform in task.platforms {
+                let platform_name = "" + platform;
+                if platform_name == "windows" {
+                    has_windows = 1;
+                }
+                if platform_name == "linux" {
+                    has_linux = 1;
+                }
+                if platform_name == "macos" {
+                    has_macos = 1;
+                }
+            }
+            require(
+                has_windows && has_linux && has_macos,
+                "cross_platform_check_task_platforms"
+            );
+        }
+    }
+    require(check_task_count == 1, "cross_platform_check_task_platforms");
+
+    let ci_source = std::fs::read_to_string(
+        std::path::join(repo, ".github/workflows/ci.yml").display
+    );
+    require(
+        ci_source.contains(
+            "AGENTERM_BOOTSTRAP_TASK: cross-platform-automation-audit"
+        ),
+        "cross_platform_ci_evidence:cross-platform-automation-audit"
+    );
+    require(
+        ci_source.contains("AGENTERM_BOOTSTRAP_TASK: client-build"),
+        "cross_platform_ci_evidence:client-build"
+    );
+    require(
+        ci_source.contains("AGENTERM_BOOTSTRAP_TASK: client-clippy"),
+        "cross_platform_ci_evidence:client-clippy"
+    );
+    require(
+        ci_source.contains("AGENTERM_BOOTSTRAP_TASK: client-smoke"),
+        "cross_platform_ci_evidence:client-smoke"
+    );
+    require(
+        ci_source.contains("--test linux_script_cli"),
+        "cross_platform_ci_evidence:linux_script_cli"
+    );
+    require(
+        ci_source.contains("~/.cargo/bin/cargo-xwin"),
+        "cross_platform_ci_cargo_xwin_cache:cargo-xwin-bin"
+    );
+    require(
+        ci_source.contains("cargo-home-v2-ci-windows-aarch64-"),
+        "cross_platform_ci_cargo_xwin_cache:cargo-home-v2"
+    );
+    require(
+        ci_source.contains("cargo-target-v3-windows-aarch64-ci-"),
+        "cross_platform_ci_cargo_xwin_cache:cargo-target-v3"
+    );
+    require(
+        ci_source.contains("cargo-xwin0.23.0-"),
+        "cross_platform_ci_cargo_xwin_cache:cargo-xwin-version-dir"
+    );
+    require(
+        ci_source.contains("CARGO_XWIN_VERSION=\"0.23.0\""),
+        "cross_platform_ci_cargo_xwin_cache:cargo-xwin-version-env"
+    );
+    require(
+        ci_source.contains("cargo install cargo-xwin --locked"),
+        "cross_platform_ci_cargo_xwin_cache:cargo-install"
+    );
+    require(
+        ci_source.contains("--version \"=$CARGO_XWIN_VERSION\" --force"),
+        "cross_platform_ci_cargo_xwin_cache:cargo-install-version-pin"
+    );
+    require(
+        ci_source.contains("cargo_xwin_state=\"reused\""),
+        "cross_platform_ci_cargo_xwin_cache:reuse-state"
+    );
+    require(
+        ci_source.contains("windows_aarch64_cargo_xwin_state"),
+        "cross_platform_ci_cargo_xwin_cache:windows-aarch64-state"
+    );
+
+    let release_source = std::fs::read_to_string(
+        std::path::join(repo, ".github/workflows/candidate.yml").display
+    );
+    require(
+        release_source.contains(
+            "AGENTERM_BOOTSTRAP_TASK: package-client-release"
+        ),
+        "cross_platform_release_package_task"
+    );
+
+    let client_source = std::fs::read_to_string(
+        std::path::join(repo, "src/client/mod.rs").display
+    );
+    require(
+        client_source.contains("run_script_command_direct(&arguments)")
+            && client_source.contains("fn run_script_command_direct(")
+            && client_source.contains("return run_script_task_command(arguments)")
+            && client_source.contains(
+                "fn run_script_command(_arguments: &[String])"
+            ) == 0,
+        "cross_platform_task_host_unavailable"
+    );
+
+    std::fs::try_remove_file(stdout_path);
+
+    print(
+        rhai::json::stringify_pretty(#{
+            schema_version: 1,
+            checked_files: checked,
+            alias_pairs: 5,
+            batch_entry_count: batch_count,
+            duplicate_business_rules: 0
+        })
+    );
+    0
+}

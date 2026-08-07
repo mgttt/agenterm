@@ -1059,7 +1059,7 @@
     {
       "id": "preflight-benchmark",
       "description": "Measure public preflight worker startup and report p95 latency",
-      "entry": "scripts/rhai/preflight-benchmark.rhai",
+      "entry": "scripts/rh/preflight-benchmark.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": ["preflight"],
@@ -1240,7 +1240,7 @@
     {
       "id": "cross-platform-automation-audit",
       "description": "Reject duplicated Cargo executable lists and package rules in shell and workflows",
-      "entry": "scripts/rhai/cross-platform-automation-audit.rhai",
+      "entry": "scripts/rh/cross-platform-automation-audit.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

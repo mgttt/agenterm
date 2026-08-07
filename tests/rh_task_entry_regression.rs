@@ -221,6 +221,32 @@ fn client_smoke_uses_native_bundled_execution() {
 }
 
 #[test]
+fn preflight_benchmark_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/preflight-benchmark.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
+    assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
+fn cross_platform_automation_audit_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/cross-platform-automation-audit.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_array_items("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
 fn agenterm_net_research_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/agenterm-net-research.rh");
     assert!(source.contains("fn entry("));
