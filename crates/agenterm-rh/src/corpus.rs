@@ -192,10 +192,13 @@ fn scan_relative_files_with_policy(
             if output.execution_mode == CdylibExecutionMode::Native {
                 Ok(())
             } else {
-                Err(RhError::Unsupported(format!(
-                    "native .rh task requires {} interpreter fallback",
-                    output.execution_mode.as_str()
-                )))
+                Err(RhError::Subset {
+                    code: "native_task_interpreter_fallback",
+                    detail: format!(
+                        "native .rh task requires {} interpreter fallback",
+                        output.execution_mode.as_str()
+                    ),
+                })
             }
         });
         match validation {
