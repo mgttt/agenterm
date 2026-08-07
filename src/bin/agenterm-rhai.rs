@@ -26,6 +26,13 @@ fn run() -> anyhow::Result<u8> {
         return u8::try_from(status.code().unwrap_or(1))
             .map_err(|_| anyhow::anyhow!("agenterm-rh returned an invalid exit code"));
     }
+    if std::env::var_os("AGENTERM_SCRIPT_BACKEND").is_none() {
+        // This process has not started worker threads yet. Keep the legacy shim's
+        // unforwarded inline, .rhai, REPL, and compatibility-worker paths interpreted.
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rhai");
+        }
+    }
     match arguments.as_slice() {
         [mode, rest @ ..] if mode == "--internal-incremental-finalize" => {
             agenterm::incremental_wrapper::finalize_incremental_manifest(rest)
