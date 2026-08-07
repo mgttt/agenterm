@@ -184,6 +184,86 @@ fn entry() {
 }
 
 #[test]
+fn rh_backend_whole_script_compat_throw_is_an_error() {
+    with_rh_backend(|| {
+        let source = r#"
+fn entry() {
+    switch 1 {
+        1 => (),
+        _ => ()
+    }
+    throw "compat boom";
+}
+"#;
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            source,
+            RhInvocationOptions {
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("whole-script compat throw must fail"),
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("rh_host_run_script: Runtime error: compat boom"),
+            "missing stable host error detail: {error}"
+        );
+
+        let healthy = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            "fn entry() { switch 1 { 1 => 42, _ => 0 } }",
+            RhInvocationOptions {
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        )
+        .expect("post-error run")
+        .expect("rh handled");
+        assert_eq!(healthy.value, Some(serde_json::json!(42)));
+    });
+}
+
+#[test]
+fn rh_backend_localized_host_eval_failure_is_an_error() {
+    with_rh_backend(|| {
+        let missing = std::env::temp_dir().join(format!(
+            "agenterm-rh-host-eval-missing-{}/file.txt",
+            std::process::id()
+        ));
+        let source = format!(
+            "fn entry() {{ std::fs::read_to_string({}); 42 }}",
+            serde_json::to_string(&missing.to_string_lossy()).expect("path json")
+        );
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Eval,
+            &source,
+            RhInvocationOptions {
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("localized host-eval failure must fail the entry"),
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("rh_host_eval: Runtime error: fs_read_to_string"),
+            "missing stable host error detail: {error}"
+        );
+    });
+}
+
+#[test]
 fn rh_backend_run_while_count_fixture() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/while-count.rh");

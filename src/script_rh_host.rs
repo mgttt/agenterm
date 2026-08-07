@@ -65,7 +65,9 @@ pub fn call_pack_entry_with_fleet(
         set_fleet_bridge(bridge);
         let module = RhNativeModule::load(native_path)?;
         register_native_module(&module)?;
-        Ok(module.call_entry())
+        clear_host_error();
+        let entry_value = module.call_entry();
+        take_host_error().map_or(Ok(entry_value), Err)
     })
 }
 
@@ -92,8 +94,12 @@ pub(crate) fn call_pack_entry_with_host_result(
         }
         let module = RhNativeModule::load(native_path)?;
         register_native_module(&module)?;
+        clear_host_error();
         let entry_value = module.call_entry();
         let host_value = HOST_RUN_SCRIPT_RESULT.with(|slot| slot.borrow_mut().take());
+        if let Some(error) = take_host_error() {
+            return Err(error);
+        }
         Ok(RhPackEntryResult {
             entry_value,
             host_value,
@@ -131,7 +137,11 @@ extern "C" fn host_run_script_call(
         Ok(value) => value,
         Err(()) => return -2,
     };
-    let response = host_run_script_source(&source).map_err(|_| -5);
+    let response = host_run_script_source(&source);
+    if let Err(error) = &response {
+        record_host_error("rh_host_run_script", error);
+    }
+    let response = response.map_err(|_| -5);
     if let Ok(json) = &response
         && let Some(value) = decode_host_entry_value(json)
     {
@@ -243,8 +253,31 @@ extern "C" fn host_eval_call(
         Ok(value) => value,
         Err(()) => return -3,
     };
-    let response = host_eval_snippet(&snippet, &scope_json).map_err(|_| -5);
+    let response = host_eval_snippet(&snippet, &scope_json);
+    if let Err(error) = &response {
+        record_host_error("rh_host_eval", error);
+    }
+    let response = response.map_err(|_| -5);
     write_response(response, out_buf, out_cap)
+}
+
+fn clear_host_error() {
+    HOST_ERROR.with(|slot| {
+        slot.borrow_mut().take();
+    });
+}
+
+fn record_host_error(code: &'static str, detail: &str) {
+    HOST_ERROR.with(|slot| {
+        let mut error = slot.borrow_mut();
+        if error.is_none() {
+            *error = Some(RhError::Compile(format!("{code}: {detail}")));
+        }
+    });
+}
+
+fn take_host_error() -> Option<RhError> {
+    HOST_ERROR.with(|slot| slot.borrow_mut().take())
 }
 
 fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> {
@@ -357,6 +390,8 @@ std::thread_local! {
     static FLEET_BRIDGE: std::cell::RefCell<Option<FleetBridgeFn>> =
         const { std::cell::RefCell::new(None) };
     static HOST_RUN_SCRIPT_RESULT: std::cell::RefCell<Option<RhHostEntryValue>> =
+        const { std::cell::RefCell::new(None) };
+    static HOST_ERROR: std::cell::RefCell<Option<RhError>> =
         const { std::cell::RefCell::new(None) };
 }
 
