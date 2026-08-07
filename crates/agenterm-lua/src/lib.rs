@@ -91,6 +91,18 @@ impl LuaEngine {
         Ok(())
     }
 
+    /// Evaluate Lua source from a file, returning an i64 exit code
+    /// and captured print output.
+    pub fn eval_file(
+        &self,
+        path: &std::path::Path,
+        host: &LuaHostFunctions,
+    ) -> Result<LuaEvalResult, LuaError> {
+        let source = std::fs::read_to_string(path)
+            .map_err(|e| LuaError::Engine(format!("read_file: {e}")))?;
+        self.eval(&source, host)
+    }
+
     /// Evaluate Lua source with optional host functions, returning an i64 exit code
     /// and captured print output.
     pub fn eval(
@@ -306,6 +318,59 @@ mod tests {
         let result = engine
             .eval("local r = __host.fleet_call('test', '{}') return 0", &host)
             .expect("eval");
+        assert_eq!(result.value, 0);
+    }
+
+    #[test]
+    fn eval_fleet_module() {
+        let engine = LuaEngine::new().expect("create engine");
+        let host = LuaHostFunctions {
+            fleet_call: Some(Arc::new(|op: String, params: String| {
+                if op == "tabs.list" && params == "{}" {
+                    Ok("[{\"id\":\"tab1\",\"title\":\"Test\"}]".to_string())
+                } else if op == "ui.snapshot" && params == "{}" {
+                    Ok("{\"width\":1920,\"height\":1080}".to_string())
+                } else {
+                    Err(format!("unknown_op: {op}"))
+                }
+            })),
+            ..Default::default()
+        };
+
+        // Load fleet.lua source and wrap it
+        let fleet_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("scripts")
+            .join("lua")
+            .join("lib")
+            .join("fleet.lua");
+        let fleet_source = std::fs::read_to_string(&fleet_path)
+            .expect("read fleet.lua");
+
+        // fleet.lua ends with `return fleet`; strip it so we can append test code
+        let fleet_source = fleet_source.trim_end().strip_suffix("return fleet")
+            .unwrap_or(&fleet_source)
+            .trim_end()
+            .to_string();
+
+        let script = format!(
+            "{fleet_source}\n\
+             local result = fleet.tabs.list()\n\
+             assert(result ~= nil, 'tabs.list returned nil')\n\
+             assert(type(result) == 'table', 'expected table')\n\
+             assert(#result == 1, 'expected 1 tab')\n\
+             assert(result[1].id == 'tab1', 'expected tab1 id')\n\
+             \n\
+             local snap = fleet.ui.snapshot()\n\
+             assert(snap.width == 1920, 'expected width')\n\
+             \n\
+             return 0"
+        );
+
+        let result = engine.eval(&script, &host).expect("fleet module eval");
         assert_eq!(result.value, 0);
     }
 }
