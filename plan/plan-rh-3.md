@@ -119,7 +119,9 @@
 | M42f6f | 原生 `std::fs::metadata`（或与 `symlink_metadata` 对齐的 `.is_file/.is_dir/.len`）、`std::env::current_dir`、`PathBuf.is_absolute`、`json::parse_file` 糖 → `parse(read_to_string)`；解锁 `artifact-verification` 文件侧与审计叶任务 | [ ] |
 | M42f6g | 易切叶任务 cutover（依赖 6e/6f）：`mcp-conformance`、`performance-samples`、`agenterm-net-research`；INT-only `.rh` + entry 切线 + 归档 | [ ] |
 | M42f6h | JSON 集合迭代加强（`for` over JSON array / object keys 已部分具备则补缺口）+ `release_candidate`/`qualification`/`package_qualified` lib 原生移植 | [ ] |
+| M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |
+| M42f8 | **Shim 收口顺序（非并行捷径）**：Phase A 先清零 manifest `.rhai` 入口与工作流硬编码 `.rhai`；Phase B 才把 `agenterm-rhai` 收成纯 forwarder（含 `run *.rhai`/`task`）；Phase C 再拆主库 Rhai `Engine`/`script_rh_host` compat。禁止在 A 未完成时宣称 rhai 已归档——compat-delegating 仍是 Rhai | [ ] |
 
 **M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。
 

@@ -499,7 +499,7 @@ jobs:
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
           target/aarch64-apple-darwin/release/agenterm-rh \
-            run scripts/rhai/finalize-macos-provenance.rhai -- \
+            run scripts/rh/finalize-macos-provenance.rh -- \
             "$ARCHIVE" "$ARCHIVE.provenance.json"
 
       - name: Package macOS ARM64 unsigned preview
@@ -566,7 +566,7 @@ jobs:
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
           target/x86_64-apple-darwin/release/agenterm-rh \
-            run scripts/rhai/finalize-macos-provenance.rhai -- \
+            run scripts/rh/finalize-macos-provenance.rh -- \
             "$ARCHIVE" "$ARCHIVE.provenance.json"
 
       - name: Package macOS x86_64 unsigned preview

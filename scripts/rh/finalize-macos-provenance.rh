@@ -1,0 +1,64 @@
+// Mark one already accepted, signed macOS archive provenance as notarized.
+//
+// The caller owns Apple notarytool submission and may invoke this task only
+// after the exact archive receives an Accepted result.
+//
+// Args: ARCHIVE PROVENANCE_JSON
+
+fn entry() {
+    if args.len != 2 {
+        return rh::fail("expected: ARCHIVE PROVENANCE_JSON");
+    }
+
+    let archive = std::path::absolute(args[0]).display;
+    let provenance_path = std::path::absolute(args[1]).display;
+    require(
+        std::fs::exists(archive) && std::fs::symlink_metadata(archive).is_file,
+        "finalize_macos_provenance_archive"
+    );
+    require(
+        std::fs::exists(provenance_path)
+            && std::fs::symlink_metadata(provenance_path).is_file,
+        "finalize_macos_provenance_input"
+    );
+    let provenance =
+        rhai::json::parse(std::fs::read_to_string(provenance_path));
+    require(
+        provenance.schema_version == 1
+            && provenance.product == "AgenTerm"
+            && provenance.os == "macos"
+            && provenance.channel == "release"
+            && provenance.signed
+            && !provenance.notarized,
+        "finalize_macos_provenance_state"
+    );
+    require(
+        provenance.sha256 == rhai::crypto::sha256_file(archive),
+        "finalize_macos_provenance_archive_hash"
+    );
+    let updated = #{
+        schema_version: provenance.schema_version,
+        product: provenance.product,
+        version: provenance.version,
+        os: provenance.os,
+        arch: provenance.arch,
+        channel: provenance.channel,
+        signed: provenance.signed,
+        notarized: true,
+        artifact: provenance.artifact,
+        sha256: provenance.sha256,
+        source_commit: provenance.source_commit,
+        source_tag: provenance.source_tag,
+        artifact_manifest_sha256: provenance.artifact_manifest_sha256,
+        cargo_lock_sha256: provenance.cargo_lock_sha256,
+        sbom_sha256: provenance.sbom_sha256,
+        execution_evidence: provenance.execution_evidence,
+        build_log: provenance.build_log
+    };
+    rhai::runtime::atomic_write(
+        provenance_path,
+        rhai::json::stringify_pretty(updated) + "\n"
+    );
+    print("NOTARIZED PROVENANCE " + provenance_path);
+    0
+}

@@ -72,10 +72,10 @@ fn ci_manifest_task_entrypoints_use_rh_front_door() {
 #[test]
 fn candidate_and_release_use_only_rh_scripting_front_door() {
     assert!(CANDIDATE.contains(
-        "target/aarch64-apple-darwin/release/agenterm-rh \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
+        "target/aarch64-apple-darwin/release/agenterm-rh \\\n            run scripts/rh/finalize-macos-provenance.rh"
     ));
     assert!(CANDIDATE.contains(
-        "target/x86_64-apple-darwin/release/agenterm-rh \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
+        "target/x86_64-apple-darwin/release/agenterm-rh \\\n            run scripts/rh/finalize-macos-provenance.rh"
     ));
     assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\""));
     assert!(CANDIDATE.contains(
