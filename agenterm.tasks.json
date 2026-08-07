@@ -699,7 +699,7 @@
     {
       "id": "diagnostic-bundle-selftest",
       "description": "Prove retained CLI, GUI, and Script failure bundles are bounded, private, identity-checked, and orphan-free",
-      "entry": "scripts/rhai/diagnostic-bundle-selftest.rhai",
+      "entry": "scripts/rh/diagnostic-bundle-selftest.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-rhai.exe", "dist/agenterm.exe"],

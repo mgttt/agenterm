@@ -203,11 +203,16 @@ fn start_task_probe(
     timeout,
     extra_limits
 ) {
+    // Coerce path/timeout params to strings for native typed packs.
+    let repo_s = "" + repo;
+    let entry_s = "" + entry;
+    let script_s = "" + script;
+    let timeout_s = "" + timeout;
     let arguments = [
-        "run", entry,
+        "run", entry_s,
         "--profile", "local",
-        "--project-root", repo,
-        "--timeout-ms", timeout,
+        "--project-root", repo_s,
+        "--timeout-ms", timeout_s,
         "--max-operations", "10000000"
     ];
     for limit in extra_limits {
@@ -220,7 +225,7 @@ fn start_task_probe(
     arguments.push("--internal-failure-bundle-probe");
     let command = test_harness::configured_command(
         context,
-        script,
+        script_s,
         arguments
     );
     command.timeout(std::time::Duration::from_secs(45));
@@ -261,10 +266,6 @@ fn entry() {
         repo,
         "diagnostic-orchestrator"
     );
-    let gui_probe_started = 0;
-    let script_probe_started = 0;
-    let gui_probe = std::process::command("cmd.exe");
-    let script_probe = std::process::command("cmd.exe");
     let failure = "";
 
     if failure == "" {
@@ -298,7 +299,7 @@ fn entry() {
                 "diagnostic-cli-probe"
             );
             if cli_match.error != "" {
-                failure = cli_match.error;
+                failure = "" + cli_match.error;
             } else {
                 failure = assert_bounded_bundle(
                     cli_match.path,
@@ -315,7 +316,8 @@ fn entry() {
     if failure == "" {
         print("STEP GUI and script-worker failure bundles in parallel");
         let gui_before = retained_bundles(bundle_root);
-        gui_probe = start_task_probe(
+        // Bind Child via start() — do not placeholder with Command (native typed).
+        let gui_probe = start_task_probe(
             outer_context,
             script,
             repo,
@@ -327,9 +329,8 @@ fn entry() {
             "60000",
             []
         );
-        gui_probe_started = 1;
         let script_before = retained_bundles(bundle_root);
-        script_probe = start_task_probe(
+        let script_probe = start_task_probe(
             outer_context,
             script,
             repo,
@@ -344,7 +345,6 @@ fn entry() {
                 "--max-output-bytes", "1048576"
             ]
         );
-        script_probe_started = 1;
         failure = complete_task_probe(gui_probe, "theme");
         if failure == "" {
             let gui_match = only_new_bundle(
@@ -353,7 +353,7 @@ fn entry() {
                 "theme"
             );
             if gui_match.error != "" {
-                failure = gui_match.error;
+                failure = "" + gui_match.error;
             } else {
                 failure = assert_bounded_bundle(
                     gui_match.path,
@@ -375,7 +375,7 @@ fn entry() {
                 "script"
             );
             if script_match.error != "" {
-                failure = script_match.error;
+                failure = "" + script_match.error;
             } else {
                 failure = assert_bounded_bundle(
                     script_match.path,
@@ -392,19 +392,19 @@ fn entry() {
                 "PASS: CLI, GUI, and script failure bundles are bounded and orphan-free"
             );
         }
-    }
-
-    if gui_probe_started != 0 && gui_probe.state == "running" {
-        gui_probe.kill();
-        gui_probe.wait_with_output(
-            std::time::Duration::from_secs(2)
-        );
-    }
-    if script_probe_started != 0 && script_probe.state == "running" {
-        script_probe.kill();
-        script_probe.wait_with_output(
-            std::time::Duration::from_secs(2)
-        );
+        // Cleanup stays in the Child binding scope (same block as start()).
+        if gui_probe.state == "running" {
+            gui_probe.kill();
+            gui_probe.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+        }
+        if script_probe.state == "running" {
+            script_probe.kill();
+            script_probe.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+        }
     }
     for path in retained_bundles(bundle_root) {
         if !initial.contains(path)

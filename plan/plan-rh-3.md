@@ -153,7 +153,7 @@
 | M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [~] |
 | M42f8e | 仓库痕迹清扫：`scripts/rhai` 引用、`agenterm-rhai` 运营串、测试 pin、AGENTS/PRD | [~] |
 
-**M42f7g / M42f8 进度（2026-08-07 tip +rev41）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip（仍约 28 条 `.rhai`）。**rev 41**：Json 返回函数上 `require`/`throw` 返回 Null/默认值；subset 允许本地 FnCall 作赋值 RHS；JSON→StringList 边界强制。**已 flip**：`harness-cleanup-selftest`、`build-identity`（Native he=1+pack）。**仍 Compat/阻塞**：`qualification-selftest`（JSON 字段/下标赋值：`timing.gates[i].status=…` 等，需原生 JSON mutate）；`diagnostic-bundle-selftest`（下一步：`path.parent.display.to_lower` 字符串链）。M42f8a–d 草稿齐。M42f8e 审计已落盘；Phase A 切线门禁 = Native+pack。
+**M42f7g / M42f8 进度（2026-08-07 tip +rev42）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip（仍约 28 条 `.rhai`）。**rev 42**：`path.display.to_lower`（含嵌套 parent/absolute）；`split` 变量分隔符 + JSON 路径 + `.len`；`for` 本地 Json/StringList 返回；`String += stringish`→`push_str`；Child/Command 形参 `mut`；显式字符串表达式优先于 host-surface。**已 flip**：`harness-cleanup-selftest`、`build-identity`、`diagnostic-bundle-selftest`（Native he=1+pack）。**仍 Compat/阻塞**：`qualification-selftest`（JSON 字段/下标赋值：`timing.gates[i].status=…` 等，需原生 JSON mutate）。M42f8a–d 草稿齐。M42f8e 审计已落盘；Phase A 切线门禁 = Native+pack。
 
 
 **M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。
