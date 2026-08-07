@@ -41,13 +41,20 @@ position" below). Four engines, in lineage order:
   `plan/plan-v0.1.16.md` §1 "Rh. 脚本引擎矩阵".
 - **qjs — `agenterm-qjs`, capability-aligned with rh, QuickJS-based (in
   progress).** New sibling engine using `rquickjs` (bundled quickjs-ng C
-  source) as the binding. QJS-M0 (skeleton + minimal eval) shipped
-  2026-08-07 (commit `140a9152`). QJS-M1 (`check`/`eval`/`check-many` CLI
-  verbs field-for-field aligned with rh's contract — manifest/report JSON
-  shape, failure-code taxonomy, exit-code mapping) shipped the same day
-  (commit `cc7df9df`), followed by root-workspace integration (commit
-  `d5ac9a8a`, mirrors rh's `[[bin]]`-in-root-package shape). Open: L2
-  facade/`task`/`run`/`pack`/`qualify` (QJS-M2). Open risks and remaining
+  source) as the binding. QJS-M0 (skeleton + minimal eval, `140a9152`) and
+  QJS-M1 (`check`/`eval`/`check-many` CLI verbs field-for-field aligned
+  with rh's contract, `cc7df9df`) shipped 2026-08-07, followed by root-
+  workspace integration (`d5ac9a8a`, mirrors rh's `[[bin]]`-in-root-package
+  shape). QJS-M2 in progress (`e50fbbf8`, 2026-08-08): `__host` function
+  binding (`fleet_call`/`args_len`/`arg`/`print`) deliberately matches
+  `agenterm_lua::LuaHostFunctions`'s shape/naming rather than inventing a
+  qjs-specific convention, and `scripts/qjs/lib/fleet.js` is a near-line-
+  for-line port of `scripts/lua/lib/fleet.lua` — proven end-to-end against
+  the real file. A real memory-safety bug (GC-uncollectable reference
+  cycle from capturing `Ctx` in a bound closure, crashed the process) was
+  found and fixed along the way — see the "Thread/concurrency model
+  mismatch" risk entry below. Still open: `agenterm::script_backend`
+  wiring and `task`/`run`/`pack`/`qualify` verbs. Open risks and remaining
   milestones: see "Future" § **qjs execution backend** below.
 
 "Capability alignment" between rh/lua/qjs means: same L2 facade/catalog
@@ -920,11 +927,15 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
 - [~] **qjs execution backend** (`crates/agenterm-qjs`, in progress,
   capability parity with rh): QJS-M0 (skeleton + `rquickjs` binding +
-  minimal eval, commit `140a9152`), QJS-M1 (`check`/`eval`/`check-many` CLI
-  verb parity, commit `cc7df9df`), and root-workspace integration (commit
-  `d5ac9a8a`, same `[[bin]]`-in-root-package shape as rh) are shipped; see
-  "Script engine family" above and `plan/plan-v0.1.16.md` §1 QJS-M0/M1/M2.
-  L2 facade wiring and `task`/`run`/`pack`/`qualify` remain open (QJS-M2).
+  minimal eval, `140a9152`), QJS-M1 (`check`/`eval`/`check-many` CLI verb
+  parity, `cc7df9df`), root-workspace integration (`d5ac9a8a`, same
+  `[[bin]]`-in-root-package shape as rh), and the QJS-M2 host-binding layer
+  (`__host.fleet_call`/`args_len`/`arg`/`print` matching
+  `agenterm_lua::LuaHostFunctions`'s shape + a near-line-for-line
+  `scripts/qjs/lib/fleet.js` port of `scripts/lua/lib/fleet.lua`,
+  `e50fbbf8`) are shipped; see "Script engine family" above and
+  `plan/plan-v0.1.16.md` §1 QJS-M0/M1/M2. `agenterm::script_backend`
+  wiring and `task`/`run`/`pack`/`qualify` remain open (QJS-M2 continues).
   Open risk
   questions recorded here so they aren't silently assumed away by "it built
   and evaluated `1+2`" — none are blocking QJS-M0, all should be resolved
@@ -944,14 +955,28 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     `cargo test -p agenterm-qjs` are all clean — no MSVC CRT linkage
     mismatch, no symbol collisions, no `cc`/`bindgen` interaction surprises.
     Verified, not assumed.
-  - **Thread/concurrency model mismatch.** Rhai/rh keep "the engine and its
-    Scope … on one evaluation thread" (see "v0.1.9 runtime architecture"
-    above) — background I/O is native-typed and only the eval thread touches
-    script values. QuickJS's `Runtime`/`Context` are not freely Send+Sync
-    across threads either (single-threaded-VM design, same family as V8
-    isolates). Unverified whether the existing one-thread-per-engine worker
-    pattern transfers directly to qjs's worker/framed-worker integration, or
-    needs its own design pass.
+  - **Thread/concurrency model mismatch — partially validated the hard way
+    (2026-08-08).** Rhai/rh keep "the engine and its Scope … on one
+    evaluation thread" (see "v0.1.9 runtime architecture" above). QuickJS's
+    `Runtime`/`Context` are similarly not freely Send+Sync (single-
+    threaded-VM design, same family as V8 isolates) — this stopped being a
+    theoretical concern when the first `__host` binding attempt
+    (`crates/agenterm-qjs/src/host.rs`) captured a cloned `Ctx<'js>` inside
+    a bound closure's environment. That closure lives inside the JS heap as
+    a Function value *and* holds a Rust-level handle back into the same
+    context — a reference cycle QuickJS-ng's GC can't collect, which
+    crashed the whole process on `Runtime` teardown
+    (`Assertion failed: list_empty(&rt->gc_obj_list)`,
+    `STATUS_STACK_BUFFER_OVERRUN`), not just a failing test. Fixed by
+    taking `Ctx<'_>` as an ordinary *per-call* closure parameter
+    (`rquickjs::FromParam` supplies a fresh one each invocation) instead of
+    capturing it — reproduced with a 15-line minimal case before landing
+    the fix, now locked in by regression tests
+    (`eval::tests::calls_host_args`, `fleet_call_error_surfaces_as_js_exception`).
+    **Still unverified:** whether the existing one-thread-per-engine
+    worker pattern transfers directly to qjs's worker/framed-worker
+    integration (QJS-M2 continuation) — this incident narrows the risk
+    to "know the failure mode and its fix," not "resolved."
   - **No AOT — different performance character than rh.** qjs has no
     analogue to rh's T0–T3 layered AOT (`plan/plan-rh-3.md` §1 point 3);
     QuickJS interprets its own bytecode with no JIT. Capability parity does
@@ -959,14 +984,21 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     consumer must evaluate qjs on its own merits rather than assume rh-like
     throughput.
   - **Unrestricted-runtime philosophy must carry over, not just the API
-    shape.** Rhai/rh's product position (see "v0.1.9 product position"
-    above) is a deliberately **unrestricted** local runtime — no sandbox,
-    no capability tiers; authorization is the future Agent harness's job,
-    not the engine's. `rquickjs::Context::full` is likewise unrestricted by
-    default, but this needs an explicit check once host-API binding starts
-    (QJS-M2): confirm no binding-library default quietly narrows what a
-    script can reach (e.g. hidden global removal), which would make qjs a
-    second, inconsistent security model rather than parity with rh.
+    shape — partially verified (2026-08-08).** Rhai/rh's product position
+    (see "v0.1.9 product position" above) is a deliberately
+    **unrestricted** local runtime — no sandbox, no capability tiers;
+    authorization is the future Agent harness's job, not the engine's.
+    `rquickjs::Context::full` is likewise unrestricted by default, and the
+    `__host` binding layer built for QJS-M2 doesn't remove or hide any
+    global object, and propagates host-side errors (e.g. a failing
+    `fleet_call`) through to the script as a real, catchable JS exception
+    rather than swallowing or downgrading them
+    (`eval::tests::fleet_call_error_surfaces_as_js_exception`) — no
+    evidence yet of qjs becoming a second, more-restricted security model.
+    Still open: this only covers the host-binding layer built so far
+    (`fleet_call`/`args_len`/`arg`/`print`); the fuller `std.*`/network/
+    filesystem surface rh exposes hasn't been ported to qjs yet, so this
+    can't be called fully resolved.
   - **Version/hash reproducibility for future receipts.** rh AOT/qualify
     receipts bind to source hash (`design-rh-aot.md`). If qjs packs ever
     join the same receipt contract, quickjs-ng's bundled version needs an
