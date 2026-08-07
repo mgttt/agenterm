@@ -1,0 +1,501 @@
+// Prove the offline packager accepts only the exact qualified byte set.
+//
+// Args: REPO
+
+import "scripts/rh/lib/package_qualified" as package_qualified;
+
+fn expect_rejection_build(expected, repo, receipt, output) {
+    let rejected = 0;
+    try {
+        package_qualified::build_package(repo, receipt, output);
+    } catch (error) {
+        let message = error.to_string();
+        require(
+            message.contains(expected),
+            "package_selftest_wrong_rejection:" +
+                expected + ":" + message
+        );
+        rejected = 1;
+    }
+    require(
+        rejected == 1,
+        "package_selftest_expected_rejection:" + expected
+    );
+}
+
+fn only_result(output_root) {
+    let results = [];
+    for run in std::fs::read_dir(output_root) {
+        if run.is_dir {
+            let path = std::path::join(
+                run.path.display,
+                "dry-run-result.json"
+            ).display;
+            if std::fs::exists(path) {
+                results.push(path);
+            }
+        }
+    }
+    require(
+        results.len == 1,
+        "package_selftest_result_count:" + results.len
+    );
+    results[0]
+}
+
+fn latest_package_run(output_root) {
+    let sidecar_path = output_root + "/.latest-package-run";
+    let run_directory = std::fs::read_to_string(sidecar_path);
+    run_directory.trim();
+    run_directory
+}
+
+fn cleanup_fixture(fixture, owned_root) {
+    let resolved = std::path::absolute(fixture).display;
+    let parent = std::path::parent(resolved).display;
+    parent.to_lower();
+    let owned_absolute = std::path::absolute(owned_root).display;
+    owned_absolute.to_lower();
+    require(
+        parent == owned_absolute,
+        "package_selftest_fixture_outside_owned_root"
+    );
+    if std::fs::exists(resolved) {
+        std::fs::remove_dir_all(resolved);
+    }
+}
+
+fn git_output(fixture, arguments, code) {
+    let stdout_path = fixture + "." + code + ".stdout.tmp";
+    let exit_code = std::process::command_stdout_file(
+        "git",
+        arguments,
+        30000,
+        stdout_path,
+        #{ current_dir: fixture }
+    );
+    if exit_code != 0 {
+        let error_text = std::fs::read_to_string(stdout_path);
+        require(0, code + ":" + error_text);
+    }
+    let text = std::fs::read_to_string(stdout_path);
+    text.trim();
+    std::fs::try_remove_file(stdout_path);
+    text
+}
+
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: REPO");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let owned_root =
+        std::path::join(repo, "target/qualification").display;
+    std::fs::create_dir_all(owned_root);
+    let fixture_token =
+        "" + std::time::SystemTime::now().unix_millis;
+    let fixture_name = "package-selftest-" + fixture_token;
+    let fixture = std::path::join(owned_root, fixture_name).display;
+    std::fs::create_dir_all(fixture);
+
+    let repo_scripts = std::path::join(repo, "scripts").display;
+    let fixture_scripts = std::path::join(fixture, "scripts").display;
+    let fixture_dist = std::path::join(fixture, "dist").display;
+    let fixture_qualification =
+        std::path::join(fixture, "target/qualification").display;
+    std::fs::create_dir_all(fixture_dist);
+    std::fs::create_dir_all(fixture_scripts);
+    std::fs::create_dir_all(fixture_qualification);
+    let gitignore_path =
+        std::path::join(fixture, ".gitignore").display;
+    std::fs::write(gitignore_path, "/dist/\n/target/\n");
+    let cargo_path =
+        std::path::join(fixture, "Cargo.lock").display;
+    std::fs::write(cargo_path, "fixture lock\n");
+    let license_apache_path =
+        std::path::join(fixture, "LICENSE-APACHE").display;
+    std::fs::write(
+        license_apache_path,
+        "fixture LICENSE-APACHE\n"
+    );
+    let license_mit_path =
+        std::path::join(fixture, "LICENSE-MIT").display;
+    std::fs::write(license_mit_path, "fixture LICENSE-MIT\n");
+    let notices_path =
+        std::path::join(fixture, "THIRD_PARTY_NOTICES.md").display;
+    std::fs::write(
+        notices_path,
+        "fixture THIRD_PARTY_NOTICES.md\n"
+    );
+    let artifacts_source =
+        std::path::join(repo_scripts, "artifacts.json").display;
+    let artifacts_destination =
+        std::path::join(fixture_scripts, "artifacts.json").display;
+    std::fs::copy(artifacts_source, artifacts_destination);
+    let gates_source =
+        std::path::join(
+            repo_scripts,
+            "qualification-gates.json"
+        ).display;
+    let gates_destination =
+        std::path::join(
+            fixture_scripts,
+            "qualification-gates.json"
+        ).display;
+    std::fs::copy(gates_source, gates_destination);
+
+    git_output(fixture, ["init", "--quiet"], "package_fixture_init");
+    git_output(fixture, ["add", "."], "package_fixture_add");
+    git_output(
+        fixture,
+        [
+            "-c", "user.name=qualification-selftest",
+            "-c", "user.email=qualification-selftest.invalid",
+            "commit", "--quiet", "-m", "fixture"
+        ],
+        "package_fixture_commit"
+    );
+    let head = git_output(
+        fixture,
+        ["rev-parse", "HEAD"],
+        "package_fixture_head"
+    );
+    head.to_lower();
+
+    let artifact_path = artifacts_destination;
+    let artifact_spec = rhai::json::parse_file(artifact_path);
+    let executable_records = [];
+    for artifact in artifact_spec.executables {
+        let artifact_name = "" + artifact.name;
+        let path = std::path::join(fixture_dist, artifact_name).display;
+        std::fs::write(path, "fixture " + artifact_name + "\n");
+        let file_size = std::fs::metadata(path).len;
+        let file_hash = rhai::crypto::sha256_file(path);
+        executable_records.push(#{
+            name: artifact_name,
+            role: artifact.role,
+            size: file_size,
+            sha256: file_hash
+        });
+    }
+    let cargo_hash = rhai::crypto::sha256_file(cargo_path);
+    let artifact_hash = rhai::crypto::sha256_file(artifact_path);
+    let sbom_path = std::path::join(
+        fixture_dist,
+        "agenterm-sbom.spdx.json"
+    ).display;
+    std::fs::write(
+        sbom_path,
+        "fixture deterministic SPDX inventory\n"
+    );
+    let sbom_hash = rhai::crypto::sha256_file(sbom_path);
+    let gate_path = gates_destination;
+    let gate_hash = rhai::crypto::sha256_file(gate_path);
+    let gate_spec = rhai::json::parse_file(gate_path);
+    let agenterm_json_path =
+        std::path::join(fixture_dist, "agenterm.json").display;
+    let metadata = #{
+        schema_version: 2,
+        product: "AgenTerm",
+        version: "0.1.7",
+        git_commit: head,
+        git_dirty: false,
+        cargo_lock_sha256: cargo_hash,
+        artifact_manifest_sha256: artifact_hash,
+        executables: executable_records
+    };
+    rhai::runtime::atomic_write(
+        agenterm_json_path,
+        rhai::json::stringify_pretty(metadata) + "\n"
+    );
+    let receipt_executables = [];
+    for record in executable_records {
+        receipt_executables.push(#{
+            name: record.name,
+            sha256: record.sha256
+        });
+    }
+    let gates = [];
+    for gate in gate_spec.required_gates {
+        gates.push(#{ id: gate.id, status: "passed" });
+    }
+    let receipt = #{
+        schema_version: 1,
+        product: "AgenTerm",
+        release: true,
+        stress_included: true,
+        gate_manifest: #{ sha256: gate_hash },
+        provenance: #{
+            git_head: head,
+            source_dirty: false,
+            cargo_lock_sha256: cargo_hash,
+            artifact_manifest_sha256: artifact_hash,
+            sbom_sha256: sbom_hash,
+            executables: receipt_executables
+        },
+        gates: gates
+    };
+    let receipt_path = std::path::join(
+        fixture_qualification,
+        "receipt.json"
+    ).display;
+    rhai::runtime::atomic_write(
+        receipt_path,
+        rhai::json::stringify_pretty(receipt) + "\n"
+    );
+
+    let output_relative =
+        "target/qualification/package-dry-run";
+    let output_root =
+        std::path::join(fixture, output_relative).display;
+    package_qualified::build_package(
+        fixture,
+        "target/qualification/receipt.json",
+        output_relative
+    );
+    let run_directory = latest_package_run(output_root);
+    let result_path = only_result(output_root);
+    let result = rhai::json::parse_file(result_path);
+    let archive_name = "" + result.archive;
+    let archive =
+        std::path::join(run_directory, archive_name).display;
+    let archive_exists = std::fs::exists(archive);
+    let archive_hash = rhai::crypto::sha256_file(archive);
+    let result_hash = "" + result.archive_sha256;
+    require(
+        result.dry_run == 1
+            && archive_exists == 1
+            && result_hash == archive_hash,
+        "package_selftest_result_incomplete"
+    );
+    let tar_stdout = fixture + ".package_selftest_archive_list.stdout.tmp";
+    let tar_code = std::process::command_stdout_file(
+        "tar.exe",
+        ["-tf", archive],
+        30000,
+        tar_stdout,
+        #{ current_dir: fixture }
+    );
+    if tar_code != 0 {
+        let tar_error = std::fs::read_to_string(tar_stdout);
+        require(0, "package_selftest_archive_list:" + tar_error);
+    }
+    let listing = std::fs::read_to_string(tar_stdout);
+    listing.trim();
+    std::fs::try_remove_file(tar_stdout);
+    let archive_names = [];
+    for line in listing.split("\n") {
+        let name = line;
+        name.trim();
+        if name != "" {
+            archive_names.push(name);
+        }
+    }
+    let expected_names = [];
+    for artifact in artifact_spec.executables {
+        expected_names.push("" + artifact.name);
+    }
+    expected_names.push("agenterm.json");
+    expected_names.push("artifacts.json");
+    expected_names.push("qualification-receipt.json");
+    expected_names.push("agenterm-sbom.spdx.json");
+    expected_names.push("LICENSE-APACHE");
+    expected_names.push("LICENSE-MIT");
+    expected_names.push("THIRD_PARTY_NOTICES.md");
+    expected_names.push("package-manifest.json");
+    require(
+        package_qualified::exact_values(expected_names, archive_names),
+        "package_selftest_archive_members"
+    );
+
+    let release_output =
+        "target/qualification/package-release";
+    let release_root =
+        std::path::join(fixture, release_output).display;
+    package_qualified::build_release_package(
+        fixture,
+        "target/qualification/receipt.json",
+        release_output
+    );
+    let release_directory = latest_package_run(release_root);
+    let release_result_path = std::path::join(
+        release_directory,
+        "release-result.json"
+    ).display;
+    let release_result = rhai::json::parse_file(release_result_path);
+    let release_archive_name = "" + release_result.archive;
+    let release_archive =
+        std::path::join(
+            release_directory,
+            release_archive_name
+        ).display;
+    let release_manifest_path = std::path::join(
+        release_directory,
+        "package-manifest.json"
+    ).display;
+    let release_manifest =
+        rhai::json::parse_file(release_manifest_path);
+    let release_archive_exists = std::fs::exists(release_archive);
+    let release_archive_hash =
+        rhai::crypto::sha256_file(release_archive);
+    let release_result_hash = "" + release_result.archive_sha256;
+    require(
+        release_result.dry_run == 0
+            && release_manifest.dry_run == 0
+            && !release_archive_name.contains("dry-run")
+            && release_archive_exists == 1
+            && release_result_hash == release_archive_hash,
+        "package_selftest_release_result_incomplete"
+    );
+
+    let bad_cargo_hash =
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    let rejected_cargo_receipt = #{
+        schema_version: 1,
+        product: "AgenTerm",
+        release: true,
+        stress_included: true,
+        gate_manifest: #{ sha256: gate_hash },
+        provenance: #{
+            git_head: head,
+            source_dirty: false,
+            cargo_lock_sha256: bad_cargo_hash,
+            artifact_manifest_sha256: artifact_hash,
+            sbom_sha256: sbom_hash,
+            executables: receipt_executables
+        },
+        gates: gates
+    };
+    rhai::runtime::atomic_write(
+        receipt_path,
+        rhai::json::stringify_pretty(rejected_cargo_receipt) + "\n"
+    );
+    expect_rejection_build(
+        "package_receipt_cargo_lock_hash",
+        fixture,
+        "target/qualification/receipt.json",
+        "target/qualification/rejected-cargo"
+    );
+    let bad_manifest_hash =
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    let rejected_manifest_receipt = #{
+        schema_version: 1,
+        product: "AgenTerm",
+        release: true,
+        stress_included: true,
+        gate_manifest: #{ sha256: gate_hash },
+        provenance: #{
+            git_head: head,
+            source_dirty: false,
+            cargo_lock_sha256: cargo_hash,
+            artifact_manifest_sha256: bad_manifest_hash,
+            sbom_sha256: sbom_hash,
+            executables: receipt_executables
+        },
+        gates: gates
+    };
+    rhai::runtime::atomic_write(
+        receipt_path,
+        rhai::json::stringify_pretty(rejected_manifest_receipt) + "\n"
+    );
+    expect_rejection_build(
+        "package_receipt_artifact_manifest_hash",
+        fixture,
+        "target/qualification/receipt.json",
+        "target/qualification/rejected-manifest"
+    );
+    rhai::runtime::atomic_write(
+        receipt_path,
+        rhai::json::stringify_pretty(receipt) + "\n"
+    );
+
+    let first_name = "" + artifact_spec.executables[0].name;
+    let first_path = std::path::join(fixture_dist, first_name).display;
+    let first_bytes = std::fs::read_to_string(first_path);
+    std::fs::write(first_path, first_bytes + "tampered\n");
+    expect_rejection_build(
+        "package_executable_hash:" + first_name,
+        fixture,
+        "target/qualification/receipt.json",
+        "target/qualification/rejected-output"
+    );
+    let bad_head = "000000000000000000000000000000000000";
+    let rejected_head_receipt = #{
+        schema_version: 1,
+        product: "AgenTerm",
+        release: true,
+        stress_included: true,
+        gate_manifest: #{ sha256: gate_hash },
+        provenance: #{
+            git_head: bad_head,
+            source_dirty: false,
+            cargo_lock_sha256: cargo_hash,
+            artifact_manifest_sha256: artifact_hash,
+            sbom_sha256: sbom_hash,
+            executables: receipt_executables
+        },
+        gates: gates
+    };
+    rhai::runtime::atomic_write(
+        receipt_path,
+        rhai::json::stringify_pretty(rejected_head_receipt) + "\n"
+    );
+    expect_rejection_build(
+        "package_receipt_head_mismatch",
+        fixture,
+        "target/qualification/receipt.json",
+        "target/qualification/rejected-head"
+    );
+
+    let lib_path = std::path::join(
+        repo,
+        "scripts/rh/lib/package_qualified.rh"
+    ).display;
+    let qualified_path = std::path::join(
+        repo,
+        "scripts/rh/package-qualified.rh"
+    ).display;
+    let release_qualified_path = std::path::join(
+        repo,
+        "scripts/rh/package-release-qualified.rh"
+    ).display;
+    let lib_source = std::fs::read_to_string(lib_path);
+    let qualified_source = std::fs::read_to_string(qualified_path);
+    let release_qualified_source =
+        std::fs::read_to_string(release_qualified_path);
+    let source =
+        lib_source + qualified_source + release_qualified_source;
+    require(
+        !source.contains("build.bat"),
+        "package_selftest_forbidden_action:build.bat"
+    );
+    require(
+        !source.contains("cargo build"),
+        "package_selftest_forbidden_action:cargo build"
+    );
+    require(
+        !source.contains("git tag"),
+        "package_selftest_forbidden_action:git tag"
+    );
+    require(
+        !source.contains("git push"),
+        "package_selftest_forbidden_action:git push"
+    );
+    require(
+        !source.contains("gh release"),
+        "package_selftest_forbidden_action:gh release"
+    );
+    require(
+        !source.contains("release.cmd"),
+        "package_selftest_forbidden_action:release.cmd"
+    );
+    require(
+        !source.contains("scripts/rhai/release.rhai"),
+        "package_selftest_forbidden_action:scripts/rhai/release.rhai"
+    );
+
+    cleanup_fixture(fixture, owned_root);
+    print("PASS: qualified dry-run and public package self-test");
+    0
+}
