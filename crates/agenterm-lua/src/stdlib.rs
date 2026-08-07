@@ -457,6 +457,17 @@ fn build_crypto(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
+    // std.crypto.sha256_file(path) → hex string
+    crypto.set(
+        "sha256_file",
+        lua.create_function(|_lua, path: String| {
+            let bytes = std::fs::read(&path)
+                .map_err(|e| mlua::Error::runtime(format!("sha256_file_read: {e}")))?;
+            let hash = sha2::Sha256::digest(&bytes);
+            Ok(hex_encode(&hash))
+        })?,
+    )?;
+
     Ok(crypto)
 }
 
@@ -917,5 +928,27 @@ mod tests {
             .eval("return #std.crypto.sha256('')", &host())
             .expect("eval");
         assert_eq!(r.value, 64);
+    }
+
+    #[test]
+    fn crypto_sha256_file() {
+        let dir = TempDir::new().expect("tempdir");
+        let p = dir.path().join("hashme.txt");
+        std::fs::write(&p, "abc").expect("write");
+        let e = engine();
+        let r = e
+            .eval(
+                &format!(
+                    "local h = std.crypto.sha256_file([[{}]]); print(h); return #h",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 64);
+        assert_eq!(
+            r.stdout.trim(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

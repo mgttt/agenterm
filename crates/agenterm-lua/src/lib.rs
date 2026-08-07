@@ -373,4 +373,81 @@ mod tests {
         let result = engine.eval(&script, &host).expect("fleet module eval");
         assert_eq!(result.value, 0);
     }
+
+    #[test]
+    fn eval_build_identity_module() {
+        use std::process::Command;
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = dir.path();
+
+        // Set up a minimal git repo with required files
+        Command::new("git")
+            .args(["init", repo.to_str().unwrap()])
+            .output()
+            .expect("git init");
+        // Configure git user for commit
+        Command::new("git")
+            .args(["-C", repo.to_str().unwrap(), "config", "user.email", "test@example.com"])
+            .output()
+            .ok();
+        Command::new("git")
+            .args(["-C", repo.to_str().unwrap(), "config", "user.name", "Test"])
+            .output()
+            .ok();
+        std::fs::write(repo.join("Cargo.lock"), "# lock\n").expect("Cargo.lock");
+        std::fs::create_dir_all(repo.join("scripts")).expect("scripts dir");
+        std::fs::write(repo.join("scripts").join("artifacts.json"), "{}").expect("artifacts.json");
+        Command::new("git")
+            .args(["-C", repo.to_str().unwrap(), "add", "."])
+            .output()
+            .expect("git add");
+        Command::new("git")
+            .args(["-C", repo.to_str().unwrap(), "commit", "-m", "init"])
+            .output()
+            .expect("git commit");
+
+        let engine = LuaEngine::new().expect("create engine");
+        let output_path = repo.join("build-identity.bat");
+        let repo_str = repo.to_str().unwrap().to_string();
+        let output_str = output_path.to_str().unwrap().to_string();
+        let host = LuaHostFunctions {
+            args_len: Some(Arc::new(|| 3)),
+            arg: Some(Arc::new(move |i: i64| {
+                match i {
+                    0 => Ok(repo_str.clone()),
+                    1 => Ok("dev".to_string()),
+                    2 => Ok(output_str.clone()),
+                    _ => Err("out of range".to_string()),
+                }
+            })),
+            ..Default::default()
+        };
+
+        // Load build_identity module, then entry point
+        let lib_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap().parent().unwrap()
+            .join("scripts").join("lua").join("lib").join("build_identity.lua");
+        let lib_source = std::fs::read_to_string(&lib_path).expect("read lib");
+        // Remove `return build_identity` so the local stays in scope
+        let lib_source = lib_source.trim_end()
+            .strip_suffix("return build_identity")
+            .unwrap_or(&lib_source)
+            .trim_end()
+            .to_string();
+
+        let entry_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap().parent().unwrap()
+            .join("scripts").join("lua").join("build_identity.lua");
+        let entry_source = std::fs::read_to_string(&entry_path).expect("read entry");
+
+        let script = format!("{lib_source}\n{entry_source}");
+        let result = engine.eval(&script, &host).expect("build_identity eval");
+        assert_eq!(result.value, 0);
+
+        // Verify output batch file exists and has expected content
+        let batch = std::fs::read_to_string(repo.join("build-identity.bat")).expect("read batch");
+        assert!(batch.contains("AGENTERM_BUILD_IDENTITY_VERSION=1"));
+        assert!(batch.contains("AGENTERM_BUILD_GIT_COMMIT="));
+        assert!(batch.contains("AGENTERM_BUILD_PROFILE=dev"));
+    }
 }
