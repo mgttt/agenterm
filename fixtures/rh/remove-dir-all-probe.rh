@@ -1,0 +1,10 @@
+// Probe native std::fs::remove_dir_all(path) recursive directory removal.
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: PATH");
+    }
+
+    let path = args[0];
+    std::fs::remove_dir_all(path);
+    0
+}

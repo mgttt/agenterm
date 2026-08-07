@@ -276,7 +276,7 @@ mod tests {
         // Live `scripts/rhai/` shrinks as tasks cut over to Native `.rh` and
         // archives move under `scripts/archive/rhai/`. Keep a floor that still
         // covers remaining orchestrators/smokes without freezing a peak count.
-        assert!(report.scanned >= 40, "scanned {}", report.scanned);
+        assert!(report.scanned >= 30, "scanned {}", report.scanned);
         assert_eq!(
             report.passed, report.scanned,
             "compat check should pass scripts/rhai"

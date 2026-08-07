@@ -1,0 +1,10 @@
+// Probe native std::path::parent(path).display lexical parent resolution.
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: PATH");
+    }
+
+    let path = args[0];
+    let parent = std::path::parent(path).display;
+    parent.len
+}

@@ -139,10 +139,10 @@
 | M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + 剩余叶（`candidate-*`、`migration-audit`、Wave3：`prd-alignment`/`prune`/`powershell`/`preflight`/`target-report`）；`target-report` 仍缺 `pop`/float。**codegen 28 后**：`array.push`/JSON 数组字面量已解；`path.parent` 与 Child/sleep 仍属后续；入口仍停 `.rhai` 直至叶达 Native | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | `test_harness` + smoke/orch：Child+sleep + 全量 `*-smoke`；`switch`/`do` 编排体仍延后 | [ ] |
-| M42f7a | codegen 30：`std::process::id` → INT；fixture `process-id-probe.rh` | [ ] |
-| M42f7b | codegen 31：`std::path::parent(…).display`；fixture `path-parent-probe.rh` | [ ] |
-| M42f7c | codegen 32：`rhai::json::stringify`（compact）+ `rhai::runtime::append_sync` + `String.sub_string`；fixture `append-sync-probe.rh` | [ ] |
-| M42f7d | codegen 33：`std::fs::remove_dir_all`；fixture `remove-dir-all-probe.rh` | [ ] |
+| M42f7a | codegen 30：`std::process::id` → INT；fixture `process-id-probe.rh` | [x] |
+| M42f7b | codegen 31：`std::path::parent(…).display`；fixture `path-parent-probe.rh` | [x] |
+| M42f7c | codegen 32：`rhai::json::stringify`（compact）+ `rhai::runtime::append_sync` + `String.sub_string`；fixture `append-sync-probe.rh` | [x] |
+| M42f7d | codegen 33：`std::fs::remove_dir_all`；fixture `remove-dir-all-probe.rh` | [x] |
 | M42f7e | codegen 34：`Command` builder + `Command.output`/`Output`（success/exit_code/stdout_text/stderr_text/require_success）；timeout 用 INT ms（不引 Duration）；fixture `process-output-probe.rh` | [ ] |
 | M42f7f | codegen 35：`Command.start`/`Child`（id/state/kill/wait_with_output）；fixture `child-lifecycle-probe.rh` | [ ] |
 | M42f7g | INT-only `scripts/rh/lib/test_harness.rh` + `harness-cleanup-selftest` native+pack；entry 切线 + 归档；回归 | [ ] |

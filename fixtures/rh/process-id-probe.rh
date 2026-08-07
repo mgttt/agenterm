@@ -1,0 +1,6 @@
+// Probe native std::process::id for PID stamping in string concat.
+fn entry() {
+    let n = 0 + std::process::id();
+    print("" + n);
+    n
+}

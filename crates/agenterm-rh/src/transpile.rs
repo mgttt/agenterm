@@ -739,6 +739,7 @@ fn is_stringish_method_name(name: &str) -> bool {
             | "to_lower"
             | "to_string"
             | "split"
+            | "sub_string"
             | "len"
     )
 }
@@ -757,8 +758,10 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
         Expr::FnCall(call, ..) => {
             // Known JSON-consuming callees. Merely passing `param` to an
             // arbitrary call is not JSON evidence (strings are passed too).
-            if ((call.namespace.to_string() == "rhai::json" && call.name == "stringify_pretty")
-                || (call.namespace.is_empty() && call.name == "stringify_pretty"))
+            if ((call.namespace.to_string() == "rhai::json"
+                && (call.name == "stringify_pretty" || call.name == "stringify"))
+                || (call.namespace.is_empty()
+                    && (call.name == "stringify_pretty" || call.name == "stringify")))
                 && call.args.len() == 1
                 && is_param_var(&call.args[0], param)
             {
@@ -859,6 +862,7 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
             .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
         || std_fs_create_dir_all_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_try_create_dir_all_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_remove_dir_all_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_rename_args(expr)
             .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
         || std_fs_try_rename_args(expr)
@@ -867,6 +871,7 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         || std_fs_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_join_display_args(expr)
             .is_some_and(|(base, child)| is_param_var(base, param) || is_param_var(child, param))
+        || path_parent_display_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_buf_from_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_buf_from_display_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_buf_from_is_absolute_arg(expr).is_some_and(|path| is_param_var(path, param))
@@ -1596,10 +1601,13 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if string_list_index(expr, ctx).is_some() => ValueKind::String,
         _ if string_split_args(expr, ctx).is_some() => ValueKind::StringList,
         _ if json_stringify_pretty_arg(expr).is_some() => ValueKind::String,
+        _ if json_stringify_arg(expr).is_some() => ValueKind::String,
+        _ if string_sub_string_arg(expr, ctx).is_some() => ValueKind::String,
         _ if string_concat_args(expr, ctx).is_some() => ValueKind::String,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
+        _ if path_parent_display_arg(expr).is_some() => ValueKind::String,
         _ if path_absolute_display_arg(expr).is_some() => ValueKind::String,
         _ if path_buf_from_display_arg(expr).is_some() => ValueKind::String,
         _ if path_buf_from_file_name_arg(expr).is_some() => ValueKind::String,
@@ -1629,6 +1637,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
+        _ if std_process_id(expr) => ValueKind::Int,
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
@@ -1838,6 +1847,30 @@ fn path_absolute_display_arg(expr: &Expr) -> Option<&Expr> {
     Some(&call.args[0])
 }
 
+fn path_parent_display_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let display = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    if !display {
+        return None;
+    }
+    let Expr::FnCall(call, ..) = &boxed.lhs else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::path" || call.name != "parent" || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
 fn std_fs_symlink_metadata_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "symlink_metadata")
 }
@@ -2027,6 +2060,10 @@ fn std_fs_try_create_dir_all_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "try_create_dir_all")
 }
 
+fn std_fs_remove_dir_all_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "remove_dir_all")
+}
+
 fn std_fs_rename_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     std_fs_two_arg(expr, "rename")
 }
@@ -2120,6 +2157,53 @@ fn json_stringify_pretty_arg(expr: &Expr) -> Option<&Expr> {
     Some(&call.args[0])
 }
 
+fn json_stringify_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::json" || call.name != "stringify" || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn runtime_append_sync_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::runtime"
+        || call.name != "append_sync"
+        || call.args.len() != 2
+    {
+        return None;
+    }
+    Some((&call.args[0], &call.args[1]))
+}
+
+fn std_process_id(expr: &Expr) -> bool {
+    let Expr::FnCall(call, ..) = expr else {
+        return false;
+    };
+    call.namespace.to_string() == "std::process" && call.name == "id" && call.args.is_empty()
+}
+
+fn string_sub_string_arg<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a rhai::FnCallExpr> {
+    let (_, call) = parse_string_method_call(expr, ctx)?;
+    if call.name != "sub_string" || call.args.is_empty() || call.args.len() > 2 {
+        return None;
+    }
+    if !is_pure_int_expr(&call.args[0])
+        || call
+            .args
+            .get(1)
+            .is_some_and(|argument| !is_pure_int_expr(argument))
+    {
+        return None;
+    }
+    Some(call)
+}
+
 fn string_split_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'a Expr)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
@@ -2148,6 +2232,7 @@ fn string_split_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'a
                 || std_env_get_arg(&boxed.lhs).is_some()
                 || crypto_sha256_file_arg(&boxed.lhs).is_some()
                 || json_stringify_pretty_arg(&boxed.lhs).is_some()
+                || json_stringify_arg(&boxed.lhs).is_some()
         }
     };
     if !receiver_ok {
@@ -2902,6 +2987,7 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         )
         || std_env_get_arg(expr).is_some()
         || path_join_display_args(expr).is_some()
+        || path_parent_display_arg(expr).is_some()
         || path_absolute_display_arg(expr).is_some()
         || path_buf_from_display_arg(expr).is_some()
         || path_buf_from_file_name_arg(expr).is_some()
@@ -2911,6 +2997,8 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || std_fs_read_to_string_arg(expr).is_some()
         || crypto_sha256_file_arg(expr).is_some()
         || json_stringify_pretty_arg(expr).is_some()
+        || json_stringify_arg(expr).is_some()
+        || string_sub_string_arg(expr, ctx).is_some()
         || string_list_index(expr, ctx).is_some()
         || json_path_array_index(expr, ctx).is_some()
         || dir_entry_string_field(expr, ctx).is_some()
@@ -2947,6 +3035,7 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || json_object_keys_len_path(expr, ctx).is_some()
         || set_keys_len_path(expr, ctx).is_some()
         || std_time_system_time_now_unix_millis(expr)
+        || std_process_id(expr)
         || system_time_unix_millis_binding(expr, ctx).is_some()
         || fs_metadata_modified_unix_millis(expr).is_some()
         || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
@@ -3093,6 +3182,20 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             if !emit_json_stringify_pretty(out, value, ctx)? {
                 return Err(RhError::Transpile(
                     "stringify_pretty argument must be a JSON value".into(),
+                ));
+            }
+        }
+        _ if let Some(value) = json_stringify_arg(expr) => {
+            if !emit_json_stringify(out, value, ctx)? {
+                return Err(RhError::Transpile(
+                    "stringify argument must be a JSON value".into(),
+                ));
+            }
+        }
+        _ if string_sub_string_arg(expr, ctx).is_some() => {
+            if !emit_string_sub_string(out, expr, ctx)? {
+                return Err(RhError::Transpile(
+                    "sub_string receiver must be a string binding".into(),
                 ));
             }
         }
@@ -3331,6 +3434,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some(path) = std_fs_remove_dir_all_arg(expr)
+            && emit_std_fs_remove_dir_all(out, path, ctx)?
+        {
+            return Ok(());
+        }
         if let Some((src, dst)) = std_fs_rename_args(expr)
             && emit_std_fs_rename(out, src, dst, ctx)?
         {
@@ -3347,6 +3455,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if emit_string_predicate(out, expr, ctx)? {
             return Ok(());
         }
+        if emit_string_sub_string(out, expr, ctx)? {
+            return Ok(());
+        }
         if emit_string_mut_expr(out, expr, ctx)? {
             return Ok(());
         }
@@ -3357,6 +3468,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some(path) = path_absolute_display_arg(expr)
             && emit_path_absolute(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = path_parent_display_arg(expr)
+            && emit_path_parent(out, path, ctx)?
         {
             return Ok(());
         }
@@ -3468,6 +3584,10 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("rh_system_time_now_unix_millis()");
             return Ok(());
         }
+        if std_process_id(expr) {
+            out.push_str("rh_process_id()");
+            return Ok(());
+        }
         if std_time_system_time_now_rfc3339(expr) {
             out.push_str("rh_system_time_now_rfc3339()");
             return Ok(());
@@ -3492,8 +3612,18 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some((path, text)) = runtime_append_sync_args(expr)
+            && emit_runtime_append_sync(out, path, text, ctx)?
+        {
+            return Ok(());
+        }
         if let Some(value) = json_stringify_pretty_arg(expr)
             && emit_json_stringify_pretty(out, value, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(value) = json_stringify_arg(expr)
+            && emit_json_stringify(out, value, ctx)?
         {
             return Ok(());
         }
@@ -3721,6 +3851,30 @@ fn emit_json_stringify_pretty(
     }
 }
 
+fn emit_json_stringify(
+    out: &mut String,
+    value: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    match value {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            out.push_str("rh_json_stringify(&");
+            out.push_str(ident.1.as_str());
+            out.push(')');
+            Ok(true)
+        }
+        Expr::Map(..) => {
+            out.push_str("rh_json_stringify(&");
+            emit_json_map_literal(out, value, ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 fn emit_json_array_push_stmt(
     out: &mut String,
     expr: &Expr,
@@ -3816,6 +3970,7 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             || std_env_get_arg(expr).is_some()
             || crypto_sha256_file_arg(expr).is_some()
             || json_stringify_pretty_arg(expr).is_some()
+            || json_stringify_arg(expr).is_some()
             || string_list_index(expr, ctx).is_some()
             || std_time_system_time_now_rfc3339(expr) =>
         {
@@ -3909,6 +4064,24 @@ fn emit_runtime_atomic_write(
     out.push_str(&path_expr);
     out.push_str(", &");
     emit_stringish(out, value, ctx)?;
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_runtime_append_sync(
+    out: &mut String,
+    path: &Expr,
+    text: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_append_sync(");
+    out.push_str(&path_expr);
+    out.push_str(", &");
+    emit_stringish(out, text, ctx)?;
     out.push(')');
     Ok(true)
 }
@@ -4423,6 +4596,41 @@ fn emit_string_predicate(
     Ok(true)
 }
 
+fn emit_string_sub_string(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((receiver, call)) = parse_string_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    if call.name != "sub_string" || call.args.is_empty() || call.args.len() > 2 {
+        return Ok(false);
+    }
+    if !is_pure_int_expr(&call.args[0])
+        || call
+            .args
+            .get(1)
+            .is_some_and(|argument| !is_pure_int_expr(argument))
+    {
+        return Ok(false);
+    }
+    out.push_str("rh_string_sub_string(&");
+    emit_string_receiver(out, receiver);
+    out.push_str(", ");
+    emit_expr(out, &call.args[0], ctx)?;
+    out.push_str(", ");
+    if call.args.len() == 2 {
+        out.push_str("Some(");
+        emit_expr(out, &call.args[1], ctx)?;
+        out.push(')');
+    } else {
+        out.push_str("None");
+    }
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_string_mut_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((receiver, call)) = parse_string_method_call(expr, ctx) else {
         return Ok(false);
@@ -4527,6 +4735,17 @@ fn emit_path_absolute(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Resul
         return Ok(false);
     }
     out.push_str("rh_path_absolute(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_path_parent(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_path_parent(");
     out.push_str(&path_expr);
     out.push(')');
     Ok(true)
@@ -4709,6 +4928,21 @@ fn emit_std_fs_try_create_dir_all(
         return Ok(false);
     }
     out.push_str("rh_try_create_dir_all(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_remove_dir_all(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_remove_dir_all(");
     out.push_str(&path_expr);
     out.push(')');
     Ok(true)
@@ -6263,6 +6497,147 @@ fn entry() { stage_copy(args[0], args[1]) }
         );
         assert!(
             output.rust.contains("rh_json_string_path(&doc, &[\"id\"])"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_process_id_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() { let n = 0 + std::process::id(); print("" + n); n }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_process_id()"), "{}", output.rust);
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"std::process::id"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_path_parent_display_native() {
+        let source = include_str!("../../../fixtures/rh/path-parent-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_path_parent("), "{}", output.rust);
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"std::path::parent"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_stringify_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() { let doc = #{ answer: 42 }; let text = rhai::json::stringify(doc); text.len }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_json_stringify(&doc)"), "{}", output.rust);
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"rhai::json::stringify"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_append_sync_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() { let path = args[0]; rhai::runtime::append_sync(path, "tail") }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_append_sync(&path, &"), "{}", output.rust);
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"rhai::runtime::append_sync"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_sub_string_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() { let text = "abcdef"; let tail = text.sub_string(1, 3); tail.len }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_string_sub_string(&text, 1, Some(3))"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_stringify_append_sync_sub_string_bundle() {
+        let source = include_str!("../../../fixtures/rh/append-sync-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_json_stringify("), "{}", output.rust);
+        assert!(output.rust.contains("rh_append_sync("), "{}", output.rust);
+        assert!(output.rust.contains("rh_string_sub_string("), "{}", output.rust);
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_remove_dir_all_native() {
+        let source = include_str!("../../../fixtures/rh/remove-dir-all-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_remove_dir_all(&path)"), "{}", output.rust);
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::remove_dir_all"),
             "{}",
             output.rust
         );

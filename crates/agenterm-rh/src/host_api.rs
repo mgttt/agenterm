@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 29;
+pub const RH_CODEGEN_REVISION: u32 = 33;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -354,6 +354,15 @@ pub fn emit_host_runtime(out: &mut String) {
                  .map(|name| name.to_string_lossy().into_owned())\n\
                  .unwrap_or_default()\n\
          }\n\n\
+         fn rh_path_parent(path: &str) -> String {\n\
+             std::path::Path::new(path)\n\
+                 .parent()\n\
+                 .map(|parent| parent.to_string_lossy().into_owned())\n\
+                 .unwrap_or_default()\n\
+         }\n\n\
+         fn rh_process_id() -> INT {\n\
+             std::process::id() as INT\n\
+         }\n\n\
          fn rh_system_time_now_unix_millis() -> INT {\n\
              match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {\n\
                  Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
@@ -466,6 +475,41 @@ pub fn emit_host_runtime(out: &mut String) {
                  digest.update(&buffer[..count]);\n\
              }\n\
              rh_sha256_hex(digest.finalize())\n\
+         }\n\n\
+         fn rh_append_sync(path: &str, text: &str) -> INT {\n\
+             use std::io::Write;\n\
+             match std::fs::OpenOptions::new()\n\
+                 .append(true)\n\
+                 .create(true)\n\
+                 .open(path)\n\
+             {\n\
+                 Ok(mut output) => match output.write_all(text.as_bytes()) {\n\
+                     Ok(()) => 0,\n\
+                     Err(error) => {\n\
+                         let _ = rh_fail(&format!(\"runtime_append_sync: {path}: {error}\"));\n\
+                         0\n\
+                     }\n\
+                 },\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"runtime_append_sync: {path}: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_string_sub_string(value: &str, start: INT, len: Option<INT>) -> String {\n\
+             if start < 0 {\n\
+                 return String::new();\n\
+             }\n\
+             let start = start as usize;\n\
+             let chars: Vec<char> = value.chars().collect();\n\
+             if start >= chars.len() {\n\
+                 return String::new();\n\
+             }\n\
+             match len {\n\
+                 Some(len) if len < 0 => String::new(),\n\
+                 Some(len) => chars.iter().skip(start).take(len as usize).collect(),\n\
+                 None => chars.iter().skip(start).collect(),\n\
+             }\n\
          }\n\n\
          fn rh_atomic_write(path: &str, value: &str) -> INT {\n\
              use std::io::Write;\n\
@@ -663,6 +707,15 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_try_create_dir_all(path: &str) -> INT {\n\
              i64::from(std::fs::create_dir_all(path).is_ok())\n\
          }\n\n\
+         fn rh_remove_dir_all(path: &str) -> INT {\n\
+             match std::fs::remove_dir_all(path) {\n\
+                 Ok(()) => 0,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_remove_dir_all: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
          fn rh_rename(src: &str, dst: &str) -> INT {\n\
              match std::fs::rename(src, dst) {\n\
                  Ok(()) => 0,\n\
@@ -768,6 +821,15 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_json_stringify_pretty(value: &serde_json::Value) -> String {\n\
              match serde_json::to_string_pretty(value) {\n\
+                 Ok(text) => text,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"json_stringify: {error}\"));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_stringify(value: &serde_json::Value) -> String {\n\
+             match serde_json::to_string(value) {\n\
                  Ok(text) => text,\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"json_stringify: {error}\"));\n\

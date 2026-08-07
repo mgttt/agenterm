@@ -2,7 +2,7 @@
 //
 // Args: [REPO] [validate|rehearse|publish|--rehearse]
 
-import "scripts/rhai/lib/package_qualified" as package_qualified;
+import "scripts/rh/lib/package_qualified" as package_qualified;
 
 fn require(condition, message) {
     if !condition {
