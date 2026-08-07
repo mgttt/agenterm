@@ -102,7 +102,7 @@ jobs:
           test -n "$archive"
           mkdir -p "$RUNNER_TEMP/agenterm-promotion-tool"
           tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-promotion-tool"
-          chmod +x "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai"
+          chmod +x "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh"
 
       - name: Verify candidate identity and every byte
         id: bundle
@@ -115,7 +115,7 @@ jobs:
           manifest="$(find candidate -maxdepth 1 -type f \
             -name 'agenterm-*-candidate-manifest.json' -print -quit)"
           test -n "$manifest"
-          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai" \
+          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh" \
             run scripts/rhai/candidate-verify.rhai --project-root . -- \
             . "$manifest" candidate/payload
           version="$(jq -r .version "$manifest")"
@@ -142,7 +142,7 @@ jobs:
             sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1
           )"
           [[ "$version" == "$cargo_version" ]]
-          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai" \
+          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh" \
             run scripts/rhai/promotion-identity.rhai --project-root . -- \
             "$manifest" "$CANDIDATE_RUN_ID" "$source_sha" \
             candidate/promotion-identity.json >/dev/null
@@ -203,8 +203,8 @@ jobs:
           manifest="$(find candidate -maxdepth 1 -type f \
             -name 'agenterm-*-candidate-manifest.json' -print -quit)"
           test -n "$manifest"
-          test -x "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai"
-          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rhai" \
+          test -x "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh"
+          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh" \
             run scripts/rhai/build-releases-index.rhai --project-root . -- \
             "$manifest" candidate/payload candidate/releases.json
           test -f candidate/releases.json
@@ -260,8 +260,8 @@ jobs:
           test -n "$archive"
           mkdir -p "$RUNNER_TEMP/agenterm-publish-tool"
           tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-publish-tool"
-          chmod +x "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rhai"
-          "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rhai" \
+          chmod +x "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh"
+          "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh" \
             run scripts/rhai/candidate-verify.rhai --project-root . -- \
             . \
             "$(find candidate -maxdepth 1 -type f \
@@ -272,7 +272,7 @@ jobs:
           manifest="$(find candidate -maxdepth 1 -type f \
             -name 'agenterm-*-candidate-manifest.json' -print -quit)"
           test -n "$manifest"
-          "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rhai" \
+          "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh" \
             run scripts/rhai/build-releases-index.rhai --project-root . -- \
             "$manifest" candidate/payload candidate/releases.json
           test -f candidate/releases.json

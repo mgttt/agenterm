@@ -63,6 +63,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   checks. `verify-docs-site` is the first production named task migrated from
   active `.rhai` to a zero-fallback `.rh` entry; its interpreted implementation
   is retained only under `scripts/archive/rhai/` for migration archaeology.
+- [x] Candidate and Promotion execute all active scripting steps through the
+  packaged `agenterm-rh` front door. Workflow policy tests reject any restored
+  `agenterm-rhai` executable reference; `.rhai` source paths remain explicit
+  interpreter-migration debt rather than executable-entry ownership.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

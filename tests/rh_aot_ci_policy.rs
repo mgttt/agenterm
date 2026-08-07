@@ -6,6 +6,8 @@ static WINDOWS_FULL_GATE: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/win-full-gate.yml").replace("\r\n", "\n"));
 static CANDIDATE: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/candidate.yml").replace("\r\n", "\n"));
+static RELEASE: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/release.yml").replace("\r\n", "\n"));
 static PERFORMANCE_EXPERIMENT: LazyLock<String> = LazyLock::new(|| {
     include_str!("../.github/workflows/performance-experiment.yml").replace("\r\n", "\n")
 });
@@ -68,17 +70,24 @@ fn ci_manifest_task_entrypoints_use_rh_front_door() {
 }
 
 #[test]
-fn candidate_keeps_only_direct_rhai_compatibility_execution() {
+fn candidate_and_release_use_only_rh_scripting_front_door() {
     assert!(CANDIDATE.contains(
-        "target/aarch64-apple-darwin/release/agenterm-rhai \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
+        "target/aarch64-apple-darwin/release/agenterm-rh \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
     ));
     assert!(CANDIDATE.contains(
-        "target/x86_64-apple-darwin/release/agenterm-rhai \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
+        "target/x86_64-apple-darwin/release/agenterm-rh \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
     ));
-    assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rhai\""));
+    assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\""));
     assert!(CANDIDATE.contains(
-        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rhai\" \\\n            run scripts/rhai/candidate-aggregate.rhai"
+        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\" \\\n            run scripts/rhai/candidate-aggregate.rhai"
     ));
+    assert!(RELEASE.contains("chmod +x \"$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh\""));
+    assert!(RELEASE.contains(
+        "\"$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh\" \\\n            run scripts/rhai/candidate-verify.rhai"
+    ));
+    assert!(RELEASE.contains("chmod +x \"$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh\""));
+    assert!(!CANDIDATE.contains("agenterm-rhai"));
+    assert!(!RELEASE.contains("agenterm-rhai"));
 }
 
 #[test]
