@@ -45,17 +45,21 @@ fn wait_for_server(context, cli, gui_child) {
             []
         );
         if probe.success != 0 {
-            return;
+            return 0;
         }
         if gui_child.state == "exited" {
             let output = gui_child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw "theme_gui_early_exit:" + output.stderr_text();
+            test_harness::require(
+                0,
+                "theme_gui_early_exit:" + output.stderr_text()
+            );
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
-    throw "theme_server_timeout";
+    test_harness::require(0, "theme_server_timeout");
+    0
 }
 
 fn wait_for_server_stop(context, cli) {
@@ -67,14 +71,17 @@ fn wait_for_server_stop(context, cli) {
             1,
             []
         );
-        let output = "" + probe.stdout + probe.stderr;
+        let stdout_text = "" + probe.stdout;
+        let stderr_text = "" + probe.stderr;
+        let output_text = stdout_text + stderr_text;
         let stopped = "AgenTerm server is not running";
-        if probe.success == 0 && output.contains(stopped) {
-            return;
+        if probe.success == 0 && output_text.contains(stopped) {
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw "theme_server_stop_timeout";
+    test_harness::require(0, "theme_server_stop_timeout");
+    0
 }
 
 fn wait_for_exit(child, code) {
@@ -86,7 +93,10 @@ fn wait_for_exit(child, code) {
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
-    throw code;
+    test_harness::require(0, code);
+    return child.wait_with_output(
+        std::time::Duration::from_secs(2)
+    );
 }
 
 fn start_gui(context, gui, cli) {
@@ -129,17 +139,19 @@ fn only_pane(context, cli, target) {
 }
 
 fn derived_color_theme(preset_id) {
-    if preset_id.ends_with("-day") {
-        "light"
-    } else {
-        "dark"
+    let preset = "" + preset_id;
+    let theme = "dark";
+    if preset.ends_with("-day") {
+        theme = "light";
     }
+    theme
 }
 
-fn theme_option_field(snapshot, id, field) {
+fn theme_option_accent(snapshot, id) {
+    let option_id = "" + id;
     for option in snapshot.settings.theme_options {
-        if option.id == id {
-            return option[field];
+        if option.id == option_id {
+            return "" + option.accent;
         }
     }
     throw "theme_option_missing:" + id;
@@ -166,25 +178,33 @@ fn assert_theme_options(snapshot) {
         test_harness::require(found != 0, "theme_option_missing:" + id);
     }
     test_harness::require(
-        theme_option_field(snapshot, "classic-day", "accent")
-            != theme_option_field(snapshot, "fancy-day", "accent"),
+        theme_option_accent(snapshot, "classic-day")
+            != theme_option_accent(snapshot, "fancy-day"),
         "fancy_classic_accent_not_distinct"
     );
-    let fancy_metrics = theme_option_field(snapshot, "fancy-day", "metrics");
-    let corner_radius = 0 + fancy_metrics.corner_radius_control_px;
+    let fancy_metrics_ok = 0;
+    for option in snapshot.settings.theme_options {
+        if option.id == "fancy-day" {
+            if option.metrics.corner_radius_control_px > 0 {
+                fancy_metrics_ok = 1;
+            }
+        }
+    }
     test_harness::require(
-        corner_radius > 0,
+        fancy_metrics_ok != 0,
         "fancy_metrics_missing"
     );
 }
 
 fn assert_theme_open(snapshot, saved_preset, draft) {
+    let saved = "" + saved_preset;
+    let draft_text = "" + draft;
     test_harness::require(
-        snapshot.settings.appearance_preset == saved_preset,
+        snapshot.settings.appearance_preset == saved,
         "appearance_preset_saved_mismatch"
     );
     test_harness::require(
-        snapshot.settings.color_theme == derived_color_theme(saved_preset),
+        snapshot.settings.color_theme == derived_color_theme(saved),
         "color_theme_saved_mismatch"
     );
     assert_theme_options(snapshot);
@@ -195,19 +215,20 @@ fn assert_theme_open(snapshot, saved_preset, draft) {
     let appearance_draft = "" + snapshot.settings.appearance_preset_draft;
     test_harness::require(
         modal_kind == "settings"
-            && theme_draft == draft
-            && appearance_draft == draft,
+            && theme_draft == draft_text
+            && appearance_draft == draft_text,
         "theme_open_draft_mismatch"
     );
 }
 
 fn assert_theme_closed(snapshot, saved_preset) {
+    let saved = "" + saved_preset;
     test_harness::require(
-        snapshot.settings.appearance_preset == saved_preset,
+        snapshot.settings.appearance_preset == saved,
         "appearance_preset_saved_mismatch"
     );
     test_harness::require(
-        snapshot.settings.color_theme == derived_color_theme(saved_preset),
+        snapshot.settings.color_theme == derived_color_theme(saved),
         "color_theme_saved_mismatch"
     );
     assert_theme_options(snapshot);
@@ -315,7 +336,10 @@ fn entry() {
              "--timeout-ms", "30000"]
         );
         if internal_failure_probe != 0 {
-            throw "INTERNAL_FAILURE_BUNDLE_PROBE:gui:" + context.run_id;
+            test_harness::require(
+                0,
+                "INTERNAL_FAILURE_BUNDLE_PROBE:gui:" + context.run_id
+            );
         }
         let pane_before = only_pane(context, cli, tab.id);
         let token_before =
@@ -401,8 +425,8 @@ fn entry() {
         let fancy_preview = json_cli(context, cli, ["ui-snapshot"]);
         assert_theme_open(fancy_preview, "classic-day", "fancy-day");
         test_harness::require(
-            theme_option_field(fancy_preview, "fancy-day", "accent")
-                != theme_option_field(fancy_preview, "classic-day", "accent"),
+            theme_option_accent(fancy_preview, "fancy-day")
+                != theme_option_accent(fancy_preview, "classic-day"),
             "fancy_preview_accent_not_distinct"
         );
         text_cli(context, cli, ["ui-action", "settings-apply"]);
@@ -519,8 +543,10 @@ fn entry() {
             succeeded,
             failure
         );
+        0
     } catch (error) {
         completion_failure = catch_text(error);
+        0
     }
     if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);
