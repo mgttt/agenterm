@@ -1,0 +1,103 @@
+// Shared filesystem operations for validated AgenTerm build artifacts.
+
+import "scripts/rh/lib/artifact_manifest" as artifact_manifest;
+
+fn clean_locked_for_name(directory, prefix) {
+    let removed = 0;
+    let retained = 0;
+    for dir_entry in std::fs::read_dir(directory) {
+        if dir_entry.is_file
+                && dir_entry.file_name.starts_with(prefix)
+                && dir_entry.file_name.ends_with(".exe") {
+            // try_remove_file returns 1 on success / 0 when locked or missing.
+            if std::fs::try_remove_file(dir_entry.path.display) != 0 {
+                removed += 1;
+            } else {
+                retained += 1;
+            }
+        }
+    }
+    removed * 10000 + retained
+}
+
+fn clean_locked(directory_value, manifest_path) {
+    // Local fns are INT-only today: validate for invariants, then re-parse JSON.
+    artifact_manifest::validate(manifest_path);
+    let manifest_path = std::path::absolute(manifest_path).display;
+    let text = std::fs::read_to_string(manifest_path);
+    let manifest = rhai::json::parse(text);
+    let directory = std::path::absolute(directory_value).display;
+    if !std::fs::exists(directory) {
+        return 0;
+    }
+    let directory_meta = std::fs::symlink_metadata(directory);
+    require(
+        directory_meta.is_dir,
+        "locked_artifact_directory_not_directory"
+    );
+
+    let names = #{};
+    for entry in manifest.executables {
+        let name = entry.name;
+        require(
+            artifact_manifest::is_artifact_name(name),
+            "artifact_manifest_name_invalid:" + name
+        );
+        require(
+            !names.contains(name),
+            "artifact_manifest_name_duplicate:" + name
+        );
+        names[name] = true;
+    }
+
+    let removed = 0;
+    let retained = 0;
+    for entry in manifest.executables {
+        let name = entry.name;
+        let stem = name;
+        stem.replace(".exe", "");
+        let prefix = stem + ".locked-";
+        let outcome = clean_locked_for_name(directory, prefix);
+        removed += outcome / 10000;
+        retained += outcome % 10000;
+    }
+
+    if removed > 0 {
+        print(
+            "Removed " + removed +
+            " stale locked artifact(s) from " + directory
+        );
+    }
+    if retained > 0 {
+        print(
+            "Retained " + retained +
+            " locked artifact(s) still in use; the next build will retry."
+        );
+    }
+
+    removed + retained
+}
+
+fn remove_obsolete(directory_value, name) {
+    require(
+        name != ""
+            && !name.contains("/")
+            && !name.contains("\\")
+            && name != "."
+            && name != "..",
+        "obsolete_artifact_name_invalid:" + name
+    );
+    let directory = std::path::absolute(directory_value).display;
+    let obsolete_path = std::path::join(directory, name).display;
+    if !std::fs::exists(obsolete_path) {
+        return 0;
+    }
+    let obsolete_meta = std::fs::symlink_metadata(obsolete_path);
+    require(
+        obsolete_meta.is_file,
+        "obsolete_artifact_not_file:" + name
+    );
+    std::fs::remove_file(obsolete_path);
+    print("Removed obsolete artifact " + name + " from " + directory);
+    1
+}

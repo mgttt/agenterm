@@ -1,0 +1,23 @@
+// Remove stale staged executables left behind by an atomic replacement.
+//
+// Args:
+//   DIRECTORY ARTIFACT_MANIFEST [OBSOLETE_NAME...]
+
+import "scripts/rh/lib/artifact_files" as artifact_files;
+
+fn entry() {
+    if args.len < 2 {
+        return rh::fail("expected: DIRECTORY ARTIFACT_MANIFEST [OBSOLETE_NAME...]");
+    }
+
+    let directory = args[0];
+    let manifest_path = args[1];
+    let _locked = artifact_files::clean_locked(directory, manifest_path);
+
+    let obsolete_removed = 0;
+    for index in 2..args.len {
+        obsolete_removed += artifact_files::remove_obsolete(directory, args[index]);
+    }
+
+    obsolete_removed
+}
