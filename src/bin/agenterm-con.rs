@@ -36,6 +36,18 @@ use agenterm_platform::window_host::{
 
 use palette::Rgb;
 
+/// VT callback storage for OSC sequences (window title, etc.).
+#[derive(Default)]
+struct ConCallbacks {
+    title: Option<String>,
+}
+
+impl vt100::Callbacks for ConCallbacks {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        self.title = Some(String::from_utf8_lossy(title).trim().to_string());
+    }
+}
+
 /// Trailing-edge debounce for resize: drag storms produce dozens of geometry
 /// events per second. We keep only the latest metrics and apply a single resize
 /// once the stream has been quiet for this long, so TUI apps see one clean
@@ -128,7 +140,7 @@ struct ConTerminal {
     working_dir: Option<String>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
-    parser: vt100::Parser,
+    parser: vt100::Parser<ConCallbacks>,
 
     /// PTY master (input writes + resize). `None` until `opened` spawns it.
     master: Option<PtyMaster>,
@@ -172,7 +184,7 @@ impl ConTerminal {
         drop(tx);
         Self {
             working_dir,
-            parser: vt100::Parser::new(24, 80, SCROLLBACK),
+            parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
             pty_rx: rx,
@@ -378,10 +390,15 @@ impl PixelWindowApplication for ConTerminal {
 
     fn render(
         &mut self,
-        _window: &PixelWindow,
+        window: &PixelWindow,
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         self.drain_pty();
+
+        // Apply OSC title changes (shell emits \e]0;title\a).
+        if let Some(title) = self.parser.callbacks_mut().title.take() {
+            window.set_title(&title);
+        }
 
         let fw = frame.width();
         let fh = frame.height();
@@ -417,15 +434,18 @@ impl PixelWindowApplication for ConTerminal {
                     std::mem::swap(&mut fg, &mut bg);
                 }
 
+                // Wide (CJK/emoji) cells span 2 columns for background + glyph clip.
+                let span_w = if cell.is_wide() { self.cell_w * 2 } else { self.cell_w };
+
                 // Only repaint backgrounds that differ from the frame clear.
                 if bg != self.default_bg {
-                    fill_rect(pixels, fw, fh, x0, y0, self.cell_w, self.cell_h, bg.to_xrgb());
+                    fill_rect(pixels, fw, fh, x0, y0, span_w, self.cell_h, bg.to_xrgb());
                 }
 
                 if cell.has_contents() {
                     if let Some(glyph) = font::raster(first_grapheme(cell.contents()), self.font_size_px) {
                         blit_glyph(
-                            pixels, fw, fh, &glyph, x0, y0, fg, self.cell_w, self.cell_h,
+                            pixels, fw, fh, &glyph, x0, y0, fg, span_w, self.cell_h,
                         );
                     }
                 }
@@ -567,41 +587,59 @@ fn key_to_bytes(event: &NormalizedKeyEvent) -> Option<Vec<u8>> {
         return None;
     }
 
+    // Compute the base byte sequence first, then apply Alt/Meta ESC prefix.
+    let mut base: Option<Vec<u8>> = None;
+
     // Named keys produce fixed VT sequences. `NamedKey` is non-exhaustive, so
     // unmapped variants fall through to the text path below.
     if let LogicalKey::Named(named) = &event.logical {
         if let Some(bytes) = named_key_bytes(*named) {
-            return Some(bytes.to_vec());
+            base = Some(bytes.to_vec());
         }
     }
 
-    // Ctrl+letter → C0 control code (Ctrl+A = 0x01 .. Ctrl+Z = 0x1a).
-    if event.modifiers.control && !event.modifiers.alt {
-        if let LogicalKey::Character(text) = &event.logical {
-            if let Some(ch) = text.chars().next() {
-                let lower = ch.to_ascii_lowercase();
-                if ('a'..='z').contains(&lower) {
-                    return Some(vec![u8::wrapping_sub(lower as u8, b'a') + 1]);
+    if base.is_none() {
+        // Ctrl+letter → C0 control code (Ctrl+A = 0x01 .. Ctrl+Z = 0x1a).
+        if event.modifiers.control {
+            if let LogicalKey::Character(text) = &event.logical {
+                if let Some(ch) = text.chars().next() {
+                    let lower = ch.to_ascii_lowercase();
+                    if ('a'..='z').contains(&lower) {
+                        base = Some(vec![u8::wrapping_sub(lower as u8, b'a') + 1]);
+                    }
                 }
             }
         }
     }
 
-    // Plain printable text (no control / alt).
-    if !event.modifiers.control && !event.modifiers.alt {
-        if let Some(text) = event.text.as_deref() {
-            if !text.is_empty() {
-                return Some(text.as_bytes().to_vec());
+    if base.is_none() {
+        // Plain printable text (no control).
+        if !event.modifiers.control {
+            if let Some(text) = event.text.as_deref() {
+                if !text.is_empty() {
+                    base = Some(text.as_bytes().to_vec());
+                }
             }
-        }
-        if let LogicalKey::Character(text) = &event.logical {
-            if !text.is_empty() {
-                return Some(text.as_bytes().to_vec());
+            if base.is_none() {
+                if let LogicalKey::Character(text) = &event.logical {
+                    if !text.is_empty() {
+                        base = Some(text.as_bytes().to_vec());
+                    }
+                }
             }
         }
     }
 
-    None
+    // Alt/Meta → prepend ESC so readline/emacs Meta bindings work.
+    match base {
+        Some(mut bytes) if event.modifiers.alt => {
+            let mut prefixed = Vec::with_capacity(bytes.len() + 1);
+            prefixed.push(0x1b);
+            prefixed.append(&mut bytes);
+            Some(prefixed)
+        }
+        other => other,
+    }
 }
 
 /// Maps a named key to its VT input sequence, or `None` if the key has no
@@ -701,6 +739,28 @@ mod tests {
             m
         });
         assert_eq!(key_to_bytes(&e), Some(vec![0x03]));
+    }
+
+    #[test]
+    fn alt_letter_prepends_esc() {
+        let e = char_event("b", "b", {
+            let mut m = ModifierState::default();
+            m.alt = true;
+            m
+        });
+        assert_eq!(key_to_bytes(&e), Some(vec![0x1b, b'b']));
+    }
+
+    #[test]
+    fn alt_ctrl_letter_prepends_esc_before_control_code() {
+        let e = char_event("", "c", {
+            let mut m = ModifierState::default();
+            m.control = true;
+            m.alt = true;
+            m
+        });
+        // ESC + Ctrl+C (0x03)
+        assert_eq!(key_to_bytes(&e), Some(vec![0x1b, 0x03]));
     }
 
     #[test]
