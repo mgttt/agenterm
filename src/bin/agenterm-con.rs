@@ -12,10 +12,11 @@
 //! (never blocking the render path), and the VT parser is the same one the
 //! product terminal already hardened. See `plan/plan-v0.1.16.md` §C.
 
-// NOTE: windows_subsystem = "windows" is intentionally omitted. The ConPTY
-// child (cmd.exe) needs a console-capable host process; a GUI-subsystem binary
-// can cause the child to silently exit(0) without producing any output. The
-// extra console window is acceptable for a fallback terminal.
+// GUI subsystem: prevents conhost from attaching a console window.
+// Earlier this was omitted to work around cmd.exe exit(0), but that root
+// cause turned out to be PtyChild drop (Job Object kill), now fixed by
+// keeping the child handle alive for the session lifetime.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[path = "agenterm-con/font.rs"]
 mod font;
@@ -115,8 +116,10 @@ const READ_BUF: usize = 8192;
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
 
-/// Logical (DIP) font size. conhost defaults to ~12px at 96 DPI.
-const DEFAULT_FONT_PX: f64 = 12.0;
+/// Logical (DIP) font size. conhost defaults to ~12px at 96 DPI, but
+/// ab_glyph outline metrics tend to produce taller cells than GDI, so we
+/// use a slightly smaller value to match the visual size.
+const DEFAULT_FONT_PX: f64 = 10.0;
 
 /// Configuration loaded from `agenterm-con.json` (analogous to conhost
 /// "Defaults" — persist font size, window geometry, etc. without a GUI dialog).
@@ -357,7 +360,7 @@ impl ConTerminal {
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
             cell_h: 16,
-            font_size_px: 12,
+            font_size_px: 10,
             cols: 80,
             rows: 24,
             pending_geometry: None,
@@ -525,6 +528,7 @@ impl ConTerminal {
         }
 
         if let Some(bytes) = key_to_bytes(event) {
+            let _ = std::fs::OpenOptions::new().create(true).append(true).open("con-key.log").and_then(|mut f| std::io::Write::write_all(&mut f, format!("[key] {:?} mods={:?} -> {} bytes\n", event.logical, event.modifiers, bytes.len()).as_bytes()));
             if let Some(master) = &self.master {
                 let _ = master.write_all(&bytes);
             }

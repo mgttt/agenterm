@@ -26,18 +26,20 @@ fn main() {
 }
 
 fn dispatch(args: &[String]) -> Result<u8, String> {
-    if args.len() < 2 {
-        eprintln!("agenterm-lua: usage: agenterm-lua <command> [args...]");
-        eprintln!("  commands: check check-many eval hash pack build pack load qualify task run-smoke --framed-worker");
-        return Ok(1);
+    if args.len() < 2 || args[1] == "--help" || args[1] == "-h" {
+        print_help();
+        return Ok(0);
     }
 
     match args[1].as_str() {
         "--framed-worker" => run_framed_worker(),
         "check" => cmd_check(&args[2..]),
         "check-many" => cmd_check_many(&args[2..]),
+        "corpus-scan" => cmd_corpus_scan(&args[2..]),
         "eval" => cmd_eval(&args[2..]),
         "hash" => cmd_hash(&args[2..]),
+        "run" => cmd_run(&args[2..]),
+        "version" => { println!("agenterm-lua {}", env!("CARGO_PKG_VERSION")); Ok(0) },
         "pack" => {
             if args.len() < 3 {
                 return Err("pack: expected subcommand: build or load".into());
@@ -131,14 +133,17 @@ fn cmd_qualify(args: &[String]) -> Result<u8, String> {
     Ok(0)
 }
 
-/// `check-many --manifest <file>` — bounded multi-file validation.
+/// `check-many --manifest <file> [--json]` — bounded multi-file validation.
 fn cmd_check_many(args: &[String]) -> Result<u8, String> {
     let manifest_path = require_flag_value(args, "--manifest", "check-many requires --manifest <file>")?;
+    let json_out = args.iter().any(|a| a == "--json");
     let manifest = agenterm_lua::check_many::read_manifest(&manifest_path)
         .map_err(|e| format!("check_many_manifest: {e}"))?;
     let options = agenterm_lua::check_many::CheckManyOptions::default();
     let report = agenterm_lua::check_many::run_check_many(manifest, options);
-    if report.failures.is_empty() {
+    if json_out {
+        println!("{}", serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?);
+    } else if report.failures.is_empty() {
         println!("check-many: {} files ok", report.checked_files);
     } else {
         eprintln!("check-many: {} files checked, {} failures", report.checked_files, report.failures.len());
@@ -147,6 +152,52 @@ fn cmd_check_many(args: &[String]) -> Result<u8, String> {
         }
     }
     if report.ok { Ok(0) } else { Ok(1) }
+}
+
+/// `corpus-scan [--dir <dir>]` — scan directory for .lua files and check syntax.
+fn cmd_corpus_scan(args: &[String]) -> Result<u8, String> {
+    let dir = if let Some(d) = require_flag_value_opt(args, "--dir") {
+        d
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
+    let report = agenterm_lua::corpus_scan::scan_directory(&dir)
+        .map_err(|e| format!("corpus_scan: {e}"))?;
+    if report.failures == 0 {
+        println!("corpus-scan: {} scripts ok", report.total_scripts);
+    } else {
+        eprintln!(
+            "corpus-scan: {} scripts checked, {} failures",
+            report.total_scripts, report.failures
+        );
+        for f in &report.failed_files {
+            eprintln!("  {} — {}", f.path, f.message);
+        }
+    }
+    if report.failures == 0 { Ok(0) } else { Ok(1) }
+}
+
+/// `run <file.lua> -- <arg1> <arg2>` — execute Lua script with CLI arguments.
+fn cmd_run(args: &[String]) -> Result<u8, String> {
+    // Find the `--` separator
+    let sep = args.iter().position(|a| a == "--");
+    let (file_args, script_args): (&[String], &[String]) = if let Some(pos) = sep {
+        (&args[..pos], &args[pos + 1..])
+    } else {
+        (args, &[])
+    };
+    let path = require_arg(file_args, 0, "run <file.lua> [-- <args>...]")?;
+    let source = read_file(&path)?;
+    let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
+    let base_host = agenterm_lua::LuaHostFunctions::default();
+    let args_vec: Vec<String> = script_args.to_vec();
+    let result = engine.eval_with_args(&source, &base_host, &args_vec)
+        .map_err(|e| e.to_string())?;
+    if !result.stdout.is_empty() {
+        print!("{}", result.stdout);
+    }
+    println!("rh run ok: {} -> {}", path.display(), result.value);
+    Ok(0)
 }
 
 /// `task <subcommand>` — delegate to agenterm main binary.
@@ -193,8 +244,32 @@ fn require_flag_value(args: &[String], flag: &str, usage: &str) -> Result<PathBu
     Ok(PathBuf::from(value))
 }
 
+fn require_flag_value_opt(args: &[String], flag: &str) -> Option<PathBuf> {
+    let pos = args.iter().position(|a| a == flag)?;
+    args.get(pos + 1).map(PathBuf::from)
+}
+
 fn read_file(path: &std::path::Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("read_file {}: {e}", path.display()))
+}
+
+fn print_help() {
+    println!("agenterm-lua {} — LuaJIT scripting backend for AgenTerm", env!("CARGO_PKG_VERSION"));
+    println!();
+    println!("Commands:");
+    println!("  check <file.lua>              Syntax check");
+    println!("  check-many --manifest <file>   Batch syntax check (--json for JSON output)");
+    println!("  corpus-scan [--dir <dir>]      Scan directory for .lua files and check");
+    println!("  eval <file.lua>                Evaluate script (with bytecode cache)");
+    println!("  hash <file.lua>                Print SHA256 hash of source");
+    println!("  run <file.lua> [-- <args>...]  Execute script with CLI arguments");
+    println!("  pack build <file.lua> --dir <out>  Build bytecode pack");
+    println!("  pack load <dir>                Load and execute pack from directory");
+    println!("  qual <file.lua> --dir <out>    Build + load + qualification receipt");
+    println!("  qualify <file.lua> --dir <out> Build + load + qualification receipt");
+    println!("  version                        Print version");
+    println!("  --framed-worker                Run as framed stdio worker");
+    println!("  --help, -h                     Print this help");
 }
 
 // ── framed worker ──────────────────────────────────────────────────────

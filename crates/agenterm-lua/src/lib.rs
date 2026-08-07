@@ -8,6 +8,7 @@ pub mod check;
 pub mod cache;
 pub mod check_many;
 pub mod compile;
+pub mod corpus_scan;
 pub mod manifest;
 pub mod pack;
 pub mod qualify;
@@ -170,6 +171,31 @@ impl LuaEngine {
     /// Compute SHA256 hash of Lua source.
     pub fn hash_source(source: &str) -> String {
         crate::compile::hash_source(source)
+    }
+
+    /// Evaluate Lua source with CLI arguments injected into `__host`.
+    /// `args` are exposed as `__host.args_len()` and `__host.arg(n)`.
+    pub fn eval_with_args(
+        &self,
+        source: &str,
+        host: &LuaHostFunctions,
+        args: &[String],
+    ) -> Result<LuaEvalResult, LuaError> {
+        let args_vec: Vec<String> = args.to_vec();
+        let host_with_args = LuaHostFunctions {
+            args_len: Some(Arc::new(move || args_vec.len() as i64)),
+            arg: {
+                let args = args.to_vec();
+                Some(Arc::new(move |i: i64| {
+                    args.get(i as usize)
+                        .cloned()
+                        .ok_or_else(|| format!("argument {i} is unavailable"))
+                }))
+            },
+            fleet_call: host.fleet_call.clone(),
+            print: host.print.clone(),
+        };
+        self.eval(source, &host_with_args)
     }
 
     fn inject_host_table(
@@ -409,6 +435,37 @@ mod tests {
 
         let result = engine.eval(&script, &host).expect("fleet module eval");
         assert_eq!(result.value, 0);
+    }
+
+    #[test]
+    fn eval_with_args_passes_arguments() {
+        let engine = LuaEngine::new().expect("create engine");
+        let host = LuaHostFunctions::default();
+        let args = vec!["hello".to_string(), "world".to_string()];
+        let result = engine
+            .eval_with_args(
+                "local n = __host.args_len() return n",
+                &host,
+                &args,
+            )
+            .expect("eval_with_args");
+        assert_eq!(result.value, 2);
+    }
+
+    #[test]
+    fn eval_with_args_arg_by_index() {
+        let engine = LuaEngine::new().expect("create engine");
+        let host = LuaHostFunctions::default();
+        let args = vec!["first".to_string(), "second".to_string()];
+        let result = engine
+            .eval_with_args(
+                "local a = __host.arg(0); local b = __host.arg(1); print(a .. ' ' .. b); return 0",
+                &host,
+                &args,
+            )
+            .expect("eval_with_args");
+        assert_eq!(result.value, 0);
+        assert!(result.stdout.contains("first second"), "stdout: {}", result.stdout);
     }
 
     #[test]
