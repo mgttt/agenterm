@@ -13,6 +13,7 @@
     "fixtures/rh/for-range.rh",
     "fixtures/rh/for-dyn-range.rh",
     "fixtures/rh/for-span-overflow.rh",
+    "fixtures/rh/json-array-walk.rh",
     "fixtures/rh/json-parse-schema.rh"
   ]
 }

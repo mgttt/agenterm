@@ -1,0 +1,13 @@
+fn entry() {
+    let document = rhai::json::parse(
+        "{\"executables\":[{\"release_budget_bytes\":4},{\"release_budget_bytes\":7}]}"
+    );
+    if document.executables.len != 2 {
+        return rh::fail("json_executables_length_invalid");
+    }
+    let total = 0;
+    for executable in document.executables {
+        total += executable.release_budget_bytes;
+    }
+    total
+}

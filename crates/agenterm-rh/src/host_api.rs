@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 4;
+pub const RH_CODEGEN_REVISION: u32 = 5;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -363,12 +363,42 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
-         fn rh_json_int_property(value: &serde_json::Value, key: &str) -> INT {\n\
-             match value.get(key).and_then(serde_json::Value::as_i64) {\n\
+         fn rh_json_path<'a>(\n\
+             mut value: &'a serde_json::Value,\n\
+             path: &[&str],\n\
+         ) -> Option<&'a serde_json::Value> {\n\
+             for segment in path {\n\
+                 value = value.get(*segment)?;\n\
+             }\n\
+             Some(value)\n\
+         }\n\n\
+         fn rh_json_int_path(value: &serde_json::Value, path: &[&str]) -> INT {\n\
+             match rh_json_path(value, path).and_then(serde_json::Value::as_i64) {\n\
                  Some(value) => value as INT,\n\
                  None => {\n\
-                     let _ = rh_fail(&format!(\"json_integer_field: {key}\"));\n\
+                     let _ = rh_fail(&format!(\"json_integer_path: {}\", path.join(\".\")));\n\
                      0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_array_len(value: &serde_json::Value, path: &[&str]) -> INT {\n\
+             match rh_json_path(value, path).and_then(serde_json::Value::as_array) {\n\
+                 Some(items) => items.len() as INT,\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_array_path: {}\", path.join(\".\")));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_array_items(\n\
+             value: &serde_json::Value,\n\
+             path: &[&str],\n\
+         ) -> Vec<serde_json::Value> {\n\
+             match rh_json_path(value, path).and_then(serde_json::Value::as_array) {\n\
+                 Some(items) => items.clone(),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_array_path: {}\", path.join(\".\")));\n\
+                     Vec::new()\n\
                  }\n\
              }\n\
          }\n\n\

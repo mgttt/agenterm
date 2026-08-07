@@ -508,6 +508,19 @@ fn emit_stmt(
                     .with_binding(counter.name.as_str(), ValueKind::Int);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
+            } else if let Some((binding, path)) = json_value_path(&flow.expr, ctx) {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in rh_json_array_items(&");
+                out.push_str(binding);
+                out.push_str(", ");
+                emit_json_path(out, &path);
+                out.push_str(") {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::Json);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
             } else {
                 let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
                 out.push_str("    let _for = rh_host_eval_int(");
@@ -970,24 +983,51 @@ fn json_parse_arg(expr: &Expr) -> Option<&Expr> {
     Some(&call.args[0])
 }
 
-fn json_int_property<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+fn json_value_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'a str>)> {
+    match expr {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            Some((ident.1.as_str(), Vec::new()))
+        }
+        Expr::Dot(boxed, ..) => {
+            let (binding, mut path) = json_value_path(&boxed.lhs, ctx)?;
+            let Expr::Property(property, ..) = &boxed.rhs else {
+                return None;
+            };
+            path.push(property.2.as_str());
+            Some((binding, path))
+        }
+        _ => None,
+    }
+}
+
+fn json_array_len_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'a str>)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
-    let Expr::Variable(ident, ..) = &boxed.lhs else {
-        return None;
-    };
-    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
-        return None;
+    let is_len = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "len"
+    );
+    is_len.then(|| json_value_path(&boxed.lhs, ctx)).flatten()
+}
+
+fn emit_json_path(out: &mut String, path: &[&str]) {
+    out.push_str("&[");
+    for (index, segment) in path.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format!("{segment:?}"));
     }
-    let Expr::Property(property, ..) = &boxed.rhs else {
-        return None;
-    };
-    Some((ident.1.as_str(), property.2.as_str()))
+    out.push(']');
 }
 
 fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
-    if json_int_property(expr, ctx).is_some() {
+    if json_array_len_path(expr, ctx).is_some()
+        || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
+    {
         return true;
     }
     match expr {
@@ -1036,11 +1076,21 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
-        if let Some((binding, property)) = json_int_property(expr, ctx) {
-            out.push_str("rh_json_int_property(&");
+        if let Some((binding, path)) = json_array_len_path(expr, ctx) {
+            out.push_str("rh_json_array_len(&");
             out.push_str(binding);
             out.push_str(", ");
-            out.push_str(&format!("{property:?}"));
+            emit_json_path(out, &path);
+            out.push(')');
+            return Ok(());
+        }
+        if let Some((binding, path)) = json_value_path(expr, ctx)
+            && !path.is_empty()
+        {
+            out.push_str("rh_json_int_path(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
             out.push(')');
             return Ok(());
         }

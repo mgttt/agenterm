@@ -34,6 +34,10 @@ fn check_accepts_all_fixtures() {
             "json-parse-schema",
             include_str!("../fixtures/rh/json-parse-schema.rh"),
         ),
+        (
+            "json-array-walk",
+            include_str!("../fixtures/rh/json-array-walk.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -89,10 +93,45 @@ fn json_schema_fixture_transpiles_without_interpreter_fallback() {
     assert!(
         output
             .rust
-            .contains("rh_json_int_property(&document, \"schema_version\")")
+            .contains("rh_json_int_path(&document, &[\"schema_version\"])")
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
+fn json_array_fixture_executes_natively_without_interpreter() {
+    let source = include_str!("../fixtures/rh/json-array-walk.rh");
+    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile JSON array");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output
+            .rust
+            .contains("rh_json_array_len(&document, &[\"executables\"])")
+    );
+    assert!(
+        output
+            .rust
+            .contains("for executable in rh_json_array_items(&document, &[\"executables\"])")
+    );
+    assert!(
+        output
+            .rust
+            .contains("rh_json_int_path(&executable, &[\"release_budget_bytes\"])")
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-json-array-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify JSON array pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 11);
 }
 
 #[test]
