@@ -89,7 +89,7 @@ fn remove_incremental_root(crate_path) {
         "python3",
         [
             "-c",
-            "import fcntl,os,shutil,sys\nroot=sys.argv[1]\nlocks=[]\nfor name in os.listdir(root):\n  path=os.path.join(root,name)\n  if os.path.isdir(path) and name.endswith('-working'):\n    sys.exit(2)\n  if os.path.isfile(path) and name.endswith('.lock'):\n    handle=open(path,'a')\n    fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\n    locks.append(handle)\nshutil.rmtree(root)\n",
+            "import fcntl,os,shutil,sys\nroot=sys.argv[1]\nlocks=[]\nfor name in os.listdir(root):\n  path=os.path.join(root,name)\n  if os.path.isdir(path) and name.endswith('-working'):\n    sys.exit(2)\n  if os.path.isfile(path) and name.endswith('.lock'):\n    handle=open(path,'a')\n    try:\n      fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\n    except OSError:\n      sys.exit(2)\n    locks.append(handle)\ntry:\n  shutil.rmtree(root)\nexcept OSError:\n  sys.exit(3)\n",
             crate_path
         ],
         120000
@@ -274,6 +274,7 @@ fn validate_root_manifest(path, invocation, target, incremental) {
     if !text.starts_with("{")
             || !text.contains("\"kind\":\"agenterm-incremental-touch-manifest\"")
             || !text.contains("\"schema_version\":1")
+            || !text.contains("\"snapshot_complete\":true")
             || !text.contains("\"identity_algorithm\":\"full-tree-metadata-v1\"") {
         return 0;
     }
@@ -283,23 +284,20 @@ fn validate_root_manifest(path, invocation, target, incremental) {
             || document.invocation_id != invocation
             || document.target != target
             || document.incremental_root != incremental
-            || document.snapshot_complete != true
             || document.rustc_invocations <= 0
             || document.rustc_invocations > 100000
             || document.identity_algorithm != "full-tree-metadata-v1"
             || document.roots.len > 8192 {
         return 0;
     }
-    let seen_names = [];
+    let seen_names = #{};
     for entry in document.roots {
         let root_name = entry.name;
         if safe_root_name(root_name) == 0 {
             return 0;
         }
-        for seen in seen_names {
-            if seen == root_name {
-                return 0;
-            }
+        if seen_names.contains(root_name) {
+            return 0;
         }
         if type_of(entry.touched) != "bool" {
             return 0;
@@ -310,7 +308,7 @@ fn validate_root_manifest(path, invocation, target, incremental) {
         if lowercase_sha256(entry.after_identity) == 0 {
             return 0;
         }
-        seen_names.push(root_name);
+        seen_names[root_name] = true;
     }
     1
 }
@@ -483,17 +481,18 @@ fn try_prune_manifest_root(crate_path, root_entry) {
     if root_entry.touched {
         return 1;
     }
-    if root_entry.before_identity != root_entry.after_identity {
+    let before_id = "" + root_entry.before_identity;
+    let after_id = "" + root_entry.after_identity;
+    if before_id != after_id {
         return 2;
     }
-    let identity_path =
-        std::path::join(crate_path, ".prune-identity.tmp").display;
+    let identity_path = crate_path + ".prune-identity.tmp";
     let first_status = metadata_identity(crate_path, 100000, identity_path);
     if first_status != 2 {
         return 2;
     }
     let first_identity = std::fs::read_to_string(identity_path);
-    if first_identity != root_entry.after_identity {
+    if first_identity != after_id {
         std::fs::try_remove_file(identity_path);
         return 2;
     }
@@ -507,7 +506,7 @@ fn try_prune_manifest_root(crate_path, root_entry) {
     if second_identity != first_identity {
         return 2;
     }
-    if second_identity != root_entry.after_identity {
+    if second_identity != after_id {
         return 2;
     }
     let tree = inspect_tree(crate_path);

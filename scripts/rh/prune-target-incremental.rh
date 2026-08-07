@@ -77,9 +77,20 @@ fn entry() {
         has_manifest = 1;
         manifest_path = std::path::absolute(args[3]).display;
         invocation = args[5];
-        manifest_document = rhai::json::parse(
-            std::fs::read_to_string(manifest_path)
-        );
+        if std::fs::exists(manifest_path) {
+            let manifest_text = std::fs::read_to_string(manifest_path);
+            if manifest_text.starts_with("{")
+                    && manifest_text.contains(
+                        "\"kind\":\"agenterm-incremental-touch-manifest\""
+                    )
+                    && manifest_text.contains("\"schema_version\":1")
+                    && manifest_text.contains("\"snapshot_complete\":true")
+                    && manifest_text.contains(
+                        "\"identity_algorithm\":\"full-tree-metadata-v1\""
+                    ) {
+                manifest_document = rhai::json::parse(manifest_text);
+            }
+        }
     }
 
     prune::run_after_lock(
