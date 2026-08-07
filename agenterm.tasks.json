@@ -1229,7 +1229,7 @@
     {
       "id": "package-client-release",
       "description": "Package one manifest-defined cross-platform client release with provenance",
-      "entry": "scripts/rhai/package-client-release.rhai",
+      "entry": "scripts/rh/package-client-release.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

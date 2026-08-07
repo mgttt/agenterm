@@ -1,3 +1,6 @@
+// Archived interpreted implementation retained for migration archaeology only.
+// Active task: scripts/rh/package-client-release.rh
+
 // Package one manifest-defined cross-platform client release.
 //
 // Args:

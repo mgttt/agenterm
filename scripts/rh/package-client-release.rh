@@ -7,46 +7,18 @@
 // installation remain host adapters. Payload selection and archive policy live
 // here and are driven only by scripts/artifacts.json.
 
-fn require(condition, message) {
-    if !condition {
-        throw message;
-    }
-}
-
-fn run(program, arguments, cwd, code) {
-    let exit_code = std::process::command_status(
-        program,
-        arguments,
-        300000,
-        #{ current_dir: cwd }
-    );
-    require(exit_code == 0, code);
-}
-
-fn one_platform(manifest, os_name, arch) {
-    let matches = [];
-    for platform in manifest.platforms {
-        if platform.os == os_name && platform.arch == arch {
-            matches.push(platform);
-        }
-    }
-    require(
-        matches.len == 1,
-        "package_client_platform_match:" + os_name + "-" + arch
-    );
-    matches[0]
-}
-
 fn copy_required(source, destination, code) {
-    require(std::fs::exists(source), code);
+    require(std::fs::exists(source), "" + code);
     std::fs::copy(source, destination);
+    0
 }
 
 fn valid_source_sha(value) {
-    if value.len != 40 {
+    let text = "" + value;
+    if text.len != 40 {
         return false;
     }
-    for character in value {
+    for character in text {
         if !"0123456789abcdef".contains(character.to_string()) {
             return false;
         }
@@ -63,46 +35,54 @@ fn entry() {
     let version = args[1];
     let os_name = args[2];
     let arch = args[3];
-    let binary_directory = if std::fs::exists(args[4]) {
-        args[4]
-    } else {
-        std::path::join(repo, args[4]).display
-    };
-    let mode = if args.len == 6 { args[5] } else { "" };
+    let binary_directory = std::path::join(repo, args[4]).display;
+    if std::fs::exists(args[4]) {
+        binary_directory = args[4];
+    }
+    let mode = "";
+    if args.len == 6 {
+        mode = args[5];
+    }
     require(
         mode == "" || mode == "--unsigned-preview" || mode == "--signed",
         "package_client_mode:" + mode
     );
     let unsigned_preview = mode == "--unsigned-preview";
     let signed = mode == "--signed";
-    let host_os = if std::env::has("AGENTERM_HOST_OS") {
-        std::env::get("AGENTERM_HOST_OS")
-    } else if std::fs::exists("/System/Library/CoreServices") {
-        "macos"
-    } else if std::fs::exists("/proc") {
-        "linux"
-    } else {
-        "windows"
-    };
-    let host_arch = if std::env::has("AGENTERM_HOST_ARCH") {
-        std::env::get("AGENTERM_HOST_ARCH")
-    } else if std::env::has("RUNNER_ARCH") &&
-            std::env::get("RUNNER_ARCH") == "ARM64" {
-        "aarch64"
-    } else if std::env::has("RUNNER_ARCH") &&
-            std::env::get("RUNNER_ARCH") == "X64" {
-        "x86_64"
-    } else {
-        ""
-    };
+    let host_os = "windows";
+    if std::env::has("AGENTERM_HOST_OS") {
+        host_os = std::env::get("AGENTERM_HOST_OS");
+    }
+    if !std::env::has("AGENTERM_HOST_OS")
+            && std::fs::exists("/System/Library/CoreServices") {
+        host_os = "macos";
+    }
+    if !std::env::has("AGENTERM_HOST_OS")
+            && !std::fs::exists("/System/Library/CoreServices")
+            && std::fs::exists("/proc") {
+        host_os = "linux";
+    }
+    let host_arch = "";
+    if std::env::has("AGENTERM_HOST_ARCH") {
+        host_arch = std::env::get("AGENTERM_HOST_ARCH");
+    }
+    if !std::env::has("AGENTERM_HOST_ARCH")
+            && std::env::has("RUNNER_ARCH")
+            && std::env::get("RUNNER_ARCH") == "ARM64" {
+        host_arch = "aarch64";
+    }
+    if !std::env::has("AGENTERM_HOST_ARCH")
+            && std::env::has("RUNNER_ARCH")
+            && std::env::get("RUNNER_ARCH") == "X64" {
+        host_arch = "x86_64";
+    }
     require(
         !version.contains("/") && !version.contains("\\") && version != "",
         "package_client_version"
     );
+    let cargo_path = std::path::join(repo, "Cargo.toml").display;
+    let cargo = std::fs::read_to_string(cargo_path);
     let cargo_version = "";
-    let cargo = std::fs::read_to_string(
-        std::path::join(repo, "Cargo.toml").display
-    );
     let in_cargo_package = 0;
     for source_line in cargo.split("\n") {
         let line = source_line;
@@ -112,13 +92,11 @@ fn entry() {
             if line == "[package]" {
                 in_cargo_package = 1;
             }
-            continue;
         }
         if in_cargo_package != 0 && line.starts_with("version") {
             let parts = line.split("\"");
             if parts.len >= 2 {
-                cargo_version = parts[1];
-                break;
+                cargo_version = "" + parts[1];
             }
         }
     }
@@ -138,8 +116,26 @@ fn entry() {
         artifact_manifest.schema_version == 2,
         "package_client_manifest_schema"
     );
-    let platform = one_platform(artifact_manifest, os_name, arch);
-    let package_format = platform["package"];
+    let platform_matched = 0;
+    for candidate in artifact_manifest.platforms {
+        let candidate_os = "" + candidate.os;
+        let candidate_arch = "" + candidate.arch;
+        if candidate_os == os_name && candidate_arch == arch {
+            require(
+                platform_matched == 0,
+                "package_client_platform_match:" + os_name + "-" + arch
+            );
+            platform_matched = 1;
+        }
+    }
+    require(
+        platform_matched == 1,
+        "package_client_platform_match:" + os_name + "-" + arch
+    );
+    let package_format = "zip";
+    if os_name == "linux" {
+        package_format = "tar.gz";
+    }
     require(
         package_format == "zip" || package_format == "tar.gz",
         "package_client_format:" + package_format
@@ -150,291 +146,335 @@ fn entry() {
     );
     require(!signed || os_name == "macos", "package_client_signed_platform");
 
-    let dist = if std::env::has("AGENTERM_PACKAGE_DIST") {
-        std::path::absolute(std::env::get("AGENTERM_PACKAGE_DIST")).display
-    } else {
-        std::path::join(repo, "dist").display
-    };
+    let dist = std::path::join(repo, "dist").display;
+    if std::env::has("AGENTERM_PACKAGE_DIST") {
+        let dist_env = std::env::get("AGENTERM_PACKAGE_DIST");
+        dist = std::path::absolute(dist_env).display;
+    }
     std::fs::create_dir_all(dist);
-    let scratch = rhai::runtime::temp_dir().display;
+    let scratch =
+        std::path::join(repo, ".package-client-release-scratch").display;
     let staging = std::path::join(scratch, "payload").display;
     std::fs::create_dir_all(staging);
 
-    try {
-        let executable_names = [];
-        for executable in platform.executables {
-            let name = executable.name;
-            executable_names.push(name);
-            let source = std::path::join(binary_directory, name).display;
-            let staged_binary = std::path::join(staging, name).display;
-            let staged_hidden =
-                std::path::join(staging, "." + name + ".bin").display;
-            if os_name == "linux" &&
-                    (executable.role == "gui" ||
-                     executable.role == "control-center-gui") {
-                copy_required(
-                    source,
-                    staged_hidden,
-                    "package_client_binary_missing"
-                );
-                let wrapper_source = std::path::join(
-                    repo,
-                    "scripts/linux/agenterm-gui-wrapper.sh"
-                ).display;
-                copy_required(
-                    wrapper_source,
-                    staged_binary,
-                    "package_client_linux_wrapper_missing"
-                );
-            } else {
-                copy_required(
-                    source,
-                    staged_binary,
-                    "package_client_binary_missing"
-                );
+    let executable_names = [];
+    for candidate in artifact_manifest.platforms {
+        let candidate_os = "" + candidate.os;
+        let candidate_arch = "" + candidate.arch;
+        if candidate_os == os_name && candidate_arch == arch {
+            for executable in candidate.executables {
+                let name = "" + executable.name;
+                executable_names.push(name);
+                let source = std::path::join(binary_directory, name).display;
+                let staged_binary = std::path::join(staging, name).display;
+                let hidden_name = "." + name + ".bin";
+                let staged_hidden =
+                    std::path::join(staging, hidden_name).display;
+                let role = "" + executable.role;
+                if os_name == "linux" &&
+                        (role == "gui" || role == "control-center-gui") {
+                    copy_required(
+                        source,
+                        staged_hidden,
+                        "package_client_binary_missing"
+                    );
+                    let wrapper_source = std::path::join(
+                        repo,
+                        "scripts/linux/agenterm-gui-wrapper.sh"
+                    ).display;
+                    copy_required(
+                        wrapper_source,
+                        staged_binary,
+                        "package_client_linux_wrapper_missing"
+                    );
+                } else {
+                    copy_required(
+                        source,
+                        staged_binary,
+                        "package_client_binary_missing"
+                    );
+                }
             }
         }
-        if os_name != "windows" && host_os != "windows" {
-            let chmod_args = ["+x"];
-            for name in executable_names {
-                let chmod_target =
-                    std::path::join(staging, name).display;
-                chmod_args.push(chmod_target);
-            }
-            if os_name == "linux" {
-                for executable in platform.executables {
-                    if executable.role == "gui" ||
-                            executable.role == "control-center-gui" {
-                        let chmod_bin =
-                            std::path::join(
+    }
+    if os_name != "windows" && host_os != "windows" {
+        for name in executable_names {
+            let name_text = "" + name;
+            let chmod_target =
+                std::path::join(staging, name_text).display;
+            let chmod_code = std::process::command_status(
+                "chmod",
+                ["+x", chmod_target],
+                300000,
+                #{ current_dir: repo }
+            );
+            require(chmod_code == 0, "package_client_chmod");
+        }
+        if os_name == "linux" {
+            for candidate in artifact_manifest.platforms {
+                let candidate_os = "" + candidate.os;
+                let candidate_arch = "" + candidate.arch;
+                if candidate_os == os_name && candidate_arch == arch {
+                    for executable in candidate.executables {
+                        let role = "" + executable.role;
+                        if role == "gui" || role == "control-center-gui" {
+                            let exec_name = "" + executable.name;
+                            let hidden_name = "." + exec_name + ".bin";
+                            let chmod_bin = std::path::join(
                                 staging,
-                                "." + executable.name + ".bin"
+                                hidden_name
                             ).display;
-                        chmod_args.push(chmod_bin);
+                            let chmod_code = std::process::command_status(
+                                "chmod",
+                                ["+x", chmod_bin],
+                                300000,
+                                #{ current_dir: repo }
+                            );
+                            require(chmod_code == 0, "package_client_chmod");
+                        }
                     }
                 }
             }
-            run("chmod", chmod_args, repo, "package_client_chmod");
         }
-        if os_name == "linux" && host_os == "linux" {
-            let adapter =
-                std::path::join(repo, "scripts/stage-linux-gui-libs.sh").display;
-            if std::fs::exists(adapter) {
-                run(
-                    adapter,
-                    [staging, arch],
-                    repo,
-                    "package_client_linux_libraries"
-                );
-            }
-        }
-
-        for name in [
-            "LICENSE-APACHE",
-            "LICENSE-MIT",
-            "THIRD_PARTY_NOTICES.md"
-        ] {
-            let notice_source = std::path::join(repo, name).display;
-            let notice_destination = std::path::join(staging, name).display;
-            copy_required(
-                notice_source,
-                notice_destination,
-                "package_client_notice_missing"
+    }
+    if os_name == "linux" && host_os == "linux" {
+        let adapter =
+            std::path::join(repo, "scripts/stage-linux-gui-libs.sh").display;
+        if std::fs::exists(adapter) {
+            let adapter_code = std::process::command_status(
+                adapter,
+                [staging, arch],
+                300000,
+                #{ current_dir: repo }
             );
+            require(adapter_code == 0, "package_client_linux_libraries");
         }
-        let staged_manifest =
-            std::path::join(staging, "artifacts.json").display;
+    }
+
+    let notice_names = [];
+    notice_names.push("LICENSE-APACHE");
+    notice_names.push("LICENSE-MIT");
+    notice_names.push("THIRD_PARTY_NOTICES.md");
+    for name in notice_names {
+        let name_text = "" + name;
+        let notice_source = std::path::join(repo, name_text).display;
+        let notice_destination =
+            std::path::join(staging, name_text).display;
         copy_required(
-            artifact_manifest_path,
-            staged_manifest,
-            "package_client_manifest_missing"
+            notice_source,
+            notice_destination,
+            "package_client_notice_missing"
         );
-        let sbom_source = if std::env::has("AGENTERM_PACKAGE_SBOM") {
-            std::path::absolute(std::env::get("AGENTERM_PACKAGE_SBOM")).display
-        } else {
-            std::path::join(repo, "dist/agenterm-sbom.spdx.json").display
-        };
-        if os_name == "macos" {
-            let staged_sbom = std::path::join(
-                staging,
-                "agenterm-sbom.spdx.json"
-            ).display;
-            copy_required(
-                sbom_source,
-                staged_sbom,
-                "package_client_sbom_missing"
-            );
-        }
-        if unsigned_preview {
-            let preview_source = std::path::join(
-                repo,
-                "docs/macos-unsigned-preview.md"
-            ).display;
-            let preview_staged = std::path::join(
-                staging,
-                "MACOS_UNSIGNED_PREVIEW_README.md"
-            ).display;
-            copy_required(
-                preview_source,
-                preview_staged,
-                "package_client_preview_readme"
-            );
-            let preview_zh_source = std::path::join(
-                repo,
-                "docs/macos-unsigned-preview.zh-Hant.md"
-            ).display;
-            let preview_zh_staged = std::path::join(
-                staging,
-                "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
-            ).display;
-            copy_required(
-                preview_zh_source,
-                preview_zh_staged,
-                "package_client_preview_readme_zh"
-            );
-            let preview_dist = std::path::join(
-                dist,
-                "MACOS_UNSIGNED_PREVIEW_README.md"
-            ).display;
-            std::fs::copy(preview_source, preview_dist);
-            let preview_zh_dist = std::path::join(
-                dist,
-                "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
-            ).display;
-            std::fs::copy(preview_zh_source, preview_zh_dist);
-        }
+    }
+    let staged_manifest =
+        std::path::join(staging, "artifacts.json").display;
+    copy_required(
+        artifact_manifest_path,
+        staged_manifest,
+        "package_client_manifest_missing"
+    );
+    let sbom_source =
+        std::path::join(repo, "dist/agenterm-sbom.spdx.json").display;
+    if std::env::has("AGENTERM_PACKAGE_SBOM") {
+        let sbom_env = std::env::get("AGENTERM_PACKAGE_SBOM");
+        sbom_source = std::path::absolute(sbom_env).display;
+    }
+    if os_name == "macos" {
+        let staged_sbom = std::path::join(
+            staging,
+            "agenterm-sbom.spdx.json"
+        ).display;
+        copy_required(
+            sbom_source,
+            staged_sbom,
+            "package_client_sbom_missing"
+        );
+    }
+    if unsigned_preview {
+        let preview_source = std::path::join(
+            repo,
+            "docs/macos-unsigned-preview.md"
+        ).display;
+        let preview_staged = std::path::join(
+            staging,
+            "MACOS_UNSIGNED_PREVIEW_README.md"
+        ).display;
+        copy_required(
+            preview_source,
+            preview_staged,
+            "package_client_preview_readme"
+        );
+        let preview_zh_source = std::path::join(
+            repo,
+            "docs/macos-unsigned-preview.zh-Hant.md"
+        ).display;
+        let preview_zh_staged = std::path::join(
+            staging,
+            "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
+        ).display;
+        copy_required(
+            preview_zh_source,
+            preview_zh_staged,
+            "package_client_preview_readme_zh"
+        );
+        let preview_dist = std::path::join(
+            dist,
+            "MACOS_UNSIGNED_PREVIEW_README.md"
+        ).display;
+        std::fs::copy(preview_source, preview_dist);
+        let preview_zh_dist = std::path::join(
+            dist,
+            "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
+        ).display;
+        std::fs::copy(preview_zh_source, preview_zh_dist);
+    }
 
-        let suffix = if unsigned_preview { "-unsigned-preview" } else { "" };
-        let archive_extension = ".tar.gz";
-        if package_format == "zip" {
-            archive_extension = ".zip";
-        }
-        let archive_name =
-            "agenterm-" + version + "-" + os_name + "-" + arch + suffix +
-            archive_extension;
-        let archive = std::path::join(dist, archive_name).display;
-        if std::fs::exists(archive) {
-            std::fs::remove_file(archive);
-        }
-        if package_format == "zip" {
-            if host_os == "linux" {
-                run(
-                    "zip",
-                    ["-q", "-r", archive, "."],
-                    staging,
-                    "package_client_zip"
-                );
-            } else {
-                run(
-                    "tar",
-                    ["-a", "-c", "-f", archive, "-C", staging, "."],
-                    repo,
-                    "package_client_zip"
-                );
-            }
-        } else {
-            run(
-                "tar",
-                ["-czf", archive, "-C", staging, "."],
-                repo,
-                "package_client_tar"
+    let suffix = "";
+    if unsigned_preview {
+        suffix = "-unsigned-preview";
+    }
+    let archive_extension = ".tar.gz";
+    if package_format == "zip" {
+        archive_extension = ".zip";
+    }
+    let archive_name =
+        "agenterm-" + version + "-" + os_name + "-" + arch + suffix +
+        archive_extension;
+    let archive = std::path::join(dist, archive_name).display;
+    if std::fs::exists(archive) {
+        std::fs::remove_file(archive);
+    }
+    if package_format == "zip" {
+        if host_os == "linux" {
+            let zip_code = std::process::command_status(
+                "zip",
+                ["-q", "-r", archive, "."],
+                300000,
+                #{ current_dir: staging }
             );
+            require(zip_code == 0, "package_client_zip");
+        } else {
+            let zip_code = std::process::command_status(
+                "tar",
+                ["-a", "-c", "-f", archive, "-C", staging, "."],
+                300000,
+                #{ current_dir: repo }
+            );
+            require(zip_code == 0, "package_client_zip");
         }
-        let archive_hash = rhai::crypto::sha256_file(archive);
-        let source_commit =
-            if std::env::has("AGENTERM_CANDIDATE_SOURCE_SHA") {
-                let value = std::env::get("AGENTERM_CANDIDATE_SOURCE_SHA");
-                require(
-                    valid_source_sha(value),
-                    "package_client_candidate_source"
-                );
-                let git_stdout_path =
-                    repo + ".package-client-release.git.stdout.tmp";
-                let git_exit_code = std::process::command_stdout_file(
-                    "git",
-                    ["rev-parse", "HEAD"],
-                    10000,
-                    git_stdout_path,
-                    #{ current_dir: repo }
-                );
-                require(git_exit_code == 0, "package_client_git_head");
-                let git_head_value =
-                    std::fs::read_to_string(git_stdout_path);
-                git_head_value.trim();
-                std::fs::try_remove_file(git_stdout_path);
-                require(
-                    valid_source_sha(git_head_value),
-                    "package_client_git_head_invalid"
-                );
-                require(
-                    value == git_head_value,
-                    "package_client_candidate_source_mismatch"
-                );
-                value
-            } else if std::env::has("GITHUB_SHA") {
-                std::env::get("GITHUB_SHA")
-            } else {
-                ""
-            };
-        let release_channel = "release";
-        if unsigned_preview {
-            release_channel = "macos-unsigned-preview";
-        }
-        let execution_evidence = "cross_build_existence_only";
-        if host_os == os_name && host_arch == arch {
-            execution_evidence = "native_execution_eligible";
-        }
-        let build_log = "";
-        if std::env::has("GITHUB_SERVER_URL")
-                && std::env::has("GITHUB_REPOSITORY")
-                && std::env::has("GITHUB_RUN_ID") {
-            build_log = std::env::get("GITHUB_SERVER_URL") + "/" +
-                std::env::get("GITHUB_REPOSITORY") + "/actions/runs/" +
-                std::env::get("GITHUB_RUN_ID");
-        }
-        let cargo_lock_path =
-            std::path::join(repo, "Cargo.lock").display;
-        let artifact_manifest_sha256 =
-            rhai::crypto::sha256_file(artifact_manifest_path);
-        let cargo_lock_sha256 =
-            rhai::crypto::sha256_file(cargo_lock_path);
-        let sbom_sha256 = rhai::crypto::sha256_file(sbom_source);
-        let package_manifest = #{
-            schema_version: 1,
-            product: "AgenTerm",
-            version: version,
-            os: os_name,
-            arch: arch,
-            channel: release_channel,
-            signed: signed,
-            notarized: false,
-            artifact: archive_name,
-            sha256: archive_hash,
-            source_commit: source_commit,
-            source_tag: "v" + version,
-            artifact_manifest_sha256: artifact_manifest_sha256,
-            cargo_lock_sha256: cargo_lock_sha256,
-            sbom_sha256: sbom_sha256,
-            execution_evidence: execution_evidence,
-            build_log: build_log
-        };
-        rhai::runtime::atomic_write(
-            archive + ".provenance.json",
-            rhai::json::stringify_pretty(package_manifest) + "\n"
+    } else {
+        let tar_code = std::process::command_status(
+            "tar",
+            ["-czf", archive, "-C", staging, "."],
+            300000,
+            #{ current_dir: repo }
         );
-        rhai::runtime::atomic_write(
-            archive + ".sha256",
-            archive_hash + "  " + archive_name + "\n"
-        );
-        print("PACKAGED " + archive);
-    } catch (error) {
-        if std::fs::exists(scratch) {
-            std::fs::remove_dir_all(scratch);
-        }
-        throw error;
+        require(tar_code == 0, "package_client_tar");
     }
+    let archive_hash = rhai::crypto::sha256_file(archive);
+    let source_commit = "";
+    if std::env::has("AGENTERM_CANDIDATE_SOURCE_SHA") {
+        let value = std::env::get("AGENTERM_CANDIDATE_SOURCE_SHA");
+        require(
+            valid_source_sha(value),
+            "package_client_candidate_source"
+        );
+        let git_stdout_path =
+            repo + ".package-client-release.git.stdout.tmp";
+        let git_exit_code = std::process::command_stdout_file(
+            "git",
+            ["rev-parse", "HEAD"],
+            10000,
+            git_stdout_path,
+            #{ current_dir: repo }
+        );
+        require(git_exit_code == 0, "package_client_git_head");
+        let git_head_value = std::fs::read_to_string(git_stdout_path);
+        git_head_value.trim();
+        std::fs::try_remove_file(git_stdout_path);
+        require(
+            valid_source_sha(git_head_value),
+            "package_client_git_head_invalid"
+        );
+        require(
+            value == git_head_value,
+            "package_client_candidate_source_mismatch"
+        );
+        source_commit = value;
+    }
+    if !std::env::has("AGENTERM_CANDIDATE_SOURCE_SHA")
+            && std::env::has("GITHUB_SHA") {
+        source_commit = std::env::get("GITHUB_SHA");
+    }
+    let release_channel = "release";
+    if unsigned_preview {
+        release_channel = "macos-unsigned-preview";
+    }
+    let execution_evidence = "cross_build_existence_only";
+    if host_os == os_name && host_arch == arch {
+        execution_evidence = "native_execution_eligible";
+    }
+    let build_log = "";
+    if std::env::has("GITHUB_SERVER_URL")
+            && std::env::has("GITHUB_REPOSITORY")
+            && std::env::has("GITHUB_RUN_ID") {
+        build_log = std::env::get("GITHUB_SERVER_URL") + "/" +
+            std::env::get("GITHUB_REPOSITORY") + "/actions/runs/" +
+            std::env::get("GITHUB_RUN_ID");
+    }
+    let cargo_lock_path =
+        std::path::join(repo, "Cargo.lock").display;
+    let artifact_manifest_sha256 =
+        rhai::crypto::sha256_file(artifact_manifest_path);
+    let cargo_lock_sha256 =
+        rhai::crypto::sha256_file(cargo_lock_path);
+    let sbom_sha256 = rhai::crypto::sha256_file(sbom_source);
+    let package_manifest = #{
+        schema_version: 1,
+        product: "AgenTerm",
+        version: version,
+        os: os_name,
+        arch: arch,
+        channel: release_channel,
+        signed: signed,
+        notarized: false,
+        artifact: archive_name,
+        sha256: archive_hash,
+        source_commit: source_commit,
+        source_tag: "v" + version,
+        artifact_manifest_sha256: artifact_manifest_sha256,
+        cargo_lock_sha256: cargo_lock_sha256,
+        sbom_sha256: sbom_sha256,
+        execution_evidence: execution_evidence,
+        build_log: build_log
+    };
+    let provenance_path = archive + ".provenance.json";
+    rhai::runtime::atomic_write(
+        provenance_path,
+        rhai::json::stringify_pretty(package_manifest) + "\n"
+    );
+    let checksum_path = archive + ".sha256";
+    rhai::runtime::atomic_write(
+        checksum_path,
+        archive_hash + "  " + archive_name + "\n"
+    );
     if std::fs::exists(scratch) {
-        std::fs::remove_dir_all(scratch);
+        let cleanup_stdout =
+            scratch + ".package-client-release.cleanup.stdout.tmp";
+        let cleanup_code = std::process::command_stdout_file(
+            "python3",
+            [
+                "-c",
+                "import shutil,sys; shutil.rmtree(sys.argv[1])",
+                scratch
+            ],
+            120000,
+            cleanup_stdout,
+            #{}
+        );
+        std::fs::try_remove_file(cleanup_stdout);
+        require(cleanup_code == 0, "package_client_scratch_cleanup");
     }
+    print("PACKAGED " + archive);
     0
 }
