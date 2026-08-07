@@ -15,15 +15,15 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `32a23898`（rh retarget + lua/qjs 进展） |
-| 待审合 | （无；`cursor/1-0e37`@`32a23898` ahead=0） |
+| `origin/main` | tip `6c54c6bc`（rh transpile/check_many + rhai-trace） |
+| 待审合 | `cursor/1-0e37`@`16eeacab` ahead=2（tip 14:18Z 新鲜；rev41 Json + harness-cleanup Native） |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 noop；nudge=0 |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 待审合；nudge=0 |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -64,10 +64,12 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-07T13:26Z
+### 舰队值班会话 · 2026-08-07T14:25Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-6064c3c6-e60c-4a7e-95e7-3ff211b62719`
-- URL: https://cursor.com/agents/bc-6064c3c6-e60c-4a7e-95e7-3ff211b62719
+- bcId: `bc-dd4db8cf-79f6-4e51-8988-58da068d8aa9`
+- URL: https://cursor.com/agents/bc-dd4db8cf-79f6-4e51-8988-58da068d8aa9
+- 分支: `main`
+- tip: `6c54c6bc`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -83,6 +85,7 @@
 
 ## 交接日志
 
+- 2026-08-07T14:25Z · 舰队值班会话(`bc-dd4db8cf-…`) · duty: findings=1 待审合 `cursor/1-0e37`@16eeacab ahead=2 main=6c54c6bc；nudge=0 未催主控（tip 14:18Z 新鲜）；lock 已清
 - 2026-08-07T13:26Z · 舰队值班会话(`bc-6064c3c6-…`) · duty: noop findings=0 main=32a23898；待审合=无；nudge=0 未 apply；lock 已清
 - 2026-08-07T12:26Z · 舰队值班会话(`bc-050c2699-…`) · duty: noop findings=0 main=0518a567；待审合=无；nudge=0 未 apply；lock 已清
 - 2026-08-07T12:25Z · 主控1(`bc-a4df769a-…`) · 审阅 run-f97416a1：PQS/prd-alignment 已在 tip；落地 research §11（`b0bc727`）；`cursor/1-0e37` 同步；harness 草稿勿 flip；下一步 Win `ui-input` 或 M42f7 test_harness
