@@ -21,6 +21,7 @@ enum ValueKind {
     Char,
     Json,
     Set,
+    Metadata,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +118,11 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
+                ValueKind::Metadata => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
             }
         }
         out.push_str("}}}}\"");
@@ -134,6 +140,8 @@ impl EmitCtx {
                 out.push_str(
                     ".iter().cloned().collect::<Vec<_>>()).unwrap_or_else(|_| \"[]\".to_owned())",
                 );
+            } else if matches!(kind, ValueKind::Metadata) {
+                out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
                 out.push_str(name);
                 out.push_str(".to_string()");
@@ -903,6 +911,8 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
+        _ if path_absolute_display_arg(expr).is_some() => ValueKind::String,
+        _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
@@ -1073,6 +1083,65 @@ fn path_join_display_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
         return None;
     }
     Some((&call.args[0], &call.args[1]))
+}
+
+fn path_absolute_display_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let display = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    if !display {
+        return None;
+    }
+    let Expr::FnCall(call, ..) = &boxed.lhs else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::path" || call.name != "absolute" || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn std_fs_symlink_metadata_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::fs"
+        || call.name != "symlink_metadata"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn metadata_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Metadata) {
+        return None;
+    }
+    let name = match &boxed.rhs {
+        Expr::Property(property, ..) => property.2.as_str(),
+        Expr::MethodCall(call, ..) if call.args.is_empty() => call.name.as_str(),
+        _ => return None,
+    };
+    matches!(
+        name,
+        "is_file" | "is_dir" | "is_symlink" | "is_reparse_point"
+    )
+    .then_some((ident.1.as_str(), name))
 }
 
 fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr)> {
@@ -1406,6 +1475,19 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some((base, child)) = path_join_display_args(expr)
             && emit_path_join(out, base, child, ctx)?
         {
+            return Ok(());
+        }
+        if let Some(path) = path_absolute_display_arg(expr)
+            && emit_path_absolute(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_symlink_metadata_arg(expr)
+            && emit_std_fs_symlink_metadata(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if emit_metadata_property(out, expr, ctx)? {
             return Ok(());
         }
         if let Some(call) = parse_fleet_call(expr) {
@@ -1863,6 +1945,46 @@ fn emit_path_join(
     Ok(true)
 }
 
+fn emit_path_absolute(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_path_absolute(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_symlink_metadata(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_symlink_metadata(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_metadata_property(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, property)) = metadata_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str(binding);
+    out.push('.');
+    out.push_str(property);
+    Ok(true)
+}
+
 fn emit_args_index(out: &mut String, index: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if !is_pure_int_expr(index) {
         return Err(RhError::Transpile(
@@ -2202,6 +2324,25 @@ mod tests {
         );
         assert!(output.rust.contains("rh_path_join(&root, \"Cargo.toml\")"));
         assert!(output.rust.contains("rh_std_fs_exists(&path)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_path_absolute_and_symlink_metadata() {
+        let source = include_str!("../../../fixtures/rh/path-metadata-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_path_absolute("));
+        assert!(output.rust.contains("rh_symlink_metadata("));
+        assert!(output.rust.contains("meta.is_file"));
+        assert!(output.rust.contains("meta.is_symlink"));
+        assert!(output.rust.contains("meta.is_reparse_point"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]

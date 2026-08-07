@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 9;
+pub const RH_CODEGEN_REVISION: u32 = 10;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -333,6 +333,53 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_path_join(base: &str, child: &str) -> String {\n\
              std::path::Path::new(base).join(child).to_string_lossy().into_owned()\n\
+         }\n\n\
+         fn rh_path_absolute(path: &str) -> String {\n\
+             match std::path::absolute(path) {\n\
+                 Ok(absolute) => absolute.to_string_lossy().into_owned(),\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"path_absolute: {error}\"));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         #[derive(Clone, Copy)]\n\
+         struct RhMetadata {\n\
+             is_file: INT,\n\
+             is_dir: INT,\n\
+             is_symlink: INT,\n\
+             is_reparse_point: INT,\n\
+         }\n\n\
+         fn rh_metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {\n\
+             #[cfg(windows)]\n\
+             {\n\
+                 use std::os::windows::fs::MetadataExt;\n\
+                 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;\n\
+                 metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0\n\
+             }\n\
+             #[cfg(not(windows))]\n\
+             {\n\
+                 metadata.file_type().is_symlink()\n\
+             }\n\
+         }\n\n\
+         fn rh_symlink_metadata(path: &str) -> RhMetadata {\n\
+             match std::fs::symlink_metadata(path) {\n\
+                 Ok(metadata) => RhMetadata {\n\
+                     is_file: metadata.is_file() as INT,\n\
+                     is_dir: metadata.is_dir() as INT,\n\
+                     is_symlink: metadata.file_type().is_symlink() as INT,\n\
+                     is_reparse_point: rh_metadata_is_reparse_point(&metadata) as INT,\n\
+                 },\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_symlink_metadata: {error}\"));\n\
+                     RhMetadata {\n\
+                         is_file: 0,\n\
+                         is_dir: 0,\n\
+                         is_symlink: 0,\n\
+                         is_reparse_point: 0,\n\
+                     }\n\
+                 }\n\
+             }\n\
          }\n\n\
          fn rh_utility(operation: u32, input: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_UTILITY_CALL }) else {\n\

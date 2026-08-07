@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M42 推进中；M42d1–d3（字符串方法、动态 fail、MapSet 成员）已完成，metadata/import 待做** |
+| **状态** | **M42 推进中；M42d1–d4（字符串、动态 fail、MapSet、path/metadata）已完成，import bundling 待做** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -93,7 +93,8 @@
 | M42d1 | 原生字符串方法（`starts_with`/`ends_with`/`contains` 动态 needle、`trim`、`replace`）与 `for character in string` 字符遍历；`string-validate.rh` fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
 | M42d2 | 原生动态 `rh::fail`/`throw`/`require(cond, msg)`，消息可为字符串拼接表达式；`fail-dynamic.rh` fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
 | M42d3 | 原生 bool-keyed MapSet：空 `#{}`、`.contains(string)`、`names[key]=true` 插入；`map-set-membership.rh` fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
-| M42d | 补齐 metadata 与 import bundling，无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [ ] |
+| M42d4 | 原生 `std::path::absolute(...).display` 与 `std::fs::symlink_metadata` + `Metadata.is_file/is_symlink/is_reparse_point`；`path-metadata-probe.rh` fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
+| M42d | 补齐 import bundling，无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [ ] |
 
 ---
 

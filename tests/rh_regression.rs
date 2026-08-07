@@ -54,6 +54,10 @@ fn check_accepts_all_fixtures() {
             "map-set-membership",
             include_str!("../fixtures/rh/map-set-membership.rh"),
         ),
+        (
+            "path-metadata-probe",
+            include_str!("../fixtures/rh/path-metadata-probe.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -363,4 +367,50 @@ fn map_set_membership_fixture_executes_natively_without_interpreter() {
         agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify map-set-membership pack");
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(receipt.entry_value, 3);
+}
+
+#[test]
+fn path_metadata_probe_fixture_executes_natively_without_interpreter() {
+    let source = include_str!("../fixtures/rh/path-metadata-probe.rh");
+    let output =
+        agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile path-metadata-probe");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_path_absolute("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_symlink_metadata("),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains(".is_file"), "{}", output.rust);
+    assert!(output.rust.contains(".is_symlink"), "{}", output.rust);
+    assert!(
+        output.rust.contains(".is_reparse_point"),
+        "{}",
+        output.rust
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let previous = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(&repo).expect("chdir repo root for Cargo.toml probe");
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-path-metadata-probe-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::env::set_current_dir(previous).expect("restore cwd");
+    let receipt = receipt.expect("qualify path-metadata-probe pack");
+    assert_eq!(receipt.entry_value, 111);
 }

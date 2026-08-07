@@ -83,11 +83,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   substring validation, or task-specific host utilities. They also read array
   lengths, iterate JSON arrays, access integer and string element properties,
   evaluate `type_of`, compare and concatenate strings, run string methods and
-  character loops, emit dynamic `rh::fail`/`require` messages, and track
-  bool-keyed MapSet membership (`#{}` / `.contains` / `[key]=true`) entirely in
-  generated Rust. Public qualification executes the generated native packs;
-  path metadata and import bundling remain explicit migration work before
-  `validate-artifact-manifest` can replace and archive its interpreted source.
+  character loops, emit dynamic `rh::fail`/`require` messages, track
+  bool-keyed MapSet membership (`#{}` / `.contains` / `[key]=true`), resolve
+  `std::path::absolute(...).display`, and inspect `symlink_metadata` file /
+  symlink / reparse flags entirely in generated Rust. Public qualification
+  executes the generated native packs; import bundling remains explicit
+  migration work before `validate-artifact-manifest` can replace and archive
+  its interpreted source.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
