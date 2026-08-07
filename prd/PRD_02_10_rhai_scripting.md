@@ -78,6 +78,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   an entry point fail qualification. The cache revision invalidates affected
   packs, and public task regression coverage proves invalid arguments no longer
   succeed silently.
+- [x] native `.rh` packs parse general JSON values and read integer object
+  properties without interpreter evaluation, whole-script delegation,
+  substring validation, or task-specific host utilities. Public qualification
+  executes the generated native pack; arrays, maps, metadata and import
+  bundling remain explicit migration work before `validate-artifact-manifest`
+  can replace and archive its interpreted source.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
