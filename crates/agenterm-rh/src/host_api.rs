@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 26;
+pub const RH_CODEGEN_REVISION: u32 = 27;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -791,6 +791,26 @@ pub fn emit_host_runtime(out: &mut String) {
                      serde_json::Value::Null\n\
                  }\n\
              }\n\
+         }\n\n\
+         fn rh_json_get_path_index(\n\
+             value: &serde_json::Value,\n\
+             path: &[&str],\n\
+             index: INT,\n\
+         ) -> serde_json::Value {\n\
+             match rh_json_path(value, path) {\n\
+                 Some(array) => rh_json_array_get(array, index),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_path: {}\", path.join(\".\")));\n\
+                     serde_json::Value::Null\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_string_path_index(\n\
+             value: &serde_json::Value,\n\
+             path: &[&str],\n\
+             index: INT,\n\
+         ) -> String {\n\
+             rh_json_as_str(&rh_json_get_path_index(value, path, index))\n\
          }\n\n\
          fn rh_string_split(value: &str, separator: &str) -> Vec<String> {\n\
              value.split(separator).map(str::to_owned).collect()\n\

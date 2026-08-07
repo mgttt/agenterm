@@ -1,0 +1,276 @@
+// Probe the public entry points declared for one platform.
+//
+// Args: REPO OS ARCH BINARY_DIRECTORY [--existence-only]
+
+fn entry() {
+    if args.len != 4 {
+        if args.len != 5 {
+            return rh::fail(
+                "expected: REPO OS ARCH BINARY_DIRECTORY [--existence-only]"
+            );
+        }
+        if args[4] != "--existence-only" {
+            return rh::fail(
+                "expected: REPO OS ARCH BINARY_DIRECTORY [--existence-only]"
+            );
+        }
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let os_name = args[1];
+    let arch = args[2];
+    let binary_directory = std::path::absolute(args[3]).display;
+    let existence_only = 0;
+    if args.len == 5 {
+        existence_only = 1;
+    }
+
+    let manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    let manifest_text = std::fs::read_to_string(manifest_path);
+    let manifest = rhai::json::parse(manifest_text);
+
+    let platform_match_count = 0;
+    let scripting_cli_count = 0;
+    let rh_dev_cli_count = 0;
+
+    let package_version = "";
+    let cargo_toml =
+        std::fs::read_to_string(std::path::join(repo, "Cargo.toml").display);
+    let in_package = 0;
+    for source_line in cargo_toml.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line.starts_with("[") {
+            in_package = 0;
+            if line == "[package]" {
+                in_package = 1;
+            }
+            continue;
+        }
+        if in_package == 0 {
+            continue;
+        }
+        if line.starts_with("version") == 0 {
+            continue;
+        }
+        let parts = line.split("\"");
+        require(
+            parts.len >= 3 && parts[1] != "",
+            "client_smoke_package_version_invalid"
+        );
+        package_version = parts[1];
+        break;
+    }
+    require(package_version != "", "client_smoke_package_version");
+
+    let repo_options = #{ current_dir: repo };
+    let stdout_path =
+        std::path::join(repo, ".client-smoke.stdout.tmp").display;
+
+    for platform in manifest.platforms {
+        let platform_os = "" + platform.os;
+        let platform_arch = "" + platform.arch;
+        if platform_os != os_name {
+            continue;
+        }
+        if platform_arch != arch {
+            continue;
+        }
+        platform_match_count += 1;
+
+        for executable in platform.executables {
+            let executable_name = "" + executable.name;
+            let executable_role = "" + executable.role;
+            let path =
+                std::path::join(binary_directory, executable_name).display;
+            require(
+                std::fs::exists(path),
+                "client_smoke_missing:" + executable_name
+            );
+            let metadata = std::fs::metadata(path);
+            require(
+                metadata.is_file && metadata.len > 0,
+                "client_smoke_file_invalid:" + executable_name
+            );
+
+            if executable_role == "scripting-cli" {
+                scripting_cli_count += 1;
+                require(
+                    executable.offline_probe.len == 1,
+                    "client_smoke_rhai_version_probe_missing"
+                );
+                let probe_arg = "--version";
+                require(
+                    probe_arg == "--version",
+                    "client_smoke_rhai_version_probe_missing"
+                );
+            }
+            if executable_role == "rh-dev-cli" {
+                rh_dev_cli_count += 1;
+                require(
+                    executable.offline_probe.len == 1,
+                    "client_smoke_rh_version_probe_missing"
+                );
+                let probe_arg = "version";
+                require(
+                    probe_arg == "version",
+                    "client_smoke_rh_version_probe_missing"
+                );
+            }
+
+            if existence_only == 0 {
+                if executable_role == "control-center-gui" {
+                    let help_code = std::process::command_status(
+                        path,
+                        ["--help"],
+                        10000,
+                        repo_options
+                    );
+                    require(
+                        help_code == 0,
+                        "client_smoke_probe:" + executable_name + ":--help"
+                    );
+
+                    let version_code = std::process::command_status(
+                        path,
+                        ["--version"],
+                        10000,
+                        repo_options
+                    );
+                    require(
+                        version_code == 0,
+                        "client_smoke_probe:" + executable_name + ":--version"
+                    );
+
+                    let cap_code = std::process::command_stdout_file(
+                        path,
+                        ["capabilities", "--json"],
+                        10000,
+                        stdout_path,
+                        repo_options
+                    );
+                    require(
+                        cap_code == 0,
+                        "client_smoke_probe:" + executable_name + ":capabilities"
+                    );
+                    let cap_text = std::fs::read_to_string(stdout_path);
+                    let capability = rhai::json::parse(cap_text);
+
+                    let expected_webview_backend = "";
+                    if os_name == "windows" {
+                        expected_webview_backend = "webview2";
+                    }
+                    if os_name == "macos" {
+                        expected_webview_backend = "wkwebview";
+                    }
+                    if os_name == "linux" {
+                        expected_webview_backend = "webkitgtk";
+                    }
+                    require(
+                        expected_webview_backend != "",
+                        "client_smoke_webview_platform:" + os_name
+                    );
+
+                    let capability_executable = "" + capability.executable;
+                    let capability_role = "" + capability.role;
+                    let capability_renderer = "" + capability.renderer;
+                    let webview_backend =
+                        "" + capability.webview_host.backend;
+                    let webview_host_state =
+                        "" + capability.webview_host.host_state;
+                    let active_renderer =
+                        "" + capability.webview_host.active_renderer;
+                    let runtime_presence =
+                        "" + capability.webview_host.runtime_presence;
+
+                    require(
+                        capability.schema_version == 1
+                            && capability_executable == "agenterm-cc"
+                            && capability_role == "isolated_projection"
+                            && capability.owns_terminal_authority == 0
+                            && capability.process_reuse == 1
+                            && capability.no_activate == 1
+                            && capability.views.len == 4,
+                        "client_smoke_control_center_capabilities"
+                    );
+                    require(
+                        capability_renderer == "native"
+                            && webview_backend == expected_webview_backend
+                            && webview_host_state == "unimplemented"
+                            && active_renderer == "native"
+                            && capability.webview_host.bridge_version == 1,
+                        "client_smoke_webview_host_contract"
+                    );
+                    let runtime_ok = 0;
+                    if runtime_presence == "detected" {
+                        runtime_ok = 1;
+                    }
+                    if runtime_presence == "missing" {
+                        runtime_ok = 1;
+                    }
+                    if runtime_presence == "failed" {
+                        runtime_ok = 1;
+                    }
+                    require(
+                        runtime_ok == 1,
+                        "client_smoke_webview_host_contract"
+                    );
+                }
+                if executable_role == "scripting-cli" {
+                    let probe_arg = "--version";
+                    let probe_code = std::process::command_status(
+                        path,
+                        ["--version"],
+                        10000,
+                        repo_options
+                    );
+                    require(
+                        probe_code == 0,
+                        "client_smoke_probe:" + executable_name + ":" + probe_arg
+                    );
+                }
+                if executable_role == "rh-dev-cli" {
+                    let probe_arg = "version";
+                    let probe_code = std::process::command_stdout_file(
+                        path,
+                        ["version"],
+                        10000,
+                        stdout_path,
+                        repo_options
+                    );
+                    require(
+                        probe_code == 0,
+                        "client_smoke_probe:" + executable_name + ":" + probe_arg
+                    );
+                    let banner = std::fs::read_to_string(stdout_path);
+                    banner.trim();
+                    require(
+                        banner == "agenterm-rh " + package_version,
+                        "client_smoke_rh_version_banner:" + banner
+                    );
+                }
+            }
+        }
+    }
+
+    require(
+        platform_match_count == 1,
+        "client_smoke_platform_match"
+    );
+    require(
+        scripting_cli_count == 1,
+        "client_smoke_scripting_cli_count"
+    );
+    require(
+        rh_dev_cli_count == 1,
+        "client_smoke_rh_dev_cli_count"
+    );
+
+    if std::fs::exists(stdout_path) {
+        std::fs::try_remove_file(stdout_path);
+    }
+
+    print("PASS client entrypoints " + os_name + "-" + arch);
+    0
+}

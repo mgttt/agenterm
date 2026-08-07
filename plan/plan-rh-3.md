@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg24）：易切叶已切。**Wave2 并行中**：`rh-aot-smoke` / `preflight-benchmark` / `client-smoke` / `cross-platform-automation-audit` + codegen `keys()`；其后（M42f6h）`candidate-*` → `migration-audit`；`target-report` 仍缺 `keys`/`pop`/float |
+| **状态** | **进行中 M42f6**（cg27）：`keys()` / INT→String / JSON path `[i]` 已 ship；`client-smoke` 已切 `.rh`。**Wave2 并行中**：`preflight-benchmark` / `cross-platform-automation-audit` / `artifact-verification`；其后（M42f6h）`candidate-*` → `migration-audit`；`target-report` 仍缺 `pop`/float |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -123,7 +123,11 @@
 | M42f6g2 | INT-only `scripts/rh/performance-summary.rh`；entry 切线 + 归档；sccache map 用 `.Rust` 点取（完整 `keys()` 仍属 M42f6h） | [x] |
 | M42f6g3 | INT-only `scripts/rh/build-releases-index.rh`；entry/workflow 切线 + 归档；可选 checksum/sbom/build_log 用 `type_of == "string"` | [x] |
 | M42f6g4 | INT-only `scripts/rh/rh-aot-smoke.rh`；`command_status`/`command_stdout_file`+cwd options；entry 切线 + 归档 | [x] |
-| M42f6h | JSON 集合迭代加强（`for` over JSON array / object keys 已部分具备则补缺口）+ `release_candidate`/`qualification`/`package_qualified` lib 原生移植 | [ ] |
+| M42f6g5 | 原生 JSON `obj.keys()` 迭代 + `obj.keys().len`、MapSet `.keys()`；codegen 25；fixture `json-keys-probe.rh` | [x] |
+| M42f6g6 | 原生 INT→String：`s += n`、`"prefix-" + n` 链式 concat；codegen 26；fixture `int-string-concat-probe.rh`（解锁 path 拼 millis/序号） | [x] |
+| M42f6g7 | 原生 JSON 路径下标字符串：`obj.field[i]` / `obj.a.b[i]` → `rh_json_string_path_index`；DirEntry `file_name` stringish；codegen 27；fixture `json-path-index-probe.rh`；解锁 `client-smoke` | [x] |
+| M42f6g8 | INT-only `scripts/rh/client-smoke.rh`；entry 切线 + 归档 | [x] |
+| M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + Wave2 剩余叶（`candidate-*`、`migration-audit`）；`target-report` 仍缺 `pop`/float | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |
 | M42f8 | **Shim 收口顺序（非并行捷径）**：Phase A 先清零 manifest `.rhai` 入口与工作流硬编码 `.rhai`；Phase B 才把 `agenterm-rhai` 收成纯 forwarder（含 `run *.rhai`/`task`）；Phase C 再拆主库 Rhai `Engine`/`script_rh_host` compat。禁止在 A 未完成时宣称 rhai 已归档——compat-delegating 仍是 Rhai | [ ] |

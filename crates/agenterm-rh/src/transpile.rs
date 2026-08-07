@@ -204,16 +204,22 @@ pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput,
     // delegation below, while manifest qualification can reject that mode for
     // `.rh` tasks.
     if validate_ok && has_entry_fn {
-        if let Ok(rust) = emit(&ast, EmitCtx::new(true)) {
-            let execution_mode = if rust.matches("rh_host_eval_int(").count() > 1 {
-                CdylibExecutionMode::HostEval
-            } else {
-                CdylibExecutionMode::Native
-            };
-            return Ok(CdylibTranspileOutput {
-                rust,
-                execution_mode,
-            });
+        match emit(&ast, EmitCtx::new(true)) {
+            Ok(rust) => {
+                let execution_mode = if rust.matches("rh_host_eval_int(").count() > 1 {
+                    CdylibExecutionMode::HostEval
+                } else {
+                    CdylibExecutionMode::Native
+                };
+                return Ok(CdylibTranspileOutput {
+                    rust,
+                    execution_mode,
+                });
+            }
+            Err(error) if std::env::var_os("AGENTERM_RH_EMIT_TRACE").is_some() => {
+                eprintln!("rh emit failed (falling back to compat): {error}");
+            }
+            Err(_) => {}
         }
     }
     compat_validate(source, &ast)?;
@@ -1574,6 +1580,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             ValueKind::Json
         }
         _ if json_array_index(expr, ctx).is_some() => ValueKind::Json,
+        _ if json_path_array_index(expr, ctx).is_some() => ValueKind::Json,
         _ if string_list_index(expr, ctx).is_some() => ValueKind::String,
         _ if string_split_args(expr, ctx).is_some() => ValueKind::StringList,
         _ if json_stringify_pretty_arg(expr).is_some() => ValueKind::String,
@@ -2123,6 +2130,51 @@ fn json_array_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a E
         return None;
     }
     Some((ident.1.as_str(), &boxed.rhs))
+}
+
+/// `obj.field.path[index]` — Rhai nests property Dots and terminates with Index:
+/// `Dot { doc, Dot { nested, Index { Property(probe), 0 } } }` or
+/// `Dot { doc, Index { Property(items), 0 } }`.
+fn json_path_array_index<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr)> {
+    let Expr::Dot(outer, ..) = expr else {
+        // Alternate shape: `(obj.field)[index]`.
+        if let Expr::Index(boxed, ..) = expr {
+            if matches!(&boxed.lhs, Expr::Variable(..)) {
+                return None;
+            }
+            let (binding, path) = json_value_path(&boxed.lhs, ctx)?;
+            if path.is_empty() {
+                return None;
+            }
+            return Some((binding, path, &boxed.rhs));
+        }
+        return None;
+    };
+    let (binding, mut path) = json_value_path(&outer.lhs, ctx)?;
+    let mut cursor = &outer.rhs;
+    loop {
+        match cursor {
+            Expr::Index(index_box, ..) => {
+                if !append_json_properties(&index_box.lhs, &mut path) {
+                    return None;
+                }
+                if path.is_empty() {
+                    return None;
+                }
+                return Some((binding, path, &index_box.rhs));
+            }
+            Expr::Dot(inner, ..) => {
+                if !append_json_properties(&inner.lhs, &mut path) {
+                    return None;
+                }
+                cursor = &inner.rhs;
+            }
+            _ => return None,
+        }
+    }
 }
 
 fn json_array_push_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
@@ -2697,6 +2749,8 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || crypto_sha256_file_arg(expr).is_some()
         || json_stringify_pretty_arg(expr).is_some()
         || string_list_index(expr, ctx).is_some()
+        || json_path_array_index(expr, ctx).is_some()
+        || dir_entry_string_field(expr, ctx).is_some()
         || std_time_system_time_now_rfc3339(expr)
         || system_time_rfc3339_binding(expr, ctx).is_some()
         || fs_metadata_modified_rfc3339(expr).is_some()
@@ -2816,6 +2870,23 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         out.push(')');
         return Ok(());
     }
+    if let Some((binding, path, index)) = json_path_array_index(expr, ctx) {
+        out.push_str("rh_json_string_path_index(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push_str(", ");
+        emit_intish(out, index, ctx)?;
+        out.push(')');
+        return Ok(());
+    }
+    if let Some((binding, field)) = dir_entry_string_field(expr, ctx) {
+        out.push_str(binding);
+        out.push('.');
+        out.push_str(field);
+        out.push_str(".clone()");
+        return Ok(());
+    }
     if let Some(index) = args_index_expr(expr) {
         out.push_str("rh_arg(");
         emit_expr(out, index, ctx)?;
@@ -2899,9 +2970,10 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str(").to_string()");
         }
         _ => {
-            return Err(RhError::Transpile(
-                "unsupported string expression in native rh".into(),
-            ));
+            let rendered = expr_to_rhai(expr).unwrap_or_else(|_| "<unprintable>".into());
+            return Err(RhError::Transpile(format!(
+                "unsupported string expression in native rh: {rendered}"
+            )));
         }
     }
     Ok(())
@@ -3263,6 +3335,16 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(binding);
             out.push_str(", ");
             emit_expr(out, index, ctx)?;
+            out.push(')');
+            return Ok(());
+        }
+        if let Some((binding, path, index)) = json_path_array_index(expr, ctx) {
+            out.push_str("rh_json_get_path_index(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push_str(", ");
+            emit_intish(out, index, ctx)?;
             out.push(')');
             return Ok(());
         }
@@ -4920,6 +5002,34 @@ mod tests {
         assert!(output.rust.contains("name.ends_with("));
         assert!(output.rust.contains("role.replace("));
         assert!(!output.rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_path_array_string_index() {
+        let source = include_str!("../../../fixtures/rh/json-path-index-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_string_path_index(&doc, &[\"items\"], 0)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains(
+                "rh_json_string_path_index(&doc, &[\"nested\", \"probe\"], 0)"
+            ),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]

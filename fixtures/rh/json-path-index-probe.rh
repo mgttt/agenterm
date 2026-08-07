@@ -1,0 +1,19 @@
+fn entry() {
+    let doc = #{
+        items: ["alpha", "beta"],
+        nested: #{ probe: ["version"] }
+    };
+    let first = "" + doc.items[0];
+    let second = "" + doc.items[1];
+    let probe = "" + doc.nested.probe[0];
+    if first != "alpha" {
+        return rh::fail("items0");
+    }
+    if second != "beta" {
+        return rh::fail("items1");
+    }
+    if probe != "version" {
+        return rh::fail("probe");
+    }
+    first.len() + second.len() + probe.len()
+}

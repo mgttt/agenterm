@@ -1197,7 +1197,7 @@
     {
       "id": "client-smoke",
       "description": "Probe manifest-defined offline client entrypoints for one platform",
-      "entry": "scripts/rhai/client-smoke.rhai",
+      "entry": "scripts/rh/client-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

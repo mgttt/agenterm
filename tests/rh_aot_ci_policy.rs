@@ -17,7 +17,7 @@ static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
     include_str!("../scripts/rhai/artifact-verification.rhai").replace("\r\n", "\n")
 });
 static CLIENT_SMOKE: LazyLock<String> =
-    LazyLock::new(|| include_str!("../scripts/rhai/client-smoke.rhai").replace("\r\n", "\n"));
+    LazyLock::new(|| include_str!("../scripts/rh/client-smoke.rh").replace("\r\n", "\n"));
 static ROOT_MANIFEST: &str = include_str!("../Cargo.toml");
 static RH_MANIFEST: &str = include_str!("../crates/agenterm-rh/Cargo.toml");
 static UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
@@ -204,13 +204,15 @@ fn artifact_verification_probes_manifest_roles_and_rejects_invalid_versions() {
 
 #[test]
 fn client_smoke_fail_closes_rh_version_probe_from_platform_manifest() {
+    assert!(CLIENT_SMOKE.contains("fn entry("));
     assert!(CLIENT_SMOKE.contains("metadata.is_file && metadata.len > 0"));
-    assert!(CLIENT_SMOKE.contains("executable.role == \"scripting-cli\""));
-    assert!(CLIENT_SMOKE.contains("executable.role == \"rh-dev-cli\""));
-    assert!(CLIENT_SMOKE.contains("executable.offline_probe[0] == \"--version\""));
-    assert!(CLIENT_SMOKE.contains("executable.offline_probe[0] == \"version\""));
-    assert!(CLIENT_SMOKE.contains("probes.push(executable.offline_probe)"));
-    assert!(CLIENT_SMOKE.contains("banner == \"agenterm-rh \" + version"));
+    assert!(CLIENT_SMOKE.contains("executable_role == \"scripting-cli\""));
+    assert!(CLIENT_SMOKE.contains("executable_role == \"rh-dev-cli\""));
+    assert!(CLIENT_SMOKE.contains("probe_arg == \"--version\""));
+    assert!(CLIENT_SMOKE.contains("probe_arg == \"version\""));
+    assert!(CLIENT_SMOKE.contains("std::process::command_status("));
+    assert!(CLIENT_SMOKE.contains("std::process::command_stdout_file("));
+    assert!(CLIENT_SMOKE.contains("banner == \"agenterm-rh \" + package_version"));
     assert!(CLIENT_SMOKE.contains("scripting_cli_count == 1"));
     assert!(CLIENT_SMOKE.contains("rh_dev_cli_count == 1"));
 }
