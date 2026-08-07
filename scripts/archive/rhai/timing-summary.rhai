@@ -1,9 +1,8 @@
 // Validate one AgenTerm quality-timing report and render a bounded Markdown
-// summary. In GitHub Actions, preserve earlier step summaries by appending to
-// the GITHUB_STEP_SUMMARY content; elsewhere write the Markdown to stdout.
+// summary. Archived after cutover to scripts/rh/timing-summary.rh.
 //
-// Args:
-//   TIMING_JSON
+// Named task (historical):
+//   agenterm-rhai task run timing-summary -- TIMING_JSON
 
 fn require(condition, message) {
     if !condition {
