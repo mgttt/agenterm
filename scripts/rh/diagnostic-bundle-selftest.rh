@@ -1,0 +1,420 @@
+// Prove retained CLI, GUI, and Script failure bundles are bounded, private,
+// identity-checked, and orphan-free through public executable journeys.
+//
+// Args: REPO CLI_EXE SCRIPT_EXE GUI_EXE
+
+import "scripts/rh/lib/test_harness" as test_harness;
+
+fn require(condition, message) {
+    if condition == 0 {
+        throw message;
+    } else {
+        0;
+    }
+}
+
+fn trimmed(value) {
+    let text = "" + value;
+    text.trim();
+    text
+}
+
+fn retained_bundles(bundle_root) {
+    let paths = [];
+    if !std::fs::exists(bundle_root) {
+        return paths;
+    }
+    for entry in std::fs::read_dir(bundle_root) {
+        if entry.is_dir && !entry.is_symlink {
+            paths.push(std::path::absolute(entry.path.display).display);
+        }
+    }
+    paths
+}
+
+fn only_new_bundle(bundle_root, before, suite) {
+    let matches = [];
+    for path in retained_bundles(bundle_root) {
+        let name = std::path::PathBuf::from(path).file_name;
+        if !before.contains(path) && name.starts_with(suite + "-") {
+            matches.push(path);
+        }
+    }
+    if matches.len != 1 {
+        return #{
+            error: "diagnostic_new_bundle_count:" + suite + ":" + matches.len,
+            path: ""
+        };
+    }
+    #{
+        error: "",
+        path: matches[0]
+    }
+}
+
+fn remove_bundle(bundle_root, path) {
+    let root = std::path::absolute(bundle_root).display;
+    let resolved = std::path::absolute(path).display;
+    require(
+        std::path::parent(resolved).display.to_lower() ==
+            root.to_lower(),
+        "diagnostic_bundle_outside_owned_root:" + resolved
+    );
+    if std::fs::exists(resolved) {
+        std::fs::remove_dir_all(resolved);
+    }
+    require(
+        !std::fs::exists(resolved),
+        "diagnostic_bundle_cleanup_failed:" + resolved
+    );
+    0
+}
+
+fn assert_bounded_bundle(path, suite, marker_kind) {
+    let manifest_path = std::path::join(
+        path,
+        "manifest.json"
+    ).display;
+    let cleanup_path = std::path::join(
+        path,
+        "cleanup.json"
+    ).display;
+    if !std::fs::exists(manifest_path)
+            || !std::fs::exists(cleanup_path) {
+        return "diagnostic_bundle_required_file:" + suite;
+    }
+    let manifest = rhai::json::parse_file(manifest_path);
+    let cleanup = rhai::json::parse_file(cleanup_path);
+    let marker =
+        "INTERNAL_FAILURE_BUNDLE_PROBE:" + marker_kind + ":" +
+        manifest.run_id;
+    let marker_count = manifest.failure.split(marker).len - 1;
+    if manifest.schema_version != 1
+            || manifest.suite != suite
+            || marker_count != 1 {
+        return "diagnostic_bundle_identity:" + suite + ":" + manifest.failure;
+    }
+    if manifest.privacy.command_arguments !=
+            "known content-bearing arguments redacted"
+            || manifest.privacy.output_limit_bytes != 65536
+            || manifest.privacy.pane_capture !=
+                "disabled for this suite"
+            || manifest.diagnostics.contains("capture-pane.txt") {
+        return "diagnostic_bundle_privacy:" + suite;
+    }
+
+    let failure_directory = std::path::join(
+        path,
+        "failure"
+    ).display;
+    let names = #{};
+    for name in manifest.diagnostics {
+        if std::path::PathBuf::from(name).file_name != name
+                || names.contains(name) {
+            return "diagnostic_bundle_local_unique_name:" + suite;
+        }
+        names[name] = 1;
+        let diagnostic = std::path::join(
+            failure_directory,
+            name
+        ).display;
+        if !std::fs::exists(diagnostic)
+                || std::path::parent(
+                    std::path::absolute(diagnostic).display
+                ).display.to_lower() !=
+                    std::path::absolute(
+                        failure_directory
+                    ).display.to_lower()
+                || std::fs::metadata(diagnostic).len > 65792 {
+            return "diagnostic_bundle_diagnostic_bound:" + suite + ":" + name;
+        }
+    }
+    let command_log = std::path::join(
+        path,
+        manifest.command_log
+    ).display;
+    if !std::fs::exists(command_log)
+            || std::fs::metadata(command_log).len > 524544 {
+        return "diagnostic_bundle_command_log_bound:" + suite;
+    }
+    if !cleanup.orphan_free
+            || cleanup.remaining_pids.len != 0
+            || cleanup.remaining_windows.len != 0
+            || cleanup.remaining_registrations.len != 0 {
+        return "diagnostic_bundle_cleanup_not_orphan_free:" + suite;
+    }
+
+    if suite == "theme" {
+        let snapshot = std::fs::read_to_string(
+            std::path::join(
+                failure_directory,
+                "ui-snapshot.txt"
+            ).display
+        );
+        if !snapshot.starts_with("exit_code=0")
+                || !snapshot.contains("\"protocol_version\": 1")
+                || !snapshot.contains("\"window\"") {
+            return "diagnostic_theme_snapshot_invalid";
+        }
+    }
+    if suite == "script" {
+        let commands_text = std::fs::read_to_string(command_log);
+        let commands = rhai::json::parse(commands_text);
+        let successful_worker = 0;
+        let observed_evals = [];
+        for command in commands {
+            let output = trimmed(command.output);
+            if command.arguments.contains("script")
+                    && command.arguments.contains("eval") {
+                observed_evals.push(#{
+                    exit_code: command.exit_code,
+                    output: output
+                });
+                if command.exit_code == 0 && output == "42" {
+                    successful_worker = 1;
+                }
+            }
+        }
+        if successful_worker == 0 {
+            return "diagnostic_script_success_not_retained:" +
+                rhai::json::stringify(observed_evals);
+        }
+        let retained =
+            manifest.failure + "\n" + commands_text;
+        for name in manifest.diagnostics {
+            retained += "\n" + std::fs::read_to_string(
+                std::path::join(failure_directory, name).display
+            );
+        }
+        if retained.contains("AUDIT_ENV_SECRET")
+                || retained.contains("40 + 2") {
+            return "diagnostic_script_private_input_retained";
+        }
+    }
+    ""
+}
+
+fn start_task_probe(
+    context,
+    script,
+    repo,
+    entry,
+    probe_arguments,
+    timeout,
+    extra_limits
+) {
+    let arguments = [
+        "run", entry,
+        "--profile", "local",
+        "--project-root", repo,
+        "--timeout-ms", timeout,
+        "--max-operations", "10000000"
+    ];
+    for limit in extra_limits {
+        arguments.push("" + limit);
+    }
+    arguments.push("--");
+    for probe_argument in probe_arguments {
+        arguments.push("" + probe_argument);
+    }
+    arguments.push("--internal-failure-bundle-probe");
+    let command = test_harness::configured_command(
+        context,
+        script,
+        arguments
+    );
+    command.timeout(std::time::Duration::from_secs(45));
+    command.capture_limit(262144);
+    command.start()
+}
+
+fn complete_task_probe(child, suite) {
+    let output = child.wait_with_output(
+        std::time::Duration::from_secs(45)
+    );
+    if output.success {
+        return "diagnostic_probe_unexpected_success:" + suite;
+    }
+    ""
+}
+
+fn entry() {
+    if args.len != 4 {
+        return rh::fail("expected: REPO CLI_EXE SCRIPT_EXE GUI_EXE");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let cli = std::path::absolute(args[1]).display;
+    let script = std::path::absolute(args[2]).display;
+    let gui = std::path::absolute(args[3]).display;
+    if !std::fs::exists(cli)
+            || !std::fs::exists(script)
+            || !std::fs::exists(gui) {
+        return rh::fail("diagnostic_executable_missing");
+    }
+    let bundle_root = std::path::join(
+        repo,
+        "target/smoke/test-runs"
+    ).display;
+    let initial = retained_bundles(bundle_root);
+    let outer_context = test_harness::new_context(
+        repo,
+        "diagnostic-orchestrator"
+    );
+    let gui_probe_started = 0;
+    let script_probe_started = 0;
+    let gui_probe = std::process::command("cmd.exe");
+    let script_probe = std::process::command("cmd.exe");
+    let failure = "";
+
+    if failure == "" {
+        print("STEP CLI failure bundle");
+        let before = retained_bundles(bundle_root);
+        let cli_context = test_harness::new_context(
+            repo,
+            "diagnostic-cli-probe"
+        );
+        let marker =
+            "INTERNAL_FAILURE_BUNDLE_PROBE:cli:" + cli_context.run_id;
+        let result = test_harness::run_cli(
+            cli_context,
+            cli,
+            ["__diagnostic_bundle_probe_invalid__"],
+            1,
+            []
+        );
+        if result.success {
+            failure = "diagnostic_cli_probe_succeeded";
+        } else {
+            test_harness::complete(
+                cli_context,
+                [],
+                0,
+                marker + "\n" + result.stdout + result.stderr
+            );
+            let cli_match = only_new_bundle(
+                bundle_root,
+                before,
+                "diagnostic-cli-probe"
+            );
+            if cli_match.error != "" {
+                failure = cli_match.error;
+            } else {
+                failure = assert_bounded_bundle(
+                    cli_match.path,
+                    "diagnostic-cli-probe",
+                    "cli"
+                );
+                if failure == "" {
+                    remove_bundle(bundle_root, cli_match.path);
+                }
+            }
+        }
+    }
+
+    if failure == "" {
+        print("STEP GUI and script-worker failure bundles in parallel");
+        let gui_before = retained_bundles(bundle_root);
+        gui_probe = start_task_probe(
+            outer_context,
+            script,
+            repo,
+            std::path::join(
+                repo,
+                "scripts/rhai/theme-smoke.rhai"
+            ).display,
+            [repo, gui, cli],
+            "60000",
+            []
+        );
+        gui_probe_started = 1;
+        let script_before = retained_bundles(bundle_root);
+        script_probe = start_task_probe(
+            outer_context,
+            script,
+            repo,
+            std::path::join(
+                repo,
+                "scripts/rhai/script-smoke.rhai"
+            ).display,
+            [repo, cli, script, gui],
+            "120000",
+            [
+                "--max-string-bytes", "8388608",
+                "--max-output-bytes", "1048576"
+            ]
+        );
+        script_probe_started = 1;
+        failure = complete_task_probe(gui_probe, "theme");
+        if failure == "" {
+            let gui_match = only_new_bundle(
+                bundle_root,
+                gui_before,
+                "theme"
+            );
+            if gui_match.error != "" {
+                failure = gui_match.error;
+            } else {
+                failure = assert_bounded_bundle(
+                    gui_match.path,
+                    "theme",
+                    "gui"
+                );
+                if failure == "" {
+                    remove_bundle(bundle_root, gui_match.path);
+                }
+            }
+        }
+        if failure == "" {
+            failure = complete_task_probe(script_probe, "script");
+        }
+        if failure == "" {
+            let script_match = only_new_bundle(
+                bundle_root,
+                script_before,
+                "script"
+            );
+            if script_match.error != "" {
+                failure = script_match.error;
+            } else {
+                failure = assert_bounded_bundle(
+                    script_match.path,
+                    "script",
+                    "script"
+                );
+                if failure == "" {
+                    remove_bundle(bundle_root, script_match.path);
+                }
+            }
+        }
+        if failure == "" {
+            print(
+                "PASS: CLI, GUI, and script failure bundles are bounded and orphan-free"
+            );
+        }
+    }
+
+    if gui_probe_started != 0 && gui_probe.state == "running" {
+        gui_probe.kill();
+        gui_probe.wait_with_output(
+            std::time::Duration::from_secs(2)
+        );
+    }
+    if script_probe_started != 0 && script_probe.state == "running" {
+        script_probe.kill();
+        script_probe.wait_with_output(
+            std::time::Duration::from_secs(2)
+        );
+    }
+    for path in retained_bundles(bundle_root) {
+        if !initial.contains(path)
+                && path != outer_context.run_directory {
+            remove_bundle(bundle_root, path);
+        }
+    }
+    test_harness::remove_run(outer_context);
+    if failure != "" {
+        throw failure;
+    }
+    0
+}

@@ -1,0 +1,142 @@
+// Parse the stage-0 bootstrap timing facts inherited by named native tasks.
+
+fn unavailable(reason) {
+    #{
+        schema_version: 1,
+        kind: "agenterm-bootstrap-timing",
+        state: "unavailable",
+        reason: reason,
+        setup_ms: (),
+        cargo_build_ms: (),
+        worker_copy_ms: (),
+        other_setup_ms: (),
+        clock_resolution_ms: (),
+        worker: #{
+            state: "unavailable",
+            compatibility_fingerprint: ()
+        },
+        cargo_lock_wait: #{
+            state: "unavailable",
+            duration_ms: (),
+            included_in: ()
+        }
+    }
+}
+
+fn duration_value(name) {
+    if !std::env::has(name) || std::env::get(name) == "" {
+        return -1;
+    }
+    let value = std::env::get(name).parse_int();
+    if value < 0 {
+        return -1;
+    }
+    value
+}
+
+fn is_hex(value) {
+    if value.len != 40 && value.len != 64 {
+        return 0;
+    }
+    for character in value {
+        if !"0123456789abcdef".contains(character.to_string()) {
+            return 0;
+        }
+    }
+    1
+}
+
+fn facts() {
+    if !std::env::has("AGENTERM_BOOTSTRAP_TIMING_SCHEMA") {
+        return unavailable("direct_worker_invocation");
+    }
+    if std::env::get("AGENTERM_BOOTSTRAP_TIMING_SCHEMA") != "1" {
+        return unavailable("invalid_environment:bootstrap_timing_schema");
+    }
+
+    let setup_ms = duration_value("AGENTERM_BOOTSTRAP_SETUP_MS");
+    let cargo_build_ms = duration_value("AGENTERM_BOOTSTRAP_CARGO_BUILD_MS");
+    let worker_copy_ms = duration_value("AGENTERM_BOOTSTRAP_WORKER_COPY_MS");
+    let other_setup_ms = duration_value("AGENTERM_BOOTSTRAP_OTHER_SETUP_MS");
+    let resolution_ms =
+        duration_value("AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS");
+    if setup_ms < 0
+            || cargo_build_ms < 0
+            || worker_copy_ms < 0
+            || other_setup_ms < 0
+            || resolution_ms < 0 {
+        return unavailable("invalid_environment:bootstrap_timing_missing");
+    }
+    if setup_ms + resolution_ms <
+            cargo_build_ms + worker_copy_ms + other_setup_ms {
+        return unavailable("invalid_environment:bootstrap_timing_phase_sum");
+    }
+
+    let lock_state = std::env::get("AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE");
+    let worker_state = std::env::get("AGENTERM_BOOTSTRAP_WORKER_STATE");
+    let fingerprint = std::env::get("AGENTERM_BOOTSTRAP_FINGERPRINT");
+    let worker_state_ok = 0;
+    if worker_state == "rebuilt" || worker_state == "reused" {
+        worker_state_ok = 1;
+    }
+    if worker_state_ok == 0 || is_hex(fingerprint) == 0 {
+        return unavailable("invalid_environment:bootstrap_timing_worker");
+    }
+    if worker_state == "rebuilt" && lock_state != "included_not_separable" {
+        return unavailable("invalid_environment:bootstrap_timing_lock_state");
+    }
+    if worker_state == "reused"
+            && (lock_state != "not_applicable" || cargo_build_ms != 0) {
+        return unavailable("invalid_environment:bootstrap_timing_lock_state");
+    }
+
+    let included_in = ();
+    if lock_state == "included_not_separable" {
+        included_in = "cargo_build_ms";
+    }
+
+    #{
+        schema_version: 1,
+        kind: "agenterm-bootstrap-timing",
+        state: "measured",
+        reason: (),
+        setup_ms: setup_ms,
+        cargo_build_ms: cargo_build_ms,
+        worker_copy_ms: worker_copy_ms,
+        other_setup_ms: other_setup_ms,
+        clock_resolution_ms: resolution_ms,
+        worker: #{
+            state: worker_state,
+            compatibility_fingerprint: fingerprint
+        },
+        cargo_lock_wait: #{
+            state: lock_state,
+            duration_ms: (),
+            included_in: included_in
+        }
+    }
+}
+
+fn wall_time(bootstrap, task_ms) {
+    if bootstrap.state == "measured" {
+        return #{
+            state: "partial",
+            task_ms: task_ms,
+            accounted_ms: 0 + bootstrap.setup_ms + task_ms,
+            accounted_scope:
+                "bootstrap-timing-start-through-worker-setup plus timed-task-body",
+            unmeasured_intervals: [
+                "pre-timing-clock-probe",
+                "worker-start-handoff",
+                "post-task-bootstrap-cleanup"
+            ]
+        };
+    }
+    #{
+        state: "unavailable",
+        task_ms: task_ms,
+        accounted_ms: task_ms,
+        accounted_scope: "timed-task-body-only",
+        unmeasured_intervals: ["entire-bootstrap"]
+    }
+}
