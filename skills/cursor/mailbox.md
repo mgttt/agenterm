@@ -69,7 +69,7 @@
 - bcId: `bc-dd4db8cf-79f6-4e51-8988-58da068d8aa9`
 - URL: https://cursor.com/agents/bc-dd4db8cf-79f6-4e51-8988-58da068d8aa9
 - 分支: `main`
-- tip: `6c54c6bc`
+- tip: `a8dac4ca`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
