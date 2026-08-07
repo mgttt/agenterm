@@ -3981,6 +3981,14 @@ fn emit_child_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result
             out.push(')');
             Ok(true)
         }
+        "window_key" if call.args.len() == 1 => {
+            out.push_str("rh_child_window_key(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }
@@ -4083,6 +4091,14 @@ fn emit_child_mut_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             if !emit_duration_ms(out, &call.args[0], ctx)? {
                 return Ok(false);
             }
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "window_key" if call.args.len() == 1 => {
+            out.push_str("    let _ = rh_child_window_key(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
             out.push_str(");\n");
             Ok(true)
         }
@@ -11348,6 +11364,34 @@ fn entry() {
             output
                 .rust
                 .contains("let mut facts = rh_child_platform_facts(&mut child);"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn child_window_key_uses_structured_native_host_call() {
+        let source = r#"
+fn entry() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    child.window_key("Escape");
+    child.kill();
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_child_window_key(&mut child, &String::from(\"Escape\"))"),
             "{}",
             output.rust
         );

@@ -765,7 +765,7 @@
     {
       "id": "theme-smoke",
       "description": "Prove theme preview, native-key rollback, persistence, PTY continuity, and visibly distinct rendering",
-      "entry": "scripts/rhai/theme-smoke.rhai",
+      "entry": "scripts/rh/theme-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],

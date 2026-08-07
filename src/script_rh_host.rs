@@ -655,7 +655,43 @@ extern "C" fn host_json_call(
             .get("path")
             .and_then(serde_json::Value::as_str)
             .ok_or(-5)
-            .and_then(|path| crate::script_image::inspect_png_json(Path::new(path)).map_err(|_| -5)),
+            .and_then(|path| {
+                crate::script_image::inspect_png_json(Path::new(path)).map_err(|_| -5)
+            }),
+        "process.window_key" => {
+            use crate::platform::contract::script_window::ScriptWindowKey;
+
+            let pid = input
+                .get("pid")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|pid| u32::try_from(pid).ok())
+                .ok_or(-5);
+            let key = input
+                .get("key")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|key| match key {
+                    "Backspace" => Some(ScriptWindowKey::Backspace),
+                    "Delete" => Some(ScriptWindowKey::Delete),
+                    "Down" => Some(ScriptWindowKey::Down),
+                    "End" => Some(ScriptWindowKey::End),
+                    "Enter" => Some(ScriptWindowKey::Enter),
+                    "Escape" => Some(ScriptWindowKey::Escape),
+                    "F2" => Some(ScriptWindowKey::F2),
+                    "Home" => Some(ScriptWindowKey::Home),
+                    "Left" => Some(ScriptWindowKey::Left),
+                    "Right" => Some(ScriptWindowKey::Right),
+                    "Tab" => Some(ScriptWindowKey::Tab),
+                    "Up" => Some(ScriptWindowKey::Up),
+                    _ => None,
+                })
+                .ok_or(-5);
+            match (pid, key) {
+                (Ok(pid), Ok(key)) => crate::platform::services::script_window::key(pid, key)
+                    .map(|()| serde_json::json!({ "ok": true }))
+                    .map_err(|_| -5),
+                _ => Err(-5),
+            }
+        }
         _ => Err(-4),
     }
     .and_then(|value| serde_json::to_string(&value).map_err(|_| -5));

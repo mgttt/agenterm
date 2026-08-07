@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 58;
+pub const RH_CODEGEN_REVISION: u32 = 59;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1097,6 +1097,18 @@ pub fn emit_host_runtime(out: &mut String) {
              let pid = child.inner.borrow().pid;\n\
              rh_host_json_call(\"process.platform_facts\", &serde_json::json!({ \"pid\": pid }))\n\
          }\n\n\
+        fn rh_child_window_key(child: &mut RhChild, key: &str) -> INT {\n\
+            let pid = child.inner.borrow().pid;\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_key\",\n\
+                &serde_json::json!({ \"pid\": pid, \"key\": key }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                0\n\
+            } else {\n\
+                rh_fail(\"process_window_key\")\n\
+            }\n\
+        }\n\n\
          fn rh_child_kill(child: &mut RhChild) -> INT {\n\
              let mut inner = child.inner.borrow_mut();\n\
              if let Some(process) = inner.child.as_mut() {\n\
