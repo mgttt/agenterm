@@ -1141,6 +1141,14 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         return Ok(());
     }
     if call.name == "throw" && ctx.cdylib {
+        if !ctx.in_try()
+            && let Some(Expr::StringConstant(message, ..)) = call.args.first()
+        {
+            out.push_str("return rh_fail(");
+            out.push_str(&format!("{message:?}"));
+            out.push(')');
+            return Ok(());
+        }
         if ctx.in_try() {
             return emit_throw_expr(out, call, ctx);
         }
