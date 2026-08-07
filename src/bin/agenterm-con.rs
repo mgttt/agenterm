@@ -28,6 +28,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agenterm_platform::input::{KeyPressState, LogicalKey, NamedKey, NormalizedKeyEvent};
+use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::window_host::{
     run_pixel_window, GeometryChange, LogicalPoint, LogicalSize, PixelWindow, PixelWindowApplication,
@@ -83,10 +84,9 @@ fn selection_text(screen: &vt100::Screen, a: TerminalPoint, b: TerminalPoint) ->
                     continue;
                 }
                 if cell.has_contents() {
+                    // A wide cell contributes its full text here; its
+                    // continuation cell is skipped by the guard above.
                     row_text.push_str(cell.contents());
-                    if cell.is_wide() {
-                        // Skip the continuation cell we'd hit next iteration.
-                    }
                 } else {
                     row_text.push(' ');
                 }
@@ -158,18 +158,15 @@ fn load_config() -> ConConfig {
     let mut config = ConConfig::default();
     for line in text.lines() {
         let trimmed = line.trim().trim_end_matches(',');
-        if let Some(rest) = trimmed.strip_prefix("\"font_size\"") {
-            if let Some(val) = rest.split(':').nth(1) {
-                config.font_size = val.trim().parse().ok();
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("\"cols\"") {
-            if let Some(val) = rest.split(':').nth(1) {
-                config.cols = val.trim().parse().ok();
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("\"rows\"") {
-            if let Some(val) = rest.split(':').nth(1) {
-                config.rows = val.trim().parse().ok();
-            }
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        match key.trim() {
+            "\"font_size\"" => config.font_size = value.parse().ok(),
+            "\"cols\"" => config.cols = value.parse().ok(),
+            "\"rows\"" => config.rows = value.parse().ok(),
+            _ => {}
         }
     }
     config
@@ -340,6 +337,14 @@ struct ConTerminal {
     selection: Option<(TerminalPoint, TerminalPoint)>,
     /// True while left mouse button is held during a drag.
     selecting: bool,
+    /// True while the application (not local selection) owns a button gesture.
+    /// Keeps press/release paired so TUI buttons do not get a stuck-down state.
+    mouse_dragging: bool,
+    /// Last cell reported to the application, used to collapse motion spam.
+    last_reported_cell: Option<TerminalPoint>,
+    /// Button code of the in-flight application gesture, so the release
+    /// reports the same button that was pressed.
+    active_button: Option<u8>,
     /// Current scale factor (for pointer hit-test DIP→pixel conversion).
     scale: f64,
 }
@@ -372,6 +377,9 @@ impl ConTerminal {
             wheel_accumulator: 0.0,
             selection: None,
             selecting: false,
+            mouse_dragging: false,
+            last_reported_cell: None,
+            active_button: None,
             scale: 1.0,
         }
     }
@@ -501,9 +509,10 @@ impl ConTerminal {
             return;
         }
 
-        // Ctrl+Shift+C → copy selection (always, even if no selection just clears)
-        if event.modifiers.control && event.modifiers.shift {
-            if let LogicalKey::Character(text) = &event.logical {
+        // Host shortcuts are resolved before the application sees the key.
+        if let LogicalKey::Character(text) = &event.logical {
+            let control = event.modifiers.control;
+            if control && event.modifiers.shift {
                 if text.eq_ignore_ascii_case("c") {
                     self.copy_selection();
                     return;
@@ -513,23 +522,79 @@ impl ConTerminal {
                     return;
                 }
             }
+            // Bare Ctrl+C copies when there is a selection, matching conhost;
+            // with no selection it falls through to SIGINT (0x03).
+            if control
+                && !event.modifiers.alt
+                && !event.modifiers.shift
+                && text.eq_ignore_ascii_case("c")
+                && self.selection.is_some()
+            {
+                self.copy_selection();
+                self.selection = None;
+                return;
+            }
         }
 
-        // Ctrl+C → copy if selection exists, else forward SIGINT (0x03)
-        if event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift {
-            if let LogicalKey::Character(text) = &event.logical {
-                if text.eq_ignore_ascii_case("c") && self.selection.is_some() {
-                    self.copy_selection();
-                    self.selection = None;
-                    return;
+        // Shift+PageUp/PageDown scroll the local viewport, matching conhost —
+        // but not on the alternate screen, where those keys are the app's.
+        let scrollable = event.modifiers.shift
+            && event.state == KeyPressState::Pressed
+            && !self.parser.screen().alternate_screen();
+        if let LogicalKey::Named(named) = &event.logical
+            && scrollable
+        {
+            {
+                let page = usize::from(self.rows).saturating_sub(1).max(1) as isize;
+                match named {
+                    NamedKey::PageUp => {
+                        self.scroll_by(page);
+                        return;
+                    }
+                    NamedKey::PageDown => {
+                        self.scroll_by(-page);
+                        return;
+                    }
+                    _ => {}
                 }
             }
         }
 
-        if let Some(bytes) = key_to_bytes(event) {
-            if let Some(master) = &self.master {
-                let _ = master.write_all(&bytes);
-            }
+        let mode = TerminalKeyMode {
+            application_cursor: self.parser.screen().application_cursor(),
+        };
+        if let Some(bytes) = terminal_input::key_event_to_bytes(event, mode) {
+            // Typing returns to the live view, as every terminal does.
+            self.scroll_to_bottom();
+            self.write_pty(&bytes);
+        }
+    }
+
+    /// Writes bytes to the PTY, ignoring errors from a shell that already exited.
+    fn write_pty(&self, bytes: &[u8]) {
+        if let Some(master) = &self.master {
+            let _ = master.write_all(bytes);
+        }
+    }
+
+    /// Scrolls the viewport by `lines` (positive = toward older output).
+    fn scroll_by(&mut self, lines: isize) {
+        if self.parser.screen().alternate_screen() {
+            return;
+        }
+        let max = self.parser.screen().scrollback() + self.scroll_offset;
+        let target = self.scroll_offset as isize + lines;
+        let clamped = target.clamp(0, max as isize) as usize;
+        if clamped != self.scroll_offset {
+            self.scroll_offset = clamped;
+            self.parser.screen_mut().set_scrollback(clamped);
+        }
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        if self.scroll_offset != 0 {
+            self.scroll_offset = 0;
+            self.parser.screen_mut().set_scrollback(0);
         }
     }
 
@@ -547,23 +612,197 @@ impl ConTerminal {
         let Some((start, end)) = self.selection else {
             return;
         };
-        let text = selection_text(&self.parser.screen(), start, end);
+        let text = selection_text(self.parser.screen(), start, end);
         if !text.is_empty() {
             let _ = agenterm_platform::clipboard::set_text(&text);
         }
     }
 
-    fn paste_clipboard(&self) {
-        let Ok(text) = agenterm_platform::clipboard::get_text(1024 * 1024) else {
+    fn paste_clipboard(&mut self) {
+        let Ok(text) =
+            agenterm_platform::clipboard::get_text(terminal_input::TERMINAL_PASTE_LIMIT_BYTES)
+        else {
             return;
         };
-        if text.is_empty() {
+        // Normalization drops ESC, so a payload cannot close the bracketed
+        // guard early and have its tail executed as keystrokes.
+        let normalized = terminal_input::normalize_terminal_paste(&text);
+        if normalized.is_empty() {
             return;
         }
-        // Normalize newlines to \r for PTY input.
-        let normalized: String = text.replace("\r\n", "\r").replace('\n', "\r");
-        if let Some(master) = &self.master {
-            let _ = master.write_all(normalized.as_bytes());
+        let bracketed = self.parser.screen().bracketed_paste();
+        self.scroll_to_bottom();
+        self.write_pty(&terminal_input::terminal_paste_bytes(&normalized, bracketed));
+    }
+
+    /// Current mouse reporting contract negotiated by the running application.
+    fn mouse_mode(&self) -> (terminal_input::ApplicationMouseMode, terminal_input::MouseReportEncoding) {
+        let screen = self.parser.screen();
+        let mode = match screen.mouse_protocol_mode() {
+            vt100::MouseProtocolMode::None => terminal_input::ApplicationMouseMode::None,
+            vt100::MouseProtocolMode::Press => terminal_input::ApplicationMouseMode::Press,
+            vt100::MouseProtocolMode::PressRelease => {
+                terminal_input::ApplicationMouseMode::PressRelease
+            }
+            vt100::MouseProtocolMode::ButtonMotion => {
+                terminal_input::ApplicationMouseMode::ButtonMotion
+            }
+            vt100::MouseProtocolMode::AnyMotion => terminal_input::ApplicationMouseMode::AnyMotion,
+        };
+        let encoding = match screen.mouse_protocol_encoding() {
+            vt100::MouseProtocolEncoding::Default => terminal_input::MouseReportEncoding::Default,
+            vt100::MouseProtocolEncoding::Utf8 => terminal_input::MouseReportEncoding::Utf8,
+            vt100::MouseProtocolEncoding::Sgr => terminal_input::MouseReportEncoding::Sgr,
+        };
+        (mode, encoding)
+    }
+
+    /// Attempts to deliver a pointer event to the application. Returns true
+    /// when the application consumed it, so the caller skips local selection.
+    fn report_mouse(
+        &mut self,
+        button: u8,
+        point: TerminalPoint,
+        pressed: bool,
+        motion: bool,
+        modifiers: &agenterm_platform::input::ModifierState,
+    ) -> bool {
+        let (mode, encoding) = self.mouse_mode();
+        let delivery = terminal_input::mouse_delivery(
+            mode,
+            modifiers.shift,
+            self.scroll_offset > 0,
+            motion,
+            self.mouse_dragging,
+            pressed,
+        );
+        if delivery != terminal_input::MouseDelivery::Application {
+            return false;
+        }
+        // Motion reports repeat per pixel; collapse them to one per cell.
+        if motion && self.last_reported_cell == Some(point) {
+            return true;
+        }
+        let code = terminal_input::mouse_code_with_modifiers(button, motion, *modifiers);
+        let Some(bytes) =
+            terminal_input::mouse_report_bytes(encoding, code, point.col, point.row, pressed)
+        else {
+            return false;
+        };
+        self.last_reported_cell = Some(point);
+        self.write_pty(&bytes);
+        true
+    }
+
+    /// Routes a wheel notch: application report → alternate-screen cursor keys
+    /// → local scrollback, in that order of precedence.
+    fn handle_wheel(
+        &mut self,
+        notches: f32,
+        modifiers: &agenterm_platform::input::ModifierState,
+        position: Option<LogicalPoint>,
+    ) {
+        let up = notches > 0.0;
+        let count = (notches.abs().round() as usize).clamp(1, 32);
+
+        // An application that grabbed the mouse gets buttons 64/65.
+        let (mode, _) = self.mouse_mode();
+        if mode != terminal_input::ApplicationMouseMode::None && !modifiers.shift {
+            let point = position.map(|p| self.hit_test(&p)).unwrap_or(TerminalPoint {
+                row: 0,
+                col: 0,
+            });
+            let button = if up {
+                terminal_input::MOUSE_WHEEL_UP
+            } else {
+                terminal_input::MOUSE_WHEEL_DOWN
+            };
+            for _ in 0..count {
+                // Wheel is press-only; never emit a matching release.
+                self.report_mouse(button, point, true, false, modifiers);
+            }
+            return;
+        }
+
+        // Alternate screen has no local scrollback to move, so translate the
+        // gesture into cursor keys the way xterm does — this is what makes the
+        // wheel scroll inside less/man/vim.
+        if self.parser.screen().alternate_screen() {
+            let application_cursor = self.parser.screen().application_cursor();
+            let sequence: &[u8] = match (up, application_cursor) {
+                (true, true) => b"\x1bOA",
+                (false, true) => b"\x1bOB",
+                (true, false) => b"\x1b[A",
+                (false, false) => b"\x1b[B",
+            };
+            self.write_pty(&sequence.repeat(count.min(120)));
+            return;
+        }
+
+        self.scroll_by(if up { count as isize } else { -(count as isize) });
+    }
+
+    /// Routes a pointer button press/release, preferring the application.
+    fn handle_pointer_button(
+        &mut self,
+        window: &PixelWindow,
+        button: PointerButton,
+        state: PointerButtonState,
+        position: Option<LogicalPoint>,
+        modifiers: &agenterm_platform::input::ModifierState,
+    ) {
+        let pressed = state == PointerButtonState::Pressed;
+        let point = match position {
+            Some(pos) => self.hit_test(&pos),
+            // A release with no position still has to close an open gesture.
+            None => self.last_reported_cell.unwrap_or(TerminalPoint { row: 0, col: 0 }),
+        };
+        let code = match button {
+            PointerButton::Left => 0,
+            PointerButton::Middle => 1,
+            PointerButton::Right => 2,
+            _ => return,
+        };
+
+        if pressed {
+            if self.report_mouse(code, point, true, false, modifiers) {
+                self.mouse_dragging = true;
+                self.active_button = Some(code);
+                // The application owns this gesture; drop any stale selection
+                // so the highlight does not linger over its UI.
+                self.selection = None;
+                window.request_redraw();
+                return;
+            }
+        } else if self.mouse_dragging {
+            let held = self.active_button.unwrap_or(code);
+            self.report_mouse(held, point, false, false, modifiers);
+            self.mouse_dragging = false;
+            self.active_button = None;
+            return;
+        }
+
+        // Local handling.
+        match (button, pressed) {
+            (PointerButton::Left, true) => {
+                self.selection = Some((point, point));
+                self.selecting = true;
+                window.request_redraw();
+            }
+            (PointerButton::Left, false) => {
+                self.selecting = false;
+            }
+            (PointerButton::Right, true) => {
+                // Right-click: copy if a selection exists, else paste.
+                if self.selection.is_some() {
+                    self.copy_selection();
+                    self.selection = None;
+                    window.request_redraw();
+                } else {
+                    self.paste_clipboard();
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -617,7 +856,12 @@ impl PixelWindowApplication for ConTerminal {
                 self.forward_key(&key);
                 Ok(PixelWindowDirective::Continue)
             }
-            PixelWindowEvent::MouseWheel { delta, modifiers, .. } => {
+            PixelWindowEvent::MouseWheel {
+                delta,
+                modifiers,
+                position,
+                ..
+            } => {
                 // Ctrl+wheel adjusts font size (wave 4); plain wheel scrolls.
                 if modifiers.control {
                     let dir = match delta {
@@ -642,58 +886,41 @@ impl PixelWindowApplication for ConTerminal {
                     self.wheel_accumulator += lines;
                     let whole = self.wheel_accumulator.trunc();
                     self.wheel_accumulator -= whole;
-                    if whole != 0.0 && !self.parser.screen().alternate_screen() {
-                        let max_sb = self.parser.screen().scrollback() + self.scroll_offset;
-                        let target = self.scroll_offset.saturating_add(whole.round() as usize);
-                        self.scroll_offset = target.min(max_sb);
-                        self.parser.screen_mut().set_scrollback(self.scroll_offset);
+                    if whole != 0.0 {
+                        self.handle_wheel(whole, &modifiers, position);
                         window.request_redraw();
                     }
                 }
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::PointerButton {
-                button: PointerButton::Left,
-                state: PointerButtonState::Pressed,
+                button,
+                state,
                 position,
-                ..
+                modifiers,
             } => {
-                if let Some(pos) = position {
-                    let pt = self.hit_test(&pos);
-                    self.selection = Some((pt, pt));
-                    self.selecting = true;
-                }
+                self.handle_pointer_button(window, button, state, position, &modifiers);
                 Ok(PixelWindowDirective::Continue)
             }
-            PixelWindowEvent::PointerButton {
-                button: PointerButton::Left,
-                state: PointerButtonState::Released,
+            PixelWindowEvent::PointerMoved {
+                position,
+                modifiers,
                 ..
             } => {
-                self.selecting = false;
-                Ok(PixelWindowDirective::Continue)
-            }
-            PixelWindowEvent::PointerMoved { position, .. } => {
-                if self.selecting {
-                    let pt = self.hit_test(&position);
+                let pt = self.hit_test(&position);
+                // An application gesture in flight keeps ownership so its
+                // press/release stay paired; otherwise extend local selection.
+                if self.mouse_dragging {
+                    let button = self.active_button.unwrap_or(0);
+                    self.report_mouse(button, pt, true, true, &modifiers);
+                } else if self.selecting {
                     if let Some((anchor, _)) = self.selection {
                         self.selection = Some((anchor, pt));
                         window.request_redraw();
                     }
-                }
-                Ok(PixelWindowDirective::Continue)
-            }
-            PixelWindowEvent::PointerButton {
-                button: PointerButton::Right,
-                state: PointerButtonState::Pressed,
-                ..
-            } => {
-                // Right-click: copy if selection exists, else paste.
-                if self.selection.is_some() {
-                    self.copy_selection();
-                    self.selection = None;
-                } else {
-                    self.paste_clipboard();
+                } else if self.mouse_mode().0 == terminal_input::ApplicationMouseMode::AnyMotion {
+                    // 1003: report motion with no button held (button 3 = none).
+                    self.report_mouse(3, pt, true, true, &modifiers);
                 }
                 Ok(PixelWindowDirective::Continue)
             }
@@ -768,12 +995,12 @@ impl PixelWindowApplication for ConTerminal {
                     fill_rect(pixels, fw, fh, x0, y0, span_w, self.cell_h, bg.to_xrgb());
                 }
 
-                if cell.has_contents() {
-                    if let Some(glyph) = font::raster(first_grapheme(cell.contents()), self.font_size_px) {
-                        blit_glyph(
-                            pixels, fw, fh, &glyph, x0, y0, fg, span_w, self.cell_h,
-                        );
-                    }
+                let glyph = cell
+                    .has_contents()
+                    .then(|| font::raster(first_grapheme(cell.contents()), self.font_size_px))
+                    .flatten();
+                if let Some(glyph) = glyph {
+                    blit_glyph(pixels, fw, fh, &glyph, x0, y0, fg, span_w, self.cell_h);
                 }
             }
         }
@@ -905,121 +1132,28 @@ fn first_grapheme(contents: &str) -> char {
 // ---------------------------------------------------------------------------
 // Keyboard → PTY byte encoding
 // ---------------------------------------------------------------------------
-
-fn key_to_bytes(event: &NormalizedKeyEvent) -> Option<Vec<u8>> {
-    if event.state == KeyPressState::Released {
-        return None;
-    }
-
-    // Compute the base byte sequence first, then apply Alt/Meta ESC prefix.
-    let mut base: Option<Vec<u8>> = None;
-
-    // Named keys produce fixed VT sequences. `NamedKey` is non-exhaustive, so
-    // unmapped variants fall through to the text path below.
-    if let LogicalKey::Named(named) = &event.logical {
-        if let Some(bytes) = named_key_bytes(*named) {
-            base = Some(bytes.to_vec());
-        }
-    }
-
-    if base.is_none() {
-        // Ctrl+letter → C0 control code (Ctrl+A = 0x01 .. Ctrl+Z = 0x1a).
-        if event.modifiers.control {
-            if let LogicalKey::Character(text) = &event.logical {
-                if let Some(ch) = text.chars().next() {
-                    let lower = ch.to_ascii_lowercase();
-                    if ('a'..='z').contains(&lower) {
-                        base = Some(vec![u8::wrapping_sub(lower as u8, b'a') + 1]);
-                    }
-                }
-            }
-        }
-    }
-
-    if base.is_none() {
-        // Plain printable text (no control).
-        if !event.modifiers.control {
-            if let Some(text) = event.text.as_deref() {
-                if !text.is_empty() {
-                    base = Some(text.as_bytes().to_vec());
-                }
-            }
-            if base.is_none() {
-                if let LogicalKey::Character(text) = &event.logical {
-                    if !text.is_empty() {
-                        base = Some(text.as_bytes().to_vec());
-                    }
-                }
-            }
-        }
-    }
-
-    // Alt/Meta → prepend ESC so readline/emacs Meta bindings work.
-    match base {
-        Some(mut bytes) if event.modifiers.alt => {
-            let mut prefixed = Vec::with_capacity(bytes.len() + 1);
-            prefixed.push(0x1b);
-            prefixed.append(&mut bytes);
-            Some(prefixed)
-        }
-        other => other,
-    }
-}
-
-/// Maps a named key to its VT input sequence, or `None` if the key has no
-/// fixed sequence (callers fall back to text).
-fn named_key_bytes(named: NamedKey) -> Option<&'static [u8]> {
-    match named {
-        NamedKey::Enter => Some(b"\r"),
-        NamedKey::Tab => Some(b"\t"),
-        NamedKey::Backspace => Some(b"\x7f"),
-        NamedKey::Escape => Some(b"\x1b"),
-        NamedKey::Space => Some(b" "),
-        NamedKey::ArrowUp => Some(b"\x1b[A"),
-        NamedKey::ArrowDown => Some(b"\x1b[B"),
-        NamedKey::ArrowRight => Some(b"\x1b[C"),
-        NamedKey::ArrowLeft => Some(b"\x1b[D"),
-        NamedKey::Home => Some(b"\x1b[H"),
-        NamedKey::End => Some(b"\x1b[F"),
-        NamedKey::PageUp => Some(b"\x1b[5~"),
-        NamedKey::PageDown => Some(b"\x1b[6~"),
-        NamedKey::Delete => Some(b"\x1b[3~"),
-        NamedKey::Insert => Some(b"\x1b[2~"),
-        NamedKey::F1 => Some(b"\x1bOP"),
-        NamedKey::F2 => Some(b"\x1bOQ"),
-        NamedKey::F3 => Some(b"\x1bOR"),
-        NamedKey::F4 => Some(b"\x1bOS"),
-        NamedKey::F5 => Some(b"\x1b[15~"),
-        NamedKey::F6 => Some(b"\x1b[17~"),
-        NamedKey::F7 => Some(b"\x1b[18~"),
-        NamedKey::F8 => Some(b"\x1b[19~"),
-        NamedKey::F9 => Some(b"\x1b[20~"),
-        NamedKey::F10 => Some(b"\x1b[21~"),
-        NamedKey::F11 => Some(b"\x1b[23~"),
-        NamedKey::F12 => Some(b"\x1b[24~"),
-        _ => None,
-    }
-}
+//
+// The encoding tables themselves live in `agenterm_platform::terminal_input`
+// so the GUI terminal and this console host cannot drift apart again. Only the
+// host-specific policy (what counts as a local shortcut) stays here.
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use agenterm_platform::input::ModifierState;
 
-    fn char_event(text: &str, logical: &str, mods: ModifierState) -> NormalizedKeyEvent {
-        NormalizedKeyEvent {
-            logical: LogicalKey::Character(logical.to_owned()),
-            physical: agenterm_platform::input::PhysicalKeyCode::Other,
-            text: Some(text.to_owned()),
-            state: KeyPressState::Pressed,
-            repeat: false,
-            modifiers: mods,
-        }
+    fn parser() -> vt100::Parser<ConCallbacks> {
+        vt100::Parser::<ConCallbacks>::new_with_callbacks(24, 80, 0, ConCallbacks::default())
     }
 
+    /// The escape-sequence tables are covered exhaustively in
+    /// `agenterm_platform::contract::terminal_input`. What matters here is this
+    /// host's own policy: that it reads the modes the application negotiated
+    /// and hands the shared encoder the right ones.
     #[test]
-    fn arrow_keys_encode_to_csi_sequences() {
-        let mut e = NormalizedKeyEvent {
+    fn key_encoding_is_driven_by_live_screen_mode() {
+        let mut parser = parser();
+        let up = NormalizedKeyEvent {
             logical: LogicalKey::Named(NamedKey::ArrowUp),
             physical: agenterm_platform::input::PhysicalKeyCode::Other,
             text: None,
@@ -1027,64 +1161,90 @@ mod tests {
             repeat: false,
             modifiers: ModifierState::default(),
         };
-        assert_eq!(key_to_bytes(&e), Some(b"\x1b[A".to_vec()));
 
-        e.logical = LogicalKey::Named(NamedKey::Delete);
-        assert_eq!(key_to_bytes(&e), Some(b"\x1b[3~".to_vec()));
-    }
-
-    #[test]
-    fn released_keys_produce_nothing() {
-        let e = NormalizedKeyEvent {
-            logical: LogicalKey::Named(NamedKey::Enter),
-            physical: agenterm_platform::input::PhysicalKeyCode::Other,
-            text: None,
-            state: KeyPressState::Released,
-            repeat: false,
-            modifiers: ModifierState::default(),
+        let mode = TerminalKeyMode {
+            application_cursor: parser.screen().application_cursor(),
         };
-        assert_eq!(key_to_bytes(&e), None);
+        assert_eq!(
+            terminal_input::key_event_to_bytes(&up, mode),
+            Some(b"\x1b[A".to_vec()),
+            "default mode must use CSI"
+        );
+
+        // The application turns on DECCKM; the same keypress must now encode as
+        // SS3. Ignoring this is what made vim/less misread arrow keys.
+        parser.process(b"\x1b[?1h");
+        let mode = TerminalKeyMode {
+            application_cursor: parser.screen().application_cursor(),
+        };
+        assert_eq!(
+            terminal_input::key_event_to_bytes(&up, mode),
+            Some(b"\x1bOA".to_vec()),
+            "DECCKM must switch cursor keys to SS3"
+        );
     }
 
     #[test]
-    fn plain_text_is_forwarded_as_utf8() {
-        let e = char_event("h", "h", ModifierState::default());
-        assert_eq!(key_to_bytes(&e), Some(b"h".to_vec()));
+    fn paste_framing_follows_the_application_bracketed_paste_mode() {
+        let mut parser = parser();
+        assert!(!parser.screen().bracketed_paste());
+        let text = terminal_input::normalize_terminal_paste("a\nb");
+        assert_eq!(
+            terminal_input::terminal_paste_bytes(&text, parser.screen().bracketed_paste()),
+            b"a\rb".to_vec()
+        );
 
-        let e = char_event("é", "e", ModifierState::default());
-        assert_eq!(key_to_bytes(&e), Some("é".as_bytes().to_vec()));
+        parser.process(b"\x1b[?2004h");
+        assert!(parser.screen().bracketed_paste());
+        assert_eq!(
+            terminal_input::terminal_paste_bytes(&text, parser.screen().bracketed_paste()),
+            b"\x1b[200~a\rb\x1b[201~".to_vec()
+        );
     }
 
     #[test]
-    fn ctrl_letter_maps_to_control_code() {
-        let e = char_event("", "c", {
-            let mut m = ModifierState::default();
-            m.control = true;
-            m
-        });
-        assert_eq!(key_to_bytes(&e), Some(vec![0x03]));
+    fn mouse_mode_maps_the_vt100_variants_a_tui_actually_requests() {
+        let mut app = ConTerminal::new(None);
+        assert_eq!(
+            app.mouse_mode(),
+            (
+                terminal_input::ApplicationMouseMode::None,
+                terminal_input::MouseReportEncoding::Default
+            )
+        );
+
+        // ?1002h + ?1006h is what a modern TUI asks for.
+        app.parser.process(b"\x1b[?1002h\x1b[?1006h");
+        assert_eq!(
+            app.mouse_mode(),
+            (
+                terminal_input::ApplicationMouseMode::ButtonMotion,
+                terminal_input::MouseReportEncoding::Sgr
+            )
+        );
     }
 
     #[test]
-    fn alt_letter_prepends_esc() {
-        let e = char_event("b", "b", {
-            let mut m = ModifierState::default();
-            m.alt = true;
-            m
-        });
-        assert_eq!(key_to_bytes(&e), Some(vec![0x1b, b'b']));
+    fn selection_text_joins_rows_with_crlf_and_trims_trailing_blanks() {
+        let mut parser = parser();
+        parser.process(b"ab\r\ncd");
+        let text = selection_text(
+            &parser.screen(),
+            TerminalPoint { row: 0, col: 0 },
+            TerminalPoint { row: 1, col: 79 },
+        );
+        assert_eq!(text, "ab\r\ncd");
     }
 
     #[test]
-    fn alt_ctrl_letter_prepends_esc_before_control_code() {
-        let e = char_event("", "c", {
-            let mut m = ModifierState::default();
-            m.control = true;
-            m.alt = true;
-            m
-        });
-        // ESC + Ctrl+C (0x03)
-        assert_eq!(key_to_bytes(&e), Some(vec![0x1b, 0x03]));
+    fn scrolling_clamps_to_available_scrollback() {
+        let mut app = ConTerminal::new(None);
+        // Nothing scrolled off yet, so the viewport cannot move up...
+        app.scroll_by(10);
+        assert_eq!(app.scroll_offset, 0);
+        // ...and scrolling down from the bottom must not underflow.
+        app.scroll_by(-10);
+        assert_eq!(app.scroll_offset, 0);
     }
 
     #[test]

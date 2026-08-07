@@ -235,6 +235,9 @@ pub mod ipc;
 #[cfg(feature = "input")]
 pub mod input;
 
+#[cfg(feature = "input")]
+pub mod terminal_input;
+
 #[cfg(feature = "ime")]
 pub mod ime;
 
