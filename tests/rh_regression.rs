@@ -96,6 +96,19 @@ fn json_schema_fixture_transpiles_without_interpreter_fallback() {
 }
 
 #[test]
+fn json_schema_native_pack_executes_without_interpreter() {
+    let source = r#"fn entry() {
+        let document = rhai::json::parse("{\"schema_version\":2}");
+        document.schema_version
+    }"#;
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-json-schema-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify JSON native pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 2);
+}
+
+#[test]
 fn try_catch_fixture_transpile_uses_result() {
     let source = include_str!("../fixtures/rh/try-catch.rh");
     let rust = transpile_cdylib(source).expect("transpile");
