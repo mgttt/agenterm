@@ -149,7 +149,6 @@ fn generated_cargo_toml() -> String {
          [lib]\n\
          crate-type = [\"cdylib\"]\n\n\
          [dependencies]\n\
-         rhai = {{ version = \"1.22\", default-features = false, features = [\"std\"] }}\n\
          serde_json = \"1\"\n"
     )
 }
@@ -175,8 +174,16 @@ pub fn native_extension_for_target(target: Option<&str>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        compile_native, compile_native_for_target, hash_bytes, native_extension_for_target,
+        compile_native, compile_native_for_target, generated_cargo_toml, hash_bytes,
+        native_extension_for_target,
     };
+
+    #[test]
+    fn generated_native_pack_has_no_rhai_runtime_dependency() {
+        let manifest = generated_cargo_toml();
+        assert!(manifest.contains("serde_json = \"1\""));
+        assert!(!manifest.contains("rhai"));
+    }
 
     #[test]
     fn source_hash_is_stable() {
