@@ -244,3 +244,80 @@ fn public_cli_runs_native_internal_version_policy() {
             .is_some_and(|stdout| stdout.contains("PASS: internal-only version"))
     );
 }
+
+#[test]
+fn native_internal_version_policy_rejects_governed_git_tag() {
+    let repo = repo_root();
+    let fixture = std::env::temp_dir().join(format!(
+        "agenterm-rh-internal-version-policy-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&fixture);
+    std::fs::create_dir_all(fixture.join("scripts/rhai")).expect("scripts");
+    std::fs::create_dir_all(fixture.join(".github/workflows")).expect("workflows");
+    std::fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"policy-fixture\"\nversion = \"0.1.7\"\n",
+    )
+    .expect("Cargo.toml");
+    std::fs::write(
+        fixture.join("scripts/rhai/release.rhai"),
+        "if version != \"0.1.7\" {}\n",
+    )
+    .expect("release policy");
+    std::fs::write(
+        fixture.join(".github/workflows/candidate.yml"),
+        "if [[ \"$expected\" == \"v0.1.7\" ]]; then exit 1; fi\n",
+    )
+    .expect("candidate policy");
+    let git = |arguments: &[&str]| {
+        let output = Command::new("git")
+            .current_dir(&fixture)
+            .args(arguments)
+            .output()
+            .expect("git fixture");
+        assert!(
+            output.status.success(),
+            "git {:?}: {}",
+            arguments,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "--quiet"]);
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=AgenTerm Test",
+        "-c",
+        "user.email=agenterm@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    ]);
+    git(&["tag", "v0.1.7"]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        .current_dir(&repo)
+        .arg("run")
+        .arg(repo.join("scripts/rh/internal-version-policy.rh"))
+        .args(["--project-root", ".", "--json", "--"])
+        .arg(&fixture)
+        .output()
+        .expect("run governed version fixture");
+    let _ = std::fs::remove_dir_all(&fixture);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).expect("failure JSON");
+    assert_eq!(envelope["ok"], false);
+    assert!(
+        envelope["failure"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("must not have a local Git tag"))
+    );
+}
