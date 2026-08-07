@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use rhai::{AST, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt, ASTFlags};
+use rhai::{AST, ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt};
 
 use crate::RhError;
 use crate::expr_print::{is_pure_int_expr, uses_host_surface};
@@ -128,9 +128,19 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
                     "return is not allowed inside try/catch in rh-3",
                 ));
             }
+            if block_has_break_continue(&flow.body) || block_has_break_continue(&flow.branch) {
+                return Some(subset_error(
+                    "RH_SUBSET_TRY_BREAK",
+                    "break/continue is not allowed inside try/catch in rh-3",
+                ));
+            }
             validate_stmt_block(&flow.body)?;
             validate_stmt_block(&flow.branch)
         }
+        Stmt::BreakLoop(expr, ..) if expr.is_some() => Some(subset_error(
+            "RH_SUBSET_BREAK_VALUE",
+            "break/continue with value is not in rh-3",
+        )),
         Stmt::Block(block) => validate_stmt_block(block),
         Stmt::Assignment(boxed, ..) => validate_assignment(boxed),
         Stmt::FnCall(call, ..) => {
@@ -166,6 +176,10 @@ fn block_has_invalid_return(block: &rhai::StmtBlock) -> bool {
     })
 }
 
+fn block_has_break_continue(block: &rhai::StmtBlock) -> bool {
+    block.iter().any(|stmt| matches!(stmt, Stmt::BreakLoop(..)))
+}
+
 fn validate_root_expr(expr: &Expr) -> Option<RhError> {
     if let Some(call) = parse_fleet_call(expr) {
         return validate_fleet_call(&call).err();
@@ -196,10 +210,7 @@ fn validate_root_expr(expr: &Expr) -> Option<RhError> {
 pub fn compat_validate(source: &str, ast: &AST) -> Result<(), RhError> {
     let _ = source;
     if ast_contains_eval(ast) {
-        return Err(subset_error(
-            "RH_SUBSET_NO_EVAL",
-            "eval is forbidden in rh",
-        ));
+        return Err(subset_error("RH_SUBSET_NO_EVAL", "eval is forbidden in rh"));
     }
     Ok(())
 }
@@ -246,7 +257,7 @@ fn subset_error(code: &'static str, detail: &str) -> RhError {
 
 #[cfg(test)]
 mod tests {
-    use rhai::{Engine, Stmt};
+    use rhai::Engine;
 
     use super::validate_ast;
 
@@ -270,6 +281,32 @@ mod tests {
     fn accepts_std_fs_exists() {
         let ast = Engine::new()
             .compile("fn entry() { if std::fs::exists(`/tmp`) { 1 } else { 0 } }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_for_dyn_int_range() {
+        let ast = Engine::new()
+            .compile(
+                "fn entry() { let count = 5; for x in 1..count { if x == 4 { return 7; } } 0 }",
+            )
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_for_var_len_range() {
+        let ast = Engine::new()
+            .compile("fn entry() { for x in 1..args.len { if x == 2 { return 9; } } 0 }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_for_int_range() {
+        let ast = Engine::new()
+            .compile("fn entry() { for x in 1..5 { if x == 4 { return 7; } } 0 }")
             .expect("compile");
         validate_ast(&ast).expect("subset");
     }
@@ -324,6 +361,18 @@ mod tests {
         engine.set_optimization_level(rhai::OptimizationLevel::None);
         let ast = engine
             .compile("fn entry() { let x = 3; while x != 0 { x -= 1; } x }")
+            .expect("compile");
+        validate_ast(&ast).expect("subset");
+    }
+
+    #[test]
+    fn accepts_break_continue_in_for_loop() {
+        let mut engine = rhai::Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile(
+                "fn entry() { let sum = 0; for i in 1..10 { if i == 3 { continue; } if i == 8 { break; } sum += i; } sum }",
+            )
             .expect("compile");
         validate_ast(&ast).expect("subset");
     }

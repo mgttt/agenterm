@@ -8,6 +8,7 @@ pub(crate) mod control_center;
 mod control_contract;
 mod control_dispatch;
 mod event_journal;
+pub mod incremental_wrapper;
 mod instances;
 mod ipc_endpoint;
 mod ipc_transport;
@@ -18,6 +19,7 @@ pub mod mcp_stdio;
 mod named_buffer;
 pub mod operations;
 mod protocol;
+pub mod script_api_validate;
 pub mod script_api_view;
 pub mod script_backend;
 pub mod script_catalog;
@@ -40,6 +42,7 @@ pub mod script_runtime;
 pub mod script_stdlib;
 pub mod script_stream;
 pub mod script_task;
+mod script_worker;
 mod settings;
 mod tab_tree;
 mod terminal_cursor;
@@ -90,6 +93,7 @@ pub use platform::{
 #[allow(unused_imports)]
 pub use frontend::run_gui_entry;
 
+pub use script_worker::{run_framed_worker_stdio, run_legacy_worker_stdio};
 pub use server_app::{run_server_entry, run_server_entry_with_args};
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);

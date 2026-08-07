@@ -1472,9 +1472,10 @@ fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields(
     // The manifest shrinks as PEs are folded into subcommands: 78357dd removed
     // agenterm-server.exe (authority is `agenterm server`), then 7b930b9
     // removed agenterm-mux.exe and agenterm-mcp.exe (now `agenterm-cli mux|mcp`).
+    // M22d adds agenterm-rh.exe as a dev CLI alongside agenterm-rhai.exe.
     assert!(
         String::from_utf8_lossy(&canonical.stdout)
-            .contains("defines 4 validated Windows executables")
+            .contains("defines 5 validated Windows executables")
     );
 
     let root = fixture_root("artifact-manifest");

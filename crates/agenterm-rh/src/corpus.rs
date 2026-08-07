@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{check, RhError};
+use crate::{RhError, check};
 
 pub const SCAN_FILES_MAX: usize = 256;
 pub const SCAN_TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -57,7 +57,8 @@ struct TaskEntry {
 }
 
 pub fn extract_task_entries(manifest_path: &Path) -> Result<Vec<String>, RhError> {
-    let metadata = std::fs::metadata(manifest_path).map_err(|err| RhError::Parse(err.to_string()))?;
+    let metadata =
+        std::fs::metadata(manifest_path).map_err(|err| RhError::Parse(err.to_string()))?;
     if metadata.len() as usize > 512 * 1024 {
         return Err(RhError::Parse("task manifest exceeds 512 KiB".into()));
     }
@@ -117,11 +118,7 @@ pub fn scan_rhai_directory(options: CorpusScanOptions) -> Result<CorpusScanRepor
     scan_relative_files(&options.project_root, &relative_paths)
 }
 
-fn collect_rhai_files(
-    dir: &Path,
-    root: &Path,
-    out: &mut Vec<String>,
-) -> Result<(), RhError> {
+fn collect_rhai_files(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), RhError> {
     for entry in std::fs::read_dir(dir).map_err(|err| RhError::Parse(err.to_string()))? {
         let entry = entry.map_err(|err| RhError::Parse(err.to_string()))?;
         let path = entry.path();
@@ -214,7 +211,7 @@ pub fn scan_relative_files(root: &Path, paths: &[String]) -> Result<CorpusScanRe
 mod tests {
     use std::path::PathBuf;
 
-    use super::{extract_task_entries, scan_rhai_directory, scan_task_manifest, CorpusScanOptions};
+    use super::{CorpusScanOptions, extract_task_entries, scan_rhai_directory, scan_task_manifest};
 
     #[test]
     fn scripts_rhai_scan_produces_report() {
@@ -226,7 +223,10 @@ mod tests {
         })
         .expect("scan");
         assert!(report.scanned >= 50, "scanned {}", report.scanned);
-        assert_eq!(report.passed, report.scanned, "compat check should pass scripts/rhai");
+        assert_eq!(
+            report.passed, report.scanned,
+            "compat check should pass scripts/rhai"
+        );
         assert_eq!(report.failed, 0);
     }
 

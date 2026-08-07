@@ -68,10 +68,10 @@ jobs:
         shell: cmd
         run: |
           @if not exist target\qualification\timing.json exit /b 0
-          @if exist dist\agenterm-rhai.exe (
-            dist\agenterm-rhai.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          @if exist dist\agenterm-rh.exe (
+            dist\agenterm-rh.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
           ) else (
-            target\debug\agenterm-rhai.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+            target\debug\agenterm-rh.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
           )
 
       - name: Upload quality timing

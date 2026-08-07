@@ -1,3 +1,4 @@
+pub mod api_validate;
 pub mod caller_inventory;
 pub mod check;
 pub mod check_many;
@@ -10,24 +11,27 @@ pub mod host_api;
 pub mod load;
 pub mod manifest;
 pub mod pack;
+pub mod project_import;
 pub mod qualify;
+pub mod shipped_surfaces;
 pub mod subset;
 pub mod transpile;
 
 pub use caller_inventory::{
-    scan_caller_inventory, CallerHit, CallerInventoryOptions, CallerInventoryReport,
+    CallerHit, CallerInventoryOptions, CallerInventoryReport, scan_caller_inventory,
 };
 pub use check::check;
+pub use check::{RH_MAX_EXPR_DEPTH, check_with_project_validation};
 pub use check_many::{
-    parse_check_many_cli, read_manifest, run_check_many, CheckManyManifest, CheckManyOptions,
-    CheckManyReport, ParsedCheckManyCli,
-};
-pub use corpus::{
-    extract_task_entries, scan_rhai_directory, scan_relative_files, scan_task_manifest,
-    CorpusScanOptions, CorpusScanReport,
+    CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
+    read_manifest, run_check_many,
 };
 pub use compile::{
     CompileOutput, compile_native, compile_native_for_target, hash_bytes, hash_file,
+};
+pub use corpus::{
+    CorpusScanOptions, CorpusScanReport, extract_task_entries, scan_relative_files,
+    scan_rhai_directory, scan_task_manifest,
 };
 pub use error::RhError;
 pub use host_api::{

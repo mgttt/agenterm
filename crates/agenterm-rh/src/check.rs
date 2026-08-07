@@ -1,6 +1,10 @@
+use std::path::Path;
+
 use rhai::{AST, Engine, OptimizationLevel};
 
 use crate::RhError;
+use crate::api_validate::validate_available_apis;
+use crate::project_import::validate_project_imports;
 use crate::subset::{compat_validate, validate_ast};
 
 /// Match the ordinary Script worker expression budget so large task scripts parse.
@@ -21,4 +25,36 @@ pub fn check(source: &str) -> Result<(), RhError> {
         compat_validate(source, &ast).map_err(|_| error)?;
     }
     Ok(())
+}
+
+/// rh subset check plus optional project import tree and shipped API validation.
+pub fn check_with_project_validation(
+    source: &str,
+    project_root: Option<&Path>,
+) -> Result<(), RhError> {
+    check(source)?;
+    if let Some(root) = project_root {
+        let module_sources =
+            validate_project_imports(root, source).map_err(|error| RhError::Compile(error))?;
+        for module_source in module_sources {
+            validate_available_apis(&module_source).map_err(api_validate_error_to_rh)?;
+        }
+    }
+    validate_available_apis(source).map_err(api_validate_error_to_rh)
+}
+
+fn api_validate_error_to_rh(error: crate::api_validate::ApiValidateError) -> RhError {
+    RhError::Compile(format!("{}: {}", error.code, error.message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_with_project_validation;
+
+    #[test]
+    fn check_with_project_validation_rejects_unknown_api() {
+        let error = check_with_project_validation("fn entry() { std::fs::not_shipped(`x`) }", None)
+            .expect_err("unknown API");
+        assert!(error.to_string().contains("script_api_unknown"));
+    }
 }

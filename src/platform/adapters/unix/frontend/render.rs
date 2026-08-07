@@ -851,6 +851,9 @@ pub(super) struct FrameContent<'a> {
     pub(super) editing_tab_id: Option<u64>,
     pub(super) tab_editor: Option<TabEditorView>,
     pub(super) workspace_toolbar: Option<WorkspaceToolbarView>,
+    /// Top server strip: the band rect, one chip per running instance, and the
+    /// trailing add button. Empty when the strip is hidden.
+    pub(super) server_strip: Option<ServerStripView>,
     pub(super) terminal_top: u32,
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
@@ -858,6 +861,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) settings: Option<SettingsModalView>,
     pub(super) new_terminal: Option<NewTerminalModalView<'a>>,
     pub(super) confirm_close: Option<ConfirmCloseView>,
+    pub(super) instance_picker: Option<InstancePickerView>,
     pub(super) window_close: Option<WindowCloseView>,
     pub(super) status: Option<StatusBarView<'a>>,
     pub(super) ime_preedit: Option<ImePreeditView<'a>>,
@@ -908,6 +912,9 @@ pub(super) fn render_frame(
     }
     if let Some(toolbar) = content.workspace_toolbar {
         render_workspace_toolbar(buffer, stride, width, height, palette, toolbar);
+    }
+    if let Some(strip) = content.server_strip.as_ref() {
+        render_server_strip(buffer, stride, width, height, palette, strip);
     }
     if content.terminal_at_logical_resolution {
         render_terminal_grid(
@@ -961,6 +968,9 @@ pub(super) fn render_frame(
     }
     if let Some(new_terminal) = content.new_terminal {
         render_new_terminal_modal(buffer, stride, width, height, palette, new_terminal);
+    }
+    if let Some(picker) = content.instance_picker.as_ref() {
+        render_instance_picker(buffer, stride, width, height, palette, picker);
     }
     if let Some(confirm) = content.confirm_close {
         render_confirm_close(buffer, stride, width, height, palette, confirm);
@@ -1524,6 +1534,119 @@ fn render_window_close(
             label,
             palette.text,
         );
+    }
+}
+
+/// One chip in the top server strip.
+pub(super) struct ServerStripChipView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) label: String,
+    /// Live instances read as selectable; stale ones are dimmed so leftover
+    /// registry debris stays visible rather than looking clickable.
+    pub(super) can_attach: bool,
+    pub(super) active: bool,
+}
+
+pub(super) struct ServerStripView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) chips: Vec<ServerStripChipView>,
+    pub(super) add: (u32, u32, u32, u32),
+    /// Open chip context menu: frame, `As Window` item, `Close` item.
+    pub(super) menu: Option<ServerStripMenuView>,
+}
+
+pub(super) struct ServerStripMenuView {
+    pub(super) frame: (u32, u32, u32, u32),
+    pub(super) as_window: (u32, u32, u32, u32),
+    pub(super) close: (u32, u32, u32, u32),
+}
+
+fn render_server_strip(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    strip: &ServerStripView,
+) {
+    let (sx, sy, sw, sh) = strip.bounds;
+    fill_rect(buffer, stride, sx, sy, sw, sh, rgb_to_pixel(palette.sidebar));
+    // Divider along the bottom edge separates the strip from the workbench.
+    fill_rect(
+        buffer,
+        stride,
+        sx,
+        sy + sh.saturating_sub(1),
+        sw,
+        1,
+        rgb_to_pixel(palette.divider),
+    );
+    for chip in &strip.chips {
+        let (cx, cy, cw, ch) = chip.bounds;
+        let fill = if chip.active {
+            palette.selection_background
+        } else {
+            palette.composer
+        };
+        fill_rect(buffer, stride, cx, cy, cw, ch, rgb_to_pixel(fill));
+        // Stale rows stay visible but dimmed, so leftover registry debris is
+        // obvious rather than looking like a live server you can click.
+        let text = if chip.can_attach {
+            palette.text
+        } else {
+            palette.divider
+        };
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            cx + 6,
+            cy + ch.saturating_sub(12) / 2,
+            &chip.label,
+            text,
+        );
+    }
+    let (ax, ay, aw, ah) = strip.add;
+    fill_rect(buffer, stride, ax, ay, aw, ah, rgb_to_pixel(palette.composer));
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        ax + aw / 2,
+        ay + ah.saturating_sub(12) / 2,
+        "+",
+        palette.text,
+    );
+    // The menu is drawn last so it sits above the strip and the workbench.
+    if let Some(menu) = strip.menu.as_ref() {
+        let (fx, fy, fw, fh) = menu.frame;
+        fill_rect(buffer, stride, fx, fy, fw, fh, rgb_to_pixel(palette.composer));
+        fill_rect(buffer, stride, fx, fy, fw, 1, rgb_to_pixel(palette.divider));
+        fill_rect(
+            buffer,
+            stride,
+            fx,
+            fy + fh.saturating_sub(1),
+            fw,
+            1,
+            rgb_to_pixel(palette.divider),
+        );
+        for (rect, label) in [(menu.as_window, "As Window"), (menu.close, "Close")] {
+            let (ix, iy, iw, ih) = rect;
+            draw_text(
+                buffer,
+                stride,
+                width,
+                height,
+                ix + 8,
+                iy + ih.saturating_sub(12) / 2,
+                label,
+                palette.text,
+            );
+            let _ = iw;
+        }
     }
 }
 
@@ -2347,6 +2470,124 @@ fn render_settings_modal(
         "Apply",
         true,
     );
+}
+
+/// One row in the instance picker list.
+pub(super) struct InstancePickerRowView {
+    pub(super) label: String,
+    pub(super) detail: String,
+    pub(super) selected: bool,
+    /// Dead registrations stay listed but dimmed, so debris is visible.
+    pub(super) can_attach: bool,
+}
+
+pub(super) struct InstancePickerView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) rows: Vec<InstancePickerRowView>,
+    pub(super) row_height: u32,
+    pub(super) first_row_top: u32,
+    pub(super) error: Option<String>,
+}
+
+pub(super) const INSTANCE_PICKER_WIDTH: u32 = 520;
+pub(super) const INSTANCE_PICKER_ROW_HEIGHT: u32 = 30;
+
+fn render_instance_picker(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    picker: &InstancePickerView,
+) {
+    dim_full_frame(buffer, stride, width, height);
+    let (mx, my, mw, mh) = picker.bounds;
+    fill_rect(buffer, stride, mx, my, mw, mh, rgb_to_pixel(palette.modal));
+    fill_rect(
+        buffer,
+        stride,
+        mx,
+        my,
+        mw,
+        2,
+        rgb_to_pixel(palette.focus_ring),
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 24,
+        my + 18,
+        "Open instance",
+        palette.text,
+    );
+    for (index, row) in picker.rows.iter().enumerate() {
+        let top = picker.first_row_top + index as u32 * picker.row_height;
+        if top + picker.row_height > my + mh {
+            break;
+        }
+        if row.selected {
+            fill_rect(
+                buffer,
+                stride,
+                mx + 12,
+                top,
+                mw.saturating_sub(24),
+                picker.row_height,
+                rgb_to_pixel(palette.selection_background),
+            );
+        }
+        let text = if row.can_attach {
+            palette.text
+        } else {
+            palette.divider
+        };
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            mx + 24,
+            top + picker.row_height.saturating_sub(12) / 2,
+            &row.label,
+            text,
+        );
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            mx + mw / 2,
+            top + picker.row_height.saturating_sub(12) / 2,
+            &row.detail,
+            palette.divider,
+        );
+    }
+    if picker.rows.is_empty() {
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            mx + 24,
+            picker.first_row_top,
+            "No other running instances",
+            palette.divider,
+        );
+    }
+    if let Some(error) = picker.error.as_ref() {
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            mx + 24,
+            my + mh.saturating_sub(28),
+            error,
+            palette.text,
+        );
+    }
 }
 
 fn render_new_terminal_modal(

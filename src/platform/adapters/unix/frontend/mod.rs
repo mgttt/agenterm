@@ -74,6 +74,14 @@ use crate::frontend::close_confirmation::CloseConfirmation;
 use crate::frontend::composer::ComposerWriteMode;
 use crate::frontend::cwd_editor::CwdEditorDialog;
 use crate::frontend::input;
+use crate::frontend::instance_picker::{
+    InstancePickerDialog, InstancePickerMode, InstancePickerRow, collect_instance_picker_rows,
+};
+use crate::frontend::server_strip_ui::{
+    SERVER_TABS_REFRESH, ServerCloseConfirm, ServerContextAction, ServerTabContextMenu, StripRect,
+    layout_server_add_chip, layout_server_context_menu, layout_server_tab_chips,
+    server_tab_chip_label,
+};
 use crate::frontend::interaction::{
     ApplicationMouseMode, CancelTarget, ConfirmTarget, FocusDirection, FocusState, FocusSurface,
     FocusTransitionGate, ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
@@ -333,6 +341,35 @@ struct ComposerClick {
 
 /// Converts a parsed `--mods` list into the modifier state a window event
 /// carries, so synthetic gestures see the same shift/ctrl handling as real ones.
+/// Launches a new GUI process bound to `instance`.
+///
+/// Mirrors the Windows helper of the same name; stdio is null so the child
+/// never inherits this process's console.
+fn spawn_gui_for_instance(instance: &str, endpoint: Option<&str>) -> Result<u32, String> {
+    let exe = std::env::current_exe().map_err(|error| format!("resolve agenterm path: {error}"))?;
+    let short = instance.strip_prefix("custom:").unwrap_or(instance);
+    let mut command = std::process::Command::new(exe);
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // `--endpoint` and `--instance` are conflicting selectors and the launch
+    // parser rejects both together, so prefer the row's live endpoint when we
+    // have one and fall back to the name otherwise.
+    match endpoint {
+        Some(endpoint) => {
+            command.arg("--endpoint").arg(endpoint);
+        }
+        None => {
+            command.arg("--instance").arg(short);
+        }
+    }
+    command
+        .spawn()
+        .map(|child| child.id())
+        .map_err(|error| format!("launch `{short}`: {error}"))
+}
+
 fn modifier_state(modifiers: RequestedModifiers) -> agenterm_platform::input::ModifierState {
     agenterm_platform::input::ModifierState {
         control: modifiers.control,
@@ -646,6 +683,16 @@ struct UnixApp {
     /// offsets. Drives mouse selection, which `composer_select_all` alone
     /// could never express.
     composer_cursor: TextCursor,
+    /// Running server instances shown as chips in the top strip.
+    server_tabs: Vec<InstancePickerRow>,
+    /// Next time `refresh_server_tabs_if_due` may re-scan the registry.
+    server_tabs_refresh_after: Instant,
+    /// Right-click menu on a server chip: `As Window` and `Close`.
+    server_tab_context_menu: Option<ServerTabContextMenu>,
+    /// Pending destructive close, awaiting confirmation.
+    pending_server_close: Option<ServerCloseConfirm>,
+    /// Modal list of running instances to enter or open.
+    instance_picker_dialog: InstancePickerDialog,
     /// Set while the pointer is down inside the composer text, so pointer
     /// motion extends the selection instead of being forwarded to the
     /// terminal's mouse protocol.
@@ -757,6 +804,11 @@ impl UnixApp {
             composer_buffer: String::new(),
             composer_select_all: false,
             composer_cursor: TextCursor::default(),
+            server_tabs: collect_instance_picker_rows().unwrap_or_default(),
+            server_tabs_refresh_after: Instant::now(),
+            server_tab_context_menu: None,
+            pending_server_close: None,
+            instance_picker_dialog: InstancePickerDialog::default(),
             composer_selection_dragging: false,
             composer_click: None,
             text_field_select_all: false,
@@ -1231,6 +1283,388 @@ impl UnixApp {
     }
 
     /// Text currently selected in the composer, if any.
+    /// Re-scans running instances at most every `SERVER_TABS_REFRESH`.
+    ///
+    /// Returns whether the chip set changed, so the caller only repaints on a
+    /// real difference rather than on every frame.
+    fn refresh_server_tabs_if_due(&mut self) -> bool {
+        let now = Instant::now();
+        if now < self.server_tabs_refresh_after && !self.server_tabs.is_empty() {
+            return false;
+        }
+        self.server_tabs_refresh_after = now + SERVER_TABS_REFRESH;
+        let Ok(rows) = collect_instance_picker_rows() else {
+            return false;
+        };
+        if rows == self.server_tabs {
+            return false;
+        }
+        self.server_tabs = rows;
+        true
+    }
+
+    /// Chip rectangles paired with the instance each one represents.
+    fn server_tab_rects(&self) -> Vec<(crate::ui_geometry::PixelRect, &InstancePickerRow)> {
+        let Some(strip) = self.layout().server_strip else {
+            return Vec::new();
+        };
+        let strip = StripRect {
+            left: strip.left,
+            top: strip.top,
+            right: strip.right,
+            bottom: strip.bottom,
+        };
+        layout_server_tab_chips(strip, self.server_tabs.len())
+            .into_iter()
+            .zip(self.server_tabs.iter())
+            .map(|(chip, row)| {
+                (
+                    crate::ui_geometry::PixelRect {
+                        left: chip.left,
+                        top: chip.top,
+                        right: chip.right,
+                        bottom: chip.bottom,
+                    },
+                    row,
+                )
+            })
+            .collect()
+    }
+
+    /// Opens the instance picker over the live registry rows.
+    fn open_instance_picker(&mut self, mode: InstancePickerMode) -> Result<(), String> {
+        if self
+            .focus_gate()
+            .modal_entry_blocked(ModalSurface::InstancePicker)
+            && !self.instance_picker_dialog.is_open()
+        {
+            return Err("another modal is open".to_owned());
+        }
+        let rows = collect_instance_picker_rows()?;
+        self.instance_picker_dialog.open_with_rows(mode, rows);
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn close_instance_picker(&mut self) {
+        self.instance_picker_dialog.close();
+        self.request_redraw();
+    }
+
+    /// Enters the highlighted instance.
+    ///
+    /// Like the strip chips, this opens a window on the target rather than
+    /// rebinding this window's lease, which the embedded frontend cannot do.
+    /// The dialog keeps its error visible on failure instead of closing, so a
+    /// dead row does not silently dismiss the picker.
+    fn confirm_instance_picker(&mut self) -> Result<(), String> {
+        let Some(row) = self.instance_picker_dialog.selected_row().cloned() else {
+            return Err("no instance is selected".to_owned());
+        };
+        let short = row
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(row.instance.as_str());
+        match spawn_gui_for_instance(short, Some(row.endpoint.as_str())) {
+            Ok(pid) => {
+                self.close_instance_picker();
+                self.set_status_message(format!(
+                    "Opened `{}` in a new window (PID {pid})",
+                    row.instance
+                ));
+                Ok(())
+            }
+            Err(error) => {
+                self.instance_picker_dialog.set_error(error.clone());
+                self.request_redraw();
+                Err(error)
+            }
+        }
+    }
+
+    /// Opens the chip context menu at the pointer, anchored under the chip.
+    fn open_server_tab_context_menu(&mut self, x: i32, y: i32, row: &InstancePickerRow) {
+        if self.focus_gate().full_modal_blocked() {
+            return;
+        }
+        self.server_tab_context_menu = Some(ServerTabContextMenu {
+            instance: row.instance.clone(),
+            endpoint: row.endpoint.clone(),
+            can_attach: row.can_attach,
+            origin_x: x,
+            origin_y: y,
+        });
+        self.request_redraw();
+    }
+
+    fn dismiss_server_tab_context_menu(&mut self) -> bool {
+        if self.server_tab_context_menu.take().is_some() {
+            self.request_redraw();
+            return true;
+        }
+        false
+    }
+
+    /// Menu frame plus the `As Window` and `Close` item rects.
+    fn server_context_menu_geometry(
+        &self,
+    ) -> Option<(
+        crate::ui_geometry::PixelRect,
+        crate::ui_geometry::PixelRect,
+        crate::ui_geometry::PixelRect,
+    )> {
+        let menu = self.server_tab_context_menu.as_ref()?;
+        let (client_width, client_height) = self.client_size();
+        let client_right = i32::try_from(client_width).unwrap_or(i32::MAX);
+        let client_bottom = i32::try_from(client_height).unwrap_or(i32::MAX);
+        // Anchor under the owning chip while it is still on screen, so the menu
+        // reads as belonging to that chip rather than floating at the cursor.
+        let anchor_left = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(_, row)| row.instance == menu.instance)
+            .map(|(rect, _)| rect.left);
+        let (frame, as_window, close) = layout_server_context_menu(
+            menu.origin_x,
+            menu.origin_y,
+            client_right,
+            client_bottom,
+            anchor_left,
+        );
+        let to_rect = |r: StripRect| crate::ui_geometry::PixelRect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        };
+        Some((to_rect(frame), to_rect(as_window), to_rect(close)))
+    }
+
+    fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
+        let (_, as_window, close) = self.server_context_menu_geometry()?;
+        if as_window.contains(x, y) {
+            return Some(ServerContextAction::NewWindow);
+        }
+        if close.contains(x, y) {
+            return Some(ServerContextAction::Close);
+        }
+        None
+    }
+
+    /// Handles a click while the context menu is open.
+    ///
+    /// Returns whether the click was consumed. A click outside the menu only
+    /// dismisses it and is *not* consumed, so the same press still reaches the
+    /// strip or workbench underneath -- matching how native menus behave.
+    fn handle_server_context_menu_click(&mut self, x: i32, y: i32) -> bool {
+        let Some((frame, _, _)) = self.server_context_menu_geometry() else {
+            return false;
+        };
+        if !frame.contains(x, y) {
+            self.dismiss_server_tab_context_menu();
+            return false;
+        }
+        let action = self.server_context_action_at(x, y);
+        let Some(menu) = self.server_tab_context_menu.take() else {
+            return true;
+        };
+        match action {
+            Some(ServerContextAction::NewWindow) => {
+                if let Err(error) = self.select_server_tab_by_instance(&menu.instance) {
+                    self.set_status_message(error);
+                }
+            }
+            Some(ServerContextAction::Close) => self.open_server_close_confirm(menu),
+            None => {}
+        }
+        self.request_redraw();
+        true
+    }
+
+    /// Shuts the target server down over IPC.
+    ///
+    /// Closing the server this window is attached to would strand the GUI, so
+    /// that case is refused rather than half-performed; the user can close the
+    /// window itself instead.
+    fn shutdown_server_instance(&mut self, pending: &ServerCloseConfirm) -> Result<(), String> {
+        if !pending.can_attach {
+            return Err(format!(
+                "server `{}` is not live and cannot be shut down from the strip",
+                pending.instance
+            ));
+        }
+        if pending.endpoint == crate::client::ipc_address() {
+            return Err(format!(
+                "`{}` is this window's own server; close the window instead",
+                pending.instance
+            ));
+        }
+        use crate::ipc_endpoint::IpcEndpoint;
+        let parsed = pending
+            .endpoint
+            .parse::<IpcEndpoint>()
+            .map_err(|error| format!("invalid endpoint {}: {error}", pending.endpoint))?;
+        let previous = crate::client::resolved_ipc_endpoint().ok();
+        let short = pending
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(pending.instance.as_str());
+        // Pin the client selectors at the peer for one request, then always put
+        // them back so this window keeps its own attachment even on failure.
+        crate::frontend_server::pin_client_peer_for_gui(&parsed, Some(short))?;
+        let shutdown = crate::client::send_ipc_request(vec!["shutdown".to_owned()]);
+        if let Some(previous) = previous.as_ref() {
+            let _ = crate::frontend_server::pin_client_peer_for_gui(
+                &previous.endpoint,
+                Some(&previous.logical_instance.canonical_name()),
+            );
+        }
+        let response = shutdown.map_err(|error| format!("{error:#}"))?;
+        if !response.ok {
+            return Err(format!(
+                "shutdown of `{}` failed: {}",
+                pending.instance, response.error
+            ));
+        }
+        Ok(())
+    }
+
+    /// Closes the server behind a chip.
+    ///
+    /// Windows stages this behind its own confirm modal. Unix has no
+    /// `ServerClose` modal surface yet, and wiring a pending state with no way
+    /// to confirm or cancel would strand the user, so this acts directly and
+    /// relies on `shutdown_server_instance` to refuse the two dangerous cases
+    /// (a stale row, and this window's own server).
+    ///
+    /// TODO(macos): add the confirm modal for parity once Unix grows a
+    /// `ModalSurface::ServerClose`, so an accidental click on a *live* peer is
+    /// recoverable rather than immediate.
+    fn open_server_close_confirm(&mut self, menu: ServerTabContextMenu) {
+        if !menu.can_attach {
+            // A stale registration has no live owner to shut down; saying so
+            // beats a confirm that could only fail.
+            self.set_status_message(format!(
+                "Server `{}` is not live; nothing to close",
+                menu.instance
+            ));
+            return;
+        }
+        self.pending_server_close = Some(ServerCloseConfirm {
+            instance: menu.instance,
+            endpoint: menu.endpoint,
+            can_attach: menu.can_attach,
+        });
+        if let Err(error) = self.finish_server_close_confirm(true) {
+            self.set_status_message(error);
+        }
+    }
+
+    fn finish_server_close_confirm(&mut self, confirm: bool) -> Result<(), String> {
+        let Some(pending) = self.pending_server_close.take() else {
+            return Ok(());
+        };
+        if !confirm {
+            self.request_redraw();
+            return Ok(());
+        }
+        let instance = pending.instance.clone();
+        let result = self.shutdown_server_instance(&pending);
+        self.server_tabs = collect_instance_picker_rows().unwrap_or_default();
+        self.server_tabs_refresh_after = Instant::now() + SERVER_TABS_REFRESH;
+        self.request_redraw();
+        match result {
+            Ok(()) => {
+                self.set_status_message(format!("Server `{instance}` closed"));
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Opens the chip menu on a right-click inside the strip.
+    ///
+    /// Returns whether the press was consumed, so a right-click on chrome never
+    /// reaches the terminal's mouse reporting.
+    fn handle_server_strip_secondary_click(&mut self, x: i32, y: i32) -> bool {
+        let Some(strip) = self.layout().server_strip else {
+            return false;
+        };
+        if !strip.contains(x, y) {
+            return false;
+        }
+        let row = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(chip, _)| chip.contains(x, y))
+            .map(|(_, row)| row.clone());
+        match row {
+            Some(row) => self.open_server_tab_context_menu(x, y, &row),
+            // Right-clicking empty strip background just closes any open menu.
+            None => {
+                self.dismiss_server_tab_context_menu();
+            }
+        }
+        true
+    }
+
+    /// Routes a click in the top strip to a chip or the add button.
+    ///
+    /// Returns whether the click was consumed, so the workbench below never
+    /// sees a press aimed at the strip.
+    fn handle_server_strip_click(&mut self, x: i32, y: i32) -> bool {
+        let Some(strip) = self.layout().server_strip else {
+            return false;
+        };
+        if !strip.contains(x, y) {
+            return false;
+        }
+        let instance = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(chip, _)| chip.contains(x, y))
+            .map(|(_, row)| row.instance.clone());
+        if let Some(instance) = instance {
+            if let Err(error) = self.select_server_tab_by_instance(&instance) {
+                self.set_status_message(error);
+            }
+            self.request_redraw();
+        }
+        // Clicks on the strip background (including the add button, which has
+        // no Unix dialog yet) are still consumed: the strip is chrome, and
+        // letting a press fall through to the terminal would be worse.
+        true
+    }
+
+    /// Opens a window on `instance`, the way clicking a Windows chip does.
+    ///
+    /// Unix does not rebind the current GUI's lease the way Windows does, so
+    /// this always spawns a window for the target rather than pretending to
+    /// switch in place; that keeps the visible behaviour honest.
+    fn select_server_tab_by_instance(&mut self, instance: &str) -> Result<(), String> {
+        let row = self
+            .server_tabs
+            .iter()
+            .find(|row| {
+                row.instance == instance
+                    || row.instance.strip_prefix("custom:") == Some(instance)
+                    || row.instance_label == instance
+            })
+            .cloned()
+            .ok_or_else(|| format!("server tab `{instance}` is not listed"))?;
+        if row.endpoint == crate::client::ipc_address() {
+            self.set_status_message(format!("Already on `{}`", row.instance));
+            return Ok(());
+        }
+        let short = row
+            .instance
+            .strip_prefix("custom:")
+            .unwrap_or(row.instance.as_str());
+        let pid = spawn_gui_for_instance(short, Some(row.endpoint.as_str()))?;
+        self.set_status_message(format!("Opened `{}` in a new window (PID {pid})", row.instance));
+        Ok(())
+    }
+
     fn composer_selected_text(&self) -> Option<String> {
         text_selection::selected_text(&self.composer_buffer, self.composer_cursor)
     }
@@ -1282,7 +1716,7 @@ impl UnixApp {
             tab_editor_open: self.tab_editor_dialog.is_open(),
             close_confirmation_open: self.close_confirmation.is_open(),
             cwd_editor_open: self.cwd_editor_dialog.is_open(),
-            instance_picker_open: false,
+            instance_picker_open: self.instance_picker_dialog.is_open(),
             server_new_open: false,
             server_close_pending: false,
         }
@@ -1829,12 +2263,22 @@ impl UnixApp {
             let _ = self.complete_tab_editor(false);
         }
         self.sync_composer_buffer_to_tab();
+        // Carry the active tab and its current override in, so the dialog can
+        // offer the Current Terminal scope. Opening with `None` here is what
+        // made `switch_scope` silently refuse on Unix: it declines whenever
+        // there is no target tab, so the whole per-terminal appearance surface
+        // was unreachable even though the shared state machine supports it.
+        let address = crate::client::ipc_address();
+        let target_tab_id = self.active_id().map(|id| format!("@{id}"));
+        let override_draft = target_tab_id
+            .as_deref()
+            .map(|tab_id| self.config.terminal_override(&address, tab_id))
+            .unwrap_or_default();
         settings::ui_action_open(
             &mut self.settings_dialog,
-            self.config
-                .effective_terminal_appearance(&crate::client::ipc_address(), None),
-            None,
-            TerminalAppearanceOverride::default(),
+            self.config.effective_terminal_appearance(&address, None),
+            target_tab_id,
+            override_draft,
         );
         self.set_focus_surface_internal(UnixFocusSurface::Settings, "semantic");
     }
@@ -1849,6 +2293,17 @@ impl UnixApp {
             self.config.terminal_font_family = changes.default_appearance.terminal_font_family;
             self.config.terminal_font_size = changes.default_appearance.terminal_font_size;
             self.config.appearance_preset = changes.default_appearance.appearance_preset;
+            // Persist the per-terminal override too. Applying only the default
+            // appearance silently discarded everything the Current Terminal
+            // scope had just edited, so the scope switch would appear to work
+            // and then lose the user's change on apply.
+            if let Some(tab_id) = changes.target_tab_id.as_deref() {
+                self.config.set_terminal_override(
+                    &crate::client::ipc_address(),
+                    tab_id,
+                    changes.override_draft.clone(),
+                );
+            }
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
             self.refresh_window_title();
         }
@@ -2454,6 +2909,51 @@ impl UnixApp {
                     "scrollbar": sidebar_scrollbar,
                 },
                 "toolbar": layout.workspace_toolbar.map(workspace_toolbar_snapshot_json),
+                // Chips carry their own bounds so an agent can click one the
+                // same way a human does, via `ui-input pointer`.
+                "server_strip": layout.server_strip.map(|strip| {
+                    serde_json::json!({
+                        "bounds": pixel_rect_json(strip),
+                        "tabs": self
+                            .server_tab_rects()
+                            .into_iter()
+                            .map(|(chip, row)| serde_json::json!({
+                                "instance": row.instance,
+                                "label": server_tab_chip_label(
+                                    &row.instance,
+                                    row.can_attach,
+                                ),
+                                "can_attach": row.can_attach,
+                                "pid": row.pid,
+                                "tab_count": row.tab_count,
+                                "bounds": pixel_rect_json(chip),
+                            }))
+                            .collect::<Vec<_>>(),
+                        // Menu item bounds so an agent can drive `As Window` /
+                        // `Close` with `ui-input pointer`, as a human does.
+                        "menu": self.server_context_menu_geometry().map(
+                            |(frame, as_window, close)| serde_json::json!({
+                                "bounds": pixel_rect_json(frame),
+                                "as_window": pixel_rect_json(as_window),
+                                "close": pixel_rect_json(close),
+                            }),
+                        ),
+                        "add": pixel_rect_json({
+                            let add = layout_server_add_chip(StripRect {
+                                left: strip.left,
+                                top: strip.top,
+                                right: strip.right,
+                                bottom: strip.bottom,
+                            });
+                            crate::ui_geometry::PixelRect {
+                                left: add.left,
+                                top: add.top,
+                                right: add.right,
+                                bottom: add.bottom,
+                            }
+                        }),
+                    })
+                }),
                 "terminal": {
                     "x": layout.terminal.left,
                     "y": layout.terminal.top,
@@ -2542,13 +3042,7 @@ impl UnixApp {
                 ModalSurface::NewTerminal => self.new_terminal_dialog.snapshot_modal(),
                 ModalSurface::CwdEditor => self.cwd_editor_dialog.snapshot_modal(),
                 ModalSurface::TabClose => self.close_confirmation.snapshot_modal(),
-                ModalSurface::InstancePicker => serde_json::json!({
-                    "kind": "instance-picker",
-                    "mode": "attach",
-                    "rows": [],
-                    "selected": 0,
-                    "error": "instance picker is Windows-first in this build",
-                }),
+                ModalSurface::InstancePicker => self.instance_picker_dialog.snapshot_modal(),
                 ModalSurface::ServerNew | ModalSurface::ServerClose => serde_json::json!({
                     "kind": "server-strip",
                     "error": "server strip dialogs are Windows-first in this build",
@@ -2855,6 +3349,12 @@ impl UnixApp {
 
     fn handle_content_click(&mut self, x: f64, y: f64) {
         if self.handle_window_close_click(x, y) {
+            return;
+        }
+        if self.handle_server_context_menu_click(x as i32, y as i32) {
+            return;
+        }
+        if self.handle_server_strip_click(x as i32, y as i32) {
             return;
         }
         if self.tab_editor_dialog.is_open() {
@@ -4319,6 +4819,77 @@ impl UnixApp {
         };
 
         let modal_active = self.modal_surface_active();
+        // Rows carry their own geometry so the painted list and any future
+        // hit-test agree; keyboard and ui-action drive it today.
+        let instance_picker_view = self.instance_picker_dialog.is_open().then(|| {
+            let (client_width, client_height) = self.client_size();
+            let width = render::INSTANCE_PICKER_WIDTH.min(client_width.saturating_sub(32).max(1));
+            let rows: Vec<_> = self
+                .instance_picker_dialog
+                .rows()
+                .iter()
+                .enumerate()
+                .map(|(index, row)| render::InstancePickerRowView {
+                    label: row.instance_label.clone(),
+                    detail: format!("pid {} · {}", row.pid, row.classification),
+                    selected: index == self.instance_picker_dialog.selected_index(),
+                    can_attach: row.can_attach,
+                })
+                .collect();
+            let body = 56 + rows.len().max(1) as u32 * render::INSTANCE_PICKER_ROW_HEIGHT + 40;
+            let height = body.min(client_height.saturating_sub(32).max(1));
+            let left = client_width.saturating_sub(width) / 2;
+            let top = client_height.saturating_sub(height) / 2;
+            render::InstancePickerView {
+                bounds: (left, top, width, height),
+                rows,
+                row_height: render::INSTANCE_PICKER_ROW_HEIGHT,
+                first_row_top: top + 48,
+                error: self
+                    .instance_picker_dialog
+                    .last_error()
+                    .map(ToOwned::to_owned),
+            }
+        });
+
+        // Chip geometry comes from the shared strip layout, so the painted
+        // chips and the snapshot bounds an agent clicks are the same rects.
+        let active_instance = crate::client::ipc_address();
+        let server_strip_view = layout.server_strip.map(|strip| {
+            let chips = self
+                .server_tab_rects()
+                .into_iter()
+                .map(|(chip, row)| render::ServerStripChipView {
+                    bounds: u32_rect(chip),
+                    label: server_tab_chip_label(&row.instance, row.can_attach),
+                    can_attach: row.can_attach,
+                    active: row.endpoint == active_instance,
+                })
+                .collect();
+            let add = layout_server_add_chip(StripRect {
+                left: strip.left,
+                top: strip.top,
+                right: strip.right,
+                bottom: strip.bottom,
+            });
+            render::ServerStripView {
+                menu: self.server_context_menu_geometry().map(
+                    |(frame, as_window, close)| render::ServerStripMenuView {
+                        frame: u32_rect(frame),
+                        as_window: u32_rect(as_window),
+                        close: u32_rect(close),
+                    },
+                ),
+                bounds: u32_rect(strip),
+                chips,
+                add: u32_rect(crate::ui_geometry::PixelRect {
+                    left: add.left,
+                    top: add.top,
+                    right: add.right,
+                    bottom: add.bottom,
+                }),
+            }
+        });
         let workspace_toolbar = if !self.focus_gate().workspace_controls_visible() {
             None
         } else {
@@ -4444,12 +5015,14 @@ impl UnixApp {
                 editing_tab_id,
                 tab_editor,
                 workspace_toolbar,
+                server_strip: server_strip_view,
                 terminal_top: layout.terminal.top.max(0) as u32,
                 composer: composer_view,
                 scrollbar,
                 sidebar_scrollbar,
                 settings,
                 confirm_close,
+                instance_picker: instance_picker_view,
                 window_close,
                 new_terminal,
                 status: Some(status_view),
@@ -4983,6 +5556,94 @@ impl ControlHost for UnixApp {
         }
     }
 
+    fn open_instance_picker_modal(&mut self, mode: &str) -> Result<(), String> {
+        let mode = InstancePickerMode::parse(mode).unwrap_or(InstancePickerMode::Attach);
+        self.open_instance_picker(mode)
+    }
+
+    fn instance_picker_select(
+        &mut self,
+        target: crate::control_dispatch::InstancePickerTarget,
+    ) -> Result<(), String> {
+        use crate::control_dispatch::InstancePickerTarget;
+        if !self.instance_picker_dialog.is_open() {
+            return Err("instance picker is not open".to_owned());
+        }
+        match target {
+            InstancePickerTarget::Next => self.instance_picker_dialog.select_next(),
+            InstancePickerTarget::Prev => self.instance_picker_dialog.select_prev(),
+            InstancePickerTarget::Name(name) => {
+                self.instance_picker_dialog.select_by_instance(&name)?;
+            }
+            InstancePickerTarget::Pid(pid) => {
+                self.instance_picker_dialog.select_by_pid(pid)?;
+            }
+        }
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn instance_picker_confirm(&mut self) -> Result<(), String> {
+        if !self.instance_picker_dialog.is_open() {
+            return Err("instance picker is not open".to_owned());
+        }
+        self.confirm_instance_picker()
+    }
+
+    fn instance_picker_cancel(&mut self) -> Result<(), String> {
+        if !self.instance_picker_dialog.is_open() {
+            return Err("instance picker is not open".to_owned());
+        }
+        self.close_instance_picker();
+        Ok(())
+    }
+
+    fn select_server_tab(&mut self, instance: &str) -> Result<(), String> {
+        // Always re-read on an explicit select: the 2s cache otherwise makes a
+        // click look dead right after a second server starts.
+        self.server_tabs = collect_instance_picker_rows().unwrap_or_default();
+        self.server_tabs_refresh_after = Instant::now() + SERVER_TABS_REFRESH;
+        self.select_server_tab_by_instance(instance)?;
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn switch_settings_scope(&mut self, scope: settings::SettingsScope) -> Result<(), String> {
+        if !self.settings_dialog.is_open() {
+            return Err("Settings is not open".to_owned());
+        }
+        // `switch_scope` reports `false` when the move is a no-op (already in
+        // that scope, or no target terminal to override). Redraw only when it
+        // actually changed something.
+        if self.settings_dialog.switch_scope(scope)? {
+            self.request_redraw();
+        }
+        Ok(())
+    }
+
+    fn toggle_settings_inheritance(
+        &mut self,
+        field: settings::AppearanceField,
+    ) -> Result<(), String> {
+        if !self.settings_dialog.is_open() {
+            return Err("Settings is not open".to_owned());
+        }
+        if self.settings_dialog.toggle_inheritance(field)? {
+            self.request_redraw();
+        }
+        Ok(())
+    }
+
+    fn reset_settings_overrides(&mut self) -> Result<(), String> {
+        if !self.settings_dialog.is_open() {
+            return Err("Settings is not open".to_owned());
+        }
+        if self.settings_dialog.reset_overrides() {
+            self.request_redraw();
+        }
+        Ok(())
+    }
+
     fn open_tab_editor(&mut self, tab_id: u64) -> Result<(), String> {
         self.open_tab_editor_for(tab_id)
     }
@@ -5018,7 +5679,8 @@ impl ControlHost for UnixApp {
                 return Ok(true);
             }
             CancelTarget::InstancePicker => {
-                return Err("instance picker is Windows-first in this build".to_owned());
+                self.close_instance_picker();
+                return Ok(true);
             }
             CancelTarget::None => {}
         }
@@ -5039,7 +5701,8 @@ impl ControlHost for UnixApp {
                 Ok(true)
             }
             ConfirmTarget::InstancePicker => {
-                Err("instance picker is Windows-first in this build".to_owned())
+                self.confirm_instance_picker()?;
+                Ok(true)
             }
             ConfirmTarget::None => Ok(false),
         }
@@ -5772,6 +6435,14 @@ impl UnixApp {
                     .unwrap_or(self.last_cursor);
                 match state {
                     PointerButtonState::Pressed => {
+                        // Chrome wins over terminal mouse reporting: a
+                        // right-click on the server strip must open its menu,
+                        // not travel to the shell as an SGR report.
+                        if button == PointerButton::Right
+                            && self.handle_server_strip_secondary_click(x as i32, y as i32)
+                        {
+                            return;
+                        }
                         if self.forward_terminal_mouse(x, y, Some(code), true, false) {
                             self.mouse_report_button = Some(code);
                         }

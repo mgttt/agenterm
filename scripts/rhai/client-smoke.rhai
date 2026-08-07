@@ -8,6 +8,28 @@ fn require(condition, message) {
     }
 }
 
+fn package_version(repo) {
+    let cargo = std::fs::read_to_string(
+        std::path::join(repo, "Cargo.toml").display
+    );
+    let in_package = false;
+    for source_line in cargo.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line.starts_with("[") {
+            in_package = line == "[package]";
+            continue;
+        }
+        if in_package && line.starts_with("version") {
+            let parts = line.split("\"");
+            if parts.len >= 2 {
+                return parts[1];
+            }
+        }
+    }
+    ""
+}
+
 require(
     args.len == 4 || (args.len == 5 && args[4] == "--existence-only"),
     "expected: REPO OS ARCH BINARY_DIRECTORY [--existence-only]"
@@ -27,9 +49,33 @@ for platform in manifest.platforms {
     }
 }
 require(matches.len == 1, "client_smoke_platform_match");
+let version = package_version(repo);
+require(version != "", "client_smoke_package_version");
+let scripting_cli_count = 0;
+let rh_dev_cli_count = 0;
 for executable in matches[0].executables {
     let path = std::path::join(binary_directory, executable.name).display;
     require(std::fs::exists(path), "client_smoke_missing:" + executable.name);
+    let metadata = std::fs::metadata(path);
+    require(
+        metadata.is_file && metadata.len > 0,
+        "client_smoke_file_invalid:" + executable.name
+    );
+    if executable.role == "scripting-cli" {
+        scripting_cli_count += 1;
+        require(
+            executable.offline_probe.len == 1
+                && executable.offline_probe[0] == "--version",
+            "client_smoke_rhai_version_probe_missing"
+        );
+    } else if executable.role == "rh-dev-cli" {
+        rh_dev_cli_count += 1;
+        require(
+            executable.offline_probe.len == 1
+                && executable.offline_probe[0] == "version",
+            "client_smoke_rh_version_probe_missing"
+        );
+    }
     if !existence_only {
         let probes = [];
         if executable.role == "control-center-gui" {
@@ -94,8 +140,17 @@ for executable in matches[0].executables {
                         ),
                     "client_smoke_webview_host_contract"
                 );
+            } else if executable.role == "rh-dev-cli" {
+                let banner = output.stdout_text();
+                banner.trim();
+                require(
+                    banner == "agenterm-rh " + version,
+                    "client_smoke_rh_version_banner:" + banner
+                );
             }
         }
     }
 }
+require(scripting_cli_count == 1, "client_smoke_scripting_cli_count");
+require(rh_dev_cli_count == 1, "client_smoke_rh_dev_cli_count");
 print("PASS client entrypoints " + os_name + "-" + arch);

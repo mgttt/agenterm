@@ -175,15 +175,13 @@ fn categorize_path(relative: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{scan_caller_inventory, CallerInventoryOptions, NEEDLE};
+    use super::{CallerInventoryOptions, NEEDLE, scan_caller_inventory};
 
     #[test]
     fn caller_inventory_finds_operational_references() {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let report = scan_caller_inventory(CallerInventoryOptions {
-            project_root: repo,
-        })
-        .expect("inventory");
+        let report = scan_caller_inventory(CallerInventoryOptions { project_root: repo })
+            .expect("inventory");
         assert_eq!(report.needle, NEEDLE);
         assert!(report.hit_count >= 40, "hits {}", report.hit_count);
         assert!(

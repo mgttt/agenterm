@@ -331,10 +331,25 @@ fn stmt_uses_host(stmt: &Stmt) -> bool {
     }
 }
 
+pub fn is_var_len_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Dot(boxed, ..) => {
+            matches!(&boxed.lhs, Expr::Variable(..))
+                && (matches!(&boxed.rhs, Expr::Property(prop, ..) if prop.2.as_str() == "len")
+                    || matches!(
+                        &boxed.rhs,
+                        Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
+                    ))
+        }
+        _ => false,
+    }
+}
+
 pub fn is_pure_int_expr(expr: &Expr) -> bool {
     match expr {
         Expr::IntegerConstant(..) => true,
         Expr::Variable(..) => true,
+        e if is_var_len_expr(e) => true,
         Expr::FnCall(call, ..) if call.op_token.is_some() => call.args.iter().all(is_pure_int_expr),
         Expr::FnCall(call, ..) if call.name == "throw" => false,
         Expr::FnCall(..) | Expr::MethodCall(..) => false,
@@ -354,7 +369,7 @@ pub fn is_pure_int_expr(expr: &Expr) -> bool {
 mod tests {
     use rhai::Engine;
 
-    use super::{expr_to_rhai, uses_host_surface};
+    use super::{expr_to_rhai, is_pure_int_expr, is_var_len_expr, uses_host_surface};
 
     fn parse_expr(source: &str) -> rhai::Expr {
         let wrapped = format!("fn probe() {{ {source} }}");
@@ -365,6 +380,17 @@ mod tests {
             rhai::Stmt::FnCall(call, ..) => rhai::Expr::FnCall(call.clone(), rhai::Position::NONE),
             other => panic!("unexpected stmt: {other:?}"),
         }
+    }
+
+    #[test]
+    fn var_len_is_pure_int_expr() {
+        let len_prop = parse_expr("args.len");
+        let len_call = parse_expr("args.len()");
+        assert!(is_var_len_expr(&len_prop));
+        assert!(is_var_len_expr(&len_call));
+        assert!(is_pure_int_expr(&len_prop));
+        assert!(is_pure_int_expr(&len_call));
+        assert!(!is_pure_int_expr(&parse_expr("std::fs::exists(`/tmp`)")));
     }
 
     #[test]

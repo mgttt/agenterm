@@ -2,6 +2,23 @@ use std::sync::LazyLock;
 
 static WORKFLOW: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/ci.yml").replace("\r\n", "\n"));
+static WINDOWS_FULL_GATE: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/win-full-gate.yml").replace("\r\n", "\n"));
+static CHECK: LazyLock<String> =
+    LazyLock::new(|| include_str!("../scripts/rhai/check.rhai").replace("\r\n", "\n"));
+static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../scripts/rhai/artifact-verification.rhai").replace("\r\n", "\n")
+});
+static CLIENT_SMOKE: LazyLock<String> =
+    LazyLock::new(|| include_str!("../scripts/rhai/client-smoke.rhai").replace("\r\n", "\n"));
+static ROOT_MANIFEST: &str = include_str!("../Cargo.toml");
+static RH_MANIFEST: &str = include_str!("../crates/agenterm-rh/Cargo.toml");
+static UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
+static WINDOWS_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
+static ARTIFACT_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../scripts/artifacts.json"))
+        .expect("scripts/artifacts.json must be valid JSON")
+});
 
 fn job_span(name: &str, next_job: Option<&str>) -> &'static str {
     let marker = format!("  {name}:\n");
@@ -13,6 +30,50 @@ fn job_span(name: &str, next_job: Option<&str>) -> &'static str {
         .unwrap_or(WORKFLOW.len());
     assert!(end > start, "CI job span for {name} is empty");
     &WORKFLOW[start..end]
+}
+
+fn normalized_task_callers(source: &str) -> String {
+    source
+        .replace('\\', "/")
+        .replace(".exe", "")
+        .replace('"', "")
+}
+
+#[test]
+fn ci_manifest_task_entrypoints_use_rh_front_door() {
+    for (name, source) in [
+        ("ci", WORKFLOW.as_str()),
+        ("win-full-gate", WINDOWS_FULL_GATE.as_str()),
+    ] {
+        let normalized = normalized_task_callers(source);
+        let task_runs = normalized.matches("task run").count();
+        let rh_task_runs = normalized.matches("agenterm-rh task run").count();
+        assert!(task_runs > 0, "{name} must retain manifest task coverage");
+        assert_eq!(
+            rh_task_runs, task_runs,
+            "{name} has a task run outside the agenterm-rh front door"
+        );
+        assert!(
+            !normalized.contains("agenterm-rhai task run"),
+            "{name} regressed to the compatibility CLI"
+        );
+    }
+}
+
+#[test]
+fn dist_task_worker_prefers_rh_with_explicit_compatibility_fallback() {
+    let rh = CHECK
+        .find("[\"dist/agenterm-rh.exe\", \"dist/agenterm-rh\"]")
+        .expect("dist rh candidates");
+    let compatibility = CHECK
+        .find("[\"dist/agenterm-rhai.exe\", \"dist/agenterm-rhai\"]")
+        .expect("dist compatibility candidates");
+    let selection = CHECK
+        .find("let worker = if dist_rh_cli != \"\"")
+        .expect("rh-first worker selection");
+    assert!(rh < compatibility && compatibility < selection);
+    assert!(CHECK.contains("COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai"));
+    assert!(CHECK.contains("check_dist_task_worker_missing"));
 }
 
 #[test]
@@ -48,4 +109,68 @@ fn macos_ci_cross_compiles_rh_reference_pack() {
     assert!(job.contains("AGENTERM_RH_QUALIFY_TARGET"));
     assert!(job.contains("cargo check -p agenterm-rh --locked"));
     assert!(job.contains("cross_compiles_reference_pack_when_target_env_set"));
+}
+
+#[test]
+fn rh_binary_is_owned_and_built_by_root_package() {
+    let root_bin = "[[bin]]\nname = \"agenterm-rh\"\npath = \"crates/agenterm-rh/src/main.rs\"";
+    assert!(ROOT_MANIFEST.contains(root_bin));
+    assert!(RH_MANIFEST.contains("autobins = false"));
+    assert!(!RH_MANIFEST.contains("[[bin]]"));
+
+    let root_build = "cargo build --quiet --locked --bin agenterm-rh";
+    let old_package_build = "-p agenterm-rh --bin agenterm-rh";
+    assert!(UNIX_BOOTSTRAP.contains(root_build));
+    assert!(WINDOWS_BOOTSTRAP.contains(root_build));
+    assert!(!UNIX_BOOTSTRAP.contains(old_package_build));
+    assert!(!WINDOWS_BOOTSTRAP.contains(old_package_build));
+}
+
+#[test]
+fn artifact_manifest_declares_both_rhai_and_rh_offline_version_probes() {
+    let executables = ARTIFACT_MANIFEST["executables"]
+        .as_array()
+        .expect("manifest executables");
+    let role = |expected: &str| {
+        let matches = executables
+            .iter()
+            .filter(|entry| entry["role"] == expected)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "expected one {expected} executable");
+        matches[0]
+    };
+
+    let rhai = role("scripting-cli");
+    assert_eq!(rhai["name"], "agenterm-rhai.exe");
+    assert_eq!(rhai["offline_probe"], serde_json::json!(["--version"]));
+
+    let rh = role("rh-dev-cli");
+    assert_eq!(rh["name"], "agenterm-rh.exe");
+    assert_eq!(rh["offline_probe"], serde_json::json!(["version"]));
+}
+
+#[test]
+fn artifact_verification_probes_manifest_roles_and_rejects_invalid_versions() {
+    assert!(ARTIFACT_VERIFICATION.contains("artifact_for_role(manifest, \"scripting-cli\")"));
+    assert!(ARTIFACT_VERIFICATION.contains("artifact_for_role(manifest, \"rh-dev-cli\")"));
+    assert!(ARTIFACT_VERIFICATION.contains("artifact.offline_probe[0] == probe_argument"));
+    assert!(ARTIFACT_VERIFICATION.contains("std::fs::metadata(path).len > 0"));
+    assert!(ARTIFACT_VERIFICATION.contains("output(path, artifact.offline_probe, repo, code)"));
+    assert!(ARTIFACT_VERIFICATION.contains("== banner + \" \" + version"));
+    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rhai_version\""));
+    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rh_version\""));
+    assert!(!ARTIFACT_VERIFICATION.contains("dist, \"agenterm-rh.exe\""));
+}
+
+#[test]
+fn client_smoke_fail_closes_rh_version_probe_from_platform_manifest() {
+    assert!(CLIENT_SMOKE.contains("metadata.is_file && metadata.len > 0"));
+    assert!(CLIENT_SMOKE.contains("executable.role == \"scripting-cli\""));
+    assert!(CLIENT_SMOKE.contains("executable.role == \"rh-dev-cli\""));
+    assert!(CLIENT_SMOKE.contains("executable.offline_probe[0] == \"--version\""));
+    assert!(CLIENT_SMOKE.contains("executable.offline_probe[0] == \"version\""));
+    assert!(CLIENT_SMOKE.contains("probes.push(executable.offline_probe)"));
+    assert!(CLIENT_SMOKE.contains("banner == \"agenterm-rh \" + version"));
+    assert!(CLIENT_SMOKE.contains("scripting_cli_count == 1"));
+    assert!(CLIENT_SMOKE.contains("rh_dev_cli_count == 1"));
 }

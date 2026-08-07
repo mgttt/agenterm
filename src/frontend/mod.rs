@@ -299,17 +299,17 @@ pub(crate) fn parse_gui_launch_arguments(
             }
         }
     }
-    let selector_count = [
-        selectors.endpoint.is_some(),
-        selectors.address.is_some(),
-        selectors.instance.is_some(),
-    ]
-    .into_iter()
-    .filter(|selected| *selected)
-    .count();
-    if selector_count > 1 {
+    // Match the platform IPC contract: authority conflicts only.
+    // --endpoint may pair with --instance for attach identity / labels.
+    // --endpoint + --address, and --address + --instance, remain exclusive.
+    let has_endpoint = selectors.endpoint.is_some();
+    let has_address = selectors.address.is_some();
+    let has_instance = selectors.instance.is_some();
+    if (has_endpoint && has_address) || (has_address && has_instance) {
         return Err(format!(
-            "{name} --endpoint, --address, and --instance are mutually exclusive",
+            "{name} --endpoint and --address are mutually exclusive; \
+             --address and --instance are mutually exclusive. \
+             --endpoint may pair with --instance for identity (attach/peer pin).",
             name = policy.launcher_name
         ));
     }
@@ -524,6 +524,25 @@ mod tests {
             result.is_err(),
             "endpoint and address flags should remain mutually exclusive"
         );
+    }
+
+    #[test]
+    fn shared_gui_launch_parser_allows_endpoint_with_instance_identity() {
+        let parsed = parse_gui_launch_arguments(
+            &[
+                "--endpoint".to_owned(),
+                "tcp:127.0.0.1:48815".to_owned(),
+                "--instance".to_owned(),
+                "dev".to_owned(),
+            ],
+            UNIX_GUI_LAUNCH_POLICY,
+        )
+        .expect("endpoint may pair with instance for attach identity");
+        assert_eq!(
+            parsed.selectors.endpoint.as_deref(),
+            Some("tcp:127.0.0.1:48815")
+        );
+        assert_eq!(parsed.selectors.instance.as_deref(), Some("dev"));
     }
 
     #[test]

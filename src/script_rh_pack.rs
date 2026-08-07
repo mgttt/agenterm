@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn rh_pack_observability_without_env() {
         let value = super::rh_pack_observability();
-        assert_eq!(value["script_backend"], "rhai");
+        assert_eq!(value["script_backend"], "rh");
         assert!(value["rh_pack"].is_null());
     }
 

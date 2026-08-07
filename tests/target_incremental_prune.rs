@@ -9,7 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const BUILD_TASK: &str = include_str!("../scripts/rhai/build.rhai");
-const SCRIPT_BINARY: &str = include_str!("../src/bin/agenterm-rhai.rs");
+const INCREMENTAL_WRAPPER_SOURCE: &str = include_str!("../src/incremental_wrapper.rs");
 
 fn fixture_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -73,7 +73,7 @@ fn session_lock(unit: &Path, timestamp: &str, random: &str) -> PathBuf {
 
 fn run_prune(root: &Path) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .args(["task", "run", "prune-target-incremental", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -92,7 +92,7 @@ fn run_prune(root: &Path) -> Output {
 
 fn run_prune_with_manifest(root: &Path, manifest: &Path, invocation: &str) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .args(["task", "run", "prune-target-incremental", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -236,24 +236,66 @@ fn development_build_uses_only_the_stable_wrapper_and_finalizes_after_staging() 
 
 #[test]
 fn wrapper_source_owns_the_cargo_lock_barrier_and_exact_touch_evidence() {
-    let cargo_lock = SCRIPT_BINARY
+    let cargo_lock = INCREMENTAL_WRAPPER_SOURCE
         .find("let cargo_lock_observed = cargo_lock_is_held")
         .expect("Cargo lock observation");
-    let before = SCRIPT_BINARY
+    let before = INCREMENTAL_WRAPPER_SOURCE
         .find("let snapshot = snapshot_incremental_roots")
         .expect("before snapshot");
-    let touch = SCRIPT_BINARY
+    let touch = INCREMENTAL_WRAPPER_SOURCE
         .find("touch.roots.insert(touched_name)")
         .expect("exact touched root record");
-    let compiler = SCRIPT_BINARY
+    let compiler = INCREMENTAL_WRAPPER_SOURCE
         .find("Command::new(compiler).args(rustc_arguments).status()")
         .expect("transparent compiler forward");
     assert!(cargo_lock < before && before < touch && touch < compiler);
-    assert!(SCRIPT_BINARY.contains("barrier.lock()?"));
-    assert!(SCRIPT_BINARY.contains("full-tree-metadata-v1"));
-    assert!(SCRIPT_BINARY.contains("!incremental_poison_present(&state.join(\"invalid\"))"));
-    assert!(SCRIPT_BINARY.contains("agenterm::is_direct_directory(&entry.path())"));
-    assert!(SCRIPT_BINARY.contains("agenterm::is_direct_file(path)"));
+    assert!(INCREMENTAL_WRAPPER_SOURCE.contains("barrier.lock()?"));
+    assert!(INCREMENTAL_WRAPPER_SOURCE.contains("full-tree-metadata-v1"));
+    assert!(
+        INCREMENTAL_WRAPPER_SOURCE
+            .contains("!incremental_poison_present(&state.join(\"invalid\"))")
+    );
+    assert!(INCREMENTAL_WRAPPER_SOURCE.contains("crate::is_direct_directory(&entry.path())"));
+    assert!(INCREMENTAL_WRAPPER_SOURCE.contains("crate::is_direct_file(path)"));
+}
+
+#[test]
+fn both_executables_dispatch_incremental_wrapper_mode() {
+    let root = initialize_fixture("wrapper-parity");
+    let target = root.join("target");
+    let incremental = target.join("debug/incremental");
+    let invocation = "test-wrapper-parity-0001";
+    let state = target.join("debug/.agenterm-incremental").join(invocation);
+    let compiler_probe = Path::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+    let direct = Command::new(compiler_probe)
+        .arg("--version")
+        .output()
+        .expect("run direct compiler probe");
+
+    for executable in [
+        Path::new(env!("CARGO_BIN_EXE_agenterm-rh")),
+        Path::new(env!("CARGO_BIN_EXE_agenterm-rhai")),
+    ] {
+        let wrapped = Command::new(executable)
+            .env(
+                "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+                "agenterm-incremental-manifest-v1",
+            )
+            .env("AGENTERM_INCREMENTAL_INVOCATION_ID", invocation)
+            .env("AGENTERM_INCREMENTAL_TARGET", &target)
+            .env("AGENTERM_INCREMENTAL_ROOT", &incremental)
+            .env("AGENTERM_INCREMENTAL_STATE", &state)
+            .env("RUSTC_WRAPPER", executable)
+            .arg(compiler_probe)
+            .arg("--version")
+            .output()
+            .expect("run wrapper parity probe");
+        assert_eq!(wrapped.status.code(), direct.status.code());
+        assert_eq!(wrapped.stdout, direct.stdout);
+        assert_eq!(wrapped.stderr, direct.stderr);
+    }
+
+    fs::remove_dir_all(root).expect("remove wrapper parity fixture");
 }
 
 #[test]
@@ -271,7 +313,7 @@ fn rustc_wrapper_snapshots_under_cargo_lock_and_finalizes_exact_touch_manifest()
     let state = target.join("debug/.agenterm-incremental").join(invocation);
     fs::create_dir_all(&state).expect("create producer state");
     let touched = incremental.join("probe-root");
-    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     let compiler_probe = Path::new(env!("CARGO_BIN_EXE_agenterm-cli"));
     let compiler_arguments = [
         "--crate-name".to_owned(),
@@ -355,7 +397,7 @@ fn hot_build_without_a_real_incremental_rustc_cannot_authorize_roots() {
     let state = target.join("debug/.agenterm-incremental").join(invocation);
     fs::create_dir_all(&state).expect("create empty producer state");
     let manifest = state.join("manifest.json");
-    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     let finalized = Command::new(executable)
         .env(
             "AGENTERM_INTERNAL_RUSTC_WRAPPER",

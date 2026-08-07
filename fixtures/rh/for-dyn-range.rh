@@ -1,0 +1,8 @@
+fn entry() {
+    let total = 0;
+    let limit = 4;
+    for value in 1..limit {
+        total += value;
+    }
+    total
+}

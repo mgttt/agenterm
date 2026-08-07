@@ -4,7 +4,7 @@ use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
-    expr_print::{expr_to_rhai, is_pure_int_expr, uses_host_surface},
+    expr_print::{expr_to_rhai, is_pure_int_expr, is_var_len_expr, uses_host_surface},
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
     host_api::{emit_host_runtime, rust_raw_string_literal},
     subset::{compat_validate, validate_ast},
@@ -401,17 +401,39 @@ fn emit_stmt(
         }
         Stmt::For(boxed, ..) => {
             let (counter, _, flow) = boxed.as_ref();
-            if let Some(items) = int_for_iterable(&flow.expr) {
-                out.push_str("    for ");
-                out.push_str(counter.name.as_str());
-                out.push_str(" in [");
-                for (index, item) in items.iter().enumerate() {
-                    if index > 0 {
-                        out.push_str(", ");
+            if let Some(plan) = int_for_plan(&flow.expr) {
+                match plan {
+                    IntForPlan::Values(items) => {
+                        out.push_str("    for ");
+                        out.push_str(counter.name.as_str());
+                        out.push_str(" in [");
+                        for (index, item) in items.iter().enumerate() {
+                            if index > 0 {
+                                out.push_str(", ");
+                            }
+                            out.push_str(&item.to_string());
+                        }
+                        out.push_str("].iter().copied() {\n");
                     }
-                    out.push_str(&item.to_string());
+                    IntForPlan::Exclusive { start, end } => {
+                        out.push_str("    for ");
+                        out.push_str(counter.name.as_str());
+                        out.push_str(" in ");
+                        emit_for_bound(out, &start, ctx)?;
+                        out.push_str("..");
+                        emit_for_bound(out, &end, ctx)?;
+                        out.push_str(" {\n");
+                    }
+                    IntForPlan::Inclusive { start, end } => {
+                        out.push_str("    for ");
+                        out.push_str(counter.name.as_str());
+                        out.push_str(" in ");
+                        emit_for_bound(out, &start, ctx)?;
+                        out.push_str("..=");
+                        emit_for_bound(out, &end, ctx)?;
+                        out.push_str(" {\n");
+                    }
                 }
-                out.push_str("].iter().copied() {\n");
                 let mut loop_ctx = ctx
                     .clone()
                     .with_binding(counter.name.as_str(), ValueKind::Int);
@@ -491,6 +513,18 @@ fn emit_stmt(
             emit_call(out, call, ctx)?;
             out.push_str(";\n");
         }
+        Stmt::BreakLoop(expr, flags, ..) => {
+            if expr.is_some() {
+                return Err(RhError::Transpile(
+                    "break/continue with value is not in rh-3".into(),
+                ));
+            }
+            if flags.contains(ASTFlags::BREAK) {
+                out.push_str("    break;\n");
+            } else {
+                out.push_str("    continue;\n");
+            }
+        }
         Stmt::Noop(..) => {}
         other => {
             return Err(RhError::Transpile(format!(
@@ -539,11 +573,7 @@ fn emit_block_tail_expr(
     Ok(())
 }
 
-fn emit_try_block(
-    out: &mut String,
-    block: &StmtBlock,
-    ctx: &mut EmitCtx,
-) -> Result<(), RhError> {
+fn emit_try_block(out: &mut String, block: &StmtBlock, ctx: &mut EmitCtx) -> Result<(), RhError> {
     let stmts: Vec<_> = block.iter().collect();
     if stmts.is_empty() {
         out.push_str("        Ok(0)\n");
@@ -572,6 +602,18 @@ fn emit_try_stmt(
             out.push_str("        return Err(");
             emit_expr(out, expr, ctx)?;
             out.push_str(");\n");
+        }
+        Stmt::BreakLoop(expr, flags, ..) => {
+            if expr.is_some() {
+                return Err(RhError::Transpile(
+                    "break/continue with value is not in rh-3".into(),
+                ));
+            }
+            if flags.contains(ASTFlags::BREAK) {
+                out.push_str("        break;\n");
+            } else {
+                out.push_str("        continue;\n");
+            }
         }
         Stmt::FnCall(call, ..) if call.name == "throw" => {
             out.push_str("        ");
@@ -653,18 +695,97 @@ fn infer_binding_kind(expr: &Expr) -> ValueKind {
     }
 }
 
-fn int_for_iterable(iterable: &Expr) -> Option<Vec<i64>> {
-    let Expr::Array(items, ..) = iterable else {
+const MAX_NATIVE_FOR_SPAN: i64 = 4096;
+
+#[derive(Debug, Clone)]
+enum IntForBound {
+    Const(i64),
+    Expr(Expr),
+}
+
+#[derive(Debug, Clone)]
+enum IntForPlan {
+    Values(Vec<i64>),
+    Exclusive {
+        start: IntForBound,
+        end: IntForBound,
+    },
+    Inclusive {
+        start: IntForBound,
+        end: IntForBound,
+    },
+}
+
+fn int_for_bound(expr: &Expr) -> Option<IntForBound> {
+    int_const(expr)
+        .map(IntForBound::Const)
+        .or_else(|| is_pure_int_expr(expr).then(|| IntForBound::Expr(expr.clone())))
+}
+
+fn emit_for_bound(out: &mut String, bound: &IntForBound, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    match bound {
+        IntForBound::Const(value) => out.push_str(&value.to_string()),
+        IntForBound::Expr(expr) => emit_expr(out, expr, ctx)?,
+    }
+    Ok(())
+}
+
+fn int_const(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::IntegerConstant(value, ..) => Some(*value),
+        _ => None,
+    }
+}
+
+fn bounded_exclusive_span(start: i64, end: i64) -> Option<i64> {
+    if end <= start {
+        return Some(0);
+    }
+    let span = end.checked_sub(start)?;
+    (span <= MAX_NATIVE_FOR_SPAN).then_some(span)
+}
+
+fn bounded_inclusive_span(start: i64, end: i64) -> Option<i64> {
+    if end < start {
+        return Some(0);
+    }
+    let span = end.checked_sub(start)?.checked_add(1)?;
+    (span <= MAX_NATIVE_FOR_SPAN).then_some(span)
+}
+
+fn int_for_plan(iterable: &Expr) -> Option<IntForPlan> {
+    if let Expr::Array(items, ..) = iterable {
+        let mut values = Vec::new();
+        for item in items {
+            values.push(int_const(item)?);
+        }
+        return Some(IntForPlan::Values(values));
+    }
+    let Expr::FnCall(call, ..) = iterable else {
         return None;
     };
-    let mut values = Vec::new();
-    for item in items {
-        let Expr::IntegerConstant(value, ..) = item else {
-            return None;
-        };
-        values.push(*value);
+    if call.args.len() != 2 {
+        return None;
     }
-    Some(values)
+    let start = int_for_bound(&call.args[0])?;
+    let end = int_for_bound(&call.args[1])?;
+    let is_exclusive = call.name.as_str() == Token::ExclusiveRange.literal_syntax();
+    let is_inclusive = call.name.as_str() == Token::InclusiveRange.literal_syntax();
+    if !is_exclusive && !is_inclusive {
+        return None;
+    }
+    if let (IntForBound::Const(start), IntForBound::Const(end)) = (&start, &end) {
+        if is_exclusive {
+            bounded_exclusive_span(*start, *end)?;
+        } else {
+            bounded_inclusive_span(*start, *end)?;
+        }
+    }
+    if is_exclusive {
+        Some(IntForPlan::Exclusive { start, end })
+    } else {
+        Some(IntForPlan::Inclusive { start, end })
+    }
 }
 
 fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), RhError> {
@@ -723,6 +844,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
         Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
+        Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
             out.push_str("{ ");
@@ -783,9 +905,7 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
         }
         (Token::NotEqualsTo, 2) => comparison_binary(out, "!=", &args[0], &args[1], ctx),
         (Token::GreaterThan, 2) => comparison_binary(out, ">", &args[0], &args[1], ctx),
-        (Token::GreaterThanEqualsTo, 2) => {
-            comparison_binary(out, ">=", &args[0], &args[1], ctx)
-        }
+        (Token::GreaterThanEqualsTo, 2) => comparison_binary(out, ">=", &args[0], &args[1], ctx),
         (Token::LessThan, 2) => comparison_binary(out, "<", &args[0], &args[1], ctx),
         (Token::LessThanEqualsTo, 2) => comparison_binary(out, "<=", &args[0], &args[1], ctx),
         (Token::And, 2) => logical_binary(out, "&&", &args[0], &args[1], ctx),
@@ -887,9 +1007,16 @@ mod tests {
     fn cdylib_transpile_emits_while_loop() {
         let source = include_str!("../../../fixtures/rh/while.rh");
         let rust = transpile_cdylib(source).expect("transpile");
+        assert!(rust.contains("while "), "expected while in:\n{rust}");
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_for_int_range() {
+        let source = include_str!("../../../fixtures/rh/for-range.rh");
+        let rust = transpile_cdylib(source).expect("transpile");
         assert!(
-            rust.contains("while "),
-            "expected while in:\n{rust}"
+            rust.contains("for value in 1..5"),
+            "expected native for-range in:\n{rust}"
         );
     }
 
@@ -905,6 +1032,53 @@ mod tests {
             other => panic!("unexpected stmt: {other:?}"),
         };
         assert_eq!(call.operation_id, "protocol.info");
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_for_dyn_int_range() {
+        let source = include_str!("../../../fixtures/rh/for-dyn-range.rh");
+        let rust = transpile_cdylib(source).expect("transpile");
+        assert!(
+            rust.contains("for value in 1..limit"),
+            "expected native dynamic for-range in:\n{rust}"
+        );
+        assert!(!rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_for_var_len_range() {
+        let rust = transpile_cdylib(
+            "fn entry() { let total = 0; for index in 1..args.len { total += index; } total }",
+        )
+        .expect("transpile");
+        assert!(
+            rust.contains("for index in 1.."),
+            "expected native for-range in:\n{rust}"
+        );
+        assert!(
+            rust.contains("args.len"),
+            "expected args.len bound in:\n{rust}"
+        );
+        assert!(!rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn int_for_plan_skips_span_check_for_dynamic_bounds() {
+        let ast = super::parse("fn entry() { for i in 0..count { 0 } }").expect("parse");
+        let def = ast.iter_fn_def().next().expect("fn");
+        let stmt = def.body.iter().next().expect("stmt");
+        let rhai::Stmt::For(boxed, ..) = stmt else {
+            panic!("expected for stmt");
+        };
+        let (_, _, flow) = boxed.as_ref();
+        let plan = super::int_for_plan(&flow.expr).expect("plan");
+        assert!(matches!(
+            plan,
+            super::IntForPlan::Exclusive {
+                start: super::IntForBound::Const(0),
+                end: super::IntForBound::Expr(_),
+            }
+        ));
     }
 
     #[test]

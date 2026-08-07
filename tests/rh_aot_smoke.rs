@@ -94,6 +94,34 @@ fn while_fixture_qualifies_with_native_loop() {
 }
 
 #[test]
+fn native_for_fixtures_qualify_with_expected_entry_values() {
+    for (name, source, expected) in [
+        ("for-range", include_str!("../fixtures/rh/for-range.rh"), 10),
+        (
+            "for-dyn-range",
+            include_str!("../fixtures/rh/for-dyn-range.rh"),
+            6,
+        ),
+        (
+            "break-continue",
+            include_str!("../fixtures/rh/break-continue.rh"),
+            25,
+        ),
+    ] {
+        let dir =
+            std::env::temp_dir().join(format!("agenterm-rh-{name}-smoke-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let receipt = agenterm_rh::qualify_pack_dir(source, &dir)
+            .unwrap_or_else(|error| panic!("{name} qualify failed: {error}"));
+        assert_eq!(receipt.entry_value, expected, "{name} entry value");
+        let loaded = agenterm_rh::RhPack::load(&dir)
+            .unwrap_or_else(|error| panic!("{name} load failed: {error}"));
+        assert_eq!(loaded.entry_value(), expected, "{name} loaded entry value");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn stdlib_fixture_qualifies_with_host_eval() {
     let dir = std::env::temp_dir().join(format!("agenterm-rh-stdlib-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

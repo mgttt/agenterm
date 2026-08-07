@@ -18,6 +18,7 @@ use crate::{
     settings::clamp_tabs_width,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
+    frontend::settings::{AppearanceField, SettingsScope},
     theme::AppearancePreset,
     ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
@@ -643,6 +644,49 @@ pub(crate) trait ControlHost {
     #[allow(dead_code)]
     fn preview_settings_preset(&mut self, _preset: AppearancePreset) {}
 
+    /// Opens the instance picker modal.
+    fn open_instance_picker_modal(&mut self, _mode: &str) -> Result<(), String> {
+        Err("instance picker is not supported on this host".to_owned())
+    }
+
+    /// Moves the picker highlight, or selects a row by name or PID.
+    fn instance_picker_select(&mut self, _target: InstancePickerTarget) -> Result<(), String> {
+        Err("instance picker is not supported on this host".to_owned())
+    }
+
+    /// Enters the highlighted instance.
+    fn instance_picker_confirm(&mut self) -> Result<(), String> {
+        Err("instance picker is not supported on this host".to_owned())
+    }
+
+    /// Dismisses the picker without entering anything.
+    fn instance_picker_cancel(&mut self) -> Result<(), String> {
+        Err("instance picker is not supported on this host".to_owned())
+    }
+
+    /// Attaches to, or opens a window on, a server instance shown in the
+    /// top strip.
+    fn select_server_tab(&mut self, _instance: &str) -> Result<(), String> {
+        Err("server strip is not supported on this host".to_owned())
+    }
+
+    /// Switches the open settings dialog between global defaults and the
+    /// active terminal's own overrides.
+    fn switch_settings_scope(&mut self, _scope: SettingsScope) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
+    /// Toggles one appearance field between inheriting the default and
+    /// carrying a per-terminal override.
+    fn toggle_settings_inheritance(&mut self, _field: AppearanceField) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
+    /// Drops every per-terminal appearance override in one step.
+    fn reset_settings_overrides(&mut self) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
     fn open_tab_editor(&mut self, _tab_id: u64) -> Result<(), String> {
         Err("tab editor is not supported on this host".to_owned())
     }
@@ -1008,6 +1052,97 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
             host.preview_settings_preset(AppearancePreset::fancy_night());
             Some(ui_snapshot_response(host))
         }
+        // Scope and inheritance were Windows-only ui-actions even though the
+        // state machine has always lived in the shared settings dialog. Placing
+        // them here rather than in one adapter gives both hosts the same
+        // behaviour and keeps a third implementation from appearing later.
+        "open-instance-picker" => {
+            let mode = option_value(args, "--mode").unwrap_or("attach");
+            match host.open_instance_picker_modal(mode) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "instance-picker-next" | "instance-picker-prev" => {
+            let target = if action == "instance-picker-next" {
+                InstancePickerTarget::Next
+            } else {
+                InstancePickerTarget::Prev
+            };
+            match host.instance_picker_select(target) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "instance-picker-select" => {
+            // `--name` deliberately, not the global `--instance`, which picks
+            // the control endpoint rather than a row in this list.
+            let target = if let Some(name) = option_value(args, "--name")
+                .or_else(|| option_value(args, "--logical-instance"))
+            {
+                InstancePickerTarget::Name(name.to_owned())
+            } else if let Some(pid) =
+                option_value(args, "--pid").and_then(|value| value.parse::<u32>().ok())
+            {
+                InstancePickerTarget::Pid(pid)
+            } else {
+                return Some(IpcResponse::failure(
+                    "instance-picker-select requires --name NAME or --pid N \
+                     (not global --instance)",
+                ));
+            };
+            match host.instance_picker_select(target) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "instance-picker-confirm" => match host.instance_picker_confirm() {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "instance-picker-cancel" => match host.instance_picker_cancel() {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "select-server-tab" | "open-instance" => {
+            let Some(instance) = args.get(2).map(String::as_str) else {
+                return Some(IpcResponse::failure(
+                    "select-server-tab requires an instance name",
+                ));
+            };
+            match host.select_server_tab(instance) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "settings-defaults" => match host.switch_settings_scope(SettingsScope::Defaults) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-current" => match host.switch_settings_scope(SettingsScope::CurrentTerminal) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-font-toggle" => {
+            match host.toggle_settings_inheritance(AppearanceField::FontFamily) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "settings-size-toggle" => {
+            match host.toggle_settings_inheritance(AppearanceField::FontSize) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "settings-theme-toggle" => match host.toggle_settings_inheritance(AppearanceField::Theme) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-reset-overrides" => match host.reset_settings_overrides() {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
         "settings-apply" => match host.close_settings_modal(true) {
             Ok(()) => Some(ui_snapshot_response(host)),
             Err(error) => Some(IpcResponse::failure(error)),
@@ -1036,6 +1171,15 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
         },
         _ => None,
     }
+}
+
+/// What an `instance-picker-select` request is aiming at.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum InstancePickerTarget {
+    Next,
+    Prev,
+    Name(String),
+    Pid(u32),
 }
 
 pub(crate) fn dispatch_shared_command(

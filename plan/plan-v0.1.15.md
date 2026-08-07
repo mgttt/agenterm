@@ -1,22 +1,24 @@
 # AgenTerm v0.1.15 公开计划
 
-状态：**已定稿，待授权开工**（2026-08-05 定版；此前为占位稿/思维工作树，
-素材保留在 §3.5 / §5 / §7 / §8 / §9 / §10）。
+状态：**主波已合 main；公开发版未授权**（2026-08-05 定版；2026-08-06 收口；
+2026-08-07 起新叶改走 [`plan-v0.1.16.md`](plan-v0.1.16.md)）。
+素材与推迟表全文仍保留在 §1 / §2.6 / §3.5 / §5 / §7–§12。
 不改变任何已发布/在途版本的授权状态；不创建 tag/Candidate/Release。
 
 **主题：发布链降本（cache 优先）+ 交付后 install 卫生。**
 比占位稿的「反馈左移 + 发布链降本」**更窄**：反馈左移只保留最便宜的两叶，
 夜间彩排与自动派发推 v0.2.x——理由基于实测数字，见 §2。
 
-开工前需人工拍板 §5.7 的政策决策项（阻塞关系见 §2.5）。
+政策决策项全文见 §5.7；阻塞关系见 §2.5。
 
-**三端 agent 并发派工**：见 **§2.2.1**（叶 × 泳道 × 文件域 × 禁区）。  
-不要另开 `plan/orchestrate-*.md`——派工以本文为 SSOT。  
+**三端 agent 并发派工（历史）**：见 **§2.2.1**。  
+**现行派工**：[`plan-v0.1.16.md`](plan-v0.1.16.md)。  
 平台封装 / shared-first 纪律见 `AGENTS.md`、`plan/plan-platform-encapsulation-gap.md`。
 
 **Win must-ship 状态（2026-08-06 收口）**：R1–R4、A3–A4、G2/G3/G6/G7a、  
-H1/H3/H4、B1–B5、P0-1–P0-3、U1/U3、mux/mcp 独立 PE 移除 **已在 main**。  
-U2 真机证据 / B6 / H2 / M* / N1 等仍开或后置。OSX/Lnx 接手见 **§2.2.2**。  
+H1/H3/H4、B1–B5、P0-1–P0-3、U1/U3、mux/mcp 独立 PE 移除、multi-lease /
+As Window **已在 main**。  
+U2 真机证据 / B6 / H2 / M* / N1 等 → **v0.1.16**。Unix 多实例深度见 0.1.16 O 组。  
 **本版不发布 tag/Candidate/Release** 直至人工授权。
 
 ## 0. 数据来源与关键事实（全部实测，可复现）
@@ -2589,3 +2591,52 @@ ui-input key --key NAME [--mods shift,ctrl,alt,meta]
 优先级 1 我可以直接开工（改动小、状态机现成、用户可感知）。
 2/3/4 是「要不要把 Windows-first 的多实例 UX 补到 macOS」的**产品排期问题**，
 5 需要先定 macOS 菜单的形态——这三类都**等你拍板**，我不自己定。
+
+## 12. OSX 对齐 Win：优先级 1 已交付（2026-08-06 深夜）
+
+### 12.1 Settings 逐终端外观 —— 已上线
+
+macOS 用户以前**只能改全局外观**：Settings 没有作用域切换，无法给某个终端单独
+设字体/字号/主题，也看不到某个字段是继承还是覆写。Windows 从共享对话框写出来
+那天起就有。
+
+三个缺陷层层遮掩，逐个揭开：
+
+1. `open_settings` 传 `target_tab_id: None`，而 `switch_scope` **在没有目标终端时
+   一律拒绝** —— 所以 Current Terminal 作用域根本进不去，尽管状态机支持。
+2. 六个 ui-action **哪里都没有 dispatch 分支**。我加在**共享 `control_dispatch`**
+   而不是 Unix adapter 里，这样两端共用一份实现，也堵死了将来冒出第三份的路。
+3. `close_settings` 只应用了 `changes.default_appearance`，**丢掉了
+   `changes.override_draft`** —— 即使作用域切过去了，Apply 也会静默吃掉用户的修改。
+
+**状态机本身（`src/frontend/settings.rs` 的 `SettingsScope`/`AppearanceField`/
+`switch_scope`/`toggle_inheritance`/`reset_overrides`）一行没改** —— Unix 只是
+从来没调用过它。这印证了 §11.2 的判断。
+
+实机验证：开 → `scope=defaults, target=@5` → `settings-current` →
+`scope=current-terminal` → toggle + apply → `current_terminal_override =
+{appearance_preset: "classic-night"}` → reset + apply → `None`。
+
+catalog：SHARED **44 → 50**，WINDOWS_ONLY **14 → 8**。
+
+### 12.2 顺手修掉一个会静默失败的安装事故
+
+`install.sh` 被 `6b7ea4d` 改成了**全文 601 行 CRLF**，在 macOS/Linux 上直接死在
+shebang：
+
+```
+env: bash\r: No such file or directory
+```
+
+**而且丢弃输出时它是静默失败的** —— 我自己就为此丢过一次构建，直到发现装进去的
+镜像比 `target/release` 老了几个钟头才察觉。凡是 `./install.sh ... >/dev/null`
+的调用都会「看起来成功、实际没装」。
+
+`.gitattributes` 本来就把 `Cargo.lock` 和 JSON 清单钉成 LF，但**没有 shell 脚本
+规则**，已补 `*.sh text eol=lf`。install.sh 是唯一受影响的脚本。
+
+### 12.3 剩下的 8 个 WINDOWS_ONLY 全是多实例 UI
+
+`instance-picker-*`（5 个）、`open-instance-picker`、`open-instance`、
+`select-server-tab`。对应 §11.3 的优先级 2/3/4，**都是「要不要把 Windows-first
+的多实例 UX 补到 macOS」这一个产品排期问题**，等拍板。

@@ -38,6 +38,16 @@
         "--version"
       ],
       "release_budget_bytes": 4194304
+    },
+    {
+      "name": "agenterm-rh.exe",
+      "role": "rh-dev-cli",
+      "pe_subsystem": 3,
+      "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+      "offline_probe": [
+        "version"
+      ],
+      "release_budget_bytes": 4194304
     }
   ],
   "platforms": [
@@ -83,6 +93,16 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-rh.exe",
+          "role": "rh-dev-cli",
+          "pe_subsystem": 3,
+          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+          "offline_probe": [
+            "version"
+          ],
+          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -125,6 +145,15 @@
           "offline_probe": [
             "--version"
           ]
+        },
+        {
+          "name": "agenterm-rh.exe",
+          "role": "rh-dev-cli",
+          "pe_subsystem": 3,
+          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+          "offline_probe": [
+            "version"
+          ]
         }
       ]
     },
@@ -162,6 +191,14 @@
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": [
             "--help"
+          ]
+        },
+        {
+          "name": "agenterm-rh",
+          "role": "rh-dev-cli",
+          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+          "offline_probe": [
+            "version"
           ]
         }
       ]
@@ -201,6 +238,14 @@
           "offline_probe": [
             "--help"
           ]
+        },
+        {
+          "name": "agenterm-rh",
+          "role": "rh-dev-cli",
+          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+          "offline_probe": [
+            "version"
+          ]
         }
       ]
     },
@@ -239,6 +284,14 @@
           "offline_probe": [
             "--help"
           ]
+        },
+        {
+          "name": "agenterm-rh",
+          "role": "rh-dev-cli",
+          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+          "offline_probe": [
+            "version"
+          ]
         }
       ]
     },
@@ -276,6 +329,14 @@
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": [
             "--help"
+          ]
+        },
+        {
+          "name": "agenterm-rh",
+          "role": "rh-dev-cli",
+          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
+          "offline_probe": [
+            "version"
           ]
         }
       ]

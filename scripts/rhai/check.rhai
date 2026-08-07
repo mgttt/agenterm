@@ -364,6 +364,31 @@ fn run_step(label, specs, repo, scratch, sequence) {
     sequence
 }
 
+fn lint_cli_worker(fallback) {
+    if std::env::has("AGENTERM_BOOTSTRAP_RH_CLI") {
+        let path =
+            std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_RH_CLI")).display;
+        if std::fs::exists(path)
+            && std::fs::metadata(path).is_file
+            && std::fs::metadata(path).len > 0 {
+            return path;
+        }
+    }
+    fallback
+}
+
+fn first_nonempty_file(repo, relative_paths) {
+    for relative in relative_paths {
+        let path = std::path::join(repo, relative).display;
+        if std::fs::exists(path)
+                && std::fs::metadata(path).is_file
+                && std::fs::metadata(path).len > 0 {
+            return path;
+        }
+    }
+    ""
+}
+
 fn task(worker, manifest, id, timeout_ms, extra) {
     let arguments = [
         "task", "run", id,
@@ -539,6 +564,7 @@ require(
 );
 let bootstrap_worker =
     std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
+let lint_worker = lint_cli_worker(bootstrap_worker);
 let quick = false;
 let release = false;
 let skip_smoke = false;
@@ -703,7 +729,7 @@ if quick {
             manifest,
             "lint",
             120000,
-            [bootstrap_worker, "static"]
+            [lint_worker, "static"]
         )],
         repo,
         scratch,
@@ -954,14 +980,14 @@ let lint_gate = run_gate(
             manifest,
             "lint",
             120000,
-            [bootstrap_worker, "--self-test"]
+            [lint_worker, "--self-test"]
         ),
         task(
             bootstrap_worker,
             manifest,
             "lint",
             120000,
-            [bootstrap_worker, "static"]
+            [lint_worker, "static"]
         )
     ],
     repo,
@@ -1157,8 +1183,29 @@ let build_gate = run_gate(
 );
 context = build_gate.context;
 sequence = build_gate.sequence;
-let worker =
-    std::path::join(repo, "dist/agenterm-rhai.exe").display;
+let dist_rh_cli = first_nonempty_file(
+    repo,
+    ["dist/agenterm-rh.exe", "dist/agenterm-rh"]
+);
+let compatibility_task_worker = first_nonempty_file(
+    repo,
+    ["dist/agenterm-rhai.exe", "dist/agenterm-rhai"]
+);
+require(
+    dist_rh_cli != "" || compatibility_task_worker != "",
+    "check_dist_task_worker_missing"
+);
+let worker = if dist_rh_cli != "" {
+    dist_rh_cli
+} else {
+    print(
+        "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai; " +
+            "agenterm-rh is unavailable"
+    );
+    compatibility_task_worker
+};
+let dist_lint_cli =
+    if dist_rh_cli != "" { dist_rh_cli } else { lint_worker };
 
 let ordinary_gates = [
     #{
@@ -1170,7 +1217,7 @@ let ordinary_gates = [
         id:"rhai-lint",
         label:"production Rhai source lint",
         specs:[task(
-            worker, manifest, "lint", 120000, [worker, "rhai"]
+            worker, manifest, "lint", 120000, [dist_lint_cli, "rhai"]
         )]
     },
     #{

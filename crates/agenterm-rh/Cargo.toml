@@ -7,14 +7,11 @@ description = "AgenTerm rh pack language: subset check, transpile, and AOT pipel
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mgttt/agenterm"
 publish = false
+autobins = false
 
 [lib]
 name = "agenterm_rh"
 path = "src/lib.rs"
-
-[[bin]]
-name = "agenterm-rh"
-path = "src/main.rs"
 
 [dependencies]
 rhai = { version = "1.22", default-features = false, features = ["std", "internals"] }

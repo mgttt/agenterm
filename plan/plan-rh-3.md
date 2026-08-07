@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **进行中** |
+| **状态** | **M29 独立测试扩面完成**（standalone CLI；公共 API；预算矩阵；控制流 AOT） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -38,7 +38,38 @@
 | M22a | M22 预备：`caller-inventory` + `corpus-scan --tasks` 机器可读报告 | [x] |
 | M22b | worker parity：`RhRunContext` args/project_root、`host_eval`/`host_run_script` 注入、framed-worker 黑盒 | [x] |
 | M22c | check-many 薄转发兼容：rhai CLI/manifest kind、bootstrap.cmd 对称、forward 黑盒 | [x] |
-| M22 | 替换轨：`agenterm-rhai` → 薄转发或 rename（需全量 caller 清单 + Candidate 证据） | [ ] |
+| M22d | lint.rhai 优先 `agenterm-rh` check-many；artifacts/stage-build 纳入 dev CLI | [x] |
+| M22e | CLI 薄转发黑盒（check/eval/run/version）；framed-worker entry fixture；`for` 整型 range 原生 AOT | [x] |
+| M22f | **默认 rh 后端**（`AGENTERM_SCRIPT_BACKEND=rh`）；bootstrap/worker 注入；删除 Rhai check-many 回退 | [x] |
+| M22 | 替换轨：`agenterm-rhai` 薄壳 + rh 默认执行（Candidate 六 cell 改名仍待人审） | [x] |
+| M23a | for-loop 纯 int / `.len` range 原生 AOT（`for x in 1..5`、`for i in 0..arr.len()`） | [x] |
+| M23b | rh `check` parity：`import`/project root + API catalog 对齐 rhai lint 语义 | [x] |
+| M23c | caller wave 1：CI / bootstrap 运营引用清单化迁移（`caller-inventory` 基线 guard） | [x] |
+| M23d | `agenterm-rhai` shim 硬化：剩余 dev forward 路径（check/eval/run/version/worker） | [x] |
+| M24a | 原生 `break`/`continue` in for/while（reject try 内与带值 break） | [x] |
+| M24b | check-many host 校验：project imports + shipped API catalog（`api_validate`/`project_import`） | [x] |
+| M24c | bootstrap wave 1：`AGENTERM_BOOTSTRAP_RH_CLI` 注入；check.rhai 优先 rh CLI | [x] |
+| M25a | `agenterm-rh task` 前门：显式转发未迁移 task 引擎到相邻兼容 PE，保留退出码 | [x] |
+| M25b | bootstrap 默认通过 rh task 前门启动；`AGENTERM_RHAI_COMPAT_CLI` 明示兼容边界 | [x] |
+| M25c | task 前门黑盒：成功列出 manifest；兼容 PE 缺失时硬失败 | [x] |
+| M25d | framed-worker 捕获 compat fallback `print`，按输出预算封入结果帧，禁止协议 stdout 污染 | [x] |
+| M26a | project import 编译校验统一到 `agenterm-rh::project_import` SSOT，主库仅留 resolver 与薄适配 | [x] |
+| M26b | artifact verification / client smoke manifest 驱动验证 rhai + rh 双 PE offline probe | [x] |
+| M26c | worker / framed / REPL / execute 从 `agenterm-rhai` bin 下沉 `script_worker` 主库模块 | [x] |
+| M26d | worker check 直接保留 typed API validator failure；迁移后 22 个 worker 单测全绿 | [x] |
+| M27a | 根包拥有并构建 `agenterm-rh` binary，解除 rh library ↔ 主库的 Cargo 环依赖 | [x] |
+| M27b | `agenterm-rh` 直接承载 task、legacy worker 与 framed-worker，共享主库实现 | [x] |
+| M27c | one-shot / persistent supervisor 默认解析 `agenterm-rh`，显式兼容回退 `agenterm-rhai` | [x] |
+| M27d | supervisor 默认注入 `AGENTERM_SCRIPT_BACKEND=rh`；诊断报告实际 worker 与候选名称 | [x] |
+| M28a | incremental RUSTC wrapper 下沉主库，rh/rhai 双 PE parity；权威黑盒改测 rh | [x] |
+| M28b | bootstrap 仅构建、缓存并执行 `agenterm-rh`，移除无消费者的 compat 环境接线 | [x] |
+| M28c | CI 与 dist task caller wave 2 改用 rh；caller inventory 保持单调下降 guard | [x] |
+| M28d | rh check/check-many 保持既有 typed JSON、退出码与项目根路径完整性契约 | [x] |
+| M29a | isolated `agenterm-rh` CLI 套件：无相邻 rhai 的 help/check/check-many/task 契约 | [x] |
+| M29b | check-many 全 fixture 与 per-file/aggregate/wall-time 预算 typed limit 矩阵 | [x] |
+| M29c | for range/dynamic range/break-continue 真实 AOT qualify；span 超界 fallback | [x] |
+| M29d | rhai shim 仅转发 `.rh` eval/run，保留 inline eval 与 `.rhai` 解释执行 | [x] |
+| M29e | crate 外部 public API contract 套件纳入 `rh-check` | [x] |
 
 ---
 
@@ -65,19 +96,37 @@
 
 ## 4. 非目标（rh-3）
 
-- 不默认 `AGENTERM_SCRIPT_BACKEND=rh`
-- 不迁移 62 task manifest
+- ~~不默认 `AGENTERM_SCRIPT_BACKEND=rh`~~ → **M22f 已默认 rh**；显式 `=rhai` 可回退
+- 不迁移 62 task manifest 文件名（compat-delegating 继续跑 `.rhai`）
 - 不引入 Cranelift / 字节码 JIT
-- 不替换 `agenterm-rhai` worker/repl/task（M18–M22）
+- ~~不替换 `agenterm-rhai` worker/repl/task~~ → **pack 热路径已 rh**；REPL/复杂语句仍 Rhai 回退
+- 不移除 `rhai` crate 依赖（AST 解析 + host_eval 桥）
 
 ---
 
-## 5. 依赖与顺序
+## 5. M23 扩面轨（rh-3 后续）
+
+相对 M22 默认 rh 后端，M23 把 **原生 AOT 覆盖面**、**check 语义 parity**、**caller 清单 wave 1**、**薄壳 forward 硬化** 拆成四条可独立验收的叶。
+
+| ID | 用户问题 | 交付 | 验收 | 非目标 |
+|----|----------|------|------|--------|
+| **M23a** | `for` range 仍部分 host eval | 纯 int 字面/`..` range 与 `.len()` 上界原生 emit | `fixtures/rh/for-range.rh` qualify；`rh_regression` 含 `for … in` 机器码 | 任意 host 表面迭代器；`for-in` 对象/map |
+| **M23b** | rh `check` 与 rhai lint 对 import/catalog 不一致 | `agenterm-rh check` / check-many 校验 project imports + `script_api` catalog 可见性 | `./rh-check.sh`；与 rhai check-many 同 manifest 零 diff（允许 rh-only 扩展字段） | 重写 catalog；改 broker 权限 |
+| **M23c** | CI/bootstrap 仍大量 `agenterm-rhai` 字符串 | wave 1：`.github/workflows/**`、`scripts/bootstrap.*` 运营引用改指向 `agenterm-rh` 或 env 中性名 | `caller-inventory` ≥400 hits 基线 guard；bootstrap+ci 类非零；wave 1 diff 可审 | 一次删光 432 引用；改 task manifest 文件名 |
+| **M23d** | 薄壳 forward 边角仍漏 dev 路径 | `agenterm-rhai` 剩余 check/eval/run/version/worker 转发与错误码对齐 | `rh_cli_forward` + framed-worker 黑盒；无静默 Rhai 回退（除显式 `=rhai`） | 移除 `agenterm-rhai` PE；Candidate 六 cell 改名 |
+
+**顺序：** M23a ∥ M23b（热文件不同）→ M23c（依赖 inventory 基线）→ M23d（整合 forward 面）。M23c 的 read-only guard 已落 `tests/rh_corpus` + `fixtures/rh/caller-inventory-baseline.json`。
+
+---
+
+## 6. 依赖与顺序
 
 ```text
 rh-3a (while + eval) → rh-3b (assign + try) → rh-3c (check-many + worker parity)
         ↓
-rh-4 corpus 报告 → 0.1.15 完成后 M15 全量迁移决策
+rh-4 corpus 报告 → M22 默认 rh + 薄壳
         ↓
-agenterm-rhai 薄替换 / rename（Candidate 六 cell + caller 清单）
+M23a/b (AOT + check parity) → M23c (caller wave 1) → M23d (shim hardening)
+        ↓
+Candidate 六 cell 改名 / 全量 caller 清单（待人审）
 ```

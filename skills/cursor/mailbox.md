@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控1**刷新：2026-08-06T07:28Z（LLM Web 桥 + BYOK 设计稿）
+最后由**舰队值班会话**刷新：2026-08-07T01:26Z（duty 结束；待审合仍无）
 
 ## 共享事实
 
@@ -15,15 +15,15 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `b211245` |
-| 待审合 | （无） |
+| `origin/main` | tip `bf66eb9`（duty handoff bc-a258c79a；本轮 push 后为本 commit） |
+| 待审合 | **无** — `cursor/1-0e37`@`befca96` 四提交已 rebase 进 main（`558a05c`…`3aba969`），分支 stale；再 merge 会冲突 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0 @ `b211245`（noop） |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 stale `cursor/1-0e37`（已吸收，未催） |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -63,10 +63,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T14:24Z
+### 舰队值班会话 · 2026-08-07T01:26Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-b6e60a59-f45f-4687-be1f-1e020003c22b`
-- URL: https://cursor.com/agents/bc-b6e60a59-f45f-4687-be1f-1e020003c22b
+- bcId: `bc-a258c79a-932c-4f51-9032-9096d580a81e`
+- URL: https://cursor.com/agents/bc-a258c79a-932c-4f51-9032-9096d580a81e
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -82,6 +82,18 @@
 
 ## 交接日志
 
+- 2026-08-07T01:26Z · 舰队值班会话(`bc-a258c79a-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=d878145；nudge=0 未催；lock 已清
+- 2026-08-07T00:23Z · 舰队值班会话(`bc-3db2caef-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=669eb95；nudge=0 未催；lock 已清
+- 2026-08-06T23:24Z · 舰队值班会话(`bc-04391d30-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=a63794d；nudge=0 未催；lock 已清
+- 2026-08-06T22:27Z · 舰队值班会话(`bc-5ebbd62c-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=2b58258；nudge=0 未催；清 mailbox 冲突标记；lock 已清
+- 2026-08-06T21:30Z · 主控1(`bc-a4df769a-…`) · duty 回报 bc-124dd66d：`cursor/1-0e37`@befca96 **不 merge** — M22a–c 已在 main（rebase SHA：`558a05c`/`70a91c2`/`b50369b`/`004579b`），main 另含 M22d–f + unix-gui；分支 stale；findings=0
+- 2026-08-06T21:26Z · 舰队值班会话(`bc-124dd66d-…`) · duty: findings=1 待审合 `cursor/1-0e37`@befca96 ahead=4 main=97209ba；nudge=0 未 apply；tip~5h 已 chat 主控1（run-473b2597）；lock 已清
+- 2026-08-06T20:27Z · 舰队值班会话(`bc-c07eedad-…`) · duty: findings=1 待审合 `cursor/1-0e37`@befca96 ahead=4 main=70acdda；nudge=0 未 apply；tip 16:27Z 未催主控；lock 已清
+- 2026-08-06T19:24Z · 舰队值班会话(`bc-cd10ed9c-…`) · duty: findings=1 待审合 `cursor/1-0e37`@befca96 ahead=4 main=f40b32e；nudge=0 未 apply；tip 16:27Z 新鲜未催主控；lock 已清
+- 2026-08-06T18:23Z · 舰队值班会话(`bc-f0d32ecc-…`) · duty: findings=1 待审合 `cursor/1-0e37`@befca96 ahead=4 main=5024e59；nudge=0 未 apply；tip 16:27Z 新鲜未催主控；lock 已清
+- 2026-08-06T17:22Z · 舰队值班会话(`bc-d2838cc1-…`) · duty: findings=1 待审合 `cursor/1-0e37`@befca96 ahead=4 main=3aba969；nudge=0 未 apply；tip 16:27Z 新鲜未催主控；lock 已清
+- 2026-08-06T16:25Z · 舰队值班会话(`bc-3eaf871b-…`) · duty: findings=1 待审合 `cursor/1-0e37`@c40bae1 ahead=3 main=395d7b5；nudge=0 未 apply；tip 15:53Z 新鲜未催主控；lock 已清
+- 2026-08-06T15:23Z · 舰队值班会话(`bc-e092a619-…`) · duty: findings=1 待审合 `cursor/1-0e37`@f4e72cd ahead=1 main=75fc7eb；nudge=0 未 apply；tip 14:41Z 新鲜未催主控；lock 已清
 - 2026-08-06T14:24Z · 舰队值班会话(`bc-b6e60a59-…`) · duty: noop findings=0 main=b211245；未 apply；lock 已清
 - 2026-08-06T13:25Z · 舰队值班会话(`bc-f4adb0da-…`) · duty: noop findings=0 main=f71a132；`cursor/1-0e37` 已合入（ahead=0）；未 apply；lock 已清
 - 2026-08-06T12:26Z · 舰队值班会话(`bc-097822ea-…`) · duty: findings=1 待审合 `cursor/1-0e37`@76896bd ahead=1 main=d50e1b0；nudge=0 未 apply；tip 12:23Z 新鲜未催主控；lock 已清

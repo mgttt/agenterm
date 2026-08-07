@@ -46,7 +46,10 @@ use crate::{
             remote_word_selection,
         },
         server_strip_ui::{
-            ServerCloseConfirm, ServerContextAction, ServerNewDialog, ServerTabContextMenu,
+            SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, SERVER_TABS_REFRESH, StripRect,
+            ServerCloseConfirm,
+            ServerContextAction, ServerNewDialog, ServerTabContextMenu, layout_server_add_chip,
+            layout_server_context_menu, layout_server_tab_chips, server_tab_chip_label,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope, appearance_preset_grid},
         tab_editor::{TabEditorDialog, TabEditorFocus},
@@ -215,19 +218,11 @@ fn toolbar_action_returns_terminal_focus(action_id: &str) -> bool {
 
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
-const SERVER_STRIP_HEIGHT: i32 = 32;
-const SERVER_TAB_MIN_WIDTH: i32 = 88;
-const SERVER_TAB_MAX_WIDTH: i32 = 160;
-const SERVER_TAB_GAP: i32 = 4;
-/// Trailing `[+]` chip width reserved on the right of the server strip.
-const SERVER_ADD_WIDTH: i32 = 28;
-const SERVER_CONTEXT_MENU_WIDTH: i32 = 148;
-const SERVER_CONTEXT_MENU_ITEM_HEIGHT: i32 = 28;
+const SERVER_STRIP_HEIGHT: i32 = 34;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 /// U3: coalesce PTY regrids when the user flips tabs quickly.
 const TAB_PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
-const SERVER_TABS_REFRESH: Duration = Duration::from_secs(2);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = 0x25;
 
 /// Full sidebar clock chrome string (`YY-MM-DD Ddd\nHH:MM:SS`) for redraw ticks.
@@ -1633,7 +1628,7 @@ impl RemoteWindowState {
                     .context(
                         "open-instance requires --name NAME (global --instance selects the CLI endpoint)",
                     )?;
-                self.spawn_gui_for_instance(instance)?;
+                self.spawn_gui_for_instance(instance, None)?;
             }
             "select-server-tab" => {
                 let instance = option_value(&command.args, "--name")
@@ -4575,48 +4570,44 @@ impl RemoteWindowState {
             return Vec::new();
         };
         let strip = win_rect(strip);
-        let count = self.server_tabs.len().max(1) as i32;
-        // Fit *all* chips: shrink below the preferred min rather than dropping
-        // trailing servers (user must be able to click every listed instance).
-        // Reserve trailing [+] so chips never cover the add control.
-        let gaps = SERVER_TAB_GAP * (count - 1).max(0);
-        let chips_right = (strip.right - MARGIN - SERVER_ADD_WIDTH).max(strip.left + MARGIN);
-        let available = (chips_right - (strip.left + MARGIN) - gaps).max(count);
-        // Prefer SERVER_TAB_MIN_WIDTH when the strip has room; shrink so every
-        // chip remains clickable when many servers are listed.
-        let width = (available / count)
-            .clamp(48, SERVER_TAB_MAX_WIDTH)
-            .min(available / count);
-        let width = width.max(SERVER_TAB_MIN_WIDTH.min(available / count));
-        let mut left = strip.left + MARGIN;
-        let mut out = Vec::new();
-        for (index, row) in self.server_tabs.iter().enumerate() {
-            let right = if index + 1 == self.server_tabs.len() {
-                // Last chip absorbs remainder up to the reserved [+] gutter.
-                chips_right.max(left + width)
-            } else {
-                left + width
-            };
-            let rect = ProductPixelRect {
-                left,
-                top: strip.top + 4,
-                right,
-                bottom: strip.bottom - 4,
-            };
-            out.push((rect, row));
-            left = right + SERVER_TAB_GAP;
-        }
-        out
+        let strip = StripRect {
+            left: strip.left,
+            top: strip.top,
+            right: strip.right,
+            bottom: strip.bottom,
+        };
+        let chips = layout_server_tab_chips(strip, self.server_tabs.len());
+        chips
+            .into_iter()
+            .zip(self.server_tabs.iter())
+            .map(|(chip, row)| {
+                (
+                    ProductPixelRect {
+                        left: chip.left,
+                        top: chip.top,
+                        right: chip.right,
+                        bottom: chip.bottom,
+                    },
+                    row,
+                )
+            })
+            .collect()
     }
 
     fn server_add_rect(&self) -> Option<ProductPixelRect> {
         let strip = self.workspace_geometry().server_strip?;
         let strip = win_rect(strip);
+        let add = layout_server_add_chip(StripRect {
+            left: strip.left,
+            top: strip.top,
+            right: strip.right,
+            bottom: strip.bottom,
+        });
         Some(ProductPixelRect {
-            left: strip.right - MARGIN - SERVER_ADD_WIDTH,
-            top: strip.top + 4,
-            right: strip.right - MARGIN,
-            bottom: strip.bottom - 4,
+            left: add.left,
+            top: add.top,
+            right: add.right,
+            bottom: add.bottom,
         })
     }
 
@@ -4627,13 +4618,9 @@ impl RemoteWindowState {
     }
 
     fn server_tab_row_at(&self, x: i32, y: i32) -> Option<&InstancePickerRow> {
-        let strip = self.workspace_geometry().server_strip?;
-        // Full strip height is clickable (not only the inner tab chip padding).
-        if y < strip.top || y >= strip.bottom || x < strip.left || x >= strip.right {
-            return None;
-        }
+        // Hit chips only (not the empty strip gutter or the [+] control).
         for (rect, row) in self.server_tab_rects() {
-            if x >= rect.left && x < rect.right {
+            if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
                 return Some(row);
             }
         }
@@ -4672,9 +4659,9 @@ impl RemoteWindowState {
         if !row.can_attach {
             // Dead registration: open a new GUI for that instance name so the
             // strip remains an "enter" control even with no live tabs/owner.
-            self.spawn_gui_for_instance(short)?;
+            let child_pid = self.spawn_gui_for_instance(short, Some(row.endpoint.as_str()))?;
             self.last_message = Some(format!(
-                "Server `{}` was {}; opened a new window for that instance",
+                "Server `{}` was {}; opened a new window (PID {child_pid})",
                 row.instance, row.classification
             ));
             self.window.request_redraw();
@@ -4763,17 +4750,18 @@ impl RemoteWindowState {
             InstanceIdentity::from_process(self.client.as_ref().map(UiClientModel::server_pid))
                 .map(|id| id.instance);
         if self.server_tabs.is_empty() {
-            let chips_right = strip.right - MARGIN - SERVER_ADD_WIDTH;
-            draw_text(
+            let chips_right = strip.right - SERVER_TAB_STRIP_INSET - SERVER_ADD_WIDTH;
+            draw_text_aligned(
                 device,
                 ProductPixelRect {
-                    left: strip.left + MARGIN,
-                    top: strip.top + 8,
-                    right: chips_right.max(strip.left + MARGIN + 1),
+                    left: strip.left + SERVER_TAB_STRIP_INSET,
+                    top: strip.top + 6,
+                    right: chips_right.max(strip.left + SERVER_TAB_STRIP_INSET + 1),
                     bottom: strip.bottom - 6,
                 },
                 "Servers: (refreshing…)",
                 palette.muted_text.canvas_rgb(),
+                TextHorizontalAlignment::Left,
             );
         } else {
             for (rect, row) in self.server_tab_rects() {
@@ -4786,28 +4774,23 @@ impl RemoteWindowState {
                     palette.status.canvas_rgb()
                 };
                 fill(device, &rect, fill_color);
-                frame(device, &rect, palette.active_border.canvas_rgb());
-                let label = if row.can_attach {
-                    // Prefer short instance id so chips stay clickable at a glance.
-                    let short = row
-                        .instance
-                        .strip_prefix("custom:")
-                        .unwrap_or(row.instance.as_str());
-                    format!("{short} · {}", row.pid)
-                } else {
-                    let short = row
-                        .instance
-                        .strip_prefix("custom:")
-                        .unwrap_or(row.instance.as_str());
-                    format!("{short} (stale)")
-                };
-                draw_text(
+                frame(
+                    device,
+                    &rect,
+                    if active {
+                        palette.focus_ring.canvas_rgb()
+                    } else {
+                        palette.active_border.canvas_rgb()
+                    },
+                );
+                let label = server_tab_chip_label(&row.instance, row.can_attach);
+                draw_text_aligned(
                     device,
                     ProductPixelRect {
-                        left: rect.left + 8,
-                        top: rect.top + 6,
-                        right: rect.right - 8,
-                        bottom: rect.bottom - 4,
+                        left: rect.left + 6,
+                        top: rect.top,
+                        right: rect.right - 6,
+                        bottom: rect.bottom,
                     },
                     &label,
                     if active {
@@ -4815,22 +4798,19 @@ impl RemoteWindowState {
                     } else {
                         palette.text.canvas_rgb()
                     },
+                    TextHorizontalAlignment::Center,
                 );
             }
         }
         if let Some(add) = self.server_add_rect() {
             fill(device, &add, palette.composer.canvas_rgb());
             frame(device, &add, palette.active_border.canvas_rgb());
-            draw_text(
+            draw_text_aligned(
                 device,
-                ProductPixelRect {
-                    left: add.left,
-                    top: add.top,
-                    right: add.right,
-                    bottom: add.bottom,
-                },
+                add,
                 "+",
                 palette.text.canvas_rgb(),
+                TextHorizontalAlignment::Center,
             );
         }
         // Context menu is painted last in `paint_frame` so the terminal
@@ -5007,27 +4987,31 @@ impl RemoteWindowState {
     }
 
     /// As Window: always open another interactive GUI for the instance.
-    /// Multiple concurrent GUI leases on one server are allowed.
+    /// Multiple concurrent GUI leases on one server are allowed — including
+    /// a second window for the *currently active* server tab.
     fn focus_existing_or_spawn_instance_gui(
         &mut self,
         instance: &str,
         endpoint: &str,
     ) -> Result<()> {
-        let short = instance.strip_prefix("custom:").unwrap_or(instance);
-        let _ = endpoint;
-        // Prefer a new window so the same server can be projected in multiple
-        // GUIs at once (multi-lease). Foreground existing owners only when spawn
-        // fails hard (e.g. process launch denied).
-        match self.spawn_gui_for_instance(short) {
-            Ok(()) => Ok(()),
+        match self.spawn_gui_for_instance(instance, Some(endpoint)) {
+            Ok(child_pid) => {
+                self.last_message = Some(format!(
+                    "Opened new GUI window (PID {child_pid}) for `{instance}`"
+                ));
+                self.last_error = None;
+                self.window.request_redraw();
+                Ok(())
+            }
             Err(spawn_error) => {
+                // Last resort: if spawn failed, try foregrounding any existing peer.
                 if let Some(pid) = Self::query_ui_lease_owner_pid(endpoint)
                     && pid != std::process::id()
                     && Self::activate_gui_process(pid).is_ok()
                 {
                     self.last_message = Some(format!(
                         "Could not start a new window ({spawn_error:#}); \
-                         brought existing GUI PID {pid} forward for `{short}`"
+                         brought existing GUI PID {pid} forward"
                     ));
                     self.window.request_redraw();
                     return Ok(());
@@ -5037,26 +5021,72 @@ impl RemoteWindowState {
         }
     }
 
-    fn spawn_gui_for_instance(&mut self, instance: &str) -> Result<()> {
+    /// Spawn a new replaceable GUI for `instance`, optionally pinned to `endpoint`.
+    /// Returns the child PID so the caller can surface/activate it.
+    fn spawn_gui_for_instance(
+        &mut self,
+        instance: &str,
+        endpoint: Option<&str>,
+    ) -> Result<u32> {
         let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
         let short = instance.strip_prefix("custom:").unwrap_or(instance);
         let mut command = std::process::Command::new(exe);
+        // --ui-client is mandatory for As Window: without it the launcher runs
+        // attempt_gui_handoff, focuses the already-attached GUI, and exits
+        // (GuiLaunchResult::Reused). That made "As Window" on the *active* tab
+        // look like a complete no-op while inactive tabs appeared to work.
         command
+            .arg("--ui-client")
             .arg("--instance")
             .arg(short)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        // Human "As Window" / Open another should surface the new GUI. Only
-        // inherit --no-activate from automation environments so smokes stay quiet.
-        if crate::client::no_activate_from_environment() {
-            command.arg("--no-activate");
+        // Prefer the strip row's live endpoint so the child does not re-resolve
+        // to a different peer or invent a second server authority. Endpoint may
+        // pair with --instance for attach identity (IPC contract).
+        if let Some(endpoint) = endpoint.filter(|value| !value.is_empty()) {
+            command.arg("--endpoint").arg(endpoint);
+        }
+        // Never inherit automation/no-activate or sticky IPC env from the parent
+        // GUI — that is what made "As Window" on the active tab look like a no-op
+        // (child started hidden or attached the wrong way and exited).
+        for name in [
+            "AGENTERM_NO_ACTIVATE",
+            "AGENTERM_IPC_ADDRESS",
+            "AGENTERM_IPC_ENDPOINT",
+            "AGENTERM_INSTANCE",
+        ] {
+            command.env_remove(name);
         }
         // Breakaway + ACCESS_DENIED visible fallback: agenterm-platform only.
-        crate::platform::process::spawn_breakaway_visible_command(&mut command)
-            .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
-        self.last_message = Some(format!("Opening instance `{short}` in a new window"));
-        Ok(())
+        // Keep the child handle so we can activate its HWND after it maps.
+        let (mut child, _mode) =
+            crate::platform::process::spawn_breakaway_visible_child(&mut command).map_err(
+                |error| anyhow::anyhow!("could not open instance `{short}`: {error}"),
+            )?;
+        let child_pid = child.id();
+        std::thread::Builder::new()
+            .name("agenterm-as-window-activate".to_owned())
+            .spawn(move || {
+                // Give the child time to create its top-level window, then raise it.
+                for delay_ms in [150_u64, 350, 700, 1200] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    if agenterm_platform::process_window::activate(child_pid).is_ok() {
+                        break;
+                    }
+                    // Child may have exited (old exclusive server, bad args).
+                    if let Ok(Some(_)) = child.try_wait() {
+                        break;
+                    }
+                }
+                let _ = child.wait();
+            })
+            .map_err(|error| anyhow::anyhow!("could not start As Window waiter: {error}"))?;
+        self.last_message = Some(format!(
+            "Opening instance `{short}` in a new window (PID {child_pid})"
+        ));
+        Ok(child_pid)
     }
 
     fn spawn_server_instance(&mut self, name: &str) -> Result<()> {
@@ -5166,32 +5196,39 @@ impl RemoteWindowState {
         let client = self.window.client_size();
         let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
         let client_bottom = i32::try_from(client.height).unwrap_or(i32::MAX);
-        let width = SERVER_CONTEXT_MENU_WIDTH;
-        let item_h = SERVER_CONTEXT_MENU_ITEM_HEIGHT;
-        let height = item_h * 2 + 4;
-        let left = menu.origin_x.clamp(0, (client_right - width).max(0));
-        let top = menu.origin_y.clamp(0, (client_bottom - height).max(0));
-        let frame = ProductPixelRect {
-            left,
-            top,
-            right: left + width,
-            bottom: top + height,
-        };
-        // Top: As Window (open instance in a new GUI); bottom: Close.
-        // Keep Close last so the destructive action is not the first hit.
-        let as_window = ProductPixelRect {
-            left: left + 2,
-            top: top + 2,
-            right: left + width - 2,
-            bottom: top + 2 + item_h,
-        };
-        let close = ProductPixelRect {
-            left: left + 2,
-            top: top + 2 + item_h,
-            right: left + width - 2,
-            bottom: top + 2 + item_h * 2,
-        };
-        Some((frame, close, as_window))
+        // Align the menu under the owning chip when we can still find it.
+        let anchor_left = self
+            .server_tab_rects()
+            .into_iter()
+            .find(|(_, row)| row.instance == menu.instance)
+            .map(|(rect, _)| rect.left);
+        let (frame, as_window, close) = layout_server_context_menu(
+            menu.origin_x,
+            menu.origin_y,
+            client_right,
+            client_bottom,
+            anchor_left,
+        );
+        Some((
+            ProductPixelRect {
+                left: frame.left,
+                top: frame.top,
+                right: frame.right,
+                bottom: frame.bottom,
+            },
+            ProductPixelRect {
+                left: close.left,
+                top: close.top,
+                right: close.right,
+                bottom: close.bottom,
+            },
+            ProductPixelRect {
+                left: as_window.left,
+                top: as_window.top,
+                right: as_window.right,
+                bottom: as_window.bottom,
+            },
+        ))
     }
 
     fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
@@ -5551,27 +5588,30 @@ impl RemoteWindowState {
         frame(device, &frame_rect, palette.accent.canvas_rgb());
         fill(device, &as_window, palette.composer.canvas_rgb());
         fill(device, &close, palette.composer.canvas_rgb());
-        draw_text(
+        // Left-aligned menu labels with equal horizontal padding.
+        draw_text_aligned(
             device,
             ProductPixelRect {
                 left: as_window.left + 12,
                 top: as_window.top,
-                right: as_window.right - 8,
+                right: as_window.right - 12,
                 bottom: as_window.bottom,
             },
             "As Window",
             palette.text.canvas_rgb(),
+            TextHorizontalAlignment::Left,
         );
-        draw_text(
+        draw_text_aligned(
             device,
             ProductPixelRect {
                 left: close.left + 12,
                 top: close.top,
-                right: close.right - 8,
+                right: close.right - 12,
                 bottom: close.bottom,
             },
             "Close",
             palette.text.canvas_rgb(),
+            TextHorizontalAlignment::Left,
         );
     }
 
@@ -8686,12 +8726,22 @@ fn frame(device: &mut dyn ControlCanvas, rect: &ProductPixelRect, color: Rgb8) {
 }
 
 fn draw_text(device: &mut dyn ControlCanvas, rect: ProductPixelRect, text: &str, color: Rgb8) {
+    draw_text_aligned(device, rect, text, color, TextHorizontalAlignment::Left);
+}
+
+fn draw_text_aligned(
+    device: &mut dyn ControlCanvas,
+    rect: ProductPixelRect,
+    text: &str,
+    color: Rgb8,
+    horizontal: TextHorizontalAlignment,
+) {
     device.text_rect(
         control_rect(rect),
         text,
         color,
         TextOptions {
-            horizontal: TextHorizontalAlignment::Left,
+            horizontal,
             vertical_center: true,
             single_line: true,
             end_ellipsis: true,
@@ -8997,6 +9047,17 @@ mod tests {
                 || source.contains("multi-lease")
                 || source.contains("concurrent interactive GUIs"),
             "product path must not reintroduce exclusive single-GUI messaging"
+        );
+        // Spawn must force a second replaceable UI. Without --ui-client the
+        // child hands off to the active window and exits (looks like no-op).
+        let spawn_fn = source
+            .split("fn spawn_gui_for_instance(")
+            .nth(1)
+            .and_then(|rest| rest.split("fn spawn_server_instance(").next())
+            .expect("spawn_gui_for_instance body");
+        assert!(
+            spawn_fn.contains("\"--ui-client\""),
+            "As Window child must pass --ui-client to skip launcher handoff"
         );
     }
 

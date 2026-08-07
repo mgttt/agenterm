@@ -15,7 +15,8 @@ use crate::script_protocol::{
 };
 
 use super::{
-    ConcurrencyPermit, SupervisedResult, SupervisorError, platform, try_acquire_permit, write_frame,
+    ConcurrencyPermit, SupervisedResult, SupervisorError, configure_script_backend, platform,
+    try_acquire_permit, write_frame,
 };
 
 /// Bounds the worker-side frame tracker, completed-invocation set, and retained
@@ -101,6 +102,7 @@ impl PersistentWorkerClient {
             .stderr(Stdio::null());
         platform::configure_worker_command(&mut command)
             .map_err(|error| SupervisorError::Spawn(error.message))?;
+        configure_script_backend(&mut command);
         if let Some(working_directory) = working_directory {
             command.current_dir(working_directory);
         }

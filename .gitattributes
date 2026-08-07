@@ -2,5 +2,11 @@
 Cargo.lock text eol=lf
 scripts/artifacts.json text eol=lf
 scripts/qualification-gates.json text eol=lf
+# Shell scripts must keep LF: a CRLF install.sh fails on macOS/Linux with
+# "env: bash\r: No such file or directory", and it fails *silently* when the
+# caller discards output, so an install can appear to succeed while leaving the
+# old binary in place.
+*.sh text eol=lf
+
 *.cmd text eol=crlf
 *.bat text eol=crlf

@@ -8,9 +8,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Shipped baseline
 
-- [x] `agenterm-rhai.exe` is the public `run`, `eval`, `repl`, `check`,
-  `api`, and named-task CLI while retaining private
-  `--worker`/`--framed-worker` modes;
+- [x] `agenterm-rh.exe` is the default task and supervised worker front door:
+  one-shot and persistent supervisors resolve it before the explicit
+  `agenterm-rhai.exe` compatibility fallback and default its execution backend
+  to `rh`. It directly hosts named tasks plus private
+  `--worker`/`--framed-worker` modes through the shared library.
+  `agenterm-rhai.exe` remains the compatibility public `run`, `eval`, `repl`,
+  `check`, and `api` CLI;
+  its PE now owns only incremental-wrapper and command dispatch code, while
+  `script_worker` in the shared `agenterm` library owns worker, framed
+  protocol, REPL and execute behavior;
   on Windows, `agenterm-cli.exe script repl ...` is a thin process-forwarding
   compatibility route to the adjacent `agenterm-rhai` sidecar, inherits
   stdio and exit status, and never links a second Rhai engine into the control
@@ -762,11 +769,22 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
 - [~] **rh execution backend** (`crates/agenterm-rh`, `agenterm-rh` CLI):
   rh-0→rh-2 — subset check, transpile→rustc AOT, pack qualify, fleet native
   shim, host eval (stdlib parity via `configure_engine`), source-hash AOT cache,
-  `AGENTERM_SCRIPT_BACKEND=rh` trial path, dedicated `./rh-check.sh` suite
-- [ ] **Rhai → rh migration** (incremental, no forced cutover):
-  task manifest and automation corpus remain `.rhai` until v0.1.15 delivery
-  completes; then per-script rh-2 validation, optional default backend switch,
-  and eventual deprecation of interpreter hot path for pack entry points only
+  default `AGENTERM_SCRIPT_BACKEND=rh`, project/API-aware check-many, native
+  range and break/continue control flow, and dedicated `./rh-check.sh` suite.
+- [~] **Rhai → rh migration** (incremental, compatibility boundary explicit):
+  `agenterm-rh` is the bootstrap task command front door and the sole
+  stage-0 cached worker. It directly hosts the task engine, framed worker and
+  incremental Rust compiler wrapper through the shared library; CI task
+  callers and authoritative worker/check-many black boxes use this entry.
+  Its dedicated gate now includes an isolated single-PE CLI suite, an external
+  public-library contract suite, complete fixture checking, typed budget
+  failures, and native AOT qualification for supported control flow.
+  The task manifest and automation corpus remain `.rhai`.
+  Worker/REPL implementation has moved from the
+  `agenterm-rhai` binary into the shared `script_worker` library, but its
+  interpreter, host-eval fallback, and AST parsing remain on Rhai while their
+  typed boundaries migrate. Release verification requires both manifest roles
+  and validates each role's declared offline version probe.
 - [ ] **Layered deployment** (JVM / JAR analogue):
   - **Base runtime** — stable PE family (`agenterm`, `agenterm-rhai`, …):
     host Facade, broker, supervision, qualification; rebases rarely
@@ -776,9 +794,9 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   - Control Center, gateway sidecar, and task runners consume the same host
     C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
 
-Non-goals until v0.1.15 ships: default `AGENTERM_SCRIPT_BACKEND=rh` for the
-62-task automation manifest; npm-style remote rh imports; Cranelift direct
-codegen (transpile→rustc remains the production backend until a later gate).
+Current non-goals: renaming or deleting the compatibility PE before worker and
+REPL ownership moves; npm-style remote rh imports; Cranelift direct codegen
+(transpile→rustc remains the production backend until a later gate).
 
 ## Explicitly deferred
 

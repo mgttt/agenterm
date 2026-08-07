@@ -33,16 +33,16 @@ esac
 
 TARGET_ROOT=${CARGO_TARGET_DIR:-target}
 CACHE_DIR="$TARGET_ROOT/bootstrap-worker-cache/$AGENTERM_HOST_OS-$AGENTERM_HOST_ARCH"
-CACHE_WORKER="$CACHE_DIR/agenterm-rhai"
-CACHE_STAMP="$CACHE_DIR/compatibility.stamp"
+CACHE_WORKER="$CACHE_DIR/agenterm-rh"
+CACHE_STAMP="$CACHE_DIR/worker.stamp"
 IDENTITY_FILE="$CACHE_DIR/identity-$$.txt"
 POST_IDENTITY_FILE="$CACHE_DIR/post-identity-$$.txt"
 UNTRACKED_FILE="$CACHE_DIR/untracked-$$.txt"
 CACHE_TEMP="$CACHE_DIR/worker-$$.tmp"
 STAMP_TEMP="$CACHE_DIR/stamp-$$.tmp"
-SOURCE="$TARGET_ROOT/debug/agenterm-rhai"
+SOURCE="$TARGET_ROOT/debug/agenterm-rh"
 BOOTSTRAP_DIR="$TARGET_ROOT/task-bootstrap-$$"
-WORKER="$BOOTSTRAP_DIR/agenterm-rhai"
+WORKER="$BOOTSTRAP_DIR/agenterm-rh"
 
 cleanup() {
     rm -f -- "$WORKER" "$IDENTITY_FILE" "$POST_IDENTITY_FILE" \
@@ -77,7 +77,7 @@ write_identity() {
 }
 
 mkdir -p -- "$CACHE_DIR"
-# Compatibility uses source content and tool identities, never timestamps.
+# Worker reuse uses source content and tool identities, never timestamps.
 write_identity "$IDENTITY_FILE"
 AGENTERM_BOOTSTRAP_FINGERPRINT=$(git hash-object -- "$IDENTITY_FILE")
 CACHE_VALID=false
@@ -102,8 +102,7 @@ if [ "$CACHE_VALID" = true ]; then
     AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable
 else
     AGENTERM_BOOTSTRAP_CARGO_START_MS=$(clock_ms)
-    cargo build --quiet --locked --bin agenterm-rhai
-    cargo build --quiet --locked -p agenterm-rh --bin agenterm-rh
+    cargo build --quiet --locked --bin agenterm-rh
     AGENTERM_BOOTSTRAP_CARGO_END_MS=$(clock_ms)
     AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=$((
         AGENTERM_BOOTSTRAP_CARGO_END_MS - AGENTERM_BOOTSTRAP_CARGO_START_MS
@@ -135,11 +134,6 @@ fi
 # macOS uses BSD chmod, whose option parser does not accept a standalone `--`.
 # WORKER is rooted under target/ and cannot begin with an option.
 chmod +x "$WORKER"
-RH_SOURCE="$TARGET_ROOT/debug/agenterm-rh"
-if [ -s "$RH_SOURCE" ]; then
-    cp -- "$RH_SOURCE" "$BOOTSTRAP_DIR/agenterm-rh"
-    chmod +x "$BOOTSTRAP_DIR/agenterm-rh"
-fi
 AGENTERM_BOOTSTRAP_COPY_END_MS=$(clock_ms)
 AGENTERM_BOOTSTRAP_WORKER_COPY_MS=$((
     AGENTERM_BOOTSTRAP_COPY_END_MS - AGENTERM_BOOTSTRAP_COPY_START_MS
@@ -159,6 +153,7 @@ if [ "$AGENTERM_BOOTSTRAP_OTHER_SETUP_MS" -lt 0 ]; then
     AGENTERM_BOOTSTRAP_OTHER_SETUP_MS=0
 fi
 AGENTERM_BOOTSTRAP_TIMING_SCHEMA=1
+export AGENTERM_SCRIPT_BACKEND=rh
 export AGENTERM_BOOTSTRAP_WORKER AGENTERM_BOOTSTRAP_CACHE_WORKER
 export AGENTERM_BOOTSTRAP_PLATFORM
 export AGENTERM_HOST_OS AGENTERM_HOST_ARCH
