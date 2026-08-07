@@ -615,7 +615,7 @@ pub(crate) fn command_status(
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn command_stdout_file(
+pub(crate) fn run_command_stdout_file(
     program: &str,
     arguments: &[String],
     timeout_ms: u64,

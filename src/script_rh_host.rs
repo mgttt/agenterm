@@ -286,7 +286,7 @@ fn host_process_stdout_file(request: &str) -> Result<i32, String> {
     let (program, arguments, timeout_ms, stdout_path) = host_process_request(request)?;
     let stdout_path =
         stdout_path.ok_or_else(|| "process_stdout_path_type: expected string".to_owned())?;
-    let code = crate::script_process::command_stdout_file(
+    let code = crate::script_process::run_command_stdout_file(
         &program,
         &arguments,
         timeout_ms,
