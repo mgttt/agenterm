@@ -423,6 +423,20 @@ fn target_report_uses_native_bundled_execution() {
 }
 
 #[test]
+fn prune_target_incremental_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/prune-target-incremental.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(output.rust.contains("rh_path_join("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
 fn package_release_qualified_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/package-release-qualified.rh");
     assert!(source.contains("fn entry("));

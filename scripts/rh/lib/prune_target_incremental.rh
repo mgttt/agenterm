@@ -1,0 +1,1006 @@
+// Shared incremental target prune helpers (INT-only native pack).
+//
+// Locking, recursive delete, tree inspection, and metadata identity use
+// python3 fcntl/shutil/hashlib via command_status because the matching
+// std::fs APIs are not native yet.
+
+
+fn exact_repo_root(repo) {
+    require(repo != "", "incremental-prune-git-root");
+    let stdout_path = repo + ".prune-target-incremental.stdout.tmp";
+    let prefix_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "rev-parse", "--show-prefix"],
+        10000,
+        stdout_path
+    );
+    require(prefix_code == 0, "incremental-prune-git-root");
+    let prefix = std::fs::read_to_string(stdout_path);
+    prefix.trim();
+    std::fs::try_remove_file(stdout_path);
+    require(prefix == "", "incremental_prune_repo_not_exact_git_root:" + repo);
+}
+
+fn direct_directory(path, code) {
+    require(path != "", code + "_empty");
+    require(std::fs::exists(path), code + "_missing:" + path);
+    let metadata = std::fs::symlink_metadata(path);
+    require(metadata.is_dir, code + "_not_directory:" + path);
+    require(
+        !metadata.is_symlink && !metadata.is_reparse_point,
+        code + "_indirect:" + path
+    );
+}
+
+fn direct_file(path) {
+    require(path != "", "direct_file_empty");
+    if !std::fs::exists(path) {
+        return 0;
+    }
+    let metadata = std::fs::symlink_metadata(path);
+    if metadata.is_file && !metadata.is_symlink && !metadata.is_reparse_point {
+        1
+    } else {
+        0
+    }
+}
+
+fn lock_available(path) {
+    require(path != "", "lock_available_empty");
+    let code = std::process::command_status(
+        "python3",
+        [
+            "-c",
+            "import fcntl,sys; f=open(sys.argv[1],'a'); fcntl.flock(f.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)",
+            path
+        ],
+        10000
+    );
+    if code == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn remove_tree(path) {
+    require(path != "", "remove_tree_empty");
+    let code = std::process::command_status(
+        "python3",
+        [
+            "-c",
+            "import shutil,sys; shutil.rmtree(sys.argv[1])",
+            path
+        ],
+        120000
+    );
+    if code == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+// Acquire every direct .lock under root, then remove the whole compilation-unit root.
+// Returns 1 removed, 0 shape/identity failure, 2 lock/working contention, 3 remove failure.
+fn remove_incremental_root(crate_path) {
+    require(crate_path != "", "remove_incremental_root_empty");
+    let code = std::process::command_status(
+        "python3",
+        [
+            "-c",
+            "import fcntl,os,shutil,sys\nroot=sys.argv[1]\nlocks=[]\nfor name in os.listdir(root):\n  path=os.path.join(root,name)\n  if os.path.isdir(path) and name.endswith('-working'):\n    sys.exit(2)\n  if os.path.isfile(path) and name.endswith('.lock'):\n    handle=open(path,'a')\n    fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\n    locks.append(handle)\nshutil.rmtree(root)\n",
+            crate_path
+        ],
+        120000
+    );
+    if code == 0 {
+        return 1;
+    }
+    if code == 2 {
+        return 2;
+    }
+    if code == 3 {
+        return 3;
+    }
+    0
+}
+
+fn decimal_parse(text) {
+    if text == "" {
+        return -1;
+    }
+    let value = 0;
+    let negative = 0;
+    let started = 0;
+    let first = 1;
+    for character in text {
+        if first != 0 && character == "-" {
+            negative = 1;
+            first = 0;
+        } else {
+            first = 0;
+            let digit = -1;
+            if "0".contains(character.to_string()) { digit = 0; }
+            if "1".contains(character.to_string()) { digit = 1; }
+            if "2".contains(character.to_string()) { digit = 2; }
+            if "3".contains(character.to_string()) { digit = 3; }
+            if "4".contains(character.to_string()) { digit = 4; }
+            if "5".contains(character.to_string()) { digit = 5; }
+            if "6".contains(character.to_string()) { digit = 6; }
+            if "7".contains(character.to_string()) { digit = 7; }
+            if "8".contains(character.to_string()) { digit = 8; }
+            if "9".contains(character.to_string()) { digit = 9; }
+            if digit < 0 {
+                if started == 0 {
+                    return -1;
+                }
+                return -1;
+            }
+            started = 1;
+            value = value * 10 + digit;
+        }
+    }
+    if started == 0 {
+        return -1;
+    }
+    if negative != 0 {
+        0 - value
+    } else {
+        value
+    }
+}
+
+// Returns -1 invalid tree, else files * 1000000 * 1000000 + bytes.
+fn inspect_tree(root) {
+    require(root != "", "inspect_tree_empty");
+    let stdout_path = root + ".inspect-tree.stdout.tmp";
+    let code = std::process::command_stdout_file(
+        "python3",
+        [
+            "-c",
+            "import os,sys\nroot=sys.argv[1]\nout=sys.argv[2]\nfiles=0\nbytes=0\npending=[root]\nwhile pending:\n  d=pending.pop()\n  for name in os.listdir(d):\n    p=os.path.join(d,name)\n    if os.path.islink(p):\n      open(out,'w').write('-1')\n      sys.exit(0)\n    if os.path.isdir(p):\n      pending.append(p)\n    elif os.path.isfile(p):\n      files+=1\n      bytes+=os.path.getsize(p)\n    else:\n      open(out,'w').write('-1')\n      sys.exit(0)\nopen(out,'w').write(str(files*1000000*1000000+bytes))\n",
+            root,
+            stdout_path
+        ],
+        120000,
+        stdout_path
+    );
+    if code != 0 {
+        return -1;
+    }
+    let text = std::fs::read_to_string(stdout_path);
+    std::fs::try_remove_file(stdout_path);
+    text.trim();
+    decimal_parse(text)
+}
+
+fn safe_root_name(value) {
+    if value == "" {
+        return 0;
+    }
+    if value == "." {
+        return 0;
+    }
+    if value == ".." {
+        return 0;
+    }
+    if value.len > 255 {
+        return 0;
+    }
+    if value.contains("/") {
+        return 0;
+    }
+    if value.contains("\\") {
+        return 0;
+    }
+    1
+}
+
+fn lowercase_sha256(value) {
+    if value.len != 64 {
+        return 0;
+    }
+    for character in value {
+        if !"0123456789abcdef".contains(character.to_string()) {
+            return 0;
+        }
+    }
+    1
+}
+
+fn safe_invocation_id(value) {
+    if value.len < 16 {
+        return 0;
+    }
+    if value.len > 128 {
+        return 0;
+    }
+    let alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
+    for character in value {
+        if !alphabet.contains(character.to_string()) {
+            return 0;
+        }
+    }
+    1
+}
+
+// Returns 0 invalid, 1 working, 2 ok; writes identity hash to output_path on ok.
+fn metadata_identity(root, maximum_entries, output_path) {
+    require(root != "", "metadata_identity_empty_root");
+    require(output_path != "", "metadata_identity_empty_output");
+    if maximum_entries <= 0 {
+        return 0;
+    }
+    let code = std::process::command_status(
+        "python3",
+        [
+            "-c",
+            "import hashlib,json,os,sys\nroot,out=sys.argv[1:3]\nmax_entries=100000\nrecords=[]\npending=[(root,'',0)]\ntry:\n  st=os.lstat(root)\nexcept OSError:\n  sys.exit(0)\nif not os.path.isdir(root) or os.path.islink(root):\n  sys.exit(0)\nrecords.append('d|.|%d|%d' % (st.st_size,int(st.st_mtime*1000)))\nwhile pending:\n  path,relative,depth=pending.pop()\n  if depth>=64:\n    sys.exit(0)\n  for name in os.listdir(path):\n    if len(records)>=max_entries:\n      sys.exit(0)\n    rel=name if relative=='' else relative+'/'+name\n    if len(rel)>4096:\n      sys.exit(0)\n    child=os.path.join(path,name)\n    try:\n      st=os.lstat(child)\n    except OSError:\n      sys.exit(0)\n    if os.path.islink(child):\n      sys.exit(0)\n    if os.path.isdir(child):\n      if name.endswith('-working'):\n        sys.exit(1)\n      records.append('d|%s|%d|%d' % (rel,st.st_size,int(st.st_mtime*1000)))\n      pending.append((child,rel,depth+1))\n    elif os.path.isfile(child):\n      records.append('f|%s|%d|%d' % (rel,st.st_size,int(st.st_mtime*1000)))\n    else:\n      sys.exit(0)\nrecords.sort()\npayload=json.dumps(records,separators=(',',':'))\nopen(out,'w').write(hashlib.sha256(payload.encode()).hexdigest())\nsys.exit(2)\n",
+            root,
+            output_path
+        ],
+        120000
+    );
+    if code == 0 {
+        return 0;
+    }
+    if code == 1 {
+        return 1;
+    }
+    if code == 2 {
+        return 2;
+    }
+    0
+}
+
+fn validate_root_manifest(path, invocation, target, incremental) {
+    require(target != "", "validate_root_manifest_target");
+    require(incremental != "", "validate_root_manifest_incremental");
+    if safe_invocation_id(invocation) == 0 {
+        return 0;
+    }
+    if direct_file(path) == 0 {
+        return 0;
+    }
+    let metadata = std::fs::symlink_metadata(path);
+    if metadata.len <= 0 {
+        return 0;
+    }
+    if metadata.len > 2097152 {
+        return 0;
+    }
+    let text = std::fs::read_to_string(path);
+    if !text.starts_with("{")
+            || !text.contains("\"kind\":\"agenterm-incremental-touch-manifest\"")
+            || !text.contains("\"schema_version\":1")
+            || !text.contains("\"identity_algorithm\":\"full-tree-metadata-v1\"") {
+        return 0;
+    }
+    let document = rhai::json::parse(text);
+    if document.kind != "agenterm-incremental-touch-manifest"
+            || document.schema_version != 1
+            || document.invocation_id != invocation
+            || document.target != target
+            || document.incremental_root != incremental
+            || document.snapshot_complete != true
+            || document.rustc_invocations <= 0
+            || document.rustc_invocations > 100000
+            || document.identity_algorithm != "full-tree-metadata-v1"
+            || document.roots.len > 8192 {
+        return 0;
+    }
+    let seen_names = [];
+    for entry in document.roots {
+        let root_name = entry.name;
+        if safe_root_name(root_name) == 0 {
+            return 0;
+        }
+        for seen in seen_names {
+            if seen == root_name {
+                return 0;
+            }
+        }
+        if type_of(entry.touched) != "bool" {
+            return 0;
+        }
+        if lowercase_sha256(entry.before_identity) == 0 {
+            return 0;
+        }
+        if lowercase_sha256(entry.after_identity) == 0 {
+            return 0;
+        }
+        seen_names.push(root_name);
+    }
+    1
+}
+
+fn session_timestamp_micros(name) {
+    require(name != "", "session_timestamp_empty");
+    if !name.starts_with("s-") {
+        return -1;
+    }
+    let parts = name.split("-");
+    if parts.len != 4 {
+        return -1;
+    }
+    if parts[1] == ""
+            || parts[2] == ""
+            || parts[3] == ""
+            || parts[3] == "working" {
+        return -1;
+    }
+    base36(parts[1])
+}
+
+fn session_is_valid(name) {
+    if session_timestamp_micros(name) < 0 {
+        0
+    } else {
+        1
+    }
+}
+
+fn session_lock_present(crate_path, session_name) {
+    require(crate_path != "", "session_lock_present_empty_crate");
+    require(session_name != "", "session_lock_present_empty_name");
+    let code = std::process::command_status(
+        "python3",
+        [
+            "-c",
+            "import os,sys\ncrate,name=sys.argv[1:3]\nparts=name.split('-')\nif len(parts)!=4 or parts[0]!='s' or not parts[1] or not parts[2] or not parts[3] or parts[3]=='working': sys.exit(2)\nlock=os.path.join(crate,'s-%s-%s.lock'%(parts[1],parts[2]))\nmeta=os.lstat(lock)\nif not os.path.isfile(lock) or os.path.islink(lock): sys.exit(1)\nsys.exit(0)\n",
+            crate_path,
+            session_name
+        ],
+        10000
+    );
+    if code == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn remove_session_tree(crate_path, session_name, session_path) {
+    require(crate_path != "", "remove_session_tree_empty_crate");
+    require(session_name != "", "remove_session_tree_empty_name");
+    require(session_path != "", "remove_session_tree_empty_path");
+    let code = std::process::command_status(
+        "python3",
+        [
+            "-c",
+            "import fcntl,os,shutil,sys\ncrate,name,tree=sys.argv[1:4]\nparts=name.split('-')\nif len(parts)!=4 or parts[0]!='s' or not parts[1] or not parts[2] or not parts[3] or parts[3]=='working': sys.exit(3)\nlock=os.path.join(crate,'s-%s-%s.lock'%(parts[1],parts[2]))\ntry:\n  before=os.lstat(tree)\nexcept OSError:\n  sys.exit(5)\nhandle=open(lock,'a')\ntry:\n  fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept OSError:\n  sys.exit(1)\ntry:\n  after=os.lstat(tree)\nexcept OSError:\n  sys.exit(5)\nif int(before.st_mtime*1000)!=int(after.st_mtime*1000):\n  sys.exit(4)\nshutil.rmtree(tree)\n",
+            crate_path,
+            session_name,
+            session_path
+        ],
+        120000
+    );
+    if code == 0 {
+        return 1;
+    }
+    if code == 4 {
+        return 2;
+    }
+    0
+}
+
+fn base36(value) {
+    if value.len == 0 {
+        return -1;
+    }
+    if value.len > 12 {
+        return -1;
+    }
+    let result = 0;
+    for character in value {
+        let digit = -1;
+        if "0".contains(character.to_string()) { digit = 0; }
+        if "1".contains(character.to_string()) { digit = 1; }
+        if "2".contains(character.to_string()) { digit = 2; }
+        if "3".contains(character.to_string()) { digit = 3; }
+        if "4".contains(character.to_string()) { digit = 4; }
+        if "5".contains(character.to_string()) { digit = 5; }
+        if "6".contains(character.to_string()) { digit = 6; }
+        if "7".contains(character.to_string()) { digit = 7; }
+        if "8".contains(character.to_string()) { digit = 8; }
+        if "9".contains(character.to_string()) { digit = 9; }
+        if "a".contains(character.to_string()) { digit = 10; }
+        if "b".contains(character.to_string()) { digit = 11; }
+        if "c".contains(character.to_string()) { digit = 12; }
+        if "d".contains(character.to_string()) { digit = 13; }
+        if "e".contains(character.to_string()) { digit = 14; }
+        if "f".contains(character.to_string()) { digit = 15; }
+        if "g".contains(character.to_string()) { digit = 16; }
+        if "h".contains(character.to_string()) { digit = 17; }
+        if "i".contains(character.to_string()) { digit = 18; }
+        if "j".contains(character.to_string()) { digit = 19; }
+        if "k".contains(character.to_string()) { digit = 20; }
+        if "l".contains(character.to_string()) { digit = 21; }
+        if "m".contains(character.to_string()) { digit = 22; }
+        if "n".contains(character.to_string()) { digit = 23; }
+        if "o".contains(character.to_string()) { digit = 24; }
+        if "p".contains(character.to_string()) { digit = 25; }
+        if "q".contains(character.to_string()) { digit = 26; }
+        if "r".contains(character.to_string()) { digit = 27; }
+        if "s".contains(character.to_string()) { digit = 28; }
+        if "t".contains(character.to_string()) { digit = 29; }
+        if "u".contains(character.to_string()) { digit = 30; }
+        if "v".contains(character.to_string()) { digit = 31; }
+        if "w".contains(character.to_string()) { digit = 32; }
+        if "x".contains(character.to_string()) { digit = 33; }
+        if "y".contains(character.to_string()) { digit = 34; }
+        if "z".contains(character.to_string()) { digit = 35; }
+        if digit < 0 {
+            return -1;
+        }
+        result = result * 36 + digit;
+    }
+    result
+}
+
+fn session_is_newest(crate_path, session_name, timestamp_micros) {
+    require(crate_path != "", "session_is_newest_empty_crate");
+    require(session_name != "", "session_is_newest_empty_name");
+    for other in std::fs::read_dir(crate_path) {
+        if other.is_dir {
+            let other_name = "" + other.file_name;
+            if session_is_valid(other_name) != 0 {
+                let other_ts = session_timestamp_micros(other_name);
+                if other_ts >= 0 {
+                    let other_meta =
+                        std::fs::symlink_metadata(other.path.display);
+                    if other_meta.is_dir
+                            && !other_meta.is_symlink
+                            && !other_meta.is_reparse_point {
+                        if other_ts > timestamp_micros {
+                            return 0;
+                        }
+                        if other_ts == timestamp_micros
+                                && other_name > session_name {
+                            return 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    1
+}
+
+fn tree_files(tree) {
+    tree / (1000000 * 1000000)
+}
+
+fn tree_bytes(tree) {
+    tree % (1000000 * 1000000)
+}
+
+// Manifest root action codes: 0 none, 1 touched, 2 identity, 3 working/lock,
+// 4 shape, 5 remove failure, 1000000+tree removed.
+fn try_prune_manifest_root(crate_path, root_entry) {
+    require(crate_path != "", "try_prune_manifest_root_empty_path");
+    if root_entry.touched {
+        return 1;
+    }
+    if root_entry.before_identity != root_entry.after_identity {
+        return 2;
+    }
+    let identity_path =
+        std::path::join(crate_path, ".prune-identity.tmp").display;
+    let first_status = metadata_identity(crate_path, 100000, identity_path);
+    if first_status != 2 {
+        return 2;
+    }
+    let first_identity = std::fs::read_to_string(identity_path);
+    if first_identity != root_entry.after_identity {
+        std::fs::try_remove_file(identity_path);
+        return 2;
+    }
+    let second_status = metadata_identity(crate_path, 100000, identity_path);
+    if second_status != 2 {
+        std::fs::try_remove_file(identity_path);
+        return 2;
+    }
+    let second_identity = std::fs::read_to_string(identity_path);
+    std::fs::try_remove_file(identity_path);
+    if second_identity != first_identity {
+        return 2;
+    }
+    if second_identity != root_entry.after_identity {
+        return 2;
+    }
+    let tree = inspect_tree(crate_path);
+    if tree < 0 {
+        return 4;
+    }
+    let remove_code = remove_incremental_root(crate_path);
+    if remove_code == 1 {
+        return 1000000 + tree;
+    }
+    if remove_code == 2 {
+        return 3;
+    }
+    if remove_code == 0 {
+        return 4;
+    }
+    5
+}
+
+fn write_manifest_skip_stats(
+    path,
+    skipped_root_touched,
+    skipped_root_identity,
+    skipped_root_working_or_lock,
+    skipped_root_shape,
+    skipped_root_remove_failure
+) {
+    require(path != "", "write_manifest_skip_stats_path");
+    let text =
+        skipped_root_touched + "\n" +
+        skipped_root_identity + "\n" +
+        skipped_root_working_or_lock + "\n" +
+        skipped_root_shape + "\n" +
+        skipped_root_remove_failure;
+    rhai::runtime::atomic_write(path, text);
+}
+
+fn read_manifest_stat(path, line_index) {
+    require(path != "", "read_manifest_stat_path");
+    let text = std::fs::read_to_string(path);
+    let lines = text.split("\n");
+    let index = 0;
+    for line in lines {
+        if index == line_index {
+            return decimal_parse(line);
+        }
+        index += 1;
+    }
+    0
+}
+
+fn prune_manifest_roots(incremental, document, skip_stats_path) {
+    require(incremental != "", "prune_manifest_roots_empty");
+    let removed_roots = 0;
+    let removed_root_files = 0;
+    let removed_root_logical_bytes = 0;
+    let skipped_root_touched = 0;
+    let skipped_root_identity = 0;
+    let skipped_root_working_or_lock = 0;
+    let skipped_root_shape = 0;
+    let skipped_root_remove_failure = 0;
+    for crate_entry in std::fs::read_dir(incremental) {
+        if crate_entry.is_dir {
+            let crate_name = "" + crate_entry.file_name;
+            let crate_path = std::path::join(incremental, crate_name).display;
+            for root_entry in document.roots {
+                if root_entry.name == crate_name {
+                    let action = try_prune_manifest_root(crate_path, root_entry);
+                    if action == 1 {
+                        skipped_root_touched += 1;
+                    }
+                    if action == 2 {
+                        skipped_root_identity += 1;
+                    }
+                    if action == 3 {
+                        skipped_root_working_or_lock += 1;
+                    }
+                    if action == 4 {
+                        skipped_root_shape += 1;
+                    }
+                    if action == 5 {
+                        skipped_root_remove_failure += 1;
+                    }
+                    if action >= 1000000 {
+                        let tree = action - 1000000;
+                        let tree_file_count = tree_files(tree);
+                        let tree_byte_count = tree_bytes(tree);
+                        removed_roots += 1;
+                        removed_root_files += tree_file_count;
+                        removed_root_logical_bytes += tree_byte_count;
+                    }
+                }
+            }
+        }
+    }
+    write_manifest_skip_stats(
+        skip_stats_path,
+        skipped_root_touched,
+        skipped_root_identity,
+        skipped_root_working_or_lock,
+        skipped_root_shape,
+        skipped_root_remove_failure
+    );
+    let scale_files = 1000000;
+    let scale_bytes = scale_files * 1000000;
+    removed_roots + removed_root_files * scale_files
+        + removed_root_logical_bytes * scale_bytes
+}
+
+// Session action codes: 0 keep, 1 young, 2 missing lock, 3 remove failure,
+// 4 indirect, 5 active lock, 1000000+tree removed.
+fn try_prune_obsolete_session(
+    crate_path,
+    session_name,
+    session_path,
+    now_micros,
+    minimum_age_micros
+) {
+    require(crate_path != "", "try_prune_obsolete_session_empty_crate");
+    require(session_name != "", "try_prune_obsolete_session_empty_name");
+    require(session_path != "", "try_prune_obsolete_session_empty_path");
+    let timestamp_micros = session_timestamp_micros(session_name);
+    if timestamp_micros < 0 {
+        return 0;
+    }
+    let metadata = std::fs::symlink_metadata(session_path);
+    if !metadata.is_dir {
+        return 4;
+    }
+    if metadata.is_symlink {
+        return 4;
+    }
+    if metadata.is_reparse_point {
+        return 4;
+    }
+    if session_is_newest(crate_path, session_name, timestamp_micros) != 0 {
+        return 0;
+    }
+    if now_micros - timestamp_micros < minimum_age_micros {
+        return 1;
+    }
+    if session_lock_present(crate_path, session_name) == 0 {
+        return 2;
+    }
+    if !std::fs::exists(session_path) {
+        return 3;
+    }
+    let tree = inspect_tree(session_path);
+    if tree < 0 {
+        return 4;
+    }
+    let remove_code =
+        remove_session_tree(crate_path, session_name, session_path);
+    if remove_code == 2 {
+        return 4;
+    }
+    if remove_code == 0 {
+        return 5;
+    }
+    1000000 + tree
+}
+
+fn count_finalized_sessions(crate_path) {
+    require(crate_path != "", "count_finalized_sessions_empty");
+    let crate_metadata = std::fs::symlink_metadata(crate_path);
+    if crate_metadata.is_symlink {
+        return -1;
+    }
+    if crate_metadata.is_reparse_point {
+        return -1;
+    }
+    let session_count = 0;
+    for entry in std::fs::read_dir(crate_path) {
+        if entry.is_dir {
+            if session_is_valid("" + entry.file_name) != 0 {
+                let metadata = std::fs::symlink_metadata(entry.path.display);
+                if !metadata.is_dir {
+                    return -1;
+                }
+                if metadata.is_symlink {
+                    return -1;
+                }
+                if metadata.is_reparse_point {
+                    return -1;
+                }
+                session_count += 1;
+            }
+        }
+    }
+    session_count
+}
+
+fn write_session_stats(
+    path,
+    compilation_units,
+    finalized_sessions,
+    removed_sessions,
+    removed_files,
+    removed_logical_bytes,
+    skipped_indirect,
+    skipped_missing_lock,
+    skipped_active_lock,
+    skipped_young,
+    skipped_remove_failure
+) {
+    require(path != "", "write_session_stats_path");
+    let text =
+        compilation_units + "\n" +
+        finalized_sessions + "\n" +
+        removed_sessions + "\n" +
+        removed_files + "\n" +
+        removed_logical_bytes + "\n" +
+        skipped_indirect + "\n" +
+        skipped_missing_lock + "\n" +
+        skipped_active_lock + "\n" +
+        skipped_young + "\n" +
+        skipped_remove_failure;
+    rhai::runtime::atomic_write(path, text);
+}
+
+fn prune_finalized_sessions(
+    incremental,
+    now_micros,
+    minimum_age_micros,
+    session_stats_path
+) {
+    require(incremental != "", "prune_finalized_sessions_empty");
+    let compilation_units = 0;
+    let finalized_sessions = 0;
+    let removed_sessions = 0;
+    let removed_files = 0;
+    let removed_logical_bytes = 0;
+    let skipped_indirect = 0;
+    let skipped_missing_lock = 0;
+    let skipped_active_lock = 0;
+    let skipped_young = 0;
+    let skipped_remove_failure = 0;
+    for crate_entry in std::fs::read_dir(incremental) {
+        if crate_entry.is_dir {
+            let crate_name = "" + crate_entry.file_name;
+            let crate_path =
+                std::path::join(incremental, crate_name).display;
+            let session_count = count_finalized_sessions(crate_path);
+            if session_count < 0 {
+                skipped_indirect += 1;
+            }
+            if session_count > 0 {
+                compilation_units += 1;
+                finalized_sessions += session_count;
+                for entry in std::fs::read_dir(crate_path) {
+                    if entry.is_dir {
+                        let session_name = "" + entry.file_name;
+                        if session_is_valid(session_name) != 0 {
+                            let action = try_prune_obsolete_session(
+                                crate_path,
+                                session_name,
+                                entry.path.display,
+                                now_micros,
+                                minimum_age_micros
+                            );
+                            if action == 1 {
+                                skipped_young += 1;
+                            }
+                            if action == 2 {
+                                skipped_missing_lock += 1;
+                            }
+                            if action == 3 {
+                                skipped_remove_failure += 1;
+                            }
+                            if action == 4 {
+                                skipped_indirect += 1;
+                            }
+                            if action == 5 {
+                                skipped_active_lock += 1;
+                            }
+                            if action >= 1000000 {
+                                let tree = action - 1000000;
+                                let tree_file_count = tree_files(tree);
+                                let tree_byte_count = tree_bytes(tree);
+                                removed_sessions += 1;
+                                removed_files += tree_file_count;
+                                removed_logical_bytes += tree_byte_count;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    write_session_stats(
+        session_stats_path,
+        compilation_units,
+        finalized_sessions,
+        removed_sessions,
+        removed_files,
+        removed_logical_bytes,
+        skipped_indirect,
+        skipped_missing_lock,
+        skipped_active_lock,
+        skipped_young,
+        skipped_remove_failure
+    );
+    0
+}
+
+fn read_session_stat(path, line_index) {
+    require(path != "", "read_session_stat_path");
+    let text = std::fs::read_to_string(path);
+    let lines = text.split("\n");
+    let index = 0;
+    for line in lines {
+        if index == line_index {
+            return decimal_parse(line);
+        }
+        index += 1;
+    }
+    0
+}
+
+fn emit_summary(
+    root_manifest_state,
+    removed_roots,
+    removed_root_files,
+    removed_root_logical_bytes,
+    skipped_root_touched,
+    skipped_root_identity,
+    skipped_root_working_or_lock,
+    skipped_root_shape,
+    skipped_root_remove_failure,
+    compilation_units,
+    finalized_sessions,
+    removed_sessions,
+    removed_files,
+    removed_logical_bytes,
+    skipped_indirect,
+    skipped_missing_lock,
+    skipped_active_lock,
+    skipped_young,
+    skipped_remove_failure
+) {
+    require(root_manifest_state != "", "emit_summary_state");
+    print(
+        "Cargo incremental prune: scope=obsolete-finalized-sessions" +
+        ", root_manifest=" + root_manifest_state +
+        ", removed_roots=" + removed_roots +
+        ", removed_root_files=" + removed_root_files +
+        ", removed_root_logical_bytes=" + removed_root_logical_bytes +
+        ", skipped_root_touched=" + skipped_root_touched +
+        ", skipped_root_identity=" + skipped_root_identity +
+        ", skipped_root_working_or_lock=" + skipped_root_working_or_lock +
+        ", skipped_root_shape=" + skipped_root_shape +
+        ", skipped_root_remove_failure=" + skipped_root_remove_failure +
+        ", units=" + compilation_units +
+        ", finalized=" + finalized_sessions +
+        ", removed_sessions=" + removed_sessions +
+        ", removed_files=" + removed_files +
+        ", removed_logical_bytes=" + removed_logical_bytes +
+        ", skipped_indirect=" + skipped_indirect +
+        ", skipped_missing_lock=" + skipped_missing_lock +
+        ", skipped_active_lock=" + skipped_active_lock +
+        ", skipped_young=" + skipped_young +
+        ", skipped_remove_failure=" + skipped_remove_failure
+    );
+    0
+}
+
+fn run_after_lock(
+    incremental,
+    target,
+    has_manifest,
+    manifest_path,
+    invocation,
+    manifest_document
+) {
+    require(incremental != "", "run_after_lock_incremental");
+    require(target != "", "run_after_lock_target");
+    let now_micros = std::time::SystemTime::now().unix_millis * 1000;
+    let minimum_age_micros = 60000000;
+    let root_manifest_state = "absent";
+    let removed_roots = 0;
+    let removed_root_files = 0;
+    let removed_root_logical_bytes = 0;
+    let skipped_root_touched = 0;
+    let skipped_root_identity = 0;
+    let skipped_root_working_or_lock = 0;
+    let skipped_root_shape = 0;
+    let skipped_root_remove_failure = 0;
+    let compilation_units = 0;
+    let finalized_sessions = 0;
+    let removed_sessions = 0;
+    let removed_files = 0;
+    let removed_logical_bytes = 0;
+    let skipped_indirect = 0;
+    let skipped_missing_lock = 0;
+    let skipped_active_lock = 0;
+    let skipped_young = 0;
+    let skipped_remove_failure = 0;
+
+    if has_manifest != 0 {
+        if validate_root_manifest(
+            manifest_path,
+            invocation,
+            target,
+            incremental
+        ) != 0 {
+            root_manifest_state = "valid";
+            let manifest_skip_path =
+                std::path::join(incremental, ".prune-manifest-skips.tmp").display;
+            let scale_files = 1000000;
+            let scale_bytes = scale_files * 1000000;
+            let removal_packed = prune_manifest_roots(
+                incremental,
+                manifest_document,
+                manifest_skip_path
+            );
+            let unpacked_roots = removal_packed % scale_files;
+            let unpacked_root_files =
+                (removal_packed / scale_files) % scale_files;
+            let unpacked_root_bytes = removal_packed / scale_bytes;
+            removed_roots = unpacked_roots;
+            removed_root_files = unpacked_root_files;
+            removed_root_logical_bytes = unpacked_root_bytes;
+            let touched_stat = read_manifest_stat(manifest_skip_path, 0);
+            let identity_stat = read_manifest_stat(manifest_skip_path, 1);
+            let working_stat = read_manifest_stat(manifest_skip_path, 2);
+            let shape_stat = read_manifest_stat(manifest_skip_path, 3);
+            let remove_fail_stat = read_manifest_stat(manifest_skip_path, 4);
+            skipped_root_touched = touched_stat;
+            skipped_root_identity = identity_stat;
+            skipped_root_working_or_lock = working_stat;
+            skipped_root_shape = shape_stat;
+            skipped_root_remove_failure = remove_fail_stat;
+            std::fs::try_remove_file(manifest_skip_path);
+        }
+        if validate_root_manifest(
+            manifest_path,
+            invocation,
+            target,
+            incremental
+        ) == 0 {
+            root_manifest_state = "invalid";
+        }
+    }
+
+    let session_stats_path =
+        std::path::join(incremental, ".prune-session-stats.tmp").display;
+    prune_finalized_sessions(
+        incremental,
+        now_micros,
+        minimum_age_micros,
+        session_stats_path
+    );
+    let units_stat = read_session_stat(session_stats_path, 0);
+    let finalized_stat = read_session_stat(session_stats_path, 1);
+    let removed_sessions_stat = read_session_stat(session_stats_path, 2);
+    let removed_files_stat = read_session_stat(session_stats_path, 3);
+    let removed_bytes_stat = read_session_stat(session_stats_path, 4);
+    let indirect_stat = read_session_stat(session_stats_path, 5);
+    let missing_lock_stat = read_session_stat(session_stats_path, 6);
+    let active_lock_stat = read_session_stat(session_stats_path, 7);
+    let young_stat = read_session_stat(session_stats_path, 8);
+    let remove_fail_stat = read_session_stat(session_stats_path, 9);
+    compilation_units = units_stat;
+    finalized_sessions = finalized_stat;
+    removed_sessions = removed_sessions_stat;
+    removed_files = removed_files_stat;
+    removed_logical_bytes = removed_bytes_stat;
+    skipped_indirect = indirect_stat;
+    skipped_missing_lock = missing_lock_stat;
+    skipped_active_lock = active_lock_stat;
+    skipped_young = young_stat;
+    skipped_remove_failure = remove_fail_stat;
+    std::fs::try_remove_file(session_stats_path);
+
+    emit_summary(
+        root_manifest_state,
+        removed_roots,
+        removed_root_files,
+        removed_root_logical_bytes,
+        skipped_root_touched,
+        skipped_root_identity,
+        skipped_root_working_or_lock,
+        skipped_root_shape,
+        skipped_root_remove_failure,
+        compilation_units,
+        finalized_sessions,
+        removed_sessions,
+        removed_files,
+        removed_logical_bytes,
+        skipped_indirect,
+        skipped_missing_lock,
+        skipped_active_lock,
+        skipped_young,
+        skipped_remove_failure
+    );
+}

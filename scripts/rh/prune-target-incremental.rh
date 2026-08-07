@@ -1,0 +1,93 @@
+// Reclaim obsolete finalized rustc sessions without discarding the newest
+// reusable cache for any Cargo compilation unit.
+//
+// Args:
+//   REPO [TARGET] [--manifest PATH --invocation ID]
+
+import "scripts/rh/lib/prune_target_incremental" as prune;
+
+fn entry() {
+    let valid_args = 0;
+    if args.len == 1 {
+        valid_args = 1;
+    }
+    if args.len == 2 {
+        valid_args = 1;
+    }
+    if args.len == 6 {
+        valid_args = 1;
+    }
+    if valid_args == 0 {
+        return rh::fail("expected: REPO [TARGET] [--manifest PATH --invocation ID]");
+    }
+    if args.len == 6 {
+        require(
+            args[2] == "--manifest" && args[4] == "--invocation",
+            "expected: REPO TARGET --manifest PATH --invocation ID"
+        );
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    prune::exact_repo_root(repo);
+
+    let expected_joined = std::path::join(repo, "target").display;
+    let expected_target = std::path::absolute(expected_joined).display;
+    let target_argument = "target";
+    if args.len >= 2 {
+        if args[1] != "" {
+            target_argument = args[1];
+        }
+    }
+    let target_candidate = std::path::PathBuf::from(target_argument);
+    let target_joined = std::path::join(repo, target_argument).display;
+    let target = std::path::absolute(target_joined).display;
+    if target_candidate.is_absolute != 0 {
+        target = std::path::absolute(target_argument).display;
+    }
+    require(
+        target == expected_target,
+        "incremental_prune_target_not_exact_repo_target:" + target
+    );
+    prune::direct_directory(target, "incremental_prune_target");
+
+    let debug_profile = std::path::join(target, "debug").display;
+    let incremental = std::path::join(debug_profile, "incremental").display;
+    if !std::fs::exists(incremental) {
+        print("Cargo incremental prune: skipped (debug/incremental is absent)");
+        return 0;
+    }
+    prune::direct_directory(debug_profile, "incremental_prune_debug");
+    prune::direct_directory(incremental, "incremental_prune_root");
+
+    let cargo_lock_path = std::path::join(debug_profile, ".cargo-lock").display;
+    if prune::direct_file(cargo_lock_path) == 0 {
+        print("Cargo incremental prune: skipped (debug/.cargo-lock is absent or indirect)");
+        return 0;
+    }
+    if prune::lock_available(cargo_lock_path) == 0 {
+        print("Cargo incremental prune: skipped (debug/.cargo-lock is active)");
+        return 0;
+    }
+
+    let has_manifest = 0;
+    let manifest_path = "";
+    let invocation = "";
+    let manifest_document = rhai::json::parse("{}");
+    if args.len == 6 {
+        has_manifest = 1;
+        manifest_path = std::path::absolute(args[3]).display;
+        invocation = args[5];
+        manifest_document = rhai::json::parse(
+            std::fs::read_to_string(manifest_path)
+        );
+    }
+
+    prune::run_after_lock(
+        incremental,
+        target,
+        has_manifest,
+        manifest_path,
+        invocation,
+        manifest_document
+    );
+}

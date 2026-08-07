@@ -1038,7 +1038,7 @@
     {
       "id": "prune-target-incremental",
       "description": "Prune obsolete finalized rustc incremental sessions under the exact repository debug target",
-      "entry": "scripts/rhai/prune-target-incremental.rhai",
+      "entry": "scripts/rh/prune-target-incremental.rh",
       "profile": "local",
       "cwd": ".",
       "args": [],
