@@ -3,15 +3,16 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use agenterm_rh::{RhError, RhPack, RH_HOST_API_VERSION};
+use agenterm_rh::{RH_CODEGEN_REVISION, RH_HOST_API_VERSION, RhError, RhPack};
 
 static SOURCE_CACHE: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
 
 fn cache_key(source: &str) -> String {
     format!(
-        "{}:{}",
+        "{}-api{}-cg{}",
         agenterm_rh::hash_bytes(source.as_bytes()),
-        RH_HOST_API_VERSION
+        RH_HOST_API_VERSION,
+        RH_CODEGEN_REVISION,
     )
 }
 
@@ -52,7 +53,14 @@ pub fn loaded_pack_for_source(
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_source_to_cache, native_path_for_source};
+    use super::{cache_key, compile_source_to_cache, native_path_for_source};
+
+    #[test]
+    fn source_cache_key_owns_abi_and_codegen_compatibility() {
+        let key = cache_key("fn entry() { 1 }");
+        assert!(key.ends_with("-api8-cg1"), "{key}");
+        assert!(!key.contains(':'));
+    }
 
     #[test]
     fn source_cache_is_stable_for_same_source() {
