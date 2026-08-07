@@ -678,7 +678,7 @@
     {
       "id": "build-identity",
       "description": "Freeze source revision, dirty state, and build-input hashes into a batch environment",
-      "entry": "scripts/rh/build-identity.rh",
+      "entry": "scripts/rhai/build-identity.rhai",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
