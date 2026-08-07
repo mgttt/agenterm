@@ -24,6 +24,17 @@ pub struct TerminalKeyMode {
     /// (`ESC [ A`). Full-screen readline/editor apps rely on this to tell a
     /// cursor key apart from a literal escape sequence in the input stream.
     pub application_cursor: bool,
+
+    /// Whether an input method is attached to this surface.
+    ///
+    /// Not a VT mode — a host fact, but it changes how a key event must be
+    /// read. Normally, if the backend supplies no committed `text` we fall
+    /// back to the logical key so layouts that under-report still type. Under
+    /// an IME that fallback double-types: the backend reports `text: None`
+    /// precisely because the IME consumed the key and will deliver the result
+    /// separately as a commit, yet the logical key is still `Character('a')`.
+    /// So when an IME is attached, committed text is the only trusted source.
+    pub ime_active: bool,
 }
 
 /// xterm's modifier parameter for CSI sequences: 1 + shift(1) + alt(2) + ctrl(4).
@@ -179,15 +190,17 @@ pub fn key_event_to_bytes(event: &NormalizedKeyEvent, mode: TerminalKeyMode) -> 
 
     // Plain printable text. `text` is the layout-resolved commit (respects
     // dead keys and shift); `logical` is the fallback when the backend did not
-    // supply one.
-    let text = event
-        .text
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .or(match &event.logical {
-            LogicalKey::Character(value) if !value.is_empty() => Some(value.as_str()),
-            _ => None,
-        })?;
+    // supply one — but never under an IME, where a missing `text` means the
+    // key was consumed for composition.
+    let committed = event.text.as_deref().filter(|value| !value.is_empty());
+    let text = match committed {
+        Some(value) => value,
+        None if mode.ime_active => return None,
+        None => match &event.logical {
+            LogicalKey::Character(value) if !value.is_empty() => value.as_str(),
+            _ => return None,
+        },
+    };
 
     Some(alt_prefixed(text.as_bytes().to_vec(), event.modifiers))
 }
@@ -431,9 +444,15 @@ mod tests {
 
     const NORMAL: TerminalKeyMode = TerminalKeyMode {
         application_cursor: false,
+        ime_active: false,
     };
     const APP: TerminalKeyMode = TerminalKeyMode {
         application_cursor: true,
+        ime_active: false,
+    };
+    const IME: TerminalKeyMode = TerminalKeyMode {
+        application_cursor: false,
+        ime_active: true,
     };
 
     #[test]
@@ -542,6 +561,31 @@ mod tests {
             key_event_to_bytes(&character("5", mods(true, false, false)), NORMAL),
             None
         );
+    }
+
+    #[test]
+    fn an_attached_ime_suppresses_the_logical_key_fallback() {
+        // A key the IME consumed: no committed text, but the logical key is
+        // still there. Falling back to it would type the Latin key AND then
+        // the IME's commit, so the user sees "aa" for one keystroke.
+        let consumed = NormalizedKeyEvent {
+            logical: LogicalKey::Character("a".to_owned()),
+            physical: PhysicalKeyCode::Other,
+            text: None,
+            state: KeyPressState::Pressed,
+            repeat: false,
+            modifiers: mods(false, false, false),
+        };
+        assert_eq!(key_event_to_bytes(&consumed, NORMAL), Some(b"a".to_vec()));
+        assert_eq!(key_event_to_bytes(&consumed, IME), None);
+
+        // Committed text is still trusted under an IME — this is how ordinary
+        // typing keeps working while an IME is merely attached.
+        let typed = NormalizedKeyEvent {
+            text: Some("a".to_owned()),
+            ..consumed
+        };
+        assert_eq!(key_event_to_bytes(&typed, IME), Some(b"a".to_vec()));
     }
 
     #[test]

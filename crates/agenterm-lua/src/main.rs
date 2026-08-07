@@ -307,9 +307,10 @@ fn run_framed_worker() -> Result<u8, String> {
     match operation {
         "check" => {
             match engine.check(source) {
-                Ok(()) => write_json_result(&mut stdout, invocation_id, "check", true, "", None)?,
+                Ok(()) => write_json_result(&mut stdout, invocation_id, "check", true, "", None, None)?,
                 Err(e) => write_json_result(
                     &mut stdout, invocation_id, "check", false, "",
+                    None,
                     Some(&format!("lua_parse: {e}")),
                 )?,
             }
@@ -319,12 +320,13 @@ fn run_framed_worker() -> Result<u8, String> {
             match engine.eval(source, &host) {
                 Ok(eval_result) => write_json_result(
                     &mut stdout, invocation_id, operation, true, &eval_result.stdout,
-                    None,
+                    Some(eval_result.value), None,
                 )
                 .map(|_| eval_result.value as u8),
                 Err(e) => {
                     write_json_result(
                         &mut stdout, invocation_id, operation, false, "",
+                        None,
                         Some(&e.to_string()),
                     )?;
                     Ok(1)
@@ -335,12 +337,13 @@ fn run_framed_worker() -> Result<u8, String> {
             match engine.eval(source, &host) {
                 Ok(eval_result) => write_json_result(
                     &mut stdout, invocation_id, operation, true, &eval_result.stdout,
-                    None,
+                    Some(eval_result.value), None,
                 )
                 .map(|_| eval_result.value as u8),
                 Err(e) => {
                     write_json_result(
                         &mut stdout, invocation_id, operation, false, "",
+                        None,
                         Some(&e.to_string()),
                     )?;
                     Ok(1)
@@ -356,6 +359,7 @@ fn write_json_result(
     operation: &str,
     ok: bool,
     stdout: &str,
+    value: Option<i64>,
     failure: Option<&str>,
 ) -> Result<(), String> {
     let mut result = serde_json::json!({
@@ -368,6 +372,9 @@ fn write_json_result(
         "stdout": stdout,
         "duration_ms": 1,
     });
+    if let Some(v) = value {
+        result["value"] = serde_json::json!(v);
+    }
     if let Some(msg) = failure {
         result["failure"] = serde_json::json!({
             "code": if operation == "check" { "lua_parse" } else { "lua_runtime" },

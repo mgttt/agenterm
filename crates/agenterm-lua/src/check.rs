@@ -8,7 +8,9 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     // std.fs
     "std.fs.exists",
     "std.fs.read",
+    "std.fs.read_to_string",
     "std.fs.write",
+    "std.fs.write_bytes",
     "std.fs.metadata",
     "std.fs.copy",
     "std.fs.create_dir",
@@ -23,6 +25,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.process.stdout_file",
     "std.process.id",
     "std.process.list",
+    "std.process.kill",
     // std.path
     "std.path.absolute",
     "std.path.join",
@@ -41,6 +44,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.time.Duration.from_secs",
     // std.json
     "std.json.parse",
+    "std.json.parse_file",
     "std.json.stringify",
     // std.crypto
     "std.crypto.sha256",
@@ -68,6 +72,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "os.difftime",
     // rhai compatibility
     "rhai.runtime.atomic_write",
+    "rhai.runtime.temp_dir",
     "rhai.hash.fnv1a64",
     "rh.fail",
 ];

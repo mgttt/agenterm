@@ -239,8 +239,14 @@ fn main() {
     if let Some(rows) = initial_rows {
         app.rows = rows.max(2);
     }
+    // IME must stay on: without it CJK cannot be typed at all, which no
+    // console host on Windows gets to call acceptable. An earlier fix disabled
+    // it to recover keyboard input, but the actual cause was the missing
+    // focus request in `opened` — see the Ime arm in `event` for the other
+    // half (composed text never reached the PTY, which made IME look broken).
     let options = PixelWindowOptions::new("agenterm-con", LogicalSize::new(960.0, 600.0))
-        .with_no_activate(no_activate);
+        .with_no_activate(no_activate)
+        .with_ime_allowed(true);
 
     if let Err(error) = run_pixel_window(options, Box::new(app)) {
         let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
@@ -345,6 +351,16 @@ struct ConTerminal {
     /// Button code of the in-flight application gesture, so the release
     /// reports the same button that was pressed.
     active_button: Option<u8>,
+
+    /// In-progress IME composition, drawn inline at the cursor. While this is
+    /// non-empty the keystrokes feeding the composition must not also be sent
+    /// to the PTY — the IME delivers the result once, as a commit.
+    ime_preedit: String,
+
+    /// Whether an input method is attached (between Enabled and Disabled).
+    /// Gates the logical-key fallback, which would otherwise double-type keys
+    /// the IME consumed. See `TerminalKeyMode::ime_active`.
+    ime_attached: bool,
     /// Current scale factor (for pointer hit-test DIP→pixel conversion).
     scale: f64,
 }
@@ -380,6 +396,8 @@ impl ConTerminal {
             mouse_dragging: false,
             last_reported_cell: None,
             active_button: None,
+            ime_preedit: String::new(),
+            ime_attached: false,
             scale: 1.0,
         }
     }
@@ -504,8 +522,107 @@ impl ConTerminal {
         self.parser.screen_mut().set_size(rows, cols);
     }
 
+    /// Handles one IME composition event.
+    ///
+    /// Without this, a Chinese/Japanese/Korean user can compose in the OS
+    /// candidate window but the result never reaches the shell — which is what
+    /// made "IME enabled" look like "keyboard broken" and led to IME being
+    /// switched off entirely.
+    fn handle_ime(&mut self, window: &PixelWindow, event: agenterm_platform::ime::ImeEvent) {
+        use agenterm_platform::ime::{classify_event, ImeAction};
+
+        // The terminal grid is always a valid composition anchor: we place the
+        // candidate window at the cursor cell below.
+        match &event {
+            agenterm_platform::ime::ImeEvent::Enabled => self.ime_attached = true,
+            agenterm_platform::ime::ImeEvent::Disabled => self.ime_attached = false,
+            _ => {}
+        }
+
+        match classify_event(event, true) {
+            ImeAction::UpdatePreedit { text, .. } => {
+                self.ime_preedit = text;
+                self.update_ime_anchor(window);
+            }
+            ImeAction::ClearPreedit => {
+                self.ime_preedit.clear();
+            }
+            ImeAction::CommitText(text) => {
+                self.ime_preedit.clear();
+                if !self.exit && !self.child_gone {
+                    self.scroll_to_bottom();
+                    self.write_pty(text.as_bytes());
+                }
+            }
+            // `ImeAction` is non-exhaustive; an unknown future action must not
+            // silently drop a composition, so clear rather than guess.
+            ImeAction::None => {}
+            _ => self.ime_preedit.clear(),
+        }
+        window.request_redraw();
+    }
+
+    /// Draws the in-progress composition starting at the cursor cell and
+    /// returns how many cells it occupied, so the caller can push the cursor
+    /// past it. Wide (CJK) characters take two cells, matching the grid.
+    fn draw_preedit(
+        &self,
+        pixels: &mut [u32],
+        fw: u32,
+        fh: u32,
+        cursor: (u16, u16),
+    ) -> u32 {
+        let y0 = u32::from(cursor.0) * self.cell_h;
+        let mut advance = 0u32;
+        // Inverted so the provisional text is unmistakable against committed
+        // output, plus an underline in the conventional IME style.
+        let fg = self.default_bg;
+        let bg = self.default_fg;
+
+        for character in self.ime_preedit.chars() {
+            let wide = unicode_width::UnicodeWidthChar::width(character).unwrap_or(1) > 1;
+            let cells = if wide { 2 } else { 1 };
+            let x0 = (u32::from(cursor.1) + advance) * self.cell_w;
+            if x0 >= fw || y0 >= fh {
+                break;
+            }
+            let span = self.cell_w * cells;
+            fill_rect(pixels, fw, fh, x0, y0, span, self.cell_h, bg.to_xrgb());
+            if let Some(glyph) = font::raster(character, self.font_size_px) {
+                blit_glyph(pixels, fw, fh, &glyph, x0, y0, fg, span, self.cell_h);
+            }
+            // Underline: the standard "this is not committed yet" affordance.
+            let underline_y = y0 + self.cell_h.saturating_sub(1);
+            fill_rect(pixels, fw, fh, x0, underline_y, span, 1, fg.to_xrgb());
+            advance += cells;
+        }
+        advance
+    }
+
+    /// Anchors the OS candidate window to the cursor cell, so it does not
+    /// appear at an arbitrary corner of the screen.
+    fn update_ime_anchor(&self, window: &PixelWindow) {
+        let (row, col) = self.parser.screen().cursor_position();
+        let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
+        let x = f64::from(u32::from(col) * self.cell_w) / scale;
+        let y = f64::from(u32::from(row) * self.cell_h) / scale;
+        let _ = window.set_ime_cursor_area(agenterm_platform::window_host::LogicalRect::new(
+            x,
+            y,
+            f64::from(self.cell_w) / scale,
+            f64::from(self.cell_h) / scale,
+        ));
+    }
+
     fn forward_key(&mut self, event: &NormalizedKeyEvent) {
         if self.exit || self.child_gone {
+            return;
+        }
+
+        // Keys that feed an active composition belong to the IME, not the PTY.
+        // Forwarding them too would double-type the Latin keys behind a
+        // Chinese/Japanese composition.
+        if !self.ime_preedit.is_empty() {
             return;
         }
 
@@ -562,6 +679,7 @@ impl ConTerminal {
 
         let mode = TerminalKeyMode {
             application_cursor: self.parser.screen().application_cursor(),
+            ime_active: self.ime_attached,
         };
         if let Some(bytes) = terminal_input::key_event_to_bytes(event, mode) {
             // Typing returns to the live view, as every terminal does.
@@ -856,6 +974,10 @@ impl PixelWindowApplication for ConTerminal {
                 self.forward_key(&key);
                 Ok(PixelWindowDirective::Continue)
             }
+            PixelWindowEvent::Ime(ime) => {
+                self.handle_ime(window, ime);
+                Ok(PixelWindowDirective::Continue)
+            }
             PixelWindowEvent::MouseWheel {
                 delta,
                 modifiers,
@@ -1005,9 +1127,19 @@ impl PixelWindowApplication for ConTerminal {
             }
         }
 
+        // IME composition, drawn over the cells to the right of the cursor and
+        // underlined so it reads as provisional rather than committed text.
+        // conhost cannot do this — it leaves composition to a floating OS
+        // window that does not line up with the terminal grid.
+        let preedit_cells = if self.ime_preedit.is_empty() {
+            0
+        } else {
+            self.draw_preedit(pixels, fw, fh, cursor)
+        };
+
         // Solid block cursor at the current position. Hide when scrolled back.
         if !cursor_hidden && self.scroll_offset == 0 {
-            let cx = u32::from(cursor.1) * self.cell_w;
+            let cx = (u32::from(cursor.1) + preedit_cells) * self.cell_w;
             let cy = u32::from(cursor.0) * self.cell_h;
             if cx < fw && cy < fh {
                 fill_rect(
@@ -1031,6 +1163,7 @@ impl PixelWindowApplication for ConTerminal {
         window: &PixelWindow,
         now: Instant,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        // (see impl ConTerminal::draw_preedit for the composition renderer)
         if self.exit || self.child_gone {
             return Ok(PixelWindowDirective::Exit);
         }
@@ -1164,6 +1297,7 @@ mod tests {
 
         let mode = TerminalKeyMode {
             application_cursor: parser.screen().application_cursor(),
+            ime_active: false,
         };
         assert_eq!(
             terminal_input::key_event_to_bytes(&up, mode),
@@ -1176,6 +1310,7 @@ mod tests {
         parser.process(b"\x1b[?1h");
         let mode = TerminalKeyMode {
             application_cursor: parser.screen().application_cursor(),
+            ime_active: false,
         };
         assert_eq!(
             terminal_input::key_event_to_bytes(&up, mode),

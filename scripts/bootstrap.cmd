@@ -35,6 +35,11 @@ if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
 cargo build --quiet --locked --bin agenterm-rh
 if errorlevel 1 goto :failed
+rem Build agenterm-lua in parallel when Lua backend is requested.
+if /i "%AGENTERM_SCRIPT_BACKEND%"=="lua" (
+    cargo build --quiet --locked --bin agenterm-lua
+    if errorlevel 1 goto :failed
+)
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_CARGO_START_CS% %AGENTERM_BOOTSTRAP_CARGO_END_CS% AGENTERM_BOOTSTRAP_CARGO_CS
 set /a AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=AGENTERM_BOOTSTRAP_CARGO_CS*10
@@ -78,6 +83,8 @@ set /a AGENTERM_BOOTSTRAP_SETUP_MS=AGENTERM_BOOTSTRAP_SETUP_CS*10
 set /a AGENTERM_BOOTSTRAP_OTHER_SETUP_MS=AGENTERM_BOOTSTRAP_SETUP_MS-AGENTERM_BOOTSTRAP_CARGO_BUILD_MS-AGENTERM_BOOTSTRAP_WORKER_COPY_MS
 if %AGENTERM_BOOTSTRAP_OTHER_SETUP_MS% LSS 0 set "AGENTERM_BOOTSTRAP_OTHER_SETUP_MS=0"
 set "AGENTERM_SCRIPT_BACKEND=rh"
+rem Set AGENTERM_SCRIPT_BACKEND=lua to use agenterm-lua as the stage-0 worker.
+rem When lua is selected, agenterm-lua.exe is built and cached alongside agenterm-rh.exe.
 set "AGENTERM_BOOTSTRAP_TIMING_SCHEMA=1"
 set "AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS=10"
 

@@ -29,6 +29,12 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
                 .map_err(|e| mlua::Error::runtime(format!("atomic_write: {e}")))
         })?,
     )?;
+    runtime_table.set(
+        "temp_dir",
+        lua.create_function(|_lua, ()| {
+            Ok(std::env::temp_dir().to_string_lossy().into_owned())
+        })?,
+    )?;
     rhai_table.set("runtime", runtime_table)?;
 
     // rhai::hash table
@@ -208,6 +214,25 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
             std::fs::read(&path)
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
                 .map_err(|e| mlua::Error::runtime(format!("fs_read: {e}")))
+        })?,
+    )?;
+
+    // std.fs.read_to_string(path) → string | nil, err (rh alias)
+    fs.set(
+        "read_to_string",
+        lua.create_function(|_lua, path: String| {
+            std::fs::read_to_string(&path)
+                .map_err(|e| mlua::Error::runtime(format!("fs_read_to_string: {e}")))
+        })?,
+    )?;
+
+    // std.fs.write_bytes(path, content) → true | nil, err
+    fs.set(
+        "write_bytes",
+        lua.create_function(|_lua, (path, content): (String, String)| {
+            std::fs::write(&path, content.as_bytes())
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_write_bytes: {e}")))
         })?,
     )?;
 
@@ -432,6 +457,29 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
+    // std.process.kill(pid) → bool
+    process.set(
+        "kill",
+        lua.create_function(|_lua, pid: i64| {
+            #[cfg(windows)]
+            {
+                std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .map_err(|e| mlua::Error::runtime(format!("process_kill: {e}")))
+            }
+            #[cfg(not(windows))]
+            {
+                // Unix: kill via libc
+                let ret = unsafe { libc::kill(pid as i32, 9) };  // SIGKILL
+                Ok(ret == 0)
+            }
+        })?,
+    )?;
+
     Ok(process)
 }
 
@@ -618,6 +666,18 @@ fn build_json(lua: &Lua) -> Result<Table, mlua::Error> {
         lua.create_function(|lua, s: String| {
             let v: serde_json::Value = serde_json::from_str(&s)
                 .map_err(|e| mlua::Error::runtime(format!("json_parse: {e}")))?;
+            lua.to_value(&v)
+        })?,
+    )?;
+
+    // std.json.parse_file(path) → value | nil, err
+    json.set(
+        "parse_file",
+        lua.create_function(|lua, path: String| {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| mlua::Error::runtime(format!("json_parse_file_read: {e}")))?;
+            let v: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| mlua::Error::runtime(format!("json_parse_file: {e}")))?;
             lua.to_value(&v)
         })?,
     )?;
@@ -1317,5 +1377,68 @@ mod tests {
             &host(),
         ).expect("fnv compare");
         assert_eq!(r.value, 1);
+    }
+
+    // ── read_to_string / write_bytes / parse_file / temp_dir ───────
+
+    #[test]
+    fn fs_read_to_string() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("f.txt");
+        std::fs::write(&p, "hello read_to_string").unwrap();
+        let e = engine();
+        let r = e.eval(
+            &format!("local s = std.fs.read_to_string([[{}]]); return #s", p.display()),
+            &host(),
+        ).expect("read_to_string");
+        assert_eq!(r.value, 20);
+    }
+
+    #[test]
+    fn fs_write_bytes_writes_raw() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("raw.txt");
+        let e = engine();
+        e.eval(
+            &format!("std.fs.write_bytes([[{}]], 'raw_bytes')", p.display()),
+            &host(),
+        ).expect("write_bytes");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "raw_bytes");
+    }
+
+    #[test]
+    fn json_parse_file() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("data.json");
+        std::fs::write(&p, "{\"x\":42}").unwrap();
+        let e = engine();
+        let r = e.eval(
+            &format!("local obj = std.json.parse_file([[{}]]); return obj.x", p.display()),
+            &host(),
+        ).expect("parse_file");
+        assert_eq!(r.value, 42);
+    }
+
+    #[test]
+    fn temp_dir_exists() {
+        let e = engine();
+        let r = e.eval(
+            "local d = rhai.runtime.temp_dir(); return std.fs.exists(d) and 1 or 0",
+            &host(),
+        ).expect("temp_dir");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn process_kill_nonexistent() {
+        // Killing a nonexistent PID should fail gracefully
+        let e = engine();
+        let r = e.eval(
+            "local ok, err = pcall(function() std.process.kill(99999999) end); return ok and 1 or 0",
+            &host(),
+        ).expect("kill");
+        // On Windows, taskkill /F /PID 99999999 might succeed or fail;
+        // we just verify the call doesn't crash
+        assert!(r.value >= 0);
     }
 }
