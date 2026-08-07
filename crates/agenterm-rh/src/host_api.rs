@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 22;
+pub const RH_CODEGEN_REVISION: u32 = 23;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -512,12 +512,56 @@ pub fn emit_host_runtime(out: &mut String) {
              0\n\
          }\n\n\
          #[derive(Clone, Copy)]\n\
+         struct RhSystemTime {\n\
+             unix_millis: INT,\n\
+         }\n\n\
+         fn rh_system_time_rfc3339(time: &RhSystemTime) -> String {\n\
+             let millis = time.unix_millis;\n\
+             if millis < 0 {\n\
+                 let _ = rh_fail(\"system_time_before_unix_epoch\");\n\
+                 return String::new();\n\
+             }\n\
+             let seconds = millis / 1_000;\n\
+             let subsec_millis = (millis % 1_000) as u32;\n\
+             let days = seconds / 86_400;\n\
+             let day_seconds = seconds % 86_400;\n\
+             let (year, month, day) = rh_civil_date_from_unix_days(days);\n\
+             let hour = day_seconds / 3_600;\n\
+             let minute = (day_seconds % 3_600) / 60;\n\
+             let second = day_seconds % 60;\n\
+             format!(\n\
+                 \"{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{subsec_millis:03}Z\"\n\
+             )\n\
+         }\n\n\
+         fn rh_system_time_from_metadata(metadata: &std::fs::Metadata) -> RhSystemTime {\n\
+             match metadata.modified() {\n\
+                 Ok(time) => match time.duration_since(std::time::UNIX_EPOCH) {\n\
+                     Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
+                         Ok(millis) => RhSystemTime { unix_millis: millis },\n\
+                         Err(_) => {\n\
+                             let _ = rh_fail(\"system_time_overflow: milliseconds exceed Rhai integer\");\n\
+                             RhSystemTime { unix_millis: 0 }\n\
+                         }\n\
+                     },\n\
+                     Err(error) => {\n\
+                         let _ = rh_fail(&format!(\"system_time_before_unix_epoch: {error}\"));\n\
+                         RhSystemTime { unix_millis: 0 }\n\
+                     }\n\
+                 },\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"filesystem_modified_unavailable: {error}\"));\n\
+                     RhSystemTime { unix_millis: 0 }\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         #[derive(Clone, Copy)]\n\
          struct RhMetadata {\n\
              is_file: INT,\n\
              is_dir: INT,\n\
              is_symlink: INT,\n\
              is_reparse_point: INT,\n\
              len: INT,\n\
+             modified: RhSystemTime,\n\
          }\n\n\
          fn rh_metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {\n\
              #[cfg(windows)]\n\
@@ -539,6 +583,7 @@ pub fn emit_host_runtime(out: &mut String) {
                      is_symlink: metadata.file_type().is_symlink() as INT,\n\
                      is_reparse_point: rh_metadata_is_reparse_point(&metadata) as INT,\n\
                      len: metadata.len() as INT,\n\
+                     modified: rh_system_time_from_metadata(&metadata),\n\
                  },\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"fs_symlink_metadata: {error}\"));\n\
@@ -548,6 +593,7 @@ pub fn emit_host_runtime(out: &mut String) {
                          is_symlink: 0,\n\
                          is_reparse_point: 0,\n\
                          len: 0,\n\
+                         modified: RhSystemTime { unix_millis: 0 },\n\
                      }\n\
                  }\n\
              }\n\
@@ -560,6 +606,7 @@ pub fn emit_host_runtime(out: &mut String) {
                      is_symlink: metadata.file_type().is_symlink() as INT,\n\
                      is_reparse_point: rh_metadata_is_reparse_point(&metadata) as INT,\n\
                      len: metadata.len() as INT,\n\
+                     modified: rh_system_time_from_metadata(&metadata),\n\
                  },\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"fs_metadata: {error}\"));\n\
@@ -569,6 +616,7 @@ pub fn emit_host_runtime(out: &mut String) {
                          is_symlink: 0,\n\
                          is_reparse_point: 0,\n\
                          len: 0,\n\
+                         modified: RhSystemTime { unix_millis: 0 },\n\
                      }\n\
                  }\n\
              }\n\
@@ -765,9 +813,19 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
              Some(value)\n\
          }\n\n\
+         fn rh_json_intish(value: &serde_json::Value) -> Option<INT> {\n\
+             if let Some(number) = value.as_i64() {\n\
+                 return Some(number as INT);\n\
+             }\n\
+             // INT-only packs treat JSON booleans as 0/1 so `require(doc.flag)` works.\n\
+             if let Some(flag) = value.as_bool() {\n\
+                 return Some(i64::from(flag));\n\
+             }\n\
+             None\n\
+         }\n\n\
          fn rh_json_int_path(value: &serde_json::Value, path: &[&str]) -> INT {\n\
-             match rh_json_path(value, path).and_then(serde_json::Value::as_i64) {\n\
-                 Some(value) => value as INT,\n\
+             match rh_json_path(value, path).and_then(rh_json_intish) {\n\
+                 Some(value) => value,\n\
                  None => {\n\
                      let _ = rh_fail(&format!(\"json_integer_path: {}\", path.join(\".\")));\n\
                      0\n\
@@ -805,8 +863,8 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
          }\n\n\
          fn rh_json_as_i64(value: &serde_json::Value) -> INT {\n\
-             match value.as_i64() {\n\
-                 Some(value) => value as INT,\n\
+             match rh_json_intish(value) {\n\
+                 Some(value) => value,\n\
                  None => {\n\
                      let _ = rh_fail(\"json_integer_value\");\n\
                      0\n\

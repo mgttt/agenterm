@@ -25,6 +25,7 @@ enum ValueKind {
     Set,
     StringList,
     Metadata,
+    SystemTime,
     DirEntry,
     /// `std::path::PathBuf` binding stored as a UTF-8 path string.
     Path,
@@ -138,7 +139,7 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
-                ValueKind::Metadata => {
+                ValueKind::Metadata | ValueKind::SystemTime => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
@@ -166,7 +167,7 @@ impl EmitCtx {
                 out.push_str(
                     ".iter().cloned().collect::<Vec<_>>()).unwrap_or_else(|_| \"[]\".to_owned())",
                 );
-            } else if matches!(kind, ValueKind::Metadata | ValueKind::DirEntry) {
+            } else if matches!(kind, ValueKind::Metadata | ValueKind::SystemTime | ValueKind::DirEntry) {
                 out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
                 out.push_str(name);
@@ -1550,6 +1551,26 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if path_buf_from_arg(expr).is_some() => ValueKind::Path,
         _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
         _ if std_fs_metadata_arg(expr).is_some() => ValueKind::Metadata,
+        _ if dir_entry_metadata_binding(expr, ctx).is_some() => ValueKind::Metadata,
+        _ if metadata_modified_binding(expr, ctx).is_some()
+            || fs_metadata_modified_arg(expr).is_some() =>
+        {
+            ValueKind::SystemTime
+        }
+        _ if system_time_unix_millis_binding(expr, ctx).is_some()
+            || fs_metadata_modified_unix_millis(expr).is_some()
+            || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
+            || dir_entry_metadata_len(expr, ctx).is_some()
+            || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len") =>
+        {
+            ValueKind::Int
+        }
+        _ if system_time_rfc3339_binding(expr, ctx).is_some()
+            || fs_metadata_modified_rfc3339(expr).is_some()
+            || dir_entry_metadata_modified_rfc3339(expr, ctx).is_some() =>
+        {
+            ValueKind::String
+        }
         _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
@@ -2222,6 +2243,208 @@ fn metadata_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a s
     .then_some((ident.1.as_str(), name))
 }
 
+fn system_time_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::SystemTime) {
+        return None;
+    }
+    let name = match &boxed.rhs {
+        Expr::Property(property, ..) => property.2.as_str(),
+        Expr::MethodCall(call, ..) if call.args.is_empty() => call.name.as_str(),
+        _ => return None,
+    };
+    matches!(name, "unix_millis" | "rfc3339").then_some((ident.1.as_str(), name))
+}
+
+fn dot_property_name<'a>(rhs: &'a Expr) -> Option<&'a str> {
+    match rhs {
+        Expr::Property(property, ..) => Some(property.2.as_str()),
+        Expr::MethodCall(call, ..) if call.args.is_empty() => Some(call.name.as_str()),
+        _ => None,
+    }
+}
+
+fn dir_entry_metadata_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let binding = dir_entry_variable(expr, ctx)?;
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    (dot_property_name(&boxed.rhs)? == "metadata").then_some(binding)
+}
+
+fn metadata_modified_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Metadata) {
+        return None;
+    }
+    (dot_property_name(&boxed.rhs)? == "modified").then_some(ident.1.as_str())
+}
+
+fn system_time_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    (ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::SystemTime))
+        .then_some(ident.1.as_str())
+}
+
+fn system_time_unix_millis_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let binding = system_time_binding(expr, ctx)?;
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    (dot_property_name(&boxed.rhs)? == "unix_millis").then_some(binding)
+}
+
+fn system_time_rfc3339_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let binding = system_time_binding(expr, ctx)?;
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    (dot_property_name(&boxed.rhs)? == "rfc3339").then_some(binding)
+}
+
+fn dir_entry_metadata_len<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &outer.lhs else {
+        return None;
+    };
+    let binding = dir_entry_variable(&inner.lhs, ctx)?;
+    if dot_property_name(&inner.rhs)? != "metadata" {
+        return None;
+    }
+    (dot_property_name(&outer.rhs)? == "len").then_some(binding)
+}
+
+fn dir_entry_metadata_modified_unix_millis<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &outer.lhs else {
+        return None;
+    };
+    let Expr::Dot(meta, ..) = &inner.lhs else {
+        return None;
+    };
+    let binding = dir_entry_variable(&meta.lhs, ctx)?;
+    if dot_property_name(&meta.rhs)? != "metadata" || dot_property_name(&inner.rhs)? != "modified" {
+        return None;
+    }
+    (dot_property_name(&outer.rhs)? == "unix_millis").then_some(binding)
+}
+
+fn dir_entry_metadata_modified_rfc3339<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &outer.lhs else {
+        return None;
+    };
+    let Expr::Dot(meta, ..) = &inner.lhs else {
+        return None;
+    };
+    let binding = dir_entry_variable(&meta.lhs, ctx)?;
+    if dot_property_name(&meta.rhs)? != "metadata" || dot_property_name(&inner.rhs)? != "modified" {
+        return None;
+    }
+    (dot_property_name(&outer.rhs)? == "rfc3339").then_some(binding)
+}
+
+fn fs_metadata_modified_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    if dot_property_name(&boxed.rhs)? != "modified" {
+        return None;
+    }
+    if let Some(path) = std_fs_metadata_arg(&boxed.lhs) {
+        return Some((path, "metadata"));
+    }
+    if let Some(path) = std_fs_symlink_metadata_arg(&boxed.lhs) {
+        return Some((path, "symlink_metadata"));
+    }
+    None
+}
+
+fn fs_metadata_modified_unix_millis<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &outer.lhs else {
+        return None;
+    };
+    let (path, call_name) = if let Some(path) = std_fs_metadata_arg(&inner.lhs) {
+        (path, "metadata")
+    } else if let Some(path) = std_fs_symlink_metadata_arg(&inner.lhs) {
+        (path, "symlink_metadata")
+    } else {
+        return None;
+    };
+    if dot_property_name(&inner.rhs)? != "modified" || dot_property_name(&outer.rhs)? != "unix_millis"
+    {
+        return None;
+    }
+    Some((path, call_name))
+}
+
+fn fs_metadata_modified_rfc3339<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &outer.lhs else {
+        return None;
+    };
+    let (path, call_name) = if let Some(path) = std_fs_metadata_arg(&inner.lhs) {
+        (path, "metadata")
+    } else if let Some(path) = std_fs_symlink_metadata_arg(&inner.lhs) {
+        (path, "symlink_metadata")
+    } else {
+        return None;
+    };
+    if dot_property_name(&inner.rhs)? != "modified" || dot_property_name(&outer.rhs)? != "rfc3339" {
+        return None;
+    }
+    Some((path, call_name))
+}
+
+fn metadata_modified_property_binding<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &outer.lhs else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &inner.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Metadata) {
+        return None;
+    }
+    if dot_property_name(&inner.rhs)? != "modified" {
+        return None;
+    }
+    let property = dot_property_name(&outer.rhs)?;
+    matches!(property, "unix_millis" | "rfc3339").then_some((ident.1.as_str(), property))
+}
+
 fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, Option<&Expr>)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
@@ -2785,6 +3008,67 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(path) = std_fs_metadata_arg(expr)
             && emit_std_fs_metadata(out, path, ctx)?
         {
+            return Ok(());
+        }
+        if let Some(binding) = dir_entry_metadata_binding(expr, ctx) {
+            out.push_str("rh_metadata(&");
+            out.push_str(binding);
+            out.push_str(".path)");
+            return Ok(());
+        }
+        if let Some(binding) = metadata_modified_binding(expr, ctx) {
+            out.push_str(binding);
+            out.push_str(".modified");
+            return Ok(());
+        }
+        if let Some((binding, property)) = metadata_modified_property_binding(expr, ctx) {
+            if property == "unix_millis" {
+                out.push_str(binding);
+                out.push_str(".modified.unix_millis");
+            } else {
+                out.push_str("rh_system_time_rfc3339(&");
+                out.push_str(binding);
+                out.push_str(".modified)");
+            }
+            return Ok(());
+        }
+        if let Some((binding, property)) = system_time_property_binding(expr, ctx) {
+            if property == "unix_millis" {
+                out.push_str(binding);
+                out.push_str(".unix_millis");
+            } else {
+                out.push_str("rh_system_time_rfc3339(&");
+                out.push_str(binding);
+                out.push(')');
+            }
+            return Ok(());
+        }
+        if let Some((path, call_name)) = fs_metadata_modified_arg(expr) {
+            emit_fs_metadata_call(out, path, call_name, ctx)?;
+            out.push_str(".modified");
+            return Ok(());
+        }
+        if let Some((path, call_name)) = fs_metadata_modified_unix_millis(expr) {
+            emit_fs_metadata_call(out, path, call_name, ctx)?;
+            out.push_str(".modified.unix_millis");
+            return Ok(());
+        }
+        if let Some((path, call_name)) = fs_metadata_modified_rfc3339(expr) {
+            out.push_str("rh_system_time_rfc3339(&");
+            emit_fs_metadata_call(out, path, call_name, ctx)?;
+            out.push_str(".modified)");
+            return Ok(());
+        }
+        if let Some(binding) = dir_entry_metadata_modified_unix_millis(expr, ctx) {
+            out.push_str("rh_metadata(&");
+            out.push_str(binding);
+            out.push_str(".path).modified.unix_millis");
+            return Ok(());
+        }
+        if let Some(binding) = dir_entry_metadata_modified_rfc3339(expr, ctx) {
+            out.push_str("rh_system_time_rfc3339(&rh_metadata(&");
+            out.push_str(binding);
+            out.push_str(".path).modified)");
             return Ok(());
         }
         if emit_metadata_property(out, expr, ctx)? {
@@ -4017,6 +4301,28 @@ fn emit_std_fs_try_rename(
     Ok(true)
 }
 
+fn emit_fs_metadata_call(
+    out: &mut String,
+    path: &Expr,
+    call_name: &str,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    let helper = if call_name == "symlink_metadata" {
+        "rh_symlink_metadata"
+    } else {
+        "rh_metadata"
+    };
+    out.push_str(helper);
+    out.push('(');
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_metadata_property(
     out: &mut String,
     expr: &Expr,
@@ -4050,6 +4356,12 @@ fn emit_metadata_property(
 }
 
 fn emit_dir_entry_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    if let Some(binding) = dir_entry_metadata_len(expr, ctx) {
+        out.push_str("rh_metadata(&");
+        out.push_str(binding);
+        out.push_str(".path).len");
+        return Ok(true);
+    }
     if let Some((binding, field)) = dir_entry_int_field(expr, ctx) {
         out.push_str(binding);
         out.push('.');
@@ -5001,6 +5313,43 @@ fn entry() {
                 .contains("rh_symlink_metadata(&directory).is_dir")
         );
         assert!(output.rust.contains("rh_remove_file("));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_direntry_metadata_len_and_modified_native() {
+        let source = include_str!("../../../fixtures/rh/direntry-metadata-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_metadata(&entry.path)"),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("metadata.len"), "{}", output.rust);
+        assert!(
+            output.rust.contains("modified.unix_millis"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_system_time_rfc3339(&modified)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"entry.metadata"),
+            "{}",
+            output.rust
+        );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
