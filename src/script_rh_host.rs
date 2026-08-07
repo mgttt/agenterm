@@ -199,6 +199,14 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
                 -5
             }
         },
+        agenterm_rh::RH_HOST_UTILITY_PRINT => {
+            if let Some(capture) = crate::script_rh_run::current_run_context()
+                .and_then(|context| context.output_capture)
+            {
+                capture.push_line(&input);
+            }
+            0
+        }
         _ => {
             record_host_error("rh_utility", &format!("unknown operation {operation}"));
             -5

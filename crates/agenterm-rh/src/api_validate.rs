@@ -60,7 +60,9 @@ pub fn validate_available_apis(source: &str) -> Result<(), ApiValidateError> {
     for call in external_function_calls(source) {
         match call.as_str() {
             "print" | "debug" | "type_of" | "is_def_var" | "is_shared" | "eval" | "to_string"
-            | "to_debug" | "require" => {}
+            | "to_debug" | "require" => {
+                // language-level builtins lowered by native codegen
+            }
             "new_tab" => {
                 return Err(script_error(
                     "script_api_unavailable",

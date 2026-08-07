@@ -1,12 +1,13 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 11;
+pub const RH_CODEGEN_REVISION: u32 = 12;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
 pub const RH_HOST_UTILITY_EXISTS_CASE_EXACT: u32 = 2;
 pub const RH_HOST_UTILITY_PROCESS_STATUS: u32 = 3;
+pub const RH_HOST_UTILITY_PRINT: u32 = 4;
 
 pub type RhHostFleetCall = extern "C" fn(
     operation_id: *const u8,
@@ -389,6 +390,9 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_fail(message: &str) -> INT {\n\
              rh_utility(1, message)\n\
+         }\n\n\
+         fn rh_print(message: &str) -> INT {\n\
+             rh_utility(4, message)\n\
          }\n\n\
          fn rh_std_fs_exists_case_exact(path: &str) -> INT {\n\
              rh_utility(2, path)\n\

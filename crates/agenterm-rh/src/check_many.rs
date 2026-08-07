@@ -428,7 +428,7 @@ mod tests {
         manifest.kind = super::RHAI_CHECK_MANIFEST_KIND.to_owned();
         let report = run_check_many(manifest, parsed.options);
         assert!(report.ok, "failures: {:?}", report.failures);
-        assert_eq!(report.checked_files, 19);
+        assert_eq!(report.checked_files, 20);
     }
 
     #[test]
@@ -444,7 +444,7 @@ mod tests {
             },
         );
         assert!(report.ok, "failures: {:?}", report.failures);
-        assert_eq!(report.checked_files, 19);
+        assert_eq!(report.checked_files, 20);
     }
 
     fn manifest_for(file: &str) -> CheckManyManifest {

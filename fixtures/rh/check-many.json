@@ -20,6 +20,7 @@
     "fixtures/rh/fail-dynamic.rh",
     "fixtures/rh/map-set-membership.rh",
     "fixtures/rh/path-metadata-probe.rh",
-    "fixtures/rh/import-bundle-probe.rh"
+    "fixtures/rh/import-bundle-probe.rh",
+    "fixtures/rh/string-fn-bundle.rh"
   ]
 }

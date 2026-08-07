@@ -97,7 +97,8 @@ pub fn try_execute_rh_invocation(
             }))
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
-            let (pack, native_path) = resolve_rh_pack(source)?;
+            let (pack, native_path) =
+                resolve_rh_pack(source, options.project_root.as_deref())?;
             let entry_result = crate::script_rh_host::call_pack_entry_with_host_result(
                 &native_path,
                 fleet_bridge,
@@ -132,6 +133,7 @@ fn json_value_from_entry(entry_value: i64) -> Option<serde_json::Value> {
 
 fn resolve_rh_pack(
     source: &str,
+    project_root: Option<&std::path::Path>,
 ) -> Result<(crate::script_rh_pack::LoadedRhPack, std::path::PathBuf), agenterm_rh::RhError> {
     if let Some(pack) = crate::script_rh_pack::cached_rh_pack() {
         let native = crate::script_rh_pack::cached_native_path()
@@ -142,8 +144,10 @@ fn resolve_rh_pack(
         return Ok((pack.clone(), native));
     }
     if !source.is_empty() {
-        let pack = crate::script_rh_cache::loaded_pack_for_source(source)?;
-        let native = crate::script_rh_cache::native_path_for_source(source)?;
+        let pack =
+            crate::script_rh_cache::loaded_pack_for_source_with_project(source, project_root)?;
+        let native =
+            crate::script_rh_cache::native_path_for_source_with_project(source, project_root)?;
         return Ok((pack, native));
     }
     Err(agenterm_rh::RhError::Compile(

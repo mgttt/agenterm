@@ -1,0 +1,21 @@
+import "fixtures/rh/modules/string_helper" as helper;
+
+fn entry() {
+    let document = rhai::json::parse(
+        "{\"executables\":[{\"name\":\"agenterm-cli.exe\",\"role\":\" cli \"}]}"
+    );
+    let names = #{};
+    let score = 0;
+    for entry in document.executables {
+        let name = entry.name;
+        require(helper::is_artifact_name(name), "bad:" + name);
+        require(!names.contains(name), "dup:" + name);
+        names[name] = true;
+        let role = entry.role;
+        role.trim();
+        require(role != "", "role");
+        score += 1;
+    }
+    print("ok:" + score);
+    score
+}

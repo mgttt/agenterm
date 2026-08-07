@@ -62,6 +62,10 @@ fn check_accepts_all_fixtures() {
             "import-bundle-probe",
             include_str!("../fixtures/rh/import-bundle-probe.rh"),
         ),
+        (
+            "string-fn-bundle",
+            include_str!("../fixtures/rh/string-fn-bundle.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -448,4 +452,43 @@ fn import_bundle_probe_fixture_executes_natively_without_interpreter() {
         agenterm_rh::qualify_pack_dir(&bundled, &dir).expect("qualify import-bundle-probe pack");
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(receipt.entry_value, 42);
+}
+
+#[test]
+fn string_fn_bundle_fixture_executes_natively_without_interpreter() {
+    let source = include_str!("../fixtures/rh/string-fn-bundle.rh");
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = agenterm_rh::transpile_cdylib_with_project(&repo, source)
+        .expect("transpile string-fn-bundle");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("pub fn is_artifact_name(name: String)"),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("rh_print(&"), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_as_str(&"),
+        "{}",
+        output.rust
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let bundled =
+        agenterm_rh::bundle_project_source(&repo, source).expect("bundle string-fn-bundle");
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-string-fn-bundle-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt =
+        agenterm_rh::qualify_pack_dir(&bundled, &dir).expect("qualify string-fn-bundle pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 1);
 }

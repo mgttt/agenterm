@@ -108,8 +108,15 @@ fn checked_module_file(root: &Path, import: &str) -> Result<PathBuf, String> {
     {
         return Err(format!("script_module_root_escape: {import}"));
     }
-    let mut candidate = root.join(import);
-    candidate.set_extension("rhai");
+    let mut rh_candidate = root.join(import);
+    rh_candidate.set_extension("rh");
+    let mut rhai_candidate = root.join(import);
+    rhai_candidate.set_extension("rhai");
+    let candidate = if rh_candidate.is_file() {
+        rh_candidate
+    } else {
+        rhai_candidate
+    };
     let canonical = fs::canonicalize(&candidate)
         .map_err(|error| format!("script_module_missing: {import}: {error}"))?;
     if !canonical.starts_with(root) {
