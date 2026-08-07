@@ -12,6 +12,7 @@
     "fixtures/rh/break-continue.rh",
     "fixtures/rh/for-range.rh",
     "fixtures/rh/for-dyn-range.rh",
-    "fixtures/rh/for-span-overflow.rh"
+    "fixtures/rh/for-span-overflow.rh",
+    "fixtures/rh/json-parse-schema.rh"
   ]
 }
