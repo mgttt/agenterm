@@ -12,6 +12,8 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.fs.metadata",
     "std.fs.copy",
     "std.fs.create_dir",
+    "std.fs.read_dir",
+    "std.fs.remove_file",
     // std.process
     "std.process.command",
     "std.process.status",
@@ -22,6 +24,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.path.parent",
     "std.path.file_name",
     "std.path.is_absolute",
+    "std.path.from",
     // std.env
     "std.env.get",
     "std.env.has",
@@ -56,6 +59,8 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "os.date",
     "os.time",
     "os.difftime",
+    // rhai compatibility
+    "rhai.runtime.atomic_write",
 ];
 
 fn shipped(path: &str) -> bool {

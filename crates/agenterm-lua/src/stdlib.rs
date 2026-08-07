@@ -239,14 +239,14 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
             let entries: Vec<serde_json::Value> = std::fs::read_dir(&path)
                 .map_err(|e| mlua::Error::runtime(format!("fs_read_dir: {e}")))?
                 .filter_map(|entry| entry.ok())
-                .map(|entry| {
-                    let ft = entry.file_type().unwrap_or(std::fs::FileType::new());
-                    serde_json::json!({
+                .filter_map(|entry| {
+                    let ft = entry.file_type().ok()?;
+                    Some(serde_json::json!({
                         "name": entry.file_name().to_string_lossy(),
                         "is_file": ft.is_file(),
                         "is_dir": ft.is_dir(),
                         "path": entry.path().to_string_lossy().into_owned(),
-                    })
+                    }))
                 })
                 .collect();
             lua.to_value(&entries)
@@ -1021,5 +1021,67 @@ mod tests {
             r.stdout.trim(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    // ── std.fs additions ────────────────────────────────────────────
+
+    #[test]
+    fn fs_read_dir_lists_entries() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "b").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let e = engine();
+        let r = e
+            .eval(
+                &format!("local entries = std.fs.read_dir([[{}]]); return #entries", dir.path().display()),
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 3);
+    }
+
+    #[test]
+    fn fs_remove_file_deletes() {
+        let dir = TempDir::new().expect("tempdir");
+        let p = dir.path().join("to_delete.txt");
+        std::fs::write(&p, "x").unwrap();
+        let e = engine();
+        e.eval(
+            &format!("std.fs.remove_file([[{}]])", p.display()),
+            &host(),
+        )
+        .expect("remove");
+        assert!(!p.exists());
+    }
+
+    // ── std.path additions ──────────────────────────────────────────
+
+    #[test]
+    fn path_from_joins_segments() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local p = std.path.from({'foo', 'bar', 'baz.txt'}); return string.find(p, 'baz.txt') ~= nil and 1 or 0",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    // ── rhai.runtime ────────────────────────────────────────────────
+
+    #[test]
+    fn atomic_write_and_read() {
+        let dir = TempDir::new().expect("tempdir");
+        let p = dir.path().join("atomic.txt");
+        let e = engine();
+        e.eval(
+            &format!("rhai.runtime.atomic_write([[{}]], 'atomic content')", p.display()),
+            &host(),
+        )
+        .expect("atomic_write");
+        let content = std::fs::read_to_string(&p).expect("read");
+        assert_eq!(content, "atomic content");
     }
 }
