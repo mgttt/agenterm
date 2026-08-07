@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 37;
+pub const RH_CODEGEN_REVISION: u32 = 38;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -335,6 +335,9 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_path_join(base: &str, child: &str) -> String {\n\
              std::path::Path::new(base).join(child).to_string_lossy().into_owned()\n\
+         }\n\n\
+         fn rh_path_join2(base: String, child: String) -> String {\n\
+             std::path::Path::new(base.as_str()).join(child.as_str()).to_string_lossy().into_owned()\n\
          }\n\n\
          fn rh_path_absolute(path: &str) -> String {\n\
              match std::path::absolute(path) {\n\
@@ -820,6 +823,9 @@ pub fn emit_host_runtime(out: &mut String) {
                  capture_limit: 64 * 1024,\n\
                  current_dir: None,\n\
              }\n\
+         }\n\n\
+         fn rh_command_new_owned(program: String) -> RhCommand {\n\
+             rh_command_new(program.as_str())\n\
          }\n\n\
          fn rh_command_args(command: &mut RhCommand, args: &[String]) {\n\
              command.args.extend(args.iter().cloned());\n\
