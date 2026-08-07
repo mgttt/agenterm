@@ -1,0 +1,26 @@
+// Produce the staged build provenance manifest from frozen or live inputs.
+//
+// Args:
+//   REPO OUTPUT_MANIFEST ARTIFACT_MANIFEST STAGED_DIRECTORY PROFILE [OS ARCH]
+
+import "scripts/rh/lib/build_metadata" as build_metadata;
+
+fn entry() {
+    if args.len != 5 {
+        if args.len != 7 {
+            return rh::fail(
+                "expected: REPO OUTPUT_MANIFEST ARTIFACT_MANIFEST STAGED_DIRECTORY PROFILE [OS ARCH]"
+            );
+        }
+        return build_metadata::write_platform(
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+            args[6]
+        );
+    }
+    build_metadata::write(args[0], args[1], args[2], args[3], args[4])
+}

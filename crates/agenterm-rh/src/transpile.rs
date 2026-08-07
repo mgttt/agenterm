@@ -462,6 +462,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
             out.push_str(param.as_str());
             out.push_str(match kind {
                 ValueKind::String => ": String",
+                ValueKind::Json => ": serde_json::Value",
                 _ => ": INT",
             });
         } else {
@@ -482,13 +483,140 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
     def.params
         .iter()
         .map(|param| {
-            if param_used_as_string(def, param.as_str(), ctx) {
+            if param_used_as_json(def, param.as_str(), ctx) {
+                ValueKind::Json
+            } else if param_used_as_string(def, param.as_str(), ctx) {
                 ValueKind::String
             } else {
                 ValueKind::Int
             }
         })
         .collect()
+}
+
+fn param_used_as_json(def: &ScriptFuncDef, param: &str, _ctx: &EmitCtx) -> bool {
+    def.body.iter().any(|stmt| stmt_uses_json_param(stmt, param))
+}
+
+fn stmt_uses_json_param(stmt: &Stmt, param: &str) -> bool {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
+            expr_uses_json_param(expr.as_ref(), param)
+        }
+        Stmt::Var(boxed, ..) => expr_uses_json_param(&boxed.1, param),
+        Stmt::Assignment(boxed, ..) => {
+            expr_uses_json_param(&boxed.1.lhs, param) || expr_uses_json_param(&boxed.1.rhs, param)
+        }
+        Stmt::If(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_uses_json_param(&flow.expr, param)
+                || flow.body.iter().any(|stmt| stmt_uses_json_param(stmt, param))
+                || flow
+                    .branch
+                    .iter()
+                    .any(|stmt| stmt_uses_json_param(stmt, param))
+        }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            for_iterable_uses_json_param(&flow.expr, param)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_json_param(stmt, param))
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_uses_json_param(&flow.expr, param)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_json_param(stmt, param))
+        }
+        _ => false,
+    }
+}
+
+fn for_iterable_uses_json_param(expr: &Expr, param: &str) -> bool {
+    match expr {
+        // Bare `for x in param` is also valid for strings/StringLists — do not
+        // treat it as JSON evidence. Prefer `param.field` / `param[index]`.
+        Expr::Dot(boxed, ..) => {
+            matches!(&boxed.lhs, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+        }
+        Expr::Index(boxed, ..) => {
+            matches!(&boxed.lhs, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+        }
+        _ => false,
+    }
+}
+
+fn is_stringish_method_name(name: &str) -> bool {
+    matches!(
+        name,
+        "contains"
+            | "starts_with"
+            | "ends_with"
+            | "trim"
+            | "replace"
+            | "to_lower"
+            | "to_string"
+            | "split"
+            | "len"
+    )
+}
+
+fn is_json_method_name(name: &str) -> bool {
+    matches!(name, "push" | "insert" | "get")
+}
+
+fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
+    match expr {
+        Expr::Index(boxed, ..) => {
+            matches!(&boxed.lhs, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+                || expr_uses_json_param(&boxed.lhs, param)
+                || expr_uses_json_param(&boxed.rhs, param)
+        }
+        Expr::FnCall(call, ..) => {
+            // Known JSON-consuming callees. Merely passing `param` to an
+            // arbitrary call is not JSON evidence (strings are passed too).
+            if ((call.namespace.to_string() == "rhai::json" && call.name == "stringify_pretty")
+                || (call.namespace.is_empty() && call.name == "stringify_pretty"))
+                && call.args.len() == 1
+                && is_param_var(&call.args[0], param)
+            {
+                return true;
+            }
+            call.args
+                .iter()
+                .any(|arg| expr_uses_json_param(arg, param))
+        }
+        Expr::MethodCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_uses_json_param(arg, param)),
+        Expr::Array(items, ..) => items.iter().any(|item| expr_uses_json_param(item, param)),
+        Expr::Map(map, ..) => map.0.iter().any(|(_, value)| expr_uses_json_param(value, param)),
+        Expr::Dot(boxed, ..) => {
+            if is_param_var(&boxed.lhs, param) {
+                match &boxed.rhs {
+                    // `param.len` is shared by strings/arrays — not JSON-only.
+                    Expr::Property(property, ..) if property.2.as_str() == "len" => false,
+                    Expr::Property(..) => true,
+                    Expr::MethodCall(call, ..) if is_json_method_name(call.name.as_str()) => true,
+                    Expr::MethodCall(call, ..) if is_stringish_method_name(call.name.as_str()) => {
+                        call.args
+                            .iter()
+                            .any(|arg| expr_uses_json_param(arg, param))
+                    }
+                    _ => expr_uses_json_param(&boxed.rhs, param),
+                }
+            } else {
+                expr_uses_json_param(&boxed.lhs, param)
+                    || expr_uses_json_param(&boxed.rhs, param)
+            }
+        }
+        _ => false,
+    }
 }
 
 fn param_used_as_string(def: &ScriptFuncDef, param: &str, _ctx: &EmitCtx) -> bool {
@@ -518,7 +646,9 @@ fn stmt_uses_string_param(stmt: &Stmt, param: &str) -> bool {
         }
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
-            expr_uses_string_param(&flow.expr, param)
+            // Bare `for ch in param` is the string character-iteration form.
+            matches!(&flow.expr, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+                || expr_uses_string_param(&flow.expr, param)
                 || flow
                     .body
                     .iter()
@@ -557,6 +687,16 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         || std_fs_symlink_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_join_display_args(expr)
             .is_some_and(|(base, child)| is_param_var(base, param) || is_param_var(child, param))
+    {
+        return true;
+    }
+    // `param.len` is the common string-length property form (also used by hex checks).
+    if let Expr::Dot(boxed, ..) = expr
+        && is_param_var(&boxed.lhs, param)
+        && matches!(
+            &boxed.rhs,
+            Expr::Property(property, ..) if property.2.as_str() == "len"
+        )
     {
         return true;
     }
@@ -2405,6 +2545,16 @@ fn emit_std_fs_read_to_string(
     path: &Expr,
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
+    if let Some((base, child)) = path_join_display_args(path) {
+        let mut join_expr = String::new();
+        if !emit_path_join(&mut join_expr, base, child, ctx)? {
+            return Ok(false);
+        }
+        out.push_str("rh_std_fs_read_to_string(&");
+        out.push_str(&join_expr);
+        out.push(')');
+        return Ok(true);
+    }
     let mut path_expr = String::new();
     if !emit_native_string(&mut path_expr, path, ctx)? {
         return Ok(false);
@@ -2519,6 +2669,25 @@ fn emit_json_value_expr(
         Expr::Array(items, ..) if items.is_empty() => {
             out.push_str("serde_json::Value::Array(Vec::new())");
         }
+        Expr::Array(items, ..)
+            if items
+                .iter()
+                .all(|item| matches!(item, Expr::StringConstant(..))) =>
+        {
+            out.push_str("serde_json::Value::Array(vec![");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                let Expr::StringConstant(value, ..) = item else {
+                    unreachable!("checked string constants");
+                };
+                out.push_str("serde_json::Value::String(String::from(");
+                out.push_str(&format!("{value:?}"));
+                out.push_str("))");
+            }
+            out.push_str("])");
+        }
         Expr::Variable(ident, ..)
             if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
         {
@@ -2533,10 +2702,14 @@ fn emit_json_value_expr(
             out.push_str(".clone())");
         }
         Expr::Variable(ident, ..)
-            if matches!(
-                ctx.scope.get(ident.1.as_str()).copied(),
-                Some(ValueKind::Int | ValueKind::Bool)
-            ) =>
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Bool) =>
+        {
+            out.push_str("serde_json::Value::Bool(");
+            out.push_str(ident.1.as_str());
+            out.push_str(" != 0)");
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Int) =>
         {
             out.push_str("serde_json::json!(");
             out.push_str(ident.1.as_str());
@@ -2554,17 +2727,9 @@ fn emit_json_value_expr(
             emit_stringish(out, expr, ctx)?;
             out.push(')');
         }
-        _ if metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
-            || is_pure_int_expr(expr)
-            || is_native_json_int_expr(expr, ctx) =>
-        {
-            out.push_str("serde_json::json!(");
-            emit_expr(out, expr, ctx)?;
-            out.push(')');
-        }
-        _ if json_array_index(expr, ctx).is_some() => {
-            emit_expr(out, expr, ctx)?;
-        }
+        // Prefer preserving JSON field types (string name/role, nested objects)
+        // before the int-coercion fallback — `is_native_json_int_expr` matches any
+        // non-empty JSON path and would otherwise force `rh_json_int_path`.
         _ if let Some((binding, path)) = json_value_path(expr, ctx) => {
             if path.is_empty() {
                 out.push_str(binding);
@@ -2576,6 +2741,17 @@ fn emit_json_value_expr(
                 emit_json_path(out, &path);
                 out.push(')');
             }
+        }
+        _ if json_array_index(expr, ctx).is_some() => {
+            emit_expr(out, expr, ctx)?;
+        }
+        _ if metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
+            || is_pure_int_expr(expr)
+            || is_native_json_int_expr(expr, ctx) =>
+        {
+            out.push_str("serde_json::json!(");
+            emit_expr(out, expr, ctx)?;
+            out.push(')');
         }
         _ => {
             return Err(RhError::Transpile(format!(
@@ -2761,6 +2937,16 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
         _ if args_index_expr(expr).is_some() => {
             out.push('&');
             emit_args_index(out, args_index_expr(expr).expect("checked args index"), ctx)?;
+        }
+        _ if let Some((binding, path)) = json_value_path(expr, ctx)
+            && !path.is_empty() =>
+        {
+            // Temporary String is valid for the duration of the call argument.
+            out.push_str("&rh_json_string_path(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push(')');
         }
         _ if dir_entry_path_display_binding(expr, ctx).is_some()
             || dir_entry_string_field(expr, ctx).is_some_and(|(_, field)| field == "path") =>
@@ -3417,11 +3603,10 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
             if index > 0 {
                 out.push_str(", ");
             }
-            let expect_string = sig.get(index).copied() == Some(ValueKind::String);
-            if expect_string {
-                emit_string_arg(out, arg, ctx)?;
-            } else {
-                emit_expr(out, arg, ctx)?;
+            match sig.get(index).copied() {
+                Some(ValueKind::String) => emit_string_arg(out, arg, ctx)?,
+                Some(ValueKind::Json) => emit_json_arg(out, arg, ctx)?,
+                _ => emit_expr(out, arg, ctx)?,
             }
         }
         out.push(')');
@@ -3431,6 +3616,25 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         "unsupported call `{}` in rh-2",
         call.name
     )))
+}
+
+fn emit_json_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    match expr {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone()");
+            Ok(())
+        }
+        Expr::Map(..) | Expr::Array(..) => emit_json_value_expr(out, expr, ctx),
+        _ if json_value_path(expr, ctx).is_some() || json_array_index(expr, ctx).is_some() => {
+            emit_json_value_expr(out, expr, ctx)
+        }
+        _ => Err(RhError::Transpile(
+            "local fn JSON argument must be a JSON value".into(),
+        )),
+    }
 }
 
 fn emit_string_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -3607,7 +3811,10 @@ fn binary(
 
 #[cfg(test)]
 mod tests {
-    use super::{CdylibExecutionMode, transpile, transpile_cdylib, transpile_cdylib_with_mode};
+    use super::{
+        CdylibExecutionMode, transpile, transpile_cdylib, transpile_cdylib_with_mode,
+        transpile_cdylib_with_project,
+    };
 
     #[test]
     fn transpiles_add_fn() {
@@ -4265,6 +4472,51 @@ fn entry() { stage_copy(args[0], args[1]) }
                 .rust
                 .contains("rh_host_eval_int(\"std::time::SystemTime::now().unix_millis")
         );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn write_build_metadata_project_transpiles_native() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        let source = std::fs::read_to_string(root.join("scripts/rh/write-build-metadata.rh"))
+            .expect("entry");
+        let bundled = crate::bundle_project_source(&root, &source).expect("bundle");
+        let ast = super::parse(&bundled).expect("parse");
+        crate::subset::validate_ast(&ast).expect("validate");
+        let output = transpile_cdylib_with_project(&root, &source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_stdout_file("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
+        assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_json_stringify_pretty("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("serde_json::Value::Bool("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_get_path(&artifact, &[\"name\"])"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        // Host API always defines `fn rh_host_eval_int`; Native packs must not call it.
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 }
