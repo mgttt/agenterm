@@ -42,9 +42,13 @@ position" below). Four engines, in lineage order:
 - **qjs — `agenterm-qjs`, capability-aligned with rh, QuickJS-based (in
   progress).** New sibling engine using `rquickjs` (bundled quickjs-ng C
   source) as the binding. QJS-M0 (skeleton + minimal eval) shipped
-  2026-08-07 (commit `140a9152`), standalone (not yet wired into the root
-  Cargo workspace). Open risks and next milestones: see "Future" §
-  **qjs execution backend** below.
+  2026-08-07 (commit `140a9152`). QJS-M1 (`check`/`eval`/`check-many` CLI
+  verbs field-for-field aligned with rh's contract — manifest/report JSON
+  shape, failure-code taxonomy, exit-code mapping) shipped the same day
+  (commit `cc7df9df`), followed by root-workspace integration (commit
+  `d5ac9a8a`, mirrors rh's `[[bin]]`-in-root-package shape). Open: L2
+  facade/`task`/`run`/`pack`/`qualify` (QJS-M2). Open risks and remaining
+  milestones: see "Future" § **qjs execution backend** below.
 
 "Capability alignment" between rh/lua/qjs means: same L2 facade/catalog
 surface, same CLI verb contract (check/eval/pack/check-many/task — see rh's
@@ -914,11 +918,14 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     hot-swappable without rebuilding the base PE
   - Control Center, gateway sidecar, and task runners consume the same host
     C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
-- [ ] **qjs execution backend** (`crates/agenterm-qjs`, planned, capability
-  parity with rh): QJS-M0 shipped standalone (skeleton + `rquickjs` binding +
-  minimal eval, commit `140a9152`; see "Script engine family" above and
-  `plan/plan-v0.1.16.md` §1 QJS-M0/M1/M2). Root-workspace integration,
-  CLI-verb parity, and L2 facade wiring are open (QJS-M1/M2). Open risk
+- [~] **qjs execution backend** (`crates/agenterm-qjs`, in progress,
+  capability parity with rh): QJS-M0 (skeleton + `rquickjs` binding +
+  minimal eval, commit `140a9152`), QJS-M1 (`check`/`eval`/`check-many` CLI
+  verb parity, commit `cc7df9df`), and root-workspace integration (commit
+  `d5ac9a8a`, same `[[bin]]`-in-root-package shape as rh) are shipped; see
+  "Script engine family" above and `plan/plan-v0.1.16.md` §1 QJS-M0/M1/M2.
+  L2 facade wiring and `task`/`run`/`pack`/`qualify` remain open (QJS-M2).
+  Open risk
   questions recorded here so they aren't silently assumed away by "it built
   and evaluated `1+2`" — none are blocking QJS-M0, all should be resolved
   (or explicitly accepted) before qjs leaves "planned" for "partial":
@@ -929,14 +936,14 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     the same L2/CLI ambiguity differently; a reconciliation pass against
     both is likely needed once both have real usage, not assumed away by
     either engine shipping first.
-  - **Root-workspace C-dependency interaction.** rquickjs bundles quickjs-ng
-    C source built via the `cc` crate; lua's binding (likely `mlua`, itself
-    C-source-bundled) will share the same root workspace once qjs is wired
-    in (QJS-M1). Unverified: MSVC CRT linkage mode (`/MT` vs `/MD`) matches
-    between both `-sys` crates' `build.rs`, no symbol collisions, no
-    `cc`/`bindgen` toolchain interaction surprises when both compile into
-    one binary. Must be checked at QJS-M1, not assumed clean from each
-    building fine in isolation.
+  - **Root-workspace C-dependency interaction — resolved (2026-08-07).**
+    rquickjs bundles quickjs-ng C source built via the `cc` crate; qjs is now
+    wired into the root workspace (commit `d5ac9a8a`) alongside lua's own
+    C-bundled binding. `cargo check --workspace` /
+    `cargo build -p agenterm --bin agenterm-qjs` /
+    `cargo test -p agenterm-qjs` are all clean — no MSVC CRT linkage
+    mismatch, no symbol collisions, no `cc`/`bindgen` interaction surprises.
+    Verified, not assumed.
   - **Thread/concurrency model mismatch.** Rhai/rh keep "the engine and its
     Scope … on one evaluation thread" (see "v0.1.9 runtime architecture"
     above) — background I/O is native-typed and only the eval thread touches
