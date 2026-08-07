@@ -5,7 +5,7 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-fn require(condition, message) {
+fn assert_ok(condition, message) {
     if condition == 0 {
         throw message;
     } else {
@@ -55,7 +55,7 @@ fn only_new_bundle(bundle_root, before, suite) {
 fn remove_bundle(bundle_root, path) {
     let root = std::path::absolute(bundle_root).display;
     let resolved = std::path::absolute(path).display;
-    require(
+    assert_ok(
         std::path::parent(resolved).display.to_lower() ==
             root.to_lower(),
         "diagnostic_bundle_outside_owned_root:" + resolved
@@ -63,7 +63,7 @@ fn remove_bundle(bundle_root, path) {
     if std::fs::exists(resolved) {
         std::fs::remove_dir_all(resolved);
     }
-    require(
+    assert_ok(
         !std::fs::exists(resolved),
         "diagnostic_bundle_cleanup_failed:" + resolved
     );

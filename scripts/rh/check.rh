@@ -418,7 +418,7 @@ fn direct_task(worker, repo, id, timeout_ms, arguments) {
     spec(worker, command_arguments, timeout_ms + 10000, #{})
 }
 
-fn sorted(values) {
+fn check_sorted(values) {
     let result = [];
     for value in values {
         let inserted = false;
@@ -437,8 +437,8 @@ fn sorted(values) {
 }
 
 fn exact(left, right) {
-    let first = sorted(left);
-    let second = sorted(right);
+    let first = check_sorted(left);
+    let second = check_sorted(right);
     if first.len != second.len {
         return false;
     }
