@@ -1,0 +1,890 @@
+// Enforce the frozen v0.1.10 PowerShell migration ledger.
+//
+// Named task:
+//   agenterm-rh task run migration-audit --json
+
+fn entry() {
+    if args.len > 1 {
+        return rh::fail("expected: [REPO]");
+    }
+
+    let repo = std::env::current_dir().display;
+    if args.len == 1 {
+        repo = std::path::absolute(args[0]).display;
+    }
+    let stdout_path = repo + ".powershell-migration-audit.stdout.tmp";
+
+    let ledger_path = std::path::join(
+        repo,
+        "scripts/powershell-migration.json"
+    ).display;
+    let ledger = rhai::json::parse(std::fs::read_to_string(ledger_path));
+    require(ledger.schema_version == 2, "migration_ledger_schema");
+    require(ledger.baseline_count == 43, "migration_ledger_baseline_count");
+    require(
+        ledger.entries.len == ledger.baseline_count,
+        "migration_ledger_entry_count"
+    );
+
+    let known = #{};
+    let known_parity = #{};
+    let deleted = 0;
+    let deleted_paths_set = #{};
+    for entry in ledger.entries {
+        let entry_path = "" + entry.path;
+        entry_path.trim();
+        require(type_of(entry.id) == "string", "migration_ledger_empty_id:" + entry_path);
+        let entry_id = "" + entry.id;
+        entry_id.trim();
+        require(entry_id != "", "migration_ledger_empty_id:" + entry.path);
+        require(entry_path.ends_with(".ps1"), "migration_ledger_non_ps1_path");
+        require(
+            type_of(entry.responsibility) == "string",
+            "migration_ledger_responsibility:" + entry.path
+        );
+        let entry_responsibility = "" + entry.responsibility;
+        entry_responsibility.trim();
+        require(
+            entry_responsibility != "",
+            "migration_ledger_responsibility:" + entry.path
+        );
+        require(
+            type_of(entry.replacement_task) == "string",
+            "migration_ledger_replacement_task:" + entry.path
+        );
+        let entry_replacement_task = "" + entry.replacement_task;
+        entry_replacement_task.trim();
+        require(
+            entry_replacement_task != "",
+            "migration_ledger_replacement_task:" + entry.path
+        );
+        require(
+            type_of(entry.replacement) == "string",
+            "migration_ledger_replacement:" + entry.path
+        );
+        let entry_replacement = "" + entry.replacement;
+        entry_replacement.trim();
+        require(
+            entry_replacement != "",
+            "migration_ledger_replacement:" + entry.path
+        );
+        require(
+            type_of(entry.evidence) == "string",
+            "migration_ledger_evidence:" + entry.path
+        );
+        let entry_evidence = "" + entry.evidence;
+        entry_evidence.trim();
+        require(entry_evidence != "", "migration_ledger_evidence:" + entry.path);
+        require(
+            type_of(entry.callers) == "array"
+                && entry.callers.len > 0
+                && entry.callers.len <= 32,
+            "migration_ledger_callers:" + entry.path
+        );
+        let seen_callers = #{};
+        for item in entry.callers {
+            let item_text = "" + item;
+            item_text.trim();
+            require(item_text != "", "migration_ledger_callers:" + entry.path);
+            require(
+                item_text.len <= 512,
+                "migration_ledger_callers_item_too_long:" + entry.path
+            );
+            require(
+                !seen_callers.contains(item_text),
+                "migration_ledger_callers_duplicate:" + entry.path + ":" + item_text
+            );
+            seen_callers[item_text] = true;
+        }
+        require(
+            type_of(entry.inputs) == "array"
+                && entry.inputs.len > 0
+                && entry.inputs.len <= 32,
+            "migration_ledger_inputs:" + entry.path
+        );
+        let seen_inputs = #{};
+        for item in entry.inputs {
+            let item_text = "" + item;
+            item_text.trim();
+            require(item_text != "", "migration_ledger_inputs:" + entry.path);
+            require(
+                item_text.len <= 512,
+                "migration_ledger_inputs_item_too_long:" + entry.path
+            );
+            require(
+                !seen_inputs.contains(item_text),
+                "migration_ledger_inputs_duplicate:" + entry.path + ":" + item_text
+            );
+            seen_inputs[item_text] = true;
+        }
+        require(
+            type_of(entry.outputs) == "array"
+                && entry.outputs.len > 0
+                && entry.outputs.len <= 32,
+            "migration_ledger_outputs:" + entry.path
+        );
+        let seen_outputs = #{};
+        for item in entry.outputs {
+            let item_text = "" + item;
+            item_text.trim();
+            require(item_text != "", "migration_ledger_outputs:" + entry.path);
+            require(
+                item_text.len <= 512,
+                "migration_ledger_outputs_item_too_long:" + entry.path
+            );
+            require(
+                !seen_outputs.contains(item_text),
+                "migration_ledger_outputs_duplicate:" + entry.path + ":" + item_text
+            );
+            seen_outputs[item_text] = true;
+        }
+        require(
+            type_of(entry.side_effects) == "array"
+                && entry.side_effects.len > 0
+                && entry.side_effects.len <= 32,
+            "migration_ledger_side_effects:" + entry.path
+        );
+        let seen_entry_effects = #{};
+        for item in entry.side_effects {
+            let item_text = "" + item;
+            item_text.trim();
+            require(
+                item_text != "",
+                "migration_ledger_side_effects:" + entry.path
+            );
+            require(
+                item_text.len <= 512,
+                "migration_ledger_side_effects_item_too_long:" + entry.path
+            );
+            require(
+                !seen_entry_effects.contains(item_text),
+                "migration_ledger_side_effects_duplicate:" +
+                    entry.path + ":" + item_text
+            );
+            seen_entry_effects[item_text] = true;
+        }
+        require(
+            type_of(entry.platforms) == "array"
+                && entry.platforms.len > 0
+                && entry.platforms.len <= 32,
+            "migration_ledger_platforms:" + entry.path
+        );
+        let seen_platforms = #{};
+        for item in entry.platforms {
+            let item_text = "" + item;
+            item_text.trim();
+            require(item_text != "", "migration_ledger_platforms:" + entry.path);
+            require(
+                item_text.len <= 512,
+                "migration_ledger_platforms_item_too_long:" + entry.path
+            );
+            require(
+                !seen_platforms.contains(item_text),
+                "migration_ledger_platforms_duplicate:" + entry.path + ":" + item_text
+            );
+            seen_platforms[item_text] = true;
+        }
+        for platform in entry.platforms {
+            require(
+                platform == "windows"
+                    || platform == "linux"
+                    || platform == "macos",
+                "migration_ledger_platform:" + entry.path + ":" + platform
+            );
+        }
+        for effect in entry.side_effects {
+            let effect_text = "" + effect;
+            require(
+                effect_text == "none"
+                    || effect_text == "repository_read"
+                    || effect_text == "process_spawn"
+                    || effect_text == "artifact_write"
+                    || effect_text == "gui_spawn"
+                    || effect_text == "network_loopback"
+                    || effect_text == "terminal_compatibility_payload"
+                    || effect_text == "git_mutation"
+                    || effect_text == "remote_publish",
+                "migration_ledger_side_effect:" + entry.path + ":" + effect_text
+            );
+        }
+        require(
+            type_of(entry.budgets) == "map"
+                && entry.budgets.timeout_ms > 0
+                && entry.budgets.timeout_ms <= 3600000
+                && entry.budgets.max_output_bytes > 0
+                && entry.budgets.max_output_bytes <= 8388608,
+            "migration_ledger_budgets:" + entry.path
+        );
+        require(
+            type_of(entry.parity_evidence) == "array"
+                && entry.parity_evidence.len > 0,
+            "migration_ledger_parity_evidence:" + entry.path
+        );
+        for parity in entry.parity_evidence {
+            require(
+                type_of(parity) == "map",
+                "migration_ledger_parity_evidence_item:" + entry.path
+            );
+            require(
+                type_of(parity.id) == "string",
+                "migration_ledger_parity_id:" + entry.path
+            );
+            let parity_id = "" + parity.id;
+            parity_id.trim();
+            require(parity_id != "", "migration_ledger_parity_id:" + entry.path);
+            require(
+                type_of(parity.owner) == "string",
+                "migration_ledger_parity_owner:" + entry.path
+            );
+            let parity_owner = "" + parity.owner;
+            parity_owner.trim();
+            require(
+                parity_owner != "",
+                "migration_ledger_parity_owner:" + entry.path
+            );
+            require(
+                type_of(parity.proof) == "string",
+                "migration_ledger_parity_proof:" + entry.path
+            );
+            let parity_proof = "" + parity.proof;
+            parity_proof.trim();
+            require(
+                parity_proof != "",
+                "migration_ledger_parity_proof:" + entry.path
+            );
+            require(
+                parity_id.starts_with("migration-parity:"),
+                "migration_ledger_parity_id:" + entry_path + ":" + parity_id
+            );
+            require(
+                !known_parity.contains(parity_id),
+                "migration_ledger_parity_id_duplicate:" + entry_path + ":" +
+                    parity_id
+            );
+            known_parity[parity_id] = true;
+        }
+        require(
+            !known.contains(entry_path),
+            "migration_ledger_duplicate_path: " + entry_path
+        );
+        require(
+            entry.status == "inventory" || entry.status == "deleted",
+            "migration_ledger_status: " + entry_path
+        );
+        known[entry_path] = true;
+        if entry.status == "deleted" {
+            deleted += 1;
+            deleted_paths_set[entry_path] = true;
+        }
+    }
+
+    let ps1_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "ls-files", "--", "*.ps1"],
+        10000,
+        stdout_path
+    );
+    require(ps1_code == 0, "migration-git-ls-files");
+    let ps1_text = std::fs::read_to_string(stdout_path);
+    let current = #{};
+    for source_line in ps1_text.split("\n") {
+        let path = source_line;
+        path.trim();
+        if path == "" {
+            continue;
+        }
+        require(known.contains(path), "migration_unplanned_ps1: " + path);
+        require(
+            !deleted_paths_set.contains(path),
+            "migration_deleted_ps1_returned: " + path
+        );
+        current[path] = true;
+    }
+
+    for entry in ledger.entries {
+        let entry_path = "" + entry.path;
+        entry_path.trim();
+        if entry.status == "inventory" {
+            require(
+                current.contains(entry_path),
+                "migration_unrecorded_removal: " + entry_path
+            );
+        }
+    }
+
+    for path in deleted_paths_set.keys() {
+        let deleted_path = "" + path;
+        let grep_code = std::process::command_stdout_file(
+            "git",
+            [
+                "-C",
+                repo,
+                "grep",
+                "-n",
+                "-F",
+                "-e",
+                deleted_path,
+                "--",
+                ".github",
+                "build.bat",
+                "check.cmd",
+                "lint.cmd",
+                "release.cmd",
+                "scripts",
+                "tests"
+            ],
+            10000,
+            stdout_path
+        );
+        require(
+            grep_code == 0 || grep_code == 1,
+            "migration-git-grep-deleted-references:" + deleted_path
+        );
+        if grep_code == 0 {
+            let grep_text = std::fs::read_to_string(stdout_path);
+            for source_line in grep_text.split("\n") {
+                let line = source_line;
+                line.trim();
+                if line == ""
+                        || line.starts_with("scripts/powershell-migration.json:") {
+                    continue;
+                }
+                return rh::fail("migration_deleted_ps1_reference:" + line);
+            }
+        }
+    }
+
+    let automation_code = std::process::command_stdout_file(
+        "git",
+        [
+            "-C",
+            repo,
+            "ls-files",
+            "--",
+            "*.bat",
+            "*.cmd",
+            "*.sh",
+            "*.rhai",
+            "*.rh",
+            ".github/workflows"
+        ],
+        10000,
+        stdout_path
+    );
+    require(automation_code == 0, "migration-automation-inventory");
+    let automation_text = std::fs::read_to_string(stdout_path);
+    let automation_count = 0;
+    for source_line in automation_text.split("\n") {
+        let path = source_line;
+        path.trim();
+        if path == "" {
+            continue;
+        }
+        automation_count += 1;
+        let source = std::fs::read_to_string(std::path::join(repo, path).display);
+        let line_number = 0;
+        for line in source.split("\n") {
+            line_number += 1;
+            let lower_line = line;
+            lower_line.to_lower();
+            let trimmed_line = lower_line;
+            trimmed_line.trim();
+            let automation_hit = 0;
+            if lower_line.contains(".ps1")
+                    || lower_line.contains("powershell.exe")
+                    || lower_line.contains("pwsh.exe")
+                    || lower_line.contains(`"powershell"`)
+                    || lower_line.contains(`"pwsh"`)
+                    || lower_line.contains("'powershell'")
+                    || lower_line.contains("'pwsh'")
+                    || lower_line.contains("shell: powershell")
+                    || lower_line.contains("shell: pwsh")
+                    || trimmed_line.starts_with("powershell ")
+                    || trimmed_line.starts_with("pwsh ")
+                    || trimmed_line.starts_with("run: powershell ")
+                    || trimmed_line.starts_with("run: pwsh ") {
+                automation_hit = 1;
+            }
+            if automation_hit == 1 {
+                let allowed = 0;
+                if path == "scripts/rh/powershell-migration-audit.rh"
+                        || path ==
+                            "scripts/archive/rhai/powershell-migration-audit.rhai"
+                        || path == "scripts/rhai/powershell-migration-audit.rhai" {
+                    if !lower_line.contains("std::process::command(")
+                            && !trimmed_line.starts_with("powershell ")
+                            && !trimmed_line.starts_with("pwsh ") {
+                        allowed = 1;
+                    }
+                } else if path == "scripts/rhai/check.rhai" {
+                    if lower_line ==
+                            `if name != "powershell.exe" && name != "pwsh.exe" {` {
+                        allowed = 1;
+                    }
+                } else if path == "scripts/rhai/fresh-clone-rehearsal.rhai" {
+                    if lower_line == `"powershell.exe"`
+                            || lower_line == `"pwsh.exe"` {
+                        allowed = 1;
+                    }
+                } else if path == "scripts/rhai/qualification-selftest.rhai" {
+                    if lower_line == `["pwsh.exe:123"],` {
+                        allowed = 1;
+                    }
+                } else if path == "scripts/rhai/remote-ui-smoke.rhai" {
+                    if lower_line ==
+                            `"--", "powershell.exe", "-nologo", "-noprofile"`
+                            || lower_line ==
+                                `"--", "powershell.exe", "-nologo", "-noprofile",`
+                            || lower_line == `"alternate-wheel.ps1"` {
+                        allowed = 1;
+                    }
+                }
+                if allowed == 0 {
+                    return rh::fail(
+                        "migration_powershell_automation_reference:" + path +
+                            ":" + line_number
+                    );
+                }
+            }
+        }
+    }
+
+    let batch_code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "ls-files", "--", "*.bat", "*.cmd"],
+        10000,
+        stdout_path
+    );
+    require(batch_code == 0, "migration-git-ls-batch");
+    let batch_text = std::fs::read_to_string(stdout_path);
+    let batch_paths = #{};
+    let batch_count = 0;
+    for source_line in batch_text.split("\n") {
+        let path = source_line;
+        path.trim();
+        if path != "" {
+            batch_paths[path] = true;
+            batch_count += 1;
+        }
+    }
+    require(
+        batch_count == 7,
+        "migration_batch_inventory_count:" + batch_count
+    );
+    require(
+        batch_paths.contains("build.bat"),
+        "migration_batch_inventory_missing:build.bat"
+    );
+    require(
+        batch_paths.contains("check.cmd"),
+        "migration_batch_inventory_missing:check.cmd"
+    );
+    require(
+        batch_paths.contains("lint.cmd"),
+        "migration_batch_inventory_missing:lint.cmd"
+    );
+    require(
+        batch_paths.contains("release.cmd"),
+        "migration_batch_inventory_missing:release.cmd"
+    );
+    require(
+        batch_paths.contains("rh-check.cmd"),
+        "migration_batch_inventory_missing:rh-check.cmd"
+    );
+    require(
+        batch_paths.contains("scripts/rh-check.cmd"),
+        "migration_batch_inventory_missing:scripts/rh-check.cmd"
+    );
+    require(
+        batch_paths.contains("scripts/bootstrap.cmd"),
+        "migration_batch_inventory_missing:scripts/bootstrap.cmd"
+    );
+
+    let build_alias = std::fs::read_to_string(
+        std::path::join(repo, "build.bat").display
+    );
+    build_alias.replace("\r\n", "\n");
+    build_alias.trim();
+    require(
+        build_alias ==
+            `@setlocal && set "AGENTERM_BOOTSTRAP_TASK=build" && call "%~dp0scripts\bootstrap.cmd" %*`,
+        "migration_batch_alias_not_thin:build.bat"
+    );
+    let check_alias = std::fs::read_to_string(
+        std::path::join(repo, "check.cmd").display
+    );
+    check_alias.replace("\r\n", "\n");
+    check_alias.trim();
+    require(
+        check_alias ==
+            `@setlocal && set "AGENTERM_BOOTSTRAP_TASK=check" && call "%~dp0scripts\bootstrap.cmd" %*`,
+        "migration_batch_alias_not_thin:check.cmd"
+    );
+    let lint_alias = std::fs::read_to_string(
+        std::path::join(repo, "lint.cmd").display
+    );
+    lint_alias.replace("\r\n", "\n");
+    lint_alias.trim();
+    require(
+        lint_alias ==
+            `@setlocal && set "AGENTERM_BOOTSTRAP_TASK=lint" && call "%~dp0scripts\bootstrap.cmd" %*`,
+        "migration_batch_alias_not_thin:lint.cmd"
+    );
+    let release_alias = std::fs::read_to_string(
+        std::path::join(repo, "release.cmd").display
+    );
+    release_alias.replace("\r\n", "\n");
+    release_alias.trim();
+    require(
+        release_alias ==
+            `@setlocal && set "AGENTERM_BOOTSTRAP_TASK=release" && call "%~dp0scripts\bootstrap.cmd" %*`,
+        "migration_batch_alias_not_thin:release.cmd"
+    );
+    let rh_check_alias = std::fs::read_to_string(
+        std::path::join(repo, "rh-check.cmd").display
+    );
+    rh_check_alias.replace("\r\n", "\n");
+    rh_check_alias.trim();
+    require(
+        rh_check_alias == "@echo off\n\"%~dp0scripts\\rh-check.cmd\" %*",
+        "migration_rh_check_alias_not_thin"
+    );
+    let rh_check_source = std::fs::read_to_string(
+        std::path::join(repo, "scripts/rh-check.cmd").display
+    );
+    let rh_check_lower = rh_check_source;
+    rh_check_lower.to_lower();
+    require(
+        rh_check_lower.contains("cargo build --locked --bin agenterm-rh")
+            && rh_check_lower.contains("cargo test -p agenterm-rh --locked")
+            && !rh_check_lower.contains("powershell")
+            && !rh_check_lower.contains("pwsh"),
+        "migration_rh_check_not_native"
+    );
+    let bootstrap_source = std::fs::read_to_string(
+        std::path::join(repo, "scripts/bootstrap.cmd").display
+    );
+    let bootstrap_lower = bootstrap_source;
+    bootstrap_lower.to_lower();
+    require(
+        !bootstrap_lower.contains("release-fast"),
+        "migration_batch_bootstrap_business_rule:release-fast"
+    );
+    require(
+        !bootstrap_lower.contains("stage-build"),
+        "migration_batch_bootstrap_business_rule:stage-build"
+    );
+    require(
+        !bootstrap_lower.contains("include-stress"),
+        "migration_batch_bootstrap_business_rule:include-stress"
+    );
+    require(
+        !bootstrap_lower.contains("package-qualified"),
+        "migration_batch_bootstrap_business_rule:package-qualified"
+    );
+    require(
+        !bootstrap_lower.contains("--timeout-ms"),
+        "migration_batch_bootstrap_business_rule:--timeout-ms"
+    );
+    require(
+        !bootstrap_lower.contains("--max-operations"),
+        "migration_batch_bootstrap_business_rule:--max-operations"
+    );
+    require(
+        !bootstrap_lower.contains("--max-collection-items"),
+        "migration_batch_bootstrap_business_rule:--max-collection-items"
+    );
+    require(
+        !bootstrap_lower.contains("--max-string-bytes"),
+        "migration_batch_bootstrap_business_rule:--max-string-bytes"
+    );
+    require(
+        !bootstrap_lower.contains("--max-output-bytes"),
+        "migration_batch_bootstrap_business_rule:--max-output-bytes"
+    );
+    require(
+        !bootstrap_lower.contains("cargo clean"),
+        "migration_batch_bootstrap_business_rule:cargo clean"
+    );
+    require(
+        !bootstrap_lower.contains("git push"),
+        "migration_batch_bootstrap_business_rule:git push"
+    );
+    require(
+        !bootstrap_lower.contains("git tag"),
+        "migration_batch_bootstrap_business_rule:git tag"
+    );
+    require(
+        bootstrap_lower.contains(`task run "%agenterm_bootstrap_task%"`),
+        "migration_batch_bootstrap_task_forward"
+    );
+    require(
+        bootstrap_lower.contains(
+            "cargo build --quiet --locked --bin agenterm-rh"
+        ),
+        "migration_batch_bootstrap_worker_build"
+    );
+    let bootstrap_line_count = 0;
+    for source_line in bootstrap_lower.split("\n") {
+        bootstrap_line_count += 1;
+    }
+    require(
+        bootstrap_line_count <= 175,
+        "migration_batch_bootstrap_size"
+    );
+
+    let build_sh_path = std::path::join(repo, "build.sh").display;
+    require(
+        std::fs::exists(build_sh_path),
+        "migration_shell_alias_missing:build.sh"
+    );
+    let build_shell = std::fs::read_to_string(build_sh_path);
+    build_shell.replace("\r\n", "\n");
+    build_shell.trim();
+    require(
+        build_shell ==
+            "#!/usr/bin/env sh\n" +
+            "set -eu\n" +
+            "AGENTERM_BOOTSTRAP_TASK=build\n" +
+            "export AGENTERM_BOOTSTRAP_TASK\n" +
+            `exec "$(dirname "$0")/scripts/bootstrap.sh" "$@"`,
+        "migration_shell_alias_not_thin:build.sh"
+    );
+    let check_sh_path = std::path::join(repo, "check.sh").display;
+    require(
+        std::fs::exists(check_sh_path),
+        "migration_shell_alias_missing:check.sh"
+    );
+    let check_shell = std::fs::read_to_string(check_sh_path);
+    check_shell.replace("\r\n", "\n");
+    check_shell.trim();
+    require(
+        check_shell ==
+            "#!/usr/bin/env sh\n" +
+            "set -eu\n" +
+            "AGENTERM_BOOTSTRAP_TASK=check\n" +
+            "export AGENTERM_BOOTSTRAP_TASK\n" +
+            `exec "$(dirname "$0")/scripts/bootstrap.sh" "$@"`,
+        "migration_shell_alias_not_thin:check.sh"
+    );
+    let lint_sh_path = std::path::join(repo, "lint.sh").display;
+    require(
+        std::fs::exists(lint_sh_path),
+        "migration_shell_alias_missing:lint.sh"
+    );
+    let lint_shell = std::fs::read_to_string(lint_sh_path);
+    lint_shell.replace("\r\n", "\n");
+    lint_shell.trim();
+    require(
+        lint_shell ==
+            "#!/usr/bin/env sh\n" +
+            "set -eu\n" +
+            "AGENTERM_BOOTSTRAP_TASK=lint\n" +
+            "export AGENTERM_BOOTSTRAP_TASK\n" +
+            `exec "$(dirname "$0")/scripts/bootstrap.sh" "$@"`,
+        "migration_shell_alias_not_thin:lint.sh"
+    );
+    let release_sh_path = std::path::join(repo, "release.sh").display;
+    require(
+        std::fs::exists(release_sh_path),
+        "migration_shell_alias_missing:release.sh"
+    );
+    let release_shell = std::fs::read_to_string(release_sh_path);
+    release_shell.replace("\r\n", "\n");
+    release_shell.trim();
+    require(
+        release_shell ==
+            "#!/usr/bin/env sh\n" +
+            "set -eu\n" +
+            "AGENTERM_BOOTSTRAP_TASK=release\n" +
+            "export AGENTERM_BOOTSTRAP_TASK\n" +
+            `exec "$(dirname "$0")/scripts/bootstrap.sh" "$@"`,
+        "migration_shell_alias_not_thin:release.sh"
+    );
+    let shell_bootstrap_path =
+        std::path::join(repo, "scripts/bootstrap.sh").display;
+    require(
+        std::fs::exists(shell_bootstrap_path),
+        "migration_shell_bootstrap_missing"
+    );
+    let shell_bootstrap = std::fs::read_to_string(shell_bootstrap_path);
+    let shell_bootstrap_lower = shell_bootstrap;
+    shell_bootstrap_lower.to_lower();
+    let shell_bootstrap_operational_lines = 0;
+    for source_line in shell_bootstrap_lower.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" && (!line.starts_with("#") || line.starts_with("#!")) {
+            shell_bootstrap_operational_lines += 1;
+        }
+    }
+    require(
+        !shell_bootstrap_lower.contains("release-fast"),
+        "migration_shell_bootstrap_business_rule:release-fast"
+    );
+    require(
+        !shell_bootstrap_lower.contains("stage-build"),
+        "migration_shell_bootstrap_business_rule:stage-build"
+    );
+    require(
+        !shell_bootstrap_lower.contains("include-stress"),
+        "migration_shell_bootstrap_business_rule:include-stress"
+    );
+    require(
+        !shell_bootstrap_lower.contains("package-qualified"),
+        "migration_shell_bootstrap_business_rule:package-qualified"
+    );
+    require(
+        !shell_bootstrap_lower.contains("--timeout-ms"),
+        "migration_shell_bootstrap_business_rule:--timeout-ms"
+    );
+    require(
+        !shell_bootstrap_lower.contains("--max-operations"),
+        "migration_shell_bootstrap_business_rule:--max-operations"
+    );
+    require(
+        !shell_bootstrap_lower.contains("--max-collection-items"),
+        "migration_shell_bootstrap_business_rule:--max-collection-items"
+    );
+    require(
+        !shell_bootstrap_lower.contains("--max-string-bytes"),
+        "migration_shell_bootstrap_business_rule:--max-string-bytes"
+    );
+    require(
+        !shell_bootstrap_lower.contains("--max-output-bytes"),
+        "migration_shell_bootstrap_business_rule:--max-output-bytes"
+    );
+    require(
+        !shell_bootstrap_lower.contains("cargo clean"),
+        "migration_shell_bootstrap_business_rule:cargo clean"
+    );
+    require(
+        !shell_bootstrap_lower.contains("git push"),
+        "migration_shell_bootstrap_business_rule:git push"
+    );
+    require(
+        !shell_bootstrap_lower.contains("git tag"),
+        "migration_shell_bootstrap_business_rule:git tag"
+    );
+    require(
+        shell_bootstrap_lower.contains(
+            `task run "$agenterm_bootstrap_task"`
+        )
+            && shell_bootstrap_lower.contains(
+                "cargo build --quiet --locked --bin agenterm-rh"
+            )
+            && shell_bootstrap_operational_lines <= 160,
+        "migration_shell_bootstrap_not_generic"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_timing_schema")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_timing_schema"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_timing_schema"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_setup_ms")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_setup_ms"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_setup_ms"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_cargo_build_ms")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_cargo_build_ms"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_cargo_build_ms"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_worker_copy_ms")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_worker_copy_ms"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_worker_copy_ms"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_other_setup_ms")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_other_setup_ms"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_other_setup_ms"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_clock_resolution_ms")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_clock_resolution_ms"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_clock_resolution_ms"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_lock_wait_state")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_lock_wait_state"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_lock_wait_state"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_worker_state")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_worker_state"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_worker_state"
+    );
+    require(
+        bootstrap_lower.contains("agenterm_bootstrap_fingerprint")
+            && shell_bootstrap_lower.contains("agenterm_bootstrap_fingerprint"),
+        "migration_bootstrap_timing_fact:agenterm_bootstrap_fingerprint"
+    );
+    require(
+        bootstrap_lower.contains("included_not_separable")
+            && shell_bootstrap_lower.contains("included_not_separable"),
+        "migration_bootstrap_timing_fact:included_not_separable"
+    );
+    require(
+        bootstrap_lower.contains("not_applicable")
+            && shell_bootstrap_lower.contains("not_applicable"),
+        "migration_bootstrap_timing_fact:not_applicable"
+    );
+    require(
+        bootstrap_lower.contains("worker.stamp")
+            && shell_bootstrap_lower.contains("worker.stamp"),
+        "migration_bootstrap_timing_fact:worker.stamp"
+    );
+    require(
+        bootstrap_lower.contains("git hash-object")
+            && shell_bootstrap_lower.contains("git hash-object"),
+        "migration_bootstrap_timing_fact:git hash-object"
+    );
+    require(
+        bootstrap_lower.contains("rustc -vv")
+            && shell_bootstrap_lower.contains("rustc -vv"),
+        "migration_bootstrap_timing_fact:rustc -vv"
+    );
+    require(
+        bootstrap_lower.contains("cargo -vv")
+            && shell_bootstrap_lower.contains("cargo -vv"),
+        "migration_bootstrap_timing_fact:cargo -vv"
+    );
+    require(
+        bootstrap_lower.contains("cargo.lock")
+            && shell_bootstrap_lower.contains("cargo.lock"),
+        "migration_bootstrap_timing_fact:cargo.lock"
+    );
+    require(
+        bootstrap_lower.contains("agenterm.tasks.json")
+            && shell_bootstrap_lower.contains("agenterm.tasks.json"),
+        "migration_bootstrap_timing_fact:agenterm.tasks.json"
+    );
+
+    std::fs::try_remove_file(stdout_path);
+
+    let report = #{
+        schema_version: 2,
+        task_id: "migration-audit",
+        baseline_count: ledger.baseline_count,
+        deleted_count: deleted,
+        remaining_count: current.keys().len,
+        expected_remaining_count: ledger.baseline_count - deleted,
+        powershell_automation_references: 0,
+        automation_file_count: automation_count,
+        batch_entry_count: batch_count,
+        batch_alias_count: 4,
+        batch_business_logic_references: 0,
+        shell_alias_count: 4,
+        shell_business_logic_references: 0,
+        drift: false
+    };
+    require(
+        report.remaining_count == report.expected_remaining_count,
+        "migration_remaining_count: actual=" + report.remaining_count +
+            ", expected=" + report.expected_remaining_count
+    );
+    print(rhai::json::stringify_pretty(report));
+    0
+}

@@ -1,0 +1,900 @@
+// Keep the PRD modules, shipped evidence contract, and public catalogs aligned.
+//
+// Args:
+//   REPO [CLI_EXE]
+
+fn entry() {
+    if args.len != 1 {
+        if args.len != 2 {
+            return rh::fail("expected: REPO [CLI_EXE]");
+        }
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let use_arg_cli = 0;
+    if args.len == 2 {
+        use_arg_cli = 1;
+    }
+    if use_arg_cli == 1 {
+        let cli_arg = std::path::absolute(args[1]).display;
+        let cli_arg_exe = cli_arg + ".exe";
+        require(
+            std::fs::exists(cli_arg) != 0 || std::fs::exists(cli_arg_exe) != 0,
+            "prd_alignment_input_missing"
+        );
+    } else {
+        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
+        let cli_default_exe = cli_default + ".exe";
+        require(
+            std::fs::exists(cli_default) != 0
+                || std::fs::exists(cli_default_exe) != 0,
+            "prd_alignment_input_missing"
+        );
+    }
+
+    let prd_path = std::path::join(repo, "PRD.md").display;
+    let detail_directory = std::path::join(repo, "prd").display;
+    let contract_path =
+        std::path::join(detail_directory, "alignment-contract.json").display;
+    require(std::fs::exists(repo), "prd_alignment_input_missing");
+    require(std::fs::exists(prd_path), "prd_alignment_input_missing");
+    require(std::fs::exists(detail_directory), "prd_alignment_input_missing");
+    require(std::fs::exists(contract_path), "prd_alignment_input_missing");
+
+    let stdout_path = std::path::join(
+        repo,
+        ".prd-alignment.stdout.tmp"
+    ).display;
+
+    let prd_index = std::fs::read_to_string(prd_path);
+    let linked = [];
+    let linked_first = 1;
+    for part in prd_index.split("(prd/") {
+        if linked_first == 0 {
+            let closing = part.split(")");
+            require(closing.len >= 2, "prd_alignment_link_unclosed");
+            let link_name = "";
+            let have_link = 0;
+            for piece in closing {
+                if have_link == 0 {
+                    link_name = piece;
+                    have_link = 1;
+                }
+            }
+            if link_name.starts_with("PRD_") {
+                if link_name.ends_with(".md") {
+                    linked.push(link_name);
+                }
+            }
+        }
+        if linked_first == 1 {
+            linked_first = 0;
+        }
+    }
+
+    let actual = [];
+    for dir_entry in std::fs::read_dir(detail_directory) {
+        let file_name = "" + dir_entry.file_name;
+        if dir_entry.is_file {
+            if file_name.starts_with("PRD_") {
+                if file_name.ends_with(".md") {
+                    actual.push(file_name);
+                }
+            }
+        }
+    }
+    require(
+        actual.len == linked.len,
+        "prd_alignment_list_count:prd_modules:expected=" + linked.len +
+            ":actual=" + actual.len
+    );
+    let linked_seen = #{};
+    for name in linked {
+        let linked_name = "" + name;
+        require(
+            linked_seen.contains(linked_name) == 0,
+            "prd_alignment_list_duplicate:prd_modules:" + linked_name
+        );
+        linked_seen[linked_name] = true;
+    }
+    for name in actual {
+        require(
+            linked_seen.contains(name),
+            "prd_alignment_list_mismatch:prd_modules:missing=" + name
+        );
+    }
+
+    let contract = rhai::json::parse_file(contract_path);
+    require(contract.schema_version == 3, "prd_alignment_contract_schema");
+    let capabilities = contract.capabilities;
+    require(capabilities.len > 0, "prd_alignment_capabilities_empty");
+
+    let capability_ids = #{};
+    let allowed_kinds = #{
+        architecture: true,
+        behavior: true,
+        decision: true,
+        visual: true
+    };
+    let allowed_modes = #{
+        "black-box": true,
+        "black-box-partial": true,
+        decision: true,
+        "unit-source-partial": true
+    };
+    for capability in capabilities {
+        let cap_id = "" + capability.id;
+        require(cap_id != "", "prd_alignment_capability_id");
+        require(cap_id.starts_with(".") == 0, "prd_alignment_capability_id");
+        require(cap_id.starts_with("-") == 0, "prd_alignment_capability_id");
+        require(cap_id.ends_with(".") == 0, "prd_alignment_capability_id");
+        require(cap_id.ends_with("-") == 0, "prd_alignment_capability_id");
+        require(
+            capability_ids.contains(cap_id) == 0,
+            "prd_alignment_capability_duplicate:" + cap_id
+        );
+        capability_ids[cap_id] = true;
+        require(
+            allowed_kinds.contains(capability.kind),
+            "prd_alignment_capability_kind:" + capability.id
+        );
+        require(
+            allowed_modes.contains(capability.evidence_mode),
+            "prd_alignment_evidence_mode:" + capability.id
+        );
+        if capability.kind == "decision" {
+            require(
+                capability.status == "accepted"
+                    && capability.evidence_mode == "decision"
+                    && capability.evidence_ids.len == 0,
+                "prd_alignment_decision_contract:" + capability.id
+            );
+        } else if capability.status == "shipped" {
+            require(
+                capability.evidence_mode == "black-box"
+                    && capability.evidence_ids.len > 0,
+                "prd_alignment_shipped_contract:" + capability.id
+            );
+        } else {
+            require(
+                capability.status == "partial"
+                    && (
+                        capability.evidence_mode == "black-box-partial"
+                            || capability.evidence_mode == "unit-source-partial"
+                    )
+                    && capability.evidence_ids.len > 0,
+                "prd_alignment_partial_contract:" + capability.id
+            );
+        }
+        let declaration = "" + capability.prd;
+        declaration.to_lower();
+        let status_found = 0;
+        let root_document = std::fs::read_to_string(prd_path);
+        root_document.to_lower();
+        for source_line in root_document.split("\n") {
+            if status_found == 0 {
+                let line = source_line;
+                line.trim();
+                if line.contains(declaration) != 0 {
+                    if capability.status == "partial" {
+                        if line.starts_with("- [~]") {
+                            status_found = 1;
+                        }
+                    } else {
+                        if line.starts_with("- [x]") {
+                            status_found = 1;
+                        }
+                    }
+                }
+            }
+        }
+        for linked_name in linked {
+            if status_found == 0 {
+                let module_name = "" + linked_name;
+                let detail_path = std::path::join(
+                    detail_directory,
+                    module_name
+                ).display;
+                let detail_document = std::fs::read_to_string(detail_path);
+                detail_document.to_lower();
+                for source_line in detail_document.split("\n") {
+                    if status_found == 0 {
+                        let line = source_line;
+                        line.trim();
+                        if line.contains(declaration) != 0 {
+                            if capability.status == "partial" {
+                                if line.starts_with("- [~]") {
+                                    status_found = 1;
+                                }
+                            } else {
+                                if line.starts_with("- [x]") {
+                                    status_found = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        require(
+            status_found == 1,
+            "prd_alignment_status_line:" + capability.id
+        );
+    }
+
+    let gates_path =
+        std::path::join(repo, "scripts/qualification-gates.json").display;
+    let gate_manifest = rhai::json::parse_file(gates_path);
+    let registered_evidence = #{};
+    let evidence_suites = #{
+        "cli-smoke": true,
+        "control-center-smoke": true,
+        "control-center-linux-smoke": true,
+        "control-center-macos-smoke": true,
+        "unix-frontend-linux-smoke": true,
+        "unix-frontend-macos-smoke": true,
+        "server-smoke": true,
+        "native-ipc-smoke": true,
+        "native-ipc-compat-smoke": true,
+        "remote-ui-smoke": true,
+        "remote-ui-upgrade-smoke": true,
+        "fleet-smoke": true,
+        "script-smoke": true,
+        "startup-smoke": true,
+        "theme-smoke": true,
+        "wake-smoke": true,
+        "working-context-smoke": true,
+        "workbench-smoke": true
+    };
+    let evidence_gates = [];
+    for gate in gate_manifest.required_gates {
+        if evidence_suites.contains(gate.id) {
+            evidence_gates.push(gate);
+        }
+    }
+    let host_native_path =
+        std::path::join(repo, "scripts/host-native-evidence-gates.json").display;
+    let host_native_manifest = rhai::json::parse_file(host_native_path);
+    require(
+        host_native_manifest.schema_version == 1,
+        "prd_alignment_host_native_schema"
+    );
+    for gate in host_native_manifest.gates {
+        require(
+            evidence_suites.contains(gate.id)
+                && (gate.platform == "linux" || gate.platform == "macos"),
+            "prd_alignment_host_native_gate:" + gate.id
+        );
+        evidence_gates.push(gate);
+    }
+    let rhai_dir = std::path::join(repo, "scripts/rhai").display;
+    for gate in evidence_gates {
+        let suite_name = "" + gate.id;
+        let effective_suite = suite_name;
+        if type_of(gate.suite) == "string" {
+            let suite_override = "" + gate.suite;
+            if suite_override != "" {
+                effective_suite = suite_override;
+            }
+        }
+        let rhai_name = effective_suite + ".rhai";
+        let rhai_path = std::path::join(rhai_dir, rhai_name).display;
+        require(
+            std::fs::exists(rhai_path),
+            "prd_alignment_evidence_suite_missing:" + gate.id
+        );
+        let suite_source = std::fs::read_to_string(rhai_path);
+        for evidence_id in gate.evidence {
+            let evidence_key = "" + evidence_id;
+            require(evidence_key != "", "prd_alignment_evidence_id:" + evidence_key);
+            require(
+                evidence_key.starts_with(".") == 0,
+                "prd_alignment_evidence_id:" + evidence_key
+            );
+            require(
+                evidence_key.starts_with("-") == 0,
+                "prd_alignment_evidence_id:" + evidence_key
+            );
+            require(
+                evidence_key.ends_with(".") == 0,
+                "prd_alignment_evidence_id:" + evidence_key
+            );
+            require(
+                evidence_key.ends_with("-") == 0,
+                "prd_alignment_evidence_id:" + evidence_key
+            );
+            require(
+                registered_evidence.contains(evidence_key) == 0,
+                "prd_alignment_evidence_duplicate:" + evidence_key
+            );
+            require(
+                suite_source.contains("EVIDENCE " + evidence_key)
+                    || suite_source.contains("Write-Evidence '" + evidence_key + "'")
+                    || suite_source.contains("'" + evidence_key + "'")
+                    || suite_source.contains("\"" + evidence_key + "\""),
+                "prd_alignment_evidence_not_emitted:" + evidence_key
+            );
+            registered_evidence[evidence_key] = true;
+        }
+    }
+
+    let expected_evidence = [];
+    for capability in capabilities {
+        if capability.kind != "decision" {
+            for evidence_id in capability.evidence_ids {
+                expected_evidence.push(evidence_id);
+            }
+        }
+    }
+    let expected_evidence_map = #{};
+    for evidence_id in expected_evidence {
+        let evidence_key = "" + evidence_id;
+        expected_evidence_map[evidence_key] = true;
+    }
+    require(
+        expected_evidence_map.keys().len == registered_evidence.keys().len,
+        "prd_alignment_list_count:capability_evidence:expected=" +
+            expected_evidence_map.keys().len +
+            ":actual=" + registered_evidence.keys().len
+    );
+    for evidence_id in expected_evidence_map.keys() {
+        require(
+            registered_evidence.contains(evidence_id),
+            "prd_alignment_list_mismatch:capability_evidence:missing=" +
+                evidence_id
+        );
+    }
+
+    let repo_options = #{ current_dir: repo };
+    let catalog_code = 0;
+    if use_arg_cli == 1 {
+        let cli_arg = std::path::absolute(args[1]).display;
+        let cli_arg_exe = cli_arg + ".exe";
+        if std::fs::exists(cli_arg) == 0 {
+            catalog_code = std::process::command_stdout_file(
+                cli_arg_exe,
+                ["list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            catalog_code = std::process::command_stdout_file(
+                cli_arg,
+                ["list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    } else {
+        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
+        let cli_default_exe = cli_default + ".exe";
+        if std::fs::exists(cli_default) == 0 {
+            catalog_code = std::process::command_stdout_file(
+                cli_default_exe,
+                ["list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            catalog_code = std::process::command_stdout_file(
+                cli_default,
+                ["list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    }
+    require(catalog_code == 0, "prd_alignment_cli_catalog");
+    let catalog_text = std::fs::read_to_string(stdout_path);
+    let catalog_count = 0;
+    let public_names = #{};
+    for source_line in catalog_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            catalog_count += 1;
+            let pieces = line.split(" (");
+            require(pieces.len <= 2, "prd_alignment_catalog_line:" + line);
+            let name = pieces[0];
+            let public_name = "" + name;
+            require(public_name != "", "prd_alignment_command_name:" + public_name);
+            require(
+                public_name.starts_with(".") == 0,
+                "prd_alignment_command_name:" + public_name
+            );
+            require(
+                public_name.starts_with("-") == 0,
+                "prd_alignment_command_name:" + public_name
+            );
+            require(
+                public_name.ends_with(".") == 0,
+                "prd_alignment_command_name:" + public_name
+            );
+            require(
+                public_name.ends_with("-") == 0,
+                "prd_alignment_command_name:" + public_name
+            );
+            public_names[public_name] = true;
+            if pieces.len == 2 {
+                let aliases = pieces[1];
+                require(aliases.ends_with(")"), "prd_alignment_catalog_aliases");
+                let alias_parts = aliases.split(")");
+                let alias_body = alias_parts[0];
+                for source_alias in alias_body.split(",") {
+                    let alias = source_alias;
+                    alias.trim();
+                    let alias_name = "" + alias;
+                    require(
+                        alias_name != "",
+                        "prd_alignment_command_alias:" + alias_name
+                    );
+                    require(
+                        alias_name.starts_with(".") == 0,
+                        "prd_alignment_command_alias:" + alias_name
+                    );
+                    require(
+                        alias_name.starts_with("-") == 0,
+                        "prd_alignment_command_alias:" + alias_name
+                    );
+                    require(
+                        alias_name.ends_with(".") == 0,
+                        "prd_alignment_command_alias:" + alias_name
+                    );
+                    require(
+                        alias_name.ends_with("-") == 0,
+                        "prd_alignment_command_alias:" + alias_name
+                    );
+                    public_names[alias_name] = true;
+                }
+            }
+        }
+    }
+    for name in public_names.keys() {
+        let mention_found = 0;
+        let root_document = std::fs::read_to_string(prd_path);
+        root_document.to_lower();
+        if root_document.contains(name) != 0 {
+            mention_found = 1;
+        }
+        for linked_name in linked {
+            if mention_found == 0 {
+                let module_name = "" + linked_name;
+                let detail_path = std::path::join(
+                    detail_directory,
+                    module_name
+                ).display;
+                let detail_document = std::fs::read_to_string(detail_path);
+                detail_document.to_lower();
+                if detail_document.contains(name) != 0 {
+                    mention_found = 1;
+                }
+            }
+        }
+        require(
+            mention_found == 1,
+            "prd_alignment_public_command_missing:" + name
+        );
+    }
+    for root_name in contract.planned_command_roots {
+        require(
+            public_names.contains(root_name) == 0,
+            "prd_alignment_planned_command_public:" + root_name
+        );
+    }
+
+    let protocol_code = 0;
+    if use_arg_cli == 1 {
+        let cli_arg = std::path::absolute(args[1]).display;
+        let cli_arg_exe = cli_arg + ".exe";
+        if std::fs::exists(cli_arg) == 0 {
+            protocol_code = std::process::command_stdout_file(
+                cli_arg_exe,
+                ["protocol-info"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            protocol_code = std::process::command_stdout_file(
+                cli_arg,
+                ["protocol-info"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    } else {
+        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
+        let cli_default_exe = cli_default + ".exe";
+        if std::fs::exists(cli_default) == 0 {
+            protocol_code = std::process::command_stdout_file(
+                cli_default_exe,
+                ["protocol-info"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            protocol_code = std::process::command_stdout_file(
+                cli_default,
+                ["protocol-info"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    }
+    require(protocol_code == 0, "prd_alignment_protocol");
+    let protocol = rhai::json::parse(std::fs::read_to_string(stdout_path));
+    require(
+        protocol.command_catalog.schema_version == 1,
+        "prd_alignment_command_catalog_schema"
+    );
+    let catalog_lines = [];
+    for source_line in catalog_text.split("\n") {
+        let catalog_line = source_line;
+        catalog_line.trim();
+        if catalog_line != "" {
+            catalog_lines.push("" + catalog_line);
+        }
+    }
+    require(
+        catalog_lines.len == catalog_count,
+        "prd_alignment_list_count:protocol_command_catalog:expected=" +
+            catalog_count + ":actual=" + catalog_lines.len
+    );
+    let catalog_pos = 0;
+    for command in protocol.command_catalog.commands {
+        let command_id = "" + command.id;
+        let walk = 0;
+        for source_line in catalog_lines {
+            if walk == catalog_pos {
+                let catalog_line = "" + source_line;
+                if command.aliases.len > 0 {
+                    let paren_parts = catalog_line.split(" (");
+                    require(
+                        paren_parts.len == 2,
+                        "prd_alignment_list_mismatch:protocol_command_catalog:index=" +
+                            catalog_pos + ":expected=" + catalog_line +
+                            ":actual=" + command_id
+                    );
+                    require(
+                        paren_parts[0] == command_id,
+                        "prd_alignment_list_mismatch:protocol_command_catalog:index=" +
+                            catalog_pos + ":expected=" + catalog_line +
+                            ":actual=" + command_id
+                    );
+                    let alias_tail = paren_parts[1];
+                    require(
+                        alias_tail.ends_with(")"),
+                        "prd_alignment_catalog_aliases"
+                    );
+                    let alias_closing = alias_tail.split(")");
+                    let alias_body = alias_closing[0];
+                    let alias_parts = alias_body.split(",");
+                    require(
+                        alias_parts.len == command.aliases.len,
+                        "prd_alignment_list_mismatch:protocol_command_catalog:index=" +
+                            catalog_pos + ":expected=" + catalog_line +
+                            ":actual=" + command_id
+                    );
+                    let alias_pos = 0;
+                    for alias in command.aliases {
+                        let expected_alias = "" + alias;
+                        let alias_walk = 0;
+                        for source_alias in alias_parts {
+                            if alias_walk == alias_pos {
+                                let actual_alias = source_alias;
+                                actual_alias.trim();
+                                require(
+                                    ("" + actual_alias) == expected_alias,
+                                    "prd_alignment_list_mismatch:protocol_command_catalog:index=" +
+                                        catalog_pos + ":expected=" + catalog_line +
+                                        ":actual=" + command_id
+                                );
+                            }
+                            alias_walk += 1;
+                        }
+                        alias_pos += 1;
+                    }
+                } else {
+                    require(
+                        catalog_line == command_id,
+                        "prd_alignment_list_mismatch:protocol_command_catalog:index=" +
+                            catalog_pos + ":expected=" + catalog_line +
+                            ":actual=" + command_id
+                    );
+                }
+            }
+            walk += 1;
+        }
+        catalog_pos += 1;
+    }
+    require(
+        catalog_pos == catalog_count,
+        "prd_alignment_list_count:protocol_command_catalog:expected=" +
+            catalog_count + ":actual=" + catalog_pos
+    );
+
+    let protocol_capabilities = #{};
+    for capability in capabilities {
+        if type_of(capability.protocol_feature) == "string" {
+            let feature = "" + capability.protocol_feature;
+            if feature != "" {
+                require(
+                    protocol_capabilities.contains(feature) == 0,
+                    "prd_alignment_protocol_feature_duplicate:" + feature
+                );
+                protocol_capabilities[feature] = true;
+            }
+        }
+    }
+    require(
+        protocol_capabilities.keys().len == protocol.features.len,
+        "prd_alignment_list_count:protocol_features:expected=" +
+            protocol_capabilities.keys().len +
+            ":actual=" + protocol.features.len
+    );
+    let protocol_features = protocol.features;
+    let protocol_features_text = rhai::json::stringify_pretty(protocol_features);
+    for feature in protocol_capabilities.keys() {
+        let feature_key = "" + feature;
+        let needle_spaced = "\"" + feature_key + "\": true";
+        let needle_compact = "\"" + feature_key + "\":true";
+        require(
+            protocol_features_text.contains(needle_spaced) != 0
+                || protocol_features_text.contains(needle_compact) != 0,
+            "prd_alignment_protocol_feature_false:" + feature_key
+        );
+    }
+    for extension in protocol.extensions {
+        require(
+            public_names.contains(extension),
+            "prd_alignment_extension_missing:" + extension
+        );
+    }
+    for command in protocol.compatibility.tmux_rmux {
+        require(
+            public_names.contains(command),
+            "prd_alignment_compatibility_missing:" + command
+        );
+    }
+    for command in protocol.compatibility.partial {
+        require(
+            public_names.contains(command),
+            "prd_alignment_compatibility_missing:" + command
+        );
+    }
+
+    let mux_code = 0;
+    if use_arg_cli == 1 {
+        let cli_arg = std::path::absolute(args[1]).display;
+        let cli_arg_exe = cli_arg + ".exe";
+        if std::fs::exists(cli_arg) == 0 {
+            mux_code = std::process::command_stdout_file(
+                cli_arg_exe,
+                ["mux", "compatibility", "--json"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            mux_code = std::process::command_stdout_file(
+                cli_arg,
+                ["mux", "compatibility", "--json"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    } else {
+        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
+        let cli_default_exe = cli_default + ".exe";
+        if std::fs::exists(cli_default) == 0 {
+            mux_code = std::process::command_stdout_file(
+                cli_default_exe,
+                ["mux", "compatibility", "--json"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            mux_code = std::process::command_stdout_file(
+                cli_default,
+                ["mux", "compatibility", "--json"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    }
+    require(mux_code == 0, "prd_alignment_mux_compatibility");
+    let mux_compatibility = rhai::json::parse(std::fs::read_to_string(stdout_path));
+    let mux_list_code = 0;
+    if use_arg_cli == 1 {
+        let cli_arg = std::path::absolute(args[1]).display;
+        let cli_arg_exe = cli_arg + ".exe";
+        if std::fs::exists(cli_arg) == 0 {
+            mux_list_code = std::process::command_stdout_file(
+                cli_arg_exe,
+                ["mux", "list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            mux_list_code = std::process::command_stdout_file(
+                cli_arg,
+                ["mux", "list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    } else {
+        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
+        let cli_default_exe = cli_default + ".exe";
+        if std::fs::exists(cli_default) == 0 {
+            mux_list_code = std::process::command_stdout_file(
+                cli_default_exe,
+                ["mux", "list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        } else {
+            mux_list_code = std::process::command_stdout_file(
+                cli_default,
+                ["mux", "list-commands"],
+                10000,
+                stdout_path,
+                repo_options
+            );
+        }
+    }
+    require(mux_list_code == 0, "prd_alignment_mux_catalog");
+    let mux_text = std::fs::read_to_string(stdout_path);
+    let mux_line_count = 0;
+    let supported_mux = [];
+    let unsupported_mux = [];
+    for source_line in mux_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            mux_line_count += 1;
+            if line.contains(" (unsupported:") {
+                let fields = line.split(" ");
+                let mux_name = "";
+                let have_field = 0;
+                for field in fields {
+                    if have_field == 0 {
+                        mux_name = field;
+                        have_field = 1;
+                    }
+                }
+                unsupported_mux.push(mux_name);
+            } else {
+                supported_mux.push(line);
+            }
+        }
+    }
+    let expected_supported_mux = [];
+    for name in mux_compatibility.supported {
+        expected_supported_mux.push("" + name);
+    }
+    require(
+        expected_supported_mux.len == supported_mux.len,
+        "prd_alignment_list_count:mux_supported:expected=" +
+            expected_supported_mux.len + ":actual=" + supported_mux.len
+    );
+    let supported_pos = 0;
+    for expected_json in expected_supported_mux {
+        let expected_item = "" + expected_json;
+        let walk = 0;
+        for actual_json in supported_mux {
+            if walk == supported_pos {
+                require(
+                    expected_item == ("" + actual_json),
+                    "prd_alignment_list_mismatch:mux_supported:index=" +
+                        supported_pos + ":expected=" + expected_item +
+                        ":actual=" + ("" + actual_json)
+                );
+            }
+            walk += 1;
+        }
+        supported_pos += 1;
+    }
+    let expected_unsupported = [];
+    for command in mux_compatibility.explicitly_unsupported {
+        expected_unsupported.push("" + command.name);
+    }
+    require(
+        expected_unsupported.len == unsupported_mux.len,
+        "prd_alignment_list_count:mux_unsupported:expected=" +
+            expected_unsupported.len + ":actual=" + unsupported_mux.len
+    );
+    let unsupported_pos = 0;
+    for expected_json in expected_unsupported {
+        let expected_item = "" + expected_json;
+        let walk = 0;
+        for actual_json in unsupported_mux {
+            if walk == unsupported_pos {
+                require(
+                    expected_item == ("" + actual_json),
+                    "prd_alignment_list_mismatch:mux_unsupported:index=" +
+                        unsupported_pos + ":expected=" + expected_item +
+                        ":actual=" + ("" + actual_json)
+                );
+            }
+            walk += 1;
+        }
+        unsupported_pos += 1;
+    }
+    for name in supported_mux {
+        let mention_found = 0;
+        let root_document = std::fs::read_to_string(prd_path);
+        root_document.to_lower();
+        if root_document.contains(name) != 0 {
+            mention_found = 1;
+        }
+        for linked_name in linked {
+            if mention_found == 0 {
+                let module_name = "" + linked_name;
+                let detail_path = std::path::join(
+                    detail_directory,
+                    module_name
+                ).display;
+                let detail_document = std::fs::read_to_string(detail_path);
+                detail_document.to_lower();
+                if detail_document.contains(name) != 0 {
+                    mention_found = 1;
+                }
+            }
+        }
+        require(
+            mention_found == 1,
+            "prd_alignment_mux_command_missing:" + name
+        );
+    }
+    for name in unsupported_mux {
+        let mention_found = 0;
+        let root_document = std::fs::read_to_string(prd_path);
+        root_document.to_lower();
+        if root_document.contains(name) != 0 {
+            mention_found = 1;
+        }
+        for linked_name in linked {
+            if mention_found == 0 {
+                let module_name = "" + linked_name;
+                let detail_path = std::path::join(
+                    detail_directory,
+                    module_name
+                ).display;
+                let detail_document = std::fs::read_to_string(detail_path);
+                detail_document.to_lower();
+                if detail_document.contains(name) != 0 {
+                    mention_found = 1;
+                }
+            }
+        }
+        require(
+            mention_found == 1,
+            "prd_alignment_mux_command_missing:" + name
+        );
+    }
+
+    std::fs::try_remove_file(stdout_path);
+
+    print(
+        "PASS: PRD aligns with " + catalog_count +
+        " catalog entries, " + public_names.keys().len + " public names, " +
+        protocol.features.len + " protocol features, " + mux_line_count +
+        " mux commands, " + capability_ids.keys().len + " capability IDs, and " +
+        registered_evidence.keys().len + " executable evidence IDs"
+    );
+    0
+}

@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg28 + g13/g14）：`lint`/`supply-chain` 已切 `.rh`。Wave3 余叶与 `candidate-*` 仍属后续 |
+| **状态** | **进行中 M42f6**（cg28 + g13–g16）：`lint`/`supply-chain`/`migration-audit`/`prd-alignment` 已切 `.rh`。余叶 `prune`/`preflight`/`target-report` 与 `candidate-*` 仍属后续 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -133,6 +133,8 @@
 | M42f6g12 | codegen 28：`for` 内 `array.push`（既有 emit 固化单测）、异构 JSON 数组字面量 `[doc.a, doc.b]`、`parts[0].len` 误解析恢复、MapSet `seen[doc.id]=true` stringish 键；fixture `json-array-*-probe.rh` / `string-list-index-probe.rh` | [x] |
 | M42f6g13 | INT-only `scripts/rh/lint.rh`；entry 切线 + 归档；回归 `lint_*` | [x] |
 | M42f6g14 | INT-only `scripts/rh/supply-chain.rh`（去 string helper；`let stored = arr[i]` 绑定再比较；pack compile 通过）；entry 切线 + 归档；回归 `supply_chain_*` | [x] |
+| M42f6g15 | INT-only `scripts/rh/powershell-migration-audit.rh`；`migration-audit` entry 切线 + 归档；回归 `migration_audit_*` | [x] |
+| M42f6g16 | INT-only `scripts/rh/prd-alignment.rh`；entry 切线 + 归档；回归 `prd_alignment_*` | [x] |
 | M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + 剩余叶（`candidate-*`、`migration-audit`、Wave3：`prd-alignment`/`prune`/`powershell`/`preflight`/`target-report`）；`target-report` 仍缺 `pop`/float。**codegen 28 后**：`array.push`/JSON 数组字面量已解；`path.parent` 与 Child/sleep 仍属后续；入口仍停 `.rhai` 直至叶达 Native | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |

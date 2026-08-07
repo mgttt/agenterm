@@ -1007,7 +1007,7 @@
     {
       "id": "migration-audit",
       "description": "Enforce the frozen PowerShell inventory and reject PowerShell or batch business-logic drift",
-      "entry": "scripts/rhai/powershell-migration-audit.rhai",
+      "entry": "scripts/rh/powershell-migration-audit.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
@@ -1069,7 +1069,7 @@
     {
       "id": "prd-alignment",
       "description": "Align PRD modules and shipped evidence with the public CLI, protocol, and Mux catalogs",
-      "entry": "scripts/rhai/prd-alignment.rhai",
+      "entry": "scripts/rh/prd-alignment.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm-cli"],

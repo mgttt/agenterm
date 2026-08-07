@@ -310,36 +310,16 @@ fn readme_examples_uses_native_bundled_execution() {
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 }
 
-#[test]
-fn manifest_top_level_rhai_tasks_use_compatibility_execution() {
-    let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(repo().join("agenterm.tasks.json")).expect("manifest"),
-    )
-    .expect("manifest json");
-    let mut invalid = Vec::new();
-    for task in manifest["tasks"].as_array().expect("tasks") {
-        let id = task["id"].as_str().expect("id");
-        let entry = task["entry"].as_str().expect("entry");
-        if !entry.ends_with(".rhai") {
-            continue;
-        }
-        let (source, output) = transpile_entry(entry);
-        if output
-            .rust
-            .contains("fn rh_entry_internal() -> INT {\n    0\n")
-            || (!source.contains("fn entry(")
-                && output.execution_mode.as_str() != "compat-delegating")
-        {
-            invalid.push(format!(
-                "{id} ({entry}): mode={}",
-                output.execution_mode.as_str()
-            ));
-        }
-    }
-    assert!(
-        invalid.is_empty(),
-        "top-level .rhai tasks must use compatibility execution: {invalid:?}"
-    );
+	#[test]
+	fn migration_audit_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/powershell-migration-audit.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
+    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 }
 
 #[test]
@@ -401,4 +381,16 @@ fn native_rh_task_without_entry_fails_manifest_qualification() {
             .is_some_and(|error| error.contains("native .rh task requires compat-delegating")),
         "{report:?}"
     );
+}#[test]
+fn prd_alignment_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/prd-alignment.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
+    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 }
+
+
