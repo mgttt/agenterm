@@ -4,7 +4,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use mlua::{Lua, Table, Value};
+use mlua::{Lua, LuaSerdeExt, Table, Value};
 
 /// Inject the full `std` global table into the Lua runtime.
 pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
@@ -14,6 +14,8 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     std_table.set("path", build_path(lua)?)?;
     std_table.set("env", build_env(lua)?)?;
     std_table.set("time", build_time(lua)?)?;
+    std_table.set("json", build_json(lua)?)?;
+    std_table.set("crypto", build_crypto(lua)?)?;
     lua.globals().set("std", std_table)?;
     Ok(())
 }
@@ -409,6 +411,65 @@ fn civil_date_from_unix_days(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
+// ── std.json ────────────────────────────────────────────────────────────
+
+fn build_json(lua: &Lua) -> Result<Table, mlua::Error> {
+    let json = lua.create_table()?;
+
+    // std.json.parse(s) → value (table/number/string/bool/nil)
+    json.set(
+        "parse",
+        lua.create_function(|lua, s: String| {
+            let v: serde_json::Value = serde_json::from_str(&s)
+                .map_err(|e| mlua::Error::runtime(format!("json_parse: {e}")))?;
+            lua.to_value(&v)
+        })?,
+    )?;
+
+    // std.json.stringify(v) → string
+    json.set(
+        "stringify",
+        lua.create_function(|_lua, val: Value| {
+            let v: serde_json::Value = serde_json::to_value(&val)
+                .map_err(|e| mlua::Error::runtime(format!("json_stringify: {e}")))?;
+            // Use compact (non-pretty) output matching rh's default
+            serde_json::to_string(&v)
+                .map_err(|e| mlua::Error::runtime(format!("json_stringify: {e}")))
+        })?,
+    )?;
+
+    Ok(json)
+}
+
+// ── std.crypto ──────────────────────────────────────────────────────────
+
+fn build_crypto(lua: &Lua) -> Result<Table, mlua::Error> {
+    use sha2::Digest;
+
+    let crypto = lua.create_table()?;
+
+    // std.crypto.sha256(data) → hex string
+    crypto.set(
+        "sha256",
+        lua.create_function(|_lua, data: String| {
+            let hash = sha2::Sha256::digest(data.as_bytes());
+            Ok(hex_encode(&hash))
+        })?,
+    )?;
+
+    Ok(crypto)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[usize::from(byte >> 4)] as char);
+        out.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::*;
@@ -778,5 +839,83 @@ mod tests {
         let s = r.stdout.trim();
         assert!(s.contains('T'), "missing T separator");
         assert!(s.ends_with('Z'), "missing Z suffix");
+    }
+
+    // ── std.json ────────────────────────────────────────────────────
+
+    #[test]
+    fn json_parse_object() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local obj = std.json.parse('{\"a\":1,\"b\":\"x\"}'); return obj.a",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn json_parse_array() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local arr = std.json.parse('[10, 20, 30]'); return arr[1]",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 10);
+    }
+
+    #[test]
+    fn json_stringify_table() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local s = std.json.stringify({x = 1, y = 'hi'}); print(s); return string.find(s, '\"x\"') ~= nil and 1 or 0",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn json_roundtrip() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local obj = std.json.parse('{\"key\":\"value\"}'); local s = std.json.stringify(obj); print(s); return string.find(s, '\"key\"') ~= nil and 1 or 0",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    // ── std.crypto ──────────────────────────────────────────────────
+
+    #[test]
+    fn crypto_sha256() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local h = std.crypto.sha256('abc'); print(h); return #h",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 64);
+        // Known SHA256 of "abc"
+        assert_eq!(
+            r.stdout.trim(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn crypto_sha256_empty() {
+        let e = engine();
+        let r = e
+            .eval("return #std.crypto.sha256('')", &host())
+            .expect("eval");
+        assert_eq!(r.value, 64);
     }
 }
