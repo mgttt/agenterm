@@ -6,24 +6,27 @@ to Linux/planning in another session.
 
 ## Preconditions
 
-- Cloud Agent VM has **`CURSOR_API`** injected (length ~69 chars; **never log or
-  commit the value**).
+- **Auth** (either):
+  - Cloud Agent VM: **`CURSOR_API`** injected (length ~69 chars; **never log or
+    commit the value**), or
+  - Local host: `CURSOR_API` env **or** `~/env.jsonl` line with `CURSOR_API.api_key`
+    (see [cloud.ts](cloud.ts)).
 - This repo is wired to a Cursor **cloud environment** (discover name via MCP,
   not hardcoded in scripts).
 - Creating agents uses the **REST API**; the bundled `cursor-cloud` MCP tools
-  are **read/monitor only** (no create endpoint).
+  are **read/monitor only** (no create endpoint). Preferred wrapper:
+  `bun skills/cursor/cloud.ts …`.
 
 ## Discover this run (no secrets)
 
 ```text
-cursor-cloud MCP → environment-info
-  → environment.name, repos[], dashboard URL
+# Preferred cross-host CLI (env or ~/env.jsonl):
+bun skills/cursor/cloud.ts me
+bun skills/cursor/cloud.ts list --active --env mgttt/agenterm
+bun skills/cursor/cloud.ts get 主控1
 
-cursor-cloud MCP → run-info
-  → current bcId, branch, status, https://cursor.com/agents/<bcId>
-
-cursor-cloud MCP → list-cloud-agents
-  → other sessions on this environment/repo
+# On a cloud VM with cursor-cloud MCP:
+cursor-cloud MCP → environment-info / run-info / list-cloud-agents
 ```
 
 ## Create a sibling agent (desensitized template)
