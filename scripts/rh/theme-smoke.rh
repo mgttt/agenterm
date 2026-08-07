@@ -8,32 +8,31 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = ["ux.theme-settings"];
-
 fn catch_text(error) {
     "" + error
 }
 
 fn json_cli(context, cli, arguments) {
-    rhai::json::parse(
-        test_harness::invoke_cli(
-            context,
-            cli,
-            arguments,
-            0,
-            []
-        ).stdout
-    )
-}
-
-fn text_cli(context, cli, arguments) {
-    test_harness::invoke_cli(
+    let output = test_harness::invoke_cli(
         context,
         cli,
         arguments,
         0,
         []
-    ).stdout
+    );
+    let text = "" + output.stdout;
+    rhai::json::parse(text)
+}
+
+fn text_cli(context, cli, arguments) {
+    let output = test_harness::invoke_cli(
+        context,
+        cli,
+        arguments,
+        0,
+        []
+    );
+    "" + output.stdout
 }
 
 fn wait_for_server(context, cli, gui_child) {
@@ -59,19 +58,6 @@ fn wait_for_server(context, cli, gui_child) {
     throw "theme_server_timeout";
 }
 
-fn wait_for_window(gui_child) {
-    for attempt in 0..200 {
-        if gui_child.platform_facts.top_level_window_present != 0 {
-            return;
-        }
-        if gui_child.state == "exited" {
-            throw "theme_window_early_exit";
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
-    }
-    throw "theme_window_timeout";
-}
-
 fn wait_for_server_stop(context, cli) {
     for attempt in 0..200 {
         let probe = test_harness::run_cli(
@@ -81,9 +67,9 @@ fn wait_for_server_stop(context, cli) {
             1,
             []
         );
-        let output = probe.stdout + probe.stderr;
-        if probe.success == 0
-                && output.contains("AgenTerm server is not running") {
+        let output = "" + probe.stdout + probe.stderr;
+        let stopped = "AgenTerm server is not running";
+        if probe.success == 0 && output.contains(stopped) {
             return;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -111,7 +97,9 @@ fn start_gui(context, gui, cli) {
     );
     let child = command.start();
     wait_for_server(context, cli, child);
-    wait_for_window(child);
+    // Window readiness is owned by wait-ui below. Child.platform_facts is not
+    // native-emitted yet; a typed wait_for_window(gui_child) also mis-infers
+    // the param as Json (nested .platform_facts path before Child evidence).
     let snapshot = json_cli(
         context,
         cli,
@@ -182,14 +170,15 @@ fn assert_theme_options(snapshot) {
             != theme_option_field(snapshot, "fancy-day", "accent"),
         "fancy_classic_accent_not_distinct"
     );
+    let fancy_metrics = theme_option_field(snapshot, "fancy-day", "metrics");
+    let corner_radius = 0 + fancy_metrics.corner_radius_control_px;
     test_harness::require(
-        theme_option_field(snapshot, "fancy-day", "metrics")
-            .corner_radius_control_px > 0,
+        corner_radius > 0,
         "fancy_metrics_missing"
     );
 }
 
-fn assert_theme(snapshot, saved_preset, draft, open) {
+fn assert_theme_open(snapshot, saved_preset, draft) {
     test_harness::require(
         snapshot.settings.appearance_preset == saved_preset,
         "appearance_preset_saved_mismatch"
@@ -199,22 +188,38 @@ fn assert_theme(snapshot, saved_preset, draft, open) {
         "color_theme_saved_mismatch"
     );
     assert_theme_options(snapshot);
-    if open != 0 {
-        test_harness::require(
-            type_of(snapshot.modal) != "()"
-                && snapshot.modal.kind == "settings"
-                && snapshot.settings.theme_draft == draft
-                && snapshot.settings.appearance_preset_draft == draft,
-            "theme_open_draft_mismatch"
-        );
-    } else {
-        test_harness::require(
-            type_of(snapshot.modal) == "()"
-                && type_of(snapshot.settings.theme_draft) == "()"
-                && type_of(snapshot.settings.appearance_preset_draft) == "()",
-            "theme_expected_closed"
-        );
-    }
+    // Avoid type_of: emit only accepts bare Json bindings / paths that stay
+    // Json-typed; unit checks use stringified null/absent drafts instead.
+    let modal_kind = "" + snapshot.modal.kind;
+    let theme_draft = "" + snapshot.settings.theme_draft;
+    let appearance_draft = "" + snapshot.settings.appearance_preset_draft;
+    test_harness::require(
+        modal_kind == "settings"
+            && theme_draft == draft
+            && appearance_draft == draft,
+        "theme_open_draft_mismatch"
+    );
+}
+
+fn assert_theme_closed(snapshot, saved_preset) {
+    test_harness::require(
+        snapshot.settings.appearance_preset == saved_preset,
+        "appearance_preset_saved_mismatch"
+    );
+    test_harness::require(
+        snapshot.settings.color_theme == derived_color_theme(saved_preset),
+        "color_theme_saved_mismatch"
+    );
+    assert_theme_options(snapshot);
+    let modal_kind = "" + snapshot.modal.kind;
+    let theme_draft = "" + snapshot.settings.theme_draft;
+    let appearance_draft = "" + snapshot.settings.appearance_preset_draft;
+    test_harness::require(
+        modal_kind == ""
+            && theme_draft == ""
+            && appearance_draft == "",
+        "theme_expected_closed"
+    );
 }
 
 fn retain_failure_snapshot(context, cli) {
@@ -285,12 +290,7 @@ fn entry() {
             "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n"
         );
         let migration_gui = start_gui(context, gui, cli);
-        assert_theme(
-            json_cli(context, cli, ["ui-snapshot"]),
-            "classic-day",
-            (),
-            0
-        );
+        assert_theme_closed(json_cli(context, cli, ["ui-snapshot"]), "classic-day");
         text_cli(context, cli, ["ui-action", "close-window"]);
         text_cli(context, cli, ["ui-action", "stop-server-and-exit"]);
         wait_for_exit(migration_gui, "theme_migration_gui_exit_timeout");
@@ -334,52 +334,33 @@ fn entry() {
 
         print("STEP preview all four presets through public ui-actions");
         text_cli(context, cli, ["ui-action", "open-settings"]);
-        assert_theme(
-            json_cli(context, cli, ["ui-snapshot"]),
-            "classic-night",
-            "classic-night",
-            1
-        );
-        for action in [
-            "settings-preset-classic-day",
-            "settings-preset-classic-night",
-            "settings-preset-fancy-day",
-            "settings-preset-fancy-night",
-            "settings-theme-light",
-            "settings-theme-dark",
-        ] {
-            text_cli(context, cli, ["ui-action", action]);
-        }
+        assert_theme_open(json_cli(context, cli, ["ui-snapshot"]), "classic-night", "classic-night");
+        text_cli(context, cli, ["ui-action", "settings-preset-classic-day"]);
+        text_cli(context, cli, ["ui-action", "settings-preset-classic-night"]);
+        text_cli(context, cli, ["ui-action", "settings-preset-fancy-day"]);
+        text_cli(context, cli, ["ui-action", "settings-preset-fancy-night"]);
+        text_cli(context, cli, ["ui-action", "settings-theme-light"]);
+        text_cli(context, cli, ["ui-action", "settings-theme-dark"]);
         let fancy_snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        assert_theme(
-            fancy_snapshot,
-            "classic-night",
-            "classic-night",
-            1
-        );
+        assert_theme_open(fancy_snapshot, "classic-night", "classic-night");
 
         print("STEP native classic-day preview and Cancel rollback");
         text_cli(context, cli, ["ui-action", "open-settings"]);
-        assert_theme(
-            json_cli(context, cli, ["ui-snapshot"]),
-            "classic-night",
-            "classic-night",
-            1
-        );
+        assert_theme_open(json_cli(context, cli, ["ui-snapshot"]), "classic-night", "classic-night");
         text_cli(context, cli, ["screenshot", "-o", night_png]);
         let snapshot = json_cli(
             context,
             cli,
             ["ui-action", "settings-preset-classic-day"]
         );
-        assert_theme(snapshot, "classic-night", "classic-day", 1);
+        assert_theme_open(snapshot, "classic-night", "classic-day");
         text_cli(context, cli, ["screenshot", "-o", day_png]);
         let snapshot = json_cli(
             context,
             cli,
             ["ui-action", "cancel"]
         );
-        assert_theme(snapshot, "classic-night", (), 0);
+        assert_theme_closed(snapshot, "classic-night");
 
         print("STEP Escape rolls a second classic-day preview back");
         text_cli(context, cli, ["ui-action", "open-settings"]);
@@ -388,7 +369,7 @@ fn entry() {
             cli,
             ["ui-action", "settings-preset-classic-day"]
         );
-        assert_theme(snapshot, "classic-night", "classic-day", 1);
+        assert_theme_open(snapshot, "classic-night", "classic-day");
         first_gui.window_key("Escape");
         let snapshot = json_cli(
             context,
@@ -396,7 +377,7 @@ fn entry() {
             ["wait-ui", "--window-state", "restored",
              "--modal-kind", "none", "--timeout-ms", "30000"]
         );
-        assert_theme(snapshot, "classic-night", (), 0);
+        assert_theme_closed(snapshot, "classic-night");
 
         print("STEP native Apply persists classic-day without interrupting the PTY");
         text_cli(context, cli, ["ui-action", "open-settings"]);
@@ -406,7 +387,7 @@ fn entry() {
             cli,
             ["ui-action", "settings-apply"]
         );
-        assert_theme(snapshot, "classic-day", (), 0);
+        assert_theme_closed(snapshot, "classic-day");
         let persisted = rhai::json::parse_file(context.settings_path);
         test_harness::require(
             persisted.appearance_preset == "classic-day",
@@ -418,7 +399,7 @@ fn entry() {
         text_cli(context, cli, ["ui-action", "settings-preset-fancy-day"]);
         text_cli(context, cli, ["screenshot", "-o", fancy_day_png]);
         let fancy_preview = json_cli(context, cli, ["ui-snapshot"]);
-        assert_theme(fancy_preview, "classic-day", "fancy-day", 1);
+        assert_theme_open(fancy_preview, "classic-day", "fancy-day");
         test_harness::require(
             theme_option_field(fancy_preview, "fancy-day", "accent")
                 != theme_option_field(fancy_preview, "classic-day", "accent"),
@@ -426,7 +407,7 @@ fn entry() {
         );
         text_cli(context, cli, ["ui-action", "settings-apply"]);
         let fancy_applied = json_cli(context, cli, ["ui-snapshot"]);
-        assert_theme(fancy_applied, "fancy-day", (), 0);
+        assert_theme_closed(fancy_applied, "fancy-day");
         let fancy_persisted = rhai::json::parse_file(context.settings_path);
         test_harness::require(
             fancy_persisted.appearance_preset == "fancy-day",
@@ -504,12 +485,7 @@ fn entry() {
             ["wait-ui", "-t", restored.id, "--tab-state", "running",
              "--timeout-ms", "30000"]
         );
-        assert_theme(
-            json_cli(context, cli, ["ui-snapshot"]),
-            "fancy-day",
-            (),
-            0
-        );
+        assert_theme_closed(json_cli(context, cli, ["ui-snapshot"]), "fancy-day");
 
         text_cli(context, cli, ["ui-action", "close-window"]);
         text_cli(
