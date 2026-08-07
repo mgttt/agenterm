@@ -1,0 +1,462 @@
+// Byte-qualified offline Windows package construction (INT-only native pack).
+
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+}
+
+fn exact_values(expected, actual) {
+    if expected.len != actual.len {
+        return false;
+    }
+    for idx in 0..expected.len {
+        let value = expected[idx];
+        let found = 0;
+        for j in 0..actual.len {
+            if actual[j] == value {
+                found = 1;
+            }
+        }
+        if found == 0 {
+            return false;
+        }
+    }
+    for idx in 0..actual.len {
+        let value = actual[idx];
+        let found = 0;
+        for j in 0..expected.len {
+            if expected[j] == value {
+                found = 1;
+            }
+        }
+        if found == 0 {
+            return false;
+        }
+    }
+    true
+}
+
+fn valid_version(value) {
+    if value == "" || value.contains("/") || value.contains("\\") {
+        return false;
+    }
+    let build_parts = value.split("+");
+    if build_parts.len > 2 {
+        return false;
+    }
+    let public_version = build_parts[0];
+    let prerelease_parts = public_version.split("-");
+    if prerelease_parts.len > 2 {
+        return false;
+    }
+    let core = prerelease_parts[0];
+    let parts = core.split(".");
+    if parts.len != 3 {
+        return false;
+    }
+    if parts[0] == "" || parts[1] == "" || parts[2] == "" {
+        return false;
+    }
+    true
+}
+
+fn build_package_mode(
+    repo_value,
+    receipt_value,
+    output_value,
+    dry_run
+) {
+    let repo = std::path::absolute(repo_value).display;
+    let receipt_path =
+        std::path::join(repo, receipt_value).display;
+    let output_root =
+        std::path::join(repo, output_value).display;
+    let receipt = rhai::json::parse_file(receipt_path);
+    require(
+        receipt.schema_version == 1
+            && receipt.product == "AgenTerm"
+            && receipt.release
+            && receipt.stress_included,
+        "package_receipt_not_release_stress"
+    );
+    require(
+        !receipt.provenance.source_dirty,
+        "package_receipt_source_dirty"
+    );
+    for gate in receipt.gates {
+        let gate_id = "" + gate.id;
+        let gate_status = "" + gate.status;
+        require(
+            gate_status == "passed",
+            "package_receipt_gate_not_passed:" + gate_id
+        );
+    }
+
+    let stdout_path = repo + ".package-qualified.stdout.tmp";
+    let git_code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require(git_code == 0, "package_git_head");
+    let head = std::fs::read_to_string(stdout_path);
+    head.trim();
+    head.to_lower();
+    std::fs::try_remove_file(stdout_path);
+    require(
+        head.len == 40 && receipt.provenance.git_head == head,
+        "package_receipt_head_mismatch"
+    );
+
+    let cargo_lock_path =
+        std::path::join(repo, "Cargo.lock").display;
+    require(
+        std::fs::exists(cargo_lock_path)
+            && std::fs::metadata(cargo_lock_path).is_file,
+        "package_input_missing:" + cargo_lock_path
+    );
+    let cargo_hash = rhai::crypto::sha256_file(cargo_lock_path);
+    require(
+        receipt.provenance.cargo_lock_sha256 == cargo_hash,
+        "package_receipt_cargo_lock_hash"
+    );
+    let artifact_manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    require(
+        std::fs::exists(artifact_manifest_path)
+            && std::fs::metadata(artifact_manifest_path).is_file,
+        "package_input_missing:" + artifact_manifest_path
+    );
+    let artifact_hash = rhai::crypto::sha256_file(artifact_manifest_path);
+    require(
+        receipt.provenance.artifact_manifest_sha256 == artifact_hash,
+        "package_receipt_artifact_manifest_hash"
+    );
+    let sbom_path = std::path::join(
+        repo,
+        "dist/agenterm-sbom.spdx.json"
+    ).display;
+    require(
+        std::fs::exists(sbom_path) && std::fs::metadata(sbom_path).is_file,
+        "package_input_missing:" + sbom_path
+    );
+    let sbom_hash = rhai::crypto::sha256_file(sbom_path);
+    require(
+        receipt.provenance.sbom_sha256 == sbom_hash,
+        "package_receipt_sbom_hash"
+    );
+    let gate_manifest_path = std::path::join(
+        repo,
+        "scripts/qualification-gates.json"
+    ).display;
+    require(
+        std::fs::exists(gate_manifest_path)
+            && std::fs::metadata(gate_manifest_path).is_file,
+        "package_input_missing:" + gate_manifest_path
+    );
+    let gate_hash = rhai::crypto::sha256_file(gate_manifest_path);
+    require(
+        receipt.gate_manifest.sha256 == gate_hash,
+        "package_receipt_gate_manifest_hash"
+    );
+    let gate_manifest = rhai::json::parse_file(gate_manifest_path);
+    let required_gate_names = [];
+    for gate in gate_manifest.required_gates {
+        let gate_id = "" + gate.id;
+        required_gate_names.push(gate_id);
+    }
+    let receipt_gate_names = [];
+    for gate in receipt.gates {
+        let gate_id = "" + gate.id;
+        receipt_gate_names.push(gate_id);
+    }
+    require(
+        exact_values(required_gate_names, receipt_gate_names),
+        "package_receipt_gate_set"
+    );
+
+    let artifact_spec =
+        rhai::json::parse_file(artifact_manifest_path);
+    let artifact_names = [];
+    for executable in artifact_spec.executables {
+        let executable_name = "" + executable.name;
+        artifact_names.push(executable_name);
+    }
+    require(
+        artifact_names.len > 0,
+        "package_artifact_manifest_empty"
+    );
+    let unique = #{};
+    for idx in 0..artifact_names.len {
+        let name = artifact_names[idx];
+        require(
+            !unique.contains(name),
+            "package_artifact_duplicate:" + name
+        );
+        unique[name] = true;
+    }
+    let receipt_artifact_names = [];
+    for executable in receipt.provenance.executables {
+        let executable_name = "" + executable.name;
+        receipt_artifact_names.push(executable_name);
+    }
+    require(
+        exact_values(artifact_names, receipt_artifact_names),
+        "package_receipt_artifact_set"
+    );
+
+    let metadata_path =
+        std::path::join(repo, "dist/agenterm.json").display;
+    let metadata = rhai::json::parse_file(metadata_path);
+    require(
+        metadata.schema_version == 2
+            && metadata.git_commit == head
+            && !metadata.git_dirty
+            && metadata.cargo_lock_sha256 == cargo_hash
+            && metadata.artifact_manifest_sha256 == artifact_hash,
+        "package_metadata_source_mismatch"
+    );
+    let metadata_artifact_names = [];
+    for executable in metadata.executables {
+        let executable_name = "" + executable.name;
+        metadata_artifact_names.push(executable_name);
+    }
+    require(
+        exact_values(artifact_names, metadata_artifact_names),
+        "package_metadata_artifact_set"
+    );
+
+    let dist_root = std::path::join(repo, "dist").display;
+    let payload = [];
+    for idx in 0..artifact_names.len {
+        let name = artifact_names[idx];
+        let source = std::path::join(dist_root, name).display;
+        require(
+            std::fs::exists(source) && std::fs::metadata(source).is_file,
+            "package_input_missing:" + source
+        );
+        let hash = rhai::crypto::sha256_file(source);
+        let receipt_hash = "";
+        let receipt_count = 0;
+        for executable in receipt.provenance.executables {
+            let executable_name = "" + executable.name;
+            if executable_name == name {
+                receipt_count += 1;
+                receipt_hash = executable.sha256;
+            }
+        }
+        require(
+            receipt_count == 1,
+            "package_receipt_artifact_duplicate:" + name
+        );
+        let metadata_hash = "";
+        let metadata_count = 0;
+        for executable in metadata.executables {
+            let executable_name = "" + executable.name;
+            if executable_name == name {
+                metadata_count += 1;
+                metadata_hash = executable.sha256;
+            }
+        }
+        require(
+            metadata_count == 1,
+            "package_metadata_artifact_duplicate:" + name
+        );
+        require(
+            receipt_hash == hash && metadata_hash == hash,
+            "package_executable_hash:" + name
+        );
+        payload.push(#{ name: name, sha256: hash, path: source });
+    }
+
+    let license_apache_path =
+        std::path::join(repo, "LICENSE-APACHE").display;
+    let license_mit_path =
+        std::path::join(repo, "LICENSE-MIT").display;
+    let notices_path = std::path::join(
+        repo,
+        "THIRD_PARTY_NOTICES.md"
+    ).display;
+    require(
+        std::fs::exists(license_apache_path)
+            && std::fs::metadata(license_apache_path).is_file,
+        "package_input_missing:" + license_apache_path
+    );
+    require(
+        std::fs::exists(license_mit_path)
+            && std::fs::metadata(license_mit_path).is_file,
+        "package_input_missing:" + license_mit_path
+    );
+    require(
+        std::fs::exists(notices_path)
+            && std::fs::metadata(notices_path).is_file,
+        "package_input_missing:" + notices_path
+    );
+    payload.push(#{
+        name: "agenterm.json",
+        sha256: rhai::crypto::sha256_file(metadata_path),
+        path: metadata_path
+    });
+    payload.push(#{
+        name: "artifacts.json",
+        sha256: rhai::crypto::sha256_file(artifact_manifest_path),
+        path: artifact_manifest_path
+    });
+    payload.push(#{
+        name: "qualification-receipt.json",
+        sha256: rhai::crypto::sha256_file(receipt_path),
+        path: receipt_path
+    });
+    payload.push(#{
+        name: "agenterm-sbom.spdx.json",
+        sha256: rhai::crypto::sha256_file(sbom_path),
+        path: sbom_path
+    });
+    payload.push(#{
+        name: "LICENSE-APACHE",
+        sha256: rhai::crypto::sha256_file(license_apache_path),
+        path: license_apache_path
+    });
+    payload.push(#{
+        name: "LICENSE-MIT",
+        sha256: rhai::crypto::sha256_file(license_mit_path),
+        path: license_mit_path
+    });
+    payload.push(#{
+        name: "THIRD_PARTY_NOTICES.md",
+        sha256: rhai::crypto::sha256_file(notices_path),
+        path: notices_path
+    });
+
+    let version = "" + metadata.version;
+    require(valid_version(version), "package_version_invalid:" + version);
+    let run_id = std::time::SystemTime::now().unix_millis;
+    let run_directory =
+        std::path::join(output_root, run_id).display;
+    let staging =
+        std::path::join(run_directory, "staging").display;
+    std::fs::create_dir_all(staging);
+
+    let members = [];
+    for entry in payload {
+        let entry_name = "" + entry.name;
+        let entry_path = "" + entry.path;
+        let entry_hash = "" + entry.sha256;
+        let destination =
+            std::path::join(staging, entry_name).display;
+        std::fs::copy(entry_path, destination);
+        let destination_hash = rhai::crypto::sha256_file(destination);
+        require(
+            destination_hash == entry_hash,
+            "package_payload_changed:" + entry_name
+        );
+        members.push(entry_name);
+    }
+    let receipt_file_hash = rhai::crypto::sha256_file(receipt_path);
+    let package_manifest = #{
+        schema_version: 1,
+        dry_run: dry_run,
+        product: "AgenTerm",
+        version: version,
+        qualified_head: head,
+        qualification_receipt_sha256: receipt_file_hash,
+        cargo_lock_sha256: cargo_hash,
+        artifact_manifest_sha256: artifact_hash,
+        sbom_sha256: sbom_hash,
+        payload: payload
+    };
+    let staged_manifest = std::path::join(
+        staging,
+        "package-manifest.json"
+    ).display;
+    let manifest_json =
+        rhai::json::stringify_pretty(package_manifest) + "\n";
+    rhai::runtime::atomic_write(staged_manifest, manifest_json);
+    members.push("package-manifest.json");
+
+    let archive_suffix = "";
+    if dry_run {
+        archive_suffix = "-dry-run";
+    }
+    let archive_name =
+        "agenterm-" + version + "-windows-x86_64" + archive_suffix +
+        ".zip";
+    let archive =
+        std::path::join(run_directory, archive_name).display;
+    let zip_stdout = staging + ".package-qualified.tar.stdout.tmp";
+    let zip_code = std::process::command_stdout_file(
+        "tar.exe",
+        ["-a", "-c", "-f", archive, "-C", staging, "."],
+        30000,
+        zip_stdout,
+        #{ current_dir: staging }
+    );
+    std::fs::try_remove_file(zip_stdout);
+    if zip_code != 0 {
+        throw "package_zip_create";
+    }
+    let external_manifest = std::path::join(
+        run_directory,
+        "package-manifest.json"
+    ).display;
+    std::fs::copy(staged_manifest, external_manifest);
+    let archive_hash = rhai::crypto::sha256_file(archive);
+    let result = #{
+        schema_version: 1,
+        dry_run: dry_run,
+        archive: archive_name,
+        archive_sha256: archive_hash,
+        package_manifest: "package-manifest.json",
+        qualified_head: head
+    };
+    let result_name = if dry_run {
+        "dry-run-result.json"
+    } else {
+        "release-result.json"
+    };
+    let result_json =
+        rhai::json::stringify_pretty(result) + "\n";
+    rhai::runtime::atomic_write(
+        std::path::join(run_directory, result_name).display,
+        result_json
+    );
+    if std::fs::exists(staging) {
+        let cleanup_stdout =
+            staging + ".package-qualified.cleanup.stdout.tmp";
+        let cleanup_code = std::process::command_stdout_file(
+            "python3",
+            [
+                "-c",
+                "import shutil,sys; shutil.rmtree(sys.argv[1])",
+                staging
+            ],
+            120000,
+            cleanup_stdout,
+            #{}
+        );
+        std::fs::try_remove_file(cleanup_stdout);
+        require(cleanup_code == 0, "package_staging_cleanup:" + staging);
+    }
+    run_directory
+}
+
+fn build_package(repo_value, receipt_value, output_value) {
+    build_package_mode(
+        repo_value,
+        receipt_value,
+        output_value,
+        true
+    )
+}
+
+fn build_release_package(repo_value, receipt_value, output_value) {
+    build_package_mode(
+        repo_value,
+        receipt_value,
+        output_value,
+        false
+    )
+}
