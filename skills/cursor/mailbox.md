@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**舰队值班会话**刷新：2026-08-07T11:23Z（duty 结束；noop）
+最后由**主控1**刷新：2026-08-07T12:25Z（审阅后：research §11 落地；继续 server/CLI）
 
 ## 共享事实
 
@@ -13,11 +13,11 @@
 | 产品版本 | **0.1.14**（`Cargo.toml`）；v0.1.15 计划另案 |
 | 当前主线任务 | **server/CLI 首要**；CI 收口；CC 产品化不急 |
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
-| 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
+| 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `9559f722`（duty handoff bc-70e902a1） |
-| 待审合 | （无；`cursor/1-0e37`@`8d5ee7fd` ahead=0） |
-| CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
+| `origin/main` | tip `b0bc727`（research N-axis；RH cutover 已合） |
+| 待审合 | （无；`cursor/1-0e37`@`b0bc727` ahead=0） |
+| CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
@@ -38,8 +38,9 @@
 
 ### → 主控1（当前）
 1. 近程 **server/CLI**（Base）；CC/LLM 按 App 线 P1–P2，不拖 Base 发布。
-2. **产品设计跟进**：`plan/design-release-base-vs-apps.md` §8（Release & Apps 角色、RQ-*）。
-3. CC/LLM 设计 OQ/LQ/GP/RQ 待用户裁决；分身3/4 IDLE。
+2. **下一步**：Windows `ui-input` 待拍板（原生 EDIT composer）；并行可推 M42f7 `test_harness` 原生以解 selftest。
+3. harness-cleanup `.rh` 草稿仅 compat，**勿 flip** 直至 Child/test_harness 原生。
+4. CC/LLM 设计 OQ/LQ/GP/RQ 待用户裁决；分身3/4 IDLE。
 
 ## 请示队列
 
@@ -47,14 +48,14 @@
 
 ## 席位状态
 
-### 主控1 · 2026-08-06T07:20Z
+### 主控1 · 2026-08-07T12:25Z
 - 状态: RUNNING — 当前主控
 - bcId: `bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b`
 - URL: https://cursor.com/agents/bc-a4df769a-f16d-4ee8-9bd3-6b1ce4e1097b
 - 分支: `main`
-- tip: `820626a`
-- 下一步: 等用户对 CC 设计 OQ 裁决；近程仍 server/CLI
-- 阻塞: 无
+- tip: `b0bc727`
+- 下一步: server/CLI — Windows `ui-input` 决策或 M42f7 `test_harness`
+- 阻塞: Win `ui-input` composer/EDIT 策略未拍板；M42f7 缺 Child/sleep
 
 ### 主控2 · 2026-08-06T00:52Z
 - 状态: IDLE — 已换防/待命；勿再当唯一统筹
