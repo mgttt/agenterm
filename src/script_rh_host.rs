@@ -628,6 +628,7 @@ extern "C" fn host_json_call(
             .and_then(|pid| u32::try_from(pid).ok())
             .map(crate::script_process::process_platform_facts_json)
             .ok_or(-5),
+        "process.list" => crate::script_process::process_list_json().map_err(|_| -5),
         _ => Err(-4),
     }
     .and_then(|value| serde_json::to_string(&value).map_err(|_| -5));
@@ -901,6 +902,26 @@ mod tests {
         assert!(value.get("top_level_window_supported").is_some());
         assert!(value.get("top_level_window_present").is_some());
         assert!(value.get("top_level_window_title").is_some());
+
+        let operation = "process.list";
+        let input = "{}";
+        let wrote = super::host_json_call(
+            operation.as_ptr(),
+            operation.len() as u32,
+            input.as_ptr(),
+            input.len() as u32,
+            output.as_mut_ptr(),
+            output.len() as u32,
+        );
+        assert!(wrote > 0);
+        let processes: serde_json::Value =
+            serde_json::from_slice(&output[..wrote as usize]).expect("process list JSON");
+        assert!(
+            processes.as_array().is_some_and(|items| items.iter().any(
+                |process| process.get("id").and_then(serde_json::Value::as_u64)
+                    == Some(u64::from(std::process::id()))
+            ))
+        );
     }
 
     #[test]

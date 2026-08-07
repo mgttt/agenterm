@@ -2582,6 +2582,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
+        _ if std_process_list(expr) => ValueKind::Json,
         _ if std_process_id(expr) => ValueKind::Int,
         _ if std_process_command_arg(expr).is_some() => ValueKind::Command,
         _ if command_output_call(expr, ctx).is_some() => ValueKind::Output,
@@ -3363,6 +3364,13 @@ fn std_process_id(expr: &Expr) -> bool {
         return false;
     };
     call.namespace.to_string() == "std::process" && call.name == "id" && call.args.is_empty()
+}
+
+fn std_process_list(expr: &Expr) -> bool {
+    let Expr::FnCall(call, ..) = expr else {
+        return false;
+    };
+    call.namespace.to_string() == "std::process" && call.name == "list" && call.args.is_empty()
 }
 
 fn std_process_command_arg(expr: &Expr) -> Option<&Expr> {
@@ -6255,6 +6263,10 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if std_process_id(expr) {
             out.push_str("rh_process_id()");
+            return Ok(());
+        }
+        if std_process_list(expr) {
+            out.push_str("rh_host_json_call(\"process.list\", &serde_json::json!({}))");
             return Ok(());
         }
         if let Some(program) = std_process_command_arg(expr)
@@ -11319,6 +11331,37 @@ fn entry() {
             output
                 .rust
                 .contains("let mut facts = rh_child_platform_facts(&mut child);"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn process_list_uses_structured_native_host_call() {
+        let source = r#"
+fn entry() {
+    let processes = std::process::list();
+    for index in 0..processes.len {
+        let process = processes[index];
+        if process.id == std::process::id() {
+            require(process.executable_name != "", "process_name");
+        }
+    }
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_host_json_call(\"process.list\""),
             "{}",
             output.rust
         );

@@ -811,6 +811,23 @@ pub(crate) fn process_platform_facts_json(id: u32) -> serde_json::Value {
     })
 }
 
+pub(crate) fn process_list_json() -> Result<serde_json::Value, String> {
+    let mut processes = platform_process_list().map_err(|error| error.to_string())?;
+    processes.sort_by_key(|process| process.id);
+    Ok(serde_json::Value::Array(
+        processes
+            .into_iter()
+            .map(|process| {
+                serde_json::json!({
+                    "id": process.id,
+                    "parent_id": process.parent_id,
+                    "executable_name": process.executable_name,
+                })
+            })
+            .collect(),
+    ))
+}
+
 fn child_stdout(child: &mut ScriptChild) -> Result<ScriptStream, Box<EvalAltResult>> {
     Ok(child
         .0
