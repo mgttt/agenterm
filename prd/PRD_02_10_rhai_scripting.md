@@ -11,6 +11,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm-rhai.exe` is the public `run`, `eval`, `repl`, `check`,
   `api`, and named-task CLI while retaining private
   `--worker`/`--framed-worker` modes;
+  its PE now owns only incremental-wrapper and command dispatch code, while
+  `script_worker` in the shared `agenterm` library owns worker, framed
+  protocol, REPL and execute behavior;
   on Windows, `agenterm-cli.exe script repl ...` is a thin process-forwarding
   compatibility route to the adjacent `agenterm-rhai` sidecar, inherits
   stdio and exit status, and never links a second Rhai engine into the control
@@ -769,8 +772,11 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   automation corpus remain `.rhai`; `agenterm-rh task` currently invokes the
   adjacent `agenterm-rhai` compatibility PE through
   `AGENTERM_RHAI_COMPAT_CLI`, preserves its exit status, and fails closed when
-  that PE is absent. Worker, REPL, host-eval fallback, and AST parsing remain
-  on Rhai while their typed boundaries migrate.
+  that PE is absent. Worker/REPL implementation has moved from the
+  `agenterm-rhai` binary into the shared `script_worker` library, but its
+  interpreter, host-eval fallback, and AST parsing remain on Rhai while their
+  typed boundaries migrate. Release verification requires both manifest roles
+  and validates each role's declared offline version probe.
 - [ ] **Layered deployment** (JVM / JAR analogue):
   - **Base runtime** — stable PE family (`agenterm`, `agenterm-rhai`, …):
     host Facade, broker, supervision, qualification; rebases rarely

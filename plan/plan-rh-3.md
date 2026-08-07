@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M25 task 前门完成**（bootstrap 默认 `agenterm-rh task`；显式兼容桥；缺桥失败） |
+| **状态** | **M26 运行时拆分完成**（import SSOT；双 PE 探针；worker 下沉主库） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -53,6 +53,10 @@
 | M25b | bootstrap 默认通过 rh task 前门启动；`AGENTERM_RHAI_COMPAT_CLI` 明示兼容边界 | [x] |
 | M25c | task 前门黑盒：成功列出 manifest；兼容 PE 缺失时硬失败 | [x] |
 | M25d | framed-worker 捕获 compat fallback `print`，按输出预算封入结果帧，禁止协议 stdout 污染 | [x] |
+| M26a | project import 编译校验统一到 `agenterm-rh::project_import` SSOT，主库仅留 resolver 与薄适配 | [x] |
+| M26b | artifact verification / client smoke manifest 驱动验证 rhai + rh 双 PE offline probe | [x] |
+| M26c | worker / framed / REPL / execute 从 `agenterm-rhai` bin 下沉 `script_worker` 主库模块 | [x] |
+| M26d | worker check 直接保留 typed API validator failure；迁移后 22 个 worker 单测全绿 | [x] |
 
 ---
 

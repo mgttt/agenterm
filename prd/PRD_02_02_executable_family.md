@@ -240,7 +240,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Script hosting is not available there. Existing one-shot commands retain
   their single-worker supervisor. Both paths reuse one runtime library, API
   graph, local scheduler, standard library, modules, named tasks, and typed
-  Fleet APIs without becoming a persistent daemon or an Agent permission layer
+  Fleet APIs without becoming a persistent daemon or an Agent permission layer.
+  The worker, framed-protocol, REPL and execute implementation is owned by the
+  shared `agenterm` library; `agenterm-rhai` retains a thin dispatch surface
+  plus its incremental-build wrapper rather than a second worker implementation.
 - [x] v0.1.12 executable-name decision: retain `agenterm-rhai.exe` /
   `agenterm-rhai` as the canonical name for the same unrestricted Rhai
   runtime. Renaming is deferred until measured external usage and a complete
