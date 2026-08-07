@@ -2176,9 +2176,26 @@ fn emit_stmt(
             emit_try_block(out, &flow.body, &mut try_ctx)?;
             out.push_str("    })() {\n");
             out.push_str("        Ok(__rh_try_v) => __rh_try_v,\n");
-            out.push_str("        Err(_) => {\n");
-            emit_block_tail_expr(out, &flow.branch, ctx)?;
-            out.push_str("        }\n");
+            let catch_name = match &flow.expr {
+                Expr::Variable(ident, ..) if !ident.1.as_str().is_empty() => {
+                    Some(ident.1.as_str().to_string())
+                }
+                _ => None,
+            };
+            if let Some(name) = &catch_name {
+                out.push_str("        Err(");
+                out.push_str(name);
+                out.push_str(") => {\n");
+                let mut catch_ctx = ctx.clone().with_binding(name.as_str(), ValueKind::Int);
+                emit_catch_block_stmts(out, &flow.branch, &mut catch_ctx)?;
+                out.push_str("            0\n");
+                out.push_str("        }\n");
+            } else {
+                out.push_str("        Err(_) => {\n");
+                emit_catch_block_stmts(out, &flow.branch, ctx)?;
+                out.push_str("            0\n");
+                out.push_str("        }\n");
+            }
             out.push_str("    };\n");
         }
         Stmt::TryCatch(..) => {
@@ -2268,39 +2285,18 @@ fn emit_stmt(
     Ok(())
 }
 
-fn emit_block_tail_expr(
+fn emit_catch_block_stmts(
     out: &mut String,
     block: &StmtBlock,
     ctx: &mut EmitCtx,
 ) -> Result<(), RhError> {
-    let stmts: Vec<_> = block.iter().collect();
-    if stmts.is_empty() {
-        out.push_str("            0\n");
-        return Ok(());
-    }
-    for stmt in &stmts[..stmts.len() - 1] {
+    for stmt in block.iter() {
         let mut inner = String::new();
         emit_stmt(&mut inner, stmt, ctx, false)?;
         for line in inner.lines() {
             out.push_str("            ");
             out.push_str(line);
             out.push('\n');
-        }
-    }
-    match stmts.last().expect("non-empty") {
-        Stmt::Expr(expr) => {
-            out.push_str("            ");
-            emit_expr(out, expr, ctx)?;
-            out.push('\n');
-        }
-        other => {
-            let mut inner = String::new();
-            emit_stmt(&mut inner, other, ctx, true)?;
-            for line in inner.lines() {
-                out.push_str("            ");
-                out.push_str(line);
-                out.push('\n');
-            }
         }
     }
     Ok(())
@@ -2332,8 +2328,13 @@ fn emit_try_stmt(
             out.push_str(");\n");
         }
         Stmt::Return(Some(expr), flags, ..) if flags.contains(ASTFlags::BREAK) => {
+            // Rhai parses `throw msg` as a BREAK-flagged return. Keep Err arm INT.
             out.push_str("        return Err(");
-            emit_expr(out, expr, ctx)?;
+            if is_pure_int_expr(expr) {
+                emit_expr(out, expr, ctx)?;
+            } else {
+                emit_rh_fail(out, expr, ctx)?;
+            }
             out.push_str(");\n");
         }
         Stmt::BreakLoop(expr, flags, ..) => {
@@ -2427,8 +2428,12 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
         ValueKind::Json => Some("serde_json::Value::Null"),
         ValueKind::StringList | ValueKind::ChildList => Some("Vec::new()"),
         ValueKind::Set => Some("std::collections::HashSet::<String>::new()"),
-        // Opaque process values: callers should not throw from these helpers yet.
-        ValueKind::Command | ValueKind::Output | ValueKind::Child => None,
+        // Typed placeholders after rh_fail so throw keeps the function return kind.
+        ValueKind::Output => Some(
+            "RhOutput { success: 0, exit_code: -1, stdout: String::new(), stderr: String::new() }",
+        ),
+        ValueKind::Child => Some("RhChild::exited(0, 64 * 1024)"),
+        ValueKind::Command => None,
         ValueKind::Char | ValueKind::Metadata | ValueKind::SystemTime | ValueKind::DirEntry => None,
     }
 }
@@ -10797,6 +10802,68 @@ fn entry() {
         );
         assert!(
             !output.rust.contains("return failure;"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn try_catch_binds_error_and_returns_int_arm() {
+        let source = r#"
+fn entry() {
+    let failure = "";
+    try {
+        throw "boom";
+    } catch (error) {
+        failure = "" + error;
+    }
+    if failure == "" {
+        return 0;
+    }
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        let entry = output
+            .rust
+            .split("pub fn entry()")
+            .nth(1)
+            .expect("entry fn");
+        assert!(
+            entry.contains("Err(error) =>") && entry.contains("failure ="),
+            "{entry}"
+        );
+        assert!(
+            !entry.contains("Err(_) =>"),
+            "catch arm must bind the error name: {entry}"
+        );
+    }
+
+    #[test]
+    fn throw_from_output_helper_keeps_output_return_kind() {
+        let source = r#"
+fn wait_or_fail(child, code) {
+    if child.state == "exited" {
+        return child.wait_with_output(std::time::Duration::from_secs(1));
+    }
+    throw code;
+    child.wait_with_output(std::time::Duration::from_secs(0))
+}
+fn entry() {
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output.rust.contains("let _ = rh_fail(&code);")
+                && output.rust.contains("return RhOutput {"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("return rh_fail(&code);"),
             "{}",
             output.rust
         );

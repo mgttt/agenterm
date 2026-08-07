@@ -952,7 +952,7 @@
     {
       "id": "remote-ui-upgrade-smoke",
       "description": "Prove real GUI byte upgrade and rollback against one stable server, PTY, lease, and scrollback",
-      "entry": "scripts/rhai/remote-ui-upgrade-smoke.rhai",
+      "entry": "scripts/rh/remote-ui-upgrade-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm.exe"],

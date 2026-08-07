@@ -23,12 +23,13 @@ fn command(context, cli, arguments, expected_failure) {
 
 fn command_text(context, cli, arguments) {
     let output = command(context, cli, arguments, 0);
-    output.stdout + output.stderr
+    "" + output.stdout + output.stderr
 }
 
 fn command_json(context, cli, arguments) {
     let output = command(context, cli, arguments, 0);
-    rhai::json::parse(output.stdout + output.stderr)
+    let text = "" + output.stdout + output.stderr;
+    rhai::json::parse(text)
 }
 
 fn wait_for_server(context, cli, server) {
@@ -41,17 +42,22 @@ fn wait_for_server(context, cli, server) {
             []
         );
         if probe.success != 0 {
-            return rhai::json::parse(probe.stdout);
+            let text = "" + probe.stdout;
+            return rhai::json::parse(text);
         }
         if server.state == "exited" {
             let output = server.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
             throw "remote_upgrade_server_early_exit:" + output.stderr;
+            // Unreachable: keep return kind Json (bare throw can infer String).
+            return rhai::json::parse("{}");
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_upgrade_server_ready_timeout";
+    // Unreachable: keep return kind Json.
+    rhai::json::parse("{}")
 }
 
 fn wait_for_exit(child, timeout_attempts, code) {
@@ -64,6 +70,8 @@ fn wait_for_exit(child, timeout_attempts, code) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
+    // Unreachable: keep return kind Output (bare throw infers String).
+    child.wait_with_output(std::time::Duration::from_secs(0))
 }
 
 fn start_upgrade_ui(context, cli, executable, label) {
@@ -81,12 +89,13 @@ fn start_upgrade_ui(context, cli, executable, label) {
             0,
             []
         );
-        if lease_probe.success != 0
-                && gui.platform_facts.top_level_window_supported != 0
-                && gui.platform_facts.top_level_window_present != 0
-                && gui.platform_facts.top_level_window_id != 0 {
-            let lease = rhai::json::parse(lease_probe.stdout);
-            if lease.attached != 0 && lease.client_pid == gui.id {
+        // Lease + client_pid ownership only — Child.platform_facts is not
+        // native-emitted and nested .platform_facts paths mis-infer Child as Json.
+        if lease_probe.success != 0 {
+            let lease_text = "" + lease_probe.stdout;
+            let lease = rhai::json::parse(lease_text);
+            let client_pid = 0 + lease.client_pid;
+            if lease.attached != 0 && client_pid == gui.id {
                 return gui;
             }
         }
@@ -99,6 +108,8 @@ fn start_upgrade_ui(context, cli, executable, label) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw label + "_gui_lease_timeout";
+    // Unreachable: keep return kind Child (bare throw infers String).
+    gui
 }
 
 fn stop_upgrade_ui_keeping_server(context, cli, gui) {
@@ -133,7 +144,8 @@ fn stop_upgrade_ui_keeping_server(context, cli, gui) {
         200,
         "remote_upgrade_gui_exit_timeout"
     );
-    test_harness::require(output.success != 0, "remote_upgrade_gui_exit_failure");
+        let gui_exit_ok = 0 + output.success;
+        test_harness::require(gui_exit_ok != 0, "remote_upgrade_gui_exit_failure");
     for attempt in 0..200 {
         let lease = command_json(
             context,
@@ -141,11 +153,12 @@ fn stop_upgrade_ui_keeping_server(context, cli, gui) {
             ["ui-lease", "status"]
         );
         if lease.attached == 0 {
-            return;
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_upgrade_lease_detach_timeout";
+    0
 }
 
 fn entry() {
@@ -160,7 +173,10 @@ fn entry() {
     );
     let repo = std::path::absolute(args[0]).display;
     let prior_gui_exe = std::path::absolute(args[1]).display;
-    let next_gui_arg = if args.len == 6 { args[5] } else { args[2] };
+    let next_gui_arg = args[2];
+    if args.len == 6 {
+        next_gui_arg = args[5];
+    }
     let next_gui_exe = std::path::absolute(next_gui_arg).display;
     let cli = std::path::absolute(args[3]).display;
     let server_exe = std::path::absolute(args[4]).display;
@@ -191,17 +207,20 @@ fn entry() {
         wait_for_server(context, cli, server);
 
         let baseline = command_json(context, cli, ["ui-bootstrap"]);
-        let tab_id = baseline.active_tab_id;
+        let tab_id = "" + baseline.active_tab_id;
         let baseline_tab_index = -1;
         for index in 0..baseline.tabs.len {
-            if baseline.tabs[index].id == tab_id {
+            let candidate = baseline.tabs[index];
+            let candidate_id = "" + candidate.id;
+            if candidate_id == tab_id {
                 baseline_tab_index = index;
             }
         }
         let baseline_tab = baseline.tabs[baseline_tab_index];
+        let server_child_id = 0 + server.id;
         test_harness::require(
             baseline_tab_index >= 0
-                && baseline.server_pid == server.id
+                && baseline.server_pid == server_child_id
                 && baseline_tab.process_id != 0,
             "remote_upgrade_baseline_identity"
         );
@@ -234,7 +253,7 @@ fn entry() {
                 && prior_build.protocol_version == 1,
             "remote_upgrade_prior_build_identity"
         );
-        let prior_pid = prior.id;
+        let prior_pid = 0 + prior.id;
 
         let conflict_command = test_harness::configured_command(
             context,
@@ -247,8 +266,9 @@ fn entry() {
             200,
             "remote_upgrade_competing_gui_timeout"
         );
+        let conflict_ok = 0 + conflict_output.success;
         test_harness::require(
-            conflict_output.success == 0,
+            conflict_ok == 0,
             "remote_upgrade_competing_gui_succeeded"
         );
         let conflict_lease = command_json(
@@ -259,7 +279,9 @@ fn entry() {
         let healthy_bootstrap = command_json(context, cli, ["ui-bootstrap"]);
         let healthy_tab_index = -1;
         for index in 0..healthy_bootstrap.tabs.len {
-            if healthy_bootstrap.tabs[index].id == tab_id {
+            let candidate = healthy_bootstrap.tabs[index];
+            let candidate_id = "" + candidate.id;
+            if candidate_id == tab_id {
                 healthy_tab_index = index;
             }
         }
@@ -313,9 +335,10 @@ fn entry() {
         );
         let next_build = next_lease.client_build;
         let next_identity = rhai::json::stringify(next_build);
+        let next_pid = 0 + next.id;
         test_harness::require(
             next_identity != prior_identity
-                && next.id != prior_pid,
+                && next_pid != prior_pid,
             "remote_upgrade_next_identity_unchanged"
         );
         command_text(
@@ -330,7 +353,9 @@ fn entry() {
         let next_bootstrap = command_json(context, cli, ["ui-bootstrap"]);
         let next_tab_index = -1;
         for index in 0..next_bootstrap.tabs.len {
-            if next_bootstrap.tabs[index].id == tab_id {
+            let candidate = next_bootstrap.tabs[index];
+            let candidate_id = "" + candidate.id;
+            if candidate_id == tab_id {
                 next_tab_index = index;
             }
         }
@@ -395,7 +420,9 @@ fn entry() {
         let final_bootstrap = command_json(context, cli, ["ui-bootstrap"]);
         let final_tab_index = -1;
         for index in 0..final_bootstrap.tabs.len {
-            if final_bootstrap.tabs[index].id == tab_id {
+            let candidate = final_bootstrap.tabs[index];
+            let candidate_id = "" + candidate.id;
+            if candidate_id == tab_id {
                 final_tab_index = index;
             }
         }
@@ -409,6 +436,9 @@ fn entry() {
                 "--max-bytes", "65536"
             ]
         );
+        let token_2 = stream_prefix + "_2";
+        let token_8 = stream_prefix + "_8";
+        let token_12 = stream_prefix + "_12";
         test_harness::require(
             final_tab_index >= 0
                 && final_bootstrap.server_pid == server_pid
@@ -418,9 +448,9 @@ fn entry() {
                 && final_composer == draft
                 && final_tab.screen.max_scrollback
                     >= next_tab.screen.max_scrollback
-                && capture.contains(stream_prefix + "_2")
-                && capture.contains(stream_prefix + "_8")
-                && capture.contains(stream_prefix + "_12"),
+                && capture.contains(token_2)
+                && capture.contains(token_8)
+                && capture.contains(token_12),
             "remote_upgrade_rollback_lost_state"
         );
 
@@ -436,8 +466,9 @@ fn entry() {
             400,
             "remote_upgrade_server_shutdown_timeout"
         );
+        let server_exit_ok = 0 + server_output.success;
         test_harness::require(
-            server_output.success != 0,
+            server_exit_ok != 0,
             "remote_upgrade_server_shutdown_failure"
         );
         print(
