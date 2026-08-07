@@ -102,6 +102,11 @@ fn remove_obsolete(directory_value, name) {
     1
 }
 
+// Park an in-use destination as stem.locked-<n>.exe.
+// Prefer a 0..4096 try_rename counter over SystemTime.unix_millis: the millis
+// API is native (M42f3) but wall-clock stamps can collide under concurrency and
+// do not probe name availability; sequential try_rename is deterministic.
+// Returns INT 1 on success (caller stage/stage_as: 0 = direct copy, 1 = parked).
 fn park_running_destination(
     source,
     destination,
