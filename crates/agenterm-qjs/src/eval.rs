@@ -209,4 +209,50 @@ mod tests {
         .expect_err("fleet_call should throw");
         assert!(error.to_string().contains("boom"), "got: {error}");
     }
+
+    /// End-to-end proof that `scripts/qjs/lib/fleet.js` (the real L2 facade
+    /// file, not a copy) actually works against `__host.fleet_call` —
+    /// mirrors `agenterm_lua`'s `eval_fleet_module` test
+    /// (`crates/agenterm-lua/src/lib.rs`) almost exactly, including which
+    /// operations it exercises, so the two engines' fleet facades are
+    /// tested the same way, not just written to look the same.
+    #[test]
+    fn eval_fleet_module() {
+        let host = QjsHostFunctions {
+            fleet_call: Some(Arc::new(|op, params| match (op, params) {
+                ("tabs.list", "{}") => Ok(r#"[{"id":"tab1","title":"Test"}]"#.to_owned()),
+                ("ui.snapshot", "{}") => Ok(r#"{"width":1920,"height":1080}"#.to_owned()),
+                _ => Err(format!("unknown_op: {op}")),
+            })),
+            ..Default::default()
+        };
+
+        let fleet_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("scripts")
+            .join("qjs")
+            .join("lib")
+            .join("fleet.js");
+        let fleet_source = std::fs::read_to_string(&fleet_path).expect("read fleet.js");
+
+        let script = format!(
+            "{fleet_source}\n\
+             function entry() {{\n\
+               const tabs = fleet.tabs.list();\n\
+               if (!Array.isArray(tabs)) throw new Error('expected array');\n\
+               if (tabs.length !== 1) throw new Error('expected 1 tab');\n\
+               if (tabs[0].id !== 'tab1') throw new Error('expected tab1 id');\n\
+               const snap = fleet.ui.snapshot();\n\
+               if (snap.width !== 1920) throw new Error('expected width');\n\
+               return 0;\n\
+             }}"
+        );
+
+        let outcome =
+            eval_entry_with_host(&script, "fleet-module.js", &host).expect("fleet module eval");
+        assert_eq!(outcome.value, Some(json!(0)));
+    }
 }

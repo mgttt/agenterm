@@ -17,6 +17,31 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     std_table.set("json", build_json(lua)?)?;
     std_table.set("crypto", build_crypto(lua)?)?;
     lua.globals().set("std", std_table)?;
+
+    // rhai.runtime table (compatibility alias for rh's atomic_write etc.)
+    let rhai_table = lua.create_table()?;
+    let runtime_table = lua.create_table()?;
+    runtime_table.set(
+        "atomic_write",
+        lua.create_function(|_lua, (path, content): (String, String)| {
+            atomic_write(&path, &content)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("atomic_write: {e}")))
+        })?,
+    )?;
+    rhai_table.set("runtime", runtime_table)?;
+    lua.globals().set("rhai", rhai_table)?;
+
+    Ok(())
+}
+
+/// Atomic file write: write to temp file, then rename (on same filesystem).
+fn atomic_write(path: &str, content: &str) -> Result<(), std::io::Error> {
+    let path = std::path::Path::new(path);
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    std::io::Write::write_all(&mut tmp, content.as_bytes())?;
+    tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -349,6 +374,21 @@ fn build_path(lua: &Lua) -> Result<Table, mlua::Error> {
     path.set(
         "is_absolute",
         lua.create_function(|_lua, p: String| Ok(Path::new(&p).is_absolute()))?,
+    )?;
+
+    // std.path.from(parts...) → string (PathBuf::from equivalent)
+    path.set(
+        "from",
+        lua.create_function(|_lua, parts: Vec<String>| {
+            if parts.is_empty() {
+                return Ok(String::new());
+            }
+            let mut p = std::path::PathBuf::from(&parts[0]);
+            for part in &parts[1..] {
+                p.push(part);
+            }
+            Ok(p.to_string_lossy().into_owned())
+        })?,
     )?;
 
     Ok(path)
