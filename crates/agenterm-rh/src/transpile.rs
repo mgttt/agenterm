@@ -1570,9 +1570,18 @@ fn emit_stmt(
                     out.push_str(", ");
                     emit_native_string(out, separator, ctx)?;
                     out.push(')');
+                } else if let Expr::Array(items, ..) = expr {
+                    out.push_str("vec![");
+                    for (index, item) in items.iter().enumerate() {
+                        if index > 0 {
+                            out.push_str(", ");
+                        }
+                        emit_stringish(out, item, ctx)?;
+                    }
+                    out.push(']');
                 } else {
                     return Err(RhError::Transpile(
-                        "string list binding requires .split(\"…\")".into(),
+                        "string list binding requires .split(\"…\") or a string array literal".into(),
                     ));
                 }
             } else if kind == ValueKind::Set {
@@ -2184,6 +2193,14 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             if !items.is_empty()
                 && items
                     .iter()
+                    .all(|item| is_stringish_array_item(item, ctx)) =>
+        {
+            ValueKind::StringList
+        }
+        Expr::Array(items, ..)
+            if !items.is_empty()
+                && items
+                    .iter()
                     .all(|item| is_native_json_value_item(item, ctx)) =>
         {
             ValueKind::Json
@@ -2248,6 +2265,8 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
+        _ if dir_entry_path_display_binding(expr, ctx).is_some() => ValueKind::String,
+        _ if dir_entry_string_field(expr, ctx).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         Expr::FnCall(call, ..)
             if call.namespace.is_empty()
@@ -3463,6 +3482,25 @@ fn string_list_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     }
     let rhs = string_list_index_rhs(&boxed.rhs)?;
     Some((ident.1.as_str(), rhs))
+}
+
+fn is_stringish_array_item(expr: &Expr, ctx: &EmitCtx) -> bool {
+    match expr {
+        Expr::StringConstant(..) => true,
+        Expr::Variable(ident, ..) => matches!(
+            ctx.scope.get(ident.1.as_str()),
+            Some(ValueKind::String | ValueKind::Path)
+        ),
+        _ => json_value_path(expr, ctx).is_some()
+            || path_join_display_args(expr).is_some()
+            || path_parent_display_arg(expr).is_some()
+            || path_absolute_display_arg(expr).is_some()
+            || path_buf_from_display_arg(expr).is_some()
+            || string_concat_args(expr, ctx).is_some()
+            || args_index_expr(expr).is_some()
+            || std_env_get_arg(expr).is_some()
+            || dir_entry_path_display_binding(expr, ctx).is_some(),
+    }
 }
 
 fn is_native_json_value_item(expr: &Expr, ctx: &EmitCtx) -> bool {
@@ -5107,6 +5145,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(".len() as INT)");
         }
         Expr::Dot(..)
+            if var_len_name(expr).is_some_and(|name| {
+                ctx.scope.get(name).copied() == Some(ValueKind::ChildList)
+            }) =>
+        {
+            out.push('(');
+            out.push_str(var_len_name(expr).expect("checked child list binding"));
+            out.push_str(".len() as INT)");
+        }
+        Expr::Dot(..)
             if var_len_name(expr)
                 .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::Json)) =>
         {
@@ -5420,6 +5467,16 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
         }
         _ if json_array_index(expr, ctx).is_some() => {
             emit_expr(out, expr, ctx)?;
+        }
+        _ if var_len_name(expr).is_some_and(|name| {
+            ctx.scope.get(name).copied() == Some(ValueKind::ChildList)
+        }) =>
+        {
+            out.push_str("serde_json::json!(");
+            out.push('(');
+            out.push_str(var_len_name(expr).expect("checked child list binding"));
+            out.push_str(".len() as INT)");
+            out.push(')');
         }
         _ if metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
             || is_pure_int_expr(expr)
@@ -6708,6 +6765,16 @@ fn emit_json_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(),
         {
             out.push_str(ident.1.as_str());
             out.push_str(".clone()");
+            Ok(())
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::StringList) =>
+        {
+            // StringList arrays (e.g. path lists) coerce to JSON string arrays at
+            // typed local-fn boundaries.
+            out.push_str("serde_json::Value::Array(");
+            out.push_str(ident.1.as_str());
+            out.push_str(".iter().cloned().map(serde_json::Value::String).collect())");
             Ok(())
         }
         Expr::Map(..) | Expr::Array(..) => emit_json_value_expr(out, expr, ctx),
@@ -8012,10 +8079,12 @@ fn entry() { stage_copy(args[0], args[1]) }
 
     #[test]
     fn cdylib_transpile_emits_json_array_literal_from_json_locals_native() {
+        // Mixed JSON path + int keeps Json array emit. An all-string-path
+        // literal may infer StringList (harness pending-directory lists).
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
     let doc = rhai::json::parse(args[0]);
-    let pair = [doc.a, doc.b];
+    let pair = [doc.a, 42];
     pair.len
 }"#,
         )
@@ -8295,11 +8364,13 @@ fn entry() { stage_copy(args[0], args[1]) }
         assert!(
             matches!(
                 output.execution_mode,
-                CdylibExecutionMode::Native | CdylibExecutionMode::HostEval
+                CdylibExecutionMode::Native
             ),
-            "{:?}",
-            output.execution_mode
+            "{:?}\n{}",
+            output.execution_mode,
+            output.rust
         );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]

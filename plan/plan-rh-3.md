@@ -153,7 +153,7 @@
 | M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [~] |
 | M42f8e | 仓库痕迹清扫：`scripts/rhai` 引用、`agenterm-rhai` 运营串、测试 pin、AGENTS/PRD | [~] |
 
-**M42f7g / M42f8 进度（2026-08-07 tip `096fb15`+）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip `agenterm.tasks.json`（仍约 30 条 `.rhai`；`build-identity` 已回退 `.rhai` 直至 Native）。**rev 37**：bundler 将模块函数前缀为 `alias__name`，双 import 不再 `script_module_fn_conflict`。M42f7g：bundled `test_harness`/`output-fn-arg-probe` 现为 **HostEval**（rev 38；unique_he≈2：`read_dir` scrub、`owned_children.len`），尚未 Native/he=1。M42f8a–d 草稿齐。M42f8e **只读审计已落盘** [`plan/rhai-trace-m42f8e.md`](rhai-trace-m42f8e.md)（约 153 命中文件；Phase A 前必改：30 条 manifest、`release.yml` promotion-identity、若干测试 pin）；清扫本体仍待 Native+pack 后门禁。Phase A 切线门禁 = 目标叶 `execution_mode=native` 且 pack 通过。
+**M42f7g / M42f8 进度（2026-08-07 tip `096fb15`+）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip `agenterm.tasks.json`（仍约 30 条 `.rhai`；`build-identity` 已回退 `.rhai` 直至 Native）。**rev 37**：bundler 将模块函数前缀为 `alias__name`，双 import 不再 `script_module_fn_conflict`。M42f7g：bundled `test_harness`/`output-fn-arg-probe` 已达 **Native**（rev 39；he_count=1）。下一步：`harness-cleanup-selftest` 等叶在 pack 证明后 flip。M42f8a–d 草稿齐。M42f8e **只读审计已落盘** [`plan/rhai-trace-m42f8e.md`](rhai-trace-m42f8e.md)（约 153 命中文件；Phase A 前必改：30 条 manifest、`release.yml` promotion-identity、若干测试 pin）；清扫本体仍待 Native+pack 后门禁。Phase A 切线门禁 = 目标叶 `execution_mode=native` 且 pack 通过。
 
 
 **M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。
