@@ -7,7 +7,9 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = ["server.headless-authority"];
+fn catch_text(error) {
+    "" + error
+}
 
 fn command(context, cli, arguments, expected_failure) {
     test_harness::invoke_cli(
@@ -128,16 +130,23 @@ fn entry() {
         owned_children.push(server);
         let protocol = wait_for_server(context, cli, server);
         let server_facts = server.platform_facts;
+        // Coerce nested JSON string fields before compare (native string emit).
+        let ownership_mode = "" + protocol.ui_bridge.ownership_mode;
+        let server_executable = "" + protocol.ui_bridge.server_executable;
+        let replaceable_ui = protocol.ui_bridge.replaceable_ui;
+        let interactive_lease = protocol.ui_bridge.interactive_lease;
+        let reconnect = protocol.ui_bridge.reconnect;
+        let rollback_proven = protocol.ui_bridge.rollback_proven;
         test_harness::require(
             server_facts.top_level_window_supported != 0
                 && server_facts.top_level_window_present == 0
                 && protocol.pid == server.id
-                && protocol.ui_bridge.ownership_mode == "split_server_client"
-                && protocol.ui_bridge.server_executable == "agenterm.exe"
-                && protocol.ui_bridge.replaceable_ui != 0
-                && protocol.ui_bridge.interactive_lease != 0
-                && protocol.ui_bridge.reconnect != 0
-                && protocol.ui_bridge.rollback_proven != 0,
+                && ownership_mode == "split_server_client"
+                && server_executable == "agenterm.exe"
+                && replaceable_ui != 0
+                && interactive_lease != 0
+                && reconnect != 0
+                && rollback_proven != 0,
             "server_smoke_process_ownership_boundary"
         );
 
@@ -504,7 +513,7 @@ fn entry() {
         );
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            ["server.headless-authority"],
             "server.headless-authority"
         );
         command_text(context, cli, ["shutdown"]);
@@ -521,7 +530,7 @@ fn entry() {
         );
         succeeded = 1;
     } catch (error) {
-        failure = "" + error;
+        failure = catch_text(error);
     }
 
     let completion_failure = "";
@@ -533,7 +542,7 @@ fn entry() {
             failure
         );
     } catch (error) {
-        completion_failure = "" + error;
+        completion_failure = catch_text(error);
     }
     if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);

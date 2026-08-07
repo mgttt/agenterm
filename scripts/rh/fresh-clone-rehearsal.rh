@@ -97,10 +97,10 @@ fn is_powershell(process) {
 
 fn observe_descendants(root_id, owned_ids, identities) {
     let snapshot = std::process::list();
-    let included = #{};
-    included[root_id.to_string()] = 1;
+    let included = rhai::json::parse("{}");
+    included[root_id.to_string()] = true;
     for id in owned_ids.keys() {
-        included[id] = 1;
+        included[id] = true;
     }
     for depth in 0..64 {
         let changed = 0;
@@ -108,7 +108,7 @@ fn observe_descendants(root_id, owned_ids, identities) {
             let id = process.id.to_string();
             let parent = process.parent_id.to_string();
             if !included.contains(id) && included.contains(parent) {
-                included[id] = 1;
+                included[id] = true;
                 changed = 1;
             }
         }
@@ -179,7 +179,8 @@ fn joined(values) {
         if text != "" {
             text += ",";
         }
-        text += value.to_string();
+        // Prefer string coerce over `.to_string()` assign RHS (subset gate).
+        text += "" + value;
     }
     text
 }
@@ -426,7 +427,7 @@ let evidence = #{
         script_worker_observed: 0
     },
     process_observation: #{
-        root_id: (),
+        root_id: rhai::json::parse("null"),
         scan_interval_ms: 500,
         child_deadline_ms: child_deadline_ms,
         scan_count: 0,
@@ -434,21 +435,21 @@ let evidence = #{
         timeline: [],
         remaining_before_cleanup: [],
         remaining_after_cleanup: [],
-        powershell_policy: ()
+        powershell_policy: rhai::json::parse("null")
     },
     qualification: #{
         expected_gate_count: 34,
         gate_count: 0,
         all_passed: 0,
         stress_included: 0,
-        receipt_source_commit: (),
-        receipt_source_dirty: ()
+        receipt_source_commit: rhai::json::parse("null"),
+        receipt_source_dirty: rhai::json::parse("null")
     },
     packaging: #{
         ready_to_publish: 0,
-        mode: (),
-        archive_name: (),
-        archive_sha256: ()
+        mode: rhai::json::parse("null"),
+        archive_name: rhai::json::parse("null"),
+        archive_sha256: rhai::json::parse("null")
     },
     mutation_proof: #{
         local_tags_unchanged: 0,
@@ -467,8 +468,8 @@ let evidence = #{
 let failure = ();
 let child = ();
 let owned_ids = #{};
-let identities = #{};
-let unique = #{};
+let identities = rhai::json::parse("{}");
+let unique = rhai::json::parse("{}");
 try {
     checked_output(
         "git",

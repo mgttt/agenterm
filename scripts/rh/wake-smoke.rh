@@ -7,7 +7,9 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = ["fleet.wake-coalescing", "ux-parity.wake-coalescing"];
+fn catch_text(error) {
+    "" + error
+}
 
 fn command(context, cli, arguments, expected_failure) {
     test_harness::invoke_cli(
@@ -143,7 +145,8 @@ fn entry() {
         );
         command_text(context, cli, ["send-keys", "-t", tab_id, "Enter"]);
 
-        for client in clients {
+        for client_index in 0..clients.len() {
+            let client = clients[client_index];
             let output = client.wait_with_output(
                 std::time::Duration::from_secs(20)
             );
@@ -233,7 +236,7 @@ fn entry() {
 
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            ["fleet.wake-coalescing", "ux-parity.wake-coalescing"],
             "fleet.wake-coalescing"
         );
         command_text(context, cli, ["shutdown"]);
@@ -244,7 +247,7 @@ fn entry() {
         test_harness::require(server_output.success != 0, "wake_smoke_server_exit_failure");
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            ["fleet.wake-coalescing", "ux-parity.wake-coalescing"],
             "ux-parity.wake-coalescing"
         );
         print(
@@ -252,7 +255,7 @@ fn entry() {
         );
         succeeded = 1;
     } catch (error) {
-        failure = "" + error;
+        failure = catch_text(error);
     }
 
     let completion_failure = "";
@@ -264,7 +267,7 @@ fn entry() {
             failure
         );
     } catch (error) {
-        completion_failure = "" + error;
+        completion_failure = catch_text(error);
     }
     if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);
