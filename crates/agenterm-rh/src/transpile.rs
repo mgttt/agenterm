@@ -154,7 +154,11 @@ pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput,
         ),
     );
     // #endregion
-    if validate_ok {
+    // A native cdylib must have an explicit callable entry point. Top-level
+    // compatibility scripts intentionally continue through whole-script
+    // delegation below, while manifest qualification can reject that mode for
+    // `.rh` tasks.
+    if validate_ok && has_entry_fn {
         if let Ok(rust) = emit(&ast, EmitCtx::new(true)) {
             let execution_mode = if rust.matches("rh_host_eval_int(").count() > 1 {
                 CdylibExecutionMode::HostEval
