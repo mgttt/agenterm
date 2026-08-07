@@ -307,7 +307,7 @@ fn run_diagnostic_bundle_selftest() -> Output {
         .current_dir(repo)
         .args([
             "run",
-            "scripts/rhai/diagnostic-bundle-selftest.rhai",
+            "scripts/rh/diagnostic-bundle-selftest.rh",
             "--profile",
             "local",
             "--project-root",
@@ -337,7 +337,7 @@ fn run_qualification_selftest() -> Output {
         .current_dir(repo)
         .args([
             "run",
-            "scripts/rhai/qualification-selftest.rhai",
+            "scripts/rh/qualification-selftest.rh",
             "--profile",
             "local",
             "--project-root",
@@ -387,7 +387,7 @@ fn run_working_context_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/working-context-smoke.rhai"])
+        .args(["run", "scripts/rh/working-context-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -411,7 +411,7 @@ fn run_server_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/server-smoke.rhai"])
+        .args(["run", "scripts/rh/server-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -435,7 +435,7 @@ fn run_wake_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/wake-smoke.rhai"])
+        .args(["run", "scripts/rh/wake-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -459,7 +459,7 @@ fn run_startup_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/startup-smoke.rhai"])
+        .args(["run", "scripts/rh/startup-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -484,7 +484,7 @@ fn run_cli_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/cli-smoke.rhai"])
+        .args(["run", "scripts/rh/cli-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -508,7 +508,7 @@ fn run_script_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/script-smoke.rhai"])
+        .args(["run", "scripts/rh/script-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -537,7 +537,7 @@ fn run_theme_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/theme-smoke.rhai"])
+        .args(["run", "scripts/rh/theme-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -561,7 +561,7 @@ fn run_workbench_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/workbench-smoke.rhai"])
+        .args(["run", "scripts/rh/workbench-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -585,7 +585,7 @@ fn run_remote_ui_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/remote-ui-smoke.rhai"])
+        .args(["run", "scripts/rh/remote-ui-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -609,7 +609,7 @@ fn run_fleet_smoke() -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
-        .args(["run", "scripts/rhai/fleet-smoke.rhai"])
+        .args(["run", "scripts/rh/fleet-smoke.rh"])
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -740,7 +740,7 @@ fn run_failing_check_timing(report: &Path, options: &[&str]) -> Output {
     command
         .current_dir(repo)
         .arg("run")
-        .arg(repo.join("scripts/rhai/check.rhai"))
+        .arg(repo.join("scripts/rh/check.rh"))
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -2172,16 +2172,16 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
             copy_fixture_file(repo, &fixture, &format!("prd/{name}"));
         }
     }
-    copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/server-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-upgrade-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/cli-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/script-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/theme-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/workbench-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/fleet-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-smoke.rhai");
-    copy_fixture_file(repo, &fixture, "scripts/rhai/startup-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rh/working-context-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/server-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/remote-ui-upgrade-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/cli-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/script-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/theme-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/workbench-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/fleet-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/remote-ui-smoke.rh");
+    copy_fixture_file(repo, &fixture, "scripts/rh/startup-smoke.rh");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let contract_source =
         fs::read_to_string(&contract_path).expect("read fixture alignment contract");
@@ -2596,7 +2596,7 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
             "Cargo.lock",
             "rust-toolchain.toml",
             "release.cmd",
-            "scripts/rhai/release.rhai",
+            "scripts/rh/release.rh",
             "scripts/artifacts.json",
             "scripts/qualification-gates.json",
             ".github/workflows/candidate.yml",

@@ -5,7 +5,7 @@ use std::process::Command;
 #[test]
 fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let script = repo.join("scripts/rhai/fresh-clone-rehearsal.rhai");
+    let script = repo.join("scripts/rh/fresh-clone-rehearsal.rh");
     let manifest = repo.join("agenterm.tasks.json");
     let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)

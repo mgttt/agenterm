@@ -8,7 +8,7 @@ use std::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-const BUILD_TASK: &str = include_str!("../scripts/rhai/build.rhai");
+const BUILD_TASK: &str = include_str!("../scripts/rh/build.rh");
 const INCREMENTAL_WRAPPER_SOURCE: &str = include_str!("../src/incremental_wrapper.rs");
 
 fn fixture_root(name: &str) -> PathBuf {

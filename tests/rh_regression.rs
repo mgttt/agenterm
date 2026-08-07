@@ -88,7 +88,7 @@ fn check_accepts_import_via_compat() {
 
 #[test]
 fn build_rhai_transpiles_compat_delegating() {
-    let source = std::fs::read_to_string("scripts/rhai/build.rhai").expect("read");
+    let source = std::fs::read_to_string("scripts/rh/build.rh").expect("read");
     let rust = transpile_cdylib(&source).expect("transpile");
     assert!(rust.contains("compat delegating"));
     assert!(rust.contains("rh_host_run_script"));

@@ -64,7 +64,7 @@ fn generate(root: &Path, manifest: &Path, source: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
         .current_dir(repo)
         .arg("run")
-        .arg(repo.join("scripts/rhai/promotion-identity.rhai"))
+        .arg(repo.join("scripts/rh/promotion-identity.rh"))
         .args(["--project-root"])
         .arg(repo)
         .args(["--"])

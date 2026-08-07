@@ -12,7 +12,7 @@ static PERFORMANCE_EXPERIMENT: LazyLock<String> = LazyLock::new(|| {
     include_str!("../.github/workflows/performance-experiment.yml").replace("\r\n", "\n")
 });
 static CHECK: LazyLock<String> =
-    LazyLock::new(|| include_str!("../scripts/rhai/check.rhai").replace("\r\n", "\n"));
+    LazyLock::new(|| include_str!("../scripts/rh/check.rh").replace("\r\n", "\n"));
 static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
     include_str!("../scripts/rh/artifact-verification.rh").replace("\r\n", "\n")
 });

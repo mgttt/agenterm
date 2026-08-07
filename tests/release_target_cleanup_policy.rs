@@ -1,6 +1,6 @@
 const BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
 const UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
-const BUILD: &str = include_str!("../scripts/rhai/build.rhai");
+const BUILD: &str = include_str!("../scripts/rh/build.rh");
 
 #[test]
 fn release_cleanup_reclaims_both_repo_targets_after_staging() {

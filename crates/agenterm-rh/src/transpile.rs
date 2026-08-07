@@ -1409,9 +1409,18 @@ fn emit_stmt(
                     out.push_str(", ");
                     emit_native_string(out, separator, ctx)?;
                     out.push(')');
+                } else if let Expr::Array(items, ..) = expr {
+                    out.push_str("vec![");
+                    for (index, item) in items.iter().enumerate() {
+                        if index > 0 {
+                            out.push_str(", ");
+                        }
+                        emit_stringish(out, item, ctx)?;
+                    }
+                    out.push(']');
                 } else {
                     return Err(RhError::Transpile(
-                        "string list binding requires .split(\"…\")".into(),
+                        "string list binding requires .split(\"…\") or string array literal".into(),
                     ));
                 }
             } else if kind == ValueKind::Set {
@@ -1630,6 +1639,36 @@ fn emit_stmt(
                     .with_binding(counter.name.as_str(), ValueKind::Child);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
+            } else if let Expr::Array(items, ..) = &flow.expr
+                && !items.is_empty()
+                && items.iter().all(|item| is_string_for_item(item, ctx))
+            {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in [");
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    match item {
+                        Expr::Variable(ident, ..)
+                            if matches!(
+                                ctx.scope.get(ident.1.as_str()).copied(),
+                                Some(ValueKind::String | ValueKind::Path)
+                            ) =>
+                        {
+                            out.push_str(ident.1.as_str());
+                            out.push_str(".clone()");
+                        }
+                        _ => emit_stringish(out, item, ctx)?,
+                    }
+                }
+                out.push_str("].into_iter() {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::String);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
             } else if let Some(binding) = string_for_binding(&flow.expr, ctx) {
                 out.push_str("    for ");
                 out.push_str(counter.name.as_str());
@@ -1717,6 +1756,7 @@ fn emit_stmt(
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_command_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_child_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_string_list_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr)
             if ctx.cdylib
@@ -1988,6 +2028,11 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         Expr::Map(..) => ValueKind::Json,
         Expr::Array(items, ..) if items.is_empty() => ValueKind::Json,
         Expr::Array(items, ..)
+            if !items.is_empty() && items.iter().all(|item| is_string_for_item(item, ctx)) =>
+        {
+            ValueKind::StringList
+        }
+        Expr::Array(items, ..)
             if !items.is_empty()
                 && items
                     .iter()
@@ -2059,11 +2104,10 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         Expr::FnCall(call, ..)
             if call.namespace.is_empty()
                 && call.op_token.is_none()
-                && ctx.local_fns.contains(call.name.as_str()) =>
+                && is_local_fn_call(call.name.as_str(), ctx) =>
         {
-            ctx.local_fn_return_kinds
-                .get(call.name.as_str())
-                .copied()
+            resolve_local_fn_name(call.name.as_str(), ctx)
+                .and_then(|name| ctx.local_fn_return_kinds.get(name.as_str()).copied())
                 .unwrap_or(ValueKind::Int)
         }
         _ => ValueKind::Int,
@@ -2078,6 +2122,26 @@ fn string_concat_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'
         return None;
     }
     prefers_string_ops(&call.args[0], &call.args[1], ctx).then_some((&call.args[0], &call.args[1]))
+}
+
+fn is_string_for_item(expr: &Expr, ctx: &EmitCtx) -> bool {
+    matches!(expr, Expr::StringConstant(..))
+        || matches!(
+            expr,
+            Expr::Variable(ident, ..)
+                if matches!(
+                    ctx.scope.get(ident.1.as_str()).copied(),
+                    Some(ValueKind::String | ValueKind::Path)
+                )
+        )
+        || path_join_display_args(expr).is_some()
+        || path_parent_display_arg(expr).is_some()
+        || path_absolute_display_arg(expr).is_some()
+        || path_buf_from_display_arg(expr).is_some()
+        || string_concat_args(expr, ctx).is_some()
+        || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
+        || args_index_expr(expr).is_some()
+        || std_env_get_arg(expr).is_some()
 }
 
 const MAX_NATIVE_FOR_SPAN: i64 = 4096;
@@ -6737,8 +6801,12 @@ mod tests {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("pub fn add("), "{}", output.rust);
-        assert!(output.rust.contains("add(40, 2)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("pub fn helper__add("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("helper__add(40, 2)"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
