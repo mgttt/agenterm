@@ -88,9 +88,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `std::path::absolute(...).display`, inspect `symlink_metadata` file /
   symlink / reparse flags, and flatten project-relative `import` graphs into
   one native pack entirely in generated Rust. Public qualification executes
-  the generated native packs; converting `validate-artifact-manifest` itself
-  (including any remaining typed module-function parameters) remains explicit
-  migration work before its interpreted source can be archived.
+  the generated native packs. `validate-artifact-manifest` now ships as
+  native `scripts/rh/validate-artifact-manifest.rh` plus
+  `scripts/rh/lib/artifact_manifest.rh` (import-bundled, no substring or
+  task-specific host validator); remaining Rhai callers still import
+  `scripts/rhai/lib/artifact_manifest.rhai` until those tasks migrate.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
@@ -637,7 +639,7 @@ Migration ledger:
 | Locked and obsolete staged-artifact cleanup | `scripts/rhai/clean-locked-artifacts.rhai` | `scripts/clean-locked-artifacts.ps1` | `be9a538` | public `agenterm-rhai task run` black-box tests prove owned-name cleanup, unrelated-file retention, obsolete-name cleanup, and path-escape rejection | deleted; both normal stage-build callers use the named Rhai task |
 | Cargo target cleanup preparation | `scripts/rhai/prepare-target-clean.rhai` | `scripts/prepare-target-clean.ps1` | `c20acc7` | public CLI black-box tests prove Git-native exact-root binding (including Windows short/long path aliases), allowed target set, idempotent cache-tag creation, and invalid-path/tag rejection | deleted; release build calls the named Rhai task before `cargo clean` |
 | Single executable staging | `scripts/rhai/stage-artifact.rhai` | `scripts/stage-artifact.ps1` | `e087842` | public CLI black-box tests prove normal replacement, invalid-name rejection, and Windows running-image parking before replacement | deleted; shared Rhai staging orchestration reuses the same module for each manifest artifact |
-| Local executable manifest validation | `scripts/rhai/validate-artifact-manifest.rhai` | `scripts/artifact-manifest.ps1` | `e2276cc` | public CLI black-box tests prove the canonical schema and reject duplicate/invalid names, invalid subsystem/probe contracts, empty roles, and missing size budgets | deleted; build staging, metadata writing, and artifact verification invoke the named Rhai task |
+| Local executable manifest validation | `scripts/rh/validate-artifact-manifest.rh` (+ `scripts/rh/lib/artifact_manifest.rh`) | `scripts/artifact-manifest.ps1` | `e2276cc` then native `.rh` cutover | public CLI black-box tests prove the canonical schema and reject duplicate/invalid names, invalid subsystem/probe contracts, empty roles, and missing size budgets; native pack qualifies without host_eval/run_script | PowerShell deleted; task entry is native `.rh`; archived Rhai entry retained under `scripts/archive/rhai/` while sibling Rhai tasks still load the shared `.rhai` lib |
 | Source build identity freeze | `scripts/rhai/build-identity.rhai` | `scripts/build-identity.ps1` | `b082c3b` | public CLI black-box tests prove exact Git-root binding, clean/dirty truth, profile validation, batch-safe fields, and exact SHA-256 build-input identities | deleted; `build.bat` and both check lanes bootstrap the current Script Runtime before invoking the named Rhai task |
 | Staged build provenance | `scripts/rhai/write-build-metadata.rhai` plus shared artifact/metadata modules | `scripts/write-build-metadata.ps1` | current migration change | public CLI black-box tests prove frozen and live identities, executable size/hash capture, clean-source and frozen-input drift rejection; direct old/new field parity excludes only the generation timestamp | deleted; the standalone task and `stage-build.rhai` reuse the same project modules |
 | Built artifact orchestration | `scripts/rhai/stage-build.rhai` plus shared artifact/metadata modules | `scripts/stage-build.ps1` | current migration change | public CLI composition fixture proves cleanup, obsolete removal, staging, metadata and pre-mutation Git-root rejection; actual `build.bat` and direct old/new directory parity cover the six-artifact path | deleted; `build.bat` invokes one bounded Rhai task and no longer launches PowerShell |

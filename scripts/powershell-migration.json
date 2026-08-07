@@ -147,7 +147,7 @@
       "group": "deleted",
       "responsibility": "artifact manifest loading and validation",
       "replacement_task": "validate-artifact-manifest",
-      "replacement": "scripts/rhai/validate-artifact-manifest.rhai",
+      "replacement": "scripts/rh/validate-artifact-manifest.rh",
       "evidence": "public CLI black-box coverage in tests/rhai_migration.rs",
       "status": "deleted",
       "callers": [

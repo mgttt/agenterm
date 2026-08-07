@@ -1121,7 +1121,7 @@
     {
       "id": "validate-artifact-manifest",
       "description": "Validate the canonical local Windows executable manifest",
-      "entry": "scripts/rhai/validate-artifact-manifest.rhai",
+      "entry": "scripts/rh/validate-artifact-manifest.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["scripts/artifacts.json"],

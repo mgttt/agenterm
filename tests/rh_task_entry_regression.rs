@@ -18,17 +18,27 @@ fn transpile_entry(entry: &str) -> (String, agenterm_rh::CdylibTranspileOutput) 
     (source, output)
 }
 
-#[test]
-fn validate_artifact_manifest_uses_top_level_compatibility_execution() {
-    let (source, output) = transpile_entry("scripts/rhai/validate-artifact-manifest.rhai");
-    assert!(!source.contains("fn entry("));
-    assert_eq!(output.execution_mode.as_str(), "compat-delegating");
-    assert!(
-        !output
-            .rust
-            .contains("fn rh_entry_internal() -> INT {\n    0\n")
+fn transpile_project_entry(entry: &str) -> (String, agenterm_rh::CdylibTranspileOutput) {
+    let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
+        panic!("read {entry}: {error}");
+    });
+    let output = agenterm_rh::transpile_cdylib_with_project(&repo(), &source).unwrap_or_else(
+        |error| {
+            panic!("transpile {entry}: {error}");
+        },
     );
-    assert!(output.rust.contains("compat delegating"));
+    (source, output)
+}
+
+#[test]
+fn validate_artifact_manifest_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/validate-artifact-manifest.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("pub fn is_artifact_name("), "{}", output.rust);
+    assert!(output.rust.contains("pub fn validate("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
 }
 
 #[test]

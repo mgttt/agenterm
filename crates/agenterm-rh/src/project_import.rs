@@ -72,8 +72,16 @@ fn checked_module_file(root: &Path, import: &str) -> Result<PathBuf, String> {
     {
         return Err(format!("script_module_root_escape: {import}"));
     }
-    let mut candidate = root.join(import);
-    candidate.set_extension("rhai");
+    // Prefer native `.rh` modules; fall back to archived `.rhai` while callers migrate.
+    let mut rh_candidate = root.join(import);
+    rh_candidate.set_extension("rh");
+    let mut rhai_candidate = root.join(import);
+    rhai_candidate.set_extension("rhai");
+    let candidate = if rh_candidate.is_file() {
+        rh_candidate
+    } else {
+        rhai_candidate
+    };
     let canonical = fs::canonicalize(&candidate)
         .map_err(|error| format!("script_module_missing: {import}: {error}"))?;
     if !canonical.starts_with(root) {
@@ -219,6 +227,17 @@ mod tests {
                 "import \"modules/leaf\" as leaf;\nexport const middle = leaf::value;",
             ]
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn prefers_rh_modules_over_rhai() {
+        let root = fixture();
+        fs::write(root.join("modules/leaf.rhai"), "fn value() { 1 }").unwrap();
+        fs::write(root.join("modules/leaf.rh"), "fn value() { 2 }").unwrap();
+        let sources =
+            validate_project_imports(&root, "import \"modules/leaf\" as leaf;").unwrap();
+        assert_eq!(sources, ["fn value() { 2 }"]);
         fs::remove_dir_all(root).unwrap();
     }
 

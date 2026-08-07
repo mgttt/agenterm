@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M42 推进中；M42d1–d5 + 字符串形参/Json 字符串强制/print/import 缓存已就绪，validate-artifact-manifest 迁移待落地** |
+| **状态** | **M42 推进中；M42d1–d5 + M42e1 已就绪；validate-artifact-manifest 原生 `.rh` 迁移落地中** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -96,7 +96,8 @@
 | M42d4 | 原生 `std::path::absolute(...).display` 与 `std::fs::symlink_metadata` + `Metadata.is_file/is_symlink/is_reparse_point`；`path-metadata-probe.rh` fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
 | M42d5 | 项目相对 `import "…" as alias` 扁平化为单脚本，改写 `alias::fn` 为本地 INT 函数调用；`import-bundle-probe.rh` fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
 | M42e1 | Json 字符串绑定可走 `.starts_with`/`.trim`/`MapSet` key；本地 fn 按体推断 `String` 形参；原生 `print`（utility op 4）；任务编译缓存可按 `project_root` 打包 import；`string-fn-bundle.rh` 资格门 | [x] |
-| M42d | 无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [ ] |
+| M42d | 无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [x] |
+| M42e2 | `project_import` / corpus 原生门优先解析 `.rh` 模块，并对任务入口使用 `transpile_cdylib_with_project` | [x] |
 
 ---
 

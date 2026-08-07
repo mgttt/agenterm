@@ -1,0 +1,13 @@
+import "scripts/rh/lib/artifact_manifest" as artifact_manifest;
+
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: ARTIFACT_MANIFEST");
+    }
+    let count = artifact_manifest::validate(args[0]);
+    print(
+        "PASS: artifact manifest schema 2 defines " +
+        count + " validated Windows executables"
+    );
+    count
+}

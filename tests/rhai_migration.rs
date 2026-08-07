@@ -117,7 +117,7 @@ fn run_validate_artifact_manifest_fixture(path: &Path) -> Output {
         .current_dir(repo)
         .args([
             "run",
-            "scripts/rhai/validate-artifact-manifest.rhai",
+            "scripts/rh/validate-artifact-manifest.rh",
             "--project-root",
         ])
         .arg(repo)

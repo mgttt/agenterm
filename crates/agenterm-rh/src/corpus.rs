@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CdylibExecutionMode, RhError, check, transpile_cdylib_with_mode};
+use crate::{
+    CdylibExecutionMode, RhError, check_with_project_validation, transpile_cdylib_with_project,
+};
 
 pub const SCAN_FILES_MAX: usize = 256;
 pub const SCAN_TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -184,11 +186,11 @@ fn scan_relative_files_with_policy(
                 "corpus aggregate exceeds {SCAN_TOTAL_SOURCE_MAX_BYTES} bytes"
             )));
         }
-        let validation = check(&source).and_then(|()| {
+        let validation = check_with_project_validation(&source, Some(root)).and_then(|()| {
             if !require_native_rh_tasks || !relative.ends_with(".rh") {
                 return Ok(());
             }
-            let output = transpile_cdylib_with_mode(&source)?;
+            let output = transpile_cdylib_with_project(root, &source)?;
             if output.execution_mode == CdylibExecutionMode::Native {
                 Ok(())
             } else {
