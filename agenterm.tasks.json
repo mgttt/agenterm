@@ -963,10 +963,10 @@
     {
       "id": "platform-ux-parity-smoke",
       "description": "Run startup + platform-native UX parity smoke and emit cross-platform parity evidence",
-      "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
+      "entry": "scripts/rh/platform-ux-parity-smoke.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-rhai.exe", "dist/agenterm-cli.exe", "windows"],
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-rh.exe", "dist/agenterm-cli.exe", "windows"],
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
@@ -974,10 +974,10 @@
     {
       "id": "platform-ux-parity-smoke-linux",
       "description": "Run startup + embedded-linux frontend parity smoke and emit cross-platform parity evidence",
-      "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
+      "entry": "scripts/rh/platform-ux-parity-smoke.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm", "dist/agenterm-rhai", "dist/agenterm-cli", "linux"],
+      "args": [".", "dist/agenterm", "dist/agenterm-rh", "dist/agenterm-cli", "linux"],
       "dependencies": [],
       "platforms": ["linux"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
@@ -985,10 +985,10 @@
     {
       "id": "platform-ux-parity-smoke-macos",
       "description": "Run startup + embedded-macOS frontend parity smoke and emit cross-platform parity evidence",
-      "entry": "scripts/rhai/platform-ux-parity-smoke.rhai",
+      "entry": "scripts/rh/platform-ux-parity-smoke.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm", "dist/agenterm-rhai", "dist/agenterm-cli", "macos"],
+      "args": [".", "dist/agenterm", "dist/agenterm-rh", "dist/agenterm-cli", "macos"],
       "dependencies": [],
       "platforms": ["macos"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
