@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M42 通用 JSON 原生能力推进中；字符串方法/字符遍历（M42d1）已完成，artifact-manifest 迁移待续** |
+| **状态** | **M42 推进中；M42d1 字符串方法与 M42d2 动态 fail 已完成，MapSet/metadata/import 待做** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
