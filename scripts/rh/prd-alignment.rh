@@ -98,9 +98,10 @@ fn entry() {
         linked_seen[linked_name] = true;
     }
     for name in actual {
+        let actual_name = "" + name;
         require(
-            linked_seen.contains(name),
-            "prd_alignment_list_mismatch:prd_modules:missing=" + name
+            linked_seen.contains(actual_name),
+            "prd_alignment_list_mismatch:prd_modules:missing=" + actual_name
         );
     }
 
@@ -110,18 +111,16 @@ fn entry() {
     require(capabilities.len > 0, "prd_alignment_capabilities_empty");
 
     let capability_ids = #{};
-    let allowed_kinds = #{
-        architecture: true,
-        behavior: true,
-        decision: true,
-        visual: true
-    };
-    let allowed_modes = #{
-        "black-box": true,
-        "black-box-partial": true,
-        decision: true,
-        "unit-source-partial": true
-    };
+    let allowed_kinds = #{};
+    allowed_kinds["architecture"] = true;
+    allowed_kinds["behavior"] = true;
+    allowed_kinds["decision"] = true;
+    allowed_kinds["visual"] = true;
+    let allowed_modes = #{};
+    allowed_modes["black-box"] = true;
+    allowed_modes["black-box-partial"] = true;
+    allowed_modes["decision"] = true;
+    allowed_modes["unit-source-partial"] = true;
     for capability in capabilities {
         let cap_id = "" + capability.id;
         require(cap_id != "", "prd_alignment_capability_id");
@@ -134,12 +133,14 @@ fn entry() {
             "prd_alignment_capability_duplicate:" + cap_id
         );
         capability_ids[cap_id] = true;
+        let cap_kind = "" + capability.kind;
         require(
-            allowed_kinds.contains(capability.kind),
+            allowed_kinds.contains(cap_kind),
             "prd_alignment_capability_kind:" + capability.id
         );
+        let cap_evidence_mode = "" + capability.evidence_mode;
         require(
-            allowed_modes.contains(capability.evidence_mode),
+            allowed_modes.contains(cap_evidence_mode),
             "prd_alignment_evidence_mode:" + capability.id
         );
         if capability.kind == "decision" {
@@ -226,29 +227,29 @@ fn entry() {
         std::path::join(repo, "scripts/qualification-gates.json").display;
     let gate_manifest = rhai::json::parse_file(gates_path);
     let registered_evidence = #{};
-    let evidence_suites = #{
-        "cli-smoke": true,
-        "control-center-smoke": true,
-        "control-center-linux-smoke": true,
-        "control-center-macos-smoke": true,
-        "unix-frontend-linux-smoke": true,
-        "unix-frontend-macos-smoke": true,
-        "server-smoke": true,
-        "native-ipc-smoke": true,
-        "native-ipc-compat-smoke": true,
-        "remote-ui-smoke": true,
-        "remote-ui-upgrade-smoke": true,
-        "fleet-smoke": true,
-        "script-smoke": true,
-        "startup-smoke": true,
-        "theme-smoke": true,
-        "wake-smoke": true,
-        "working-context-smoke": true,
-        "workbench-smoke": true
-    };
+    let evidence_suites = #{};
+    evidence_suites["cli-smoke"] = true;
+    evidence_suites["control-center-smoke"] = true;
+    evidence_suites["control-center-linux-smoke"] = true;
+    evidence_suites["control-center-macos-smoke"] = true;
+    evidence_suites["unix-frontend-linux-smoke"] = true;
+    evidence_suites["unix-frontend-macos-smoke"] = true;
+    evidence_suites["server-smoke"] = true;
+    evidence_suites["native-ipc-smoke"] = true;
+    evidence_suites["native-ipc-compat-smoke"] = true;
+    evidence_suites["remote-ui-smoke"] = true;
+    evidence_suites["remote-ui-upgrade-smoke"] = true;
+    evidence_suites["fleet-smoke"] = true;
+    evidence_suites["script-smoke"] = true;
+    evidence_suites["startup-smoke"] = true;
+    evidence_suites["theme-smoke"] = true;
+    evidence_suites["wake-smoke"] = true;
+    evidence_suites["working-context-smoke"] = true;
+    evidence_suites["workbench-smoke"] = true;
     let evidence_gates = [];
     for gate in gate_manifest.required_gates {
-        if evidence_suites.contains(gate.id) {
+        let gate_id = "" + gate.id;
+        if evidence_suites.contains(gate_id) {
             evidence_gates.push(gate);
         }
     }
@@ -260,8 +261,9 @@ fn entry() {
         "prd_alignment_host_native_schema"
     );
     for gate in host_native_manifest.gates {
+        let host_gate_id = "" + gate.id;
         require(
-            evidence_suites.contains(gate.id)
+            evidence_suites.contains(host_gate_id)
                 && (gate.platform == "linux" || gate.platform == "macos"),
             "prd_alignment_host_native_gate:" + gate.id
         );
@@ -338,10 +340,11 @@ fn entry() {
             ":actual=" + registered_evidence.keys().len
     );
     for evidence_id in expected_evidence_map.keys() {
+        let expected_key = "" + evidence_id;
         require(
-            registered_evidence.contains(evidence_id),
+            registered_evidence.contains(expected_key),
             "prd_alignment_list_mismatch:capability_evidence:missing=" +
-                evidence_id
+                expected_key
         );
     }
 
@@ -480,9 +483,10 @@ fn entry() {
         );
     }
     for root_name in contract.planned_command_roots {
+        let planned_root = "" + root_name;
         require(
-            public_names.contains(root_name) == 0,
-            "prd_alignment_planned_command_public:" + root_name
+            public_names.contains(planned_root) == 0,
+            "prd_alignment_planned_command_public:" + planned_root
         );
     }
 
@@ -633,13 +637,14 @@ fn entry() {
             }
         }
     }
+    let protocol_features = protocol.features;
+    // protocol-info `features` is a JSON object (not an array); compare key counts.
     require(
-        protocol_capabilities.keys().len == protocol.features.len,
+        protocol_capabilities.keys().len == protocol_features.keys().len,
         "prd_alignment_list_count:protocol_features:expected=" +
             protocol_capabilities.keys().len +
-            ":actual=" + protocol.features.len
+            ":actual=" + protocol_features.keys().len
     );
-    let protocol_features = protocol.features;
     let protocol_features_text = rhai::json::stringify_pretty(protocol_features);
     for feature in protocol_capabilities.keys() {
         let feature_key = "" + feature;
@@ -652,21 +657,24 @@ fn entry() {
         );
     }
     for extension in protocol.extensions {
+        let ext_name = "" + extension;
         require(
-            public_names.contains(extension),
-            "prd_alignment_extension_missing:" + extension
+            public_names.contains(ext_name),
+            "prd_alignment_extension_missing:" + ext_name
         );
     }
     for command in protocol.compatibility.tmux_rmux {
+        let tmux_cmd = "" + command;
         require(
-            public_names.contains(command),
-            "prd_alignment_compatibility_missing:" + command
+            public_names.contains(tmux_cmd),
+            "prd_alignment_compatibility_missing:" + tmux_cmd
         );
     }
     for command in protocol.compatibility.partial {
+        let partial_cmd = "" + command;
         require(
-            public_names.contains(command),
-            "prd_alignment_compatibility_missing:" + command
+            public_names.contains(partial_cmd),
+            "prd_alignment_compatibility_missing:" + partial_cmd
         );
     }
 
@@ -797,11 +805,12 @@ fn entry() {
         let walk = 0;
         for actual_json in supported_mux {
             if walk == supported_pos {
+                let actual_mux = "" + actual_json;
                 require(
-                    expected_item == ("" + actual_json),
+                    expected_item == actual_mux,
                     "prd_alignment_list_mismatch:mux_supported:index=" +
                         supported_pos + ":expected=" + expected_item +
-                        ":actual=" + ("" + actual_json)
+                        ":actual=" + actual_mux
                 );
             }
             walk += 1;
@@ -823,11 +832,12 @@ fn entry() {
         let walk = 0;
         for actual_json in unsupported_mux {
             if walk == unsupported_pos {
+                let actual_mux = "" + actual_json;
                 require(
-                    expected_item == ("" + actual_json),
+                    expected_item == actual_mux,
                     "prd_alignment_list_mismatch:mux_unsupported:index=" +
                         unsupported_pos + ":expected=" + expected_item +
-                        ":actual=" + ("" + actual_json)
+                        ":actual=" + actual_mux
                 );
             }
             walk += 1;
@@ -835,10 +845,11 @@ fn entry() {
         unsupported_pos += 1;
     }
     for name in supported_mux {
+        let mux_name = "" + name;
         let mention_found = 0;
         let root_document = std::fs::read_to_string(prd_path);
         root_document.to_lower();
-        if root_document.contains(name) != 0 {
+        if root_document.contains(mux_name) != 0 {
             mention_found = 1;
         }
         for linked_name in linked {
@@ -850,21 +861,22 @@ fn entry() {
                 ).display;
                 let detail_document = std::fs::read_to_string(detail_path);
                 detail_document.to_lower();
-                if detail_document.contains(name) != 0 {
+                if detail_document.contains(mux_name) != 0 {
                     mention_found = 1;
                 }
             }
         }
         require(
             mention_found == 1,
-            "prd_alignment_mux_command_missing:" + name
+            "prd_alignment_mux_command_missing:" + mux_name
         );
     }
     for name in unsupported_mux {
+        let mux_name = "" + name;
         let mention_found = 0;
         let root_document = std::fs::read_to_string(prd_path);
         root_document.to_lower();
-        if root_document.contains(name) != 0 {
+        if root_document.contains(mux_name) != 0 {
             mention_found = 1;
         }
         for linked_name in linked {
@@ -876,14 +888,14 @@ fn entry() {
                 ).display;
                 let detail_document = std::fs::read_to_string(detail_path);
                 detail_document.to_lower();
-                if detail_document.contains(name) != 0 {
+                if detail_document.contains(mux_name) != 0 {
                     mention_found = 1;
                 }
             }
         }
         require(
             mention_found == 1,
-            "prd_alignment_mux_command_missing:" + name
+            "prd_alignment_mux_command_missing:" + mux_name
         );
     }
 
@@ -892,7 +904,7 @@ fn entry() {
     print(
         "PASS: PRD aligns with " + catalog_count +
         " catalog entries, " + public_names.keys().len + " public names, " +
-        protocol.features.len + " protocol features, " + mux_line_count +
+        protocol_features.keys().len + " protocol features, " + mux_line_count +
         " mux commands, " + capability_ids.keys().len + " capability IDs, and " +
         registered_evidence.keys().len + " executable evidence IDs"
     );

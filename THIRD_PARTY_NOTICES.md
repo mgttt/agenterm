@@ -28,7 +28,7 @@ Copyright and license terms remain with their respective authors.
 | `x11rb` | MIT OR Apache-2.0 |
 
 The corresponding sources and complete license files are available from each
-package's entry in the Cargo registry. `scripts/rhai/supply-chain.rhai` uses
+package's entry in the Cargo registry. `scripts/rh/supply-chain.rh` uses
 `cargo metadata --locked` as the authoritative inventory, requires this table
 to cover every direct dependency, rejects unreviewed license expressions, and
 records every resolved transitive package in the SPDX inventory.

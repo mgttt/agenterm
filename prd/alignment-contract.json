@@ -345,7 +345,7 @@
       "kind": "architecture",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "ordinary `agenterm.exe` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence",
+      "prd": "ordinary `agenterm.exe` starts or connects to the independent headless authority, acquires an interactive lease (concurrent GUIs allowed) with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence",
       "evidence_ids": ["ui.replaceable-client"]
     },
     {
@@ -543,7 +543,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`agenterm-rhai.exe` is the public `run`, `eval`, `repl`, `check`,",
+      "prd": "one-shot `run`, `eval`, `check`, `api`, and task invocations still own",
       "evidence_ids": ["script.direct-entry"]
     },
     {
@@ -559,7 +559,7 @@
       "kind": "decision",
       "status": "accepted",
       "evidence_mode": "decision",
-      "prd": "design choice: Rust (`.rs`) implements the host",
+      "prd": "Design choice: Rust (`.rs`) implements the host",
       "evidence_ids": []
     },
     {

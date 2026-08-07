@@ -15,7 +15,7 @@
       "group": "deleted",
       "responsibility": "quality gate orchestration",
       "replacement_task": "check",
-      "replacement": "check.cmd plus scripts/rhai/check.rhai and scripts/rhai/artifact-verification.rhai",
+      "replacement": "check.cmd plus scripts/rhai/check.rhai and scripts/rh/artifact-verification.rh",
       "evidence": "check.cmd --quick and --skip-smoke pass through the public Script task; the Rhai orchestrator owns ordered gates, build identity, artifact verification, declaration discovery, smoke dispatch, timing, diagnostics, and qualification receipt production without invoking PowerShell",
       "status": "deleted",
       "callers": [
@@ -61,7 +61,7 @@
       "group": "deleted",
       "responsibility": "repository static lint",
       "replacement_task": "lint",
-      "replacement": "scripts/rhai/lint.rhai plus the thin lint.cmd Script Runtime bootstrap",
+      "replacement": "scripts/rh/lint.rh plus the thin lint.cmd Script Runtime bootstrap",
       "evidence": "public lint task and wrapper pass static JSON/strict-UTF8/NUL/conflict-marker checks, production Rhai checks, malformed-input self-test, and Rust rustfmt/Clippy mode without invoking PowerShell",
       "status": "deleted",
       "callers": [
@@ -102,7 +102,7 @@
       "group": "deleted",
       "responsibility": "approved release coordination",
       "replacement_task": "release",
-      "replacement": "release.cmd plus scripts/rhai/release.rhai and scripts/rhai/lib/package_qualified.rhai",
+      "replacement": "release.cmd plus scripts/rhai/release.rhai and scripts/rh/lib/package_qualified.rh",
       "evidence": "the named release task requires clean main, rejects the internal version and existing tag, runs the complete stress-inclusive check, creates a byte-qualified package and durable rehearsal report, performs no mutation in rehearse mode, and only publish mode creates an annotated tag plus atomic main/tag push with local-tag rollback on failure",
       "status": "deleted",
       "callers": [
@@ -263,7 +263,7 @@
       "group": "deleted",
       "responsibility": "qualified package boundary self-test",
       "replacement_task": "package-qualified-selftest",
-      "replacement": "scripts/rhai/package-qualified-selftest.rhai plus scripts/rhai/lib/package_qualified.rhai",
+      "replacement": "scripts/rh/package-qualified-selftest.rh plus scripts/rh/lib/package_qualified.rh",
       "evidence": "old and named Rhai self-tests both pass; Rust public integration proves exact ZIP members and rejects Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with owned fixture cleanup",
       "status": "deleted",
       "callers": [
@@ -300,7 +300,7 @@
       "group": "deleted",
       "responsibility": "qualified byte packaging",
       "replacement_task": "package-qualified",
-      "replacement": "scripts/rhai/package-qualified.rhai plus scripts/rhai/lib/package_qualified.rhai",
+      "replacement": "scripts/rh/package-qualified.rh plus scripts/rh/lib/package_qualified.rh",
       "evidence": "named task validates exact receipt, source, manifests, SBOM, metadata, executable hashes, gate set and static payload before staging a Windows ZIP through tar.exe without build, tag, push, or release actions",
       "status": "deleted",
       "callers": [
@@ -341,7 +341,7 @@
       "group": "deleted",
       "responsibility": "preflight latency benchmark",
       "replacement_task": "preflight-benchmark",
-      "replacement": "scripts/rhai/preflight-benchmark.rhai",
+      "replacement": "scripts/rh/preflight-benchmark.rh",
       "evidence": "public worker black-box benchmark against a clean Git clone proves five passing runs, p95 target enforcement, durable report and scratch cleanup",
       "status": "deleted",
       "callers": [
@@ -417,7 +417,7 @@
       "group": "deleted",
       "responsibility": "read-only repository preflight",
       "replacement_task": "preflight",
-      "replacement": "scripts/rhai/preflight.rhai",
+      "replacement": "scripts/rh/preflight.rh",
       "evidence": "public task fixture, typed path-parent coverage, credential redaction, output-parent creation and check/release caller cutover",
       "status": "deleted",
       "callers": [
@@ -719,7 +719,7 @@
       "group": "deleted",
       "responsibility": "license and SBOM production",
       "replacement_task": "supply-chain",
-      "replacement": "scripts/rhai/supply-chain.rhai",
+      "replacement": "scripts/rh/supply-chain.rh",
       "evidence": "public task covers the entire resolved Cargo.lock graph, reviewed licenses, notice alignment, deterministic ordering, SPDX structure and scratch cleanup; old/new semantic parity differs only in stable ordinal ordering and producer identity",
       "status": "deleted",
       "callers": [
@@ -1071,7 +1071,7 @@
       "group": "deleted",
       "responsibility": "PRD and catalog alignment",
       "replacement_task": "prd-alignment",
-      "replacement": "scripts/rhai/prd-alignment.rhai",
+      "replacement": "scripts/rh/prd-alignment.rh",
       "evidence": "public task matches the exact legacy PASS summary against live CLI, protocol, Mux, PRD and evidence catalogs, and rejects a malformed contract schema in an isolated fixture",
       "status": "deleted",
       "callers": [
@@ -1627,7 +1627,7 @@
       "group": "deleted",
       "responsibility": "Cargo target inventory",
       "replacement_task": "target-report",
-      "replacement": "scripts/rhai/target-report.rhai",
+      "replacement": "scripts/rh/target-report.rh",
       "evidence": "b9d1906 plus 2026-07-29 parity reconfirmation",
       "status": "deleted",
       "callers": [
@@ -1665,7 +1665,7 @@
       "group": "deleted",
       "responsibility": "internal-only version publication policy",
       "replacement_task": "internal-version-policy",
-      "replacement": "scripts/rhai/internal-version-policy.rhai",
+      "replacement": "scripts/rh/internal-version-policy.rh",
       "evidence": "b0010f5 plus 2026-07-29 parity reconfirmation",
       "status": "deleted",
       "callers": [

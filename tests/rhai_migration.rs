@@ -266,10 +266,10 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
 fn run_prd_alignment(repo_under_test: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .arg("run")
-        .arg(repo.join("scripts/rhai/prd-alignment.rhai"))
+        .arg(repo.join("scripts/rh/prd-alignment.rh"))
         .args(["--profile", "local", "--project-root"])
         .arg(repo)
         .args([
@@ -282,7 +282,7 @@ fn run_prd_alignment(repo_under_test: &Path) -> Output {
         .arg(repo_under_test)
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
         .output()
-        .expect("run Rhai PRD-alignment task")
+        .expect("run rh PRD-alignment task")
 }
 
 #[cfg(windows)]

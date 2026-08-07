@@ -1032,7 +1032,7 @@ fn assert_runtime_and_framing(
             "script", "run",
             std::path::join(
                 repo,
-                "scripts/rhai/target-report.rhai"
+                "scripts/rh/target-report.rh"
             ).display,
             "--profile", "local",
             "--timeout-ms", "10000",
