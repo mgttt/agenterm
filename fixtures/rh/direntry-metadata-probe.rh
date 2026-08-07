@@ -1,0 +1,20 @@
+fn entry() {
+    let total_bytes = 0;
+    let oldest_millis = 0;
+    let oldest_text = "";
+    for entry in std::fs::read_dir(args[0]) {
+        if !entry.is_file {
+            continue;
+        }
+        let metadata = entry.metadata;
+        let modified = metadata.modified;
+        let modified_millis = modified.unix_millis;
+        let bytes = metadata.len;
+        total_bytes += bytes;
+        if total_bytes == bytes || modified_millis < oldest_millis {
+            oldest_millis = modified_millis;
+            oldest_text = modified.rfc3339;
+        }
+    }
+    total_bytes + oldest_millis
+}

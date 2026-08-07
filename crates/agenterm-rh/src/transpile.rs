@@ -2368,6 +2368,9 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || json_stringify_pretty_arg(expr).is_some()
         || string_list_index(expr, ctx).is_some()
         || std_time_system_time_now_rfc3339(expr)
+        || system_time_rfc3339_binding(expr, ctx).is_some()
+        || fs_metadata_modified_rfc3339(expr).is_some()
+        || dir_entry_metadata_modified_rfc3339(expr, ctx).is_some()
         || matches!(
             expr,
             Expr::Variable(ident, ..)
