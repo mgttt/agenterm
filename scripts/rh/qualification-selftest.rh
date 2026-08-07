@@ -47,9 +47,12 @@ fn remove_owned_scratch(root, path) {
     0
 }
 
-fn evidence_lines(gate) {
+fn evidence_lines(evidence) {
+    // Take the evidence array path directly so the call site can pass
+    // `gate.evidence` (JSON path) even when the loop binding's Json kind is
+    // not yet visible at the typed local-fn boundary.
     let output = [];
-    for id in gate.evidence {
+    for id in evidence {
         output.push("EVIDENCE " + "" + id);
     }
     output
@@ -149,7 +152,7 @@ fn entry() {
                 gate_id,
                 status,
                 0,
-                evidence_lines(gate)
+                evidence_lines(gate.evidence)
             );
         }
         expect_rejection(
@@ -171,7 +174,7 @@ fn entry() {
             gate_id,
             "passed",
             0,
-            evidence_lines(gate)
+            evidence_lines(gate.evidence)
         );
     }
     expect_rejection(

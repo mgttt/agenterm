@@ -6825,31 +6825,32 @@ fn emit_owned_string_element(
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
     match expr {
-        Expr::StringConstant(value, ..) => {
-            out.push_str("String::from(");
-            out.push_str(&format!("{value:?}"));
-            out.push(')');
-            Ok(true)
-        }
         Expr::Variable(ident, ..)
             if matches!(
                 ctx.scope.get(ident.1.as_str()).copied(),
                 Some(ValueKind::String | ValueKind::Path)
             ) =>
         {
+            // Clone so later uses of the binding remain valid (argv + options).
             out.push_str(ident.1.as_str());
             out.push_str(".clone()");
             Ok(true)
         }
         _ => {
-            let mut borrowed = String::new();
-            if !emit_native_string(&mut borrowed, expr, ctx)? {
-                return Ok(false);
+            // format!/String::from/path joins and `"" + json.field` already produce owned String.
+            match emit_stringish(out, expr, ctx) {
+                Ok(()) => Ok(true),
+                Err(_) => {
+                    let mut borrowed = String::new();
+                    if !emit_native_string(&mut borrowed, expr, ctx)? {
+                        return Ok(false);
+                    }
+                    out.push_str("String::from(");
+                    out.push_str(&borrowed);
+                    out.push(')');
+                    Ok(true)
+                }
             }
-            out.push_str("String::from(");
-            out.push_str(&borrowed);
-            out.push(')');
-            Ok(true)
         }
     }
 }
@@ -7970,6 +7971,45 @@ fn emit_json_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(),
             out.push_str("serde_json::Value::Array(");
             out.push_str(ident.1.as_str());
             out.push_str(".iter().cloned().map(serde_json::Value::String).collect())");
+            Ok(())
+        }
+        Expr::FnCall(call, ..)
+            if call.op_token.is_none()
+                && call.namespace.is_empty()
+                && is_local_fn_call(call.name.as_str(), ctx)
+                && matches!(
+                    ctx.local_fn_return_kinds
+                        .get(
+                            resolve_local_fn_name(call.name.as_str(), ctx)
+                                .expect("checked local fn")
+                                .as_str(),
+                        )
+                        .copied(),
+                    Some(ValueKind::Json)
+                ) =>
+        {
+            // `add_result(..., evidence_lines(gate.evidence))` — Json-returning
+            // local calls are valid JSON arguments.
+            emit_call(out, call, ctx)
+        }
+        Expr::FnCall(call, ..)
+            if call.op_token.is_none()
+                && call.namespace.is_empty()
+                && is_local_fn_call(call.name.as_str(), ctx)
+                && matches!(
+                    ctx.local_fn_return_kinds
+                        .get(
+                            resolve_local_fn_name(call.name.as_str(), ctx)
+                                .expect("checked local fn")
+                                .as_str(),
+                        )
+                        .copied(),
+                    Some(ValueKind::StringList)
+                ) =>
+        {
+            out.push_str("serde_json::Value::Array((");
+            emit_call(out, call, ctx)?;
+            out.push_str(").into_iter().map(serde_json::Value::String).collect())");
             Ok(())
         }
         Expr::Map(..) | Expr::Array(..) => emit_json_value_expr(out, expr, ctx),
@@ -9877,6 +9917,42 @@ fn entry() { stage_copy(args[0], args[1]) }
             output
                 .rust
                 .contains("rh_json_int_path(&context, &[\"process_observation\", \"owned_commands\"]) + "),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_local_fn_json_return_as_json_arg_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn evidence_lines(evidence) {
+    let output = [];
+    for id in evidence {
+        output.push("EVIDENCE " + "" + id);
+    }
+    output
+}
+fn add_result(context, lines) {
+    context.lines = lines;
+    context
+}
+fn entry() {
+    let context = rhai::json::parse("{\"lines\":[]}");
+    let gate = rhai::json::parse("{\"evidence\":[\"a\"]}");
+    context = add_result(context, evidence_lines(gate.evidence));
+    context.lines.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("evidence_lines(") || output.rust.contains("fn evidence_lines"),
             "{}",
             output.rust
         );
