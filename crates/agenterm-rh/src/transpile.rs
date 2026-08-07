@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 
 use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
@@ -138,13 +139,42 @@ pub fn transpile_cdylib(source: &str) -> Result<String, RhError> {
 
 pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput, RhError> {
     let ast = parse(source)?;
-    if validate_ast(&ast).is_ok() {
+    let has_entry_fn = ast_has_entry_fn(&ast);
+    let validate_ok = validate_ast(&ast).is_ok();
+    // #region agent log
+    debug_transpile_log(
+        "A",
+        "transpile.rs:transpile_cdylib_with_mode",
+        "parsed cdylib source",
+        &format!(
+            "{{\"has_entry_fn\":{},\"validate_ast_ok\":{},\"source_bytes\":{}}}",
+            has_entry_fn,
+            validate_ok,
+            source.len()
+        ),
+    );
+    // #endregion
+    if validate_ok {
         if let Ok(rust) = emit(&ast, EmitCtx::new(true)) {
             let execution_mode = if rust.matches("rh_host_eval_int(").count() > 1 {
                 CdylibExecutionMode::HostEval
             } else {
                 CdylibExecutionMode::Native
             };
+            let noop_stub = cdylib_rust_is_noop_entry_stub(&rust);
+            // #region agent log
+            debug_transpile_log(
+                if noop_stub { "B" } else { "C" },
+                "transpile.rs:transpile_cdylib_with_mode",
+                "emit succeeded for cdylib",
+                &format!(
+                    "{{\"has_entry_fn\":{},\"execution_mode\":\"{}\",\"noop_entry_stub\":{}}}",
+                    has_entry_fn,
+                    execution_mode.as_str(),
+                    noop_stub
+                ),
+            );
+            // #endregion
             return Ok(CdylibTranspileOutput {
                 rust,
                 execution_mode,
@@ -152,10 +182,47 @@ pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput,
         }
     }
     compat_validate(source, &ast)?;
+    // #region agent log
+    debug_transpile_log(
+        "D",
+        "transpile.rs:transpile_cdylib_with_mode",
+        "falling back to compat delegating",
+        &format!(
+            "{{\"has_entry_fn\":{},\"validate_ast_ok\":{}}}",
+            has_entry_fn, validate_ok
+        ),
+    );
+    // #endregion
     Ok(CdylibTranspileOutput {
         rust: emit_compat_delegating(source)?,
         execution_mode: CdylibExecutionMode::CompatDelegating,
     })
+}
+
+fn ast_has_entry_fn(ast: &AST) -> bool {
+    ast.iter_functions().any(|meta| meta.name == "entry")
+}
+
+fn cdylib_rust_is_noop_entry_stub(rust: &str) -> bool {
+    rust.contains("fn rh_entry_internal() -> INT {\n    0\n")
+}
+
+fn debug_transpile_log(hypothesis_id: &str, location: &str, message: &str, data_json: &str) {
+    if std::env::var_os("AGENTERM_RH_TRANSPILE_DEBUG").is_none() {
+        return;
+    }
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let line = format!(
+        "{{\"sessionId\":\"rh-noop-audit\",\"hypothesisId\":\"{hypothesis_id}\",\"location\":\"{location}\",\"message\":\"{message}\",\"data\":{data_json},\"timestamp\":{timestamp}}}\n"
+    );
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/opt/cursor/logs/debug.log")
+        .and_then(|mut file| file.write_all(line.as_bytes()));
 }
 
 fn emit_compat_delegating(source: &str) -> Result<String, RhError> {
@@ -227,6 +294,14 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
         if has_entry {
             out.push_str("    entry()\n");
         } else {
+            // #region agent log
+            debug_transpile_log(
+                "B",
+                "transpile.rs:emit",
+                "cdylib emit without fn entry() uses literal zero stub",
+                &format!("{{\"has_entry_fn\":false,\"wrote_fn\":{wrote_fn}}}"),
+            );
+            // #endregion
             out.push_str("    0\n");
         }
         out.push_str("}\n\n");
