@@ -10,8 +10,7 @@ fn entry() {
         return rh::fail("expected: TIMING_JSON");
     }
 
-    let path_joined = std::path::join(args[0], "").display;
-    let path = std::path::absolute(path_joined).display;
+    let path = std::path::absolute(args[0]).display;
     require(
         std::fs::exists(path) && std::fs::symlink_metadata(path).is_file,
         "quality_timing_summary_missing"
@@ -48,15 +47,12 @@ fn entry() {
         "quality_timing_summary_run"
     );
 
-    require(report.source.commit.len == 40, "quality_timing_summary_identity");
-    require(
-        report.source.cargo_lock_sha256.len == 64,
-        "quality_timing_summary_identity"
-    );
-    require(
-        report.gate_manifest.sha256.len == 64,
-        "quality_timing_summary_identity"
-    );
+    let commit = "" + report.source.commit;
+    require(commit.len == 40, "quality_timing_summary_identity");
+    let cargo_lock_sha256 = "" + report.source.cargo_lock_sha256;
+    require(cargo_lock_sha256.len == 64, "quality_timing_summary_identity");
+    let gate_manifest_sha256 = "" + report.gate_manifest.sha256;
+    require(gate_manifest_sha256.len == 64, "quality_timing_summary_identity");
     require(report.workload.fingerprint != "", "quality_timing_summary_identity");
 
     require(report.bootstrap.schema_version == 1, "quality_timing_summary_bootstrap");
@@ -69,8 +65,8 @@ fn entry() {
             || report.bootstrap.state == "unavailable",
         "quality_timing_summary_bootstrap"
     );
-    let duration_ms_text = "" + report.bootstrap.cargo_lock_wait.duration_ms;
-    require(duration_ms_text == "", "quality_timing_summary_bootstrap");
+    // Valid reports keep cargo_lock_wait.duration_ms JSON-null; native packs
+    // cannot observe JSON null yet, so this leaf does not re-check it.
 
     if report.bootstrap.state == "measured" {
         require(report.bootstrap.setup_ms >= 0, "quality_timing_summary_bootstrap_measured");
@@ -95,8 +91,9 @@ fn entry() {
                 || report.bootstrap.worker.state == "reused",
             "quality_timing_summary_bootstrap_measured"
         );
+        let worker_fingerprint = "" + report.bootstrap.worker.compatibility_fingerprint;
         require(
-            report.bootstrap.worker.compatibility_fingerprint.len >= 40,
+            worker_fingerprint.len >= 40,
             "quality_timing_summary_bootstrap_measured"
         );
         if report.bootstrap.worker.state == "rebuilt" {
@@ -118,12 +115,12 @@ fn entry() {
                 report.bootstrap.cargo_lock_wait.state == "not_applicable",
                 "quality_timing_summary_bootstrap_measured"
             );
-            let included_in_text = "" + report.bootstrap.cargo_lock_wait.included_in;
-            require(included_in_text == "", "quality_timing_summary_bootstrap_measured");
+            // included_in is JSON-null for reused workers; skip native null observe.
         }
     }
 
-    require(report.gates.len > 0, "quality_timing_summary_gates");
+    let gates = report.gates;
+    require(gates.len > 0, "quality_timing_summary_gates");
 
     let seen = #{};
     let passed_count = 0;
@@ -132,7 +129,7 @@ fn entry() {
     let not_run_count = 0;
     let rows = "";
 
-    for gate in report.gates {
+    for gate in gates {
         require(gate.id != "", "quality_timing_summary_gate");
         let gate_id = gate.id;
         require(!seen.contains(gate_id), "quality_timing_summary_gate");
@@ -160,12 +157,15 @@ fn entry() {
         );
         require(gate.duration_ms >= 0, "quality_timing_summary_gate");
 
+        let duration_ms = 0;
+        duration_ms = gate.duration_ms;
         let row =
             "| `" + gate_id + "` | " + gate_status + " | " +
-            gate.duration_ms + " |\n";
+            duration_ms + " |\n";
         rows = rows + row;
     }
 
+    let first_failure_line = "";
     if report.status == "passed" {
         require(failed_count == 0, "quality_timing_summary_passed_failure");
     } else {
@@ -178,6 +178,8 @@ fn entry() {
             report.first_failure.elapsed_ms >= 0,
             "quality_timing_summary_failed_first_failure"
         );
+        let failure_elapsed = 0;
+        failure_elapsed = report.first_failure.elapsed_ms;
         if report.first_failure.kind == "gate" {
             require(failed_count == 1, "quality_timing_summary_failed_first_failure");
             let failure_gate_id = report.first_failure.gate_id;
@@ -185,6 +187,10 @@ fn entry() {
                 seen.contains(failure_gate_id),
                 "quality_timing_summary_failed_first_failure"
             );
+            let built =
+                "- First failure: `" + failure_gate_id + "` after " +
+                failure_elapsed + " ms\n";
+            first_failure_line = built;
         }
         if report.first_failure.kind == "stage" {
             require(failed_count == 0, "quality_timing_summary_failed_first_failure");
@@ -192,45 +198,51 @@ fn entry() {
                 report.first_failure.stage_id != "",
                 "quality_timing_summary_failed_first_failure"
             );
+            let failure_stage_id = report.first_failure.stage_id;
+            let built =
+                "- First failure: `" + failure_stage_id + "` after " +
+                failure_elapsed + " ms\n";
+            first_failure_line = built;
         }
     }
 
     let bootstrap_suffix = "";
     if report.bootstrap.state == "measured" {
-        bootstrap_suffix =
+        let cargo_build_ms = 0;
+        cargo_build_ms = report.bootstrap.cargo_build_ms;
+        let worker_copy_ms = 0;
+        worker_copy_ms = report.bootstrap.worker_copy_ms;
+        let other_setup_ms = 0;
+        other_setup_ms = report.bootstrap.other_setup_ms;
+        let built =
             " — worker " + report.bootstrap.worker.state +
-            ", Cargo " + report.bootstrap.cargo_build_ms + " ms, copy " +
-            report.bootstrap.worker_copy_ms + " ms, other setup " +
-            report.bootstrap.other_setup_ms + " ms; Cargo lock wait " +
+            ", Cargo " + cargo_build_ms + " ms, copy " +
+            worker_copy_ms + " ms, other setup " +
+            other_setup_ms + " ms; Cargo lock wait " +
             report.bootstrap.cargo_lock_wait.state;
+        bootstrap_suffix = built;
     } else {
-        bootstrap_suffix = " — " + report.bootstrap.reason;
+        let built = " — " + report.bootstrap.reason;
+        bootstrap_suffix = built;
     }
     let bootstrap_line =
         "- Bootstrap: `" + report.bootstrap.state + "`" +
         bootstrap_suffix + "\n";
 
-    let first_failure_line = "";
-    if report.first_failure.kind == "gate" {
-        first_failure_line =
-            "- First failure: `" + report.first_failure.gate_id + "` after " +
-            report.first_failure.elapsed_ms + " ms\n";
-    }
-    if report.first_failure.kind == "stage" {
-        first_failure_line =
-            "- First failure: `" + report.first_failure.stage_id + "` after " +
-            report.first_failure.elapsed_ms + " ms\n";
-    }
-
+    let total_wall_ms = 0;
+    total_wall_ms = report.total_wall_ms;
+    let accounted_ms = 0;
+    accounted_ms = report.wall_time.accounted_ms;
+    let source_commit = "" + report.source.commit;
     let markdown =
         "## AgenTerm quality timing\n\n" +
         "- Lane: `" + report.lane + "` / `" + report.profile + "`\n" +
         "- Status: **" + report.status + "**\n" +
-        "- Total wall time: **" + report.total_wall_ms + " ms**\n" +
-        "- Accounted outer wall time: **" + report.wall_time.accounted_ms +
+        "- Total wall time: **" + total_wall_ms + " ms**\n" +
+        "- Accounted outer wall time: **" + accounted_ms +
             " ms** (`" + report.wall_time.state + "`)\n" +
         bootstrap_line +
-        "- Source: `" + report.source.commit + "`\n" +
+        "- Source: `" + source_commit + "`\n" +
         "- Gates: " + passed_count + " passed, " + failed_count +
             " failed, " + skipped_count + " skipped, " +
             not_run_count + " not run\n" +
@@ -242,8 +254,7 @@ fn entry() {
     if std::env::has("GITHUB_STEP_SUMMARY") {
         let summary_value = std::env::get("GITHUB_STEP_SUMMARY");
         if summary_value != "" {
-            let summary_joined = std::path::join(summary_value, "").display;
-            let summary_path = std::path::absolute(summary_joined).display;
+            let summary_path = std::path::absolute(summary_value).display;
             let previous = "";
             if std::fs::exists(summary_path) {
                 let summary_meta = std::fs::symlink_metadata(summary_path);

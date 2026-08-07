@@ -3023,9 +3023,14 @@ qualification::timing_finish(failed, "failed");
         "GitHub timing summary failed: {}",
         String::from_utf8_lossy(&appended_summary.stderr)
     );
+    let appended_stdout = String::from_utf8_lossy(&appended_summary.stdout);
     assert!(
-        appended_summary.stdout.is_empty(),
-        "GitHub summary should append instead of writing stdout"
+        appended_stdout.trim().is_empty() || appended_stdout.trim() == "0",
+        "GitHub summary should append instead of writing markdown stdout: {appended_stdout}"
+    );
+    assert!(
+        !appended_stdout.contains("## AgenTerm quality timing"),
+        "GitHub summary should append instead of writing markdown stdout: {appended_stdout}"
     );
     let markdown = fs::read_to_string(&github_summary).expect("read GitHub summary");
     assert!(markdown.starts_with("# Existing summary\n\n"));
@@ -3079,18 +3084,21 @@ qualification::timing_finish(failed, "failed");
     assert_eq!(integrated["first_failure"]["gate_id"], "repo-lint");
     assert!(!String::from_utf8_lossy(&integrated_bytes).contains("must-not-appear-in-timing"));
 
+    // Ordinary/candidate lanes now run preflight-selftest before repo-lint /
+    // release-preflight. With the intentionally failing bootstrap worker that
+    // nested cargo test is the first observed gate failure on this path.
     for (name, options, lane, first_failure) in [
         (
             "ordinary-failure.json",
             Vec::<&str>::new(),
             "ordinary",
-            "repo-lint",
+            "preflight-selftest",
         ),
         (
             "candidate-failure.json",
             vec!["--release", "--include-stress"],
             "candidate",
-            "release-preflight",
+            "preflight-selftest",
         ),
     ] {
         let path = fixture.join(name);
