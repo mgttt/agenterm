@@ -68,6 +68,8 @@ struct EmitCtx {
     /// Return kind of the function body currently being emitted (`entry` defaults to Int).
     current_return_kind: ValueKind,
     try_depth: u32,
+    /// Locals initialized as `[]` that later `push` Child bindings (owned_children).
+    empty_child_lists: BTreeSet<String>,
 }
 
 impl EmitCtx {
@@ -80,6 +82,7 @@ impl EmitCtx {
             local_fn_return_kinds: BTreeMap::new(),
             current_return_kind: ValueKind::Int,
             try_depth: 0,
+            empty_child_lists: BTreeSet::new(),
         }
     }
 
@@ -347,6 +350,7 @@ fn merge_loop_binding_upgrades(outer: &mut EmitCtx, loop_ctx: &EmitCtx, counter:
                     | ValueKind::Path
                     | ValueKind::Json
                     | ValueKind::Child
+                    | ValueKind::ChildList
                     | ValueKind::Command
                     | ValueKind::StringList
                     | ValueKind::Set
@@ -593,6 +597,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
         .copied()
         .unwrap_or(ValueKind::Int);
     fn_ctx.current_return_kind = return_kind;
+    fn_ctx.empty_child_lists = discover_empty_child_list_bindings(&def.body);
     out.push_str("pub fn ");
     out.push_str(def.name.as_str());
     out.push('(');
@@ -1639,7 +1644,13 @@ fn emit_stmt(
     match stmt {
         Stmt::Var(boxed, ..) => {
             let (ident, expr, _) = boxed.as_ref();
-            let kind = infer_binding_kind(expr, ctx);
+            let mut kind = infer_binding_kind(expr, ctx);
+            if kind == ValueKind::Json
+                && matches!(expr, Expr::Array(items, ..) if items.is_empty())
+                && ctx.empty_child_lists.contains(ident.name.as_str())
+            {
+                kind = ValueKind::ChildList;
+            }
             out.push_str("    let mut ");
             out.push_str(ident.name.as_str());
             out.push_str(" = ");
@@ -1652,6 +1663,28 @@ fn emit_stmt(
                 out.push_str(", ");
                 emit_json_path(out, &path);
                 out.push(')');
+            } else if kind == ValueKind::ChildList
+                && matches!(expr, Expr::Array(items, ..) if items.is_empty())
+            {
+                out.push_str("Vec::new()");
+            } else if kind == ValueKind::ChildList
+                && let Expr::Array(items, ..) = expr
+            {
+                out.push_str("vec![");
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    let Expr::Variable(child_ident, ..) = item else {
+                        return Err(RhError::Transpile(
+                            "child list literal items must be Child bindings".into(),
+                        ));
+                    };
+                    out.push_str("rh_child_share(&mut ");
+                    out.push_str(child_ident.1.as_str());
+                    out.push(')');
+                }
+                out.push(']');
             } else if kind == ValueKind::Json
                 && matches!(expr, Expr::Array(items, ..) if items.is_empty())
             {
@@ -1831,6 +1864,7 @@ fn emit_stmt(
                                 | ValueKind::Path
                                 | ValueKind::Json
                                 | ValueKind::Child
+                                | ValueKind::ChildList
                                 | ValueKind::Command
                                 | ValueKind::StringList
                                 | ValueKind::Set
@@ -2166,7 +2200,9 @@ fn emit_stmt(
         Stmt::Expr(expr) if ctx.cdylib && emit_command_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_child_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_string_list_push_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_child_list_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_task_sleep_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr)
             if ctx.cdylib
                 && let Expr::FnCall(call, ..) = expr.as_ref()
@@ -2471,6 +2507,18 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         Expr::Map(map, ..) if map.0.is_empty() => ValueKind::Set,
         Expr::Map(..) => ValueKind::Json,
         Expr::Array(items, ..) if items.is_empty() => ValueKind::Json,
+        Expr::Array(items, ..)
+            if !items.is_empty()
+                && items.iter().all(|item| {
+                    matches!(
+                        item,
+                        Expr::Variable(ident, ..)
+                            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Child)
+                    )
+                }) =>
+        {
+            ValueKind::ChildList
+        }
         Expr::Array(items, ..)
             if !items.is_empty()
                 && items
@@ -3397,6 +3445,161 @@ fn emit_string_list_push_stmt(
     Ok(true)
 }
 
+fn child_list_push_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::ChildList) {
+        return None;
+    }
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    if call.name != "push" || call.args.len() != 1 {
+        return None;
+    }
+    Some((ident.1.as_str(), &call.args[0]))
+}
+
+fn emit_child_list_push_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, item)) = child_list_push_call(expr, ctx) else {
+        return Ok(false);
+    };
+    let Expr::Variable(child_ident, ..) = item else {
+        return Err(RhError::Transpile(
+            "child list push argument must be a Child binding".into(),
+        ));
+    };
+    if ctx.scope.get(child_ident.1.as_str()).copied() != Some(ValueKind::Child) {
+        return Err(RhError::Transpile(
+            "child list push argument must be a Child binding".into(),
+        ));
+    }
+    out.push_str("    ");
+    out.push_str(binding);
+    out.push_str(".push(rh_child_share(&mut ");
+    out.push_str(child_ident.1.as_str());
+    out.push_str("));\n");
+    Ok(true)
+}
+
+/// Locals bound as `let name = []` that later `name.push(child)` where `child` is a
+/// Child binding from `command.start()` (smoke `owned_children` pattern).
+fn discover_empty_child_list_bindings(block: &StmtBlock) -> BTreeSet<String> {
+    let mut empty_arrays = BTreeSet::new();
+    let mut child_names = BTreeSet::new();
+    collect_empty_array_and_child_bindings(block, &mut empty_arrays, &mut child_names);
+    let mut result = BTreeSet::new();
+    collect_child_list_pushes(block, &empty_arrays, &child_names, &mut result);
+    result
+}
+
+fn expr_is_command_start(expr: &Expr) -> bool {
+    let Expr::Dot(boxed, ..) = expr else {
+        return false;
+    };
+    matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "start" && call.args.is_empty()
+    )
+}
+
+fn collect_empty_array_and_child_bindings(
+    block: &StmtBlock,
+    empty_arrays: &mut BTreeSet<String>,
+    child_names: &mut BTreeSet<String>,
+) {
+    for stmt in block.iter() {
+        match stmt {
+            Stmt::Var(boxed, ..) => {
+                let (ident, expr, _) = boxed.as_ref();
+                if matches!(expr, Expr::Array(items, ..) if items.is_empty()) {
+                    empty_arrays.insert(ident.name.to_string());
+                }
+                if expr_is_command_start(expr) {
+                    child_names.insert(ident.name.to_string());
+                }
+            }
+            Stmt::If(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(&flow.branch, empty_arrays, child_names);
+            }
+            Stmt::For(boxed, ..) => {
+                let (_, _, flow) = boxed.as_ref();
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
+            }
+            Stmt::While(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
+            }
+            Stmt::Block(inner) => {
+                collect_empty_array_and_child_bindings(inner, empty_arrays, child_names);
+            }
+            Stmt::TryCatch(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(&flow.branch, empty_arrays, child_names);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_child_list_pushes(
+    block: &StmtBlock,
+    empty_arrays: &BTreeSet<String>,
+    child_names: &BTreeSet<String>,
+    result: &mut BTreeSet<String>,
+) {
+    for stmt in block.iter() {
+        match stmt {
+            Stmt::Expr(expr) => {
+                if let Expr::Dot(boxed, ..) = expr.as_ref()
+                    && let Expr::Variable(ident, ..) = &boxed.lhs
+                    && empty_arrays.contains(ident.1.as_str())
+                    && let Expr::MethodCall(call, ..) = &boxed.rhs
+                    && call.name == "push"
+                    && call.args.len() == 1
+                    && let Expr::Variable(child_ident, ..) = &call.args[0]
+                    && child_names.contains(child_ident.1.as_str())
+                {
+                    result.insert(ident.1.to_string());
+                }
+            }
+            Stmt::If(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
+                collect_child_list_pushes(&flow.branch, empty_arrays, child_names, result);
+            }
+            Stmt::For(boxed, ..) => {
+                let (_, _, flow) = boxed.as_ref();
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
+            }
+            Stmt::While(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
+            }
+            Stmt::Block(inner) => {
+                collect_child_list_pushes(inner, empty_arrays, child_names, result);
+            }
+            Stmt::TryCatch(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
+                collect_child_list_pushes(&flow.branch, empty_arrays, child_names, result);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn is_json_bool_comparison(expr: &Expr, ctx: &EmitCtx) -> bool {
     let Expr::FnCall(call, ..) = expr else {
         return false;
@@ -3574,6 +3777,35 @@ fn emit_duration_ms(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<
         return Ok(true);
     }
     Ok(false)
+}
+
+fn task_sleep_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() == "rhai::task" && call.name == "sleep" && call.args.len() == 1 {
+        Some(&call.args[0])
+    } else {
+        None
+    }
+}
+
+fn emit_task_sleep_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some(duration) = task_sleep_arg(expr) else {
+        return Ok(false);
+    };
+    let mut ms = String::new();
+    if !emit_duration_ms(&mut ms, duration, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("    std::thread::sleep(std::time::Duration::from_millis((");
+    out.push_str(&ms);
+    out.push_str(").max(0) as u64));\n");
+    Ok(true)
 }
 
 fn emit_std_process_command(
@@ -3770,6 +4002,14 @@ fn emit_command_mut_stmt(
             emit_stringish(out, &call.args[0], ctx)?;
             out.push_str(", &");
             emit_stringish(out, &call.args[1], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "env_remove" if call.args.len() == 1 => {
+            out.push_str("    rh_command_env_remove(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
             out.push_str(");\n");
             Ok(true)
         }
@@ -5693,6 +5933,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(index) = args_index_expr(expr) {
             emit_args_index(out, index, ctx)?;
             return Ok(());
+        }
+        if task_sleep_arg(expr).is_some() {
+            let mut stmt = String::new();
+            if emit_task_sleep_stmt(&mut stmt, expr, ctx)? {
+                out.push_str("{\n");
+                out.push_str(&stmt);
+                out.push_str("    0\n}");
+                return Ok(());
+            }
         }
         if let Some(path) = std_fs_exists_arg(expr)
             && emit_std_fs_exists(out, path, ctx)?
@@ -11013,6 +11262,87 @@ fn entry() { 0 }"#,
             output
                 .rust
                 .contains("rh_json_array_len(&context, &[\"process_observation\", \"automation_processes\"])"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_empty_child_list_push_and_arg_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn take_children(owned_children) {
+    owned_children.len
+}
+fn entry() {
+    let owned_children = [];
+    let command = std::process::command("true");
+    let child = command.start();
+    owned_children.push(child);
+    take_children(owned_children)
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("let mut owned_children = Vec::new();"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("owned_children.push(rh_child_share(&mut child));"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("take_children(owned_children.clone())"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_command_env_remove_and_task_sleep_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn entry() {
+    let command = std::process::command("true");
+    command.env_remove("AGENTERM_IPC_ADDRESS");
+    rhai::task::sleep(std::time::Duration::from_millis(1));
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_command_env_remove(&mut command, &String::from(\"AGENTERM_IPC_ADDRESS\"));"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("std::thread::sleep(std::time::Duration::from_millis((1).max(0) as u64));"),
             "{}",
             output.rust
         );

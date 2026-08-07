@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 48;
+pub const RH_CODEGEN_REVISION: u32 = 49;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -783,6 +783,7 @@ pub fn emit_host_runtime(out: &mut String) {
              program: String,\n\
              args: Vec<String>,\n\
              env: Vec<(String, String)>,\n\
+             env_remove: Vec<String>,\n\
              timeout_ms: INT,\n\
              capture_limit: usize,\n\
              current_dir: Option<String>,\n\
@@ -840,6 +841,7 @@ pub fn emit_host_runtime(out: &mut String) {
                  program: program.to_owned(),\n\
                  args: Vec::new(),\n\
                  env: Vec::new(),\n\
+                 env_remove: Vec::new(),\n\
                  timeout_ms: 2_000,\n\
                  capture_limit: 64 * 1024,\n\
                  current_dir: None,\n\
@@ -853,6 +855,9 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_command_env(command: &mut RhCommand, name: &str, value: &str) {\n\
              command.env.push((name.to_owned(), value.to_owned()));\n\
+         }\n\n\
+         fn rh_command_env_remove(command: &mut RhCommand, name: &str) {\n\
+             command.env_remove.push(name.to_owned());\n\
          }\n\n\
          fn rh_command_timeout_ms(command: &mut RhCommand, timeout_ms: INT) {\n\
              if timeout_ms > 0 {\n\
@@ -872,6 +877,9 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_build(command: &RhCommand) -> std::process::Command {\n\
              let mut process = std::process::Command::new(&command.program);\n\
              process.args(&command.args);\n\
+             for name in &command.env_remove {\n\
+                 process.env_remove(name);\n\
+             }\n\
              for (name, value) in &command.env {\n\
                  process.env(name, value);\n\
              }\n\
