@@ -361,16 +361,10 @@ fn run_qualification_selftest() -> Output {
 fn run_package_qualified_selftest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
-        .args([
-            "run",
-            "scripts/rhai/package-qualified-selftest.rhai",
-            "--profile",
-            "local",
-            "--project-root",
-        ])
-        .arg(repo)
+        .args(["task", "run", "package-qualified-selftest", "--manifest"])
+        .arg(repo.join("agenterm.tasks.json"))
         .args([
             "--timeout-ms",
             "60000",
