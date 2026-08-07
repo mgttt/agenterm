@@ -3,7 +3,6 @@
 //! Wraps mlua + LuaJIT to provide `eval` and `check` operations,
 //! with host function injection for fleet/args/print callbacks.
 
-mod check;
 mod stdlib;
 pub mod check;
 
