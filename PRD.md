@@ -121,7 +121,7 @@ AgenTerm — local agent & process fleet work OS
 | 07 | [Agent control plane](prd/PRD_02_07_agent_control_plane.md) | 观察、控制、协议、身份、确定性等待 |
 | 08 | [Observable Fleet event core](prd/PRD_02_08_observable_fleet.md) | 纪元/序列日志、读取、等待、缺口、重启、消费者 |
 | 09 | [Self-hosted development loop](prd/PRD_02_09_self_hosted_development.md) | 构建、暂存、更新可见性、安全迭代 |
-| 10 | [Rust host + Rhai scripting](prd/PRD_02_10_rhai_scripting.md) | 本地无限制运行时、监督、注册、审计、providers |
+| 10 | [Rust host + script engines (Rhai/rh/lua/qjs)](prd/PRD_02_10_rhai_scripting.md) | 本地无限制运行时、监督、注册、审计、providers；多引擎家族见该文档「Script engine family」 |
 | 11 | [MCP and agentic orchestration (`agenterm-cli mcp`)](prd/PRD_02_11_mcp_orchestration.md) | 只读 MCP 先行，再受管工具、流、调度 |
 | 12 | [Lightweight specialized intelligence (`agenterm-ai.exe`)](prd/PRD_02_12_specialized_intelligence.md) | 未指派可选智能研究方向的证据门 |
 | 13 | [Local LLM gateway (`agenterm-llm-gateway.exe`)](prd/PRD_02_13_llm_gateway.md) | 未指派受管网关假设的安全门 |

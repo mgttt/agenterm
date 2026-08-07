@@ -1,10 +1,60 @@
-# Rust host + Rhai scripting
+# Rust host + script engines (Rhai / rh / lua / qjs)
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 Runtime contract: [AgenTerm Script Runtime specification](../docs/agenterm-rhai-runtime.md)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
+
+## Script engine family
+
+This PRD's scope grew from one embedded language to a **family of script
+engines** sharing one Rust host, one L2 Facade/catalog (`fleet.*`, `std.*`),
+and one product-boundary philosophy (unrestricted local runtime; the future
+Agent harness owns authorization, not the engine — see "v0.1.9 product
+position" below). Four engines, in lineage order:
+
+- **Rhai — cancelled as the forward engine direction (2026-08-07).** Was the
+  original and, through v0.1.15, default embedded language (tree-walking
+  interpreter, `rhai` crate). `agenterm-rhai.exe` remains shipped as a
+  **compatibility shim** for existing `.rhai` callers per "Shipped baseline"
+  below and receives shim-hardening fixes (`plan/plan-rh-3.md` M23d), but no
+  further Rhai-native capability investment continues — every new capability
+  targets rh, and now lua/qjs. This PRD's title and most of its accumulated
+  detail below describe Rhai/rh history; treat "Rhai" content as the
+  wound-down lineage, not the active target.
+- **rh — self-developed, deeper host integration than Rhai
+  (`crates/agenterm-rh`, `agenterm-rh` CLI).** Syntax and object model are
+  informed by Rhai and by Rust's own `std::` shape, but rh is not an
+  interpreter: a checked subset transpiles to native Rust and compiles via
+  `rustc` (AOT), giving generated packs a direct low-level host ABI (native
+  `i64` entry points, no embedded interpreter runtime shipped in the pack)
+  that Rhai's tree-walking design never had. Default execution backend since
+  M22f (`AGENTERM_SCRIPT_BACKEND=rh`); status/detail: "Shipped baseline"
+  below, [`plan/plan-rh-3.md`](../plan/plan-rh-3.md),
+  [`plan/design-rh-aot.md`](../plan/design-rh-aot.md).
+- **lua — `agenterm-lua`, capability-aligned with rh (Windows-side, in
+  progress).** New sibling engine; framed-worker integration, `LuaEngine` +
+  host functions, and a growing `std.*` surface (`std.fs.*` etc.) landed
+  2026-08-07 (commit `8b3764f5` and follow-ups). Not built by the same agent
+  driving this PRD file — tracked here for cross-session awareness, see
+  `plan/plan-v0.1.16.md` §1 "Rh. 脚本引擎矩阵".
+- **qjs — `agenterm-qjs`, capability-aligned with rh, QuickJS-based (in
+  progress).** New sibling engine using `rquickjs` (bundled quickjs-ng C
+  source) as the binding. QJS-M0 (skeleton + minimal eval) shipped
+  2026-08-07 (commit `140a9152`), standalone (not yet wired into the root
+  Cargo workspace). Open risks and next milestones: see "Future" §
+  **qjs execution backend** below.
+
+"Capability alignment" between rh/lua/qjs means: same L2 facade/catalog
+surface, same CLI verb contract (check/eval/pack/check-many/task — see rh's
+shipped shape below), same typed JSON/exit-code envelope, same worker/
+framed-worker integration points. It explicitly does **not** mean matching
+rh's AOT/native-codegen execution strategy — that is rh-specific; lua/qjs
+may use their own VM/bytecode execution as long as the L2 contract and CLI
+behavior match. See
+[`plan/design-scripting-boundary-comparison.md`](../plan/design-scripting-boundary-comparison.md)
+§2.1/§6 for the L1/L2/L3 boundary this rests on.
 
 ## Shipped baseline
 
@@ -864,6 +914,63 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     hot-swappable without rebuilding the base PE
   - Control Center, gateway sidecar, and task runners consume the same host
     C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
+- [ ] **qjs execution backend** (`crates/agenterm-qjs`, planned, capability
+  parity with rh): QJS-M0 shipped standalone (skeleton + `rquickjs` binding +
+  minimal eval, commit `140a9152`; see "Script engine family" above and
+  `plan/plan-v0.1.16.md` §1 QJS-M0/M1/M2). Root-workspace integration,
+  CLI-verb parity, and L2 facade wiring are open (QJS-M1/M2). Open risk
+  questions recorded here so they aren't silently assumed away by "it built
+  and evaluated `1+2`" — none are blocking QJS-M0, all should be resolved
+  (or explicitly accepted) before qjs leaves "planned" for "partial":
+  - **Parallel-spec drift vs lua.** lua is currently the only independent
+    implementation stress-testing "capability parity with rh" in practice;
+    qjs is being built in parallel rather than after it (user-accepted risk,
+    2026-08-07, see `plan/plan-v0.1.16.md` §7). The two engines may resolve
+    the same L2/CLI ambiguity differently; a reconciliation pass against
+    both is likely needed once both have real usage, not assumed away by
+    either engine shipping first.
+  - **Root-workspace C-dependency interaction.** rquickjs bundles quickjs-ng
+    C source built via the `cc` crate; lua's binding (likely `mlua`, itself
+    C-source-bundled) will share the same root workspace once qjs is wired
+    in (QJS-M1). Unverified: MSVC CRT linkage mode (`/MT` vs `/MD`) matches
+    between both `-sys` crates' `build.rs`, no symbol collisions, no
+    `cc`/`bindgen` toolchain interaction surprises when both compile into
+    one binary. Must be checked at QJS-M1, not assumed clean from each
+    building fine in isolation.
+  - **Thread/concurrency model mismatch.** Rhai/rh keep "the engine and its
+    Scope … on one evaluation thread" (see "v0.1.9 runtime architecture"
+    above) — background I/O is native-typed and only the eval thread touches
+    script values. QuickJS's `Runtime`/`Context` are not freely Send+Sync
+    across threads either (single-threaded-VM design, same family as V8
+    isolates). Unverified whether the existing one-thread-per-engine worker
+    pattern transfers directly to qjs's worker/framed-worker integration, or
+    needs its own design pass.
+  - **No AOT — different performance character than rh.** qjs has no
+    analogue to rh's T0–T3 layered AOT (`plan/plan-rh-3.md` §1 point 3);
+    QuickJS interprets its own bytecode with no JIT. Capability parity does
+    **not** imply performance parity; any future latency-sensitive
+    consumer must evaluate qjs on its own merits rather than assume rh-like
+    throughput.
+  - **Unrestricted-runtime philosophy must carry over, not just the API
+    shape.** Rhai/rh's product position (see "v0.1.9 product position"
+    above) is a deliberately **unrestricted** local runtime — no sandbox,
+    no capability tiers; authorization is the future Agent harness's job,
+    not the engine's. `rquickjs::Context::full` is likewise unrestricted by
+    default, but this needs an explicit check once host-API binding starts
+    (QJS-M2): confirm no binding-library default quietly narrows what a
+    script can reach (e.g. hidden global removal), which would make qjs a
+    second, inconsistent security model rather than parity with rh.
+  - **Version/hash reproducibility for future receipts.** rh AOT/qualify
+    receipts bind to source hash (`design-rh-aot.md`). If qjs packs ever
+    join the same receipt contract, quickjs-ng's bundled version needs an
+    explicit pinning policy (`Cargo.lock` alone may be insufficient if
+    receipts need to name the exact engine build, not just "some rquickjs
+    0.12.x") — open question, not yet answered.
+  - **CI/build-time cost.** Compiling QuickJS's C source (`quickjs.c` is a
+    large single translation unit) adds non-trivial time to every clean
+    build once wired into the root workspace/CI cache; unmeasured against
+    this repo's existing build-time budget concerns (see `plan-v0.1.16.md`
+    §0.3, R′ group).
 
 Current non-goals: renaming or deleting the compatibility PE before worker and
 REPL ownership moves; npm-style remote rh imports; Cranelift direct codegen

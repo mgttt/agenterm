@@ -226,7 +226,14 @@ R′. Evidence closeout
 agent/跨 session 撞车或重复造轮子：
 
 ```text
-rh  (crates/agenterm-rh)   — Lnx 现场 agent 负责，把 rhai 迁移为自研 rh；
+rhai (agenterm-rhai)       — 已取消作为前进方向（2026-08-07）。兼容薄壳仍随
+                              M22f 保留、继续吃 shim 硬化修复（Rh-M23d），
+                              但不再获得新能力投资；见 PRD §「Script engine
+                              family」
+rh  (crates/agenterm-rh)   — Lnx 现场 agent 负责，自研语言：语法/对象模型参考
+                              rhai 与 Rust std，但不是解释器——checked subset
+                              transpile→rustc AOT，比 rhai 更深入底层（生成
+                              pack 原生 i64 入口 ABI，不带解释器运行时）；
                               M22f 已默认、M23 扩面进行中（本节原表）
 lua (agenterm-lua，新)      — Win 现场 grok.ds（另一个 Grok Build harness，
                               非本 plan 协调的 agent 池成员）负责实现，
@@ -236,6 +243,10 @@ qjs (agenterm-qjs，已开工)  — 2026-08-07 用户拍板 **不等 lua 雏形�
                               agent（本 assistant）负责；基于 QuickJS；
                               能力对齐 rh（lua 为并行参照，非阻塞依赖）
 ```
+
+四引擎详细谱系、各自状态与 shipped/partial/planned 判定，SSOT 现在是
+[`prd/PRD_02_10_rhai_scripting.md`](../prd/PRD_02_10_rhai_scripting.md)
+「Script engine family」节——本节只记执行序/泳道，不复述 PRD 内容。
 
 **「能力对齐」当前理解**（以 `plan-rh-3.md` 已验证的 rh CLI 契约为基准，
 lua/qjs 达到雏形后应比对）：
@@ -268,6 +279,7 @@ lua 雏形来去规避这个风险。
 | **QJS-M0** | [x] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型（`rquickjs` 0.12.2，bundled quickjs-ng，MSVC `cc` 自动探测编译）+ 最小 eval 跑通（算术/字符串/语法错误捕获，3 单测绿）；**暂未接入根 workspace**——lua 侧当时在同一工作树有未提交的 `Cargo.toml`/`Cargo.lock` 改动，用嵌套空 `[workspace]` 表隔离，避免撞车；lua 已提交（`8b3764f5`），接入根 workspace 留给 QJS-M1 |
 | **QJS-M1** | [ ] CLI 动词对齐 `agenterm-rh`（check/eval/pack/check-many/task 皮子） |
 | **QJS-M2** | [ ] L2 facade/catalog 接入（`fleet.*`/`std.*`，对齐 rh 语义） |
+| **QJS-risks** | [ ] 7 条已知风险已记录（并行摸索规格对账、根 workspace C 依赖冲突、线程模型、无 AOT 性能特征、unrestricted 哲学是否走样、版本/哈希可复现性、CI 构建耗时）；详见 PRD §「Script engine family」→「Future」→**qjs execution backend**；QJS-M1/M2 落地前逐条回访，不默认「能跑就是没问题」 |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
 [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md)。
