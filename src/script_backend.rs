@@ -18,6 +18,7 @@ use crate::script_rh_run::RhRunContext;
 pub enum ScriptBackend {
     Rhai,
     Rh,
+    Lua,
 }
 
 impl ScriptBackend {
@@ -30,6 +31,7 @@ impl ScriptBackend {
             .as_deref()
         {
             Some("rhai") => Self::Rhai,
+            Some("lua") => Self::Lua,
             _ => Self::Rh,
         }
     }
@@ -38,12 +40,31 @@ impl ScriptBackend {
         match self {
             Self::Rhai => "rhai",
             Self::Rh => "rh",
+            Self::Lua => "lua",
         }
+    }
+
+    /// Select backend from task entry file extension.
+    pub fn from_entry_path(path: &str) -> Self {
+        if path.ends_with(".lua") {
+            return Self::Lua;
+        }
+        if path.ends_with(".rh") {
+            return Self::Rh;
+        }
+        if path.ends_with(".rhai") {
+            return Self::Rhai;
+        }
+        Self::Rh
     }
 }
 
 pub fn rh_backend_enabled() -> bool {
     matches!(ScriptBackend::from_env(), ScriptBackend::Rh)
+}
+
+pub fn lua_backend_enabled() -> bool {
+    matches!(ScriptBackend::from_env(), ScriptBackend::Lua)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -187,6 +208,85 @@ pub fn rh_load_pack(
     crate::script_rh_pack::load_rh_pack(path)
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct LuaInvocationOptions {
+    pub project_root: Option<PathBuf>,
+    pub arguments: Option<Value>,
+    pub budgets: Option<ScriptBudgets>,
+}
+
+pub struct LuaInvocationResult {
+    pub stdout: String,
+    pub value: Option<i64>,
+}
+
+/// Try to execute a Lua invocation. Returns `Ok(None)` if the Lua backend is not enabled.
+pub fn try_execute_lua_invocation(
+    operation: ScriptOperation,
+    source: &str,
+    options: LuaInvocationOptions,
+    fleet_bridge: Option<crate::script_lua_host::LuaFleetBridgeFn>,
+) -> Result<Option<LuaInvocationResult>, String> {
+    if !lua_backend_enabled() {
+        return Ok(None);
+    }
+
+    let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
+
+    match operation {
+        ScriptOperation::Api => Ok(None),
+        ScriptOperation::Check => {
+            engine.check(source).map_err(|e| e.to_string())?;
+            Ok(Some(LuaInvocationResult {
+                stdout: String::new(),
+                value: None,
+            }))
+        }
+        ScriptOperation::Run | ScriptOperation::Eval => {
+            let mut host = agenterm_lua::LuaHostFunctions::default();
+
+            // Wire fleet bridge
+            if let Some(bridge) = fleet_bridge {
+                host.fleet_call = Some(Arc::new(
+                    move |op_id: String, params: String| -> Result<String, String> {
+                        bridge(op_id.as_str(), params.as_str())
+                    },
+                ));
+            }
+
+            // Wire args_len / arg from options.arguments
+            let args = options.arguments.clone();
+            if let Some(ref arguments) = args {
+                let args_for_len = arguments.clone();
+                let args_for_arg = arguments.clone();
+                host.args_len = Some(Arc::new(move || {
+                    args_for_len
+                        .as_array()
+                        .map(|a| a.len() as i64)
+                        .unwrap_or(0)
+                }));
+                host.arg = Some(Arc::new(move |index: i64| {
+                    args_for_arg
+                        .as_array()
+                        .and_then(|a| a.get(index as usize))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .ok_or_else(|| format!("argument {index} is unavailable"))
+                }));
+            }
+
+            let result = engine
+                .eval(source, &host)
+                .map_err(|e| format!("lua_eval: {e}"))?;
+
+            Ok(Some(LuaInvocationResult {
+                stdout: result.stdout,
+                value: Some(result.value),
+            }))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -194,8 +294,11 @@ mod tests {
     };
     use crate::script_protocol::ScriptOperation;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn default_backend_is_rh() {
+        let _guard = ENV_LOCK.lock().expect("lock");
         let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
         unsafe {
             std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
@@ -212,6 +315,136 @@ mod tests {
             .expect("probe")
             .is_some()
         );
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[test]
+    fn lua_backend_from_env() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
+        }
+        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Lua);
+        assert!(super::lua_backend_enabled());
+
+        // Also test check path
+        let result = super::try_execute_lua_invocation(
+            ScriptOperation::Check,
+            "return 0",
+            super::LuaInvocationOptions::default(),
+            None,
+        )
+        .expect("probe")
+        .expect("lua result");
+        assert!(result.value.is_none());
+
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[test]
+    fn lua_backend_from_entry_path() {
+        assert_eq!(
+            ScriptBackend::from_entry_path("scripts/lua/test.lua"),
+            ScriptBackend::Lua
+        );
+        assert_eq!(
+            ScriptBackend::from_entry_path("test.rh"),
+            ScriptBackend::Rh
+        );
+        assert_eq!(
+            ScriptBackend::from_entry_path("test.rhai"),
+            ScriptBackend::Rhai
+        );
+    }
+
+    #[test]
+    fn lua_backend_as_str() {
+        assert_eq!(ScriptBackend::Lua.as_str(), "lua");
+        assert_eq!(ScriptBackend::Rh.as_str(), "rh");
+        assert_eq!(ScriptBackend::Rhai.as_str(), "rhai");
+    }
+
+    #[test]
+    fn try_execute_lua_invocation_eval() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
+        }
+        let result = super::try_execute_lua_invocation(
+            ScriptOperation::Eval,
+            "return 42",
+            super::LuaInvocationOptions::default(),
+            None,
+        )
+        .expect("probe")
+        .expect("lua result");
+        assert_eq!(result.value, Some(42));
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[test]
+    fn try_execute_lua_invocation_check() {
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
+        }
+        let result = super::try_execute_lua_invocation(
+            ScriptOperation::Check,
+            "return 0",
+            super::LuaInvocationOptions::default(),
+            None,
+        )
+        .expect("probe")
+        .expect("lua result");
+        assert!(result.value.is_none());
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[test]
+    fn lua_backend_not_enabled_without_env() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+        }
+        let result = super::try_execute_lua_invocation(
+            ScriptOperation::Eval,
+            "return 42",
+            super::LuaInvocationOptions::default(),
+            None,
+        )
+        .expect("probe");
+        assert!(result.is_none());
         match prior {
             Some(value) => unsafe {
                 std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);

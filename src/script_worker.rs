@@ -1317,6 +1317,47 @@ fn execute_inner(
         return Ok((result.stdout, result.value));
     }
 
+    // Lua backend: enabled via AGENTERM_SCRIPT_BACKEND=lua or `.lua` entry.
+    #[cfg(not(test))]
+    if let Some(result) = crate::script_backend::try_execute_lua_invocation(
+        invocation.operation,
+        &invocation.source,
+        crate::script_backend::LuaInvocationOptions {
+            project_root: invocation
+                .project_root
+                .as_ref()
+                .map(std::path::PathBuf::from),
+            arguments: serde_json::to_value(&invocation.arguments).ok(),
+            budgets: Some(invocation.budgets.clone()),
+        },
+        broker.as_ref().map(|broker| {
+            let broker = broker.clone();
+            let bridge: crate::script_lua_host::LuaFleetBridgeFn = std::sync::Arc::new(
+                move |op_id: &str, params: &str| -> Result<String, String> {
+                    let arguments =
+                        serde_json::from_str(params).unwrap_or(serde_json::json!({}));
+                    broker
+                        .call_json(
+                            "fleet.call",
+                            serde_json::json!({
+                                "operation_id": op_id,
+                                "parameters": arguments,
+                            }),
+                        )
+                        .map(|value| value.to_string())
+                },
+            );
+            bridge
+        }),
+    )
+    .map_err(|error| configuration_error("lua_backend", error))?
+    {
+        return Ok((
+            result.stdout,
+            result.value.map(|v| serde_json::Value::from(v)),
+        ));
+    }
+
     let output = Arc::new(Mutex::new(String::new()));
     let output_exceeded = Arc::new(AtomicBool::new(false));
     let wall_time_exceeded = Arc::new(AtomicBool::new(false));

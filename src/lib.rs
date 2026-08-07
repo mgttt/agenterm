@@ -38,6 +38,8 @@ pub mod script_rh_cli;
 pub mod script_rh_host;
 pub mod script_rh_pack;
 pub mod script_rh_run;
+pub mod script_lua_host;
+pub mod script_lua_run;
 pub mod script_runtime;
 pub mod script_stdlib;
 pub mod script_stream;
