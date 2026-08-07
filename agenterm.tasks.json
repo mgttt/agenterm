@@ -667,7 +667,7 @@
     {
       "id": "artifact-verification",
       "description": "Verify staged executable roles, hashes, budgets, provenance, and offline catalogs",
-      "entry": "scripts/rhai/artifact-verification.rhai",
+      "entry": "scripts/rh/artifact-verification.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

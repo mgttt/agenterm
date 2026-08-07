@@ -14,7 +14,7 @@ static PERFORMANCE_EXPERIMENT: LazyLock<String> = LazyLock::new(|| {
 static CHECK: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rhai/check.rhai").replace("\r\n", "\n"));
 static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../scripts/rhai/artifact-verification.rhai").replace("\r\n", "\n")
+    include_str!("../scripts/rh/artifact-verification.rh").replace("\r\n", "\n")
 });
 static CLIENT_SMOKE: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rh/client-smoke.rh").replace("\r\n", "\n"));
@@ -191,14 +191,15 @@ fn artifact_manifest_declares_both_rhai_and_rh_offline_version_probes() {
 
 #[test]
 fn artifact_verification_probes_manifest_roles_and_rejects_invalid_versions() {
-    assert!(ARTIFACT_VERIFICATION.contains("artifact_for_role(manifest, \"scripting-cli\")"));
-    assert!(ARTIFACT_VERIFICATION.contains("artifact_for_role(manifest, \"rh-dev-cli\")"));
-    assert!(ARTIFACT_VERIFICATION.contains("artifact.offline_probe[0] == probe_argument"));
+    assert!(ARTIFACT_VERIFICATION.contains("fn entry("));
+    assert!(ARTIFACT_VERIFICATION.contains("\"scripting-cli\""));
+    assert!(ARTIFACT_VERIFICATION.contains("\"rh-dev-cli\""));
+    assert!(ARTIFACT_VERIFICATION.contains("(\"\" + artifact.offline_probe[0]) == \"--version\""));
+    assert!(ARTIFACT_VERIFICATION.contains("(\"\" + artifact.offline_probe[0]) == \"version\""));
     assert!(ARTIFACT_VERIFICATION.contains("std::fs::metadata(path).len > 0"));
-    assert!(ARTIFACT_VERIFICATION.contains("output(path, artifact.offline_probe, repo, code)"));
-    assert!(ARTIFACT_VERIFICATION.contains("== banner + \" \" + version"));
-    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rhai_version\""));
-    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rh_version\""));
+    assert!(ARTIFACT_VERIFICATION.contains("std::process::command_stdout_file("));
+    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rhai_version"));
+    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rh_version"));
     assert!(!ARTIFACT_VERIFICATION.contains("dist, \"agenterm-rh.exe\""));
 }
 

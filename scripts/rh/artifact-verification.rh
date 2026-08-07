@@ -1,0 +1,401 @@
+// Verify staged executable roles, budgets, provenance, and offline catalogs.
+//
+// Args:
+//   REPO [release|development]
+//
+// Native note: PE subsystem byte inspection stays in the archived Rhai task until
+// rh-3 gains native emit for std::fs::read.
+
+import "scripts/rh/lib/artifact_manifest" as artifact_manifest;
+
+fn entry() {
+    if args.len != 1 && args.len != 2 {
+        return rh::fail("expected: REPO [release|development]");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let release = 0;
+    if args.len == 2 {
+        require(
+            args[1] == "release" || args[1] == "development",
+            "artifact_verification_mode"
+        );
+        if args[1] == "release" {
+            release = 1;
+        }
+    }
+
+    let dist = std::path::join(repo, "dist").display;
+    let manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    artifact_manifest::validate(manifest_path);
+    let manifest_text = std::fs::read_to_string(manifest_path);
+    let manifest = rhai::json::parse(manifest_text);
+
+    let metadata_path = std::path::join(dist, "agenterm.json").display;
+    let metadata =
+        rhai::json::parse(std::fs::read_to_string(metadata_path));
+    require(
+        metadata.schema_version == 2,
+        "artifact_metadata_schema"
+    );
+
+    let offline_id = "agenterm-artifact-verification";
+    let offline_endpoint =
+        "pipe:\\\\.\\pipe\\agenterm-artifact-verification";
+    let stdout_path =
+        std::path::join(repo, ".artifact-verification.stdout.tmp").display;
+    let instance_dir = std::path::join(
+        repo,
+        "target/agenterm-artifact-verification/instances"
+    ).display;
+    let workspace_path = std::path::join(
+        repo,
+        "target/agenterm-artifact-verification/workspace.json"
+    ).display;
+    let probe_options = #{
+        current_dir: repo,
+        env: #{
+            "AGENTERM_IPC_ENDPOINT": offline_endpoint,
+            "AGENTERM_INSTANCE_DIR": instance_dir,
+            "AGENTERM_WORKSPACE_PATH": workspace_path,
+            "AGENTERM_NO_ACTIVATE": "1",
+        },
+        env_remove: ["AGENTERM_IPC_ADDRESS"],
+    };
+
+    let expected_names = #{};
+    let expected_count = 0;
+    for artifact in manifest.executables {
+        let artifact_name = "" + artifact.name;
+        require(
+            !expected_names.contains(artifact_name),
+            "artifact_manifest_name_duplicate:" + artifact_name
+        );
+        expected_names[artifact_name] = true;
+        expected_count += 1;
+        let path = std::path::join(dist, artifact_name).display;
+        require(std::fs::exists(path), "artifact_missing:" + artifact_name);
+        if release == 1 {
+            let actual_bytes = std::fs::metadata(path).len;
+            require(
+                actual_bytes <= artifact.release_budget_bytes,
+                "artifact_release_budget:" + artifact_name +
+                    ":actual=" + actual_bytes +
+                    ":budget=" + artifact.release_budget_bytes
+            );
+        }
+        let metadata_matches = 0;
+        for meta_entry in metadata.executables {
+            if ("" + meta_entry.name) == artifact_name {
+                require(
+                    metadata_matches == 0,
+                    "artifact_metadata_duplicate:" + artifact_name
+                );
+                metadata_matches = 1;
+                require(
+                    ("" + meta_entry.sha256)
+                        == rhai::crypto::sha256_file(path),
+                    "artifact_metadata_hash:" + artifact_name
+                );
+            }
+        }
+        require(
+            metadata_matches == 1,
+            "artifact_metadata_hash:" + artifact_name
+        );
+    }
+
+    for dir_entry in std::fs::read_dir(dist) {
+        let file_name = "" + dir_entry.file_name;
+        file_name.to_lower();
+        require(
+            !(
+                dir_entry.is_file
+                    && file_name.starts_with("agentermctl")
+                    && file_name.ends_with(".exe")
+            ),
+            "artifact_obsolete_cli:" + dir_entry.file_name
+        );
+    }
+
+    require(
+        metadata.executables.len == expected_count,
+        "artifact_metadata_count"
+    );
+    for meta_entry in metadata.executables {
+        let entry_name = "" + meta_entry.name;
+        require(
+            expected_names.contains(entry_name),
+            "artifact_metadata_unexpected:" + entry_name
+        );
+    }
+    require(
+        metadata.features.contains("codex-launcher"),
+        "artifact_metadata_feature:codex-launcher"
+    );
+    require(
+        metadata.features.contains("tab-environment"),
+        "artifact_metadata_feature:tab-environment"
+    );
+    require(
+        metadata.features.contains("mux-frontend"),
+        "artifact_metadata_feature:mux-frontend"
+    );
+
+    let head_code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require(head_code == 0, "artifact_git_head");
+    let head = std::fs::read_to_string(stdout_path);
+    head.trim();
+    require(
+        ("" + metadata.git_commit) == head,
+        "artifact_metadata_commit"
+    );
+
+    let cargo_lock_path = std::path::join(repo, "Cargo.lock").display;
+    require(
+        ("" + metadata.cargo_lock_sha256)
+            == rhai::crypto::sha256_file(cargo_lock_path),
+        "artifact_metadata_cargo_lock"
+    );
+    require(
+        ("" + metadata.artifact_manifest_sha256)
+            == rhai::crypto::sha256_file(manifest_path),
+        "artifact_metadata_manifest"
+    );
+    require(
+        ("" + metadata.rust_version) != "",
+        "artifact_metadata_rust_version"
+    );
+    require(
+        release == 0 || metadata.git_dirty == 0,
+        "artifact_release_dirty"
+    );
+
+    let cli = std::path::join(dist, "agenterm-cli.exe").display;
+    let control_center =
+        std::path::join(dist, "agenterm-cc.exe").display;
+    let metadata_version = "" + metadata.version;
+
+    let scripting_matched = 0;
+    for artifact in manifest.executables {
+        if ("" + artifact.role) != "scripting-cli" {
+            continue;
+        }
+        require(
+            scripting_matched == 0,
+            "artifact_role_duplicate:scripting-cli"
+        );
+        scripting_matched = 1;
+        require(
+            artifact.offline_probe.len == 1
+                && ("" + artifact.offline_probe[0]) == "--version",
+            "artifact_version_probe_missing:scripting-cli"
+        );
+        let artifact_name = "" + artifact.name;
+        let path = std::path::join(dist, artifact_name).display;
+        require(
+            std::fs::metadata(path).is_file
+                && std::fs::metadata(path).len > 0,
+            "artifact_version_file_invalid:" + artifact_name
+        );
+        let exit_code = std::process::command_stdout_file(
+            path,
+            ["--version"],
+            30000,
+            stdout_path,
+            probe_options
+        );
+        require(exit_code == 0, "artifact_rhai_version:exit=" + exit_code);
+        let text = std::fs::read_to_string(stdout_path);
+        text.trim();
+        require(
+            text == "agenterm-rhai " + metadata_version,
+            "artifact_rhai_version_mismatch"
+        );
+    }
+    require(scripting_matched == 1, "artifact_role_missing:scripting-cli");
+
+    let rh_dev_matched = 0;
+    for artifact in manifest.executables {
+        if ("" + artifact.role) != "rh-dev-cli" {
+            continue;
+        }
+        require(rh_dev_matched == 0, "artifact_role_duplicate:rh-dev-cli");
+        rh_dev_matched = 1;
+        require(
+            artifact.offline_probe.len == 1
+                && ("" + artifact.offline_probe[0]) == "version",
+            "artifact_version_probe_missing:rh-dev-cli"
+        );
+        let artifact_name = "" + artifact.name;
+        let path = std::path::join(dist, artifact_name).display;
+        require(
+            std::fs::metadata(path).is_file
+                && std::fs::metadata(path).len > 0,
+            "artifact_version_file_invalid:" + artifact_name
+        );
+        let exit_code = std::process::command_stdout_file(
+            path,
+            ["version"],
+            30000,
+            stdout_path,
+            probe_options
+        );
+        require(exit_code == 0, "artifact_rh_version:exit=" + exit_code);
+        let text = std::fs::read_to_string(stdout_path);
+        text.trim();
+        require(
+            text == "agenterm-rh " + metadata_version,
+            "artifact_rh_version_mismatch"
+        );
+    }
+    require(rh_dev_matched == 1, "artifact_role_missing:rh-dev-cli");
+
+    let cli_version_code = std::process::command_stdout_file(
+        cli,
+        ["--version"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(cli_version_code == 0, "artifact_cli_version");
+    let cli_version = std::fs::read_to_string(stdout_path);
+    cli_version.trim();
+    require(
+        cli_version == "agenterm-cli " + metadata_version,
+        "artifact_cli_version_mismatch"
+    );
+
+    // mux/mcp are CLI subcommands only (standalone PEs removed).
+    let mux_version_code = std::process::command_stdout_file(
+        cli,
+        ["mux", "--version"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(mux_version_code == 0, "artifact_mux_version");
+    let mux_version = std::fs::read_to_string(stdout_path);
+    mux_version.trim();
+    require(
+        mux_version == "agenterm-mux " + metadata_version +
+            " (AgenTerm compatibility frontend)",
+        "artifact_mux_version_mismatch"
+    );
+
+    let mcp_version_code = std::process::command_stdout_file(
+        cli,
+        ["mcp", "--version"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(mcp_version_code == 0, "artifact_mcp_version");
+    let mcp_version = std::fs::read_to_string(stdout_path);
+    mcp_version.trim();
+    require(
+        mcp_version == "agenterm-mcp " + metadata_version,
+        "artifact_mcp_version_mismatch"
+    );
+
+    let cc_version_code = std::process::command_stdout_file(
+        control_center,
+        ["--version"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(cc_version_code == 0, "artifact_control_center_version");
+    let cc_version = std::fs::read_to_string(stdout_path);
+    cc_version.trim();
+    require(
+        cc_version == "agenterm-cc " + metadata_version,
+        "artifact_control_center_version_mismatch"
+    );
+
+    let cc_cap_code = std::process::command_stdout_file(
+        control_center,
+        ["capabilities", "--json"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(cc_cap_code == 0, "artifact_control_center_capabilities");
+    let control_center_capabilities =
+        rhai::json::parse(std::fs::read_to_string(stdout_path));
+    require(
+        control_center_capabilities.schema_version == 1
+            && ("" + control_center_capabilities.executable)
+                == "agenterm-cc"
+            && ("" + control_center_capabilities.role)
+                == "isolated_projection"
+            && control_center_capabilities.owns_terminal_authority == 0
+            && control_center_capabilities.process_reuse == 1
+            && control_center_capabilities.no_activate == 1
+            && control_center_capabilities.views.len == 4,
+        "artifact_control_center_capabilities_invalid"
+    );
+
+    let cc_snapshot_code = std::process::command_stdout_file(
+        control_center,
+        [
+            "snapshot",
+            "--json",
+            "--endpoint",
+            offline_endpoint,
+        ],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(cc_snapshot_code == 0, "artifact_control_center_snapshot");
+    let control_center_snapshot =
+        rhai::json::parse(std::fs::read_to_string(stdout_path));
+    require(
+        control_center_snapshot.schema_version == 1
+            && ("" + control_center_snapshot.executable)
+                == "agenterm-cc"
+            && type_of(control_center_snapshot.connected_server) == "()"
+            && control_center_snapshot.views.len == 4,
+        "artifact_control_center_snapshot_invalid"
+    );
+
+    let mcp_cap_code = std::process::command_stdout_file(
+        cli,
+        ["mcp", "capabilities", "--json"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(mcp_cap_code == 0, "artifact_mcp_capabilities");
+    let mcp_capabilities =
+        rhai::json::parse(std::fs::read_to_string(stdout_path));
+    let mcp_tools = mcp_capabilities.tools;
+    let mcp_tool0 = mcp_tools[0];
+    let mcp_tool_name = "" + mcp_tool0.name;
+    require(
+        ("" + mcp_capabilities.protocol_revision) == "2025-11-25"
+            && mcp_capabilities.transports.len == 1
+            && ("" + mcp_capabilities.transports[0]) == "stdio"
+            && mcp_capabilities.resources.len == 4
+            && mcp_capabilities.tools.len == 1
+            && mcp_tool_name == "agenterm_wait"
+            && mcp_tool0.read_only == 1,
+        "artifact_mcp_capabilities_invalid"
+    );
+
+    std::fs::try_remove_file(stdout_path);
+
+    print(
+        "PASS: verified " + expected_count +
+            " staged executable roles, hashes, budgets, and offline catalogs"
+    );
+    0
+}
