@@ -1009,6 +1009,9 @@ fn json_array_len_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Ve
     let is_len = matches!(
         &boxed.rhs,
         Expr::Property(property, ..) if property.2.as_str() == "len"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
     );
     is_len.then(|| json_value_path(&boxed.lhs, ctx)).flatten()
 }
