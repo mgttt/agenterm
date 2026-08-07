@@ -37,13 +37,13 @@ fn entry() {
         return rh::fail("docs index must publish the Traditional Chinese locale choice");
     }
     let zh_product = html.contains("本機 Agent 艦隊工作 OS");
-    let windows_delivered = html.contains("Windows 已交付");
+    let multiplatform_desktop = html.contains("全平台桌面");
     let preview_guidance = html.contains("macos-unsigned-preview.md");
     if zh_product == 0 {
         return rh::fail("docs index must include reviewed Traditional Chinese product copy");
     }
-    if windows_delivered == 0 {
-        return rh::fail("docs index must include the Windows delivery statement");
+    if multiplatform_desktop == 0 {
+        return rh::fail("docs index must include the multiplatform desktop statement");
     }
     if preview_guidance == 0 {
         return rh::fail("docs index must include preview guidance");
