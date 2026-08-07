@@ -721,7 +721,7 @@
     {
       "id": "package-qualified",
       "description": "Create a byte-qualified offline Windows package dry run",
-      "entry": "scripts/rhai/package-qualified.rhai",
+      "entry": "scripts/rh/package-qualified.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "target/qualification/receipt.json", "target/qualification/package-dry-run"],
