@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**舰队值班会话**刷新：2026-08-06T23:24Z（duty 结束；待审合仍无）
+最后由**舰队值班会话**刷新：2026-08-07T00:23Z（duty 结束；待审合仍无）
 
 ## 共享事实
 
@@ -15,7 +15,7 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `a63794d`（duty handoff bc-5ebbd62c；本轮 push 后为本 commit） |
+| `origin/main` | tip `7b3b3a8`（duty handoff bc-3db2caef；本轮 push 后为本 commit） |
 | 待审合 | **无** — `cursor/1-0e37`@`befca96` 四提交已 rebase 进 main（`558a05c`…`3aba969`），分支 stale；再 merge 会冲突 |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
@@ -63,10 +63,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-06T23:24Z
+### 舰队值班会话 · 2026-08-07T00:23Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-04391d30-f330-4ca3-b0f6-816dacc56bb4`
-- URL: https://cursor.com/agents/bc-04391d30-f330-4ca3-b0f6-816dacc56bb4
+- bcId: `bc-3db2caef-b229-4a95-a4f4-0f2bbc119c2d`
+- URL: https://cursor.com/agents/bc-3db2caef-b229-4a95-a4f4-0f2bbc119c2d
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -82,6 +82,7 @@
 
 ## 交接日志
 
+- 2026-08-07T00:23Z · 舰队值班会话(`bc-3db2caef-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=669eb95；nudge=0 未催；lock 已清
 - 2026-08-06T23:24Z · 舰队值班会话(`bc-04391d30-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=a63794d；nudge=0 未催；lock 已清
 - 2026-08-06T22:27Z · 舰队值班会话(`bc-5ebbd62c-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=2b58258；nudge=0 未催；清 mailbox 冲突标记；lock 已清
 - 2026-08-06T21:30Z · 主控1(`bc-a4df769a-…`) · duty 回报 bc-124dd66d：`cursor/1-0e37`@befca96 **不 merge** — M22a–c 已在 main（rebase SHA：`558a05c`/`70a91c2`/`b50369b`/`004579b`），main 另含 M22d–f + unix-gui；分支 stale；findings=0
