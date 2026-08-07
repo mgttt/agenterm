@@ -5,6 +5,11 @@
 
 mod stdlib;
 pub mod check;
+pub mod cache;
+pub mod compile;
+pub mod manifest;
+pub mod pack;
+pub mod qualify;
 
 use std::sync::Arc;
 
@@ -134,6 +139,24 @@ impl LuaEngine {
             .clone();
 
         Ok(LuaEvalResult { value, stdout })
+    }
+
+    /// Evaluate Lua source using the bytecode cache.
+    /// Returns `(LuaEvalResult, cache_hit: bool)`.
+    pub fn eval_cached(
+        &self,
+        source: &str,
+        host: &LuaHostFunctions,
+    ) -> Result<(LuaEvalResult, bool), LuaError> {
+        let cached = crate::cache::cached_compile(source)
+            .map_err(LuaError::Engine)?;
+        let result = self.eval(source, host)?;
+        Ok((result, cached.cache_hit))
+    }
+
+    /// Compute SHA256 hash of Lua source.
+    pub fn hash_source(source: &str) -> String {
+        crate::compile::hash_source(source)
     }
 
     fn inject_host_table(
