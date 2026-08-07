@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 16;
+pub const RH_CODEGEN_REVISION: u32 = 17;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -341,6 +341,21 @@ pub fn emit_host_runtime(out: &mut String) {
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"path_absolute: {error}\"));\n\
                      String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_system_time_now_unix_millis() -> INT {\n\
+             match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {\n\
+                 Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
+                     Ok(millis) => millis,\n\
+                     Err(_) => {\n\
+                         let _ = rh_fail(\"system_time_overflow: milliseconds exceed Rhai integer\");\n\
+                         0\n\
+                     }\n\
+                 },\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"system_time_before_unix_epoch: {error}\"));\n\
+                     0\n\
                  }\n\
              }\n\
          }\n\n\

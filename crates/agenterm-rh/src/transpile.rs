@@ -1160,6 +1160,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
         _ if path_absolute_display_arg(expr).is_some() => ValueKind::String,
         _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
+        _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
@@ -1404,6 +1405,28 @@ fn std_fs_try_rename_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
 
 fn std_fs_read_dir_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "read_dir")
+}
+
+fn std_time_system_time_now_unix_millis(expr: &Expr) -> bool {
+    let Expr::Dot(boxed, ..) = expr else {
+        return false;
+    };
+    let unix_millis = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "unix_millis"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "unix_millis" && call.args.is_empty()
+    );
+    if !unix_millis {
+        return false;
+    }
+    let Expr::FnCall(call, ..) = &boxed.lhs else {
+        return false;
+    };
+    call.namespace.to_string() == "std::time::SystemTime"
+        && call.name == "now"
+        && call.args.is_empty()
 }
 
 fn symlink_metadata_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
@@ -1923,6 +1946,10 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_metadata_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if std_time_system_time_now_unix_millis(expr) {
+            out.push_str("rh_system_time_now_unix_millis()");
             return Ok(());
         }
         if emit_dir_entry_property(out, expr, ctx)? {
@@ -3506,5 +3533,26 @@ fn entry() { stage_copy(args[0], args[1]) }
         assert!(output.rust.contains("rh_try_copy(&source, &destination)"));
         assert!(output.rust.contains("rh_rename(&source, &destination)"));
         assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::copy"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_system_time_now_unix_millis_fast_path() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let suffix = std::time::SystemTime::now().unix_millis; suffix + 1 }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_system_time_now_unix_millis()"));
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::time::SystemTime::now().unix_millis")
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 }

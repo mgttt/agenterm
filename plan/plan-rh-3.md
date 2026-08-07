@@ -102,6 +102,7 @@
 | M42f0 | `internal-version-policy` 已原生 `.rh` 任务入口并真实执行（print + process_status + string contains） | [x] |
 | M42f1 | 原生 `read_dir` / `remove_file` / `try_remove_file` + 链式 metadata 标志；`clean-locked-artifacts` 任务入口切到 `.rh`；codegen revision 15 | [x] |
 | M42f2 | 原生 `copy` / `create_dir_all` / `rename`（及 try_*）；codegen revision 16；解锁 `stage-artifact` | [x] |
+| M42f3 | 原生 `std::time::SystemTime::now().unix_millis`；codegen revision 17 | [x] |
 
 ---
 
