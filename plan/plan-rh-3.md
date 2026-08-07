@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f5**：M42f5a–b3 已齐（cg20）。**下一步 M42f5c**：`stage-build.rh` + `write-build-metadata` / `stage-build` 切 `.rh` 入口并归档旧 `.rhai` |
+| **状态** | **M42f5 完成**（cg20）：`stage-build` / `write-build-metadata` 已切原生 `.rh` 入口；旧 `.rhai` 归档。下一步另开里程碑 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -104,12 +104,12 @@
 | M42f2 | 原生 `copy` / `create_dir_all` / `rename`（及 try_*）；codegen revision 16；解锁 `stage-artifact` | [x] |
 | M42f3 | 原生 `std::time::SystemTime::now().unix_millis`；codegen revision 17 | [x] |
 | M42f4 | 无损迁移 `stage-artifact`（INT-only `stage`/`stage_as`，try_copy/try_rename，无 try 内 return） | [x] |
-| M42f5 | 无损迁移 `stage-build`：复用原生 `stage`/`stage_as`/`clean_locked`，收口仍挂 Rhai 的共享 artifact 编排；任务入口切 `.rh` 并归档旧 `.rhai` | [ ] |
+| M42f5 | 无损迁移 `stage-build`：复用原生 `stage`/`stage_as`/`clean_locked`，收口仍挂 Rhai 的共享 artifact 编排；任务入口切 `.rh` 并归档旧 `.rhai` | [x] |
 | M42f5a | 原生 `std::process::command_stdout_file(program, args, timeout_ms, path) -> INT`（utility op 5；无命令白名单；stdout 落盘后由 `read_to_string` 消费）；codegen 18；解锁 git `--show-prefix` 等需 stdout 的检查 | [x] |
 | M42f5b1 | pack 原生 `env::get/has`、`sha256_file`（生成 crate 加 sha2）、`atomic_write`、`SystemTime.now().rfc3339`、`Metadata.len`、`to_lower`；codegen 19 | [x] |
 | M42f5b2 | JSON 对象构建 / `stringify_pretty`、字符串 `split` 线迭代、`json_array_push`/`json_array_get`；codegen 20；bool 字面量赋值放行 | [x] |
 | M42f5b3 | INT-only `scripts/rh/lib/build_metadata.rh`（`write`/`write_platform` 返回 0；过程调用改 `command_stdout_file`/`command_status`；transpile 收紧 JSON 形参推断 + join/read_to_string JSON 子路径；资格门覆盖 stringify+atomic_write+sha256） | [x] |
-| M42f5c | `scripts/rh/stage-build.rh`；任务 entry 切 `write-build-metadata`/`stage-build` → `.rh`；归档旧 `.rhai`；`stage`/`stage_as` 只读 INT 0/1，不假设 map；黑盒串起真实写盘 | [ ] |
+| M42f5c | `scripts/rh/stage-build.rh`；任务 entry 切 `write-build-metadata`/`stage-build` → `.rh`；归档旧 `.rhai`；`stage`/`stage_as` 只读 INT 0/1，不假设 map；黑盒串起真实写盘 | [x] |
 
 **M42f5 依赖说明：** `stage-build.rhai` 本身编排（clean → stage/stage_as 循环 → metadata → clean）在 M42f4 后已大半可复用原生 `artifact_files`；真正阻塞是 (1) `git rev-parse --show-prefix` 需要 stdout（仅有 `command_status` 不够），(2) 内联 `build_metadata::write` 需要哈希/原子写/环境/RFC3339/JSON 序列化。禁止用 shell 包装或 `host_eval` 假迁移；禁止把 metadata 改成子进程调 Rhai 任务冒充原生入口。
 

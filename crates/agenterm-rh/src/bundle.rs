@@ -76,10 +76,7 @@ fn collect_modules(
             )));
         }
         let module_source = String::from_utf8(bytes).map_err(|error| {
-            RhError::Compile(format!(
-                "script_module_encoding: {}: {error}",
-                import.path
-            ))
+            RhError::Compile(format!("script_module_encoding: {}: {error}", import.path))
         })?;
         parse_rh_ast(&module_source).map_err(|error| match error {
             RhError::Parse(message) => {
@@ -185,9 +182,7 @@ fn literal_import_decls(source: &str) -> Result<Vec<ImportDecl>, String> {
                 index += 1;
                 skip_script_spacing(bytes, &mut index);
                 if !source[index..].starts_with("as") {
-                    return Err(
-                        "script_module_import_alias: import requires `as alias`".to_owned(),
-                    );
+                    return Err("script_module_import_alias: import requires `as alias`".to_owned());
                 }
                 index += 2;
                 skip_script_spacing(bytes, &mut index);
@@ -315,9 +310,10 @@ fn rewrite_aliased_calls(source: &str, aliases: &BTreeSet<String>) -> Result<Str
             let ident = &source[start..index];
             if aliases.contains(ident)
                 && source[index..].starts_with("::")
-                && source.as_bytes().get(index + 2).is_some_and(|byte| {
-                    byte.is_ascii_alphabetic() || *byte == b'_'
-                })
+                && source
+                    .as_bytes()
+                    .get(index + 2)
+                    .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
             {
                 index += 2;
                 // Drop `alias::` and keep the function name.

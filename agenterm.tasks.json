@@ -1100,7 +1100,7 @@
     {
       "id": "stage-build",
       "description": "Stage the validated executable set and publish frozen build provenance",
-      "entry": "scripts/rhai/stage-build.rhai",
+      "entry": "scripts/rh/stage-build.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": ["build-identity", "clean-locked-artifacts", "stage-artifact", "write-build-metadata"],
@@ -1132,7 +1132,7 @@
     {
       "id": "write-build-metadata",
       "description": "Write staged or platform-target executable provenance from frozen source and input identities",
-      "entry": "scripts/rhai/write-build-metadata.rhai",
+      "entry": "scripts/rh/write-build-metadata.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": ["build-identity", "validate-artifact-manifest"],

@@ -282,9 +282,13 @@ fn write_for_artifacts(
         rhai::json::stringify_pretty(manifest) + "\n"
     );
     std::fs::try_remove_file(stdout_path);
+    let dirty_label = "0";
+    if dirty {
+        dirty_label = "1";
+    }
     print(
         "Wrote build metadata for " + commit +
-        " (" + profile + ", dirty=" + dirty + ")"
+        " (" + profile + ", dirty=" + dirty_label + ")"
     );
     0
 }
@@ -339,6 +343,7 @@ fn write_platform(
             }
         }
     }
+    require(os_name != "" && arch != "", "build_metadata_platform_os_arch_empty");
     require(
         matches == 1,
         "build_metadata_platform_match:" + os_name + "-" + arch

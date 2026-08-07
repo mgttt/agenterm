@@ -151,14 +151,15 @@ impl EmitCtx {
         out.push_str("}}}}\"");
         for (name, kind) in &self.scope {
             out.push_str(", ");
-            if matches!(kind, ValueKind::String | ValueKind::Json | ValueKind::StringList) {
+            if matches!(
+                kind,
+                ValueKind::String | ValueKind::Json | ValueKind::StringList
+            ) {
                 out.push_str("serde_json::to_string(&");
                 out.push_str(name);
                 out.push_str(").unwrap_or_else(|_| \"\\\"\\\"\".to_owned())");
             } else if matches!(kind, ValueKind::Set) {
-                out.push_str(
-                    "serde_json::to_string(&",
-                );
+                out.push_str("serde_json::to_string(&");
                 out.push_str(name);
                 out.push_str(
                     ".iter().cloned().collect::<Vec<_>>()).unwrap_or_else(|_| \"[]\".to_owned())",
@@ -282,14 +283,17 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
     let local_fns = local_fn_names(ast);
     let sig_probe = ctx.clone().with_local_fns(local_fns.clone());
     let mut local_fn_sigs = BTreeMap::new();
+    let mut local_defs: Vec<&ScriptFuncDef> = Vec::new();
     for meta in ast.iter_functions() {
         if meta.name == "entry" || meta.name == "cc_lines" {
             continue;
         }
         if let Some(def) = find_fn_def(ast, meta.name) {
             local_fn_sigs.insert(meta.name.to_string(), infer_param_kinds(def, &sig_probe));
+            local_defs.push(def);
         }
     }
+    propagate_local_fn_param_kinds(&local_defs, &mut local_fn_sigs);
     let mut base_ctx = ctx
         .clone()
         .with_local_fns(local_fns)
@@ -447,7 +451,13 @@ fn find_fn_def<'a>(ast: &'a AST, name: &str) -> Option<&'a ScriptFuncDef> {
 fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(), RhError> {
     let mut fn_ctx = ctx.clone();
     fn_ctx.scope.clear();
-    let param_kinds = infer_param_kinds(def, &fn_ctx);
+    // Prefer the shared (possibly inter-procedurally upgraded) signature so
+    // call-site emit_string_arg/emit_json_arg matches the generated Rust params.
+    let param_kinds = ctx
+        .local_fn_sigs
+        .get(def.name.as_str())
+        .cloned()
+        .unwrap_or_else(|| infer_param_kinds(def, &fn_ctx));
     for (param, kind) in def.params.iter().zip(param_kinds.iter().copied()) {
         fn_ctx = fn_ctx.with_binding(param.as_str(), kind);
     }
@@ -494,8 +504,164 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
         .collect()
 }
 
+fn propagate_local_fn_param_kinds(
+    defs: &[&ScriptFuncDef],
+    local_fn_sigs: &mut BTreeMap<String, Vec<ValueKind>>,
+) {
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for def in defs {
+            let upgrades = collect_param_kind_upgrades(def, local_fn_sigs);
+            let Some(sig) = local_fn_sigs.get_mut(def.name.as_str()) else {
+                continue;
+            };
+            for (index, kind) in upgrades {
+                if index >= sig.len() {
+                    continue;
+                }
+                if sig[index] == ValueKind::Int
+                    && matches!(kind, ValueKind::String | ValueKind::Json)
+                {
+                    sig[index] = kind;
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
+fn collect_param_kind_upgrades(
+    def: &ScriptFuncDef,
+    local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
+) -> Vec<(usize, ValueKind)> {
+    let mut upgrades = Vec::new();
+    for stmt in def.body.iter() {
+        collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, &mut upgrades);
+    }
+    upgrades
+}
+
+fn collect_param_kind_upgrades_in_stmt(
+    stmt: &Stmt,
+    def: &ScriptFuncDef,
+    local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
+    upgrades: &mut Vec<(usize, ValueKind)>,
+) {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
+            collect_param_kind_upgrades_in_expr(expr.as_ref(), def, local_fn_sigs, upgrades);
+        }
+        Stmt::Var(boxed, ..) => {
+            collect_param_kind_upgrades_in_expr(&boxed.1, def, local_fn_sigs, upgrades);
+        }
+        Stmt::Assignment(boxed, ..) => {
+            collect_param_kind_upgrades_in_expr(&boxed.1.lhs, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&boxed.1.rhs, def, local_fn_sigs, upgrades);
+        }
+        Stmt::If(boxed, ..) => {
+            let flow = boxed.as_ref();
+            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, upgrades);
+            for stmt in flow.body.iter() {
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+            }
+            for stmt in flow.branch.iter() {
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+            }
+        }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, upgrades);
+            for stmt in flow.body.iter() {
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+            }
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, upgrades);
+            for stmt in flow.body.iter() {
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+            }
+        }
+        Stmt::FnCall(call, ..) => {
+            collect_param_kind_upgrades_in_call(call, def, local_fn_sigs, upgrades);
+        }
+        _ => {}
+    }
+}
+
+fn collect_param_kind_upgrades_in_expr(
+    expr: &Expr,
+    def: &ScriptFuncDef,
+    local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
+    upgrades: &mut Vec<(usize, ValueKind)>,
+) {
+    match expr {
+        Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => {
+            collect_param_kind_upgrades_in_call(call, def, local_fn_sigs, upgrades);
+            for arg in &call.args {
+                collect_param_kind_upgrades_in_expr(arg, def, local_fn_sigs, upgrades);
+            }
+        }
+        Expr::Dot(boxed, ..) | Expr::Index(boxed, ..) => {
+            collect_param_kind_upgrades_in_expr(&boxed.lhs, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&boxed.rhs, def, local_fn_sigs, upgrades);
+        }
+        Expr::Array(items, ..) => {
+            for item in items {
+                collect_param_kind_upgrades_in_expr(item, def, local_fn_sigs, upgrades);
+            }
+        }
+        Expr::Map(map, ..) => {
+            for (_, value) in &map.0 {
+                collect_param_kind_upgrades_in_expr(value, def, local_fn_sigs, upgrades);
+            }
+        }
+        Expr::And(args, ..) | Expr::Or(args, ..) => {
+            for arg in args.iter() {
+                collect_param_kind_upgrades_in_expr(arg, def, local_fn_sigs, upgrades);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_param_kind_upgrades_in_call(
+    call: &rhai::FnCallExpr,
+    def: &ScriptFuncDef,
+    local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
+    upgrades: &mut Vec<(usize, ValueKind)>,
+) {
+    if !call.namespace.is_empty() {
+        return;
+    }
+    let Some(callee_sig) = local_fn_sigs.get(call.name.as_str()) else {
+        return;
+    };
+    for (arg_index, arg) in call.args.iter().enumerate() {
+        let Expr::Variable(ident, ..) = arg else {
+            continue;
+        };
+        let Some(param_index) = def
+            .params
+            .iter()
+            .position(|param| param.as_str() == ident.1.as_str())
+        else {
+            continue;
+        };
+        let Some(kind) = callee_sig.get(arg_index).copied() else {
+            continue;
+        };
+        if matches!(kind, ValueKind::String | ValueKind::Json) {
+            upgrades.push((param_index, kind));
+        }
+    }
+}
+
 fn param_used_as_json(def: &ScriptFuncDef, param: &str, _ctx: &EmitCtx) -> bool {
-    def.body.iter().any(|stmt| stmt_uses_json_param(stmt, param))
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_json_param(stmt, param))
 }
 
 fn stmt_uses_json_param(stmt: &Stmt, param: &str) -> bool {
@@ -510,7 +676,10 @@ fn stmt_uses_json_param(stmt: &Stmt, param: &str) -> bool {
         Stmt::If(boxed, ..) => {
             let flow = boxed.as_ref();
             expr_uses_json_param(&flow.expr, param)
-                || flow.body.iter().any(|stmt| stmt_uses_json_param(stmt, param))
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_json_param(stmt, param))
                 || flow
                     .branch
                     .iter()
@@ -586,16 +755,14 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
             {
                 return true;
             }
-            call.args
-                .iter()
-                .any(|arg| expr_uses_json_param(arg, param))
+            call.args.iter().any(|arg| expr_uses_json_param(arg, param))
         }
-        Expr::MethodCall(call, ..) => call
-            .args
-            .iter()
-            .any(|arg| expr_uses_json_param(arg, param)),
+        Expr::MethodCall(call, ..) => call.args.iter().any(|arg| expr_uses_json_param(arg, param)),
         Expr::Array(items, ..) => items.iter().any(|item| expr_uses_json_param(item, param)),
-        Expr::Map(map, ..) => map.0.iter().any(|(_, value)| expr_uses_json_param(value, param)),
+        Expr::Map(map, ..) => map
+            .0
+            .iter()
+            .any(|(_, value)| expr_uses_json_param(value, param)),
         Expr::Dot(boxed, ..) => {
             if is_param_var(&boxed.lhs, param) {
                 match &boxed.rhs {
@@ -604,15 +771,12 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
                     Expr::Property(..) => true,
                     Expr::MethodCall(call, ..) if is_json_method_name(call.name.as_str()) => true,
                     Expr::MethodCall(call, ..) if is_stringish_method_name(call.name.as_str()) => {
-                        call.args
-                            .iter()
-                            .any(|arg| expr_uses_json_param(arg, param))
+                        call.args.iter().any(|arg| expr_uses_json_param(arg, param))
                     }
                     _ => expr_uses_json_param(&boxed.rhs, param),
                 }
             } else {
-                expr_uses_json_param(&boxed.lhs, param)
-                    || expr_uses_json_param(&boxed.rhs, param)
+                expr_uses_json_param(&boxed.lhs, param) || expr_uses_json_param(&boxed.rhs, param)
             }
         }
         _ => false,
@@ -638,7 +802,10 @@ fn stmt_uses_string_param(stmt: &Stmt, param: &str) -> bool {
         Stmt::If(boxed, ..) => {
             let flow = boxed.as_ref();
             expr_uses_string_param(&flow.expr, param)
-                || flow.body.iter().any(|stmt| stmt_uses_string_param(stmt, param))
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_string_param(stmt, param))
                 || flow
                     .branch
                     .iter()
@@ -662,7 +829,10 @@ fn stmt_uses_string_param(stmt: &Stmt, param: &str) -> bool {
                     .iter()
                     .any(|stmt| stmt_uses_string_param(stmt, param))
         }
-        Stmt::FnCall(call, ..) => call.args.iter().any(|arg| expr_uses_string_param(arg, param)),
+        Stmt::FnCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_uses_string_param(arg, param)),
         _ => false,
     }
 }
@@ -687,6 +857,7 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         || std_fs_symlink_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_join_display_args(expr)
             .is_some_and(|(base, child)| is_param_var(base, param) || is_param_var(child, param))
+        || rh_fail_arg(expr).is_some_and(|message| is_param_var(message, param))
     {
         return true;
     }
@@ -735,7 +906,8 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
     if let Expr::FnCall(call, ..) = expr
         && matches!(call.op_token.as_ref(), Some(Token::Plus))
         && call.args.len() == 2
-        && ((is_param_var(&call.args[0], param) && matches!(call.args[1], Expr::StringConstant(..)))
+        && ((is_param_var(&call.args[0], param)
+            && matches!(call.args[1], Expr::StringConstant(..)))
             || (is_param_var(&call.args[1], param)
                 && matches!(call.args[0], Expr::StringConstant(..))))
     {
@@ -747,7 +919,8 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
             Some(Token::Equals | Token::EqualsTo | Token::NotEqualsTo)
         )
         && call.args.len() == 2
-        && ((is_param_var(&call.args[0], param) && matches!(call.args[1], Expr::StringConstant(..)))
+        && ((is_param_var(&call.args[0], param)
+            && matches!(call.args[1], Expr::StringConstant(..)))
             || (is_param_var(&call.args[1], param)
                 && matches!(call.args[0], Expr::StringConstant(..))))
     {
@@ -808,7 +981,8 @@ fn emit_stmt(
                 out.push_str(", ");
                 emit_json_path(out, &path);
                 out.push(')');
-            } else if kind == ValueKind::Json && matches!(expr, Expr::Array(items, ..) if items.is_empty())
+            } else if kind == ValueKind::Json
+                && matches!(expr, Expr::Array(items, ..) if items.is_empty())
             {
                 out.push_str("serde_json::Value::Array(Vec::new())");
             } else if kind == ValueKind::Json && matches!(expr, Expr::Map(..)) {
@@ -1063,8 +1237,7 @@ fn emit_stmt(
             out.push_str("    }\n");
         }
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
-        Stmt::Expr(expr)
-            if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr)
             if ctx.cdylib
                 && let Expr::FnCall(call, ..) = expr.as_ref()
@@ -1619,7 +1792,9 @@ fn std_time_system_time_now_rfc3339(expr: &Expr) -> bool {
     let Expr::FnCall(call, ..) = &boxed.lhs else {
         return false;
     };
-    call.namespace.to_string() == "std::time::SystemTime" && call.name == "now" && call.args.is_empty()
+    call.namespace.to_string() == "std::time::SystemTime"
+        && call.name == "now"
+        && call.args.is_empty()
 }
 
 fn std_env_has_arg(expr: &Expr) -> Option<&Expr> {
@@ -1743,10 +1918,7 @@ fn json_array_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a E
     Some((ident.1.as_str(), &boxed.rhs))
 }
 
-fn json_array_push_call<'a>(
-    expr: &'a Expr,
-    ctx: &EmitCtx,
-) -> Option<(&'a str, &'a Expr)> {
+fn json_array_push_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
@@ -2007,7 +2179,7 @@ fn type_of_arg(expr: &Expr) -> Option<&Expr> {
 }
 
 fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
-    matches!(expr, Expr::StringConstant(..))
+    if matches!(expr, Expr::StringConstant(..))
         || type_of_arg(expr).is_some()
         || args_index_expr(expr).is_some()
         || matches!(
@@ -2015,6 +2187,27 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
             Expr::Variable(ident, ..)
                 if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String)
         )
+        || std_env_get_arg(expr).is_some()
+        || path_join_display_args(expr).is_some()
+        || path_absolute_display_arg(expr).is_some()
+        || std_fs_read_to_string_arg(expr).is_some()
+        || crypto_sha256_file_arg(expr).is_some()
+        || json_stringify_pretty_arg(expr).is_some()
+        || string_list_index(expr, ctx).is_some()
+        || std_time_system_time_now_rfc3339(expr)
+    {
+        return true;
+    }
+    // Nested `+` chains: any string leaf makes the whole chain string-typed so
+    // `("a" + "b") + n` uses format! rather than Rust `String + i64`.
+    if let Expr::FnCall(call, ..) = expr
+        && matches!(call.op_token.as_ref(), Some(Token::Plus))
+        && call.args.len() == 2
+    {
+        return is_explicit_string_expr(&call.args[0], ctx)
+            || is_explicit_string_expr(&call.args[1], ctx);
+    }
+    false
 }
 
 fn prefers_string_ops(lhs: &Expr, rhs: &Expr, ctx: &EmitCtx) -> bool {
@@ -2497,8 +2690,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(".chars().count() as INT)");
         }
         Expr::Dot(..)
-            if var_len_name(expr)
-                .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::StringList)) =>
+            if var_len_name(expr).is_some_and(|name| {
+                ctx.scope.get(name).copied() == Some(ValueKind::StringList)
+            }) =>
         {
             out.push('(');
             out.push_str(var_len_name(expr).expect("checked string list binding"));
@@ -2620,11 +2814,7 @@ fn emit_json_array_push_stmt(
     Ok(true)
 }
 
-fn emit_json_map_literal(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<(), RhError> {
+fn emit_json_map_literal(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     let Expr::Map(map, ..) = expr else {
         return Err(RhError::Transpile(
             "emit_json_map_literal expected map literal".into(),
@@ -2644,11 +2834,7 @@ fn emit_json_map_literal(
     Ok(())
 }
 
-fn emit_json_value_expr(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<(), RhError> {
+fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     match expr {
         Expr::StringConstant(value, ..) => {
             out.push_str("serde_json::Value::String(String::from(");
@@ -2762,11 +2948,7 @@ fn emit_json_value_expr(
     Ok(())
 }
 
-fn emit_std_env_has(
-    out: &mut String,
-    name: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_std_env_has(out: &mut String, name: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let mut name_expr = String::new();
     if !emit_native_string(&mut name_expr, name, ctx)? {
         return Ok(false);
@@ -2777,11 +2959,7 @@ fn emit_std_env_has(
     Ok(true)
 }
 
-fn emit_std_env_get(
-    out: &mut String,
-    name: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_std_env_get(out: &mut String, name: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let mut name_expr = String::new();
     if !emit_native_string(&mut name_expr, name, ctx)? {
         return Ok(false);
@@ -3164,11 +3342,7 @@ fn parse_set_method_call<'a>(
     Some((ident.1.as_str(), call))
 }
 
-fn emit_set_predicate(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_set_predicate(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((binding, call)) = parse_set_method_call(expr, ctx) else {
         return Ok(false);
     };
@@ -3508,11 +3682,7 @@ fn emit_metadata_property(
     Ok(true)
 }
 
-fn emit_dir_entry_property(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_dir_entry_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
     if let Some((binding, field)) = dir_entry_int_field(expr, ctx) {
         out.push_str(binding);
         out.push('.');
@@ -4159,7 +4329,11 @@ fn entry() {
             output.rust
         );
         assert!(output.rust.contains("\"--show-prefix\""), "{}", output.rust);
-        assert!(!output.rust.contains("rh_host_eval_int(\"std::process::command_stdout_file"));
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_stdout_file")
+        );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     }
 
@@ -4186,7 +4360,11 @@ fn entry() {
             output.rust
         );
         assert!(output.rust.contains("rh_string_split("), "{}", output.rust);
-        assert!(output.rust.contains("rh_json_array_push("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_json_array_push("),
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("rh_json_stringify_pretty("),
             "{}",
@@ -4254,7 +4432,11 @@ fn entry() {
             output.rust
         );
         assert_eq!(output.rust.matches("rh_remove_file(&path)").count(), 2);
-        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::remove_file"));
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::remove_file")
+        );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     }
 
@@ -4271,7 +4453,11 @@ fn entry() {
             output.rust
         );
         assert!(output.rust.contains("rh_try_remove_file(&path)"));
-        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::try_remove_file"));
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::try_remove_file")
+        );
     }
 
     #[test]
@@ -4303,11 +4489,19 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("for dir_entry in rh_read_dir(&directory)"));
+        assert!(
+            output
+                .rust
+                .contains("for dir_entry in rh_read_dir(&directory)")
+        );
         assert!(output.rust.contains("dir_entry.is_file"));
         assert!(output.rust.contains("dir_entry.file_name.starts_with("));
         assert!(output.rust.contains("rh_try_remove_file(&dir_entry.path)"));
-        assert!(output.rust.contains("rh_symlink_metadata(&directory).is_dir"));
+        assert!(
+            output
+                .rust
+                .contains("rh_symlink_metadata(&directory).is_dir")
+        );
         assert!(output.rust.contains("rh_remove_file("));
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
@@ -4357,7 +4551,11 @@ fn entry() { clean_locked_for_name(args[0], args[1]) }
             output.rust
         );
         assert!(output.rust.contains("rh_symlink_metadata(&path).is_file"));
-        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::symlink_metadata"));
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::symlink_metadata")
+        );
     }
 
     #[test]
@@ -4406,7 +4604,11 @@ fn entry() { clean_locked_for_name(args[0], args[1]) }
             output.rust
         );
         assert_eq!(output.rust.matches("rh_create_dir_all(&path)").count(), 2);
-        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::create_dir_all"));
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::create_dir_all")
+        );
     }
 
     #[test]
@@ -4447,7 +4649,11 @@ fn entry() { stage_copy(args[0], args[1]) }
             output.rust
         );
         assert!(output.rust.contains("source: String"), "{}", output.rust);
-        assert!(output.rust.contains("destination: String"), "{}", output.rust);
+        assert!(
+            output.rust.contains("destination: String"),
+            "{}",
+            output.rust
+        );
         assert!(output.rust.contains("rh_create_dir_all(&destination)"));
         assert!(output.rust.contains("rh_try_copy(&source, &destination)"));
         assert!(output.rust.contains("rh_rename(&source, &destination)"));
@@ -4511,7 +4717,9 @@ fn entry() { stage_copy(args[0], args[1]) }
             output.rust
         );
         assert!(
-            output.rust.contains("rh_json_get_path(&artifact, &[\"name\"])"),
+            output
+                .rust
+                .contains("rh_json_get_path(&artifact, &[\"name\"])"),
             "{}",
             output.rust
         );

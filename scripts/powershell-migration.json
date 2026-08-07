@@ -680,7 +680,7 @@
       "group": "deleted",
       "responsibility": "built artifact staging",
       "replacement_task": "stage-build",
-      "replacement": "scripts/rhai/stage-build.rhai",
+      "replacement": "scripts/rh/stage-build.rh",
       "evidence": "public CLI composition fixture plus real build.bat execution and old/new staged file and metadata parity",
       "status": "deleted",
       "callers": [
@@ -759,7 +759,7 @@
       "group": "deleted",
       "responsibility": "artifact metadata production",
       "replacement_task": "write-build-metadata",
-      "replacement": "scripts/rhai/write-build-metadata.rhai",
+      "replacement": "scripts/rh/write-build-metadata.rh",
       "evidence": "public CLI black-box frozen/fallback identity and drift coverage in tests/rhai_migration.rs plus field parity against the removed PowerShell implementation",
       "status": "deleted",
       "callers": [

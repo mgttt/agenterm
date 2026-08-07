@@ -55,7 +55,9 @@ fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
     let artifacts = repo.join("scripts").join("artifacts.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    // Native `.rh` task entries must run through agenterm-rh; the rhai shim
+    // defaults AGENTERM_SCRIPT_BACKEND=rhai and cannot resolve `.rh` imports.
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     command
         .current_dir(repo)
         .args(["task", "run", "clean-locked-artifacts", "--manifest"])
@@ -86,7 +88,7 @@ fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .args(["task", "run", "stage-artifact", "--manifest"])
         .arg(manifest)
@@ -102,7 +104,7 @@ fn run_validate_artifact_manifest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .args(["task", "run", "validate-artifact-manifest", "--manifest"])
         .arg(manifest)
@@ -184,7 +186,7 @@ fn run_write_build_metadata(
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     command
         .current_dir(repo)
         .args(["task", "run", "write-build-metadata", "--manifest"])
@@ -227,12 +229,14 @@ fn run_stage_build(
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     command
         .current_dir(repo)
         .args(["task", "run", "stage-build", "--manifest"])
         .arg(manifest)
-        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        // Native AOT compile of the bundled stage-build project can exceed 10s
+        // on a cold host; keep headroom while still bounding the fixture.
+        .args(["--timeout-ms", "60000", "--max-operations", "10000000"])
         .arg("--")
         .arg(repo_under_test)
         .arg(source_directory)

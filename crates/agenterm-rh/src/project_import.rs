@@ -235,8 +235,7 @@ mod tests {
         let root = fixture();
         fs::write(root.join("modules/leaf.rhai"), "fn value() { 1 }").unwrap();
         fs::write(root.join("modules/leaf.rh"), "fn value() { 2 }").unwrap();
-        let sources =
-            validate_project_imports(&root, "import \"modules/leaf\" as leaf;").unwrap();
+        let sources = validate_project_imports(&root, "import \"modules/leaf\" as leaf;").unwrap();
         assert_eq!(sources, ["fn value() { 2 }"]);
         fs::remove_dir_all(root).unwrap();
     }

@@ -1,0 +1,104 @@
+// Stage the validated executable set and publish its provenance atomically.
+//
+// Args:
+//   REPO SOURCE_DIRECTORY DESTINATION_DIRECTORY PROFILE
+//
+// stage/stage_as return INT 0/1 (direct copy / park-replace). Callers discard
+// that INT and must not assume the old Rhai #{ destination, parked } map.
+
+import "scripts/rh/lib/artifact_files" as artifact_files;
+import "scripts/rh/lib/artifact_manifest" as artifact_manifest;
+import "scripts/rh/lib/build_metadata" as build_metadata;
+
+fn entry() {
+    if args.len != 4 {
+        return rh::fail(
+            "expected: REPO SOURCE_DIRECTORY DESTINATION_DIRECTORY PROFILE"
+        );
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let source_directory = std::path::absolute(args[1]).display;
+    let destination_directory = std::path::absolute(args[2]).display;
+    let profile = args[3];
+    require(
+        profile == "dev"
+            || profile == "release-fast"
+            || profile == "release",
+        "stage_build_profile_invalid:" + profile
+    );
+
+    // Reject non-root repos before any destination mutation (create_dir_all /
+    // staging). Temp stdout lives beside the destination path, not inside it.
+    let stdout_path = destination_directory + ".stage-build.stdout.tmp";
+    let code = std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "rev-parse", "--show-prefix"],
+        10000,
+        stdout_path
+    );
+    require(code == 0, "stage-build-git-root");
+    let prefix = std::fs::read_to_string(stdout_path);
+    prefix.trim();
+    require(prefix == "", "stage_build_repo_not_exact_git_root:" + repo);
+    std::fs::try_remove_file(stdout_path);
+
+    std::fs::create_dir_all(destination_directory);
+
+    let artifact_manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    artifact_manifest::validate(artifact_manifest_path);
+    let text = std::fs::read_to_string(artifact_manifest_path);
+    let manifest = rhai::json::parse(text);
+
+    let _locked = artifact_files::clean_locked(
+        destination_directory,
+        artifact_manifest_path
+    );
+    let _obsolete0 =
+        artifact_files::remove_obsolete(destination_directory, "agentermctl.exe");
+    let _obsolete1 = artifact_files::remove_obsolete(
+        destination_directory,
+        "agenterm-script.exe"
+    );
+    let _obsolete2 =
+        artifact_files::remove_obsolete(destination_directory, "agenterm-script");
+
+    for artifact in manifest.executables {
+        // Former source_name_for_artifact was an identity map for current
+        // manifest names; stage() discards the INT park/copy result.
+        let _staged = artifact_files::stage(
+            source_directory,
+            destination_directory,
+            artifact.name
+        );
+    }
+
+    let output_manifest =
+        std::path::join(destination_directory, "agenterm.json").display;
+    let _metadata = build_metadata::write(
+        repo,
+        output_manifest,
+        artifact_manifest_path,
+        destination_directory,
+        profile
+    );
+
+    let _locked_again = artifact_files::clean_locked(
+        destination_directory,
+        artifact_manifest_path
+    );
+    let _obsolete0_again =
+        artifact_files::remove_obsolete(destination_directory, "agentermctl.exe");
+    let _obsolete1_again = artifact_files::remove_obsolete(
+        destination_directory,
+        "agenterm-script.exe"
+    );
+    let _obsolete2_again =
+        artifact_files::remove_obsolete(destination_directory, "agenterm-script");
+
+    print(
+        "PASS: staged build artifacts and metadata in " + destination_directory
+    );
+    0
+}
