@@ -2219,6 +2219,7 @@ fn emit_stmt(
         Stmt::Expr(expr) if ctx.cdylib && emit_string_list_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_child_list_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_json_root_mutation_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_task_sleep_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr)
             if ctx.cdylib
@@ -6661,6 +6662,54 @@ fn emit_json_array_push_stmt(
     Ok(true)
 }
 
+fn emit_json_root_mutation_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return Ok(false);
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return Ok(false);
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
+        return Ok(false);
+    }
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return Ok(false);
+    };
+    match (call.name.as_str(), call.args.as_slice()) {
+        ("remove", [key]) => {
+            let mut key_rust = String::new();
+            if emit_json_map_key(&mut key_rust, key, ctx).is_err() {
+                return Ok(false);
+            }
+            out.push_str("    let _ = rh_json_remove(&mut ");
+            out.push_str(ident.1.as_str());
+            out.push_str(", &");
+            out.push_str(&key_rust);
+            out.push_str(");\n");
+            Ok(true)
+        }
+        ("insert", [index, item]) if is_pure_int_expr(index) => {
+            let mut item_rust = String::new();
+            if emit_json_value_expr(&mut item_rust, item, ctx).is_err() {
+                return Ok(false);
+            }
+            out.push_str("    let _ = rh_json_array_insert(&mut ");
+            out.push_str(ident.1.as_str());
+            out.push_str(", ");
+            emit_expr(out, index, ctx)?;
+            out.push_str(", ");
+            out.push_str(&item_rust);
+            out.push_str(");\n");
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 fn emit_json_map_literal(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     let Expr::Map(map, ..) = expr else {
         return Err(RhError::Transpile(
@@ -10052,6 +10101,38 @@ fn entry() {
         assert!(
             output.rust.contains("rh_create_dir_all(&rh_path_parent(")
                 && output.rust.contains("rh_atomic_write("),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn json_remove_and_array_insert_statements_stay_native() {
+        let source = r#"
+fn entry() {
+    let report = #{ output_path: "out.json", started_at_unix_ms: 1 };
+    report.remove("output_path");
+    report.remove("started_at_unix_ms");
+    let result = [#{ id: "b" }];
+    let value = #{ id: "a" };
+    result.insert(0, value);
+    require(result.len == 2, "insert");
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_json_remove(&mut report").count(), 2);
+        assert!(
+            output
+                .rust
+                .contains("rh_json_array_insert(&mut result, 0, value.clone())"),
             "{}",
             output.rust
         );

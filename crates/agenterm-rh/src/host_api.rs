@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 51;
+pub const RH_CODEGEN_REVISION: u32 = 52;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1154,6 +1154,38 @@ pub fn emit_host_runtime(out: &mut String) {
                  Some(node) => rh_json_array_push(node, item),\n\
                  None => {\n\
                      let _ = rh_fail(&format!(\"json_array_push_path: {}\", path.join(\".\")));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_array_insert(\n\
+             target: &mut serde_json::Value,\n\
+             index: INT,\n\
+             item: serde_json::Value,\n\
+         ) -> INT {\n\
+             let Some(items) = target.as_array_mut() else {\n\
+                 let _ = rh_fail(\"json_array_insert_target\");\n\
+                 return 0;\n\
+             };\n\
+             let Ok(index) = usize::try_from(index) else {\n\
+                 let _ = rh_fail(\"json_array_insert_index\");\n\
+                 return 0;\n\
+             };\n\
+             if index > items.len() {\n\
+                 let _ = rh_fail(\"json_array_insert_index\");\n\
+                 return 0;\n\
+             }\n\
+             items.insert(index, item);\n\
+             0\n\
+         }\n\n\
+         fn rh_json_remove(target: &mut serde_json::Value, key: &str) -> INT {\n\
+             match target.as_object_mut() {\n\
+                 Some(object) => {\n\
+                     object.remove(key);\n\
+                     0\n\
+                 }\n\
+                 None => {\n\
+                     let _ = rh_fail(\"json_remove_target\");\n\
                      0\n\
                  }\n\
              }\n\
