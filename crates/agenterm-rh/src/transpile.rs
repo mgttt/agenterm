@@ -2456,6 +2456,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
+        _ if hash_fnv1a64_arg(expr).is_some() => ValueKind::String,
         _ if dir_entry_path_display_binding(expr, ctx).is_some() => ValueKind::String,
         _ if dir_entry_string_field(expr, ctx).is_some() => ValueKind::String,
         // Local calls must win over `uses_host_surface`: otherwise
@@ -3110,6 +3111,32 @@ fn crypto_sha256_file_arg(expr: &Expr) -> Option<&Expr> {
     };
     if call.namespace.to_string() != "rhai::crypto"
         || call.name != "sha256_file"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn hash_fnv1a64_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::hash"
+        || call.name != "fnv1a64"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn bytes_from_text_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::bytes"
+        || call.name != "from_text"
         || call.args.len() != 1
     {
         return None;
@@ -4939,6 +4966,7 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || env_current_dir_display(expr)
         || std_fs_read_to_string_arg(expr).is_some()
         || crypto_sha256_file_arg(expr).is_some()
+        || hash_fnv1a64_arg(expr).is_some()
         || json_stringify_pretty_arg(expr).is_some()
         || json_stringify_arg(expr).is_some()
         || string_sub_string_arg(expr, ctx).is_some()
@@ -5261,6 +5289,13 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             if !emit_crypto_sha256_file(out, path, ctx)? {
                 return Err(RhError::Transpile(
                     "sha256_file argument must be a string path".into(),
+                ));
+            }
+        }
+        _ if hash_fnv1a64_arg(expr).is_some() => {
+            if !emit_hash_fnv1a64(out, expr, ctx)? {
+                return Err(RhError::Transpile(
+                    "fnv1a64 argument must be bytes::from_text of a stringish value".into(),
                 ));
             }
         }
@@ -5731,6 +5766,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if hash_fnv1a64_arg(expr).is_some()
+            && emit_hash_fnv1a64(out, expr, ctx)?
+        {
+            return Ok(());
+        }
         if let Some((path, value)) = runtime_atomic_write_args(expr)
             && emit_runtime_atomic_write(out, path, value, ctx)?
         {
@@ -6198,6 +6238,7 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             || args_index_expr(expr).is_some()
             || std_env_get_arg(expr).is_some()
             || crypto_sha256_file_arg(expr).is_some()
+            || hash_fnv1a64_arg(expr).is_some()
             || json_stringify_pretty_arg(expr).is_some()
             || json_stringify_arg(expr).is_some()
             || string_list_index(expr, ctx).is_some()
@@ -6381,6 +6422,52 @@ fn emit_crypto_sha256_file(
     }
     out.push_str("rh_sha256_file(");
     out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_hash_fnv1a64_bytes_input(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let text_arg = bytes_from_text_arg(expr).unwrap_or(expr);
+    if let Some(value) = json_stringify_arg(text_arg) {
+        out.push('&');
+        if !emit_json_stringify(out, value, ctx)? {
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    if let Some(value) = json_stringify_pretty_arg(text_arg) {
+        out.push('&');
+        if !emit_json_stringify_pretty(out, value, ctx)? {
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    if emit_native_string(out, text_arg, ctx)? {
+        return Ok(true);
+    }
+    out.push('&');
+    emit_stringish(out, text_arg, ctx)?;
+    Ok(true)
+}
+
+fn emit_hash_fnv1a64(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some(bytes_arg) = hash_fnv1a64_arg(expr) else {
+        return Ok(false);
+    };
+    let mut input = String::new();
+    if !emit_hash_fnv1a64_bytes_input(&mut input, bytes_arg, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_hash_fnv1a64(");
+    out.push_str(&input);
     out.push(')');
     Ok(true)
 }
@@ -8579,6 +8666,51 @@ fn entry() {
     }
 
     #[test]
+    fn cdylib_transpile_emits_hash_fnv1a64_json_map_value_native() {
+        let probe = r#"fn entry() {
+    let workload_identity = #{
+        lane: "quick",
+        profile: "dev",
+        gate_manifest_sha256: "abc"
+    };
+    let timing = #{
+        workload: #{
+            identity: workload_identity,
+            fingerprint: rhai::hash::fnv1a64(
+                rhai::bytes::from_text(
+                    rhai::json::stringify(workload_identity)
+                )
+            )
+        }
+    };
+    timing.workload.fingerprint
+}"#;
+        let probe_path = format!(
+            "/tmp/rh_probe_hash_{}.rh",
+            std::process::id()
+        );
+        let _ = std::fs::write(&probe_path, probe);
+        let output = transpile_cdylib_with_mode(probe).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_hash_fnv1a64(&rh_json_stringify(&workload_identity))"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("serde_json::Value::String("),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
     fn cdylib_transpile_emits_env_get_param_binding() {
         let output = transpile_cdylib_with_mode(
             r#"fn env_value(name) {
@@ -9122,6 +9254,31 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_hash_fnv1a64_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let doc = rhai::json::parse("{\"a\":1}");
+    let fingerprint = rhai::hash::fnv1a64(rhai::bytes::from_text(rhai::json::stringify(doc)));
+    fingerprint.len
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_hash_fnv1a64("),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_eval_int(\"rhai::hash::fnv1a64"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 

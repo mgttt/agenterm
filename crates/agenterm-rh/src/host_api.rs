@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 43;
+pub const RH_CODEGEN_REVISION: u32 = 44;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -478,6 +478,14 @@ pub fn emit_host_runtime(out: &mut String) {
                  digest.update(&buffer[..count]);\n\
              }\n\
              rh_sha256_hex(digest.finalize())\n\
+         }\n\n\
+         fn rh_hash_fnv1a64(text: &str) -> String {\n\
+             let mut hash = 0xcbf29ce484222325_u64;\n\
+             for byte in text.bytes() {\n\
+                 hash ^= u64::from(byte);\n\
+                 hash = hash.wrapping_mul(0x100000001b3);\n\
+             }\n\
+             format!(\"fnv1a64:{hash:016x}\")\n\
          }\n\n\
          fn rh_append_sync(path: &str, text: &str) -> INT {\n\
              use std::io::Write;\n\
