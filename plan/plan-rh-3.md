@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg24）：M42f6g/g2 已切；`DirEntry.metadata` + `build-releases-index` 已原生。**Wave2**：`rh-aot-smoke` → `preflight-benchmark` → `client-smoke` → `cross-platform-automation-audit` →（M42f6h `release_candidate`）`candidate-*` → `migration-audit`；`target-report` 仍缺 `keys`/`pop`/float |
+| **状态** | **进行中 M42f6**（cg24）：易切叶已切。**Wave2 并行中**：`rh-aot-smoke` / `preflight-benchmark` / `client-smoke` / `cross-platform-automation-audit` + codegen `keys()`；其后（M42f6h）`candidate-*` → `migration-audit`；`target-report` 仍缺 `keys`/`pop`/float |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
