@@ -177,6 +177,85 @@ fn load_config() -> ConConfig {
     config
 }
 
+/// Command-line options, parsed out of `main` so the precedence and
+/// passthrough rules are unit-testable rather than only observable by
+/// launching a window.
+#[derive(Debug, Default, PartialEq)]
+struct ConArgs {
+    no_activate: bool,
+    working_dir: Option<String>,
+    font_size: Option<f64>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    command: Option<Vec<String>>,
+}
+
+/// Parses arguments, returning the message to print on failure.
+fn parse_args(args: &[String]) -> Result<ConArgs, String> {
+    let mut parsed = ConArgs::default();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--no-activate" => parsed.no_activate = true,
+            "--working-dir" => {
+                parsed.working_dir = Some(
+                    rest.next()
+                        .cloned()
+                        .ok_or_else(|| "error: --working-dir requires a path
+".to_owned())?,
+                );
+            }
+            other if other.starts_with("--working-dir=") => {
+                parsed.working_dir = Some(other["--working-dir=".len()..].to_owned());
+            }
+            "--font-size" => parsed.font_size = next_value(&mut rest, "--font-size")?,
+            other if other.starts_with("--font-size=") => {
+                parsed.font_size = Some(parse_value(&other["--font-size=".len()..], "--font-size")?);
+            }
+            "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
+            "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
+            // Everything after -e is the command line, verbatim. Consuming the
+            // remainder is what lets `-e ssh host -p 22` pass `-p 22` through
+            // rather than having this parser reject it as an unknown flag.
+            "-e" | "--command" => {
+                let argv: Vec<String> = rest.cloned().collect();
+                if argv.is_empty() {
+                    return Err("error: -e requires a program to run
+".to_owned());
+                }
+                parsed.command = Some(argv);
+                return Ok(parsed);
+            }
+            unknown => {
+                return Err(format!("error: unknown argument '{unknown}'
+
+{USAGE}"));
+            }
+        }
+    }
+    Ok(parsed)
+}
+
+/// Reads the next argument as `T`, reporting the flag name on failure rather
+/// than silently ignoring a typo — the old parser dropped bad values on the
+/// floor, so `--cols twenty` quietly did nothing.
+fn next_value<'a, T: std::str::FromStr>(
+    rest: &mut impl Iterator<Item = &'a String>,
+    flag: &str,
+) -> Result<Option<T>, String> {
+    let raw = rest
+        .next()
+        .ok_or_else(|| format!("error: {flag} requires a value
+"))?;
+    parse_value(raw, flag).map(Some)
+}
+
+fn parse_value<T: std::str::FromStr>(raw: &str, flag: &str) -> Result<T, String> {
+    raw.parse()
+        .map_err(|_| format!("error: {flag} expects a number, got '{raw}'
+"))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -184,46 +263,28 @@ fn main() {
         std::process::exit(code);
     }
 
-    let mut no_activate = std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
-    let mut working_dir: Option<String> = None;
-    let mut font_size: Option<f64> = None;
-    let mut initial_cols: Option<u16> = None;
-    let mut initial_rows: Option<u16> = None;
-    let mut rest = args.iter();
-    while let Some(arg) = rest.next() {
-        match arg.as_str() {
-            "--no-activate" => no_activate = true,
-            "--working-dir" => {
-                working_dir = rest.next().cloned();
-            }
-            other if other.starts_with("--working-dir=") => {
-                working_dir = Some(other["--working-dir=".len()..].to_owned());
-            }
-            "--font-size" => {
-                font_size = rest.next().and_then(|v| v.parse().ok());
-            }
-            other if other.starts_with("--font-size=") => {
-                font_size = other["--font-size=".len()..].parse().ok();
-            }
-            "--cols" => {
-                initial_cols = rest.next().and_then(|v| v.parse().ok());
-            }
-            "--rows" => {
-                initial_rows = rest.next().and_then(|v| v.parse().ok());
-            }
-            unknown => {
-                let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
-                    "error: unknown argument '{unknown}'\n\n{USAGE}"
-                ));
-                std::process::exit(2);
-            }
+    let parsed = match parse_args(&args) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            let _ = agenterm_platform::process::write_parent_console_stderr(&message);
+            std::process::exit(2);
         }
-    }
+    };
+    let ConArgs {
+        mut no_activate,
+        working_dir,
+        font_size,
+        cols: initial_cols,
+        rows: initial_rows,
+        command,
+    } = parsed;
+    no_activate |= std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
 
     // Load config file: CLI flags override config, config overrides defaults.
     let config = load_config();
 
     let mut app = ConTerminal::new(working_dir.clone());
+    app.command = command;
     // Config values (lowest priority)
     if let Some(fs) = config.font_size {
         app.font_size_logical = fs.clamp(8.0, 36.0);
@@ -264,10 +325,16 @@ fn main() {
 const USAGE: &str = "\
 Usage: agenterm-con [--no-activate] [--working-dir DIR]
                    [--font-size N] [--cols N] [--rows N]
+                   [-e PROGRAM [ARGS...]]
        agenterm-con --version
        agenterm-con --help
 
-A minimal console host (conhost equivalent). No tabs, no server, no Fleet.
+A standalone console host (conhost equivalent). No tabs, no server, no Fleet.
+
+  -e, --command  Run PROGRAM instead of the default shell. Everything after
+                 -e is passed through verbatim, so it must come last:
+                   agenterm-con -e pwsh -NoLogo
+                   agenterm-con --working-dir C:\\src -e cargo test
 
 Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 ~/.config (Unix) with keys: font_size, cols, rows (all optional).
@@ -301,6 +368,9 @@ fn offline_cli_exit(args: &[String]) -> Option<i32> {
 
 struct ConTerminal {
     working_dir: Option<String>,
+
+    /// Program to host, from `-e`. `None` runs the user's default shell.
+    command: Option<Vec<String>>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser<ConCallbacks>,
@@ -382,6 +452,7 @@ impl ConTerminal {
         drop(tx);
         Self {
             working_dir,
+            command: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
@@ -429,18 +500,30 @@ impl ConTerminal {
 
     /// Spawns the shell PTY and the reader thread. Called once from `opened`.
     fn spawn_pty(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
-        let shell = agenterm_platform::runtime::default_terminal_shell();
-        let mut command = ChildCommand::new(shell.clone())
+        // `-e` hosts a chosen program; otherwise fall back to the user's shell.
+        let (program, extra_args) = match self.command.as_ref().and_then(|argv| argv.split_first()) {
+            Some((program, args)) => (program.clone(), args.to_vec()),
+            None => (agenterm_platform::runtime::default_terminal_shell(), Vec::new()),
+        };
+
+        let mut command = ChildCommand::new(program.clone())
             .size(TerminalSize {
                 rows: self.rows,
                 cols: self.cols,
             })
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor");
-        // Platform-neutral: returns Some("-l") on Unix for bare shells,
-        // None on Windows or when the shell already has explicit args.
-        if let Some(login_arg) =
-            agenterm_platform::pty::login_shell_argument(std::path::Path::new(&shell), 0)
+
+        if self.command.is_some() {
+            for argument in extra_args {
+                command = command.arg(argument);
+            }
+        } else if let Some(login_arg) =
+            // Platform-neutral: returns Some("-l") on Unix for bare shells,
+            // None on Windows or when the shell already has explicit args.
+            // Only meaningful for the default-shell path — a program given
+            // via -e must receive exactly the arguments the user wrote.
+            agenterm_platform::pty::login_shell_argument(std::path::Path::new(&program), 0)
         {
             command = command.arg(login_arg);
         }
@@ -449,7 +532,9 @@ impl ConTerminal {
         }
 
         let spawned = command.spawn().map_err(|error| {
-            PixelWindowError::failed("cmd_spawn_failed", format!("{error}"))
+            // Name the program: "failed to spawn" with no subject is the kind
+            // of error message that costs a user ten minutes.
+            PixelWindowError::failed("cmd_spawn_failed", format!("{program}: {error}"))
         })?;
         let (mut master, child) = spawned.into_parts();
 
@@ -1588,6 +1673,51 @@ mod tests {
         // accidentally select a word.
         assert_eq!(app.register_click(here), 2);
         assert_eq!(app.register_click(elsewhere), 1);
+    }
+
+    fn argv(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn dash_e_takes_the_rest_of_the_line_verbatim() {
+        // Flags belonging to the hosted program must reach it untouched, not
+        // be parsed (or rejected) by this host.
+        let parsed = parse_args(&argv(&["-e", "ssh", "host", "-p", "22"])).expect("parses");
+        assert_eq!(
+            parsed.command,
+            Some(argv(&["ssh", "host", "-p", "22"]))
+        );
+
+        // Host flags before -e still apply.
+        let parsed =
+            parse_args(&argv(&["--cols", "100", "-e", "pwsh", "-NoLogo"])).expect("parses");
+        assert_eq!(parsed.cols, Some(100));
+        assert_eq!(parsed.command, Some(argv(&["pwsh", "-NoLogo"])));
+    }
+
+    #[test]
+    fn dash_e_without_a_program_is_an_error() {
+        assert!(parse_args(&argv(&["-e"])).is_err());
+    }
+
+    #[test]
+    fn bad_numeric_values_are_reported_rather_than_silently_dropped() {
+        // The previous parser used `.ok()`, so `--cols twenty` was ignored and
+        // the user got a default-sized window with no explanation.
+        let error = parse_args(&argv(&["--cols", "twenty"])).expect_err("should reject");
+        assert!(error.contains("--cols"), "{error}");
+        assert!(error.contains("twenty"), "{error}");
+
+        assert!(parse_args(&argv(&["--font-size"])).is_err());
+        assert!(parse_args(&argv(&["--working-dir"])).is_err());
+    }
+
+    #[test]
+    fn unknown_flags_are_rejected_with_usage() {
+        let error = parse_args(&argv(&["--nope"])).expect_err("should reject");
+        assert!(error.contains("--nope"), "{error}");
+        assert!(error.contains("Usage:"), "{error}");
     }
 
     #[test]
