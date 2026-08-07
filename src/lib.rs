@@ -40,6 +40,7 @@ pub mod script_rh_pack;
 pub mod script_rh_run;
 pub mod script_lua_host;
 pub mod script_lua_run;
+pub mod script_qjs_host;
 pub mod script_runtime;
 pub mod script_stdlib;
 pub mod script_stream;
