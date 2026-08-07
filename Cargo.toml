@@ -68,6 +68,15 @@ rhai = { version = "1.22", default-features = false, features = ["std", "serde",
 debug = 1
 incremental = true
 
+# `cargo test` links 31 integration binaries, each pulling in the whole crate.
+# Carrying dev's debug info through all of them is what drives peak memory on
+# an 8 GB machine; line tables still give readable panic locations, which is
+# all the suite needs. Set `debug = 1` here when stepping through a test in a
+# debugger.
+[profile.test]
+debug = 0
+incremental = true
+
 [profile.release]
 opt-level = "z"
 lto = "thin"
