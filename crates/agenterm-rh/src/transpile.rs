@@ -65,6 +65,8 @@ struct EmitCtx {
     local_fns: BTreeSet<String>,
     local_fn_sigs: BTreeMap<String, Vec<ValueKind>>,
     local_fn_return_kinds: BTreeMap<String, ValueKind>,
+    /// Return kind of the function body currently being emitted (`entry` defaults to Int).
+    current_return_kind: ValueKind,
     try_depth: u32,
 }
 
@@ -76,6 +78,7 @@ impl EmitCtx {
             local_fns: BTreeSet::new(),
             local_fn_sigs: BTreeMap::new(),
             local_fn_return_kinds: BTreeMap::new(),
+            current_return_kind: ValueKind::Int,
             try_depth: 0,
         }
     }
@@ -542,6 +545,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
         .get(def.name.as_str())
         .copied()
         .unwrap_or(ValueKind::Int);
+    fn_ctx.current_return_kind = return_kind;
     out.push_str("pub fn ");
     out.push_str(def.name.as_str());
     out.push('(');
@@ -1680,9 +1684,7 @@ fn emit_stmt(
         }
         Stmt::Return(Some(expr), flags, ..) if flags.contains(ASTFlags::BREAK) => {
             // Rhai lowers `throw expr` to `Return` with BREAK (not FnCall("throw")).
-            out.push_str("    return ");
-            emit_rh_fail(out, expr, ctx)?;
-            out.push_str(";\n");
+            emit_fail_return(out, expr, ctx)?;
         }
         Stmt::Return(Some(expr), ..) => {
             out.push_str("    return ");
@@ -2121,9 +2123,7 @@ fn emit_throw_stmt(
     implicit_return: bool,
 ) -> Result<(), RhError> {
     if ctx.cdylib && !ctx.in_try() && call.args.len() == 1 {
-        out.push_str("    return ");
-        emit_rh_fail(out, &call.args[0], ctx)?;
-        out.push_str(";\n");
+        emit_fail_return(out, &call.args[0], ctx)?;
         return Ok(());
     }
     if ctx.in_try() {
@@ -2155,10 +2155,47 @@ fn emit_require_stmt(
     out.push_str("    if ");
     emit_expr(out, condition, ctx)?;
     out.push_str(" == 0 {\n");
-    out.push_str("        return ");
-    emit_rh_fail(out, message, ctx)?;
-    out.push_str(";\n");
+    // Indent one level deeper than emit_fail_return's default body indent.
+    let mut fail = String::new();
+    emit_fail_return(&mut fail, message, ctx)?;
+    for line in fail.lines() {
+        out.push_str("    ");
+        out.push_str(line);
+        out.push('\n');
+    }
     out.push_str("    }\n");
+    Ok(())
+}
+
+fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
+    match kind {
+        ValueKind::Int | ValueKind::Bool => None,
+        ValueKind::String | ValueKind::Path => Some("String::new()"),
+        ValueKind::Json => Some("serde_json::Value::Null"),
+        ValueKind::StringList | ValueKind::ChildList => Some("Vec::new()"),
+        ValueKind::Set => Some("std::collections::HashSet::<String>::new()"),
+        // Opaque process values: callers should not throw from these helpers yet.
+        ValueKind::Command | ValueKind::Output | ValueKind::Child => None,
+        ValueKind::Char | ValueKind::Metadata | ValueKind::SystemTime | ValueKind::DirEntry => None,
+    }
+}
+
+fn emit_fail_return(
+    out: &mut String,
+    message: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    if let Some(default) = fail_return_default(ctx.current_return_kind) {
+        out.push_str("    let _ = ");
+        emit_rh_fail(out, message, ctx)?;
+        out.push_str(";\n    return ");
+        out.push_str(default);
+        out.push_str(";\n");
+    } else {
+        out.push_str("    return ");
+        emit_rh_fail(out, message, ctx)?;
+        out.push_str(";\n");
+    }
     Ok(())
 }
 
@@ -6969,6 +7006,18 @@ fn emit_string_list_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str(".clone()");
             Ok(())
         }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            // JSON string arrays (common harness argv vectors) coerce at the
+            // typed StringList boundary.
+            out.push_str(
+                "rh_json_array_items(&",
+            );
+            out.push_str(ident.1.as_str());
+            out.push_str(", &[]).into_iter().map(|value| rh_json_as_str(&value)).collect()");
+            Ok(())
+        }
         Expr::Array(items, ..) => {
             out.push_str("vec![");
             for (index, item) in items.iter().enumerate() {
@@ -8481,6 +8530,28 @@ fn entry() {
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn require_in_json_returning_fn_returns_null_after_fail() {
+        let source = r#"
+fn facts(profile) {
+    require(profile == "dev", "bad_profile");
+    #{ ok: 1 }
+}
+fn entry() {
+    let doc = facts("nope");
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output.rust.contains("let _ = rh_fail(")
+                && output.rust.contains("return serde_json::Value::Null;"),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]
