@@ -116,7 +116,7 @@ jobs:
             -name 'agenterm-*-candidate-manifest.json' -print -quit)"
           test -n "$manifest"
           "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh" \
-            run scripts/rhai/candidate-verify.rhai --project-root . -- \
+            run scripts/rh/candidate-verify.rh --project-root . -- \
             . "$manifest" candidate/payload
           version="$(jq -r .version "$manifest")"
           tag="$(jq -r .expected_tag "$manifest")"
@@ -262,7 +262,7 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-publish-tool"
           chmod +x "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh"
           "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh" \
-            run scripts/rhai/candidate-verify.rhai --project-root . -- \
+            run scripts/rh/candidate-verify.rh --project-root . -- \
             . \
             "$(find candidate -maxdepth 1 -type f \
               -name 'agenterm-*-candidate-manifest.json' -print -quit)" \

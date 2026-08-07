@@ -124,7 +124,7 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(PROMOTION.contains("conclusion"));
     assert!(PROMOTION.contains("head_sha"));
     assert!(PROMOTION.contains("publish-$tag"));
-    assert!(PROMOTION.contains("candidate-verify.rhai"));
+    assert!(PROMOTION.contains("candidate-verify.rh"));
     // H1: pure-derive releases.json during verify + publish (not a second truth).
     assert!(PROMOTION.contains("task run build-releases-index"));
     assert!(!PROMOTION.contains("build-releases-index.rhai"));

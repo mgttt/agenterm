@@ -544,7 +544,7 @@ costs a full candidate cycle:
   **not** require a new candidate; re-dispatch promotion against the existing
   one.
 - [ ] `scripts/rhai/promotion-identity.rhai` and
-  `scripts/rhai/candidate-verify.rhai` are checked out at the candidate's
+  `scripts/rh/candidate-verify.rh` are checked out at the candidate's
   `source_sha`. Fixing them **requires a new candidate** — reusing the old one
   reproduces the identical failure no matter how correct `main` is.
 - [ ] Anything the candidate build itself runs — gate scripts, smoke scripts,
@@ -561,7 +561,7 @@ costs a full candidate cycle:
 ### Verify locally before spending a candidate
 
 - [ ] Download the sealed bundle and replay the promotion scripts offline
-  before dispatching promotion. `candidate-verify.rhai` and
+  before dispatching promotion. `candidate-verify.rh` and
   `promotion-identity.rhai` both run against a downloaded bundle and reproduce
   CI's result exactly, and the publish job's assertions — body digest, marker
   reconstruction, channel uniqueness — can be recomputed with `jq` and

@@ -248,10 +248,10 @@ fn aggregate(fixture: &Fixture) -> Output {
 fn verify(fixture: &Fixture, now: u64) -> Output {
     let now = now.to_string();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .arg("run")
-        .arg(repo.join("scripts/rhai/candidate-verify.rhai"))
+        .arg(repo.join("scripts/rh/candidate-verify.rh"))
         .arg("--project-root")
         .arg(repo)
         .arg("--")
@@ -282,7 +282,19 @@ fn exact_sha_candidate_happy_path_is_self_describing_and_verifiable() {
     assert!(verified.status.success(), "{}", output_text(&verified));
     assert!(output_text(&verified).contains("VALID CANDIDATE"));
 
-    let help = run_script("candidate-verify.rhai", &[Path::new("--help")]);
+    let help = {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+            .current_dir(repo)
+            .arg("run")
+            .arg(repo.join("scripts/rh/candidate-verify.rh"))
+            .arg("--project-root")
+            .arg(repo)
+            .arg("--")
+            .arg("--help")
+            .output()
+            .expect("candidate-verify help")
+    };
     assert!(help.status.success(), "{}", output_text(&help));
     assert!(output_text(&help).contains("usage: candidate-verify"));
     let help = run_script("candidate-aggregate.rhai", &[Path::new("--help")]);
