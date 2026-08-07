@@ -1,6 +1,6 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 6;
+pub const RH_HOST_API_VERSION: u32 = 7;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 
 pub type RhHostFleetCall = extern "C" fn(
@@ -27,6 +27,8 @@ pub type RhHostRunScriptCall =
 pub type RhHostStdFsExistsCall = extern "C" fn(path: *const u8, path_len: u32) -> i32;
 pub type RhHostArgsLenCall = extern "C" fn() -> i64;
 pub type RhHostArgCall = extern "C" fn(index: u32, out_buf: *mut u8, out_cap: u32) -> i32;
+pub type RhHostFsReadCall =
+    extern "C" fn(path: *const u8, path_len: u32, out_buf: *mut u8, out_cap: u32) -> i32;
 
 pub fn rust_raw_string_literal(source: &str) -> String {
     let mut hashes = 0_usize;
@@ -48,12 +50,14 @@ pub fn emit_host_runtime(out: &mut String) {
          type RhHostStdFsExistsCall = extern \"C\" fn(*const u8, u32) -> i32;\n\
          type RhHostArgsLenCall = extern \"C\" fn() -> i64;\n\n\
          type RhHostArgCall = extern \"C\" fn(u32, *mut u8, u32) -> i32;\n\n\
+         type RhHostFsReadCall = extern \"C\" fn(*const u8, u32, *mut u8, u32) -> i32;\n\n\
          static mut RH_HOST_FLEET_CALL: Option<RhHostFleetCall> = None;\n\
          static mut RH_HOST_EVAL_CALL: Option<RhHostEvalCall> = None;\n\
          static mut RH_HOST_RUN_SCRIPT_CALL: Option<RhHostRunScriptCall> = None;\n\
          static mut RH_HOST_STD_FS_EXISTS_CALL: Option<RhHostStdFsExistsCall> = None;\n\
          static mut RH_HOST_ARGS_LEN_CALL: Option<RhHostArgsLenCall> = None;\n\
          static mut RH_HOST_ARG_CALL: Option<RhHostArgCall> = None;\n\
+         static mut RH_HOST_FS_READ_CALL: Option<RhHostFsReadCall> = None;\n\
          static mut RH_HOST_OUT_LEN: usize = 0;\n\
          static RH_HOST_OUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();\n\n\
          #[no_mangle]\n\
@@ -134,6 +138,26 @@ pub fn emit_host_runtime(out: &mut String) {
                  RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
                  RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
                  RH_HOST_ARG_CALL = Some(arg_call);\n\
+             }\n\
+         }\n\n\
+         #[no_mangle]\n\
+         pub extern \"C\" fn rh_register_host_v7(\n\
+             fleet_call: RhHostFleetCall,\n\
+             eval_call: RhHostEvalCall,\n\
+             run_script_call: RhHostRunScriptCall,\n\
+             std_fs_exists_call: RhHostStdFsExistsCall,\n\
+             args_len_call: RhHostArgsLenCall,\n\
+             arg_call: RhHostArgCall,\n\
+             fs_read_call: RhHostFsReadCall,\n\
+         ) {\n\
+             unsafe {\n\
+                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
+                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
+                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
+                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
+                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
+                 RH_HOST_ARG_CALL = Some(arg_call);\n\
+                 RH_HOST_FS_READ_CALL = Some(fs_read_call);\n\
              }\n\
          }\n\n\
          fn rh_host_store(wrote: i32, scratch: Vec<u8>) -> i32 {\n\
@@ -228,6 +252,27 @@ pub fn emit_host_runtime(out: &mut String) {
     out.push_str(
         "usize];\n\
              let wrote = call(index as u32, scratch.as_mut_ptr(), scratch.len() as u32);\n\
+             if wrote <= 0 {\n\
+                 return String::new();\n\
+             }\n\
+             scratch.truncate((wrote as usize).min(scratch.len()));\n\
+             String::from_utf8(scratch).unwrap_or_default()\n\
+         }\n\n\
+         fn rh_std_fs_read_to_string(path: &str) -> String {\n\
+             let Some(call) = (unsafe { RH_HOST_FS_READ_CALL }) else {\n\
+                 return String::new();\n\
+             };\n\
+             let mut scratch = vec![0u8; ",
+    );
+    out.push_str(&RH_HOST_OUT_CAP.to_string());
+    out.push_str(
+        "usize];\n\
+             let wrote = call(\n\
+                 path.as_ptr(),\n\
+                 path.len() as u32,\n\
+                 scratch.as_mut_ptr(),\n\
+                 scratch.len() as u32,\n\
+             );\n\
              if wrote <= 0 {\n\
                  return String::new();\n\
              }\n\

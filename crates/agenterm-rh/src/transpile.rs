@@ -744,6 +744,7 @@ fn infer_binding_kind(expr: &Expr) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
+        _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
@@ -852,10 +853,18 @@ fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), Rh
 }
 
 fn std_fs_exists_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "exists")
+}
+
+fn std_fs_read_to_string_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "read_to_string")
+}
+
+fn std_fs_single_arg<'a>(expr: &'a Expr, name: &str) -> Option<&'a Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "std::fs" || call.name != "exists" || call.args.len() != 1 {
+    if call.namespace.to_string() != "std::fs" || call.name != name || call.args.len() != 1 {
         return None;
     }
     Some(&call.args[0])
@@ -870,6 +879,14 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(path) = std_fs_exists_arg(expr)
             && emit_std_fs_exists(out, path, ctx)?
         {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_read_to_string_arg(expr)
+            && emit_std_fs_read_to_string(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if emit_string_contains(out, expr, ctx) {
             return Ok(());
         }
         if let Some(call) = parse_fleet_call(expr) {
@@ -943,26 +960,74 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
 }
 
 fn emit_std_fs_exists(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
     out.push_str("rh_std_fs_exists(");
-    match path {
-        Expr::StringConstant(path, ..) => out.push_str(&format!("{path:?}")),
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_read_to_string(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_std_fs_read_to_string(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    match expr {
+        Expr::StringConstant(value, ..) => out.push_str(&format!("{value:?}")),
         Expr::Variable(ident, ..)
             if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
         {
             out.push('&');
             out.push_str(ident.1.as_str());
         }
-        _ if args_index_expr(path).is_some() => {
+        _ if args_index_expr(expr).is_some() => {
             out.push('&');
-            emit_args_index(out, args_index_expr(path).expect("checked args index"), ctx)?;
+            emit_args_index(out, args_index_expr(expr).expect("checked args index"), ctx)?;
         }
-        _ => {
-            out.truncate(out.len() - "rh_std_fs_exists(".len());
-            return Ok(false);
-        }
+        _ => return Ok(false),
     }
-    out.push(')');
     Ok(true)
+}
+
+fn emit_string_contains(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> bool {
+    let Expr::Dot(boxed, ..) = expr else {
+        return false;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return false;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::String) {
+        return false;
+    }
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return false;
+    };
+    if call.name != "contains" || call.args.len() != 1 {
+        return false;
+    }
+    let Expr::StringConstant(needle, ..) = &call.args[0] else {
+        return false;
+    };
+    out.push('(');
+    out.push_str(ident.1.as_str());
+    out.push_str(".contains(");
+    out.push_str(&format!("{needle:?}"));
+    out.push_str(") as INT)");
+    true
 }
 
 fn emit_args_index(out: &mut String, index: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -1157,6 +1222,22 @@ mod tests {
             output.rust
         );
         assert!(output.rust.contains("rh_std_fs_exists(&path)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_read_and_contains_fast_path() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let path = args[0]; let text = std::fs::read_to_string(path); text.contains(\"agenterm\") }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_std_fs_read_to_string(&path)"));
+        assert!(output.rust.contains("text.contains(\"agenterm\") as INT"));
     }
 
     #[test]

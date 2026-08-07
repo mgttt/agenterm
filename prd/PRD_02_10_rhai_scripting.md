@@ -52,6 +52,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   literals. Dynamic task paths call the typed Rust filesystem callback without
   host evaluation; the public native task verifies a real repository path and
   remains covered by the no-interpreter-fallback gate.
+- [x] host API v7 provides bounded UTF-8 `std::fs::read_to_string` for native
+  argument bindings. Native string values support literal substring checks;
+  missing, invalid UTF-8, or oversized files retain typed host failures, and
+  v2-v6 pack registration remains backward compatible.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

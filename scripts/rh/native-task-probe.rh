@@ -1,7 +1,9 @@
 fn entry() {
     let first = args[0];
     let present = std::fs::exists(first);
-    let total = args.len + first.len + present;
+    let content = std::fs::read_to_string(first);
+    let marker = content.contains("name = \"agenterm\"");
+    let total = args.len + first.len + present + marker;
     for value in 1..5 {
         total += value;
     }

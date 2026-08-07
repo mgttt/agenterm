@@ -44,6 +44,11 @@ fn manifest_native_task_transpiles_without_interpreter_fallback() {
     assert!(entry.contains("rh_arg(0)"), "{entry}");
     assert!(entry.contains("first.chars().count() as INT"), "{entry}");
     assert!(entry.contains("rh_std_fs_exists(&first)"), "{entry}");
+    assert!(
+        entry.contains("rh_std_fs_read_to_string(&first)"),
+        "{entry}"
+    );
+    assert!(entry.contains("content.contains("), "{entry}");
     assert!(entry.contains("for value in 1..5"), "{entry}");
 }
 
@@ -88,7 +93,7 @@ fn public_cli_runs_manifest_native_task() {
     let envelope: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("native task JSON");
     assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["value"], 23);
+    assert_eq!(envelope["value"], 24);
     assert!(
         envelope["stdout"]
             .as_str()

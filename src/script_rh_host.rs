@@ -110,6 +110,16 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
+        module.register_host_v7(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+            Some(host_args_len_call),
+            Some(host_arg_call),
+            Some(host_fs_read_call),
+        )
+    } else if api >= 6 {
         module.register_host_v6(
             host_fleet_call,
             Some(host_eval_call),
@@ -146,6 +156,44 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             "rh pack host api {api} is older than the minimum supported version 2"
         )))
     }
+}
+
+extern "C" fn host_fs_read_call(
+    path: *const u8,
+    path_len: u32,
+    out_buf: *mut u8,
+    out_cap: u32,
+) -> i32 {
+    if path.is_null() || out_buf.is_null() || out_cap == 0 {
+        return -1;
+    }
+    let path = match unsafe { read_utf8(path, path_len) } {
+        Ok(value) => value,
+        Err(()) => return -2,
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) => {
+            record_host_error("rh_std_fs_read_to_string", &error.to_string());
+            return -5;
+        }
+    };
+    let bytes = content.as_bytes();
+    if bytes.len() > out_cap as usize {
+        record_host_error(
+            "rh_std_fs_read_to_string",
+            "file exceeds the host output buffer",
+        );
+        return -3;
+    }
+    let Ok(length) = i32::try_from(bytes.len()) else {
+        record_host_error("rh_std_fs_read_to_string", "file length exceeds i32");
+        return -3;
+    };
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+    }
+    length
 }
 
 extern "C" fn host_arg_call(index: u32, out_buf: *mut u8, out_cap: u32) -> i32 {
@@ -548,6 +596,40 @@ mod tests {
             let error = super::take_host_error().expect("typed host error");
             assert!(error.to_string().contains("argument 1 is unavailable"));
         });
+    }
+
+    #[test]
+    fn host_fs_read_call_returns_bounded_utf8_and_typed_missing_error() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let path = path.to_string_lossy();
+        let mut output = vec![0_u8; agenterm_rh::RH_HOST_OUT_CAP as usize];
+        let wrote = super::host_fs_read_call(
+            path.as_ptr(),
+            path.len() as u32,
+            output.as_mut_ptr(),
+            output.len() as u32,
+        );
+        assert!(wrote > 0);
+        let content = std::str::from_utf8(&output[..wrote as usize]).expect("utf8");
+        assert!(content.contains("name = \"agenterm\""));
+
+        super::clear_host_error();
+        let missing = format!("{path}.missing");
+        assert_eq!(
+            super::host_fs_read_call(
+                missing.as_ptr(),
+                missing.len() as u32,
+                output.as_mut_ptr(),
+                output.len() as u32,
+            ),
+            -5
+        );
+        assert!(
+            super::take_host_error()
+                .expect("typed host error")
+                .to_string()
+                .contains("rh_std_fs_read_to_string")
+        );
     }
 
     #[test]
