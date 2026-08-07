@@ -2,6 +2,7 @@
 
 pub const RH_HOST_API_VERSION: u32 = 8;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
+pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
 pub const RH_HOST_UTILITY_EXISTS_CASE_EXACT: u32 = 2;
 
@@ -291,7 +292,7 @@ pub fn emit_host_runtime(out: &mut String) {
              };\n\
              let mut scratch = vec![0u8; ",
     );
-    out.push_str(&RH_HOST_OUT_CAP.to_string());
+    out.push_str(&RH_HOST_FS_READ_CAP.to_string());
     out.push_str(
         "usize];\n\
              let wrote = call(\n\

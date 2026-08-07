@@ -52,7 +52,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   literals. Dynamic task paths call the typed Rust filesystem callback without
   host evaluation; the public native task verifies a real repository path and
   remains covered by the no-interpreter-fallback gate.
-- [x] host API v7 provides bounded UTF-8 `std::fs::read_to_string` for native
+- [x] host API v7 provides 1 MiB-bounded UTF-8 `std::fs::read_to_string` for native
   argument bindings. Native string values support literal substring checks;
   missing, invalid UTF-8, or oversized files retain typed host failures, and
   v2-v6 pack registration remains backward compatible.
