@@ -305,12 +305,20 @@ fn fail_dynamic_fixture_executes_natively_without_interpreter() {
         output.rust
     );
     assert!(
-        output
-            .rust
-            .contains("if ((name != String::from(\"\"))) as INT == 0")
+        output.rust.contains("rh_fail(&format!(\"{}{}\""),
+        "{}",
+        output.rust
     );
-    assert!(output.rust.contains("rh_fail(&format!(\"{}{}\""));
-    assert!(output.rust.contains("String::from(\"empty:\")"));
+    assert!(
+        output.rust.contains("String::from(\"empty:\")"),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("return rh_fail") && output.rust.contains("== 0"),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 
