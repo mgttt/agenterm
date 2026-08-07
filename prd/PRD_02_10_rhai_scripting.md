@@ -30,6 +30,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   packs and compatibility-delegating pack stubs therefore contain no embedded
   Rhai runtime; parsing and explicit host-eval/host-run compatibility remain
   host responsibilities until their later migration slices.
+- [x] host API v4 executes literal-path `std::fs::exists` calls through a typed
+  Rust filesystem callback rather than constructing a Rhai Engine. Missing or
+  invalid host registration fails closed, callback errors retain the shared
+  typed host-error path, and older v2/v3 packs remain loadable. Dynamic path
+  expressions and other `std::` APIs remain explicit migration work.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

@@ -4,7 +4,7 @@
 |------|-----|
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
-| 状态 | **rh-3 compat 轨**：58/58 task check + delegating pack（host v3） |
+| 状态 | **rh-3 compat 轨**：58/58 task check + delegating pack（host v4） |
 | 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
 
 ---
@@ -78,6 +78,8 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 **机制：**
 - 纯 `INT` 控制流/算术 → 原生机器码
 - `fleet.*` → `rh_fleet_call` → broker（快路径）
+- 字符串字面量 `std::fs::exists` → host v4 typed filesystem callback，
+  不构造 Rhai Engine；动态路径暂留 host eval
 - 其余 Rhai 表达式 → `rh_host_eval_int(snippet, scope)` → 宿主 **同一** `configure_engine` Rhai 引擎
 
 **fixture：** `fixtures/rh/stdlib.rh`（`std::fs::exists` → entry 42）
