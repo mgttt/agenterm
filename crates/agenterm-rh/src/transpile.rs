@@ -851,17 +851,14 @@ fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), Rh
     Ok(())
 }
 
-fn std_fs_exists_literal(expr: &Expr) -> Option<&str> {
+fn std_fs_exists_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
     if call.namespace.to_string() != "std::fs" || call.name != "exists" || call.args.len() != 1 {
         return None;
     }
-    match &call.args[0] {
-        Expr::StringConstant(path, ..) => Some(path.as_str()),
-        _ => None,
-    }
+    Some(&call.args[0])
 }
 
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -870,10 +867,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             emit_args_index(out, index, ctx)?;
             return Ok(());
         }
-        if let Some(path) = std_fs_exists_literal(expr) {
-            out.push_str("rh_std_fs_exists(");
-            out.push_str(&format!("{path:?}"));
-            out.push(')');
+        if let Some(path) = std_fs_exists_arg(expr)
+            && emit_std_fs_exists(out, path, ctx)?
+        {
             return Ok(());
         }
         if let Some(call) = parse_fleet_call(expr) {
@@ -944,6 +940,29 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
     }
     Ok(())
+}
+
+fn emit_std_fs_exists(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    out.push_str("rh_std_fs_exists(");
+    match path {
+        Expr::StringConstant(path, ..) => out.push_str(&format!("{path:?}")),
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+        {
+            out.push('&');
+            out.push_str(ident.1.as_str());
+        }
+        _ if args_index_expr(path).is_some() => {
+            out.push('&');
+            emit_args_index(out, args_index_expr(path).expect("checked args index"), ctx)?;
+        }
+        _ => {
+            out.truncate(out.len() - "rh_std_fs_exists(".len());
+            return Ok(false);
+        }
+    }
+    out.push(')');
+    Ok(true)
 }
 
 fn emit_args_index(out: &mut String, index: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -1124,6 +1143,20 @@ mod tests {
         let rust = transpile_cdylib(source).expect("transpile");
         assert!(rust.contains("rh_std_fs_exists(\"/tmp\")"));
         assert!(!rust.contains("rh_host_eval_int(\"std::fs::exists"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_exists_arg_binding_fast_path() {
+        let output =
+            transpile_cdylib_with_mode("fn entry() { let path = args[0]; std::fs::exists(path) }")
+                .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_std_fs_exists(&path)"));
     }
 
     #[test]

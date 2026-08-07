@@ -48,6 +48,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Native string bindings and `.len` use Unicode scalar counts rather than byte
   counts; missing/non-string arguments and output-limit violations retain typed
   host failures, while v2-v5 pack registration remains backward compatible.
+- [x] `std::fs::exists` accepts native UTF-8 argument bindings as well as string
+  literals. Dynamic task paths call the typed Rust filesystem callback without
+  host evaluation; the public native task verifies a real repository path and
+  remains covered by the no-interpreter-fallback gate.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M34 typed UTF-8 invocation context 进行中**（`args[index]` 脱离 Rhai host-eval） |
+| **状态** | **M35 动态路径 fast-path 进行中**（参数绑定的 `std::fs::exists` 脱离 Rhai host-eval） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -80,6 +80,7 @@
 | M32a | task manifest/corpus 接受 `.rh` entry；公共 CLI 执行首个原生 named-task，生成代码资格门禁止 `rh_host_run_script`/`rh_host_eval_int` | [x] |
 | M33a | host API v5 暴露 typed `args.len`；native task 以两个真实调用参数返回 `12`，旧 v2-v4 pack 注册兼容保留 | [x] |
 | M34a | host API v6 以 bounded UTF-8 callback 暴露 `args[index]`；原生字符串长度按 Unicode scalar 计数，越界返回 typed host failure | [x] |
+| M35a | `std::fs::exists` 接受 native UTF-8 参数绑定并直接调用 typed Rust callback；named task 以真实 `Cargo.toml` 路径资格验证 | [x] |
 
 ---
 

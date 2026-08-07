@@ -1,6 +1,6 @@
 fn entry() {
     let first = args[0];
-    let total = args.len + first.len;
+    let total = args.len + first.len + std::fs::exists(first);
     for value in 1..5 {
         total += value;
     }
