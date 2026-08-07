@@ -5,8 +5,8 @@ use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 use crate::{
     RhError,
     expr_print::{
-        args_index_expr, args_index_len_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr,
-        is_var_len_expr, uses_host_surface, var_len_name,
+        args_index_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr, is_var_len_expr,
+        uses_host_surface, var_len_name,
     },
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
     host_api::{emit_host_runtime, rust_raw_string_literal},
@@ -921,15 +921,6 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
         Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
         Expr::Dot(..) if is_args_len_expr(expr) => out.push_str("rh_args_len()"),
-        Expr::Dot(..) if args_index_len_expr(expr).is_some() => {
-            out.push('(');
-            emit_args_index(
-                out,
-                args_index_len_expr(expr).expect("checked args index"),
-                ctx,
-            )?;
-            out.push_str(".chars().count() as INT)");
-        }
         Expr::Dot(..)
             if var_len_name(expr)
                 .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::String)) =>

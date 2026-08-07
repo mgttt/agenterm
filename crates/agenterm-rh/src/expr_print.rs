@@ -401,15 +401,6 @@ pub fn args_index_expr(expr: &Expr) -> Option<&Expr> {
         .then_some(&boxed.rhs)
 }
 
-pub fn args_index_len_expr(expr: &Expr) -> Option<&Expr> {
-    let Expr::Dot(boxed, ..) = expr else {
-        return None;
-    };
-    is_len_rhs(&boxed.rhs)
-        .then(|| args_index_expr(&boxed.lhs))
-        .flatten()
-}
-
 pub fn var_len_name(expr: &Expr) -> Option<&str> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
@@ -424,7 +415,7 @@ pub fn is_pure_int_expr(expr: &Expr) -> bool {
     match expr {
         Expr::IntegerConstant(..) => true,
         Expr::Variable(..) => true,
-        e if is_var_len_expr(e) || args_index_len_expr(e).is_some() => true,
+        e if is_var_len_expr(e) => true,
         Expr::FnCall(call, ..) if call.op_token.is_some() => call.args.iter().all(is_pure_int_expr),
         Expr::FnCall(call, ..) if call.name == "throw" => false,
         Expr::FnCall(..) | Expr::MethodCall(..) => false,
@@ -445,8 +436,8 @@ mod tests {
     use rhai::Engine;
 
     use super::{
-        args_index_expr, args_index_len_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr,
-        is_var_len_expr, stmt_to_rhai, uses_host_surface, var_len_name,
+        args_index_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr, is_var_len_expr,
+        stmt_to_rhai, uses_host_surface, var_len_name,
     };
 
     fn parse_expr(source: &str) -> rhai::Expr {
@@ -498,7 +489,6 @@ mod tests {
         assert!(is_args_len_expr(&len_call));
         assert!(!is_args_len_expr(&parse_expr("items.len")));
         assert!(args_index_expr(&parse_expr("args[2]")).is_some());
-        assert!(args_index_len_expr(&parse_expr("args[2].len")).is_some());
         assert_eq!(var_len_name(&parse_expr("first.len")), Some("first"));
         assert!(is_pure_int_expr(&len_prop));
         assert!(is_pure_int_expr(&len_call));
