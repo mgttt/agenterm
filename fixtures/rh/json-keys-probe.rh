@@ -1,0 +1,20 @@
+fn entry() {
+    let obj = #{ a: 1, b: 2 };
+    if obj.keys().len != 2 {
+        return rh::fail("keys_len");
+    }
+    let count = 0;
+    let sum = 0;
+    for key in obj.keys() {
+        count += 1;
+        if key == "a" {
+            sum += obj.a;
+        } else if key == "b" {
+            sum += obj.b;
+        }
+    }
+    if count != 2 {
+        return rh::fail("count");
+    }
+    sum
+}

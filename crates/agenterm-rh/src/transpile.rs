@@ -1052,6 +1052,16 @@ fn emit_stmt(
                 out.push_str(");\n");
                 return Ok(());
             }
+            if let Some((name, rhs)) = string_plus_int_assign(boxed, ctx) {
+                out.push_str("    ");
+                out.push_str(name);
+                out.push_str(" = format!(\"{}{}\", ");
+                out.push_str(name);
+                out.push_str(", ");
+                emit_stringish(out, rhs, ctx)?;
+                out.push_str(");\n");
+                return Ok(());
+            }
             let Expr::Variable(ident, ..) = &bin.lhs else {
                 return Err(RhError::Transpile(
                     "assignment lhs must be a variable".into(),
@@ -1135,6 +1145,30 @@ fn emit_stmt(
                 let mut loop_ctx = ctx
                     .clone()
                     .with_binding(counter.name.as_str(), ValueKind::Int);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
+            } else if let Some((binding, path)) = json_object_keys_path(&flow.expr, ctx) {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in rh_json_object_keys(&");
+                out.push_str(binding);
+                out.push_str(", ");
+                emit_json_path(out, &path);
+                out.push_str(") {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::String);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
+            } else if let Some(binding) = set_keys_for_path(&flow.expr, ctx) {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in ");
+                out.push_str(binding);
+                out.push_str(".iter().cloned() {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::String);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
             } else if let Some((binding, path)) = json_value_path(&flow.expr, ctx) {
@@ -2551,6 +2585,77 @@ fn append_json_array_len<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> bool {
     }
 }
 
+fn is_keys_method_rhs(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::MethodCall(call, ..) if call.name == "keys" && call.args.is_empty()
+    )
+}
+
+fn is_len_method_or_property(expr: &Expr) -> bool {
+    matches!(expr, Expr::Property(prop, ..) if prop.2.as_str() == "len")
+        || matches!(
+            expr,
+            Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
+        )
+}
+
+fn json_object_keys_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'a str>)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    if !is_keys_method_rhs(&boxed.rhs) {
+        return None;
+    }
+    json_value_path(&boxed.lhs, ctx)
+}
+
+fn json_object_keys_len_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'a str>)> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let (binding, path) = json_value_path(&outer.lhs, ctx)?;
+    let Expr::Dot(inner, ..) = &outer.rhs else {
+        return None;
+    };
+    if !is_keys_method_rhs(&inner.lhs) || !is_len_method_or_property(&inner.rhs) {
+        return None;
+    }
+    Some((binding, path))
+}
+
+fn set_keys_for_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    if !is_keys_method_rhs(&boxed.rhs) {
+        return None;
+    }
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    (ctx.scope.get(ident.1.as_str()) == Some(&ValueKind::Set)).then_some(ident.1.as_str())
+}
+
+fn set_keys_len_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(outer, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &outer.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()) != Some(&ValueKind::Set) {
+        return None;
+    }
+    let Expr::Dot(inner, ..) = &outer.rhs else {
+        return None;
+    };
+    if !is_keys_method_rhs(&inner.lhs) || !is_len_method_or_property(&inner.rhs) {
+        return None;
+    }
+    Some(ident.1.as_str())
+}
+
 fn emit_json_path(out: &mut String, path: &[&str]) {
     out.push_str("&[");
     for (index, segment) in path.iter().enumerate() {
@@ -2622,6 +2727,14 @@ fn prefers_string_ops(lhs: &Expr, rhs: &Expr, ctx: &EmitCtx) -> bool {
 
 fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
     if json_array_len_path(expr, ctx).is_some()
+        || json_object_keys_len_path(expr, ctx).is_some()
+        || set_keys_len_path(expr, ctx).is_some()
+        || std_time_system_time_now_unix_millis(expr)
+        || system_time_unix_millis_binding(expr, ctx).is_some()
+        || fs_metadata_modified_unix_millis(expr).is_some()
+        || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
+        || dir_entry_metadata_len(expr, ctx).is_some()
+        || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
         || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
         || type_of_arg(expr).is_some_and(|argument| {
             json_value_path(argument, ctx).is_some()
@@ -2795,6 +2908,20 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
 }
 
 fn emit_intish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    if let Some((binding, path)) = json_object_keys_len_path(expr, ctx) {
+        out.push_str("rh_json_object_keys_len(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push(')');
+        return Ok(());
+    }
+    if let Some(binding) = set_keys_len_path(expr, ctx) {
+        out.push_str("(");
+        out.push_str(binding);
+        out.push_str(".len() as INT)");
+        return Ok(());
+    }
     if let Some((binding, path)) = json_array_len_path(expr, ctx) {
         out.push_str("rh_json_array_len(&");
         out.push_str(binding);
@@ -2888,6 +3015,20 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(argument) = type_of_arg(expr)
             && emit_type_of(out, argument, ctx)?
         {
+            return Ok(());
+        }
+        if let Some((binding, path)) = json_object_keys_len_path(expr, ctx) {
+            out.push_str("rh_json_object_keys_len(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push(')');
+            return Ok(());
+        }
+        if let Some(binding) = set_keys_len_path(expr, ctx) {
+            out.push_str("(");
+            out.push_str(binding);
+            out.push_str(".len() as INT)");
             return Ok(());
         }
         if let Some((binding, path)) = json_array_len_path(expr, ctx) {
@@ -3874,6 +4015,33 @@ fn emit_string_needle(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bo
     }
 }
 
+fn string_plus_int_assign<'a>(
+    assign: &'a (OpAssignment, BinaryExpr),
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a Expr)> {
+    let (op, bin) = assign;
+    let Some((_, _, _, syntax, _, _)) = op.get_op_assignment_info() else {
+        return None;
+    };
+    if syntax != "+=" {
+        return None;
+    }
+    let Expr::Variable(ident, ..) = &bin.lhs else {
+        return None;
+    };
+    if !matches!(
+        ctx.scope.get(ident.1.as_str()),
+        Some(ValueKind::String | ValueKind::Path)
+    ) {
+        return None;
+    }
+    if is_explicit_string_expr(&bin.rhs, ctx) {
+        return None;
+    }
+    (is_pure_int_expr(&bin.rhs) || is_native_json_int_expr(&bin.rhs, ctx))
+        .then_some((ident.1.as_str(), &bin.rhs))
+}
+
 fn set_insert_assignment<'a>(
     assign: &'a (OpAssignment, BinaryExpr),
     ctx: &EmitCtx,
@@ -4752,6 +4920,94 @@ mod tests {
         assert!(output.rust.contains("name.ends_with("));
         assert!(output.rust.contains("role.replace("));
         assert!(!output.rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_object_keys_iteration() {
+        let source = include_str!("../../../fixtures/rh/json-keys-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("for key in rh_json_object_keys(&obj, &[])"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_object_keys_len(&obj, &[])"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_eval_int(\"for"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_int_string_concat() {
+        let source = include_str!("../../../fixtures/rh/int-string-concat-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("s = format!(\"{}{}\", s, String::from(\"123\"))"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("s = format!(\"{}{}\", s, (n).to_string())"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("format!(\"{}{}\", String::from(\"prefix-\"), (n).to_string())"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("String::from(\".locked-\")")
+                && output.rust.contains("(suffix).to_string()"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_eval_int(\"+"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_map_set_keys_iteration() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let names = #{}; names[\"a\"] = true; let count = 0; for key in names.keys() { count += 1; } if names.keys().len != 1 { return rh::fail(\"len\"); } count }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("for key in names.iter().cloned()"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("(names.len() as INT)"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_eval_int(\"for"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]

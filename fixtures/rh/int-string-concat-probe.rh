@@ -1,0 +1,17 @@
+fn entry() {
+    let s = "";
+    s += 123;
+    let n = std::time::SystemTime::now().unix_millis;
+    s += n;
+    let path = "prefix-" + n;
+    let stem = "stem";
+    let suffix = 7;
+    let parked_name = stem + ".locked-" + suffix + ".exe";
+    if !path.starts_with("prefix-") {
+        return rh::fail("prefix");
+    }
+    if !parked_name.ends_with(".exe") {
+        return rh::fail("suffix");
+    }
+    s.len() + path.len() + parked_name.len()
+}
