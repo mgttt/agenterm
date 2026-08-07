@@ -33,6 +33,8 @@ enum ValueKind {
     Output,
     Child,
     ChildList,
+    Stream,
+    Bytes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,7 +176,9 @@ impl EmitCtx {
                 ValueKind::Command
                 | ValueKind::Output
                 | ValueKind::Child
-                | ValueKind::ChildList => {
+                | ValueKind::ChildList
+                | ValueKind::Stream
+                | ValueKind::Bytes => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
@@ -206,6 +210,8 @@ impl EmitCtx {
                     | ValueKind::Output
                     | ValueKind::Child
                     | ValueKind::ChildList
+                    | ValueKind::Stream
+                    | ValueKind::Bytes
             ) {
                 out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
@@ -574,6 +580,8 @@ fn rust_return_type(kind: ValueKind) -> &'static str {
         ValueKind::Output => "RhOutput",
         ValueKind::Child => "RhChild",
         ValueKind::ChildList => "Vec<RhChild>",
+        ValueKind::Stream => "RhStream",
+        ValueKind::Bytes => "RhBytes",
         _ => "INT",
     }
 }
@@ -607,7 +615,10 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
         }
         if fn_ctx.cdylib {
             // Child/Command methods take &mut self in host helpers.
-            if matches!(*kind, ValueKind::Child | ValueKind::Command) {
+            if matches!(
+                *kind,
+                ValueKind::Child | ValueKind::Command | ValueKind::Stream
+            ) {
                 out.push_str("mut ");
             }
             out.push_str(param.as_str());
@@ -637,6 +648,10 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
         .map(|param| {
             if param_used_as_output(def, param.as_str()) {
                 ValueKind::Output
+            } else if param_used_as_stream(def, param.as_str()) {
+                ValueKind::Stream
+            } else if param_used_as_bytes(def, param.as_str()) {
+                ValueKind::Bytes
             } else if param_used_as_child_list(def, param.as_str()) {
                 ValueKind::ChildList
             } else if param_used_as_string_list(def, param.as_str()) {
@@ -755,6 +770,8 @@ fn propagate_local_fn_param_kinds(
                             | ValueKind::Child
                             | ValueKind::ChildList
                             | ValueKind::StringList
+                            | ValueKind::Stream
+                            | ValueKind::Bytes
                     )
                 {
                     sig[index] = kind;
@@ -909,6 +926,8 @@ fn collect_param_kind_upgrades_in_call(
                 | ValueKind::Child
                 | ValueKind::ChildList
                 | ValueKind::StringList
+                | ValueKind::Stream
+                | ValueKind::Bytes
         ) {
             upgrades.push((param_index, kind));
         }
@@ -1084,7 +1103,18 @@ fn is_output_member_name(name: &str) -> bool {
 }
 
 fn is_child_member_name(name: &str) -> bool {
-    matches!(name, "id" | "state" | "kill" | "wait_with_output")
+    matches!(
+        name,
+        "id" | "state" | "platform_facts" | "stderr" | "kill" | "wait_with_output" | "window_key"
+    )
+}
+
+fn is_stream_member_name(name: &str) -> bool {
+    name == "read"
+}
+
+fn is_bytes_member_name(name: &str) -> bool {
+    name == "to_text"
 }
 
 fn is_command_member_name(name: &str) -> bool {
@@ -1106,6 +1136,8 @@ fn rust_param_type(kind: ValueKind) -> &'static str {
         ValueKind::Output => "RhOutput",
         ValueKind::Child => "RhChild",
         ValueKind::ChildList => "Vec<RhChild>",
+        ValueKind::Stream => "RhStream",
+        ValueKind::Bytes => "RhBytes",
         ValueKind::StringList => "Vec<String>",
         ValueKind::Set => "std::collections::HashSet<String>",
         _ => "INT",
@@ -1130,6 +1162,18 @@ fn param_used_as_output(def: &ScriptFuncDef, param: &str) -> bool {
     def.body
         .iter()
         .any(|stmt| stmt_uses_param_with_member(stmt, param, is_output_member_name))
+}
+
+fn param_used_as_stream(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_param_with_member(stmt, param, is_stream_member_name))
+}
+
+fn param_used_as_bytes(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_param_with_member(stmt, param, is_bytes_member_name))
 }
 
 fn param_used_as_child(def: &ScriptFuncDef, param: &str) -> bool {
@@ -1180,6 +1224,19 @@ fn stmt_uses_param_with_member(stmt: &Stmt, param: &str, member: fn(&str) -> boo
             expr_mentions_param(&flow.expr, param, member)
                 || flow
                     .body
+                    .iter()
+                    .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
+        }
+        Stmt::Block(block) => block
+            .iter()
+            .any(|stmt| stmt_uses_param_with_member(stmt, param, member)),
+        Stmt::TryCatch(boxed, ..) => {
+            let flow = boxed.as_ref();
+            flow.body
+                .iter()
+                .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
+                || flow
+                    .branch
                     .iter()
                     .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
         }
@@ -1277,12 +1334,68 @@ fn expr_uses_child_binding(expr: &Expr, vars: &BTreeSet<String>) -> bool {
 }
 
 fn param_used_as_string_list(def: &ScriptFuncDef, param: &str) -> bool {
-    def.body.iter().any(|stmt| {
-        let (Stmt::Expr(expr) | Stmt::Return(Some(expr), ..)) = stmt else {
-            return false;
-        };
-        expr_uses_string_list_param(expr.as_ref(), param)
-    })
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_string_list_param(stmt, param))
+}
+
+fn stmt_uses_string_list_param(stmt: &Stmt, param: &str) -> bool {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
+            expr_uses_string_list_param(expr.as_ref(), param)
+        }
+        Stmt::Var(boxed, ..) => expr_uses_string_list_param(&boxed.1, param),
+        Stmt::Assignment(boxed, ..) => {
+            expr_uses_string_list_param(&boxed.1.lhs, param)
+                || expr_uses_string_list_param(&boxed.1.rhs, param)
+        }
+        Stmt::If(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_uses_string_list_param(&flow.expr, param)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_string_list_param(stmt, param))
+                || flow
+                    .branch
+                    .iter()
+                    .any(|stmt| stmt_uses_string_list_param(stmt, param))
+        }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            expr_uses_string_list_param(&flow.expr, param)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_string_list_param(stmt, param))
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_uses_string_list_param(&flow.expr, param)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_string_list_param(stmt, param))
+        }
+        Stmt::Block(block) => block
+            .iter()
+            .any(|stmt| stmt_uses_string_list_param(stmt, param)),
+        Stmt::TryCatch(boxed, ..) => {
+            let flow = boxed.as_ref();
+            flow.body
+                .iter()
+                .any(|stmt| stmt_uses_string_list_param(stmt, param))
+                || flow
+                    .branch
+                    .iter()
+                    .any(|stmt| stmt_uses_string_list_param(stmt, param))
+        }
+        Stmt::FnCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_uses_string_list_param(arg, param)),
+        _ => false,
+    }
 }
 
 fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
@@ -1610,6 +1723,11 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         Expr::And(args, ..) | Expr::Or(args, ..) => {
             args.iter().any(|arg| expr_uses_string_param(arg, param))
         }
+        Expr::Array(items, ..) => items.iter().any(|item| expr_uses_string_param(item, param)),
+        Expr::Map(map, ..) => map
+            .0
+            .iter()
+            .any(|(_, value)| expr_uses_string_param(value, param)),
         _ => false,
     }
 }
@@ -2432,8 +2550,13 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
             "RhOutput { success: 0, exit_code: -1, stdout: String::new(), stderr: String::new() }",
         ),
         ValueKind::Child => Some("RhChild::exited(0, 64 * 1024)"),
+        ValueKind::Bytes => Some("RhBytes { bytes: Vec::new() }"),
         ValueKind::Command => None,
-        ValueKind::Char | ValueKind::Metadata | ValueKind::SystemTime | ValueKind::DirEntry => None,
+        ValueKind::Char
+        | ValueKind::Metadata
+        | ValueKind::SystemTime
+        | ValueKind::DirEntry
+        | ValueKind::Stream => None,
     }
 }
 
@@ -2591,11 +2714,23 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if child_wait_with_output_call(expr, ctx).is_some() => ValueKind::Output,
         _ if output_stdout_text_call(expr, ctx).is_some() => ValueKind::String,
         _ if output_stderr_text_call(expr, ctx).is_some() => ValueKind::String,
+        _ if bytes_to_text_call(expr, ctx).is_some() => ValueKind::String,
+        _ if stream_method_call(expr, ctx)
+            .is_some_and(|(_, call)| call.name == "read" && call.args.len() == 2) =>
+        {
+            ValueKind::Bytes
+        }
+        _ if bytes_property_binding(expr, ctx).is_some() => ValueKind::Int,
         _ if char_to_string_binding(expr, ctx).is_some() => ValueKind::String,
         _ if child_property_binding(expr, ctx)
             .is_some_and(|(_, property)| property == "platform_facts") =>
         {
             ValueKind::Json
+        }
+        _ if child_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "stderr") =>
+        {
+            ValueKind::Stream
         }
         _ if child_property_binding(expr, ctx).is_some_and(|(_, property)| property == "id") => {
             ValueKind::Int
@@ -3701,6 +3836,17 @@ fn child_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     command_binding_method(expr, ctx, ValueKind::Child)
 }
 
+fn stream_method_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::Stream)
+}
+
+fn bytes_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::Bytes)
+}
+
 fn command_output_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
     let (binding, call) = command_method_call(expr, ctx)?;
     (call.name == "output" && call.args.is_empty()).then_some(binding)
@@ -3752,13 +3898,33 @@ fn child_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str,
         return None;
     }
     let property = dot_property_name(&boxed.rhs)?;
-    matches!(property, "id" | "state" | "platform_facts").then_some((ident.1.as_str(), property))
+    matches!(property, "id" | "state" | "platform_facts" | "stderr")
+        .then_some((ident.1.as_str(), property))
 }
 
 fn child_state_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
     child_property_binding(expr, ctx)
         .filter(|(_, property)| *property == "state")
         .map(|(binding, _)| binding)
+}
+
+fn bytes_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Bytes) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    (property == "len").then_some((ident.1.as_str(), property))
+}
+
+fn bytes_to_text_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = bytes_method_call(expr, ctx)?;
+    (call.name == "to_text" && call.args.is_empty()).then_some(binding)
 }
 
 fn emit_command_string_args(
@@ -3993,6 +4159,48 @@ fn emit_child_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result
     }
 }
 
+fn emit_stream_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, call)) = stream_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "read" if call.args.len() == 2 => {
+            out.push_str("rh_stream_read(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_intish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            if !emit_duration_ms(out, &call.args[1], ctx)? {
+                return Ok(false);
+            }
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_bytes_method(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some(binding) = bytes_to_text_call(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str("rh_bytes_to_text(&");
+    out.push_str(binding);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_bytes_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, property)) = bytes_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    debug_assert_eq!(property, "len");
+    out.push_str("rh_bytes_len(&");
+    out.push_str(binding);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_command_mut_stmt(
     out: &mut String,
     expr: &Expr,
@@ -4135,6 +4343,10 @@ fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
         out.push(')');
     } else if property == "platform_facts" {
         out.push_str("rh_child_platform_facts(&mut ");
+        out.push_str(binding);
+        out.push(')');
+    } else if property == "stderr" {
+        out.push_str("rh_child_stderr(&mut ");
         out.push_str(binding);
         out.push(')');
     } else if property == "id" {
@@ -5638,6 +5850,9 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         emit_stringish(out, path, ctx)?;
         return Ok(());
     }
+    if emit_bytes_method(out, expr, ctx)? {
+        return Ok(());
+    }
     if let Some(argument) = type_of_arg(expr) {
         if emit_type_of(out, argument, ctx)? {
             return Ok(());
@@ -6316,10 +6531,19 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if emit_child_method(out, expr, ctx)? {
             return Ok(());
         }
+        if emit_stream_method(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_bytes_method(out, expr, ctx)? {
+            return Ok(());
+        }
         if emit_output_property(out, expr, ctx)? {
             return Ok(());
         }
         if emit_child_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_bytes_property(out, expr, ctx)? {
             return Ok(());
         }
         if std_time_system_time_now_rfc3339(expr) {
@@ -7460,6 +7684,10 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
             out.push_str("&rh_output_stderr_text(&");
             out.push_str(binding);
             out.push(')');
+        }
+        _ if bytes_to_text_call(expr, ctx).is_some() => {
+            out.push('&');
+            emit_bytes_method(out, expr, ctx)?;
         }
         _ => return Ok(false),
     }
@@ -11392,6 +11620,48 @@ fn entry() {
             output
                 .rust
                 .contains("rh_child_window_key(&mut child, &String::from(\"Escape\"))"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn child_stream_read_and_bytes_text_stay_native() {
+        let source = r#"
+fn read_once(stream) {
+    let chunk = stream.read(65536, std::time::Duration::from_millis(100));
+    if chunk.len > 0 {
+        return chunk.to_text();
+    }
+    ""
+}
+
+fn entry() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    let text = read_once(child.stderr);
+    child.kill();
+    text.len
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("stream: RhStream"), "{}", output.rust);
+        assert!(
+            output
+                .rust
+                .contains("rh_stream_read(&mut stream, 65536, 100)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_bytes_to_text(&chunk)"),
             "{}",
             output.rust
         );

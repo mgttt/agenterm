@@ -516,3 +516,24 @@ fn package_qualified_selftest_uses_native_bundled_execution() {
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 }
 
+#[test]
+fn startup_smoke_uses_native_bundled_pack() {
+    let (source, output) = transpile_project_entry("scripts/rh/startup-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
+    assert!(output.rust.contains("rh_child_stderr("), "{}", output.rust);
+    assert!(output.rust.contains("rh_stream_read("), "{}", output.rust);
+    assert!(output.rust.contains("rh_bytes_to_text("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_host_json_call(\"process.list\""),
+        "{}",
+        output.rust
+    );
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let bundled = agenterm_rh::bundle_project_source(&repo(), &source).expect("bundle startup");
+    let pack_dir = tempfile::tempdir().expect("pack dir");
+    let pack = agenterm_rh::build_pack_dir(&bundled, pack_dir.path()).expect("build startup pack");
+    assert!(pack.native_path.exists());
+    assert!(pack.manifest_path.exists());
+}

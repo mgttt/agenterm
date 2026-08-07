@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 59;
+pub const RH_CODEGEN_REVISION: u32 = 60;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -869,6 +869,12 @@ pub fn emit_host_runtime(out: &mut String) {
              state: String,\n\
              capture_limit: usize,\n\
          }\n\n\
+        struct RhStream {\n\
+            receiver: std::sync::mpsc::Receiver<Vec<u8>>,\n\
+        }\n\n\
+        struct RhBytes {\n\
+            bytes: Vec<u8>,\n\
+        }\n\n\
          impl Clone for RhChild {\n\
              fn clone(&self) -> Self {\n\
                  Self {\n\
@@ -1097,6 +1103,44 @@ pub fn emit_host_runtime(out: &mut String) {
              let pid = child.inner.borrow().pid;\n\
              rh_host_json_call(\"process.platform_facts\", &serde_json::json!({ \"pid\": pid }))\n\
          }\n\n\
+        fn rh_child_stderr(child: &mut RhChild) -> RhStream {\n\
+            let pipe = child\n\
+                .inner\n\
+                .borrow_mut()\n\
+                .child\n\
+                .as_mut()\n\
+                .and_then(|process| process.stderr.take());\n\
+            let (sender, receiver) = std::sync::mpsc::channel();\n\
+            if let Some(mut pipe) = pipe {\n\
+                std::thread::spawn(move || {\n\
+                    use std::io::Read as _;\n\
+                    let mut buffer = [0_u8; 8192];\n\
+                    loop {\n\
+                        match pipe.read(&mut buffer) {\n\
+                            Ok(0) | Err(_) => break,\n\
+                            Ok(count) => {\n\
+                                if sender.send(buffer[..count].to_vec()).is_err() {\n\
+                                    break;\n\
+                                }\n\
+                            }\n\
+                        }\n\
+                    }\n\
+                });\n\
+            }\n\
+            RhStream { receiver }\n\
+        }\n\n\
+        fn rh_stream_read(stream: &mut RhStream, limit: INT, timeout_ms: INT) -> RhBytes {\n\
+            let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);\n\
+            let mut bytes = stream.receiver.recv_timeout(timeout).unwrap_or_default();\n\
+            bytes.truncate(usize::try_from(limit.max(0)).unwrap_or(0));\n\
+            RhBytes { bytes }\n\
+        }\n\n\
+        fn rh_bytes_to_text(bytes: &RhBytes) -> String {\n\
+            String::from_utf8_lossy(&bytes.bytes).into_owned()\n\
+        }\n\n\
+        fn rh_bytes_len(bytes: &RhBytes) -> INT {\n\
+            bytes.bytes.len() as INT\n\
+        }\n\n\
         fn rh_child_window_key(child: &mut RhChild, key: &str) -> INT {\n\
             let pid = child.inner.borrow().pid;\n\
             let result = rh_host_json_call(\n\

@@ -7,33 +7,55 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-fn process_stderr(output) {
-    "" + output.stderr
+fn run_cli_output(
+    address,
+    workspace_path,
+    settings_path,
+    instance_directory,
+    cli,
+    extra1,
+    extra2,
+    extra3,
+    extra4,
+    extra5,
+    extra6,
+    extra7
+) {
+    let address_text = "" + address;
+    let workspace_text = "" + workspace_path;
+    let settings_text = "" + settings_path;
+    let instance_text = "" + instance_directory;
+    let command_arguments = ["--address", address_text];
+    if extra1 != "" { command_arguments.push("" + extra1); }
+    if extra2 != "" { command_arguments.push("" + extra2); }
+    if extra3 != "" { command_arguments.push("" + extra3); }
+    if extra4 != "" { command_arguments.push("" + extra4); }
+    if extra5 != "" { command_arguments.push("" + extra5); }
+    if extra6 != "" { command_arguments.push("" + extra6); }
+    if extra7 != "" { command_arguments.push("" + extra7); }
+    let command = std::process::command("" + cli);
+    command.args(command_arguments);
+    command.env("AGENTERM_IPC_ADDRESS", address_text);
+    command.env("AGENTERM_WORKSPACE_PATH", workspace_text);
+    command.env("AGENTERM_SETTINGS_PATH", settings_text);
+    command.env("AGENTERM_INSTANCE_DIR", instance_text);
+    command.env("AGENTERM_NO_ACTIVATE", "1");
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    command.output()
 }
 
-fn executable_matches(value, expected) {
-    let normalized = value.to_lower();
-    normalized == expected || normalized == expected + ".exe"
-}
-
-fn script_worker_ids() {
-    let result = [];
-    for process in std::process::list() {
-        if executable_matches(
-            process.executable_name,
-            "agenterm-rh"
-        ) || executable_matches(
-            process.executable_name,
-            "agenterm-rhai"
-        ) {
-            result.push(process.id);
-        }
-    }
-    result
+fn expected_guidance(pid, address) {
+    let configured_address = "" + address;
+    "Launcher PID: " + pid +
+        "\nConfigured server address: " + configured_address +
+        "\n\nList running server PID and port: agenterm-cli.exe server-list" +
+        "\nMore CLI commands: agenterm-cli.exe -h"
 }
 
 fn append_stream_text(base, chunk) {
-    base + chunk.to_text();
+    let text = "" + base;
+    text + chunk.to_text();
 }
 
 fn read_until(stream, needle, timeout_ms) {
@@ -41,21 +63,14 @@ fn read_until(stream, needle, timeout_ms) {
     let text = "";
     let keep_waiting = 1;
     while (keep_waiting != 0) {
-        try {
-            let chunk = stream.read(
-                65536,
-                std::time::Duration::from_millis(100)
-            );
-            if chunk.len > 0 {
-                text = append_stream_text(text, chunk);
-                if text.contains(needle) {
-                    return text;
-                }
-            }
-        } catch (error) {
-            let message = "" + error;
-            if message.contains("stream_read_timeout") == 0 {
-                throw message;
+        let chunk = stream.read(
+            65536,
+            std::time::Duration::from_millis(100)
+        );
+        if chunk.len > 0 {
+            text = append_stream_text(text, chunk);
+            if text.contains(needle) {
+                return text;
             }
         }
         keep_waiting = 0;
@@ -67,35 +82,23 @@ fn read_until(stream, needle, timeout_ms) {
     throw "startup_stream_text_timeout:" + needle;
 }
 
-fn normalized_output(text) {
-    let value = text;
-    value.replace("\r\n", "\n");
-    value.trim();
-    value
-}
-
-fn expected_guidance(pid, address) {
-    "Launcher PID: " + pid +
-        "\nConfigured server address: " + address +
-        "\n\nList running server PID and port: agenterm-cli.exe server-list" +
-        "\nMore CLI commands: agenterm-cli.exe -h"
-}
-
 fn wait_for_exit(child, timeout_ms, code) {
-    // No try/return: rh-3 forbids return inside try/catch. Prefix failures
-    // at the call site if a distinct timeout code is required.
-    let _code_text = "" + code;
-    child.wait_with_output(std::time::Duration::from_millis(timeout_ms))
-}
-
-fn cli(context, executable, arguments, expected_failure) {
-    test_harness::invoke_cli(
-        context,
-        executable,
-        arguments,
-        expected_failure,
-        []
-    )
+    let code_text = "" + code;
+    let started = std::time::SystemTime::now().unix_millis;
+    let keep_waiting = 1;
+    while (keep_waiting != 0) {
+        if child.state == "exited" {
+            return child.wait_with_output(
+                std::time::Duration::from_millis(timeout_ms)
+            );
+        }
+        if std::time::SystemTime::now().unix_millis - started >= timeout_ms {
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(5));
+    }
+    throw code_text + ":timeout";
+    child.wait_with_output(std::time::Duration::from_millis(0))
 }
 
 fn entry() {
@@ -122,15 +125,40 @@ fn entry() {
     test_harness::require(maximum_window_ms > 0, "startup_window_budget_invalid");
 
     let context = test_harness::new_context(repo, "startup");
+    let smoke_address = "" + context.address;
+    let smoke_workspace = "" + context.workspace_path;
+    let smoke_settings = "" + context.settings_path;
+    let smoke_instances = "" + context.instance_directory;
     let owned_children = [];
-    let worker_ids_before = script_worker_ids();
+    let worker_ids_before = [];
+    let processes_before = std::process::list();
+    let process_before_index = 0;
+    while process_before_index < processes_before.len {
+        let process = processes_before[process_before_index];
+        let executable_name = "" + process.executable_name;
+        let executable = executable_name.to_lower();
+        if executable == "agenterm-rh"
+                || executable == "agenterm-rh.exe"
+                || executable == "agenterm-rhai"
+                || executable == "agenterm-rhai.exe" {
+            worker_ids_before.push(process.id);
+        }
+        process_before_index = process_before_index + 1;
+    }
     let succeeded = 0;
     let failure = "";
 
     try {
         print("STEP native window precedes asynchronous terminal startup");
-        let gui_command =
-            test_harness::configured_command(context, gui_exe, []);
+        let gui_command = std::process::command("" + gui_exe);
+        gui_command.args([]);
+        gui_command.env("AGENTERM_IPC_ADDRESS", smoke_address);
+        gui_command.env("AGENTERM_WORKSPACE_PATH", smoke_workspace);
+        gui_command.env("AGENTERM_SETTINGS_PATH", smoke_settings);
+        gui_command.env("AGENTERM_INSTANCE_DIR", smoke_instances);
+        gui_command.env("AGENTERM_NO_ACTIVATE", "1");
+        gui_command.timeout(std::time::Duration::from_secs(60));
+        gui_command.capture_limit(262144);
         let launch_started = std::time::SystemTime::now().unix_millis;
         let gui = gui_command.start();
         owned_children.push(gui);
@@ -148,7 +176,10 @@ fn entry() {
                 let output = gui.wait_with_output(
                     std::time::Duration::from_secs(2)
                 );
-                throw "startup_gui_early_exit:" + process_stderr(output);
+                test_harness::require(
+                    0,
+                    "startup_gui_early_exit:" + output.stderr_text()
+                );
             }
             if std::time::SystemTime::now().unix_millis - launch_started
                     >= 5000 {
@@ -157,7 +188,7 @@ fn entry() {
             rhai::task::sleep(std::time::Duration::from_millis(5));
         }
         if window_ms == 0 {
-            throw "startup_window_discovery_timeout";
+            test_harness::require(0, "startup_window_discovery_timeout");
         }
         test_harness::require(
             window_ms <= maximum_window_ms,
@@ -176,47 +207,46 @@ fn entry() {
             "More CLI commands: agenterm-cli.exe -h",
             5000
         );
+        let initial_guidance_text = "" + initial_guidance;
+        initial_guidance_text.replace("\r\n", "\n");
+        initial_guidance_text.trim();
         test_harness::require(
-            normalized_output(initial_guidance) ==
-                expected_guidance(gui.id, context.address),
+            initial_guidance_text ==
+                expected_guidance(gui.id, smoke_address),
             "startup_inherited_stderr_guidance:" + initial_guidance
         );
 
-        let version_output = cli(
-            context,
+        run_cli_output(
+            smoke_address,
+            smoke_workspace,
+            smoke_settings,
+            smoke_instances,
             cli_exe,
-            ["--version"],
-            0
-        ).stdout;
-        version_output.trim();
-        let version_parts = version_output.split(" ");
-        let version = version_parts[version_parts.len - 1];
-
-        cli(
-            context,
-            cli_exe,
-            [
-                "wait-ui", "--window-state", "restored",
-                "--timeout-ms", "30000"
-            ],
-            0
+            "wait-ui", "--window-state", "restored",
+            "--timeout-ms", "30000", "", ""
         );
-        cli(
-            context,
+        run_cli_output(
+            smoke_address,
+            smoke_workspace,
+            smoke_settings,
+            smoke_instances,
             cli_exe,
-            [
-                "wait-ui", "-t", "0", "--tab-state", "running",
-                "--timeout-ms", "30000"
-            ],
-            0
+            "wait-ui", "-t", "0", "--tab-state", "running",
+            "--timeout-ms", "30000"
         );
         // Window title string on Child.platform_facts is not native-emitted yet;
         // first-window timing + wait-ui already prove the native window path.
-        let _expected_title = "AgenTerm " + version + " — main";
 
         print("STEP repeated GUI launch hands off without blocking");
-        let second_command =
-            test_harness::configured_command(context, gui_exe, []);
+        let second_command = std::process::command("" + gui_exe);
+        second_command.args([]);
+        second_command.env("AGENTERM_IPC_ADDRESS", smoke_address);
+        second_command.env("AGENTERM_WORKSPACE_PATH", smoke_workspace);
+        second_command.env("AGENTERM_SETTINGS_PATH", smoke_settings);
+        second_command.env("AGENTERM_INSTANCE_DIR", smoke_instances);
+        second_command.env("AGENTERM_NO_ACTIVATE", "1");
+        second_command.timeout(std::time::Duration::from_secs(60));
+        second_command.capture_limit(262144);
         let second = second_command.start();
         owned_children.push(second);
         let second_output = wait_for_exit(
@@ -225,18 +255,26 @@ fn entry() {
             "startup_second_gui_handoff_timeout"
         );
         test_harness::require(second_output.success != 0, "startup_second_gui_exit");
+        let second_guidance = second_output.stderr_text();
+        let second_guidance_text = "" + second_guidance;
+        second_guidance_text.replace("\r\n", "\n");
+        second_guidance_text.trim();
         test_harness::require(
-            normalized_output(process_stderr(second_output)) ==
-                expected_guidance(second.id, context.address),
-            "startup_second_gui_guidance:" + process_stderr(second_output)
+            second_guidance_text ==
+                expected_guidance(second.id, smoke_address),
+            "startup_second_gui_guidance:" + second_guidance
         );
 
         print("STEP GUI-style CLI arguments return nonblocking guidance");
-        let guidance_command = test_harness::configured_command(
-            context,
-            gui_exe,
-            ["list-windows"]
-        );
+        let guidance_command = std::process::command("" + gui_exe);
+        guidance_command.args(["list-windows"]);
+        guidance_command.env("AGENTERM_IPC_ADDRESS", smoke_address);
+        guidance_command.env("AGENTERM_WORKSPACE_PATH", smoke_workspace);
+        guidance_command.env("AGENTERM_SETTINGS_PATH", smoke_settings);
+        guidance_command.env("AGENTERM_INSTANCE_DIR", smoke_instances);
+        guidance_command.env("AGENTERM_NO_ACTIVATE", "1");
+        guidance_command.timeout(std::time::Duration::from_secs(60));
+        guidance_command.capture_limit(262144);
         let guidance = guidance_command.start();
         owned_children.push(guidance);
         let guidance_output = wait_for_exit(
@@ -244,10 +282,10 @@ fn entry() {
             1000,
             "startup_cli_guidance_timeout"
         );
-        let guidance_stderr = process_stderr(guidance_output);
+        let guidance_stderr = guidance_output.stderr_text();
         test_harness::require(
             guidance_output.success == 0
-                && ("" + guidance_output.stdout) == ""
+                && guidance_output.stdout_text() == ""
                 && guidance_stderr.contains("No CLI command was executed")
                 && guidance_stderr.contains("agenterm-cli.exe list-windows")
                 && guidance_stderr.contains("agenterm-cli.exe server-list")
@@ -255,11 +293,15 @@ fn entry() {
             "startup_cli_guidance:" + guidance_stderr
         );
 
-        let argument_command = test_harness::configured_command(
-            context,
-            gui_exe,
-            ["--address"]
-        );
+        let argument_command = std::process::command("" + gui_exe);
+        argument_command.args(["--address"]);
+        argument_command.env("AGENTERM_IPC_ADDRESS", smoke_address);
+        argument_command.env("AGENTERM_WORKSPACE_PATH", smoke_workspace);
+        argument_command.env("AGENTERM_SETTINGS_PATH", smoke_settings);
+        argument_command.env("AGENTERM_INSTANCE_DIR", smoke_instances);
+        argument_command.env("AGENTERM_NO_ACTIVATE", "1");
+        argument_command.timeout(std::time::Duration::from_secs(60));
+        argument_command.capture_limit(262144);
         let argument_error = argument_command.start();
         owned_children.push(argument_error);
         let argument_output = wait_for_exit(
@@ -267,10 +309,10 @@ fn entry() {
             1000,
             "startup_argument_error_timeout"
         );
-        let argument_stderr = process_stderr(argument_output);
+        let argument_stderr = argument_output.stderr_text();
         test_harness::require(
             argument_output.success == 0
-                && ("" + argument_output.stdout) == ""
+                && argument_output.stdout_text() == ""
                 && argument_stderr.contains("AgenTerm GUI argument error")
                 && argument_stderr.contains(
                     "agenterm.exe --address requires HOST:PORT"
@@ -279,22 +321,37 @@ fn entry() {
             "startup_argument_error:" + argument_stderr
         );
 
-        let worker_ids_after = script_worker_ids();
-        for id in worker_ids_after {
+        let processes_after = std::process::list();
+        let process_after_index = 0;
+        while process_after_index < processes_after.len {
+            let process = processes_after[process_after_index];
+            let executable_name = "" + process.executable_name;
+            let executable = executable_name.to_lower();
+            if executable == "agenterm-rh"
+                    || executable == "agenterm-rh.exe"
+                    || executable == "agenterm-rhai"
+                    || executable == "agenterm-rhai.exe" {
             test_harness::require(
-                worker_ids_before.contains(id) != 0,
-                "startup_nested_script_worker:" + id
+                    worker_ids_before.contains(process.id) != 0,
+                    "startup_nested_script_worker:" + process.id
             );
+            }
+            process_after_index = process_after_index + 1;
         }
 
-        let close_state = rhai::json::parse(
-            cli(
-                context,
-                cli_exe,
-                ["ui-action", "close-window"],
-                0
-            ).stdout
+        let close_output = run_cli_output(
+            smoke_address,
+            smoke_workspace,
+            smoke_settings,
+            smoke_instances,
+            cli_exe,
+            "ui-action", "close-window", "", "", "", "", ""
         );
+        test_harness::require(
+            close_output.success != 0,
+            "startup_close_snapshot_failed:" + close_output.stderr_text()
+        );
+        let close_state = rhai::json::parse(close_output.stdout_text());
         let close_modal_kind = "" + close_state.modal.kind;
         let close_modal_default = "" + close_state.modal.default_action;
         test_harness::require(
@@ -303,11 +360,17 @@ fn entry() {
                 && close_state.modal.actions.contains("stop-server-and-exit") != 0,
             "startup_close_contract"
         );
-        cli(
-            context,
+        let stop_output = run_cli_output(
+            smoke_address,
+            smoke_workspace,
+            smoke_settings,
+            smoke_instances,
             cli_exe,
-            ["ui-action", "stop-server-and-exit"],
-            0
+            "ui-action", "stop-server-and-exit", "", "", "", "", ""
+        );
+        test_harness::require(
+            stop_output.success != 0,
+            "startup_stop_server_failed:" + stop_output.stderr_text()
         );
         wait_for_exit(gui, 5000, "startup_gui_shutdown_timeout");
 
@@ -344,6 +407,7 @@ fn entry() {
             succeeded,
             failure
         );
+        completion_failure = "";
     } catch (error) {
         completion_failure = "" + error;
     }
