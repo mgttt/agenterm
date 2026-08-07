@@ -1,5 +1,10 @@
 use crate::contract::input::ModifierState;
 
+// Shared winit key-event normalization (winit types → platform NormalizedKeyEvent).
+// Included here so the pixel-window host can run on Windows too.
+#[path = "../unix/input.rs"]
+mod unix;
+
 pub(crate) const fn is_primary_shortcut(modifiers: ModifierState) -> bool {
     modifiers.control && !modifiers.alt
 }

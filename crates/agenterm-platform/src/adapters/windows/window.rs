@@ -45,13 +45,15 @@ pub(crate) fn display_backend_facts() -> DisplayBackendFacts {
 }
 
 #[cfg(all(feature = "input", feature = "ime"))]
+#[path = "../unix/window_host.rs"]
+mod window_host;
+
+#[cfg(all(feature = "input", feature = "ime"))]
 pub(crate) fn run_pixel_window(
-    _options: PixelWindowOptions,
-    _application: Box<dyn PixelWindowApplication>,
+    options: PixelWindowOptions,
+    application: Box<dyn PixelWindowApplication>,
 ) -> Result<(), PixelWindowError> {
-    Err(PixelWindowError::Unsupported {
-        reason: "pixel-window-host-not-implemented-for-windows".into(),
-    })
+    window_host::run_pixel_window(options, application)
 }
 
 pub(crate) fn run_native_text_window(
