@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
@@ -72,6 +73,7 @@ impl WorkerSupervisor {
             .stderr(Stdio::null());
         platform::configure_worker_command(&mut command)
             .map_err(|error| SupervisorError::Spawn(error.message))?;
+        configure_script_backend(&mut command);
         if let Some(working_directory) = working_directory {
             command.current_dir(working_directory);
         }
@@ -290,6 +292,17 @@ impl WorkerSupervisor {
     }
 }
 
+fn configure_script_backend(command: &mut Command) {
+    command.env(
+        "AGENTERM_SCRIPT_BACKEND",
+        script_backend_environment(std::env::var_os("AGENTERM_SCRIPT_BACKEND")),
+    );
+}
+
+fn script_backend_environment(inherited: Option<OsString>) -> OsString {
+    inherited.unwrap_or_else(|| OsString::from("rh"))
+}
+
 fn try_acquire_permit() -> Result<ConcurrencyPermit, SupervisorError> {
     platform::ConcurrencyPermit::try_acquire(
         &PROCESS_ACTIVE,
@@ -348,6 +361,15 @@ fn read_frame(mut input: impl Read) -> Result<ScriptFrame, SupervisorError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_backend_defaults_to_rh_and_preserves_an_explicit_value() {
+        assert_eq!(script_backend_environment(None), OsString::from("rh"));
+        assert_eq!(
+            script_backend_environment(Some(OsString::from("rhai"))),
+            OsString::from("rhai")
+        );
+    }
 
     #[test]
     fn per_process_concurrency_is_bounded_without_spawning() {

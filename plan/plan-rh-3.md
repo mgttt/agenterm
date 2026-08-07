@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M26 运行时拆分完成**（import SSOT；双 PE 探针；worker 下沉主库） |
+| **状态** | **M27 rh 前门切换完成**（根包构建；task/worker 直承载；supervisor 默认解析 rh） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -57,6 +57,10 @@
 | M26b | artifact verification / client smoke manifest 驱动验证 rhai + rh 双 PE offline probe | [x] |
 | M26c | worker / framed / REPL / execute 从 `agenterm-rhai` bin 下沉 `script_worker` 主库模块 | [x] |
 | M26d | worker check 直接保留 typed API validator failure；迁移后 22 个 worker 单测全绿 | [x] |
+| M27a | 根包拥有并构建 `agenterm-rh` binary，解除 rh library ↔ 主库的 Cargo 环依赖 | [x] |
+| M27b | `agenterm-rh` 直接承载 task、legacy worker 与 framed-worker，共享主库实现 | [x] |
+| M27c | one-shot / persistent supervisor 默认解析 `agenterm-rh`，显式兼容回退 `agenterm-rhai` | [x] |
+| M27d | supervisor 默认注入 `AGENTERM_SCRIPT_BACKEND=rh`；诊断报告实际 worker 与候选名称 | [x] |
 
 ---
 

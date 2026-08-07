@@ -33,6 +33,10 @@ pub(crate) fn product_directory_name() -> &'static str {
 }
 
 pub(crate) const fn script_worker_default_executable_name() -> &'static str {
+    "agenterm-rh"
+}
+
+pub(crate) const fn script_worker_compatibility_executable_name() -> &'static str {
     "agenterm-rhai"
 }
 
@@ -196,7 +200,11 @@ mod tests {
 
     #[test]
     fn product_names_are_stable() {
-        assert_eq!(script_worker_default_executable_name(), "agenterm-rhai");
+        assert_eq!(script_worker_default_executable_name(), "agenterm-rh");
+        assert_eq!(
+            script_worker_compatibility_executable_name(),
+            "agenterm-rhai"
+        );
         assert!(!product_directory_name().is_empty());
     }
 }

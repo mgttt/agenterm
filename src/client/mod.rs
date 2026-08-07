@@ -1046,16 +1046,7 @@ fn run_repl_meta(
 }
 
 fn repl_worker_executable() -> Result<PathBuf, String> {
-    let current = env::current_exe()
-        .map_err(|error| format!("host_worker_path: cannot locate current executable: {error}"))?;
-    if current
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("agenterm-rhai"))
-    {
-        return Ok(current);
-    }
-    script_worker_executable()
+    script_worker_executable().map(|worker| worker.path)
 }
 
 fn query_repl(
@@ -2465,7 +2456,7 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
         }
         return run_script_command_with_context(arguments, None);
     }
-    let worker = match script_worker_executable() {
+    let worker = match script_compatibility_executable() {
         Ok(worker) => worker,
         Err(error) => {
             eprintln!("{error}");
@@ -2483,13 +2474,18 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
     } else {
         None
     };
-    match std::process::Command::new(worker)
-        .args(arguments.iter().skip(1))
-        .status()
-    {
+    let mut command = std::process::Command::new(&worker.path);
+    command.args(arguments.iter().skip(1)).env(
+        "AGENTERM_SCRIPT_BACKEND",
+        std::env::var_os("AGENTERM_SCRIPT_BACKEND").unwrap_or_else(|| "rh".into()),
+    );
+    match command.status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(error) => {
-            eprintln!("host_worker_spawn: could not start agenterm-rhai: {error}");
+            eprintln!(
+                "host_worker_spawn: could not start {}: {error}",
+                worker.name
+            );
             1
         }
     }
@@ -2511,24 +2507,76 @@ struct ScriptExecutionContext {
     working_directory: PathBuf,
 }
 
-fn script_worker_executable() -> Result<PathBuf, String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedScriptWorker {
+    path: PathBuf,
+    name: String,
+}
+
+fn script_worker_executable() -> Result<ResolvedScriptWorker, String> {
     let current = std::env::current_exe().map_err(|error| {
-        format!("host_worker_missing: could not locate current executable: {error}")
+        format!(
+            "host_worker_missing: could not locate current executable: {error}; attempted \
+             adjacent executables: {}",
+            script_worker_attempted_names(false)
+        )
     })?;
+    resolve_script_worker_executable(&current, false, Path::is_file)
+}
+
+fn script_compatibility_executable() -> Result<ResolvedScriptWorker, String> {
+    let current = std::env::current_exe().map_err(|error| {
+        format!(
+            "host_worker_missing: could not locate current executable: {error}; attempted \
+             adjacent executables: {}",
+            script_worker_attempted_names(true)
+        )
+    })?;
+    resolve_script_worker_executable(&current, true, Path::is_file)
+}
+
+fn script_worker_attempted_names(compatibility_only: bool) -> String {
+    crate::platform::paths::script_worker_executable_names()
+        .into_iter()
+        .filter(|candidate| !compatibility_only || candidate.is_compatibility_fallback())
+        .map(|candidate| candidate.name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn resolve_script_worker_executable(
+    current: &Path,
+    compatibility_only: bool,
+    is_file: impl Fn(&Path) -> bool,
+) -> Result<ResolvedScriptWorker, String> {
+    let candidates = crate::platform::paths::script_worker_executable_names()
+        .into_iter()
+        .filter(|candidate| !compatibility_only || candidate.is_compatibility_fallback())
+        .collect::<Vec<_>>();
+    let attempted = candidates
+        .iter()
+        .map(|candidate| candidate.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
     let parent = current.parent().ok_or_else(|| {
-        "host_worker_missing: agenterm-rhai is not installed next to the invoking executable"
-            .to_owned()
+        format!(
+            "host_worker_missing: no script worker directory; attempted adjacent executables: \
+             {attempted}"
+        )
     })?;
-    for name in crate::platform::paths::script_worker_executable_names() {
-        let path = parent.join(name);
-        if path.is_file() {
-            return Ok(path);
+    for candidate in candidates {
+        let path = parent.join(&candidate.name);
+        if is_file(&path) {
+            return Ok(ResolvedScriptWorker {
+                path,
+                name: candidate.name,
+            });
         }
     }
     Err(format!(
-        "host_worker_missing: agenterm-rhai is not installed next to {}; \
-         scripting is an optional component",
-        current.display()
+        "host_worker_missing: no script worker is installed next to {}; \
+         attempted adjacent executables: {attempted}; scripting is an optional component",
+        current.display(),
     ))
 }
 
@@ -2782,7 +2830,7 @@ fn run_script_command_with_context(
         observation,
     };
     let executable = match script_worker_executable() {
-        Ok(path) => path,
+        Ok(executable) => executable,
         Err(message) => {
             let outcome = AuditOutcome {
                 duration_ms: audit_duration_ms(audit_started),
@@ -2805,7 +2853,7 @@ fn run_script_command_with_context(
     let broker_budgets = invocation.budgets.clone();
     let broker_profile = invocation.profile;
     let (mut result, cancel_requested) = match WorkerSupervisor::invoke(
-        &executable,
+        &executable.path,
         Some(&context.working_directory),
         invocation,
         deadline,
@@ -2846,8 +2894,9 @@ fn run_script_command_with_context(
             return report_audit_error(error);
         }
         eprintln!(
-            "agenterm-rhai returned a mismatched protocol result \
-             (envelope/API/invocation/operation/profile identity)"
+            "{} returned a mismatched protocol result \
+             (envelope/API/invocation/operation/profile identity)",
+            executable.name
         );
         return 1;
     }
@@ -2869,7 +2918,10 @@ fn run_script_command_with_context(
         if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
             return report_audit_error(error);
         }
-        eprintln!("agenterm-rhai returned an inconsistent result envelope");
+        eprintln!(
+            "{} returned an inconsistent result envelope",
+            executable.name
+        );
         return 1;
     }
     if let Some(view) = api_view.as_ref() {
@@ -2886,7 +2938,10 @@ fn run_script_command_with_context(
             if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(error);
             }
-            eprintln!("agenterm-rhai returned an API result without a catalog");
+            eprintln!(
+                "{} returned an API result without a catalog",
+                executable.name
+            );
             return 1;
         };
         if let Err(error) = filter_script_api_catalog(catalog, view) {
@@ -2902,7 +2957,10 @@ fn run_script_command_with_context(
             if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(audit_error);
             }
-            eprintln!("agenterm-rhai returned an invalid API catalog: {error}");
+            eprintln!(
+                "{} returned an invalid API catalog: {error}",
+                executable.name
+            );
             return 1;
         }
     }
@@ -2931,7 +2989,10 @@ fn run_script_command_with_context(
                         output.push('\n');
                     }
                     Err(error) => {
-                        eprintln!("agenterm-rhai returned an invalid API catalog: {error}");
+                        eprintln!(
+                            "{} returned an invalid API catalog: {error}",
+                            executable.name
+                        );
                         return 1;
                     }
                 }
@@ -5169,8 +5230,9 @@ fn print_mux_compatibility(json: bool) {
 mod tests {
     use super::{
         HostedSubcommand, hosted_subcommand, normalize_script_source, parse_loopback_ipc_address,
-        parse_terminal_grid, run_wait_ui,
+        parse_terminal_grid, resolve_script_worker_executable, run_wait_ui,
     };
+    use std::path::Path;
 
     #[test]
     fn mux_and_mcp_are_hosted_as_bare_subcommands() {
@@ -5228,5 +5290,50 @@ mod tests {
             "///usr/bin/env agenterm-rhai\nprint(1);"
         );
         assert_eq!(normalize_script_source("print(1);".to_owned()), "print(1);");
+    }
+
+    #[test]
+    fn script_worker_resolution_prefers_rh_then_uses_adjacent_compatibility_fallback() {
+        let candidates = crate::platform::paths::script_worker_executable_names();
+        let primary = candidates
+            .first()
+            .expect("primary worker candidate")
+            .name
+            .clone();
+        let fallback = candidates
+            .iter()
+            .find(|candidate| candidate.name.starts_with("agenterm-rhai"))
+            .expect("compatibility worker candidate")
+            .name
+            .clone();
+        let current = Path::new("/bundle/agenterm-rhai.exe");
+
+        let selected_primary =
+            resolve_script_worker_executable(current, false, |path| path.ends_with(&primary))
+                .expect("primary worker");
+        assert_eq!(selected_primary.name, primary);
+
+        let selected_fallback =
+            resolve_script_worker_executable(current, false, |path| path.ends_with(&fallback))
+                .expect("compatibility worker");
+        assert_eq!(selected_fallback.name, fallback);
+
+        let selected_hosted_compatibility =
+            resolve_script_worker_executable(current, true, |_| true)
+                .expect("hosted compatibility executable");
+        assert_eq!(selected_hosted_compatibility.name, fallback);
+    }
+
+    #[test]
+    fn missing_script_worker_diagnostic_lists_every_attempted_name() {
+        let error =
+            resolve_script_worker_executable(Path::new("/bundle/agenterm-cli.exe"), false, |_| {
+                false
+            })
+            .expect_err("missing worker");
+
+        for candidate in crate::platform::paths::script_worker_executable_names() {
+            assert!(error.contains(&candidate.name), "{error}");
+        }
     }
 }

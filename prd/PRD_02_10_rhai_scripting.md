@@ -8,9 +8,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Shipped baseline
 
-- [x] `agenterm-rhai.exe` is the public `run`, `eval`, `repl`, `check`,
-  `api`, and named-task CLI while retaining private
-  `--worker`/`--framed-worker` modes;
+- [x] `agenterm-rh.exe` is the default task and supervised worker front door:
+  one-shot and persistent supervisors resolve it before the explicit
+  `agenterm-rhai.exe` compatibility fallback and default its execution backend
+  to `rh`. It directly hosts named tasks plus private
+  `--worker`/`--framed-worker` modes through the shared library.
+  `agenterm-rhai.exe` remains the compatibility public `run`, `eval`, `repl`,
+  `check`, and `api` CLI;
   its PE now owns only incremental-wrapper and command dispatch code, while
   `script_worker` in the shared `agenterm` library owns worker, framed
   protocol, REPL and execute behavior;
