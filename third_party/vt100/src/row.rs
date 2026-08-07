@@ -84,11 +84,19 @@ impl Row {
     }
 
     pub fn clear_wide(&mut self, col: u16) {
-        let cell = &self.cells[usize::from(col)];
+        let idx = usize::from(col);
+        let cell = &self.cells[idx];
         let other = if cell.is_wide() {
-            &mut self.cells[usize::from(col + 1)]
+            // Guard against the last column: a wide cell at the final
+            // column has no continuation to clear.
+            let next = idx + 1;
+            if next >= self.cells.len() {
+                return;
+            }
+            &mut self.cells[next]
         } else if cell.is_wide_continuation() {
-            &mut self.cells[usize::from(col - 1)]
+            let prev = idx.saturating_sub(1);
+            &mut self.cells[prev]
         } else {
             return;
         };
