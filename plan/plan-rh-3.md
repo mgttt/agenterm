@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M24 扩面轨完成**（break/continue AOT；check-many host 校验；bootstrap rh CLI 注入） |
+| **状态** | **M25 task 前门完成**（bootstrap 默认 `agenterm-rh task`；显式兼容桥；缺桥失败） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -49,6 +49,9 @@
 | M24a | 原生 `break`/`continue` in for/while（reject try 内与带值 break） | [x] |
 | M24b | check-many host 校验：project imports + shipped API catalog（`api_validate`/`project_import`） | [x] |
 | M24c | bootstrap wave 1：`AGENTERM_BOOTSTRAP_RH_CLI` 注入；check.rhai 优先 rh CLI | [x] |
+| M25a | `agenterm-rh task` 前门：显式转发未迁移 task 引擎到相邻兼容 PE，保留退出码 | [x] |
+| M25b | bootstrap 默认通过 rh task 前门启动；`AGENTERM_RHAI_COMPAT_CLI` 明示兼容边界 | [x] |
+| M25c | task 前门黑盒：成功列出 manifest；兼容 PE 缺失时硬失败 | [x] |
 
 ---
 

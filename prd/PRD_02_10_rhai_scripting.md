@@ -762,11 +762,15 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
 - [~] **rh execution backend** (`crates/agenterm-rh`, `agenterm-rh` CLI):
   rh-0→rh-2 — subset check, transpile→rustc AOT, pack qualify, fleet native
   shim, host eval (stdlib parity via `configure_engine`), source-hash AOT cache,
-  `AGENTERM_SCRIPT_BACKEND=rh` trial path, dedicated `./rh-check.sh` suite
-- [ ] **Rhai → rh migration** (incremental, no forced cutover):
-  task manifest and automation corpus remain `.rhai` until v0.1.15 delivery
-  completes; then per-script rh-2 validation, optional default backend switch,
-  and eventual deprecation of interpreter hot path for pack entry points only
+  default `AGENTERM_SCRIPT_BACKEND=rh`, project/API-aware check-many, native
+  range and break/continue control flow, and dedicated `./rh-check.sh` suite.
+- [~] **Rhai → rh migration** (incremental, compatibility boundary explicit):
+  `agenterm-rh` is the bootstrap task command front door. The task manifest and
+  automation corpus remain `.rhai`; `agenterm-rh task` currently invokes the
+  adjacent `agenterm-rhai` compatibility PE through
+  `AGENTERM_RHAI_COMPAT_CLI`, preserves its exit status, and fails closed when
+  that PE is absent. Worker, REPL, host-eval fallback, and AST parsing remain
+  on Rhai while their typed boundaries migrate.
 - [ ] **Layered deployment** (JVM / JAR analogue):
   - **Base runtime** — stable PE family (`agenterm`, `agenterm-rhai`, …):
     host Facade, broker, supervision, qualification; rebases rarely
@@ -776,9 +780,9 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   - Control Center, gateway sidecar, and task runners consume the same host
     C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
 
-Non-goals until v0.1.15 ships: default `AGENTERM_SCRIPT_BACKEND=rh` for the
-62-task automation manifest; npm-style remote rh imports; Cranelift direct
-codegen (transpile→rustc remains the production backend until a later gate).
+Current non-goals: renaming or deleting the compatibility PE before worker and
+REPL ownership moves; npm-style remote rh imports; Cranelift direct codegen
+(transpile→rustc remains the production backend until a later gate).
 
 ## Explicitly deferred
 
