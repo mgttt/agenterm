@@ -2216,7 +2216,7 @@ let receipt=fleet.tabs.set_note(
             "script_fleet_note_restore_failed"
         );
 
-        print("STEP direct agenterm-rhai north-star named task");
+        print("STEP direct agenterm-rh north-star named task");
         let source_project = std::path::join(
             repo,
             "examples/script-daily-check"
@@ -2314,8 +2314,13 @@ let receipt=fleet.tabs.set_note(
             audit_path
         );
         require(
-            direct_help.contains("AgenTerm Script Runtime")
-                && direct_help.contains("agenterm-rhai task run"),
+            (
+                direct_help.contains("AgenTerm Script Runtime")
+                    && direct_help.contains("agenterm-rhai task run")
+            ) || (
+                direct_help.contains("agenterm-rh")
+                    && direct_help.contains("task list")
+            ),
             "script_direct_help_mismatch"
         );
         require(
@@ -2646,6 +2651,19 @@ fn assert_audit(
     );
 }
 
+fn prefer_rh_worker(script) {
+    let parent = std::path::parent(script).display;
+    let rh_win = std::path::join(parent, "agenterm-rh.exe").display;
+    if std::fs::exists(rh_win) {
+        return rh_win;
+    }
+    let rh = std::path::join(parent, "agenterm-rh").display;
+    if std::fs::exists(rh) {
+        return rh;
+    }
+    return script;
+}
+
 require(
     args.len == 4 || (
         args.len == 5
@@ -2655,7 +2673,7 @@ require(
 );
 let repo = std::path::absolute(args[0]).display;
 let cli = std::path::absolute(args[1]).display;
-let script = std::path::absolute(args[2]).display;
+let script = prefer_rh_worker(std::path::absolute(args[2]).display);
 let gui = std::path::absolute(args[3]).display;
 let internal_failure_probe = args.len == 5;
 for executable in [cli, script, gui] {

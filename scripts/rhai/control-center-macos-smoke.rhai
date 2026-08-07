@@ -384,6 +384,18 @@ fn wait_incompatible_capture(
     throw code + "_timeout:last_frame=" + last;
 }
 
+fn resolve_script_executable(executable_directory) {
+    for candidate in [
+        std::path::join(executable_directory, "agenterm-rh").display,
+        std::path::join(executable_directory, "agenterm-rhai").display
+    ] {
+        if std::fs::exists(candidate) {
+            return candidate;
+        }
+    }
+    throw "control_center_macos_script_missing";
+}
+
 fn incompatible_listener(
     context, script_executable, address, ready_path, stop_path, code
 ) {
@@ -573,21 +585,23 @@ let control_center = std::path::absolute(control_center_value).display;
 let server_executable =
     std::path::absolute(server_executable_value).display;
 let cli_executable = std::path::absolute(cli_executable_value).display;
-let script_executable = std::path::join(
-    std::path::parent(control_center).display,
-    "agenterm-rhai"
-).display;
+let script_executable = resolve_script_executable(
+    std::path::parent(control_center).display
+);
 for executable in [
     control_center,
     server_executable,
-    cli_executable,
-    script_executable
+    cli_executable
 ] {
     require(
         std::fs::exists(executable),
         "control_center_macos_executable_missing:" + executable
     );
 }
+require(
+    std::fs::exists(script_executable),
+    "control_center_macos_script_missing"
+);
 require(
     std::fs::exists("/System/Library/CoreServices"),
     "control_center_macos_host_required"

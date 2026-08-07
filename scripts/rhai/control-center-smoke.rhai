@@ -388,6 +388,18 @@ fn reserve_loopback_address() {
     address
 }
 
+fn resolve_script_executable(executable_directory) {
+    for candidate in [
+        std::path::join(executable_directory, "agenterm-rh.exe").display,
+        std::path::join(executable_directory, "agenterm-rhai.exe").display
+    ] {
+        if std::fs::exists(candidate) {
+            return candidate;
+        }
+    }
+    throw "control_center_smoke_script_missing";
+}
+
 fn incompatible_sibling(
         context, script_executable, address, ready_path, stop_path, code) {
     for path in [ready_path, stop_path] {
@@ -540,10 +552,7 @@ let cli_executable = std::path::join(
     executable_directory,
     "agenterm-cli.exe"
 ).display;
-let script_executable = std::path::join(
-    executable_directory,
-    "agenterm-rhai.exe"
-).display;
+let script_executable = resolve_script_executable(executable_directory);
 let gui_executable = std::path::join(
     executable_directory,
     "agenterm.exe"
@@ -559,10 +568,6 @@ require(
 require(
     std::fs::exists(cli_executable),
     "control_center_smoke_cli_missing"
-);
-require(
-    std::fs::exists(script_executable),
-    "control_center_smoke_script_missing"
 );
 require(
     std::fs::exists(gui_executable),

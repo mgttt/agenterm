@@ -1,12 +1,13 @@
 // Cross-platform UX parity smoke orchestrator.
-// Canonical runtime for local execution is `agenterm-rhai task run`.
+// Canonical runtime for local execution is `agenterm-rh task run`.
 // It chains the existing platform-specific smoke suites with a shared evidence map
 // and keeps a single launch contract in one place.
 //
 // Usage:
 //   REPO GUI_EXE SCRIPT_EXE CLI_EXE PLATFORM
 // platform: windows|linux|macos
-// SCRIPT_EXE is optional and defaults to dist/{agenterm-rhai(.exe)|agenterm-rhai}.
+// SCRIPT_EXE is optional and defaults to dist/{agenterm-rh(.exe)|agenterm-rh},
+// with a compatibility fallback to agenterm-rhai when rh is unavailable.
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
@@ -457,6 +458,8 @@ fn absolute(value) {
 fn resolve_script_binary(script_exe, repository) {
     let candidates = [
         script_exe,
+        std::path::join(repository, "dist/agenterm-rh.exe").display,
+        std::path::join(repository, "dist/agenterm-rh").display,
         std::path::join(repository, "dist/agenterm-rhai.exe").display,
         std::path::join(repository, "dist/agenterm-rhai").display
     ];
@@ -524,7 +527,7 @@ fn parse_platform_args(positional_args) {
         let maybe_gui = absolute(positional_args[args_len - 4]);
         let maybe_script = absolute(positional_args[args_len - 3]);
         let maybe_cli = absolute(positional_args[args_len - 2]);
-        if maybe_script.to_lower().contains("agenterm-rhai") &&
+        if maybe_script.to_lower().contains("agenterm-rh") &&
                 maybe_gui.ends_with("agenterm.exe") &&
                 maybe_cli.ends_with("agenterm-cli.exe") {
             short.repository = maybe_repo;

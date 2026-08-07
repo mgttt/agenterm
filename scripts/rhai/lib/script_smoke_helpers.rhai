@@ -428,9 +428,11 @@ fn invoke_framed_worker(
     command.stdin_bytes(input_bytes);
     command.capture_limit(262144);
     let output = command.output();
+    let worker_label =
+        "[" + std::path::PathBuf::from(script).file_name + "]";
     test_harness::append_command_record(
         context,
-        ["[agenterm-rhai]", "--framed-worker"],
+        [worker_label, "--framed-worker"],
         output,
         false,
         []
