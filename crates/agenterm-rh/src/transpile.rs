@@ -5,7 +5,8 @@ use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 use crate::{
     RhError,
     expr_print::{
-        expr_to_rhai, is_args_len_expr, is_pure_int_expr, is_var_len_expr, uses_host_surface,
+        args_index_expr, args_index_len_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr,
+        is_var_len_expr, uses_host_surface, var_len_name,
     },
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
     host_api::{emit_host_runtime, rust_raw_string_literal},
@@ -16,6 +17,7 @@ use crate::{
 enum ValueKind {
     Int,
     Bool,
+    String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,12 +99,23 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"bool\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
+                ValueKind::String => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"string\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
             }
         }
         out.push_str("}}}}\"");
-        for name in self.scope.keys() {
+        for (name, kind) in &self.scope {
             out.push_str(", ");
-            out.push_str(name);
+            if *kind == ValueKind::String {
+                out.push_str("serde_json::to_string(&");
+                out.push_str(name);
+                out.push_str(").unwrap_or_else(|_| \"\\\"\\\"\".to_owned())");
+            } else {
+                out.push_str(name);
+            }
         }
         out.push(')');
     }
@@ -730,6 +743,8 @@ fn emit_throw_expr(
 fn infer_binding_kind(expr: &Expr) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
+        Expr::StringConstant(..) => ValueKind::String,
+        _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
@@ -895,7 +910,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
                 out.push(')');
             }
         }
-        Expr::StringConstant(..) if ctx.cdylib => emit_host_expr(out, expr, ctx)?,
+        Expr::StringConstant(value, ..) if ctx.cdylib => {
+            out.push_str("String::from(");
+            out.push_str(&format!("{value:?}"));
+            out.push(')');
+        }
         Expr::StringConstant(value, ..) => {
             out.push_str("Dynamic::from(");
             out.push_str(&format!("{value:?}"));
@@ -904,7 +923,27 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
         Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
         Expr::Dot(..) if is_args_len_expr(expr) => out.push_str("rh_args_len()"),
+        Expr::Dot(..) if args_index_len_expr(expr).is_some() => {
+            out.push('(');
+            emit_args_index(
+                out,
+                args_index_len_expr(expr).expect("checked args index"),
+                ctx,
+            )?;
+            out.push_str(".chars().count() as INT)");
+        }
+        Expr::Dot(..)
+            if var_len_name(expr)
+                .is_some_and(|name| ctx.scope.get(name).copied() == Some(ValueKind::String)) =>
+        {
+            out.push('(');
+            out.push_str(var_len_name(expr).expect("checked string binding"));
+            out.push_str(".chars().count() as INT)");
+        }
         Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
+        Expr::Index(..) if args_index_expr(expr).is_some() => {
+            emit_args_index(out, args_index_expr(expr).expect("checked args index"), ctx)?;
+        }
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
             out.push_str("{ ");
@@ -918,6 +957,18 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             )));
         }
     }
+    Ok(())
+}
+
+fn emit_args_index(out: &mut String, index: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    if !is_pure_int_expr(index) {
+        return Err(RhError::Transpile(
+            "native args index must be a pure integer expression".into(),
+        ));
+    }
+    out.push_str("rh_arg(");
+    emit_expr(out, index, ctx)?;
+    out.push(')');
     Ok(())
 }
 
@@ -1047,7 +1098,7 @@ fn binary(
 mod tests {
     use rhai::Stmt;
 
-    use super::{transpile, transpile_cdylib};
+    use super::{CdylibExecutionMode, transpile, transpile_cdylib, transpile_cdylib_with_mode};
 
     #[test]
     fn transpiles_add_fn() {
@@ -1171,6 +1222,23 @@ mod tests {
         assert!(entry.contains("rh_args_len()"), "{entry}");
         assert!(!entry.contains("rh_host_eval_int"), "{entry}");
         assert!(!entry.contains("rh_host_run_script"), "{entry}");
+    }
+
+    #[test]
+    fn cdylib_emits_native_utf8_arg_and_string_len() {
+        let output =
+            transpile_cdylib_with_mode("fn entry() { let first = args[0]; args.len + first.len }")
+                .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        let entry = output
+            .rust
+            .split_once("pub fn entry() -> INT {")
+            .and_then(|(_, suffix)| suffix.split_once("fn rh_entry_internal()"))
+            .map(|(entry, _)| entry)
+            .expect("entry");
+        assert!(entry.contains("rh_arg(0)"), "{entry}");
+        assert!(entry.contains("first.chars().count() as INT"), "{entry}");
+        assert!(!entry.contains("rh_host_eval_int"), "{entry}");
     }
 
     #[test]

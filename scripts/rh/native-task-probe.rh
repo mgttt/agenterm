@@ -1,5 +1,6 @@
 fn entry() {
-    let total = args.len;
+    let first = args[0];
+    let total = args.len + first.len;
     for value in 1..5 {
         total += value;
     }

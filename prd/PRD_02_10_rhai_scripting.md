@@ -44,6 +44,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Both `args.len` and `args.len()` transpile to `rh_args_len()` without a Rhai
   Engine, the manifest-owned native task proves real appended arguments through
   the public CLI, and v2-v4 pack registration remains backward compatible.
+- [x] host API v6 exposes bounded UTF-8 `args[index]` reads to native packs.
+  Native string bindings and `.len` use Unicode scalar counts rather than byte
+  counts; missing/non-string arguments and output-limit violations retain typed
+  host failures, while v2-v5 pack registration remains backward compatible.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

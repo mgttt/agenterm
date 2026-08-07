@@ -366,16 +366,17 @@ fn stmt_uses_host(stmt: &Stmt) -> bool {
 
 pub fn is_var_len_expr(expr: &Expr) -> bool {
     match expr {
-        Expr::Dot(boxed, ..) => {
-            matches!(&boxed.lhs, Expr::Variable(..))
-                && (matches!(&boxed.rhs, Expr::Property(prop, ..) if prop.2.as_str() == "len")
-                    || matches!(
-                        &boxed.rhs,
-                        Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
-                    ))
-        }
+        Expr::Dot(boxed, ..) => matches!(&boxed.lhs, Expr::Variable(..)) && is_len_rhs(&boxed.rhs),
         _ => false,
     }
+}
+
+fn is_len_rhs(expr: &Expr) -> bool {
+    matches!(expr, Expr::Property(prop, ..) if prop.2.as_str() == "len")
+        || matches!(
+            expr,
+            Expr::MethodCall(call, ..) if call.name == "len" && call.args.is_empty()
+        )
 }
 
 pub fn is_args_len_expr(expr: &Expr) -> bool {
@@ -392,11 +393,38 @@ pub fn is_args_len_expr(expr: &Expr) -> bool {
     }
 }
 
+pub fn args_index_expr(expr: &Expr) -> Option<&Expr> {
+    let Expr::Index(boxed, ..) = expr else {
+        return None;
+    };
+    matches!(&boxed.lhs, Expr::Variable(ident, ..) if ident.1.as_str() == "args")
+        .then_some(&boxed.rhs)
+}
+
+pub fn args_index_len_expr(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    is_len_rhs(&boxed.rhs)
+        .then(|| args_index_expr(&boxed.lhs))
+        .flatten()
+}
+
+pub fn var_len_name(expr: &Expr) -> Option<&str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    is_len_rhs(&boxed.rhs).then_some(ident.1.as_str())
+}
+
 pub fn is_pure_int_expr(expr: &Expr) -> bool {
     match expr {
         Expr::IntegerConstant(..) => true,
         Expr::Variable(..) => true,
-        e if is_var_len_expr(e) => true,
+        e if is_var_len_expr(e) || args_index_len_expr(e).is_some() => true,
         Expr::FnCall(call, ..) if call.op_token.is_some() => call.args.iter().all(is_pure_int_expr),
         Expr::FnCall(call, ..) if call.name == "throw" => false,
         Expr::FnCall(..) | Expr::MethodCall(..) => false,
@@ -417,8 +445,8 @@ mod tests {
     use rhai::Engine;
 
     use super::{
-        expr_to_rhai, is_args_len_expr, is_pure_int_expr, is_var_len_expr, stmt_to_rhai,
-        uses_host_surface,
+        args_index_expr, args_index_len_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr,
+        is_var_len_expr, stmt_to_rhai, uses_host_surface, var_len_name,
     };
 
     fn parse_expr(source: &str) -> rhai::Expr {
@@ -469,6 +497,9 @@ mod tests {
         assert!(is_args_len_expr(&len_prop));
         assert!(is_args_len_expr(&len_call));
         assert!(!is_args_len_expr(&parse_expr("items.len")));
+        assert!(args_index_expr(&parse_expr("args[2]")).is_some());
+        assert!(args_index_len_expr(&parse_expr("args[2].len")).is_some());
+        assert_eq!(var_len_name(&parse_expr("first.len")), Some("first"));
         assert!(is_pure_int_expr(&len_prop));
         assert!(is_pure_int_expr(&len_call));
         assert!(!is_pure_int_expr(&parse_expr("std::fs::exists(`/tmp`)")));

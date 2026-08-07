@@ -110,6 +110,15 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
+        module.register_host_v6(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+            Some(host_args_len_call),
+            Some(host_arg_call),
+        )
+    } else if api >= 5 {
         module.register_host_v5(
             host_fleet_call,
             Some(host_eval_call),
@@ -137,6 +146,46 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             "rh pack host api {api} is older than the minimum supported version 2"
         )))
     }
+}
+
+extern "C" fn host_arg_call(index: u32, out_buf: *mut u8, out_cap: u32) -> i32 {
+    if out_buf.is_null() || out_cap == 0 {
+        return -1;
+    }
+    let Some(context) = crate::script_rh_run::current_run_context() else {
+        record_host_error("rh_arg", "run context is unavailable");
+        return -5;
+    };
+    let Some(arguments) = context
+        .arguments
+        .and_then(|value| value.as_array().cloned())
+    else {
+        record_host_error("rh_arg", "run context arguments must be an array");
+        return -5;
+    };
+    let Some(argument) = arguments
+        .get(index as usize)
+        .and_then(|value| value.as_str())
+    else {
+        record_host_error(
+            "rh_arg",
+            &format!("argument {index} is unavailable or not a string"),
+        );
+        return -5;
+    };
+    let bytes = argument.as_bytes();
+    if bytes.len() > out_cap as usize {
+        record_host_error("rh_arg", "argument exceeds the host output buffer");
+        return -3;
+    }
+    let Ok(length) = i32::try_from(bytes.len()) else {
+        record_host_error("rh_arg", "argument length exceeds i32");
+        return -3;
+    };
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+    }
+    length
 }
 
 extern "C" fn host_args_len_call() -> i64 {
@@ -480,6 +529,28 @@ mod tests {
     }
 
     #[test]
+    fn host_arg_call_returns_utf8_and_reports_missing_index() {
+        let context = crate::script_rh_run::RhRunContext {
+            arguments: Some(serde_json::json!(["αβ"])),
+            ..Default::default()
+        };
+        crate::script_rh_run::with_run_context(context, || {
+            super::clear_host_error();
+            let mut output = [0_u8; 16];
+            let wrote = super::host_arg_call(0, output.as_mut_ptr(), output.len() as u32);
+            assert_eq!(wrote, "αβ".len() as i32);
+            assert_eq!(&output[..wrote as usize], "αβ".as_bytes());
+
+            assert_eq!(
+                super::host_arg_call(1, output.as_mut_ptr(), output.len() as u32),
+                -5
+            );
+            let error = super::take_host_error().expect("typed host error");
+            assert!(error.to_string().contains("argument 1 is unavailable"));
+        });
+    }
+
+    #[test]
     fn native_pack_uses_std_fs_exists_fast_path() {
         let dir =
             std::env::temp_dir().join(format!("agenterm-rh-host-exists-{}", std::process::id()));
@@ -633,7 +704,7 @@ fn entry() { 42 }"#;
         let dir =
             std::env::temp_dir().join(format!("agenterm-rh-host-args-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let source = "fn entry() { args.len() }";
+        let source = "fn entry() { args.len() + args[0].len }";
         agenterm_rh::build_pack_dir(source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
         let module = agenterm_rh::RhNativeModule::load(&native).expect("load");
@@ -646,13 +717,13 @@ fn entry() { 42 }"#;
             &native,
             None,
             crate::script_rh_run::RhRunContext {
-                arguments: Some(serde_json::json!(["alpha", "beta"])),
+                arguments: Some(serde_json::json!(["αβ", "beta"])),
                 project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
                 ..Default::default()
             },
         )
         .expect("entry");
-        assert_eq!(value, 2);
+        assert_eq!(value, 4);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
