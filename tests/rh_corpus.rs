@@ -75,6 +75,7 @@ fn fixture_check_many_manifest_is_valid() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let manifest_path = repo.join("fixtures/rh/check-many.json");
     let manifest = agenterm_rh::read_manifest(&manifest_path).expect("manifest");
+    let expected_files = manifest.files.len();
     let report = agenterm_rh::run_check_many(
         manifest,
         agenterm_rh::CheckManyOptions {
@@ -83,7 +84,7 @@ fn fixture_check_many_manifest_is_valid() {
         },
     );
     assert!(report.ok, "failures: {:?}", report.failures);
-    assert_eq!(report.checked_files, 8);
+    assert_eq!(report.checked_files, expected_files);
 }
 
 #[test]
