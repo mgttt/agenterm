@@ -4,6 +4,7 @@
   "files": [
     "fixtures/rh/append-sync-probe.rh",
     "fixtures/rh/break-continue.rh",
+    "fixtures/rh/child-lifecycle-probe.rh",
     "fixtures/rh/direntry-metadata-probe.rh",
     "fixtures/rh/entry.rh",
     "fixtures/rh/fail-dynamic.rh",
@@ -27,6 +28,7 @@
     "fixtures/rh/path-metadata-sugar.rh",
     "fixtures/rh/path-parent-probe.rh",
     "fixtures/rh/process-id-probe.rh",
+    "fixtures/rh/process-output-probe.rh",
     "fixtures/rh/process-stdout-file.rh",
     "fixtures/rh/remove-dir-all-probe.rh",
     "fixtures/rh/stdlib.rh",

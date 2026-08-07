@@ -9,9 +9,10 @@ use agenterm_rh::{
     transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 35] = [
+const FIXTURE_NAMES: [&str; 37] = [
     "append-sync-probe.rh",
     "break-continue.rh",
+    "child-lifecycle-probe.rh",
     "direntry-metadata-probe.rh",
     "entry.rh",
     "fail-dynamic.rh",
@@ -35,6 +36,7 @@ const FIXTURE_NAMES: [&str; 35] = [
     "path-metadata-sugar.rh",
     "path-parent-probe.rh",
     "process-id-probe.rh",
+    "process-output-probe.rh",
     "process-stdout-file.rh",
     "remove-dir-all-probe.rh",
     "stdlib.rh",

@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 33;
+pub const RH_CODEGEN_REVISION: u32 = 35;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -755,6 +755,234 @@ pub fn emit_host_runtime(out: &mut String) {
                      Vec::new()\n\
                  }\n\
              }\n\
+         }\n\n\
+         struct RhCommand {\n\
+             program: String,\n\
+             args: Vec<String>,\n\
+             env: Vec<(String, String)>,\n\
+             timeout_ms: INT,\n\
+             capture_limit: usize,\n\
+             current_dir: Option<String>,\n\
+         }\n\n\
+         struct RhOutput {\n\
+             success: INT,\n\
+             exit_code: INT,\n\
+             stdout: String,\n\
+             stderr: String,\n\
+         }\n\n\
+         struct RhChild {\n\
+             child: Option<std::process::Child>,\n\
+             pid: INT,\n\
+             state: String,\n\
+             capture_limit: usize,\n\
+         }\n\n\
+         fn rh_command_new(program: &str) -> RhCommand {\n\
+             RhCommand {\n\
+                 program: program.to_owned(),\n\
+                 args: Vec::new(),\n\
+                 env: Vec::new(),\n\
+                 timeout_ms: 2_000,\n\
+                 capture_limit: 64 * 1024,\n\
+                 current_dir: None,\n\
+             }\n\
+         }\n\n\
+         fn rh_command_args(command: &mut RhCommand, args: &[String]) {\n\
+             command.args.extend(args.iter().cloned());\n\
+         }\n\n\
+         fn rh_command_env(command: &mut RhCommand, name: &str, value: &str) {\n\
+             command.env.push((name.to_owned(), value.to_owned()));\n\
+         }\n\n\
+         fn rh_command_timeout_ms(command: &mut RhCommand, timeout_ms: INT) {\n\
+             if timeout_ms > 0 {\n\
+                 command.timeout_ms = timeout_ms.min(3_600_000);\n\
+             }\n\
+         }\n\n\
+         fn rh_command_capture_limit(command: &mut RhCommand, limit: INT) {\n\
+             if limit > 0 {\n\
+                 if let Ok(limit) = usize::try_from(limit.min(262_144)) {\n\
+                     command.capture_limit = limit.max(1);\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_command_current_dir(command: &mut RhCommand, path: &str) {\n\
+             command.current_dir = Some(path.to_owned());\n\
+         }\n\n\
+         fn rh_command_build(command: &RhCommand) -> std::process::Command {\n\
+             let mut process = std::process::Command::new(&command.program);\n\
+             process.args(&command.args);\n\
+             for (name, value) in &command.env {\n\
+                 process.env(name, value);\n\
+             }\n\
+             if let Some(dir) = &command.current_dir {\n\
+                 process.current_dir(dir);\n\
+             }\n\
+             process.stdin(std::process::Stdio::null());\n\
+             process.stdout(std::process::Stdio::piped());\n\
+             process.stderr(std::process::Stdio::piped());\n\
+             process\n\
+         }\n\n\
+         fn rh_read_pipe_limited(mut reader: impl std::io::Read, limit: usize) -> (String, bool) {\n\
+             let mut bytes = Vec::new();\n\
+             let mut chunk = [0_u8; 8192];\n\
+             let mut truncated = false;\n\
+             loop {\n\
+                 if bytes.len() >= limit {\n\
+                     truncated = true;\n\
+                     break;\n\
+                 }\n\
+                 match reader.read(&mut chunk) {\n\
+                     Ok(0) => break,\n\
+                     Ok(count) => {\n\
+                         let room = limit - bytes.len();\n\
+                         let take = count.min(room);\n\
+                         bytes.extend_from_slice(&chunk[..take]);\n\
+                         if take < count {\n\
+                             truncated = true;\n\
+                             break;\n\
+                         }\n\
+                     }\n\
+                     Err(_) => break,\n\
+                 }\n\
+             }\n\
+             (String::from_utf8(bytes).unwrap_or_default(), truncated)\n\
+         }\n\n\
+         fn rh_finish_process_output(\n\
+             mut child: std::process::Child,\n\
+             timeout: std::time::Duration,\n\
+             capture_limit: usize,\n\
+         ) -> RhOutput {\n\
+             let stdout_pipe = child.stdout.take();\n\
+             let stderr_pipe = child.stderr.take();\n\
+             let wait_result = match child.wait_timeout(timeout) {\n\
+                 Ok(result) => result,\n\
+                 Err(error) => {\n\
+                     let _ = child.kill();\n\
+                     let _ = child.wait();\n\
+                     let _ = rh_fail(&format!(\"process_wait: {error}\"));\n\
+                     return RhOutput {\n\
+                         success: 0,\n\
+                         exit_code: -1,\n\
+                         stdout: String::new(),\n\
+                         stderr: String::new(),\n\
+                     };\n\
+                 }\n\
+             };\n\
+             if wait_result.is_none() {\n\
+                 let _ = child.kill();\n\
+                 let _ = child.wait();\n\
+                 let _ = rh_fail(\"process_timeout\");\n\
+                 return RhOutput {\n\
+                     success: 0,\n\
+                     exit_code: -1,\n\
+                     stdout: String::new(),\n\
+                     stderr: String::new(),\n\
+                 };\n\
+             }\n\
+             let status = wait_result.expect(\"process wait returned unexpectedly\");\n\
+             let (stdout, _) = match stdout_pipe {\n\
+                 Some(pipe) => rh_read_pipe_limited(pipe, capture_limit),\n\
+                 None => (String::new(), false),\n\
+             };\n\
+             let (stderr, _) = match stderr_pipe {\n\
+                 Some(pipe) => rh_read_pipe_limited(pipe, capture_limit),\n\
+                 None => (String::new(), false),\n\
+             };\n\
+             RhOutput {\n\
+                 success: i64::from(status.success()),\n\
+                 exit_code: status.code().unwrap_or(-1) as INT,\n\
+                 stdout,\n\
+                 stderr,\n\
+             }\n\
+         }\n\n\
+         fn rh_command_output(command: &mut RhCommand) -> RhOutput {\n\
+             let timeout =\n\
+                 std::time::Duration::from_millis(command.timeout_ms.max(1).max(0) as u64);\n\
+             let capture_limit = command.capture_limit;\n\
+             let mut process = rh_command_build(command);\n\
+             match process.spawn() {\n\
+                 Ok(child) => rh_finish_process_output(child, timeout, capture_limit),\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
+                     RhOutput {\n\
+                         success: 0,\n\
+                         exit_code: -1,\n\
+                         stdout: String::new(),\n\
+                         stderr: String::new(),\n\
+                     }\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_command_start(command: &mut RhCommand) -> RhChild {\n\
+             let mut process = rh_command_build(command);\n\
+             match process.spawn() {\n\
+                 Ok(child) => RhChild {\n\
+                     pid: child.id() as INT,\n\
+                     child: Some(child),\n\
+                     state: String::from(\"running\"),\n\
+                     capture_limit: command.capture_limit,\n\
+                 },\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
+                     RhChild {\n\
+                         pid: 0,\n\
+                         child: None,\n\
+                         state: String::from(\"exited\"),\n\
+                         capture_limit: command.capture_limit,\n\
+                     }\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_output_stdout_text(output: &RhOutput) -> String {\n\
+             output.stdout.clone()\n\
+         }\n\n\
+         fn rh_output_stderr_text(output: &RhOutput) -> String {\n\
+             output.stderr.clone()\n\
+         }\n\n\
+         fn rh_output_require_success(output: &RhOutput, message: &str) -> INT {\n\
+             if output.success != 0 {\n\
+                 return 0;\n\
+             }\n\
+             rh_fail(message)\n\
+         }\n\n\
+         fn rh_child_state(child: &mut RhChild) -> String {\n\
+             if child.state == \"exited\" {\n\
+                 return child.state.clone();\n\
+             }\n\
+             if let Some(process) = child.child.as_mut() {\n\
+                 match process.try_wait() {\n\
+                     Ok(Some(_)) => child.state = String::from(\"exited\"),\n\
+                     Ok(None) => {}\n\
+                     Err(error) => {\n\
+                         let _ = rh_fail(&format!(\"process_try_wait: {error}\"));\n\
+                         child.state = String::from(\"exited\");\n\
+                     }\n\
+                 }\n\
+             } else {\n\
+                 child.state = String::from(\"exited\");\n\
+             }\n\
+             child.state.clone()\n\
+         }\n\n\
+         fn rh_child_kill(child: &mut RhChild) -> INT {\n\
+             if let Some(process) = child.child.as_mut() {\n\
+                 if let Err(error) = process.kill() {\n\
+                     let _ = rh_fail(&format!(\"process_kill: {error}\"));\n\
+                 }\n\
+             }\n\
+             0\n\
+         }\n\n\
+         fn rh_child_wait_with_output(child: &mut RhChild, timeout_ms: INT) -> RhOutput {\n\
+             let timeout = std::time::Duration::from_millis(timeout_ms.max(1).max(0) as u64);\n\
+             let capture_limit = child.capture_limit;\n\
+             child.state = String::from(\"exited\");\n\
+             let Some(process) = child.child.take() else {\n\
+                 return RhOutput {\n\
+                     success: 0,\n\
+                     exit_code: -1,\n\
+                     stdout: String::new(),\n\
+                     stderr: String::new(),\n\
+                 };\n\
+             };\n\
+             rh_finish_process_output(process, timeout, capture_limit)\n\
          }\n\n\
          fn rh_utility(operation: u32, input: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_UTILITY_CALL }) else {\n\

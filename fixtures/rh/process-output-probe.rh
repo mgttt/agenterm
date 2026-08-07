@@ -1,0 +1,16 @@
+// Probe native std::process::command builder + Output capture (M42f7e).
+fn entry() {
+    let command = std::process::command("/bin/echo");
+    command.args(["hi"]);
+    command.capture_limit(4096);
+    command.timeout(std::time::Duration::from_secs(5));
+    let output = command.output();
+    if output.success == 0 {
+        return rh::fail("process_output_not_success");
+    }
+    let text = output.stdout_text();
+    if text.contains("hi") {
+        return 1;
+    }
+    rh::fail("process_output_missing_hi")
+}

@@ -1,0 +1,17 @@
+// Probe native Command.start + Child lifecycle (M42f7f).
+fn entry() {
+    let command = std::process::command("/bin/sleep");
+    command.args(["30"]);
+    command.timeout(std::time::Duration::from_secs(5));
+    let child = command.start();
+    let pid = child.id;
+    if child.state != "running" {
+        return rh::fail("child_not_running");
+    }
+    child.kill();
+    child.wait_with_output(std::time::Duration::from_secs(2));
+    if child.state != "exited" {
+        return rh::fail("child_not_exited");
+    }
+    pid
+}

@@ -29,6 +29,9 @@ enum ValueKind {
     DirEntry,
     /// `std::path::PathBuf` binding stored as a UTF-8 path string.
     Path,
+    Command,
+    Output,
+    Child,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +152,11 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
+                ValueKind::Command | ValueKind::Output | ValueKind::Child => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
             }
         }
         out.push_str("}}}}\"");
@@ -167,7 +175,15 @@ impl EmitCtx {
                 out.push_str(
                     ".iter().cloned().collect::<Vec<_>>()).unwrap_or_else(|_| \"[]\".to_owned())",
                 );
-            } else if matches!(kind, ValueKind::Metadata | ValueKind::SystemTime | ValueKind::DirEntry) {
+            } else if matches!(
+                kind,
+                ValueKind::Metadata
+                    | ValueKind::SystemTime
+                    | ValueKind::DirEntry
+                    | ValueKind::Command
+                    | ValueKind::Output
+                    | ValueKind::Child
+            ) {
                 out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
                 out.push_str(name);
@@ -1312,6 +1328,8 @@ fn emit_stmt(
             out.push_str("    }\n");
         }
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_command_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_child_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr)
             if ctx.cdylib
@@ -1638,6 +1656,13 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
         _ if std_process_id(expr) => ValueKind::Int,
+        _ if std_process_command_arg(expr).is_some() => ValueKind::Command,
+        _ if command_output_call(expr, ctx).is_some() => ValueKind::Output,
+        _ if command_start_call(expr, ctx).is_some() => ValueKind::Child,
+        _ if child_wait_with_output_call(expr, ctx).is_some() => ValueKind::Output,
+        _ if output_stdout_text_call(expr, ctx).is_some() => ValueKind::String,
+        _ if output_stderr_text_call(expr, ctx).is_some() => ValueKind::String,
+        _ if child_state_binding(expr, ctx).is_some() => ValueKind::String,
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
@@ -2186,6 +2211,423 @@ fn std_process_id(expr: &Expr) -> bool {
         return false;
     };
     call.namespace.to_string() == "std::process" && call.name == "id" && call.args.is_empty()
+}
+
+fn std_process_command_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::process" || call.name != "command" || call.args.len() != 1 {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn command_binding_method<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+    kind: ValueKind,
+) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(kind) {
+        return None;
+    }
+    let call = match &boxed.rhs {
+        Expr::MethodCall(call, ..) => call,
+        _ => return None,
+    };
+    Some((ident.1.as_str(), call))
+}
+
+fn command_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::Command)
+}
+
+fn output_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::Output)
+}
+
+fn child_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::Child)
+}
+
+fn command_output_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = command_method_call(expr, ctx)?;
+    (call.name == "output" && call.args.is_empty()).then_some(binding)
+}
+
+fn command_start_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = command_method_call(expr, ctx)?;
+    (call.name == "start" && call.args.is_empty()).then_some(binding)
+}
+
+fn output_stdout_text_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = output_method_call(expr, ctx)?;
+    (call.name == "stdout_text" && call.args.is_empty()).then_some(binding)
+}
+
+fn output_stderr_text_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = output_method_call(expr, ctx)?;
+    (call.name == "stderr_text" && call.args.is_empty()).then_some(binding)
+}
+
+fn child_wait_with_output_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = child_method_call(expr, ctx)?;
+    (call.name == "wait_with_output" && call.args.len() == 1).then_some(binding)
+}
+
+fn output_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Output) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    matches!(property, "success" | "exit_code").then_some((ident.1.as_str(), property))
+}
+
+fn child_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Child) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    matches!(property, "id" | "state").then_some((ident.1.as_str(), property))
+}
+
+fn child_state_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    child_property_binding(expr, ctx)
+        .filter(|(_, property)| *property == "state")
+        .map(|(binding, _)| binding)
+}
+
+fn emit_command_string_args(
+    out: &mut String,
+    arguments: &[Expr],
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    out.push_str("&[");
+    for (index, argument) in arguments.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        let mut argument_expr = String::new();
+        if !emit_native_string(&mut argument_expr, argument, ctx)? {
+            return Ok(false);
+        }
+        out.push_str("String::from(");
+        out.push_str(&argument_expr);
+        out.push(')');
+    }
+    out.push(']');
+    Ok(true)
+}
+
+fn emit_duration_ms(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    if let Expr::FnCall(call, ..) = expr {
+        if call.namespace.to_string() == "std::time::Duration" {
+            if call.name == "from_secs" && call.args.len() == 1 && is_pure_int_expr(&call.args[0]) {
+                emit_expr(out, &call.args[0], ctx)?;
+                out.push_str(" * 1000");
+                return Ok(true);
+            }
+            if call.name == "from_millis" && call.args.len() == 1 && is_pure_int_expr(&call.args[0])
+            {
+                emit_expr(out, &call.args[0], ctx)?;
+                return Ok(true);
+            }
+        }
+    }
+    if is_pure_int_expr(expr) {
+        emit_expr(out, expr, ctx)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn emit_std_process_command(
+    out: &mut String,
+    program: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut program_expr = String::new();
+    if !emit_native_string(&mut program_expr, program, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_command_new(");
+    out.push_str(&program_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_command_method(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = command_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "output" if call.args.is_empty() => {
+            out.push_str("rh_command_output(&mut ");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        "start" if call.args.is_empty() => {
+            out.push_str("rh_command_start(&mut ");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        "args" if call.args.len() == 1 => {
+            let Expr::Array(arguments, ..) = &call.args[0] else {
+                return Ok(false);
+            };
+            out.push_str("{\n        rh_command_args(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_command_string_args(out, arguments, ctx)? {
+                return Ok(false);
+            }
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        "env" if call.args.len() == 2 => {
+            out.push_str("{\n        rh_command_env(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(", &");
+            emit_stringish(out, &call.args[1], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        "timeout" if call.args.len() == 1 => {
+            out.push_str("{\n        rh_command_timeout_ms(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_duration_ms(out, &call.args[0], ctx)? {
+                return Ok(false);
+            }
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        "capture_limit" if call.args.len() == 1 && is_pure_int_expr(&call.args[0]) => {
+            out.push_str("{\n        rh_command_capture_limit(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, &call.args[0], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        "current_dir" if call.args.len() == 1 => {
+            out.push_str("{\n        rh_command_current_dir(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_output_method(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = output_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "stdout_text" if call.args.is_empty() => {
+            out.push_str("rh_output_stdout_text(&");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        "stderr_text" if call.args.is_empty() => {
+            out.push_str("rh_output_stderr_text(&");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        "require_success" if call.args.len() == 1 => {
+            out.push_str("rh_output_require_success(&");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_child_method(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = child_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "kill" if call.args.is_empty() => {
+            out.push_str("rh_child_kill(&mut ");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        "wait_with_output" if call.args.len() == 1 => {
+            out.push_str("rh_child_wait_with_output(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_duration_ms(out, &call.args[0], ctx)? {
+                return Ok(false);
+            }
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_command_mut_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = command_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "args" if call.args.len() == 1 => {
+            let Expr::Array(arguments, ..) = &call.args[0] else {
+                return Ok(false);
+            };
+            out.push_str("    rh_command_args(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_command_string_args(out, arguments, ctx)? {
+                return Ok(false);
+            }
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "env" if call.args.len() == 2 => {
+            out.push_str("    rh_command_env(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(", &");
+            emit_stringish(out, &call.args[1], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "timeout" if call.args.len() == 1 => {
+            out.push_str("    rh_command_timeout_ms(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_duration_ms(out, &call.args[0], ctx)? {
+                return Ok(false);
+            }
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "capture_limit" if call.args.len() == 1 && is_pure_int_expr(&call.args[0]) => {
+            out.push_str("    rh_command_capture_limit(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, &call.args[0], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "current_dir" if call.args.len() == 1 => {
+            out.push_str("    rh_command_current_dir(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_child_mut_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = child_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "kill" if call.args.is_empty() => {
+            out.push_str("    rh_child_kill(&mut ");
+            out.push_str(binding);
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "wait_with_output" if call.args.len() == 1 => {
+            out.push_str("    let _ = rh_child_wait_with_output(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_duration_ms(out, &call.args[0], ctx)? {
+                return Ok(false);
+            }
+            out.push_str(");\n");
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_output_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, property)) = output_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str(binding);
+    out.push('.');
+    out.push_str(property);
+    Ok(true)
+}
+
+fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, property)) = child_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    if property == "state" {
+        out.push_str("rh_child_state(&mut ");
+        out.push_str(binding);
+        out.push(')');
+    } else if property == "id" {
+        out.push_str(binding);
+        out.push_str(".pid");
+    } else {
+        out.push_str(binding);
+        out.push('.');
+        out.push_str(property);
+    }
+    Ok(true)
 }
 
 fn string_sub_string_arg<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a rhai::FnCallExpr> {
@@ -3006,6 +3448,9 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || system_time_rfc3339_binding(expr, ctx).is_some()
         || fs_metadata_modified_rfc3339(expr).is_some()
         || dir_entry_metadata_modified_rfc3339(expr, ctx).is_some()
+        || child_state_binding(expr, ctx).is_some()
+        || output_stdout_text_call(expr, ctx).is_some()
+        || output_stderr_text_call(expr, ctx).is_some()
         || matches!(
             expr,
             Expr::Variable(ident, ..)
@@ -3036,6 +3481,9 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || set_keys_len_path(expr, ctx).is_some()
         || std_time_system_time_now_unix_millis(expr)
         || std_process_id(expr)
+        || output_property_binding(expr, ctx).is_some()
+        || child_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "id")
         || system_time_unix_millis_binding(expr, ctx).is_some()
         || fs_metadata_modified_unix_millis(expr).is_some()
         || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
@@ -3198,6 +3646,27 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
                     "sub_string receiver must be a string binding".into(),
                 ));
             }
+        }
+        _ if let Some((binding, field)) = dir_entry_string_field(expr, ctx) => {
+            out.push_str(binding);
+            out.push('.');
+            out.push_str(field);
+            out.push_str(".clone()");
+        }
+        _ if let Some(binding) = child_state_binding(expr, ctx) => {
+            out.push_str("rh_child_state(&mut ");
+            out.push_str(binding);
+            out.push(')');
+        }
+        _ if let Some(binding) = output_stdout_text_call(expr, ctx) => {
+            out.push_str("rh_output_stdout_text(&");
+            out.push_str(binding);
+            out.push(')');
+        }
+        _ if let Some(binding) = output_stderr_text_call(expr, ctx) => {
+            out.push_str("rh_output_stderr_text(&");
+            out.push_str(binding);
+            out.push(')');
         }
         _ if let Some(path) = crypto_sha256_file_arg(expr) => {
             if !emit_crypto_sha256_file(out, path, ctx)? {
@@ -3586,6 +4055,26 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if std_process_id(expr) {
             out.push_str("rh_process_id()");
+            return Ok(());
+        }
+        if let Some(program) = std_process_command_arg(expr)
+            && emit_std_process_command(out, program, ctx)?
+        {
+            return Ok(());
+        }
+        if emit_command_method(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_output_method(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_child_method(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_output_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_child_property(out, expr, ctx)? {
             return Ok(());
         }
         if std_time_system_time_now_rfc3339(expr) {
@@ -4298,6 +4787,21 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
         }
         _ if env_current_dir_display(expr) => {
             out.push_str("&rh_env_current_dir()");
+        }
+        _ if let Some(binding) = child_state_binding(expr, ctx) => {
+            out.push_str("&rh_child_state(&mut ");
+            out.push_str(binding);
+            out.push(')');
+        }
+        _ if let Some(binding) = output_stdout_text_call(expr, ctx) => {
+            out.push_str("&rh_output_stdout_text(&");
+            out.push_str(binding);
+            out.push(')');
+        }
+        _ if let Some(binding) = output_stderr_text_call(expr, ctx) => {
+            out.push_str("&rh_output_stderr_text(&");
+            out.push_str(binding);
+            out.push(')');
         }
         _ => return Ok(false),
     }
@@ -6641,6 +7145,92 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn process_output_command_builder_transpiles_native() {
+        let source = include_str!("../../../fixtures/rh/process-output-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_command_new("), "{}", output.rust);
+        assert!(output.rust.contains("rh_command_args("), "{}", output.rust);
+        assert!(output.rust.contains("rh_command_output("), "{}", output.rust);
+        assert!(output.rust.contains("rh_output_stdout_text("), "{}", output.rust);
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn child_lifecycle_command_start_transpiles_native() {
+        let source = include_str!("../../../fixtures/rh/child-lifecycle-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_command_start("), "{}", output.rust);
+        assert!(output.rust.contains("rh_child_state("), "{}", output.rust);
+        assert!(output.rust.contains("rh_child_kill("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_child_wait_with_output("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn command_output_and_child_helpers_emit_in_pack_runtime() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let command = std::process::command("/bin/true");
+    command.timeout(1000);
+    command.capture_limit(1024);
+    let output = command.output();
+    output.require_success("true_failed");
+    let sleeper = std::process::command("/bin/sleep");
+    let child = sleeper.start();
+    child.kill();
+    output.exit_code
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_command_timeout_ms("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_output_require_success("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("struct RhCommand"), "{}", output.rust);
+        assert!(output.rust.contains("struct RhOutput"), "{}", output.rust);
+        assert!(output.rust.contains("struct RhChild"), "{}", output.rust);
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 }
