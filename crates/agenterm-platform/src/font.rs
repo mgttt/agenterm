@@ -32,6 +32,16 @@ pub fn candidates() -> Vec<FontFileCandidate> {
     selected::font::candidates()
 }
 
+/// Faces consulted only for glyphs the primary font lacks.
+///
+/// The primary candidates are monospace Latin faces, which is right for cell
+/// metrics and wrong for coverage: without a fallback chain a terminal renders
+/// CJK and emoji as blank cells — the width is reserved, nothing is drawn.
+/// These are never selected as the primary face.
+pub fn fallback_candidates() -> Vec<FontFileCandidate> {
+    selected::font::fallback_candidates()
+}
+
 pub fn probe() -> FontDiscovery {
     selected::font::probe()
 }
@@ -90,6 +100,24 @@ pub fn create_terminal_font(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coverage_fallbacks_exist_and_are_distinct_from_the_primary_face() {
+        // A terminal on a CJK system renders blank cells if this list is
+        // empty, so its emptiness is a real regression, not a style nit.
+        let fallbacks = super::fallback_candidates();
+        assert!(!fallbacks.is_empty(), "every platform needs coverage fallbacks");
+
+        // The primary face must stay a monospace Latin font: cell metrics come
+        // from it, so a proportional CJK face must never lead the list.
+        let primary = super::candidates();
+        assert!(!primary.is_empty());
+        assert_ne!(
+            primary.first().map(|c| c.name),
+            fallbacks.first().map(|c| c.name),
+            "a coverage font must not become the primary face"
+        );
+    }
 
     #[test]
     fn failures_map_to_stable_typed_statuses() {

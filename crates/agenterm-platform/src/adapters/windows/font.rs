@@ -34,6 +34,38 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
     ]
 }
 
+/// Fonts consulted only for glyphs the primary face does not have.
+///
+/// The monospace faces above are Latin-only, so without this list a terminal
+/// on a Chinese/Japanese/Korean system renders CJK output as blank cells — the
+/// cell width is reserved but nothing is drawn. These are never chosen as the
+/// primary face (cell metrics must come from the monospace font), only asked
+/// for glyphs it is missing.
+pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
+    vec![
+        FontFileCandidate {
+            name: "Microsoft YaHei",
+            components: &["C:", "Windows", "Fonts", "msyh.ttc"],
+        },
+        FontFileCandidate {
+            name: "SimSun",
+            components: &["C:", "Windows", "Fonts", "simsun.ttc"],
+        },
+        FontFileCandidate {
+            name: "MS Gothic",
+            components: &["C:", "Windows", "Fonts", "msgothic.ttc"],
+        },
+        FontFileCandidate {
+            name: "Malgun Gothic",
+            components: &["C:", "Windows", "Fonts", "malgun.ttf"],
+        },
+        FontFileCandidate {
+            name: "Segoe UI Emoji",
+            components: &["C:", "Windows", "Fonts", "seguiemj.ttf"],
+        },
+    ]
+}
+
 pub(crate) fn probe() -> FontDiscovery {
     let families: Vec<&'static str> = candidates()
         .iter()

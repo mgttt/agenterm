@@ -73,6 +73,43 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
     ]
 }
 
+/// Fonts consulted only for glyphs the primary face does not have, so CJK and
+/// emoji do not render as blank cells. Never chosen as the primary face.
+///
+/// Noto Sans CJK is already a primary candidate above, but only as a last
+/// resort — on a system that found DejaVu first it is never reached, which is
+/// exactly the gap this list closes.
+pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
+    vec![
+        FontFileCandidate {
+            name: "Noto Sans CJK",
+            components: &[
+                "usr",
+                "share",
+                "fonts",
+                "opentype",
+                "noto",
+                "NotoSansCJK-Regular.ttc",
+            ],
+        },
+        FontFileCandidate {
+            name: "WenQuanYi Micro Hei",
+            components: &["usr", "share", "fonts", "truetype", "wqy", "wqy-microhei.ttc"],
+        },
+        FontFileCandidate {
+            name: "Noto Color Emoji",
+            components: &[
+                "usr",
+                "share",
+                "fonts",
+                "truetype",
+                "noto",
+                "NotoColorEmoji.ttf",
+            ],
+        },
+    ]
+}
+
 pub(crate) fn probe() -> FontDiscovery {
     let mut available_families = Vec::new();
     for candidate in candidates() {
