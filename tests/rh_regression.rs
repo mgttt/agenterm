@@ -46,6 +46,10 @@ fn check_accepts_all_fixtures() {
             "string-validate",
             include_str!("../fixtures/rh/string-validate.rh"),
         ),
+        (
+            "fail-dynamic",
+            include_str!("../fixtures/rh/fail-dynamic.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -261,7 +265,8 @@ fn fleet_fixture_transpile_uses_fleet_call() {
 #[test]
 fn string_validate_fixture_executes_natively_without_interpreter() {
     let source = include_str!("../fixtures/rh/string-validate.rh");
-    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile string validate");
+    let output =
+        agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile string validate");
     assert_eq!(
         output.execution_mode,
         agenterm_rh::CdylibExecutionMode::Native,
@@ -283,7 +288,35 @@ fn string_validate_fixture_executes_natively_without_interpreter() {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify string validate pack");
+    let receipt =
+        agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify string validate pack");
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(receipt.entry_value, 111);
+}
+
+#[test]
+fn fail_dynamic_fixture_executes_natively_without_interpreter() {
+    let source = include_str!("../fixtures/rh/fail-dynamic.rh");
+    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile fail-dynamic");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output
+            .rust
+            .contains("if ((name != String::from(\"\"))) as INT == 0")
+    );
+    assert!(output.rust.contains("rh_fail(&format!(\"{}{}\""));
+    assert!(output.rust.contains("String::from(\"empty:\")"));
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-fail-dynamic-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify fail-dynamic pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 1);
 }

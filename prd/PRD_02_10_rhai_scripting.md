@@ -82,11 +82,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   properties without interpreter evaluation, whole-script delegation,
   substring validation, or task-specific host utilities. They also read array
   lengths, iterate JSON arrays, access integer and string element properties,
-  evaluate `type_of`, compare strings and concatenate string literals entirely
-  in generated Rust. Public qualification executes the generated native packs;
-  string methods, maps, metadata and import bundling remain explicit migration
-  work before `validate-artifact-manifest` can replace and archive its
-  interpreted source.
+  evaluate `type_of`, compare and concatenate strings, run string methods and
+  character loops, and emit dynamic `rh::fail`/`require` messages entirely in
+  generated Rust. Public qualification executes the generated native packs;
+  maps, metadata and import bundling remain explicit migration work before
+  `validate-artifact-manifest` can replace and archive its interpreted source.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

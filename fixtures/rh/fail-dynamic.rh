@@ -1,0 +1,12 @@
+fn entry() {
+    let name = "agenterm";
+    require(name != "", "empty:" + name);
+    if name == "bad" {
+        return rh::fail("bad:" + name);
+    }
+    let label = "ok:" + name;
+    if label != "ok:agenterm" {
+        return rh::fail("concat:" + name);
+    }
+    1
+}

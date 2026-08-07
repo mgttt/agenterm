@@ -9,9 +9,10 @@ use agenterm_rh::{
     transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 15] = [
+const FIXTURE_NAMES: [&str; 16] = [
     "break-continue.rh",
     "entry.rh",
+    "fail-dynamic.rh",
     "fleet.rh",
     "for-dyn-range.rh",
     "for-range.rh",

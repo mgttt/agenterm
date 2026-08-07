@@ -625,6 +625,14 @@ fn emit_stmt(
         Stmt::FnCall(call, ..) if call.name == "throw" => {
             emit_throw_stmt(out, call, ctx, implicit_return)?;
         }
+        Stmt::FnCall(call, ..)
+            if ctx.cdylib
+                && call.namespace.is_empty()
+                && call.name == "require"
+                && call.args.len() == 2 =>
+        {
+            emit_require_stmt(out, &call.args[0], &call.args[1], ctx)?;
+        }
         Stmt::FnCall(call, ..) if implicit_return => {
             out.push_str("    return ");
             emit_call(out, call, ctx)?;
@@ -764,13 +772,10 @@ fn emit_throw_stmt(
     ctx: &mut EmitCtx,
     implicit_return: bool,
 ) -> Result<(), RhError> {
-    if ctx.cdylib
-        && !ctx.in_try()
-        && let Some(message) = call.args.first().and_then(throw_message)
-    {
-        out.push_str("    return rh_fail(");
-        out.push_str(&format!("{message:?}"));
-        out.push_str(");\n");
+    if ctx.cdylib && !ctx.in_try() && call.args.len() == 1 {
+        out.push_str("    return ");
+        emit_rh_fail(out, &call.args[0], ctx)?;
+        out.push_str(";\n");
         return Ok(());
     }
     if ctx.in_try() {
@@ -790,6 +795,35 @@ fn emit_throw_stmt(
             out.push_str("    return _throw;\n");
         }
     }
+    Ok(())
+}
+
+fn emit_require_stmt(
+    out: &mut String,
+    condition: &Expr,
+    message: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("    if ");
+    emit_expr(out, condition, ctx)?;
+    out.push_str(" == 0 {\n");
+    out.push_str("        return ");
+    emit_rh_fail(out, message, ctx)?;
+    out.push_str(";\n");
+    out.push_str("    }\n");
+    Ok(())
+}
+
+fn emit_rh_fail(out: &mut String, message: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    if let Some(literal) = throw_message(message) {
+        out.push_str("rh_fail(");
+        out.push_str(&format!("{literal:?}"));
+        out.push(')');
+        return Ok(());
+    }
+    out.push_str("rh_fail(&");
+    emit_stringish(out, message, ctx)?;
+    out.push(')');
     Ok(())
 }
 
@@ -983,14 +1017,14 @@ fn std_fs_single_arg<'a>(expr: &'a Expr, name: &str) -> Option<&'a Expr> {
     Some(&call.args[0])
 }
 
-fn rh_fail_message(expr: &Expr) -> Option<String> {
+fn rh_fail_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
     if call.namespace.to_string() != "rh" || call.name != "fail" || call.args.len() != 1 {
         return None;
     }
-    throw_message(&call.args[0])
+    Some(&call.args[0])
 }
 
 fn path_join_display_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
@@ -1117,6 +1151,7 @@ fn type_of_arg(expr: &Expr) -> Option<&Expr> {
 fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
     matches!(expr, Expr::StringConstant(..))
         || type_of_arg(expr).is_some()
+        || args_index_expr(expr).is_some()
         || matches!(
             expr,
             Expr::Variable(ident, ..)
@@ -1177,6 +1212,14 @@ fn emit_type_of(out: &mut String, argument: &Expr, ctx: &EmitCtx) -> Result<bool
 }
 
 fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    if let Some((lhs, rhs)) = string_concat_args(expr, ctx) {
+        out.push_str("format!(\"{}{}\", ");
+        emit_stringish(out, lhs, ctx)?;
+        out.push_str(", ");
+        emit_stringish(out, rhs, ctx)?;
+        out.push(')');
+        return Ok(());
+    }
     if let Some(argument) = type_of_arg(expr) {
         if emit_type_of(out, argument, ctx)? {
             return Ok(());
@@ -1192,6 +1235,12 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         out.push_str(binding);
         out.push_str(", ");
         emit_json_path(out, &path);
+        out.push(')');
+        return Ok(());
+    }
+    if let Some(index) = args_index_expr(expr) {
+        out.push_str("rh_arg(");
+        emit_expr(out, index, ctx)?;
         out.push(')');
         return Ok(());
     }
@@ -1268,10 +1317,8 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
-        if let Some(message) = rh_fail_message(expr) {
-            out.push_str("rh_fail(");
-            out.push_str(&format!("{message:?}"));
-            out.push(')');
+        if let Some(message) = rh_fail_arg(expr) {
+            emit_rh_fail(out, message, ctx)?;
             return Ok(());
         }
         if let Some((program, arguments, timeout)) = process_status_args(expr)
@@ -1521,7 +1568,8 @@ fn string_for_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a str> {
     let Expr::Variable(ident, ..) = expr else {
         return None;
     };
-    (ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String)).then_some(ident.1.as_str())
+    (ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String))
+        .then_some(ident.1.as_str())
 }
 
 #[derive(Clone, Copy)]
@@ -1609,11 +1657,8 @@ fn emit_string_predicate(
     let Some((receiver, call)) = parse_string_method_call(expr, ctx) else {
         return Ok(false);
     };
-    if !matches!(
-        call.name.as_str(),
-        "contains" | "starts_with" | "ends_with"
-    ) || call.args.len()
-        != 1
+    if !matches!(call.name.as_str(), "contains" | "starts_with" | "ends_with")
+        || call.args.len() != 1
     {
         return Ok(false);
     }
@@ -1631,11 +1676,7 @@ fn emit_string_predicate(
     Ok(true)
 }
 
-fn emit_string_mut_expr(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_string_mut_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((StringReceiver::Binding(binding), call)) = parse_string_method_call(expr, ctx) else {
         return Ok(false);
     };
@@ -1669,11 +1710,7 @@ fn emit_string_mut_expr(
     }
 }
 
-fn emit_string_mut_stmt(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_string_mut_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let mut inner = String::new();
     if !emit_string_mut_expr(&mut inner, expr, ctx)? {
         return Ok(false);
@@ -1741,12 +1778,9 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         return Ok(());
     }
     if call.name == "throw" && ctx.cdylib {
-        if !ctx.in_try()
-            && let Some(message) = call.args.first().and_then(throw_message)
-        {
-            out.push_str("return rh_fail(");
-            out.push_str(&format!("{message:?}"));
-            out.push(')');
+        if !ctx.in_try() && call.args.len() == 1 {
+            out.push_str("return ");
+            emit_rh_fail(out, &call.args[0], ctx)?;
             return Ok(());
         }
         if ctx.in_try() {
@@ -1757,6 +1791,12 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         out.push_str("rh_host_eval_int(");
         out.push_str(&format!("{:?}, ", snippet));
         ctx.emit_scope_json_expr(out);
+        return Ok(());
+    }
+    if call.namespace.is_empty() && call.name == "require" && call.args.len() == 2 && ctx.cdylib {
+        out.push_str("{\n");
+        emit_require_stmt(out, &call.args[0], &call.args[1], ctx)?;
+        out.push_str("    0\n}");
         return Ok(());
     }
     Err(RhError::Transpile(format!(
