@@ -587,7 +587,7 @@
     {
       "id": "timing-summary",
       "description": "Validate one quality-timing report and append a bounded Markdown job summary",
-      "entry": "scripts/rhai/timing-summary.rhai",
+      "entry": "scripts/rh/timing-summary.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

@@ -717,13 +717,12 @@ fn run_quality_timing_fixture(
 fn run_timing_summary(report: &Path, summary: Option<&Path>) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
+    let manifest = repo.join("agenterm.tasks.json");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
     command
         .current_dir(repo)
-        .arg("run")
-        .arg(repo.join("scripts/rhai/timing-summary.rhai"))
-        .args(["--profile", "local", "--project-root"])
-        .arg(repo)
+        .args(["task", "run", "timing-summary", "--manifest"])
+        .arg(manifest)
         .args([
             "--timeout-ms",
             "10000",
