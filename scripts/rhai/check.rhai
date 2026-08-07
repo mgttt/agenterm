@@ -1191,18 +1191,36 @@ let compatibility_task_worker = first_nonempty_file(
     repo,
     ["dist/agenterm-rhai.exe", "dist/agenterm-rhai"]
 );
+let task_rh_cli = if dist_rh_cli != "" {
+    dist_rh_cli
+} else {
+    first_nonempty_file(
+        repo,
+        ["target/debug/agenterm-rh.exe", "target/debug/agenterm-rh"]
+    )
+};
+let task_compatibility_worker = if compatibility_task_worker != "" {
+    compatibility_task_worker
+} else {
+    first_nonempty_file(
+        repo,
+        ["target/debug/agenterm-rhai.exe", "target/debug/agenterm-rhai"]
+    )
+};
 require(
-    dist_rh_cli != "" || compatibility_task_worker != "",
+    task_rh_cli != "" || task_compatibility_worker != "",
     "check_dist_task_worker_missing"
 );
 let worker = if dist_rh_cli != "" {
     dist_rh_cli
+} else if task_rh_cli != "" {
+    task_rh_cli
 } else {
     print(
         "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai; " +
             "agenterm-rh is unavailable"
     );
-    compatibility_task_worker
+    task_compatibility_worker
 };
 let dist_lint_cli =
     if dist_rh_cli != "" { dist_rh_cli } else { lint_worker };

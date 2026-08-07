@@ -235,19 +235,31 @@ fn rust_lint(repo) {
     );
 }
 
+fn compatibility_rhai_worker(repo) {
+    let dist_win = std::path::join(repo, "dist/agenterm-rhai.exe").display;
+    if non_empty_file(dist_win) {
+        return dist_win;
+    }
+    let dist = std::path::join(repo, "dist/agenterm-rhai").display;
+    if non_empty_file(dist) {
+        return dist;
+    }
+    let target_win = std::path::join(
+        repo,
+        "target/debug/agenterm-rhai.exe"
+    ).display;
+    if non_empty_file(target_win) {
+        return target_win;
+    }
+    std::path::join(repo, "target/debug/agenterm-rhai").display
+}
+
 fn default_worker(repo) {
     let rh = resolve_rh_cli(repo, "");
     if rh != "" {
         return rh;
     }
-    let windows = std::path::join(
-        repo,
-        "target/debug/agenterm-rhai.exe"
-    ).display;
-    if std::fs::exists(windows) {
-        return windows;
-    }
-    std::path::join(repo, "target/debug/agenterm-rhai").display
+    compatibility_rhai_worker(repo)
 }
 
 fn self_test(repo, worker) {
