@@ -1,16 +1,133 @@
 //! Standard library for Lua scripts: `std.fs`, `std.path`, `std.env`, `std.time`, etc.
 //! Aligned with rh's shipped_surfaces API surface.
 
+use std::io::Read;
 use std::path::Path;
 
-use mlua::{Lua, Table};
+use mlua::{Lua, Table, Value};
 
 /// Inject the full `std` global table into the Lua runtime.
 pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     let std_table = lua.create_table()?;
     std_table.set("fs", build_fs(lua)?)?;
+    std_table.set("process", build_process(lua)?)?;
     lua.globals().set("std", std_table)?;
     Ok(())
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+/// Extract a sequence of strings from a Lua table (1-indexed array).
+fn table_to_strings(table: &Table) -> Result<Vec<String>, mlua::Error> {
+    let mut out = Vec::new();
+    let len = table.raw_len();
+    for i in 1..=len {
+        let val: Value = table.raw_get(i)?;
+        if let Value::String(s) = val {
+            out.push(s.to_str()?.to_string());
+        }
+    }
+    Ok(out)
+}
+
+fn read_to_string(pipe: Option<impl std::io::Read>) -> String {
+    if let Some(mut p) = pipe {
+        let mut buf = Vec::new();
+        let _ = p.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// Spawn a process, capture stdout + stderr, return (success, exit_code, stdout, stderr).
+fn spawn_and_capture(
+    program: &str,
+    args: &[String],
+    timeout_ms: u64,
+) -> Result<(bool, i32, String, String), mlua::Error> {
+    use std::process::{Command, Stdio};
+
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| mlua::Error::runtime(format!("process_spawn: {e}")))?;
+
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    let exit_code = wait_child(&mut child, deadline);
+
+    let stdout = read_to_string(stdout_pipe);
+    let stderr = read_to_string(stderr_pipe);
+    let success = exit_code == 0;
+
+    Ok((success, exit_code, stdout, stderr))
+}
+
+/// Spawn a process, write stdout to file, capture stderr.
+fn spawn_stdout_file(
+    program: &str,
+    args: &[String],
+    stdout_path: &str,
+    timeout_ms: u64,
+) -> Result<(bool, i32, String), mlua::Error> {
+    use std::process::{Command, Stdio};
+
+    let file = std::fs::File::create(stdout_path)
+        .map_err(|e| mlua::Error::runtime(format!("process_stdout_file: {e}")))?;
+
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(file);
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| mlua::Error::runtime(format!("process_spawn: {e}")))?;
+
+    let stderr_pipe = child.stderr.take();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    let exit_code = wait_child(&mut child, deadline);
+
+    let stderr = if let Some(mut p) = stderr_pipe {
+        let mut buf = Vec::new();
+        let _ = p.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
+    } else {
+        String::new()
+    };
+
+    Ok((exit_code == 0, exit_code, stderr))
+}
+
+fn wait_child(child: &mut std::process::Child, deadline: std::time::Instant) -> i32 {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.code().unwrap_or(-1),
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return -1;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return -1;
+            }
+        }
+    }
 }
 
 // ── std.fs ──────────────────────────────────────────────────────────────
@@ -44,7 +161,7 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
-    // std.fs.metadata(path) → {is_file, is_dir, is_symlink, len, modified} | nil, err
+    // std.fs.metadata(path) → {is_file, is_dir, is_symlink, len, modified}
     fs.set(
         "metadata",
         lua.create_function(|lua, path: String| {
@@ -88,6 +205,62 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
     Ok(fs)
 }
 
+// ── std.process ─────────────────────────────────────────────────────────
+
+fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
+    let process = lua.create_table()?;
+
+    // std.process.command(program, args, timeout_ms) → {success, exit_code, stdout, stderr}
+    process.set(
+        "command",
+        lua.create_function(|lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
+            let args = table_to_strings(&args_tbl)?;
+            let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+            let (success, exit_code, stdout, stderr) =
+                spawn_and_capture(&program, &args, timeout)?;
+            let out = lua.create_table()?;
+            out.set("success", success)?;
+            out.set("exit_code", exit_code)?;
+            out.set("stdout", stdout)?;
+            out.set("stderr", stderr)?;
+            Ok(out)
+        })?,
+    )?;
+
+    // std.process.status(program, args, timeout_ms) → {success, exit_code}
+    process.set(
+        "status",
+        lua.create_function(|lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
+            let args = table_to_strings(&args_tbl)?;
+            let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+            let (success, exit_code, _, _) = spawn_and_capture(&program, &args, timeout)?;
+            let out = lua.create_table()?;
+            out.set("success", success)?;
+            out.set("exit_code", exit_code)?;
+            Ok(out)
+        })?,
+    )?;
+
+    // std.process.stdout_file(program, args, stdout_path, timeout_ms) → {success, exit_code}
+    process.set(
+        "stdout_file",
+        lua.create_function(
+            |lua, (program, args_tbl, stdout_path, timeout_ms): (String, Table, String, Option<u64>)| {
+                let args = table_to_strings(&args_tbl)?;
+                let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+                let (success, exit_code, _stderr) =
+                    spawn_stdout_file(&program, &args, &stdout_path, timeout)?;
+                let out = lua.create_table()?;
+                out.set("success", success)?;
+                out.set("exit_code", exit_code)?;
+                Ok(out)
+            },
+        )?,
+    )?;
+
+    Ok(process)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::*;
@@ -100,6 +273,8 @@ mod tests {
     fn host() -> LuaHostFunctions {
         LuaHostFunctions::default()
     }
+
+    // ── std.fs ──────────────────────────────────────────────────────
 
     #[test]
     fn fs_exists_true() {
@@ -147,11 +322,9 @@ mod tests {
             "local ok, err = pcall(function() return std.fs.read('/nonexistent_agenterm_test') end); return ok and 0 or 1",
             &host(),
         );
-        // Should error out (pcall catches it, returning 1)
         if let Ok(r) = r {
             assert_eq!(r.value, 1, "expected error for missing file");
         }
-        // direct runtime error also acceptable
     }
 
     #[test]
@@ -264,5 +437,61 @@ mod tests {
         )
         .expect("create_dir");
         assert!(nested.is_dir());
+    }
+
+    // ── std.process ─────────────────────────────────────────────────
+
+    #[test]
+    fn process_command_echo() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local out = std.process.command('cmd', {'/c', 'echo', 'hello'}, 5000); print(out.stdout); return out.exit_code",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 0);
+        assert!(r.stdout.trim().contains("hello"));
+    }
+
+    #[test]
+    fn process_command_exit_code() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local out = std.process.command('cmd', {'/c', 'exit', '0'}, 5000); return out.exit_code",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn process_status() {
+        let e = engine();
+        let r = e
+            .eval(
+                "local out = std.process.status('cmd', {'/c', 'echo', 'ok'}, 5000); return out.success and 1 or 0",
+                &host(),
+            )
+            .expect("eval");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn process_stdout_file() {
+        let dir = TempDir::new().expect("tempdir");
+        let out_file = dir.path().join("out.txt");
+        let e = engine();
+        e.eval(
+            &format!(
+                "local r = std.process.stdout_file('cmd', {{'/c', 'echo', 'saved'}}, [[{}]], 5000); return r.exit_code",
+                out_file.display()
+            ),
+            &host(),
+        )
+        .expect("eval");
+        let content = std::fs::read_to_string(&out_file).expect("read");
+        assert!(content.trim().contains("saved"));
     }
 }
