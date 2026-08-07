@@ -8,8 +8,14 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn binary_name(stem: &str) -> String {
+    format!("{stem}{}", std::env::consts::EXE_SUFFIX)
+}
+
 fn ensure_adjacent_rh_cli(worker_dir: &Path) {
-    let source = repo_root().join("target/debug/agenterm-rh");
+    let source = repo_root()
+        .join("target/debug")
+        .join(binary_name("agenterm-rh"));
     if fs::metadata(&source).is_ok_and(|meta| meta.len() == 0) {
         let status = Command::new("cargo")
             .args(["clean", "-p", "agenterm-rh"])
@@ -27,7 +33,7 @@ fn ensure_adjacent_rh_cli(worker_dir: &Path) {
     );
     let metadata = fs::metadata(&source).expect("agenterm-rh metadata");
     assert!(metadata.len() > 0, "agenterm-rh binary is empty");
-    let adjacent = worker_dir.join("agenterm-rh");
+    let adjacent = worker_dir.join(binary_name("agenterm-rh"));
     assert!(
         source == adjacent,
         "expected agenterm-rh adjacent to worker at {}",
@@ -53,7 +59,7 @@ fn run_rh(arguments: &[&str]) -> std::process::Output {
         .status()
         .expect("build agenterm-rhai compatibility CLI");
     assert!(status.success(), "failed to build compatibility CLI");
-    Command::new(repo.join("target/debug/agenterm-rh"))
+    Command::new(repo.join("target/debug").join(binary_name("agenterm-rh")))
         .current_dir(&repo)
         .args(arguments)
         .output()
@@ -88,6 +94,36 @@ fn rh_is_the_task_front_door_via_explicit_compat_bridge() {
     assert_eq!(
         value["provenance"]["producer"], "agenterm-rhai",
         "compatibility execution must remain explicit until the task engine migrates"
+    );
+}
+
+#[test]
+fn rh_task_front_door_fails_closed_without_compat_binary() {
+    let repo = repo_root();
+    ensure_adjacent_rh_cli(&repo.join("target/debug"));
+    let isolated = tempfile::tempdir().expect("isolated CLI directory");
+    let isolated_rh = isolated.path().join(binary_name("agenterm-rh"));
+    fs::copy(
+        repo.join("target/debug").join(binary_name("agenterm-rh")),
+        &isolated_rh,
+    )
+    .expect("copy isolated rh CLI");
+    let output = Command::new(isolated_rh)
+        .current_dir(isolated.path())
+        .args(["task", "list"])
+        .env("AGENTERM_PROJECT_ROOT", isolated.path())
+        .env(
+            "AGENTERM_RHAI_COMPAT_CLI",
+            isolated.path().join("missing-compat"),
+        )
+        .output()
+        .expect("run isolated agenterm-rh");
+    assert!(!output.status.success(), "missing compat binary must fail");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("requires the temporary agenterm-rhai compatibility binary"),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
