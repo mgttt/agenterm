@@ -52,6 +52,7 @@
 | M25a | `agenterm-rh task` 前门：显式转发未迁移 task 引擎到相邻兼容 PE，保留退出码 | [x] |
 | M25b | bootstrap 默认通过 rh task 前门启动；`AGENTERM_RHAI_COMPAT_CLI` 明示兼容边界 | [x] |
 | M25c | task 前门黑盒：成功列出 manifest；兼容 PE 缺失时硬失败 | [x] |
+| M25d | framed-worker 捕获 compat fallback `print`，按输出预算封入结果帧，禁止协议 stdout 污染 | [x] |
 
 ---
 
