@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M39 正式交付链 front door 迁移**（Candidate/Promotion 不再执行 `agenterm-rhai`） |
+| **状态** | **M40 原生进程状态与发布策略 task 迁移** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -85,6 +85,7 @@
 | M37a | native pack 直接使用 Rust `Path::join` 生成 UTF-8 路径；组合结果可供 exists/read callback 使用且不触发解释器 | [x] |
 | M38a | host API v8 提供 typed native failure 与 case-exact 文件检查；`verify-docs-site` 从活跃 `.rhai` 迁至零回退 `.rh` 并归档旧实现 | [x] |
 | M39a | Candidate、Promotion 与发布索引步骤统一通过 `agenterm-rh` 执行脚本；工作流静态门禁止恢复 `agenterm-rhai` 活跃入口 | [x] |
+| M40a | host API v9 通过通用 utility ABI 提供无命令白名单、带超时和进程树清理的 `std::process::command_status`；`internal-version-policy` 零回退迁移并归档旧实现 | [x] |
 
 ---
 

@@ -46,15 +46,18 @@ mod unix {
     }
 
     #[test]
-    fn public_run_executes_repository_script() {
-        let output = run(&[
-            "run",
-            "scripts/rhai/internal-version-policy.rhai",
-            "--project-root",
-            ".",
-            "--",
-            ".",
-        ]);
+    fn public_rh_runs_native_internal_version_policy_task() {
+        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+            .current_dir(repo_root())
+            .args([
+                "task",
+                "run",
+                "internal-version-policy",
+                "--manifest",
+                "agenterm.tasks.json",
+            ])
+            .output()
+            .expect("spawn agenterm-rh");
         assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("PASS:"), "unexpected stdout: {stdout}");

@@ -1,11 +1,12 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 8;
-pub const RH_CODEGEN_REVISION: u32 = 1;
+pub const RH_HOST_API_VERSION: u32 = 9;
+pub const RH_CODEGEN_REVISION: u32 = 2;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
 pub const RH_HOST_UTILITY_EXISTS_CASE_EXACT: u32 = 2;
+pub const RH_HOST_UTILITY_PROCESS_STATUS: u32 = 3;
 
 pub type RhHostFleetCall = extern "C" fn(
     operation_id: *const u8,
@@ -189,6 +190,28 @@ pub fn emit_host_runtime(out: &mut String) {
                  RH_HOST_UTILITY_CALL = Some(utility_call);\n\
              }\n\
          }\n\n\
+         #[no_mangle]\n\
+         pub extern \"C\" fn rh_register_host_v9(\n\
+             fleet_call: RhHostFleetCall,\n\
+             eval_call: RhHostEvalCall,\n\
+             run_script_call: RhHostRunScriptCall,\n\
+             std_fs_exists_call: RhHostStdFsExistsCall,\n\
+             args_len_call: RhHostArgsLenCall,\n\
+             arg_call: RhHostArgCall,\n\
+             fs_read_call: RhHostFsReadCall,\n\
+             utility_call: RhHostUtilityCall,\n\
+         ) {\n\
+             rh_register_host_v8(\n\
+                 fleet_call,\n\
+                 eval_call,\n\
+                 run_script_call,\n\
+                 std_fs_exists_call,\n\
+                 args_len_call,\n\
+                 arg_call,\n\
+                 fs_read_call,\n\
+                 utility_call,\n\
+             );\n\
+         }\n\n\
          fn rh_host_store(wrote: i32, scratch: Vec<u8>) -> i32 {\n\
              if wrote <= 0 {\n\
                  return wrote;\n\
@@ -322,6 +345,14 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_std_fs_exists_case_exact(path: &str) -> INT {\n\
              rh_utility(2, path)\n\
+         }\n\n\
+         fn rh_process_status(program: &str, args: &[String], timeout_ms: INT) -> INT {\n\
+             let request = serde_json::json!({\n\
+                 \"program\": program,\n\
+                 \"args\": args,\n\
+                 \"timeout_ms\": timeout_ms,\n\
+             });\n\
+             rh_utility(3, &request.to_string())\n\
          }\n\n\
          fn rh_host_run_script(source: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\

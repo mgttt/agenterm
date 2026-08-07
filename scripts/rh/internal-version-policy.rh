@@ -1,0 +1,53 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: REPO");
+    }
+
+    let repo = args[0];
+    let cargo_path = std::path::join(repo, "Cargo.toml").display;
+    let cargo = std::fs::read_to_string(cargo_path);
+    let governed = cargo.contains("version = \"0.1.7\"");
+    if governed == 0 {
+        return 0;
+    }
+
+    let tag_status = std::process::command_status(
+        "git",
+        [
+            "-C",
+            repo,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            "refs/tags/v0.1.7"
+        ],
+        2000
+    );
+    if tag_status == 0 {
+        return rh::fail("Internal-only v0.1.7 must not have a local Git tag.");
+    }
+    if tag_status != 1 {
+        return rh::fail("internal-version-git-tags");
+    }
+
+    let release_path = std::path::join(repo, "scripts/rhai/release.rhai").display;
+    let workflow_path = std::path::join(repo, ".github/workflows/candidate.yml").display;
+    let release = std::fs::read_to_string(release_path);
+    let workflow = std::fs::read_to_string(workflow_path);
+    let release_rejects = release.contains("version != \"0.1.7\"");
+    let workflow_rejects_ps = workflow.contains("expected -eq 'v0.1.7'");
+    let workflow_rejects_sh = workflow.contains("expected == \"v0.1.7\"");
+    if release_rejects == 0 {
+        return rh::fail("The local coordinator and tag workflow must both reject v0.1.7.");
+    }
+    if workflow_rejects_ps == 0 {
+        if workflow_rejects_sh == 0 {
+            return rh::fail("The local coordinator and tag workflow must both reject v0.1.7.");
+        }
+    }
+    0
+}
+
+fn cc_lines() {
+    ["PASS: internal-only version publication policy is enforced"]
+}

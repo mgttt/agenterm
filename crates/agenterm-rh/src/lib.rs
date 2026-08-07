@@ -36,9 +36,9 @@ pub use corpus::{
 pub use error::RhError;
 pub use host_api::{
     RH_CODEGEN_REVISION, RH_HOST_API_VERSION, RH_HOST_FLEET_OUT_CAP, RH_HOST_FS_READ_CAP,
-    RH_HOST_OUT_CAP, RH_HOST_UTILITY_EXISTS_CASE_EXACT, RH_HOST_UTILITY_FAIL, RhHostArgCall,
-    RhHostArgsLenCall, RhHostEvalCall, RhHostFleetCall, RhHostFsReadCall, RhHostStdFsExistsCall,
-    RhHostUtilityCall, emit_host_runtime,
+    RH_HOST_OUT_CAP, RH_HOST_UTILITY_EXISTS_CASE_EXACT, RH_HOST_UTILITY_FAIL,
+    RH_HOST_UTILITY_PROCESS_STATUS, RhHostArgCall, RhHostArgsLenCall, RhHostEvalCall,
+    RhHostFleetCall, RhHostFsReadCall, RhHostStdFsExistsCall, RhHostUtilityCall, emit_host_runtime,
 };
 pub use load::{RhNativeModule, load_and_call_entry, verify_native_hash};
 pub use manifest::RhPackManifest;

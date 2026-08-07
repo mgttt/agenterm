@@ -110,7 +110,7 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
-        module.register_host_v8(
+        module.register_host_v9(
             host_fleet_call,
             Some(host_eval_call),
             Some(host_run_script_call),
@@ -192,11 +192,54 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
                 }
             }
         }
+        agenterm_rh::RH_HOST_UTILITY_PROCESS_STATUS => match host_process_status(&input) {
+            Ok(code) => code,
+            Err(error) => {
+                record_host_error("rh_process_status", &error);
+                -5
+            }
+        },
         _ => {
             record_host_error("rh_utility", &format!("unknown operation {operation}"));
             -5
         }
     }
+}
+
+fn host_process_status(request: &str) -> Result<i32, String> {
+    let request: serde_json::Value =
+        serde_json::from_str(request).map_err(|error| format!("process_request_json: {error}"))?;
+    let program = request["program"]
+        .as_str()
+        .ok_or_else(|| "process_program_type: expected string".to_owned())?;
+    let arguments = request["args"]
+        .as_array()
+        .ok_or_else(|| "process_arguments_type: expected array".to_owned())?;
+    if arguments.len() > 256 {
+        return Err("process_arguments_too_many: maximum is 256".to_owned());
+    }
+    let arguments = arguments
+        .iter()
+        .map(|argument| {
+            let argument = argument
+                .as_str()
+                .ok_or_else(|| "process_arguments_type: expected strings".to_owned())?;
+            if argument.len() > 4096 {
+                return Err("process_argument_too_large: maximum is 4096 bytes".to_owned());
+            }
+            Ok(argument.to_owned())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let requested_timeout = request["timeout_ms"]
+        .as_u64()
+        .ok_or_else(|| "process_timeout_type: expected positive integer".to_owned())?;
+    let timeout_ms = crate::script_rh_run::current_run_context()
+        .and_then(|context| context.budgets)
+        .map_or(requested_timeout, |budgets| {
+            requested_timeout.min(budgets.wall_time_ms)
+        });
+    let code = crate::script_process::command_status(program, &arguments, timeout_ms)?;
+    i32::try_from(code).map_err(|_| format!("process_exit_code_overflow: {code}"))
 }
 
 fn path_exists_case_exact(path: &Path) -> std::io::Result<bool> {
@@ -726,6 +769,30 @@ mod tests {
                 .expect("typed failure")
                 .to_string()
                 .contains(message)
+        );
+    }
+
+    #[test]
+    fn host_process_status_returns_exit_code_and_typed_spawn_failure() {
+        let request = serde_json::json!({
+            "program": "git",
+            "args": ["--version"],
+            "timeout_ms": 2000
+        });
+        assert_eq!(
+            super::host_process_status(&request.to_string()).expect("git status"),
+            0
+        );
+
+        let missing = serde_json::json!({
+            "program": "agenterm-definitely-missing-process",
+            "args": [],
+            "timeout_ms": 2000
+        });
+        assert!(
+            super::host_process_status(&missing.to_string())
+                .expect_err("missing process")
+                .contains("process_spawn")
         );
     }
 

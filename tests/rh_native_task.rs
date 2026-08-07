@@ -184,3 +184,63 @@ fn public_cli_runs_native_docs_task_and_preserves_failure() {
             .is_some_and(|message| message.contains("expected: DOCS_ROOT"))
     );
 }
+
+#[test]
+fn internal_version_policy_is_native_and_archives_interpreted_source() {
+    let repo = repo_root();
+    let source = std::fs::read_to_string(repo.join("scripts/rh/internal-version-policy.rh"))
+        .expect("native internal version policy");
+    let output =
+        agenterm_rh::transpile_cdylib_with_mode(&source).expect("transpile version policy");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("rh_process_status("));
+    assert!(!output.rust.contains("compat delegating"));
+
+    let manifest = std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
+    assert!(manifest.contains("\"entry\": \"scripts/rh/internal-version-policy.rh\""));
+    assert!(!manifest.contains("\"entry\": \"scripts/rhai/internal-version-policy.rhai\""));
+    assert!(
+        repo.join("scripts/archive/rhai/internal-version-policy.rhai")
+            .is_file()
+    );
+    assert!(
+        !repo
+            .join("scripts/rhai/internal-version-policy.rhai")
+            .exists()
+    );
+}
+
+#[test]
+fn public_cli_runs_native_internal_version_policy() {
+    let repo = repo_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        .current_dir(&repo)
+        .args([
+            "task",
+            "run",
+            "internal-version-policy",
+            "--manifest",
+            "agenterm.tasks.json",
+            "--json",
+        ])
+        .output()
+        .expect("run native internal version policy");
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).expect("success JSON");
+    assert_eq!(envelope["ok"], true);
+    assert!(
+        envelope["stdout"]
+            .as_str()
+            .is_some_and(|stdout| stdout.contains("PASS: internal-only version"))
+    );
+}

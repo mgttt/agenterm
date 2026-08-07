@@ -927,6 +927,22 @@ fn path_join_display_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     Some((&call.args[0], &call.args[1]))
 }
 
+fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr)> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::process"
+        || call.name != "command_status"
+        || call.args.len() != 3
+    {
+        return None;
+    }
+    let Expr::Array(arguments, ..) = &call.args[1] else {
+        return None;
+    };
+    Some((&call.args[0], arguments, &call.args[2]))
+}
+
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
         if let Some(index) = args_index_expr(expr) {
@@ -947,6 +963,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("rh_fail(");
             out.push_str(&format!("{message:?}"));
             out.push(')');
+            return Ok(());
+        }
+        if let Some((program, arguments, timeout)) = process_status_args(expr)
+            && emit_process_status(out, program, arguments, timeout, ctx)?
+        {
             return Ok(());
         }
         if let Some(path) = std_fs_read_to_string_arg(expr)
@@ -1069,6 +1090,42 @@ fn emit_std_fs_exists_case_exact(
     }
     out.push_str("rh_std_fs_exists_case_exact(");
     out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_process_status(
+    out: &mut String,
+    program: &Expr,
+    arguments: &[Expr],
+    timeout: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut program_expr = String::new();
+    if !emit_native_string(&mut program_expr, program, ctx)? || !is_pure_int_expr(timeout) {
+        return Ok(false);
+    }
+    let mut argument_exprs = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        let mut argument_expr = String::new();
+        if !emit_native_string(&mut argument_expr, argument, ctx)? {
+            return Ok(false);
+        }
+        argument_exprs.push(argument_expr);
+    }
+    out.push_str("rh_process_status(");
+    out.push_str(&program_expr);
+    out.push_str(", &vec![");
+    for (index, argument) in argument_exprs.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str("String::from(");
+        out.push_str(argument);
+        out.push(')');
+    }
+    out.push_str("], ");
+    emit_expr(out, timeout, ctx)?;
     out.push(')');
     Ok(true)
 }

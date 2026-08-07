@@ -114,6 +114,7 @@ pub const SHIPPED_SURFACE_PATHS: &[&str] = &[
     "std::path::join",
     "std::path::parent",
     "std::process::command",
+    "std::process::command_status",
     "std::process::id",
     "std::process::kill",
     "std::process::list",

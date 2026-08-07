@@ -1142,7 +1142,7 @@
     {
       "id": "internal-version-policy",
       "description": "Reject publication of an internal-only product version",
-      "entry": "scripts/rhai/internal-version-policy.rhai",
+      "entry": "scripts/rh/internal-version-policy.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

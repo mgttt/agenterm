@@ -1,8 +1,5 @@
-// Fail closed when an internal-only product version becomes publishable.
-//
-// Usage:
-//   agenterm-cli script run scripts/rhai/internal-version-policy.rhai \
-//     --profile local --timeout-ms 10000 -- REPO
+// Archived interpreted implementation retained for migration archaeology only.
+// Active task: scripts/rh/internal-version-policy.rh
 
 fn require(condition, message) {
     if !condition {

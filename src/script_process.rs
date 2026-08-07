@@ -593,6 +593,28 @@ fn command_output(command: &mut ScriptCommand) -> Result<ScriptOutput, Box<EvalA
     wait_for_child(&spawn_owned(command)?, None)
 }
 
+pub(crate) fn command_status(
+    program: &str,
+    arguments: &[String],
+    timeout_ms: u64,
+) -> Result<i64, String> {
+    if timeout_ms == 0 || timeout_ms > MAX_TIMEOUT_MS {
+        return Err(format!(
+            "process_timeout_invalid: expected 1..={MAX_TIMEOUT_MS} milliseconds"
+        ));
+    }
+    let mut command = process_command(program).map_err(|error| error.to_string())?;
+    for argument in arguments {
+        validate_text(argument, "process_argument").map_err(|error| error.to_string())?;
+    }
+    command.arguments = arguments.to_vec();
+    command.timeout = Duration::from_millis(timeout_ms);
+    command.capture_bytes = 1;
+    command_output(&mut command)
+        .map(|output| output.exit_code)
+        .map_err(|error| error.to_string())
+}
+
 fn command_start(command: &mut ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult>> {
     spawn_owned(command)
 }

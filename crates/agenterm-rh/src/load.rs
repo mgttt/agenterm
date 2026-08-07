@@ -145,7 +145,55 @@ impl RhNativeModule {
         fs_read_call: Option<RhHostFsReadCall>,
         utility_call: Option<RhHostUtilityCall>,
     ) -> Result<(), RhError> {
+        self.register_host_v9(
+            fleet_call,
+            eval_call,
+            run_script_call,
+            std_fs_exists_call,
+            args_len_call,
+            arg_call,
+            fs_read_call,
+            utility_call,
+        )
+    }
+
+    pub fn register_host_v9(
+        &self,
+        fleet_call: RhHostFleetCall,
+        eval_call: Option<RhHostEvalCall>,
+        run_script_call: Option<RhHostRunScriptCall>,
+        std_fs_exists_call: Option<RhHostStdFsExistsCall>,
+        args_len_call: Option<RhHostArgsLenCall>,
+        arg_call: Option<RhHostArgCall>,
+        fs_read_call: Option<RhHostFsReadCall>,
+        utility_call: Option<RhHostUtilityCall>,
+    ) -> Result<(), RhError> {
         unsafe {
+            if let Ok(register_v9) = self.library.get::<Symbol<
+                extern "C" fn(
+                    RhHostFleetCall,
+                    RhHostEvalCall,
+                    RhHostRunScriptCall,
+                    RhHostStdFsExistsCall,
+                    RhHostArgsLenCall,
+                    RhHostArgCall,
+                    RhHostFsReadCall,
+                    RhHostUtilityCall,
+                ),
+            >>(b"rh_register_host_v9")
+            {
+                register_v9(
+                    fleet_call,
+                    eval_call.unwrap_or(dummy_eval_call),
+                    run_script_call.unwrap_or(dummy_run_script_call),
+                    std_fs_exists_call.unwrap_or(dummy_std_fs_exists_call),
+                    args_len_call.unwrap_or(dummy_args_len_call),
+                    arg_call.unwrap_or(dummy_arg_call),
+                    fs_read_call.unwrap_or(dummy_fs_read_call),
+                    utility_call.unwrap_or(dummy_utility_call),
+                );
+                return Ok(());
+            }
             if let Ok(register_v8) = self.library.get::<Symbol<
                 extern "C" fn(
                     RhHostFleetCall,

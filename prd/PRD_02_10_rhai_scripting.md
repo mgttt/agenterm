@@ -67,6 +67,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   packaged `agenterm-rh` front door. Workflow policy tests reject any restored
   `agenterm-rhai` executable reference; `.rhai` source paths remain explicit
   interpreter-migration debt rather than executable-entry ownership.
+- [x] host API v9 exposes native bounded `std::process::command_status` without
+  command or path allowlists; timeout, owned process-tree cleanup and typed
+  failures remain robustness controls. `internal-version-policy` uses Git's
+  authoritative `show-ref --verify` path in a zero-fallback `.rh` task and its
+  interpreted implementation is archived.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
