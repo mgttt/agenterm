@@ -128,9 +128,13 @@ fn tab_by_id(tab_entries, id) {
 }
 
 fn event_by_kind(events, kind) {
+    // Index on the Json param directly (aliases lose string-path emit).
+    let kind_text = "" + kind;
     let result = rhai::json::parse("null");
-    for event in events {
-        if event.kind == kind {
+    for index in 0..events.len {
+        let event = events[index];
+        let event_kind = "" + event.kind;
+        if event_kind == kind_text {
             result = event;
         }
     }
@@ -138,9 +142,14 @@ fn event_by_kind(events, kind) {
 }
 
 fn event_for_tab(events, kind, tab_id) {
+    let kind_text = "" + kind;
+    let tab_text = "" + tab_id;
     let result = rhai::json::parse("null");
-    for event in events {
-        if event.kind == kind && event.tab_id == tab_id {
+    for index in 0..events.len {
+        let event = events[index];
+        let event_kind = "" + event.kind;
+        let event_tab = "" + event.tab_id;
+        if event_kind == kind_text && event_tab == tab_text {
             result = event;
         }
     }
@@ -733,8 +742,7 @@ try {
     );
     let hide_event =
         event_by_kind(visibility_events.events, "layout.tabs.visibility");
-    let hide_payload = hide_event.payload;
-    let hide_operation_id = "" + hide_payload.operation_id;
+    let hide_operation_id = "" + hide_event.payload.operation_id;
     test_harness::require(
         json_is_present(hide_event)
             && hide_operation_id == "ui.tabs.hide",
@@ -784,8 +792,7 @@ try {
     );
     let width_event =
         event_by_kind(width_events.events, "layout.tabs.width");
-    let width_payload = width_event.payload;
-    let width_operation_id = "" + width_payload.operation_id;
+    let width_operation_id = "" + width_event.payload.operation_id;
     test_harness::require(
         json_is_present(width_event)
             && width_operation_id == "ui.tabs.set-width"
@@ -956,10 +963,15 @@ try {
     let submit_completion = rhai::json::parse("null");
     let submit_count = 0;
     let committed_operation_id = "" + committed.operation_id;
-    for event in submit_events.events {
-        if event.kind == "composer.submission-finished"
-                && event.request_id == submit_request
-                && event.operation_id == committed_operation_id {
+    let submit_events_list = submit_events.events;
+    for index in 0..submit_events_list.len {
+        let event = submit_events.events[index];
+        let event_kind = "" + event.kind;
+        let event_request = "" + event.request_id;
+        let event_operation = "" + event.operation_id;
+        if event_kind == "composer.submission-finished"
+                && event_request == submit_request
+                && event_operation == committed_operation_id {
             submit_completion = event;
             submit_count += 1;
         }
