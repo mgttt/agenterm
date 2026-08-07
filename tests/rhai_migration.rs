@@ -2712,7 +2712,7 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
         fs::remove_dir_all(&fixture).expect("remove preflight fixture");
     }
 
-    let source = fs::read_to_string(source_repo.join("scripts/rhai/preflight.rhai"))
+    let source = fs::read_to_string(source_repo.join("scripts/archive/rhai/preflight.rhai"))
         .expect("read preflight source")
         .to_ascii_lowercase();
     for forbidden in [

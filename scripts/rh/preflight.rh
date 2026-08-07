@@ -1,0 +1,829 @@
+// Read-only repository release preflight with a durable JSON report.
+//
+// Args:
+//   REPO OUTPUT_PATH [--quiet]
+
+fn require(condition, message) {
+    if condition == 0 {
+        throw message;
+    } else {
+        0;
+    }
+}
+
+fn entry() {
+    if args.len != 2 {
+        if args.len != 3 {
+            return rh::fail("expected: REPO OUTPUT_PATH [--quiet]");
+        }
+        if args[2] != "--quiet" {
+            return rh::fail("expected: REPO OUTPUT_PATH [--quiet]");
+        }
+    }
+
+    let started = std::time::SystemTime::now().unix_millis;
+    let repo = std::path::absolute(args[0]).display;
+    let output_value = std::path::PathBuf::from(args[1]);
+    let output = std::path::join(repo, args[1]).display;
+    if output_value.is_absolute {
+        output = output_value.display;
+    }
+    let quiet = 0;
+    if args.len == 3 {
+        quiet = 1;
+    }
+    let output_arg = args[1];
+    let output_parts = output_arg.split("/");
+    let output_parent = repo;
+    if output_parts.len > 1 {
+        let output_dir = output_parts[0];
+        for index in 1..output_parts.len - 1 {
+            output_dir = output_dir + "/" + output_parts[index];
+        }
+        if output_value.is_absolute {
+            output_parent = output_dir;
+        } else {
+            output_parent = std::path::join(repo, output_dir).display;
+        }
+    }
+    let stdout_path =
+        std::path::join(repo, ".preflight-git.stdout.tmp").display;
+    let gates = [];
+    let branch = "";
+    let head = "";
+    let version = "";
+    let rust_version = "";
+    let remotes = [];
+
+    let branch_passed = 1;
+    let branch_detail = "main";
+    let branch_code = std::process::command_stdout_file(
+        "git",
+        ["branch", "--show-current"],
+        10000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    if branch_code != 0 {
+        branch_passed = 0;
+        branch_detail = "preflight-git-branch";
+    } else {
+        branch = std::fs::read_to_string(stdout_path);
+        branch.trim();
+        if branch != "main" {
+            branch_passed = 0;
+            branch_detail = "Expected branch main.";
+        }
+    }
+    gates.push(#{ id: "branch-main", passed: branch_passed, detail: branch_detail });
+
+    let head_passed = 1;
+    let head_detail = "";
+    let head_code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        10000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    if head_code != 0 {
+        head_passed = 0;
+        head_detail = "preflight-git-head";
+    } else {
+        let head_raw = std::fs::read_to_string(stdout_path);
+        head_raw.trim();
+        head_raw.to_lower();
+        let head_ok = 1;
+        if head_raw.len != 40 {
+            head_ok = 0;
+        }
+        if head_ok != 0 {
+            let head_stripped = head_raw;
+            head_stripped.replace("0", "");
+            head_stripped.replace("1", "");
+            head_stripped.replace("2", "");
+            head_stripped.replace("3", "");
+            head_stripped.replace("4", "");
+            head_stripped.replace("5", "");
+            head_stripped.replace("6", "");
+            head_stripped.replace("7", "");
+            head_stripped.replace("8", "");
+            head_stripped.replace("9", "");
+            head_stripped.replace("a", "");
+            head_stripped.replace("b", "");
+            head_stripped.replace("c", "");
+            head_stripped.replace("d", "");
+            head_stripped.replace("e", "");
+            head_stripped.replace("f", "");
+            if head_stripped.len != 0 {
+                head_ok = 0;
+            }
+        }
+        if head_ok == 0 {
+            head_passed = 0;
+            head_detail = "HEAD is not a full 40-character commit hash.";
+        }
+        if head_ok != 0 {
+            head = std::fs::read_to_string(stdout_path);
+            head.trim();
+            head.to_lower();
+        }
+    }
+    if head_passed != 0 {
+        gates.push(#{ id: "full-head", passed: head_passed, detail: head });
+    } else {
+        gates.push(#{ id: "full-head", passed: head_passed, detail: head_detail });
+    }
+
+    let clean_passed = 1;
+    let clean_detail = "clean";
+    let status_code = std::process::command_stdout_file(
+        "git",
+        ["status", "--porcelain", "--untracked-files=normal"],
+        10000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    if status_code != 0 {
+        clean_passed = 0;
+        clean_detail = "preflight-git-status";
+    } else {
+        let status = std::fs::read_to_string(stdout_path);
+        status.trim();
+        if status != "" {
+            clean_passed = 0;
+            clean_detail = "Working tree is dirty.";
+        }
+    }
+    gates.push(#{ id: "clean-tree", passed: clean_passed, detail: clean_detail });
+
+    let cargo_passed = 1;
+    let cargo_detail = "cargo-package";
+    let cargo_path = std::path::join(repo, "Cargo.toml").display;
+    let cargo = std::fs::read_to_string(cargo_path);
+    let package_name = "";
+    let package_version = "";
+    let package_rust = "";
+    let cargo_active = 0;
+    for source_line in cargo.split("\n") {
+        let cargo_line = source_line;
+        cargo_line.trim();
+        if cargo_line == "[package]" {
+            cargo_active = 1;
+            continue;
+        }
+        if cargo_line.starts_with("[") {
+            cargo_active = 0;
+        }
+        if cargo_active != 0 && cargo_line.starts_with("name ") {
+            let parts = cargo_line.split("\"");
+            if parts.len >= 3 {
+                package_name = parts[1];
+            }
+        }
+        if cargo_active != 0 && cargo_line.starts_with("version ") {
+            let parts = cargo_line.split("\"");
+            if parts.len >= 3 {
+                package_version = parts[1];
+            }
+        }
+        if cargo_active != 0 && cargo_line.starts_with("rust-version ") {
+            let parts = cargo_line.split("\"");
+            if parts.len >= 3 {
+                package_rust = parts[1];
+            }
+        }
+    }
+    version = package_version;
+    rust_version = package_rust;
+    if package_name != "agenterm" {
+        cargo_passed = 0;
+    }
+    if cargo_passed != 0 {
+        let version_parts = version.split(".");
+        if version_parts.len != 3 {
+            cargo_passed = 0;
+        }
+        if cargo_passed != 0 {
+            for number in version_parts {
+                let stripped = number;
+                stripped.replace("0", "");
+                stripped.replace("1", "");
+                stripped.replace("2", "");
+                stripped.replace("3", "");
+                stripped.replace("4", "");
+                stripped.replace("5", "");
+                stripped.replace("6", "");
+                stripped.replace("7", "");
+                stripped.replace("8", "");
+                stripped.replace("9", "");
+                if stripped.len != 0 {
+                    cargo_passed = 0;
+                }
+            }
+        }
+    }
+    if cargo_passed != 0 {
+        let rust_parts = rust_version.split(".");
+        if rust_parts.len != 2 {
+            cargo_passed = 0;
+        }
+        if cargo_passed != 0 {
+            for number in rust_parts {
+                let stripped = number;
+                stripped.replace("0", "");
+                stripped.replace("1", "");
+                stripped.replace("2", "");
+                stripped.replace("3", "");
+                stripped.replace("4", "");
+                stripped.replace("5", "");
+                stripped.replace("6", "");
+                stripped.replace("7", "");
+                stripped.replace("8", "");
+                stripped.replace("9", "");
+                if stripped.len != 0 {
+                    cargo_passed = 0;
+                }
+            }
+        }
+    }
+    if cargo_passed != 0 {
+        gates.push(#{
+            id: "cargo-package",
+            passed: 1,
+            detail: "version=" + version + " rust=" + rust_version
+        });
+    } else {
+        gates.push(#{
+            id: "cargo-package",
+            passed: 0,
+            detail: "Cargo package name, version, or rust-version is invalid."
+        });
+    }
+
+    let lock_passed = 1;
+    let lock_detail = "cargo-lock";
+    let lock_path = std::path::join(repo, "Cargo.lock").display;
+    let lock = std::fs::read_to_string(lock_path);
+    let lock_version = "";
+    let lock_packages = 0;
+    let lock_checksums = 0;
+    let lock_bad_checksums = 0;
+    let in_package = 0;
+    let lock_package_name = "";
+    let lock_root_version = "";
+    let have_lock_package_name = 0;
+    for source_line in lock.split("\n") {
+        let lock_line = source_line;
+        lock_line.trim();
+        if lock_line == "[[package]]" {
+            in_package = 1;
+            have_lock_package_name = 0;
+            lock_packages += 1;
+            continue;
+        }
+        if in_package == 0 && lock_line.starts_with("version") {
+            let fields = lock_line.split("=");
+            if fields.len == 2 {
+                lock_version = fields[1];
+                lock_version.trim();
+            }
+            continue;
+        }
+        if in_package != 0 && lock_line.starts_with("name") {
+            let parts = lock_line.split("\"");
+            if parts.len >= 3 {
+                lock_package_name = parts[1];
+                have_lock_package_name = 1;
+            }
+            continue;
+        }
+        if in_package != 0 && lock_line.starts_with("version") {
+            let parts = lock_line.split("\"");
+            if parts.len >= 3 {
+                if have_lock_package_name != 0 && lock_package_name == "agenterm" {
+                    lock_root_version = parts[1];
+                }
+            }
+            continue;
+        }
+        if in_package != 0 && lock_line.starts_with("checksum") {
+            let parts = lock_line.split("\"");
+            lock_checksums += 1;
+            if parts.len < 3 {
+                lock_bad_checksums += 1;
+            } else {
+                let checksum = parts[1];
+                if checksum.len != 64 {
+                    lock_bad_checksums += 1;
+                } else {
+                    let stripped = checksum;
+                    stripped.replace("0", "");
+                    stripped.replace("1", "");
+                    stripped.replace("2", "");
+                    stripped.replace("3", "");
+                    stripped.replace("4", "");
+                    stripped.replace("5", "");
+                    stripped.replace("6", "");
+                    stripped.replace("7", "");
+                    stripped.replace("8", "");
+                    stripped.replace("9", "");
+                    stripped.replace("a", "");
+                    stripped.replace("b", "");
+                    stripped.replace("c", "");
+                    stripped.replace("d", "");
+                    stripped.replace("e", "");
+                    stripped.replace("f", "");
+                    if stripped.len != 0 {
+                        lock_bad_checksums += 1;
+                    }
+                }
+            }
+        }
+    }
+    if lock_version != "4" {
+        lock_passed = 0;
+        lock_detail = "Cargo.lock is not lockfile version 4.";
+    }
+    if lock_passed != 0 && lock_root_version != version {
+        lock_passed = 0;
+        lock_detail = "Cargo.lock AgenTerm version does not match Cargo.toml.";
+    }
+    if lock_passed != 0 && lock_checksums == 0 {
+        lock_passed = 0;
+        lock_detail = "Cargo.lock contains no registry checksums.";
+    }
+    if lock_passed != 0 && lock_bad_checksums != 0 {
+        lock_passed = 0;
+        lock_detail = "Cargo.lock contains invalid checksum hash(es).";
+    }
+    if lock_passed != 0 {
+        gates.push(#{
+            id: "cargo-lock",
+            passed: 1,
+            detail: "packages=" + lock_packages + " checksums=" + lock_checksums
+        });
+    } else {
+        gates.push(#{ id: "cargo-lock", passed: 0, detail: lock_detail });
+    }
+
+    let toolchain_passed = 1;
+    let toolchain_detail = "toolchain";
+    let toolchain_path = std::path::join(repo, "rust-toolchain.toml").display;
+    let toolchain = std::fs::read_to_string(toolchain_path);
+    let channel = "";
+    let toolchain_active = 0;
+    for source_line in toolchain.split("\n") {
+        let toolchain_line = source_line;
+        toolchain_line.trim();
+        if toolchain_line == "[toolchain]" {
+            toolchain_active = 1;
+            continue;
+        }
+        if toolchain_line.starts_with("[") {
+            toolchain_active = 0;
+        }
+        if toolchain_active != 0 && toolchain_line.starts_with("channel ") {
+            let parts = toolchain_line.split("\"");
+            if parts.len >= 3 {
+                channel = parts[1];
+            }
+        }
+    }
+    if channel.len == 0 {
+        toolchain_passed = 0;
+    }
+    if toolchain_passed != 0 {
+        let channel_parts = channel.split(".");
+        if channel_parts.len != 3 {
+            toolchain_passed = 0;
+        }
+        if toolchain_passed != 0 {
+            for number in channel_parts {
+                let stripped = number;
+                stripped.replace("0", "");
+                stripped.replace("1", "");
+                stripped.replace("2", "");
+                stripped.replace("3", "");
+                stripped.replace("4", "");
+                stripped.replace("5", "");
+                stripped.replace("6", "");
+                stripped.replace("7", "");
+                stripped.replace("8", "");
+                stripped.replace("9", "");
+                if stripped.len != 0 {
+                    toolchain_passed = 0;
+                }
+            }
+        }
+    }
+    if toolchain_passed != 0 {
+        if toolchain.contains("profile = \"minimal\"") == 0 {
+            toolchain_passed = 0;
+        }
+        if toolchain.contains("\"clippy\"") == 0 {
+            toolchain_passed = 0;
+        }
+        if toolchain.contains("\"rustfmt\"") == 0 {
+            toolchain_passed = 0;
+        }
+        if toolchain.contains("targets =") {
+            toolchain_passed = 0;
+        }
+    }
+    if toolchain_passed != 0 {
+        let channel_major = "";
+        let channel_minor = "";
+        let channel_index = 0;
+        for source_part in channel.split(".") {
+            if channel_index == 0 {
+                channel_major = source_part;
+            } else if channel_index == 1 {
+                channel_minor = source_part;
+            }
+            channel_index += 1;
+        }
+        if (channel_major + "." + channel_minor) != rust_version {
+            toolchain_passed = 0;
+            toolchain_detail =
+                "Cargo rust-version and pinned toolchain channel disagree.";
+        }
+    }
+    if toolchain_passed != 0 {
+        gates.push(#{
+            id: "toolchain",
+            passed: 1,
+            detail: "channel=" + channel + " targets=host-only"
+        });
+    } else {
+        gates.push(#{ id: "toolchain", passed: 0, detail: toolchain_detail });
+    }
+
+    let policy_passed = 1;
+    let policy_detail = "internal-version-policy";
+    if version != "0.1.7" {
+        gates.push(#{
+            id: "internal-version-policy",
+            passed: 1,
+            detail: "not-applicable version=" + version
+        });
+    } else {
+        let tag_code = std::process::command_stdout_file(
+            "git",
+            ["tag", "--list", "v0.1.7"],
+            10000,
+            stdout_path,
+            #{ current_dir: repo }
+        );
+        if tag_code != 0 {
+            policy_passed = 0;
+            policy_detail = "preflight-git-tags";
+        } else {
+            let tags = std::fs::read_to_string(stdout_path);
+            tags.trim();
+            if tags.len != 0 {
+                policy_passed = 0;
+                policy_detail =
+                    "Internal-only v0.1.7 must have no local v0.1.7 tag.";
+            } else {
+                let release_path =
+                    std::path::join(repo, "scripts/rhai/release.rhai").display;
+                let workflow_path = std::path::join(
+                    repo,
+                    ".github/workflows/candidate.yml"
+                ).display;
+                let release = std::fs::read_to_string(release_path);
+                let workflow = std::fs::read_to_string(workflow_path);
+                if release.contains("version != \"0.1.7\"") == 0 {
+                    policy_passed = 0;
+                }
+                if policy_passed != 0 {
+                    if workflow.contains("expected -eq 'v0.1.7'") == 0 {
+                        if workflow.contains("expected == \"v0.1.7\"") == 0 {
+                            policy_passed = 0;
+                        }
+                    }
+                }
+                if policy_passed != 0 {
+                    policy_detail = "internal-only untagged";
+                } else {
+                    policy_detail =
+                        "Internal v0.1.7 publication rejection policy is missing.";
+                }
+            }
+        }
+    }
+    if version == "0.1.7" {
+        gates.push(#{
+            id: "internal-version-policy",
+            passed: policy_passed,
+            detail: policy_detail
+        });
+    }
+
+    let remote_passed = 1;
+    let remote_detail = "remote-config";
+    let remote_code = std::process::command_stdout_file(
+        "git",
+        [
+            "config", "--local", "--get-regexp",
+            "^remote\\..*\\.(url|pushurl)$"
+        ],
+        10000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    if remote_code != 0 {
+        remote_passed = 0;
+        remote_detail = "preflight-git-remotes";
+    } else {
+        let remote_source = std::fs::read_to_string(stdout_path);
+        let origin_count = 0;
+        for source_line in remote_source.split("\n") {
+            let remote_line = source_line;
+            remote_line.trim();
+            if remote_line.len != 0 {
+                let fields = remote_line.split(" ");
+                if fields.len >= 2 {
+                    let remote_key = fields[0];
+                    let remote_url = fields[1];
+                    let remote_name = "remote";
+                    let remote_kind = "url";
+                    if remote_key == "remote.origin.url" {
+                        origin_count += 1;
+                        remote_name = "origin";
+                    }
+                    if remote_key == "remote.origin.pushurl" {
+                        origin_count += 1;
+                        remote_name = "origin";
+                        remote_kind = "pushurl";
+                    }
+                    if remote_key.ends_with(".pushurl") {
+                        remote_kind = "pushurl";
+                    }
+                    let embedded_credentials = 0;
+                    if (remote_url.starts_with("http://")
+                            || remote_url.starts_with("https://"))
+                            && remote_url.contains("@") {
+                        embedded_credentials = 1;
+                    }
+                    if embedded_credentials != 0 {
+                        remotes.push(#{
+                            name: remote_name,
+                            kind: remote_kind,
+                            url: "https://<redacted>",
+                            embedded_credentials: embedded_credentials
+                        });
+                    } else {
+                        remotes.push(#{
+                            name: remote_name,
+                            kind: remote_kind,
+                            url: remote_url,
+                            embedded_credentials: embedded_credentials
+                        });
+                    }
+                }
+            }
+        }
+        if origin_count == 0 {
+            remote_passed = 0;
+            remote_detail = "Local Git configuration has no origin remote.";
+        }
+    }
+    if remote_passed != 0 {
+        gates.push(#{
+            id: "remote-config",
+            passed: 1,
+            detail: "entries=" + remotes.len
+        });
+    } else {
+        gates.push(#{ id: "remote-config", passed: 0, detail: remote_detail });
+    }
+
+    let artifact_passed = 1;
+    let artifact_detail = "artifact-manifest";
+    let manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    let manifest_text = std::fs::read_to_string(manifest_path);
+    let manifest = rhai::json::parse(manifest_text);
+    if manifest.schema_version != 2 {
+        artifact_passed = 0;
+    }
+    if artifact_passed != 0 {
+        if type_of(manifest.executables) != "array" {
+            artifact_passed = 0;
+        }
+    }
+    if artifact_passed != 0 {
+        if manifest.executables.len == 0 {
+            artifact_passed = 0;
+        }
+    }
+    if artifact_passed != 0 {
+        let expected = [
+            "agenterm.exe",
+            "agenterm-cc.exe",
+            "agenterm-cli.exe",
+            "agenterm-rhai.exe"
+        ];
+        let names = #{};
+        for artifact_entry in manifest.executables {
+            names[artifact_entry.name] = true;
+        }
+        if names.keys().len != expected.len {
+            artifact_passed = 0;
+        }
+        if artifact_passed != 0 {
+            for expected_name in expected {
+                if names.contains(expected_name) == 0 {
+                    artifact_passed = 0;
+                }
+            }
+        }
+        if artifact_passed != 0 {
+            gates.push(#{
+                id: "artifact-manifest",
+                passed: 1,
+                detail: "executables=" + names.keys().len
+            });
+        } else {
+            gates.push(#{
+                id: "artifact-manifest",
+                passed: 0,
+                detail: "Artifact manifest schema or executable set is invalid."
+            });
+        }
+    } else {
+        gates.push(#{
+            id: "artifact-manifest",
+            passed: 0,
+            detail: "Artifact manifest schema or executable set is invalid."
+        });
+    }
+
+    let gate_manifest_passed = 1;
+    let gate_manifest_detail = "gate-manifest";
+    let gate_manifest_path =
+        std::path::join(repo, "scripts/qualification-gates.json").display;
+    let gate_manifest = rhai::json::parse(
+        std::fs::read_to_string(gate_manifest_path)
+    );
+    if gate_manifest.schema_version != 1 {
+        gate_manifest_passed = 0;
+    }
+    if gate_manifest_passed != 0 {
+        if gate_manifest.receipt_schema_version != 1 {
+            gate_manifest_passed = 0;
+        }
+    }
+    if gate_manifest_passed != 0 {
+        if type_of(gate_manifest.required_gates) != "array" {
+            gate_manifest_passed = 0;
+        }
+    }
+    if gate_manifest_passed != 0 {
+        if gate_manifest.required_gates.len == 0 {
+            gate_manifest_passed = 0;
+        }
+    }
+    if gate_manifest_passed != 0 {
+        let ids = #{};
+        for required_entry in gate_manifest.required_gates {
+            let gate_id = required_entry.id;
+            if gate_id.len < 2 {
+                gate_manifest_passed = 0;
+            }
+            if gate_manifest_passed != 0 {
+                if gate_id.starts_with("-") {
+                    gate_manifest_passed = 0;
+                }
+            }
+            if gate_manifest_passed != 0 {
+                let gate_stripped = required_entry.id;
+                gate_stripped.replace("a", "");
+                gate_stripped.replace("b", "");
+                gate_stripped.replace("c", "");
+                gate_stripped.replace("d", "");
+                gate_stripped.replace("e", "");
+                gate_stripped.replace("f", "");
+                gate_stripped.replace("g", "");
+                gate_stripped.replace("h", "");
+                gate_stripped.replace("i", "");
+                gate_stripped.replace("j", "");
+                gate_stripped.replace("k", "");
+                gate_stripped.replace("l", "");
+                gate_stripped.replace("m", "");
+                gate_stripped.replace("n", "");
+                gate_stripped.replace("o", "");
+                gate_stripped.replace("p", "");
+                gate_stripped.replace("q", "");
+                gate_stripped.replace("r", "");
+                gate_stripped.replace("s", "");
+                gate_stripped.replace("t", "");
+                gate_stripped.replace("u", "");
+                gate_stripped.replace("v", "");
+                gate_stripped.replace("w", "");
+                gate_stripped.replace("x", "");
+                gate_stripped.replace("y", "");
+                gate_stripped.replace("z", "");
+                gate_stripped.replace("0", "");
+                gate_stripped.replace("1", "");
+                gate_stripped.replace("2", "");
+                gate_stripped.replace("3", "");
+                gate_stripped.replace("4", "");
+                gate_stripped.replace("5", "");
+                gate_stripped.replace("6", "");
+                gate_stripped.replace("7", "");
+                gate_stripped.replace("8", "");
+                gate_stripped.replace("9", "");
+                gate_stripped.replace("-", "");
+                if gate_stripped.len != 0 {
+                    gate_manifest_passed = 0;
+                }
+            }
+            if gate_manifest_passed != 0 {
+                if ids.contains(gate_id) != 0 {
+                    gate_manifest_passed = 0;
+                }
+            }
+            if gate_manifest_passed != 0 {
+                ids[gate_id] = true;
+            }
+        }
+        if gate_manifest_passed != 0 {
+            gates.push(#{
+                id: "gate-manifest",
+                passed: 1,
+                detail: "required_gates=" + ids.keys().len
+            });
+        } else {
+            gates.push(#{
+                id: "gate-manifest",
+                passed: 0,
+                detail: "Qualification gate manifest schema or gate IDs are invalid."
+            });
+        }
+    } else {
+        gates.push(#{
+            id: "gate-manifest",
+            passed: 0,
+            detail: "Qualification gate manifest schema or gate IDs are invalid."
+        });
+    }
+
+    std::fs::try_remove_file(stdout_path);
+
+    let failed = 0;
+    for item in gates {
+        if item.passed == 0 {
+            failed += 1;
+        }
+    }
+    let passed = 0;
+    if failed == 0 {
+        passed = 1;
+    }
+    let report = #{
+        schema_version: 1,
+        kind: "agenterm-read-only-preflight",
+        passed: passed,
+        duration_ms:
+            std::time::SystemTime::now().unix_millis - started,
+        repo: repo,
+        branch: branch,
+        head: head,
+        version: version,
+        remotes: remotes,
+        gates: gates
+    };
+    std::fs::create_dir_all(output_parent);
+    rhai::runtime::atomic_write(
+        output,
+        rhai::json::stringify_pretty(report) + "\n"
+    );
+
+    if quiet == 0 {
+        print(
+            "PREFLIGHT passed=" + passed +
+            " duration_ms=" + report.duration_ms +
+            " branch=" + branch + " head=" + head + " version=" + version
+        );
+        for item in gates {
+            if item.passed != 0 {
+                print(
+                    "  PASS " + item.id + ": " + item.detail
+                );
+            } else {
+                print(
+                    "  FAIL " + item.id + ": " + item.detail
+                );
+            }
+        }
+        print("PREFLIGHT JSON " + output);
+    }
+    require(
+        passed != 0,
+        "AgenTerm read-only preflight failed; report:" + output
+    );
+    0
+}

@@ -1049,7 +1049,7 @@
     {
       "id": "preflight",
       "description": "Run the read-only repository release preflight and publish its JSON report",
-      "entry": "scripts/rhai/preflight.rhai",
+      "entry": "scripts/rh/preflight.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": ["migration-audit", "validate-artifact-manifest"],

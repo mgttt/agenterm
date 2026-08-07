@@ -381,7 +381,9 @@ fn native_rh_task_without_entry_fails_manifest_qualification() {
             .is_some_and(|error| error.contains("native .rh task requires compat-delegating")),
         "{report:?}"
     );
-}#[test]
+}
+
+#[test]
 fn prd_alignment_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/prd-alignment.rh");
     assert!(source.contains("fn entry("));
@@ -394,3 +396,16 @@ fn prd_alignment_uses_native_bundled_execution() {
 }
 
 
+
+
+#[test]
+fn preflight_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/preflight.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
