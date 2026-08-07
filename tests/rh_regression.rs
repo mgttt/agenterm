@@ -14,11 +14,22 @@ fn check_accepts_all_fixtures() {
         ("fleet", include_str!("../fixtures/rh/fleet.rh")),
         ("stdlib", include_str!("../fixtures/rh/stdlib.rh")),
         ("while", include_str!("../fixtures/rh/while.rh")),
+        ("while-count", include_str!("../fixtures/rh/while-count.rh")),
         ("try-catch", include_str!("../fixtures/rh/try-catch.rh")),
         ("try-ok", include_str!("../fixtures/rh/try-ok.rh")),
         ("for-range", include_str!("../fixtures/rh/for-range.rh")),
-        ("for-dyn-range", include_str!("../fixtures/rh/for-dyn-range.rh")),
-        ("break-continue", include_str!("../fixtures/rh/break-continue.rh")),
+        (
+            "for-dyn-range",
+            include_str!("../fixtures/rh/for-dyn-range.rh"),
+        ),
+        (
+            "break-continue",
+            include_str!("../fixtures/rh/break-continue.rh"),
+        ),
+        (
+            "for-span-overflow",
+            include_str!("../fixtures/rh/for-span-overflow.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -90,6 +101,25 @@ fn for_range_fixture_transpile_emits_native_loop() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("for value in 1..5"));
     assert!(!rust.contains("rh_host_eval_int(\"for"));
+}
+
+#[test]
+fn const_for_span_overflow_transpile_uses_host_eval_fallback() {
+    let source = include_str!("../fixtures/rh/for-span-overflow.rh");
+    let rust = transpile_cdylib(source).expect("transpile");
+    assert!(
+        rust.lines().any(|line| {
+            line.contains("let _for = rh_host_eval_int(") && line.contains("for value in 0..4097")
+        }),
+        "expected localized host-eval for fallback in:\n{rust}"
+    );
+    assert!(
+        !rust
+            .lines()
+            .any(|line| line.trim_start().starts_with("for value in 0..4097")),
+        "span above MAX_NATIVE_FOR_SPAN must not emit a native loop:\n{rust}"
+    );
+    assert!(!rust.contains("compat delegating"));
 }
 
 #[test]

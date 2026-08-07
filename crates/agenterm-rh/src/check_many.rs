@@ -202,7 +202,17 @@ pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) ->
         }
         let source = match read_source_file(&path, options.source_bytes) {
             Ok(source) => source,
-            Err(error) => {
+            Err(SourceReadFailure::Limit(message)) => {
+                failures.push(failure(
+                    label,
+                    "limit_source_bytes",
+                    message,
+                    ordinal,
+                    "limit",
+                ));
+                continue;
+            }
+            Err(SourceReadFailure::Host(error)) => {
                 failures.push(failure(
                     label,
                     "host_source_read",
@@ -251,14 +261,21 @@ fn report(
     }
 }
 
-fn read_source_file(path: &Path, max_bytes: usize) -> Result<String, RhError> {
-    let metadata = std::fs::metadata(path).map_err(|err| RhError::Parse(err.to_string()))?;
+enum SourceReadFailure {
+    Limit(String),
+    Host(RhError),
+}
+
+fn read_source_file(path: &Path, max_bytes: usize) -> Result<String, SourceReadFailure> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|err| SourceReadFailure::Host(RhError::Parse(err.to_string())))?;
     if metadata.len() as usize > max_bytes {
-        return Err(RhError::Parse(format!(
+        return Err(SourceReadFailure::Limit(format!(
             "source exceeds per-file limit of {max_bytes} bytes"
         )));
     }
-    std::fs::read_to_string(path).map_err(|err| RhError::Parse(err.to_string()))
+    std::fs::read_to_string(path)
+        .map_err(|err| SourceReadFailure::Host(RhError::Parse(err.to_string())))
 }
 
 fn failure(
@@ -380,7 +397,10 @@ where
 mod tests {
     use std::path::PathBuf;
 
-    use super::{CheckManyOptions, parse_check_many_cli, read_manifest, run_check_many};
+    use super::{
+        CheckManyManifest, CheckManyOptions, RH_CHECK_MANIFEST_KIND, TOTAL_SOURCE_MAX_BYTES,
+        parse_check_many_cli, read_manifest, run_check_many,
+    };
 
     #[test]
     fn accepts_rhai_manifest_kind_and_compat_flags() {
@@ -408,7 +428,7 @@ mod tests {
         manifest.kind = super::RHAI_CHECK_MANIFEST_KIND.to_owned();
         let report = run_check_many(manifest, parsed.options);
         assert!(report.ok, "failures: {:?}", report.failures);
-        assert_eq!(report.checked_files, 8);
+        assert_eq!(report.checked_files, 11);
     }
 
     #[test]
@@ -424,7 +444,96 @@ mod tests {
             },
         );
         assert!(report.ok, "failures: {:?}", report.failures);
-        assert_eq!(report.checked_files, 8);
+        assert_eq!(report.checked_files, 11);
+    }
+
+    fn manifest_for(file: &str) -> CheckManyManifest {
+        CheckManyManifest {
+            schema_version: 1,
+            kind: RH_CHECK_MANIFEST_KIND.to_owned(),
+            files: vec![file.to_owned()],
+        }
+    }
+
+    #[test]
+    fn check_many_classifies_per_file_source_budget_as_limit() {
+        let project = tempfile::tempdir().expect("project root");
+        let project_path = project.path().to_path_buf();
+        std::fs::write(project.path().join("oversized.rh"), "40 + 2\n")
+            .expect("write oversized script");
+
+        let report = run_check_many(
+            manifest_for("oversized.rh"),
+            CheckManyOptions {
+                project_root: project_path.clone(),
+                source_bytes: 1,
+                ..CheckManyOptions::default()
+            },
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.checked_files, 0);
+        assert_eq!(report.total_source_bytes, 0);
+        assert_eq!(report.failures[0].code, "limit_source_bytes");
+        assert_eq!(report.failures[0].exit_class, "limit");
+        assert_eq!(report.exit_code(), 3);
+        drop(project);
+        assert!(!project_path.exists(), "temporary project was not removed");
+    }
+
+    #[test]
+    fn check_many_enforces_aggregate_source_budget_with_limit_exit() {
+        let project = tempfile::tempdir().expect("project root");
+        let project_path = project.path().to_path_buf();
+        let source_path = project.path().join("aggregate.rh");
+        let source = std::fs::File::create(&source_path).expect("create aggregate script");
+        source
+            .set_len((TOTAL_SOURCE_MAX_BYTES + 1) as u64)
+            .expect("size aggregate script");
+        drop(source);
+
+        let report = run_check_many(
+            manifest_for("aggregate.rh"),
+            CheckManyOptions {
+                project_root: project_path.clone(),
+                source_bytes: TOTAL_SOURCE_MAX_BYTES + 1,
+                ..CheckManyOptions::default()
+            },
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.checked_files, 0);
+        assert_eq!(report.total_source_bytes, 0);
+        assert_eq!(report.failures[0].code, "check_many_total_source_bytes");
+        assert_eq!(report.failures[0].exit_class, "limit");
+        assert_eq!(report.exit_code(), 3);
+        drop(project);
+        assert!(!project_path.exists(), "temporary project was not removed");
+    }
+
+    #[test]
+    fn check_many_enforces_zero_wall_time_without_sleeping() {
+        let project = tempfile::tempdir().expect("project root");
+        let project_path = project.path().to_path_buf();
+        std::fs::write(project.path().join("valid.rh"), "40 + 2\n").expect("write valid script");
+
+        let report = run_check_many(
+            manifest_for("valid.rh"),
+            CheckManyOptions {
+                project_root: project_path.clone(),
+                wall_time_ms: 0,
+                ..CheckManyOptions::default()
+            },
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.checked_files, 0);
+        assert_eq!(report.total_source_bytes, 0);
+        assert_eq!(report.failures[0].code, "limit_wall_time");
+        assert_eq!(report.failures[0].exit_class, "limit");
+        assert_eq!(report.exit_code(), 3);
+        drop(project);
+        assert!(!project_path.exists(), "temporary project was not removed");
     }
 
     #[test]

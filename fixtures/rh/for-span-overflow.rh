@@ -1,0 +1,8 @@
+fn entry() {
+    for value in 0..4097 {
+        if value < 0 {
+            return value;
+        }
+    }
+    42
+}

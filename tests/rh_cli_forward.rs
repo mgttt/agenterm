@@ -326,6 +326,39 @@ fn rhai_forwards_run_as_eval_for_rh_fixture() {
 }
 
 #[test]
+fn rhai_inline_eval_stays_on_the_interpreted_compatibility_path() {
+    let output = run_rhai(&["eval", "40 + 2", "--json"]);
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("inline eval JSON");
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["value"], 42);
+}
+
+#[test]
+fn rhai_source_run_stays_on_the_interpreted_compatibility_path() {
+    let fixture = TestDirectory::new("interpreted-run");
+    let script = fixture.path().join("compat.rhai");
+    fs::write(&script, "40 + 2\n").expect("write interpreted script");
+    let output = run_rhai(&["run", &script.display().to_string(), "--json"]);
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("interpreted run JSON");
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["value"], 42);
+}
+
+#[test]
 fn rhai_forwards_version_subcommand_to_adjacent_rh() {
     let output = run_rhai(&["version"]);
     assert!(

@@ -776,6 +776,9 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   stage-0 cached worker. It directly hosts the task engine, framed worker and
   incremental Rust compiler wrapper through the shared library; CI task
   callers and authoritative worker/check-many black boxes use this entry.
+  Its dedicated gate now includes an isolated single-PE CLI suite, an external
+  public-library contract suite, complete fixture checking, typed budget
+  failures, and native AOT qualification for supported control flow.
   The task manifest and automation corpus remain `.rhai`.
   Worker/REPL implementation has moved from the
   `agenterm-rhai` binary into the shared `script_worker` library, but its

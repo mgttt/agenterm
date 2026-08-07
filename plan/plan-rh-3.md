@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M28 bootstrap/caller 切换完成**（共享 wrapper；单 rh bootstrap；CI 与黑盒入口迁移） |
+| **状态** | **M29 独立测试扩面完成**（standalone CLI；公共 API；预算矩阵；控制流 AOT） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -65,6 +65,11 @@
 | M28b | bootstrap 仅构建、缓存并执行 `agenterm-rh`，移除无消费者的 compat 环境接线 | [x] |
 | M28c | CI 与 dist task caller wave 2 改用 rh；caller inventory 保持单调下降 guard | [x] |
 | M28d | rh check/check-many 保持既有 typed JSON、退出码与项目根路径完整性契约 | [x] |
+| M29a | isolated `agenterm-rh` CLI 套件：无相邻 rhai 的 help/check/check-many/task 契约 | [x] |
+| M29b | check-many 全 fixture 与 per-file/aggregate/wall-time 预算 typed limit 矩阵 | [x] |
+| M29c | for range/dynamic range/break-continue 真实 AOT qualify；span 超界 fallback | [x] |
+| M29d | rhai shim 仅转发 `.rh` eval/run，保留 inline eval 与 `.rhai` 解释执行 | [x] |
+| M29e | crate 外部 public API contract 套件纳入 `rh-check` | [x] |
 
 ---
 

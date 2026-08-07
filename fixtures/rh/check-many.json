@@ -9,6 +9,9 @@
     "fixtures/rh/while-count.rh",
     "fixtures/rh/try-catch.rh",
     "fixtures/rh/try-ok.rh",
-    "fixtures/rh/break-continue.rh"
+    "fixtures/rh/break-continue.rh",
+    "fixtures/rh/for-range.rh",
+    "fixtures/rh/for-dyn-range.rh",
+    "fixtures/rh/for-span-overflow.rh"
   ]
 }

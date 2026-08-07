@@ -19,7 +19,9 @@ cargo test --locked \
   --test rh_backend \
   --test rh_corpus \
   --test rh_framed_worker \
-  --test rh_cli_forward
+  --test rh_cli_forward \
+  --test rh_standalone_cli \
+  --test script_check_many
 
 echo "== rh host + cache lib tests =="
 cargo test -p agenterm --locked --lib script_rh_host

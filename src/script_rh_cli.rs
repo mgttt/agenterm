@@ -8,7 +8,6 @@ const RH_DEV_COMMANDS: &[&str] = &[
     "check-many",
     "transpile",
     "compile",
-    "eval",
     "run-smoke",
     "pack",
     "qualify",
@@ -76,6 +75,7 @@ pub fn try_forward_dev_cli(arguments: &[String]) -> Option<std::io::Result<ExitS
     let command = arguments[0].as_str();
     let forwarded = match command {
         "check" => forward_if_rh_path(arguments, 1, &["check"]),
+        "eval" => forward_if_rh_path(arguments, 1, &["eval"]),
         "run" => forward_run_as_eval(arguments),
         cmd if RH_DEV_COMMANDS.contains(&cmd) => Some(arguments.to_vec()),
         _ => None,
@@ -94,7 +94,11 @@ pub fn check_many_requires_rh_error() -> String {
     "check-many requires agenterm-rh; build with: cargo build --bin agenterm-rh".into()
 }
 
-fn forward_if_rh_path(arguments: &[String], path_index: usize, prefix: &[&str]) -> Option<Vec<String>> {
+fn forward_if_rh_path(
+    arguments: &[String],
+    path_index: usize,
+    prefix: &[&str],
+) -> Option<Vec<String>> {
     let path = arguments.get(path_index)?;
     if !(path.ends_with(".rh") || path.ends_with(".rhai")) {
         return None;
@@ -106,7 +110,7 @@ fn forward_if_rh_path(arguments: &[String], path_index: usize, prefix: &[&str]) 
 
 fn forward_run_as_eval(arguments: &[String]) -> Option<Vec<String>> {
     let path = arguments.get(1)?;
-    if !(path.ends_with(".rh") || path.ends_with(".rhai")) {
+    if !path.ends_with(".rh") {
         return None;
     }
     let mut forwarded = vec!["eval".to_owned()];
@@ -116,7 +120,7 @@ fn forward_run_as_eval(arguments: &[String]) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{forward_run_as_eval, resolve_adjacent_rh_cli, resolve_rh_cli};
+    use super::{forward_if_rh_path, forward_run_as_eval, resolve_adjacent_rh_cli, resolve_rh_cli};
 
     #[test]
     fn adjacent_rh_cli_resolves_next_to_current_exe() {
@@ -139,5 +143,11 @@ mod tests {
         let forwarded = forward_run_as_eval(&args).expect("forward");
         assert_eq!(forwarded[0], "eval");
         assert_eq!(forwarded[1], "fixtures/rh/entry.rh");
+    }
+
+    #[test]
+    fn interpreted_eval_and_rhai_run_are_not_forwarded() {
+        assert!(forward_if_rh_path(&["eval".into(), "40 + 2".into()], 1, &["eval"]).is_none());
+        assert!(forward_run_as_eval(&["run".into(), "scripts/rhai/lint.rhai".into()]).is_none());
     }
 }
