@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use agenterm_platform::input::{KeyPressState, LogicalKey, NamedKey, NormalizedKeyEvent};
 use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::window_host::{
-    run_pixel_window, GeometryChange, LogicalSize, PixelWindow, PixelWindowApplication,
+    run_pixel_window, GeometryChange, LogicalPoint, LogicalSize, PixelWindow, PixelWindowApplication,
     PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions,
     PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
 };
@@ -46,6 +46,61 @@ impl vt100::Callbacks for ConCallbacks {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
         self.title = Some(String::from_utf8_lossy(title).trim().to_string());
     }
+}
+
+/// A terminal cell coordinate used for selection hit-testing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TerminalPoint {
+    row: u16,
+    col: u16,
+}
+
+impl TerminalPoint {
+    /// Returns the normalized (top-left, bottom-right) bounds of a selection.
+    fn normalize(a: TerminalPoint, b: TerminalPoint) -> (TerminalPoint, TerminalPoint) {
+        if a.row < b.row || (a.row == b.row && a.col <= b.col) {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    }
+}
+
+/// Extracts text from the VT screen between two points (inclusive).
+/// Produces Windows CRLF line joins, trims trailing whitespace per row.
+fn selection_text(screen: &vt100::Screen, a: TerminalPoint, b: TerminalPoint) -> String {
+    let (start, end) = TerminalPoint::normalize(a, b);
+    let (_, cols) = screen.size();
+    let mut result = String::new();
+    for row in start.row..=end.row {
+        let col_start = if row == start.row { start.col } else { 0 };
+        let col_end = if row == end.row { end.col + 1 } else { cols };
+        let mut row_text = String::new();
+        for col in col_start..col_end {
+            if let Some(cell) = screen.cell(row, col) {
+                if cell.is_wide_continuation() {
+                    continue;
+                }
+                if cell.has_contents() {
+                    row_text.push_str(cell.contents());
+                    if cell.is_wide() {
+                        // Skip the continuation cell we'd hit next iteration.
+                    }
+                } else {
+                    row_text.push(' ');
+                }
+            } else {
+                row_text.push(' ');
+            }
+        }
+        // Trim trailing spaces on each row (conhost behavior).
+        let trimmed = row_text.trim_end();
+        if row > start.row {
+            result.push_str("\r\n");
+        }
+        result.push_str(trimmed);
+    }
+    result
 }
 
 /// Trailing-edge debounce for resize: drag storms produce dozens of geometry
@@ -72,6 +127,9 @@ fn main() {
 
     let mut no_activate = std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
     let mut working_dir: Option<String> = None;
+    let mut font_size: Option<f64> = None;
+    let mut initial_cols: Option<u16> = None;
+    let mut initial_rows: Option<u16> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -82,6 +140,18 @@ fn main() {
             other if other.starts_with("--working-dir=") => {
                 working_dir = Some(other["--working-dir=".len()..].to_owned());
             }
+            "--font-size" => {
+                font_size = rest.next().and_then(|v| v.parse().ok());
+            }
+            other if other.starts_with("--font-size=") => {
+                font_size = other["--font-size=".len()..].parse().ok();
+            }
+            "--cols" => {
+                initial_cols = rest.next().and_then(|v| v.parse().ok());
+            }
+            "--rows" => {
+                initial_rows = rest.next().and_then(|v| v.parse().ok());
+            }
             unknown => {
                 let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
                     "error: unknown argument '{unknown}'\n\n{USAGE}"
@@ -91,7 +161,16 @@ fn main() {
         }
     }
 
-    let app = ConTerminal::new(working_dir);
+    let mut app = ConTerminal::new(working_dir);
+    if let Some(fs) = font_size {
+        app.font_size_logical = fs.clamp(8.0, 36.0);
+    }
+    if let Some(cols) = initial_cols {
+        app.cols = cols.max(2);
+    }
+    if let Some(rows) = initial_rows {
+        app.rows = rows.max(2);
+    }
     let options = PixelWindowOptions::new("agenterm-con", LogicalSize::new(960.0, 600.0))
         .with_no_activate(no_activate)
         .with_ime_allowed(true);
@@ -106,6 +185,7 @@ fn main() {
 
 const USAGE: &str = "\
 Usage: agenterm-con [--no-activate] [--working-dir DIR]
+                   [--font-size N] [--cols N] [--rows N]
        agenterm-con --version
        agenterm-con --help
 
@@ -179,6 +259,14 @@ struct ConTerminal {
     scroll_offset: usize,
     /// Accumulated wheel delta (fractional lines pending application).
     wheel_accumulator: f32,
+
+    /// Text selection: anchor + focus in terminal cell coordinates.
+    /// None = no selection; Some = active or completed selection.
+    selection: Option<(TerminalPoint, TerminalPoint)>,
+    /// True while left mouse button is held during a drag.
+    selecting: bool,
+    /// Current scale factor (for pointer hit-test DIP→pixel conversion).
+    scale: f64,
 }
 
 impl ConTerminal {
@@ -207,6 +295,9 @@ impl ConTerminal {
             exit: false,
             scroll_offset: 0,
             wheel_accumulator: 0.0,
+            selection: None,
+            selecting: false,
+            scale: 1.0,
         }
     }
 
@@ -307,12 +398,17 @@ impl ConTerminal {
             self.scroll_offset = 0;
             self.parser.screen_mut().set_scrollback(0);
         }
+        // New output clears stale selection.
+        if got_output && !self.selecting {
+            self.selection = None;
+        }
     }
 
     /// Applies a settled geometry: resize PTY first, then the VT model. The PTY
     /// resize is allowed to fail (some backends reject transient bad sizes);
     /// the model still converges so the next event is consistent.
     fn apply_resize(&mut self, phys_w: u32, phys_h: u32, scale: f64) {
+        self.scale = scale;
         self.recompute_metrics(scale);
         let (cols, rows) = Self::compute_grid(phys_w, phys_h, self.cell_w, self.cell_h);
         if cols == self.cols && rows == self.rows {
@@ -330,10 +426,70 @@ impl ConTerminal {
         if self.exit || self.child_gone {
             return;
         }
+
+        // Ctrl+Shift+C → copy selection (always, even if no selection just clears)
+        if event.modifiers.control && event.modifiers.shift {
+            if let LogicalKey::Character(text) = &event.logical {
+                if text.eq_ignore_ascii_case("c") {
+                    self.copy_selection();
+                    return;
+                }
+                if text.eq_ignore_ascii_case("v") {
+                    self.paste_clipboard();
+                    return;
+                }
+            }
+        }
+
+        // Ctrl+C → copy if selection exists, else forward SIGINT (0x03)
+        if event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift {
+            if let LogicalKey::Character(text) = &event.logical {
+                if text.eq_ignore_ascii_case("c") && self.selection.is_some() {
+                    self.copy_selection();
+                    self.selection = None;
+                    return;
+                }
+            }
+        }
+
         if let Some(bytes) = key_to_bytes(event) {
             if let Some(master) = &self.master {
                 let _ = master.write_all(&bytes);
             }
+        }
+    }
+
+    /// Converts a logical (DIP) pointer position to terminal cell coordinates.
+    fn hit_test(&self, pos: &LogicalPoint) -> TerminalPoint {
+        let phys_x = pos.x * self.scale;
+        let phys_y = pos.y * self.scale;
+        TerminalPoint {
+            row: (phys_y / self.cell_h as f64) as u16,
+            col: (phys_x / self.cell_w as f64) as u16,
+        }
+    }
+
+    fn copy_selection(&self) {
+        let Some((start, end)) = self.selection else {
+            return;
+        };
+        let text = selection_text(&self.parser.screen(), start, end);
+        if !text.is_empty() {
+            let _ = agenterm_platform::clipboard::set_text(&text);
+        }
+    }
+
+    fn paste_clipboard(&self) {
+        let Ok(text) = agenterm_platform::clipboard::get_text(1024 * 1024) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        // Normalize newlines to \r for PTY input.
+        let normalized: String = text.replace("\r\n", "\r").replace('\n', "\r");
+        if let Some(master) = &self.master {
+            let _ = master.write_all(normalized.as_bytes());
         }
     }
 }
@@ -347,6 +503,7 @@ impl PixelWindowApplication for ConTerminal {
             1.0
         };
         self.recompute_metrics(scale);
+        self.scale = scale;
         window.set_title(&format!("agenterm-con — {}", font::resolved_name()));
         let (cols, rows) =
             Self::compute_grid(metrics.physical_width, metrics.physical_height, self.cell_w, self.cell_h);
@@ -386,7 +543,21 @@ impl PixelWindowApplication for ConTerminal {
             }
             PixelWindowEvent::MouseWheel { delta, modifiers, .. } => {
                 // Ctrl+wheel adjusts font size (wave 4); plain wheel scrolls.
-                if !modifiers.control {
+                if modifiers.control {
+                    let dir = match delta {
+                        WheelDelta::Lines { y, .. } => y,
+                        _ => 0.0,
+                    };
+                    if dir.abs() > 0.0 {
+                        let delta_size = if dir > 0.0 { 1.0 } else { -1.0 };
+                        self.font_size_logical = (self.font_size_logical + delta_size).clamp(8.0, 36.0);
+                        let metrics = window.metrics().ok();
+                        if let Some(m) = metrics {
+                            self.apply_resize(m.physical_width, m.physical_height, m.scale_factor);
+                        }
+                        window.request_redraw();
+                    }
+                } else {
                     let lines = match delta {
                         WheelDelta::Lines { y, .. } => y,
                         WheelDelta::LogicalPixels { y, .. } => y as f32 / (self.cell_h as f32).max(1.0),
@@ -408,11 +579,46 @@ impl PixelWindowApplication for ConTerminal {
             PixelWindowEvent::PointerButton {
                 button: PointerButton::Left,
                 state: PointerButtonState::Pressed,
+                position,
                 ..
             } => {
-                // Selection arrives in C2; a plain click still focuses/activates
-                // without us stealing it, so there is nothing to do here yet.
-                let _ = window;
+                if let Some(pos) = position {
+                    let pt = self.hit_test(&pos);
+                    self.selection = Some((pt, pt));
+                    self.selecting = true;
+                }
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerButton {
+                button: PointerButton::Left,
+                state: PointerButtonState::Released,
+                ..
+            } => {
+                self.selecting = false;
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerMoved { position, .. } => {
+                if self.selecting {
+                    let pt = self.hit_test(&position);
+                    if let Some((anchor, _)) = self.selection {
+                        self.selection = Some((anchor, pt));
+                        window.request_redraw();
+                    }
+                }
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerButton {
+                button: PointerButton::Right,
+                state: PointerButtonState::Pressed,
+                ..
+            } => {
+                // Right-click: copy if selection exists, else paste.
+                if self.selection.is_some() {
+                    self.copy_selection();
+                    self.selection = None;
+                } else {
+                    self.paste_clipboard();
+                }
                 Ok(PixelWindowDirective::Continue)
             }
             _ => Ok(PixelWindowDirective::Continue),
@@ -461,6 +667,19 @@ impl PixelWindowApplication for ConTerminal {
 
                 let mut fg = palette::resolve(cell.fgcolor(), self.default_fg, cell.bold());
                 let mut bg = palette::resolve(cell.bgcolor(), self.default_bg, false);
+
+                // Selection highlight: invert fg/bg for selected cells.
+                if let Some((sa, sb)) = self.selection {
+                    let (lo, hi) = TerminalPoint::normalize(sa, sb);
+                    if row >= lo.row && row <= hi.row {
+                        let col_start = if row == lo.row { lo.col } else { 0 };
+                        let col_end = if row == hi.row { hi.col } else { u16::MAX };
+                        if col >= col_start && col <= col_end {
+                            std::mem::swap(&mut fg, &mut bg);
+                        }
+                    }
+                }
+
                 if cell.inverse() {
                     std::mem::swap(&mut fg, &mut bg);
                 }
