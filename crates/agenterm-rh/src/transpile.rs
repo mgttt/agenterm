@@ -2598,6 +2598,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if child_wait_with_output_call(expr, ctx).is_some() => ValueKind::Output,
         _ if output_stdout_text_call(expr, ctx).is_some() => ValueKind::String,
         _ if output_stderr_text_call(expr, ctx).is_some() => ValueKind::String,
+        _ if char_to_string_binding(expr, ctx).is_some() => ValueKind::String,
         _ if child_property_binding(expr, ctx).is_some_and(|(_, property)| property == "id") => {
             ValueKind::Int
         }
@@ -5669,6 +5670,11 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
     }
     if env_current_dir_display(expr) {
         out.push_str("rh_env_current_dir()");
+        return Ok(());
+    }
+    if let Some(binding) = char_to_string_binding(expr, ctx) {
+        out.push_str(binding);
+        out.push_str(".to_string()");
         return Ok(());
     }
     if let Some((binding, path)) = json_value_path(expr, ctx)
@@ -8816,6 +8822,35 @@ mod tests {
         assert!(output.rust.contains("name.ends_with("));
         assert!(output.rust.contains("role.replace("));
         assert!(!output.rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn char_to_string_assignment_stays_native() {
+        let source = r#"
+fn entry() {
+    let text = "abc";
+    let pieces = [];
+    for character in text {
+        let piece = character.to_string();
+        pieces.push(piece);
+    }
+    require(pieces.len == 3, "pieces");
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("let mut piece = character.to_string();"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]
