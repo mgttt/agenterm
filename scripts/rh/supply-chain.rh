@@ -1,0 +1,415 @@
+// Validate locked Cargo licenses and write a deterministic SPDX 2.3 inventory.
+//
+// Args:
+//   REPO OUTPUT_PATH
+
+fn entry() {
+    if args.len != 2 {
+        return rh::fail("expected: REPO OUTPUT_PATH");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let output_value = std::path::PathBuf::from(args[1]);
+    let output = std::path::join(repo, args[1]).display;
+    if output_value.is_absolute {
+        output = output_value.display;
+    }
+    let output_arg = args[1];
+    let output_parts = output_arg.split("/");
+    let output_parent = repo;
+    if output_parts.len > 1 {
+        let output_dir = output_parts[0];
+        for index in 1..output_parts.len - 1 {
+            output_dir = output_dir + "/" + output_parts[index];
+        }
+        output_parent = std::path::join(repo, output_dir).display;
+    }
+
+    let cargo_lock_path = std::path::join(repo, "Cargo.lock").display;
+    let lock_text = std::fs::read_to_string(cargo_lock_path);
+    lock_text.replace("\r\n", "\n");
+    lock_text.replace("\r", "\n");
+    let checksum_keys = [];
+    let checksum_values = [];
+    let lock_name = "";
+    let lock_version = "";
+    let lock_source = "";
+    let lock_checksum = "";
+    for source_line in lock_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line == "[[package]]" {
+            if lock_checksum != "" {
+                checksum_keys.push(
+                    lock_name + "\n" + lock_version + "\n" + lock_source
+                );
+                checksum_values.push(lock_checksum);
+            }
+            lock_name = "";
+            lock_version = "";
+            lock_source = "";
+            lock_checksum = "";
+        } else if line.starts_with("name = ") {
+            let parts = line.split("\"");
+            if parts.len >= 3 {
+                lock_name = parts[1];
+            } else {
+                lock_name = "";
+            }
+        } else if line.starts_with("version = ") {
+            let parts = line.split("\"");
+            if parts.len >= 3 {
+                lock_version = parts[1];
+            } else {
+                lock_version = "";
+            }
+        } else if line.starts_with("source = ") {
+            let parts = line.split("\"");
+            if parts.len >= 3 {
+                lock_source = parts[1];
+            } else {
+                lock_source = "";
+            }
+        } else if line.starts_with("checksum = ") {
+            let parts = line.split("\"");
+            if parts.len >= 3 {
+                lock_checksum = parts[1];
+            } else {
+                lock_checksum = "";
+            }
+        }
+    }
+    if lock_checksum != "" {
+        checksum_keys.push(
+            lock_name + "\n" + lock_version + "\n" + lock_source
+        );
+        checksum_values.push(lock_checksum);
+    }
+
+    std::fs::create_dir_all(output_parent);
+    let run_stamp = std::time::SystemTime::now().unix_millis;
+    let metadata_name = "cargo-metadata-" + run_stamp + ".json";
+    let metadata_path = std::path::join(output_parent, metadata_name).display;
+    let manifest_path = std::path::join(repo, "Cargo.toml").display;
+    let metadata_code = std::process::command_stdout_file(
+        "cargo",
+        [
+            "metadata", "--locked", "--format-version", "1",
+            "--manifest-path", manifest_path
+        ],
+        45000,
+        metadata_path,
+        #{ current_dir: repo }
+    );
+    require(
+        metadata_code == 0,
+        "supply_chain_cargo_metadata"
+    );
+    let metadata = rhai::json::parse_file(metadata_path);
+    std::fs::try_remove_file(metadata_path);
+    require(
+        type_of(metadata.resolve) != "()",
+        "supply_chain_resolve_missing"
+    );
+
+    let allowed = #{
+        "(MIT OR Apache-2.0) AND Unicode-3.0": true,
+        "0BSD OR MIT OR Apache-2.0": true,
+        "Apache-2.0": true,
+        "Apache-2.0 AND ISC": true,
+        "Apache-2.0 AND MIT": true,
+        "Apache-2.0 OR ISC OR MIT": true,
+        "Apache-2.0 OR MIT": true,
+        "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT": true,
+        "BSD-2-Clause": true,
+        "BSD-2-Clause OR Apache-2.0 OR MIT": true,
+        "BSD-3-Clause": true,
+        "BSD-3-Clause OR MIT OR Apache-2.0": true,
+        "CC0-1.0": true,
+        "CDLA-Permissive-2.0": true,
+        "ISC": true,
+        "MIT": true,
+        "MIT OR Apache-2.0": true,
+        "MIT OR Apache-2.0 OR LGPL-2.1-or-later": true,
+        "MIT OR Apache-2.0 OR Zlib": true,
+        "MIT OR Zlib OR Apache-2.0": true,
+        "MIT/Apache-2.0": true,
+        "MPL-2.0+": true,
+        "Unlicense/MIT": true,
+        "Unlicense OR MIT": true,
+        "Zlib OR Apache-2.0 OR MIT": true
+    };
+
+    let workspace_ids = #{};
+    for id in metadata.workspace_members {
+        let workspace_id = "" + id;
+        workspace_ids[workspace_id] = true;
+    }
+    let resolved_ids = #{};
+    for node in metadata.resolve.nodes {
+        let resolved_id = "" + node.id;
+        resolved_ids[resolved_id] = true;
+    }
+    let dependencies = [];
+    let roots = [];
+    for pkg in metadata.packages {
+        let pkg_id = "" + pkg.id;
+        if workspace_ids.contains(pkg_id) {
+            roots.push(pkg);
+        } else if resolved_ids.contains(pkg_id) {
+            dependencies.push(pkg);
+        }
+    }
+    require(dependencies.len > 0, "supply_chain_dependencies_empty");
+    require(
+        roots.len == workspace_ids.keys().len,
+        "supply_chain_workspace_package_count"
+    );
+
+    let sorted_dependencies = [];
+    let picked = #{};
+    for pass in 0..dependencies.len {
+        let best_index = -1;
+        let best_key = "";
+        for index in 0..dependencies.len {
+            let index_key = "" + index;
+            if !picked.contains(index_key) {
+                let candidate = dependencies[index];
+                let key =
+                    "" + candidate.name + "\n" + candidate.version + "\n" +
+                        candidate.source + "\n" + candidate.id;
+                if best_index < 0 || key < best_key {
+                    best_index = index;
+                    best_key = key;
+                }
+            }
+        }
+        let picked_key = "" + best_index;
+        picked[picked_key] = true;
+        sorted_dependencies.push(dependencies[best_index]);
+    }
+
+    for pkg in sorted_dependencies {
+        let license = "";
+        if type_of(pkg.license) == "string" {
+            license = "" + pkg.license;
+        }
+        let package_source = "";
+        if type_of(pkg.source) == "string" {
+            package_source = "" + pkg.source;
+        }
+        let pkg_name = "" + pkg.name;
+        let pkg_version = "" + pkg.version;
+        require(
+            license != "",
+            "supply_chain_license_missing:" + pkg_name + ":" + pkg_version
+        );
+        require(
+            allowed.contains(license),
+            "supply_chain_license_unreviewed:" + pkg_name + ":" +
+                pkg_version + ":" + license
+        );
+        if pkg_name == "softbuffer" || pkg_name == "vt100" {
+            require(
+                package_source == "",
+                "supply_chain_vendored_source_unexpected:" + pkg_name + ":" +
+                    pkg_version
+            );
+            let package_id = "";
+            if type_of(pkg.id) == "string" {
+                package_id = "" + pkg.id;
+            }
+            package_id.replace("\\", "/");
+            let vendored_tree = "";
+            if pkg_name == "softbuffer" {
+                vendored_tree = "third_party/softbuffer";
+            } else {
+                vendored_tree = "third_party/vt100";
+            }
+            let vendored_marker = "/" + vendored_tree;
+            require(
+                package_id.contains(vendored_marker),
+                "supply_chain_vendored_path_mismatch:" + pkg_name + ":" +
+                    pkg_version
+            );
+        } else {
+            require(
+                package_source != "",
+                "supply_chain_source_missing:" + pkg_name + ":" + pkg_version
+            );
+            let key =
+                pkg_name + "\n" + pkg_version + "\n" + package_source;
+            if package_source.starts_with("registry+") {
+                let checksum_found = 0;
+                for index in 0..checksum_keys.len {
+                    let stored_key = checksum_keys[index];
+                    if stored_key == key {
+                        checksum_found = 1;
+                    }
+                }
+                require(
+                    checksum_found == 1,
+                    "supply_chain_checksum_missing:" + pkg_name + ":" +
+                        pkg_version
+                );
+            }
+        }
+    }
+
+    let direct_names = #{};
+    let workspace_names = #{};
+    for root in roots {
+        let root_name = "" + root.name;
+        workspace_names[root_name] = true;
+    }
+    for root in roots {
+        for dependency in root.dependencies {
+            let dependency_name = "" + dependency.name;
+            if !workspace_names.contains(dependency_name) {
+                direct_names[dependency_name] = true;
+            }
+        }
+    }
+    let notice_names = #{};
+    let notices_path =
+        std::path::join(repo, "THIRD_PARTY_NOTICES.md").display;
+    let notices_text = std::fs::read_to_string(notices_path);
+    for source_line in notices_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line.starts_with("| `") {
+            let fields = line.split("`");
+            if fields.len >= 3 && fields[1] != "" {
+                let notice_name = "" + fields[1];
+                notice_names[notice_name] = true;
+            }
+        }
+    }
+    require(
+        direct_names.keys().len == notice_names.keys().len,
+        "supply_chain_notice_count"
+    );
+    for name in direct_names.keys() {
+        require(
+            notice_names.contains(name),
+            "supply_chain_notice_missing:" + name
+        );
+    }
+
+    let cargo_lock_hash = rhai::crypto::sha256_file(cargo_lock_path);
+    let scratch_name = "spdx-key-" + run_stamp + ".tmp";
+    let spdx_scratch = std::path::join(output_parent, scratch_name).display;
+    let spdx_packages = [];
+    let relationships = [];
+    let described = [];
+    for pkg in sorted_dependencies {
+        let package_source = "";
+        if type_of(pkg.source) == "string" {
+            package_source = "" + pkg.source;
+        }
+        let pkg_name = "" + pkg.name;
+        let pkg_version = "" + pkg.version;
+        let key =
+            pkg_name + "\n" + pkg_version + "\n" + package_source;
+        rhai::runtime::atomic_write(spdx_scratch, key);
+        let id_hash = rhai::crypto::sha256_file(spdx_scratch);
+        let spdx_id = "SPDXRef-Package-" + id_hash;
+        let license_text = "";
+        if type_of(pkg.license) == "string" {
+            license_text = "" + pkg.license;
+        }
+        let spdx_license_text = license_text;
+        if license_text == "MIT/Apache-2.0" {
+            spdx_license_text = "MIT OR Apache-2.0";
+        } else if license_text == "MPL-2.0+" {
+            spdx_license_text = "MPL-2.0-or-later";
+        }
+        let reference_locator =
+            "pkg:cargo/" + pkg_name + "@" + pkg_version;
+        let source_comment = "Cargo source: " + package_source;
+        let external_refs = [];
+        external_refs.push(#{
+            referenceCategory: "PACKAGE-MANAGER",
+            referenceType: "purl",
+            referenceLocator: reference_locator
+        });
+        let checksum_found = 0;
+        let checksum_index = -1;
+        for index in 0..checksum_keys.len {
+            let stored_key = checksum_keys[index];
+            if stored_key == key {
+                checksum_found = 1;
+                checksum_index = index;
+            }
+        }
+        if checksum_found == 1 {
+            let checksum_value = checksum_values[checksum_index];
+            let checksums = [];
+            checksums.push(#{
+                algorithm: "SHA256",
+                checksumValue: checksum_value
+            });
+            spdx_packages.push(#{
+                SPDXID: spdx_id,
+                name: pkg.name,
+                versionInfo: pkg.version,
+                downloadLocation: "NOASSERTION",
+                filesAnalyzed: false,
+                licenseConcluded: spdx_license_text,
+                licenseDeclared: spdx_license_text,
+                copyrightText: "NOASSERTION",
+                comment: source_comment,
+                externalRefs: external_refs,
+                checksums: checksums
+            });
+        } else {
+            spdx_packages.push(#{
+                SPDXID: spdx_id,
+                name: pkg.name,
+                versionInfo: pkg.version,
+                downloadLocation: "NOASSERTION",
+                filesAnalyzed: false,
+                licenseConcluded: spdx_license_text,
+                licenseDeclared: spdx_license_text,
+                copyrightText: "NOASSERTION",
+                comment: source_comment,
+                externalRefs: external_refs
+            });
+        }
+        described.push(spdx_id);
+        relationships.push(#{
+            spdxElementId: "SPDXRef-DOCUMENT",
+            relationshipType: "DESCRIBES",
+            relatedSpdxElement: spdx_id
+        });
+    }
+    std::fs::try_remove_file(spdx_scratch);
+
+    let document = #{
+        spdxVersion: "SPDX-2.3",
+        dataLicense: "CC0-1.0",
+        SPDXID: "SPDXRef-DOCUMENT",
+        name: "AgenTerm Cargo dependencies " + cargo_lock_hash,
+        documentNamespace:
+            "https://agenterm.local/spdx/cargo-lock/" + cargo_lock_hash,
+        creationInfo: #{
+            created: "1970-01-01T00:00:00Z",
+            creators: ["Tool: agenterm-rh task run supply-chain"],
+            comment:
+                "Generation time is fixed so identical Cargo.lock inputs produce identical bytes."
+        },
+        documentDescribes: described,
+        packages: spdx_packages,
+        relationships: relationships
+    };
+    rhai::runtime::atomic_write(
+        output,
+        rhai::json::stringify_pretty(document) + "\n"
+    );
+    print(
+        "PASS: wrote deterministic SPDX inventory for " +
+            sorted_dependencies.len +
+            " resolved packages to " + output
+    );
+    0
+}

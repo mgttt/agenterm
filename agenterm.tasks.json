@@ -1090,7 +1090,7 @@
     {
       "id": "supply-chain",
       "description": "Validate locked Cargo licenses and write deterministic SPDX evidence",
-      "entry": "scripts/rhai/supply-chain.rhai",
+      "entry": "scripts/rh/supply-chain.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

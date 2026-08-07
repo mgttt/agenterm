@@ -3145,7 +3145,7 @@ fn supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph() {
     assert_eq!(document["dataLicense"], "CC0-1.0");
     assert_eq!(
         document["creationInfo"]["creators"][0],
-        "Tool: agenterm-rhai task run supply-chain"
+        "Tool: agenterm-rh task run supply-chain"
     );
     let packages = document["packages"].as_array().expect("SPDX packages");
     let relationships = document["relationships"]
