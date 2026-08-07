@@ -450,6 +450,20 @@ fn package_qualified_uses_native_bundled_execution() {
 }
 
 #[test]
+fn candidate_verify_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/candidate-verify.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
+    assert!(output.rust.contains("pub fn verify_platform("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_parse(&rh_std_fs_read_to_string("), "{}", output.rust);
+    assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
+    assert!(output.rust.contains("rh_path_join("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
 fn package_release_qualified_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/package-release-qualified.rh");
     assert!(source.contains("fn entry("));

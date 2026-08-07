@@ -637,7 +637,7 @@
     {
       "id": "candidate-verify",
       "description": "Verify one exact-SHA Candidate manifest, qualification receipt, and every payload byte",
-      "entry": "scripts/rhai/candidate-verify.rhai",
+      "entry": "scripts/rh/candidate-verify.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],
