@@ -83,30 +83,48 @@ fn valid_version(value) {
 
 
 fn exact_values(expected, actual) {
+    // Index access keeps params typed as JSON arrays (bare `for x in param`
+    // plus `.len` otherwise infers String and runtime rh_json_as_str fails).
     if expected.len != actual.len {
         return false;
     }
-    for value in expected {
+    let i = 0;
+    while i < expected.len {
+        let value = expected[i];
+        let value_text = "" + value;
         let found = 0;
-        for candidate in actual {
-            if candidate == value {
+        let j = 0;
+        while j < actual.len {
+            let candidate = actual[j];
+            let candidate_text = "" + candidate;
+            if candidate_text == value_text {
                 found = 1;
             }
+            j = j + 1;
         }
         if found == 0 {
             return false;
         }
+        i = i + 1;
     }
-    for value in actual {
+    let i = 0;
+    while i < actual.len {
+        let value = actual[i];
+        let value_text = "" + value;
         let found = 0;
-        for candidate in expected {
-            if candidate == value {
+        let j = 0;
+        while j < expected.len {
+            let candidate = expected[j];
+            let candidate_text = "" + candidate;
+            if candidate_text == value_text {
                 found = 1;
             }
+            j = j + 1;
         }
         if found == 0 {
             return false;
         }
+        i = i + 1;
     }
     true
 }
@@ -784,7 +802,9 @@ fn entry() {
     let manifest = rhai::json::parse_file(manifest_path);
     let source_sha = "" + manifest.source_sha;
     let expected_tag = "" + manifest.expected_tag;
-    let run_id = "" + manifest.run.id;
+    // run.id is a JSON integer; coerce via int add before string concat
+    // (`"" + json_int` fails rh_json_as_str / json_string_path).
+    let run_id = 0 + manifest.run.id;
     print(
         "VALID CANDIDATE " + source_sha + " " +
             expected_tag + " run=" + run_id

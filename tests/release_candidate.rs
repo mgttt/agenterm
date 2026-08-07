@@ -207,20 +207,6 @@ fn fixture(name: &str) -> Fixture {
     }
 }
 
-fn run_script(script: &str, arguments: &[&Path]) -> Output {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"));
-    command
-        .current_dir(repo)
-        .arg("run")
-        .arg(repo.join("scripts/rhai").join(script))
-        .arg("--project-root")
-        .arg(repo)
-        .arg("--");
-    command.args(arguments);
-    command.output().expect("run Candidate Rhai script")
-}
-
 fn run_build_releases_index(arguments: &[&Path]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
@@ -234,15 +220,20 @@ fn run_build_releases_index(arguments: &[&Path]) -> Output {
 }
 
 fn aggregate(fixture: &Fixture) -> Output {
-    run_script(
-        "candidate-aggregate.rhai",
-        &[
-            &fixture.root,
-            &fixture.metadata,
-            &fixture.assets,
-            &fixture.manifest,
-        ],
-    )
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        .current_dir(repo)
+        .arg("run")
+        .arg(repo.join("scripts/rh/candidate-aggregate.rh"))
+        .arg("--project-root")
+        .arg(repo)
+        .arg("--")
+        .arg(&fixture.root)
+        .arg(&fixture.metadata)
+        .arg(&fixture.assets)
+        .arg(&fixture.manifest)
+        .output()
+        .expect("aggregate Candidate")
 }
 
 fn verify(fixture: &Fixture, now: u64) -> Output {
@@ -297,7 +288,19 @@ fn exact_sha_candidate_happy_path_is_self_describing_and_verifiable() {
     };
     assert!(help.status.success(), "{}", output_text(&help));
     assert!(output_text(&help).contains("usage: candidate-verify"));
-    let help = run_script("candidate-aggregate.rhai", &[Path::new("--help")]);
+    let help = {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+            .current_dir(repo)
+            .arg("run")
+            .arg(repo.join("scripts/rh/candidate-aggregate.rh"))
+            .arg("--project-root")
+            .arg(repo)
+            .arg("--")
+            .arg("--help")
+            .output()
+            .expect("candidate-aggregate help")
+    };
     assert!(help.status.success(), "{}", output_text(&help));
     assert!(output_text(&help).contains("usage: candidate-aggregate"));
 }

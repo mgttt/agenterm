@@ -79,7 +79,7 @@ fn candidate_and_release_use_only_rh_scripting_front_door() {
     ));
     assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\""));
     assert!(CANDIDATE.contains(
-        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\" \\\n            run scripts/rhai/candidate-aggregate.rhai"
+        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\" \\\n            run scripts/rh/candidate-aggregate.rh"
     ));
     assert!(RELEASE.contains("chmod +x \"$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh\""));
     assert!(RELEASE.contains(

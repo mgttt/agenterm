@@ -196,7 +196,7 @@ jobs:
             target/smoke/*.png
 
       - name: Publish Candidate quality timing summary
-        # A4: timing-summary.rhai appends the per-gate table to GITHUB_STEP_SUMMARY
+        # A4: timing-summary.rh appends the per-gate table to GITHUB_STEP_SUMMARY
         # when that env is set (Actions always sets it). No artifact download needed.
         if: always() && matrix.platform_id == 'windows-x86_64'
         continue-on-error: true
@@ -704,7 +704,7 @@ jobs:
           mkdir -p candidate-output/payload
           cp candidate-input/* candidate-output/payload/
           "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh" \
-            run scripts/rhai/candidate-aggregate.rhai --project-root . -- \
+            run scripts/rh/candidate-aggregate.rh --project-root . -- \
             . candidate-metadata.json candidate-output/payload \
             "candidate-output/agenterm-$version-candidate-manifest.json"
 

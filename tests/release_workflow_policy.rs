@@ -58,7 +58,7 @@ fn candidate_runs_one_full_gate_and_seals_six_platform_parts() {
     assert!(CANDIDATE.contains("target/qualification/receipt.json"));
     assert!(CANDIDATE.contains("name: Stage flat candidate part"));
     assert!(CANDIDATE.contains("path: candidate-part/"));
-    assert!(CANDIDATE.contains("candidate-aggregate.rhai"));
+    assert!(CANDIDATE.contains("candidate-aggregate.rh"));
     assert!(CANDIDATE.contains("--project-root . --"));
     assert!(CANDIDATE.contains("path: candidate-output/"));
     assert!(!CANDIDATE.contains(".agenterm-rhai.bin"));
