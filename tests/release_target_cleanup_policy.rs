@@ -32,3 +32,16 @@ fn bootstrap_exposes_one_stable_cross_platform_rustc_wrapper_path() {
         UNIX_BOOTSTRAP.contains("export AGENTERM_BOOTSTRAP_WORKER AGENTERM_BOOTSTRAP_CACHE_WORKER")
     );
 }
+
+#[test]
+fn bootstrap_prefers_rh_task_front_door_with_explicit_compat_binary() {
+    assert!(BOOTSTRAP.contains("set \"AGENTERM_RHAI_COMPAT_CLI=%AGENTERM_BOOTSTRAP_WORKER%\""));
+    assert!(BOOTSTRAP.contains(
+        "if defined AGENTERM_BOOTSTRAP_RH_CLI set \"AGENTERM_BOOTSTRAP_TASK_CLI=%AGENTERM_BOOTSTRAP_RH_CLI%\""
+    ));
+    assert!(BOOTSTRAP.contains("\"%AGENTERM_BOOTSTRAP_TASK_CLI%\" task run"));
+
+    assert!(UNIX_BOOTSTRAP.contains("AGENTERM_RHAI_COMPAT_CLI=\"$WORKER\""));
+    assert!(UNIX_BOOTSTRAP.contains("TASK_CLI=\"$AGENTERM_BOOTSTRAP_RH_CLI\""));
+    assert!(UNIX_BOOTSTRAP.contains("\"$TASK_CLI\" task run"));
+}

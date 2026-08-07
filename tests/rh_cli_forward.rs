@@ -21,7 +21,10 @@ fn ensure_adjacent_rh_cli(worker_dir: &Path) {
         .args(["build", "-p", "agenterm-rh", "--bin", "agenterm-rh"])
         .status()
         .expect("build agenterm-rh");
-    assert!(status.success(), "failed to build agenterm-rh for forward test");
+    assert!(
+        status.success(),
+        "failed to build agenterm-rh for forward test"
+    );
     let metadata = fs::metadata(&source).expect("agenterm-rh metadata");
     assert!(metadata.len() > 0, "agenterm-rh binary is empty");
     let adjacent = worker_dir.join("agenterm-rh");
@@ -40,6 +43,43 @@ fn run_rhai(arguments: &[&str]) -> std::process::Output {
         .args(arguments)
         .output()
         .expect("run agenterm-rhai forward")
+}
+
+fn run_rh(arguments: &[&str]) -> std::process::Output {
+    let repo = repo_root();
+    ensure_adjacent_rh_cli(&repo.join("target/debug"));
+    let status = Command::new("cargo")
+        .args(["build", "--bin", "agenterm-rhai"])
+        .status()
+        .expect("build agenterm-rhai compatibility CLI");
+    assert!(status.success(), "failed to build compatibility CLI");
+    Command::new(repo.join("target/debug/agenterm-rh"))
+        .current_dir(&repo)
+        .args(arguments)
+        .output()
+        .expect("run agenterm-rh")
+}
+
+#[test]
+fn rh_is_the_task_front_door_via_explicit_compat_bridge() {
+    let repo = repo_root();
+    let manifest = repo.join("agenterm.tasks.json");
+    let output = run_rh(&[
+        "task",
+        "list",
+        "--manifest",
+        &manifest.display().to_string(),
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("task list JSON from rh front door");
+    assert!(value.is_array(), "unexpected task list: {value}");
 }
 
 #[test]

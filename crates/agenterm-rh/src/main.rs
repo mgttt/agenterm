@@ -1,12 +1,27 @@
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
-    RH_VERSION, RhError, build_pack_dir, check, compile_native, hash_file, load_and_call_entry,
-    qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory, scan_rhai_directory,
-    transpile, write_receipt, CallerInventoryOptions, CorpusScanOptions, parse_check_many_cli,
+    CallerInventoryOptions, CorpusScanOptions, RH_VERSION, RhError, build_pack_dir, check,
+    compile_native, hash_file, load_and_call_entry, parse_check_many_cli, qualify_pack_dir,
+    read_manifest, run_check_many, scan_caller_inventory, scan_rhai_directory, transpile,
+    write_receipt,
 };
 
 fn main() -> ExitCode {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if let Some(result) = agenterm_rh::try_forward_compat_cli(&arguments) {
+        return match result {
+            Ok(status) => status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .map(ExitCode::from)
+                .unwrap_or(ExitCode::FAILURE),
+            Err(err) => {
+                eprintln!("{err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -72,13 +87,11 @@ fn run() -> Result<(), RhError> {
             let path = require_path(&mut args, "eval")?;
             let source = read_source(&path)?;
             check(&source)?;
-            let scratch =
-                tempfile::tempdir().map_err(|err| RhError::Compile(err.to_string()))?;
+            let scratch = tempfile::tempdir().map_err(|err| RhError::Compile(err.to_string()))?;
             let receipt = qualify_pack_dir(&source, scratch.path())?;
-            let native = scratch.path().join(format!(
-                "pack.{}",
-                agenterm_rh::compile::native_extension()
-            ));
+            let native = scratch
+                .path()
+                .join(format!("pack.{}", agenterm_rh::compile::native_extension()));
             let value = load_and_call_entry(&native)?;
             println!(
                 "rh eval ok: {} -> {}\n  source_hash={}\n  native_hash={}\n  cc_lines={}",
@@ -148,7 +161,7 @@ fn run() -> Result<(), RhError> {
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | check-many | corpus-scan | caller-inventory | transpile | compile | eval | run-smoke | pack | qualify | hash | version"
+                "unknown command `{other}`; try check | check-many | corpus-scan | caller-inventory | transpile | compile | eval | run-smoke | pack | qualify | hash | version | task"
             )));
         }
     }
@@ -161,8 +174,8 @@ fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<(),
     let manifest = read_manifest(&parsed.manifest_path)?;
     let report = run_check_many(manifest, parsed.options);
     if parsed.json {
-        let encoded = serde_json::to_string_pretty(&report)
-            .map_err(|err| RhError::Parse(err.to_string()))?;
+        let encoded =
+            serde_json::to_string_pretty(&report).map_err(|err| RhError::Parse(err.to_string()))?;
         println!("{encoded}");
     } else if report.ok {
         println!("OK ({} files)", report.checked_files);
@@ -203,7 +216,11 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<()
                 });
             }
             "--json" => json = true,
-            other => return Err(RhError::Parse(format!("unknown corpus-scan option `{other}`"))),
+            other => {
+                return Err(RhError::Parse(format!(
+                    "unknown corpus-scan option `{other}`"
+                )));
+            }
         }
     }
     let report = scan_rhai_directory(CorpusScanOptions {
@@ -212,8 +229,8 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<()
         tasks_manifest,
     })?;
     if json {
-        let encoded = serde_json::to_string_pretty(&report)
-            .map_err(|err| RhError::Parse(err.to_string()))?;
+        let encoded =
+            serde_json::to_string_pretty(&report).map_err(|err| RhError::Parse(err.to_string()))?;
         println!("{encoded}");
     } else {
         println!(
@@ -248,8 +265,8 @@ fn run_caller_inventory_command(args: &mut impl Iterator<Item = String>) -> Resu
     }
     let report = scan_caller_inventory(CallerInventoryOptions { project_root })?;
     if json {
-        let encoded = serde_json::to_string_pretty(&report)
-            .map_err(|err| RhError::Parse(err.to_string()))?;
+        let encoded =
+            serde_json::to_string_pretty(&report).map_err(|err| RhError::Parse(err.to_string()))?;
         println!("{encoded}");
     } else {
         println!(
@@ -340,6 +357,7 @@ fn print_usage() {
            pack build <file> --dir PATH        build pack dir (native + manifest + entry.rh)\n\
            qualify <file> --dir PATH [-o json] build + load + write qualification receipt\n\
            hash <file>                         sha256 receipt\n\
-           version\n"
+           version\n\
+           task list|show|check|run ...        temporary compatibility bridge\n"
     );
 }
