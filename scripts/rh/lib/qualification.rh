@@ -560,13 +560,15 @@ fn provenance(
             executable_name
         ).display;
         let hash = sha256(path);
-        let metadata_entry = ();
+        // JSON null sentinel so later `.sha256` string coerce stays on the Json lane
+        // (a `()` init keeps INT and poisons post-loop field reads).
+        let metadata_entry = bootstrap_timing::null_json();
         let entry_count = 0;
         for entry in metadata.executables {
             let entry_name = "" + entry.name;
             if entry_name == executable_name {
                 q_require(
-                    metadata_entry == (),
+                    metadata_entry == bootstrap_timing::null_json(),
                     "qualification_metadata_artifact_duplicate:" +
                         executable_name
                 );
@@ -575,7 +577,7 @@ fn provenance(
             }
         }
         q_require(
-            metadata_entry != ()
+            metadata_entry != bootstrap_timing::null_json()
                 && "" + metadata_entry.sha256 == hash,
             "qualification_metadata_artifact_hash:" +
                 executable_name
