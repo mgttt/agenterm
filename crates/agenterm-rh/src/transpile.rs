@@ -16,6 +16,29 @@ enum ValueKind {
     Bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CdylibExecutionMode {
+    Native,
+    HostEval,
+    CompatDelegating,
+}
+
+impl CdylibExecutionMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::HostEval => "host-eval",
+            Self::CompatDelegating => "compat-delegating",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CdylibTranspileOutput {
+    pub rust: String,
+    pub execution_mode: CdylibExecutionMode,
+}
+
 #[derive(Clone)]
 struct EmitCtx {
     cdylib: bool,
@@ -95,14 +118,29 @@ pub fn transpile(source: &str) -> Result<String, RhError> {
 }
 
 pub fn transpile_cdylib(source: &str) -> Result<String, RhError> {
+    Ok(transpile_cdylib_with_mode(source)?.rust)
+}
+
+pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput, RhError> {
     let ast = parse(source)?;
     if validate_ast(&ast).is_ok() {
         if let Ok(rust) = emit(&ast, EmitCtx::new(true)) {
-            return Ok(rust);
+            let execution_mode = if rust.matches("rh_host_eval_int(").count() > 1 {
+                CdylibExecutionMode::HostEval
+            } else {
+                CdylibExecutionMode::Native
+            };
+            return Ok(CdylibTranspileOutput {
+                rust,
+                execution_mode,
+            });
         }
     }
     compat_validate(source, &ast)?;
-    emit_compat_delegating(source)
+    Ok(CdylibTranspileOutput {
+        rust: emit_compat_delegating(source)?,
+        execution_mode: CdylibExecutionMode::CompatDelegating,
+    })
 }
 
 fn emit_compat_delegating(source: &str) -> Result<String, RhError> {

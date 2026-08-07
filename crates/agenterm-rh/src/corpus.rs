@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{RhError, check};
+use crate::{CdylibExecutionMode, RhError, check, transpile_cdylib_with_mode};
 
 pub const SCAN_FILES_MAX: usize = 256;
 pub const SCAN_TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -91,7 +91,7 @@ pub fn scan_task_manifest(options: CorpusScanOptions) -> Result<CorpusScanReport
         .clone()
         .unwrap_or_else(|| options.project_root.join("agenterm.tasks.json"));
     let entries = extract_task_entries(&manifest_path)?;
-    let mut report = scan_relative_files(&options.project_root, &entries)?;
+    let mut report = scan_relative_files_with_policy(&options.project_root, &entries, true)?;
     report.kind = "agenterm-rh-corpus-scan-tasks";
     Ok(report)
 }
@@ -143,6 +143,14 @@ fn collect_rhai_files(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<
 }
 
 pub fn scan_relative_files(root: &Path, paths: &[String]) -> Result<CorpusScanReport, RhError> {
+    scan_relative_files_with_policy(root, paths, false)
+}
+
+fn scan_relative_files_with_policy(
+    root: &Path,
+    paths: &[String],
+    require_native_rh_tasks: bool,
+) -> Result<CorpusScanReport, RhError> {
     let mut entries = Vec::new();
     let mut total_source_bytes = 0_usize;
     let mut passed = 0_usize;
@@ -176,7 +184,21 @@ pub fn scan_relative_files(root: &Path, paths: &[String]) -> Result<CorpusScanRe
                 "corpus aggregate exceeds {SCAN_TOTAL_SOURCE_MAX_BYTES} bytes"
             )));
         }
-        match check(&source) {
+        let validation = check(&source).and_then(|()| {
+            if !require_native_rh_tasks || !relative.ends_with(".rh") {
+                return Ok(());
+            }
+            let output = transpile_cdylib_with_mode(&source)?;
+            if output.execution_mode == CdylibExecutionMode::Native {
+                Ok(())
+            } else {
+                Err(RhError::Unsupported(format!(
+                    "native .rh task requires {} interpreter fallback",
+                    output.execution_mode.as_str()
+                )))
+            }
+        });
+        match validation {
             Ok(()) => {
                 passed += 1;
                 entries.push(CorpusScanEntry {
@@ -209,9 +231,33 @@ pub fn scan_relative_files(root: &Path, paths: &[String]) -> Result<CorpusScanRe
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
 
     use super::{CorpusScanOptions, extract_task_entries, scan_rhai_directory, scan_task_manifest};
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "agenterm-rh-corpus-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&path).expect("create test dir");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn scripts_rhai_scan_produces_report() {
@@ -245,5 +291,34 @@ mod tests {
         assert_eq!(report.scanned, entries.len());
         assert_eq!(report.passed, report.scanned);
         assert_eq!(report.failed, 0);
+    }
+
+    #[test]
+    fn task_manifest_rejects_rh_entry_that_needs_interpreter_fallback() {
+        let root = TestDir::new("native-policy");
+        fs::create_dir_all(root.0.join("scripts")).expect("scripts dir");
+        fs::write(
+            root.0.join("scripts/fallback.rh"),
+            "fn entry() { switch 1 { 1 => 42, _ => 0 } }\n",
+        )
+        .expect("fallback source");
+        let manifest = root.0.join("agenterm.tasks.json");
+        fs::write(&manifest, r#"{"tasks":[{"entry":"scripts/fallback.rh"}]}"#)
+            .expect("task manifest");
+
+        let report = scan_task_manifest(CorpusScanOptions {
+            project_root: root.0.clone(),
+            tasks_manifest: Some(manifest),
+            ..CorpusScanOptions::default()
+        })
+        .expect("scan report");
+        assert_eq!(report.passed, 0);
+        assert_eq!(report.failed, 1);
+        assert!(
+            report.entries[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("compat-delegating"))
+        );
     }
 }

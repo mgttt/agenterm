@@ -26,7 +26,12 @@ fn manifest_native_task_transpiles_without_interpreter_fallback() {
 
     let source = native_task_source();
     agenterm_rh::check(&source).expect("check");
-    let rust = agenterm_rh::transpile_cdylib(&source).expect("transpile");
+    let output = agenterm_rh::transpile_cdylib_with_mode(&source).expect("transpile");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native
+    );
+    let rust = output.rust;
     let entry = rust
         .split_once("pub fn entry() -> INT {")
         .and_then(|(_, suffix)| suffix.split_once("fn rh_entry_internal()"))
@@ -36,6 +41,26 @@ fn manifest_native_task_transpiles_without_interpreter_fallback() {
     assert!(!entry.contains("rh_host_run_script"), "{entry}");
     assert!(!entry.contains("rh_host_eval_int"), "{entry}");
     assert!(entry.contains("for value in 1..5"), "{entry}");
+}
+
+#[test]
+fn execution_mode_distinguishes_native_host_eval_and_compatibility() {
+    let host_eval = agenterm_rh::transpile_cdylib_with_mode(include_str!(
+        "../fixtures/rh/for-span-overflow.rh"
+    ))
+    .expect("localized host eval");
+    assert_eq!(
+        host_eval.execution_mode,
+        agenterm_rh::CdylibExecutionMode::HostEval
+    );
+
+    let compatibility =
+        agenterm_rh::transpile_cdylib_with_mode("fn entry() { switch 1 { 1 => 42, _ => 0 } }")
+            .expect("whole-script compatibility");
+    assert_eq!(
+        compatibility.execution_mode,
+        agenterm_rh::CdylibExecutionMode::CompatDelegating
+    );
 }
 
 #[test]

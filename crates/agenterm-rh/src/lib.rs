@@ -42,6 +42,9 @@ pub use load::{RhNativeModule, load_and_call_entry, verify_native_hash};
 pub use manifest::RhPackManifest;
 pub use pack::{PackBuildOutput, RhPack, build_pack_dir};
 pub use qualify::{RhQualificationReceipt, qualify_pack_dir, write_receipt};
-pub use transpile::{transpile, transpile_cdylib};
+pub use transpile::{
+    CdylibExecutionMode, CdylibTranspileOutput, transpile, transpile_cdylib,
+    transpile_cdylib_with_mode,
+};
 
 pub const RH_VERSION: &str = env!("CARGO_PKG_VERSION");
