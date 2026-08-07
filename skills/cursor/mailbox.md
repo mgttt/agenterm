@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**舰队值班会话**刷新：2026-08-07T02:24Z（duty 结束；待审合仍无）
+最后由**舰队值班会话**刷新：2026-08-07T03:22Z（duty 结束；待审合已刷新）
 
 ## 共享事实
 
@@ -15,15 +15,15 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md` |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `2b980eb`（duty handoff bc-a05b6df7；本轮 push 后为本 commit） |
-| 待审合 | **无** — `cursor/1-0e37`@`befca96` 四提交已 rebase 进 main（`558a05c`…`3aba969`），分支 stale；再 merge 会冲突 |
+| `origin/main` | tip （duty handoff bc-ee2f81de；本轮 push 后为本 commit） |
+| 待审合 | **`cursor/1-0e37`@`eaadd67` ahead=14**（03:10Z；含 merge-main + RH 后续修复；tip 新鲜未催） |
 | CI | run `31060999962` @ `f3b95a5`（前次 `31059086660` @ `da25929` Windows 被 cancel）。观察中；Windows quality gate 待结论。docs 推送不触发 CI（paths-ignore） |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 stale `cursor/1-0e37`（已吸收，未催） |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1 待审合 `cursor/1-0e37`@eaadd67；nudge=0 |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -63,10 +63,10 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-07T02:24Z
+### 舰队值班会话 · 2026-08-07T03:22Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-a05b6df7-5b65-4761-8416-3a96b9487af7`
-- URL: https://cursor.com/agents/bc-a05b6df7-5b65-4761-8416-3a96b9487af7
+- bcId: `bc-ee2f81de-4dc1-4b37-80c3-7eea9f40b0dd`
+- URL: https://cursor.com/agents/bc-ee2f81de-4dc1-4b37-80c3-7eea9f40b0dd
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -82,6 +82,7 @@
 
 ## 交接日志
 
+- 2026-08-07T03:22Z · 舰队值班会话(`bc-ee2f81de-…`) · duty: findings=1 待审合 `cursor/1-0e37`@eaadd67 ahead=14 main=1fda246；nudge=0 未 apply；tip 03:10Z 新鲜未催主控；lock 已清
 - 2026-08-07T02:24Z · 舰队值班会话(`bc-a05b6df7-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=ccccfb8；nudge=0 未催；lock 已清
 - 2026-08-07T01:26Z · 舰队值班会话(`bc-a258c79a-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=d878145；nudge=0 未催；lock 已清
 - 2026-08-07T00:23Z · 舰队值班会话(`bc-3db2caef-…`) · duty: findings=1 stale `cursor/1-0e37`@befca96 ahead=4（rebase 已在 main；待审合=无）main=669eb95；nudge=0 未催；lock 已清
