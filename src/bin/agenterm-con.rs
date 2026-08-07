@@ -115,8 +115,62 @@ const READ_BUF: usize = 8192;
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
 
-/// Logical (DIP) font size. Ctrl+wheel will adjust this in a later increment.
-const DEFAULT_FONT_PX: f64 = 13.0;
+/// Logical (DIP) font size. conhost defaults to ~12px at 96 DPI.
+const DEFAULT_FONT_PX: f64 = 12.0;
+
+/// Configuration loaded from `agenterm-con.json` (analogous to conhost
+/// "Defaults" — persist font size, window geometry, etc. without a GUI dialog).
+///
+/// Location: `%APPDATA%/agenterm-con.json` on Windows,
+/// `~/.config/agenterm-con.json` on Unix.
+#[derive(Default)]
+struct ConConfig {
+    font_size: Option<f64>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+}
+
+fn config_path() -> Option<std::path::PathBuf> {
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return Some(std::path::PathBuf::from(appdata).join("agenterm-con.json"));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(
+            std::path::PathBuf::from(home)
+                .join(".config")
+                .join("agenterm-con.json"),
+        );
+    }
+    None
+}
+
+fn load_config() -> ConConfig {
+    let Some(path) = config_path() else {
+        return ConConfig::default();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return ConConfig::default();
+    };
+    // Minimal JSON parsing without a serde dependency: look for known keys.
+    let mut config = ConConfig::default();
+    for line in text.lines() {
+        let trimmed = line.trim().trim_end_matches(',');
+        if let Some(rest) = trimmed.strip_prefix("\"font_size\"") {
+            if let Some(val) = rest.split(':').nth(1) {
+                config.font_size = val.trim().parse().ok();
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("\"cols\"") {
+            if let Some(val) = rest.split(':').nth(1) {
+                config.cols = val.trim().parse().ok();
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("\"rows\"") {
+            if let Some(val) = rest.split(':').nth(1) {
+                config.rows = val.trim().parse().ok();
+            }
+        }
+    }
+    config
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -161,7 +215,21 @@ fn main() {
         }
     }
 
-    let mut app = ConTerminal::new(working_dir);
+    // Load config file: CLI flags override config, config overrides defaults.
+    let config = load_config();
+
+    let mut app = ConTerminal::new(working_dir.clone());
+    // Config values (lowest priority)
+    if let Some(fs) = config.font_size {
+        app.font_size_logical = fs.clamp(8.0, 36.0);
+    }
+    if let Some(cols) = config.cols {
+        app.cols = cols.max(2);
+    }
+    if let Some(rows) = config.rows {
+        app.rows = rows.max(2);
+    }
+    // CLI flags override config
     if let Some(fs) = font_size {
         app.font_size_logical = fs.clamp(8.0, 36.0);
     }
@@ -189,7 +257,12 @@ Usage: agenterm-con [--no-activate] [--working-dir DIR]
        agenterm-con --version
        agenterm-con --help
 
-A minimal console host (conhost equivalent). No tabs, no server, no Fleet.";
+A minimal console host (conhost equivalent). No tabs, no server, no Fleet.
+
+Configuration: create agenterm-con.json in %APPDATA% (Windows) or
+~/.config (Unix) with keys: font_size, cols, rows (all optional).
+CLI flags override config; config overrides defaults.
+Ctrl+wheel adjusts font size at runtime.";
 
 /// Flags that must not open a window. Returns `Some(exit_code)` when handled.
 fn offline_cli_exit(args: &[String]) -> Option<i32> {
@@ -284,7 +357,7 @@ impl ConTerminal {
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
             cell_h: 16,
-            font_size_px: 13,
+            font_size_px: 12,
             cols: 80,
             rows: 24,
             pending_geometry: None,
