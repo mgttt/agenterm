@@ -336,10 +336,26 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
         }
     }
     propagate_local_fn_param_kinds(&local_defs, &mut local_fn_sigs);
+    // Iterate return kinds so wrappers like `complete_quiet -> complete_impl`
+    // see the callee Json return instead of defaulting to Int.
     let mut local_fn_return_kinds = BTreeMap::new();
-    let return_probe = sig_probe.clone().with_local_fn_sigs(local_fn_sigs.clone());
-    for def in &local_defs {
-        local_fn_return_kinds.insert(def.name.to_string(), infer_return_kind(def, &return_probe));
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let return_probe = sig_probe
+            .clone()
+            .with_local_fn_sigs(local_fn_sigs.clone())
+            .with_local_fn_return_kinds(local_fn_return_kinds.clone());
+        for def in &local_defs {
+            let kind = infer_return_kind(def, &return_probe);
+            match local_fn_return_kinds.get(def.name.as_str()).copied() {
+                Some(existing) if existing == kind => {}
+                _ => {
+                    local_fn_return_kinds.insert(def.name.to_string(), kind);
+                    changed = true;
+                }
+            }
+        }
     }
     let mut base_ctx = ctx
         .clone()
@@ -1025,6 +1041,8 @@ fn rust_param_type(kind: ValueKind) -> &'static str {
         ValueKind::Output => "RhOutput",
         ValueKind::Child => "RhChild",
         ValueKind::ChildList => "Vec<RhChild>",
+        ValueKind::StringList => "Vec<String>",
+        ValueKind::Set => "std::collections::HashSet<String>",
         _ => "INT",
     }
 }
@@ -1343,6 +1361,10 @@ fn param_used_as_string(def: &ScriptFuncDef, param: &str, _ctx: &EmitCtx) -> boo
 
 fn stmt_uses_string_param(stmt: &Stmt, param: &str) -> bool {
     match stmt {
+        // Rhai lowers `throw message` to Return+BREAK; a thrown param is a string.
+        Stmt::Return(Some(expr), flags, ..) if flags.contains(ASTFlags::BREAK) => {
+            is_param_var(expr.as_ref(), param) || expr_uses_string_param(expr.as_ref(), param)
+        }
         Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
             expr_uses_string_param(expr.as_ref(), param)
         }
@@ -1654,6 +1676,12 @@ fn emit_stmt(
                 out.push_str(" = ");
             }
             emit_expr(out, &bin.rhs, ctx)?;
+            out.push_str(";\n");
+        }
+        Stmt::Return(Some(expr), flags, ..) if flags.contains(ASTFlags::BREAK) => {
+            // Rhai lowers `throw expr` to `Return` with BREAK (not FnCall("throw")).
+            out.push_str("    return ");
+            emit_rh_fail(out, expr, ctx)?;
             out.push_str(";\n");
         }
         Stmt::Return(Some(expr), ..) => {
@@ -2261,13 +2289,18 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if child_wait_with_output_call(expr, ctx).is_some() => ValueKind::Output,
         _ if output_stdout_text_call(expr, ctx).is_some() => ValueKind::String,
         _ if output_stderr_text_call(expr, ctx).is_some() => ValueKind::String,
+        _ if child_property_binding(expr, ctx).is_some_and(|(_, property)| property == "id") => {
+            ValueKind::Int
+        }
         _ if child_state_binding(expr, ctx).is_some() => ValueKind::String,
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
         _ if dir_entry_path_display_binding(expr, ctx).is_some() => ValueKind::String,
         _ if dir_entry_string_field(expr, ctx).is_some() => ValueKind::String,
-        _ if uses_host_surface(expr) => ValueKind::Bool,
+        // Local calls must win over `uses_host_surface`: otherwise
+        // `new_context(args[0], …)` is mis-typed as Bool because `args[0]` is a
+        // host surface nested in the call arguments.
         Expr::FnCall(call, ..)
             if call.namespace.is_empty()
                 && call.op_token.is_none()
@@ -2277,6 +2310,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
                 .and_then(|name| ctx.local_fn_return_kinds.get(name.as_str()).copied())
                 .unwrap_or(ValueKind::Int)
         }
+        _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
 }
@@ -4112,6 +4146,38 @@ fn json_array_len_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Ve
     append_json_array_len(&boxed.rhs, &mut path).then_some((binding, path))
 }
 
+/// `doc.path.contains(needle)` for JSON string substring or array membership.
+///
+/// Rhai may attach `.contains` either as the outermost method:
+/// `Dot(json_path, MethodCall(contains))`, or nest properties under the rhs:
+/// `Dot(root, Dot(Property…, MethodCall(contains)))`.
+fn json_contains_path<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let (binding, mut path) = json_value_path(&boxed.lhs, ctx)?;
+    let needle = append_json_contains(&boxed.rhs, &mut path)?;
+    Some((binding, path, needle))
+}
+
+fn append_json_contains<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> Option<&'a Expr> {
+    match expr {
+        Expr::MethodCall(call, ..) if call.name == "contains" && call.args.len() == 1 => {
+            Some(&call.args[0])
+        }
+        Expr::Dot(boxed, ..) => {
+            if !append_json_properties(&boxed.lhs, path) {
+                return None;
+            }
+            append_json_contains(&boxed.rhs, path)
+        }
+        _ => None,
+    }
+}
+
 fn append_json_array_len<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> bool {
     match expr {
         Expr::Property(property, ..) if property.2.as_str() == "len" => true,
@@ -4282,6 +4348,7 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
     if json_array_len_path(expr, ctx).is_some()
         || json_object_keys_len_path(expr, ctx).is_some()
         || set_keys_len_path(expr, ctx).is_some()
+        || json_contains_path(expr, ctx).is_some()
         || std_time_system_time_now_unix_millis(expr)
         || std_process_id(expr)
         || output_property_binding(expr, ctx).is_some()
@@ -4803,6 +4870,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_set_predicate(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_json_path_contains(out, expr, ctx)? {
             return Ok(());
         }
         if emit_string_predicate(out, expr, ctx)? {
@@ -5507,52 +5577,63 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
                 .get(resolved.as_str())
                 .copied()
                 .unwrap_or(ValueKind::Int);
+            let sig = ctx
+                .local_fn_sigs
+                .get(resolved.as_str())
+                .cloned()
+                .unwrap_or_default();
+            let mut emit_typed_args = |out: &mut String| -> Result<(), RhError> {
+                for (index, arg) in call.args.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    match sig.get(index).copied() {
+                        Some(ValueKind::String) => emit_string_arg(out, arg, ctx)?,
+                        Some(ValueKind::Json) => emit_json_arg(out, arg, ctx)?,
+                        Some(ValueKind::ChildList) => emit_child_list_arg(out, arg, ctx)?,
+                        Some(ValueKind::StringList) => emit_string_list_arg(out, arg, ctx)?,
+                        Some(ValueKind::Output) => {
+                            if let Expr::Variable(ident, ..) = arg
+                                && ctx.scope.get(ident.1.as_str()).copied()
+                                    == Some(ValueKind::Output)
+                            {
+                                out.push_str(ident.1.as_str());
+                                out.push_str(".clone()");
+                            } else {
+                                emit_expr(out, arg, ctx)?;
+                            }
+                        }
+                        _ => emit_expr(out, arg, ctx)?,
+                    }
+                }
+                Ok(())
+            };
             match return_kind {
                 ValueKind::String | ValueKind::Path => {
                     out.push_str("serde_json::Value::String(");
                     out.push_str(resolved.as_str());
                     out.push('(');
-                    for (index, arg) in call.args.iter().enumerate() {
-                        if index > 0 {
-                            out.push_str(", ");
-                        }
-                        emit_expr(out, arg, ctx)?;
-                    }
+                    emit_typed_args(out)?;
                     out.push_str("))");
                 }
                 ValueKind::Json => {
                     out.push_str(resolved.as_str());
                     out.push('(');
-                    for (index, arg) in call.args.iter().enumerate() {
-                        if index > 0 {
-                            out.push_str(", ");
-                        }
-                        emit_expr(out, arg, ctx)?;
-                    }
+                    emit_typed_args(out)?;
                     out.push(')');
                 }
                 ValueKind::Bool => {
                     out.push_str("serde_json::Value::Bool(");
                     out.push_str(resolved.as_str());
                     out.push('(');
-                    for (index, arg) in call.args.iter().enumerate() {
-                        if index > 0 {
-                            out.push_str(", ");
-                        }
-                        emit_expr(out, arg, ctx)?;
-                    }
+                    emit_typed_args(out)?;
                     out.push_str(") != 0)");
                 }
                 _ => {
                     out.push_str("serde_json::json!(");
                     out.push_str(resolved.as_str());
                     out.push('(');
-                    for (index, arg) in call.args.iter().enumerate() {
-                        if index > 0 {
-                            out.push_str(", ");
-                        }
-                        emit_expr(out, arg, ctx)?;
-                    }
+                    emit_typed_args(out)?;
                     out.push_str("))");
                 }
             }
@@ -6133,6 +6214,30 @@ fn emit_set_predicate(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
     Ok(true)
 }
 
+fn emit_json_path_contains(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, path, needle)) = json_contains_path(expr, ctx) else {
+        return Ok(false);
+    };
+    // Probe needle emit first so unsupported args fall back to HostEval
+    // instead of failing the whole native pack.
+    let mut needle_rust = String::new();
+    if emit_json_value_expr(&mut needle_rust, needle, ctx).is_err() {
+        return Ok(false);
+    }
+    out.push_str("rh_json_contains_path(&");
+    out.push_str(binding);
+    out.push_str(", ");
+    emit_json_path(out, &path);
+    out.push_str(", &");
+    out.push_str(&needle_rust);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_string_predicate(
     out: &mut String,
     expr: &Expr,
@@ -6321,9 +6426,11 @@ fn emit_path_join(
         out.push(')');
         return Ok(true);
     }
-    out.push_str("rh_path_join2(");
+    // Borrow both sides so String bindings remain usable after join
+    // (rh_path_join2 used to move owned temps/bindings).
+    out.push_str("rh_path_join(&");
     emit_stringish(out, base, ctx)?;
-    out.push_str(", ");
+    out.push_str(", &");
     emit_stringish(out, child, ctx)?;
     out.push(')');
     Ok(true)
@@ -6737,11 +6844,14 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
                 Some(ValueKind::String) => emit_string_arg(out, arg, ctx)?,
                 Some(ValueKind::Json) => emit_json_arg(out, arg, ctx)?,
                 Some(ValueKind::ChildList) => emit_child_list_arg(out, arg, ctx)?,
+                Some(ValueKind::StringList) => emit_string_list_arg(out, arg, ctx)?,
                 Some(ValueKind::Output) => {
                     if let Expr::Variable(ident, ..) = arg
                         && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Output)
                     {
+                        // Clone so callers can keep reading fields after the call.
                         out.push_str(ident.1.as_str());
+                        out.push_str(".clone()");
                     } else {
                         emit_expr(out, arg, ctx)?;
                     }
@@ -6848,6 +6958,32 @@ fn emit_string_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(
         _ => emit_stringish(out, expr, ctx)?,
     }
     Ok(())
+}
+
+fn emit_string_list_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    match expr {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::StringList) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone()");
+            Ok(())
+        }
+        Expr::Array(items, ..) => {
+            out.push_str("vec![");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                emit_stringish(out, item, ctx)?;
+            }
+            out.push(']');
+            Ok(())
+        }
+        _ => Err(RhError::Transpile(format!(
+            "local fn string-list argument must be a string array (expr={expr:?})"
+        ))),
+    }
 }
 
 fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -8324,6 +8460,90 @@ fn entry() { stage_copy(args[0], args[1]) }
     }
 
     #[test]
+    fn new_context_with_args_index_stays_json_binding() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = r#"
+import "scripts/rh/lib/test_harness" as test_harness;
+fn entry() {
+    let context = test_harness::new_context(args[0], "args-index-json");
+    let command = std::process::command("/bin/echo");
+    command.args(["x"]);
+    let output = command.output();
+    test_harness::append_command_record(context, ["x"], output, 0, []);
+    0
+}
+"#;
+        let output = transpile_cdylib_with_project(&root, source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output.rust.contains("let mut context = test_harness__new_context(rh_arg(0)"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn throw_string_binding_emits_rh_fail_return() {
+        let source = r#"
+fn entry() {
+    let failure = "boom";
+    if 1 == 0 {
+        throw failure;
+    }
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output.rust.contains("return rh_fail(&failure);"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("return failure;"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn json_path_contains_array_and_string_stay_native() {
+        let source = r#"
+fn entry() {
+    let proof = #{
+        cleanup: #{ forced_pids: [1, 2] },
+        manifest: #{ failure: "original-marker-text" }
+    };
+    let owned_pid = 1;
+    let marker = "marker";
+    require(proof.cleanup.forced_pids.contains(owned_pid), "array");
+    require(proof.manifest.failure.contains(marker), "string");
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output
+                .rust
+                .contains("rh_json_contains_path(&proof, &[\"cleanup\", \"forced_pids\"]"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_contains_path(&proof, &[\"manifest\", \"failure\"]"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_eval_int(\""));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
     fn output_fn_arg_accepts_rh_output_in_local_call() {
         let source = include_str!("../../../fixtures/rh/output-fn-arg-probe.rh");
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -8352,7 +8572,8 @@ fn entry() { stage_copy(args[0], args[1]) }
         assert!(
             output.rust.contains("test_harness__append_command_record(")
                 && output.rust.contains("String::from(\"probe\")")
-                && output.rust.contains(", output, 0"),
+                && (output.rust.contains(", output, 0")
+                    || output.rust.contains(", output.clone(), 0")),
             "{}",
             output.rust
         );

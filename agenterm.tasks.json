@@ -688,7 +688,7 @@
     {
       "id": "harness-cleanup-selftest",
       "description": "Prove exact Rhai smoke-harness child ownership, cleanup evidence, and original-failure retention",
-      "entry": "scripts/rhai/harness-cleanup-selftest.rhai",
+      "entry": "scripts/rh/harness-cleanup-selftest.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],
