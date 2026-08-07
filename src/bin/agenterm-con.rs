@@ -1,9 +1,10 @@
-//! `agenterm-cmd` — a minimal, stable fallback terminal.
+//! `agenterm-con` — a minimal console host (conhost equivalent).
 //!
-//! A standalone single-window terminal that does not depend on the agenterm
-//! server, Fleet, or any product UI state. It opens one window, spawns the
-//! platform default shell in a PTY, parses the output stream with the vendored
-//! `vt100` model, and renders cells into the platform pixel-window surface.
+//! Like Windows `conhost.exe`, it owns the terminal window, renders cells
+//! into a pixel surface, and forwards keyboard input to a shell running
+//! inside a PTY. It does not implement tab/workspace/Fleet/server — it is a
+//! lightweight, standalone console host for when the full agenterm GUI is
+//! unavailable or being rebuilt.
 //!
 //! Design priority: **stability**. The terminal that TUI agents and CLI tools
 //! crash inside most often dies during resize storms or VT-sequence floods, so
@@ -16,9 +17,9 @@
 // can cause the child to silently exit(0) without producing any output. The
 // extra console window is acceptable for a fallback terminal.
 
-#[path = "agenterm-cmd/font.rs"]
+#[path = "agenterm-con/font.rs"]
 mod font;
-#[path = "agenterm-cmd/palette.rs"]
+#[path = "agenterm-con/palette.rs"]
 mod palette;
 
 use std::sync::mpsc;
@@ -78,25 +79,25 @@ fn main() {
         }
     }
 
-    let app = CmdTerminal::new(working_dir);
-    let options = PixelWindowOptions::new("agenterm-cmd", LogicalSize::new(960.0, 600.0))
+    let app = ConTerminal::new(working_dir);
+    let options = PixelWindowOptions::new("agenterm-con", LogicalSize::new(960.0, 600.0))
         .with_no_activate(no_activate)
         .with_ime_allowed(true);
 
     if let Err(error) = run_pixel_window(options, Box::new(app)) {
         let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
-            "agenterm-cmd: {error}"
+            "agenterm-con: {error}"
         ));
         std::process::exit(1);
     }
 }
 
 const USAGE: &str = "\
-Usage: agenterm-cmd [--no-activate] [--working-dir DIR]
-       agenterm-cmd --version
-       agenterm-cmd --help
+Usage: agenterm-con [--no-activate] [--working-dir DIR]
+       agenterm-con --version
+       agenterm-con --help
 
-A minimal standalone terminal. No tabs, no server, no Fleet.";
+A minimal console host (conhost equivalent). No tabs, no server, no Fleet.";
 
 /// Flags that must not open a window. Returns `Some(exit_code)` when handled.
 fn offline_cli_exit(args: &[String]) -> Option<i32> {
@@ -104,7 +105,7 @@ fn offline_cli_exit(args: &[String]) -> Option<i32> {
     match args.first().map(String::as_str) {
         Some("--version" | "-V") if alone => {
             let _ = agenterm_platform::process::write_parent_console_stdout(&format!(
-                "agenterm-cmd {}",
+                "agenterm-con {}",
                 env!("CARGO_PKG_VERSION")
             ));
             Some(0)
@@ -123,7 +124,7 @@ fn offline_cli_exit(args: &[String]) -> Option<i32> {
     }
 }
 
-struct CmdTerminal {
+struct ConTerminal {
     working_dir: Option<String>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
@@ -163,7 +164,7 @@ struct CmdTerminal {
     exit: bool,
 }
 
-impl CmdTerminal {
+impl ConTerminal {
     fn new(working_dir: Option<String>) -> Self {
         let (tx, rx) = mpsc::channel();
         // Drop the sender on the main side; the reader thread owns the only
@@ -240,7 +241,7 @@ impl CmdTerminal {
         let (tx, rx) = mpsc::channel();
         let waker = window.waker();
         thread::Builder::new()
-            .name("agenterm-cmd-reader".into())
+            .name("agenterm-con-reader".into())
             .spawn(move || {
                 let mut buf = [0u8; READ_BUF];
                 loop {
@@ -309,7 +310,7 @@ impl CmdTerminal {
     }
 }
 
-impl PixelWindowApplication for CmdTerminal {
+impl PixelWindowApplication for ConTerminal {
     fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = if metrics.scale_factor.is_finite() && metrics.scale_factor > 0.0 {
@@ -318,7 +319,7 @@ impl PixelWindowApplication for CmdTerminal {
             1.0
         };
         self.recompute_metrics(scale);
-        window.set_title(&format!("agenterm-cmd — {}", font::resolved_name()));
+        window.set_title(&format!("agenterm-con — {}", font::resolved_name()));
         let (cols, rows) =
             Self::compute_grid(metrics.physical_width, metrics.physical_height, self.cell_w, self.cell_h);
         self.cols = cols;

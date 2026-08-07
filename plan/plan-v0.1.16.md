@@ -145,14 +145,14 @@ O. Unix multi-instance reachability
 
 **禁区**：Lnx 与 OSX **不同时**写 `unix/frontend/**`（继承 0.1.15 §2.2.1）。
 
-### C. 后备终端（agenterm-cmd.exe）
+### C. 控制台宿主（agenterm-con.exe）
 
 > 动机：cmd.exe 不稳定 + agenterm.exe 自身开发时被锁无法覆盖 → 需要一个
-> **最小可用、不依赖 agenterm server** 的纯终端作为后备。基于 `crates/agenterm-platform`
-> 薄封装，预留未来作为 Windows server attach 体。
+> **最小可用、不依赖 agenterm server** 的控制台宿主（对标 Windows conhost.exe）。
+> 基于 `crates/agenterm-platform` 薄封装，预留未来作为 Windows server attach 体。
 
 ```text
-C. Fallback terminal (agenterm-cmd.exe)
+C. Console host (agenterm-con.exe)
 ├─ [x] C1 最小 ConPTY 窗：开窗、起 shell、pty 泵、渲染（platform 直调）
 ├─ [x] C2 键盘输入 + 鼠标选择 + 剪贴板（复用 platform 的 input/clipboard 封装）
 ├─ [ ] C3 滚动缓冲区 + 字体/DPI 跟随（复用 platform 的 font/screenshot）
@@ -161,10 +161,10 @@ C. Fallback terminal (agenterm-cmd.exe)
 
 - [ ] **C1 最小 ConPTY 窗**
   - **用户问题**：agenterm 开发/锁住时没有可靠终端
-  - **做法**：`src/bin/agenterm-cmd.rs`，用 `agenterm-platform` 的 window/pty/input
+  - **做法**：`src/bin/agenterm-con.rs`，用 `agenterm-platform` 的 window/pty/input
     创建单窗、起 `cmd.exe`（或 `%COMSPEC%`）、pty 读写泵、blit 渲染
   - **依赖**：C2（输入）、C3（渲染完整性）
-  - **验收**：`agenterm-cmd.exe` 双击启动 → 出现 cmd 窗 → 可输入命令 → 输出正确渲染
+  - **验收**：`agenterm-con.exe` 双击启动 → 出现 cmd 窗 → 可输入命令 → 输出正确渲染
   - **非目标**：tab、workspace、Fleet、CC、server 进程
 
 - [ ] **C2 键盘输入 + 鼠标选择 + 剪贴板**
@@ -182,10 +182,10 @@ C. Fallback terminal (agenterm-cmd.exe)
 - [ ] **C4 server attach 预留**
   - **用户问题**：未来可能在 Windows 下需要轻量 attach 到 agenterm server
     （类似 Unix 下 `agenterm-cli` attach 到 headless server 的终端体）
-  - **做法**：`agenterm-cmd.exe --attach <instance>` 模式下，实现与
+  - **做法**：`agenterm-con.exe --attach <instance>` 模式下，实现与
     `src/platform/adapters/windows/remote_frontend` 相同的 IPC 帧协议
     （loopback 连接 → protocol handshake → blit 帧消费 → 输入帧产出）
-  - **验收**：`agenterm-cmd --attach <name>` 连接成功，server 侧 tab 内容渲染到 cmd 窗
+  - **验收**：`agenterm-con --attach <name>` 连接成功，server 侧 tab 内容渲染到 cmd 窗
   - **非目标**：本版不发 C4；仅「协议接线预留」，不阻塞 C1–C3
   - **成本**：大（需端到端验证 server↔cmd 帧往返）；优先度低于 W/O
 
@@ -320,7 +320,7 @@ lua 雏形来去规避这个风险。
 | **Lnx-env** | Linux | F 环境、Linux smoke 复验、T-debt | `adapters/linux/**`、环境笔记 | 不写 unix frontend 巨石 |
 | **CI-R** | 任意独占 | R′ 观测/最小 workflow 修 | workflows / check.rhai | 不扩 scope 到 GUI |
 | **Rh** | 任意 | Rh-M23 | `crates/agenterm-rh/**`、caller 清单、wave 1 CI/bootstrap | 不删 `agenterm-rhai` PE；Candidate 改名仍 HOLD |
-| **C-fallback** | 任意 | C1–C3 | `src/bin/agenterm-cmd.rs`、`crates/agenterm-platform` consumer | 不引入 Fleet/server workspace；不扩成全功能终端 |
+| **C-fallback** | 任意 | C1–C3 | `src/bin/agenterm-con.rs`、`crates/agenterm-platform` consumer | 不引入 Fleet/server workspace；不扩成全功能终端 |
 
 规则：一人一热域；shared-first；机制进 `agenterm-platform`；小步 push main。
 

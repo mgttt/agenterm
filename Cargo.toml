@@ -36,8 +36,8 @@ name = "agenterm-cc"
 path = "src/bin/agenterm-cc.rs"
 
 [[bin]]
-name = "agenterm-cmd"
-path = "src/bin/agenterm-cmd.rs"
+name = "agenterm-con"
+path = "src/bin/agenterm-con.rs"
 
 [dependencies]
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
