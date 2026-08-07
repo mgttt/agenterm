@@ -34,14 +34,29 @@ fn bootstrap_exposes_one_stable_cross_platform_rustc_wrapper_path() {
 }
 
 #[test]
-fn bootstrap_prefers_rh_task_front_door_with_explicit_compat_binary() {
-    assert!(BOOTSTRAP.contains("set \"AGENTERM_RHAI_COMPAT_CLI=%AGENTERM_BOOTSTRAP_WORKER%\""));
+fn bootstrap_builds_caches_and_executes_only_the_rh_worker() {
+    assert!(
+        BOOTSTRAP.contains(
+            "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\\debug\\agenterm-rh.exe"
+        )
+    );
     assert!(BOOTSTRAP.contains(
-        "if defined AGENTERM_BOOTSTRAP_RH_CLI set \"AGENTERM_BOOTSTRAP_TASK_CLI=%AGENTERM_BOOTSTRAP_RH_CLI%\""
+        "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\agenterm-rh.exe"
     ));
-    assert!(BOOTSTRAP.contains("\"%AGENTERM_BOOTSTRAP_TASK_CLI%\" task run"));
+    assert!(BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rh"));
+    assert!(!BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rhai"));
+    assert!(!BOOTSTRAP.contains("agenterm-rhai.exe"));
+    assert!(BOOTSTRAP.contains("\"%AGENTERM_BOOTSTRAP_WORKER%\" task run"));
+    assert!(!BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_RH_CLI"));
+    assert!(!BOOTSTRAP.contains("AGENTERM_RHAI_COMPAT_CLI"));
 
-    assert!(UNIX_BOOTSTRAP.contains("AGENTERM_RHAI_COMPAT_CLI=\"$WORKER\""));
-    assert!(UNIX_BOOTSTRAP.contains("TASK_CLI=\"$AGENTERM_BOOTSTRAP_RH_CLI\""));
-    assert!(UNIX_BOOTSTRAP.contains("\"$TASK_CLI\" task run"));
+    assert!(UNIX_BOOTSTRAP.contains("SOURCE=\"$TARGET_ROOT/debug/agenterm-rh\""));
+    assert!(UNIX_BOOTSTRAP.contains("CACHE_WORKER=\"$CACHE_DIR/agenterm-rh\""));
+    assert!(UNIX_BOOTSTRAP.contains("WORKER=\"$BOOTSTRAP_DIR/agenterm-rh\""));
+    assert!(UNIX_BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rh"));
+    assert!(!UNIX_BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rhai"));
+    assert!(!UNIX_BOOTSTRAP.contains("agenterm-rhai\""));
+    assert!(UNIX_BOOTSTRAP.contains("\"$WORKER\" task run"));
+    assert!(!UNIX_BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_RH_CLI"));
+    assert!(!UNIX_BOOTSTRAP.contains("AGENTERM_RHAI_COMPAT_CLI"));
 }

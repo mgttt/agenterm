@@ -47,12 +47,12 @@ fn write_manifest(root: &Path, files: Vec<String>) -> PathBuf {
 }
 
 fn run(root: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(root)
         .args(arguments)
         .env("AGENTERM_SCRIPT_AUDIT_PATH", root.join("audit.jsonl"))
         .output()
-        .expect("run agenterm-rhai")
+        .expect("run agenterm-rh")
 }
 
 #[test]

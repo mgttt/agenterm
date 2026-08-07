@@ -4,23 +4,23 @@
   "needle": "agenterm-rhai",
   "min_hit_count": 400,
   "min_categories": {
-    "bootstrap": 1,
-    "ci": 5
+    "bootstrap": 5,
+    "ci": 15
   },
   "observed_at_commit": "main",
-  "observed_hit_count": 432,
-  "observed_scanned_files": 727,
+  "observed_hit_count": 407,
+  "observed_scanned_files": 733,
   "observed_categories": {
-    "bootstrap": 16,
-    "ci": 40,
-    "documentation": 164,
+    "bootstrap": 6,
+    "ci": 19,
+    "documentation": 173,
     "install": 4,
-    "other": 29,
+    "other": 30,
     "release-artifacts": 7,
     "rhai-script": 39,
-    "rust-crate": 5,
-    "rust-src": 41,
-    "rust-test": 81,
+    "rust-crate": 6,
+    "rust-src": 34,
+    "rust-test": 83,
     "task-manifest": 6
   }
 }

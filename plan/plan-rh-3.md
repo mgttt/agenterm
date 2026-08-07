@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M27 rh 前门切换完成**（根包构建；task/worker 直承载；supervisor 默认解析 rh） |
+| **状态** | **M28 bootstrap/caller 切换完成**（共享 wrapper；单 rh bootstrap；CI 与黑盒入口迁移） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -61,6 +61,10 @@
 | M27b | `agenterm-rh` 直接承载 task、legacy worker 与 framed-worker，共享主库实现 | [x] |
 | M27c | one-shot / persistent supervisor 默认解析 `agenterm-rh`，显式兼容回退 `agenterm-rhai` | [x] |
 | M27d | supervisor 默认注入 `AGENTERM_SCRIPT_BACKEND=rh`；诊断报告实际 worker 与候选名称 | [x] |
+| M28a | incremental RUSTC wrapper 下沉主库，rh/rhai 双 PE parity；权威黑盒改测 rh | [x] |
+| M28b | bootstrap 仅构建、缓存并执行 `agenterm-rh`，移除无消费者的 compat 环境接线 | [x] |
+| M28c | CI 与 dist task caller wave 2 改用 rh；caller inventory 保持单调下降 guard | [x] |
+| M28d | rh check/check-many 保持既有 typed JSON、退出码与项目根路径完整性契约 | [x] |
 
 ---
 

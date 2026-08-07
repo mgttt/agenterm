@@ -26,7 +26,7 @@ fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
 #[test]
 fn framed_worker_run_honors_task_arguments_with_rh_backend() {
     with_rh_backend(|| {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -85,7 +85,7 @@ fn framed_worker_run_honors_task_arguments_with_rh_backend() {
 fn framed_worker_run_entry_fixture_with_rh_backend() {
     with_rh_backend(|| {
         let source = std::fs::read_to_string("fixtures/rh/entry.rh").expect("read entry.rh");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -152,7 +152,7 @@ fn framed_worker_captures_compat_fallback_print_output() {
     with_rh_backend(|| {
         let source =
             std::fs::read_to_string("scripts/rhai/lint.rhai").expect("read lint task source");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

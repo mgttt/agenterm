@@ -2,6 +2,10 @@ use std::sync::LazyLock;
 
 static WORKFLOW: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/ci.yml").replace("\r\n", "\n"));
+static WINDOWS_FULL_GATE: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/win-full-gate.yml").replace("\r\n", "\n"));
+static CHECK: LazyLock<String> =
+    LazyLock::new(|| include_str!("../scripts/rhai/check.rhai").replace("\r\n", "\n"));
 static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
     include_str!("../scripts/rhai/artifact-verification.rhai").replace("\r\n", "\n")
 });
@@ -26,6 +30,50 @@ fn job_span(name: &str, next_job: Option<&str>) -> &'static str {
         .unwrap_or(WORKFLOW.len());
     assert!(end > start, "CI job span for {name} is empty");
     &WORKFLOW[start..end]
+}
+
+fn normalized_task_callers(source: &str) -> String {
+    source
+        .replace('\\', "/")
+        .replace(".exe", "")
+        .replace('"', "")
+}
+
+#[test]
+fn ci_manifest_task_entrypoints_use_rh_front_door() {
+    for (name, source) in [
+        ("ci", WORKFLOW.as_str()),
+        ("win-full-gate", WINDOWS_FULL_GATE.as_str()),
+    ] {
+        let normalized = normalized_task_callers(source);
+        let task_runs = normalized.matches("task run").count();
+        let rh_task_runs = normalized.matches("agenterm-rh task run").count();
+        assert!(task_runs > 0, "{name} must retain manifest task coverage");
+        assert_eq!(
+            rh_task_runs, task_runs,
+            "{name} has a task run outside the agenterm-rh front door"
+        );
+        assert!(
+            !normalized.contains("agenterm-rhai task run"),
+            "{name} regressed to the compatibility CLI"
+        );
+    }
+}
+
+#[test]
+fn dist_task_worker_prefers_rh_with_explicit_compatibility_fallback() {
+    let rh = CHECK
+        .find("[\"dist/agenterm-rh.exe\", \"dist/agenterm-rh\"]")
+        .expect("dist rh candidates");
+    let compatibility = CHECK
+        .find("[\"dist/agenterm-rhai.exe\", \"dist/agenterm-rhai\"]")
+        .expect("dist compatibility candidates");
+    let selection = CHECK
+        .find("let worker = if dist_rh_cli != \"\"")
+        .expect("rh-first worker selection");
+    assert!(rh < compatibility && compatibility < selection);
+    assert!(CHECK.contains("COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai"));
+    assert!(CHECK.contains("check_dist_task_worker_missing"));
 }
 
 #[test]

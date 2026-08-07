@@ -772,11 +772,12 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   default `AGENTERM_SCRIPT_BACKEND=rh`, project/API-aware check-many, native
   range and break/continue control flow, and dedicated `./rh-check.sh` suite.
 - [~] **Rhai → rh migration** (incremental, compatibility boundary explicit):
-  `agenterm-rh` is the bootstrap task command front door. The task manifest and
-  automation corpus remain `.rhai`; `agenterm-rh task` currently invokes the
-  adjacent `agenterm-rhai` compatibility PE through
-  `AGENTERM_RHAI_COMPAT_CLI`, preserves its exit status, and fails closed when
-  that PE is absent. Worker/REPL implementation has moved from the
+  `agenterm-rh` is the bootstrap task command front door and the sole
+  stage-0 cached worker. It directly hosts the task engine, framed worker and
+  incremental Rust compiler wrapper through the shared library; CI task
+  callers and authoritative worker/check-many black boxes use this entry.
+  The task manifest and automation corpus remain `.rhai`.
+  Worker/REPL implementation has moved from the
   `agenterm-rhai` binary into the shared `script_worker` library, but its
   interpreter, host-eval fallback, and AST parsing remain on Rhai while their
   typed boundaries migrate. Release verification requires both manifest roles

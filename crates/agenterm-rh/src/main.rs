@@ -2,14 +2,29 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use agenterm_rh::{
     CallerInventoryOptions, CorpusScanOptions, RH_VERSION, RhError, build_pack_dir, check,
-    compile_native, hash_file, load_and_call_entry, parse_check_many_cli, qualify_pack_dir,
-    read_manifest, run_check_many, scan_caller_inventory, scan_rhai_directory, transpile,
-    write_receipt,
+    check_with_project_validation, compile_native, hash_file, load_and_call_entry,
+    parse_check_many_cli, qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory,
+    scan_rhai_directory, transpile, write_receipt,
 };
 
 fn main() -> ExitCode {
+    let os_arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    if agenterm::incremental_wrapper::is_incremental_rustc_wrapper_process(&os_arguments) {
+        agenterm::incremental_wrapper::run_incremental_rustc_wrapper(os_arguments);
+    }
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     match arguments.as_slice() {
+        [mode, rest @ ..] if mode == "check-many" => {
+            return public_command_exit_code(run_check_many_command(&mut rest.iter().cloned()));
+        }
+        [mode, rest @ ..] if mode == "check" => {
+            return public_command_exit_code(run_public_check_command(rest));
+        }
+        [mode, rest @ ..] if mode == "--internal-incremental-finalize" => {
+            return worker_exit_code(
+                agenterm::incremental_wrapper::finalize_incremental_manifest(rest),
+            );
+        }
         [mode] if mode == "--worker" => {
             return worker_exit_code(agenterm::run_legacy_worker_stdio());
         }
@@ -46,6 +61,16 @@ fn script_exit_code(code: i32) -> ExitCode {
         .unwrap_or(ExitCode::FAILURE)
 }
 
+fn public_command_exit_code(result: Result<u8, RhError>) -> ExitCode {
+    match result {
+        Ok(code) => ExitCode::from(code),
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
     let Some(command) = args.next() else {
         print_usage();
@@ -61,9 +86,6 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
             let source = read_source(&path)?;
             check(&source)?;
             println!("rh check ok: {}", path.display());
-        }
-        "check-many" => {
-            run_check_many_command(&mut args)?;
         }
         "corpus-scan" => {
             run_corpus_scan_command(&mut args)?;
@@ -183,7 +205,7 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
     Ok(())
 }
 
-fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
+fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<u8, RhError> {
     let parsed = parse_check_many_cli(args)?;
     let manifest = read_manifest(&parsed.manifest_path)?;
     let report = run_check_many(manifest, parsed.options);
@@ -195,13 +217,94 @@ fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<(),
         println!("OK ({} files)", report.checked_files);
     } else {
         for failure in &report.failures {
-            eprintln!("{}: {} ({})", failure.path, failure.message, failure.code);
+            eprintln!(
+                "{}: {}",
+                failure.path,
+                serde_json::json!({
+                    "code": failure.code,
+                    "message": failure.message,
+                    "invocation_id": failure.invocation_id,
+                    "exit_class": failure.exit_class,
+                })
+            );
         }
     }
-    if report.ok {
-        Ok(())
-    } else {
-        Err(RhError::Parse("check-many reported failures".into()))
+    Ok(report.exit_code())
+}
+
+fn run_public_check_command(arguments: &[String]) -> Result<u8, RhError> {
+    let Some(path) = arguments.first() else {
+        return Err(RhError::Parse("usage: agenterm-rh check <file>".into()));
+    };
+    let mut project_root = PathBuf::from(".");
+    let mut json = false;
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--project-root" => {
+                project_root =
+                    PathBuf::from(arguments.get(index + 1).ok_or_else(|| {
+                        RhError::Parse("missing path after --project-root".into())
+                    })?);
+                index += 2;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            other => {
+                return Err(RhError::Parse(format!("unknown check option `{other}`")));
+            }
+        }
+    }
+    let source = read_source(&PathBuf::from(path))?;
+    match check_with_project_validation(&source, Some(&project_root)) {
+        Ok(()) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "exit_class": "success",
+                        "failure": serde_json::Value::Null,
+                    })
+                );
+            } else {
+                println!("rh check ok: {path}");
+            }
+            Ok(0)
+        }
+        Err(error) => {
+            let (code, message) = public_check_failure(&error);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": false,
+                        "exit_class": "script",
+                        "failure": {
+                            "code": code,
+                            "message": message,
+                        },
+                    })
+                );
+            } else {
+                eprintln!("{error}");
+            }
+            Ok(1)
+        }
+    }
+}
+
+fn public_check_failure(error: &RhError) -> (&str, &str) {
+    match error {
+        RhError::Parse(message) => ("rh_subset", message),
+        RhError::Subset { code, detail } => (code, detail),
+        RhError::Compile(message) => message
+            .split_once(": ")
+            .filter(|(code, _)| !code.is_empty())
+            .unwrap_or(("rh_check", message)),
+        RhError::Transpile(message) => ("rh_transpile", message),
     }
 }
 

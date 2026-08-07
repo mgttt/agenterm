@@ -38,6 +38,8 @@ pub struct CheckManyFailure {
     pub path: String,
     pub code: String,
     pub message: String,
+    pub invocation_id: String,
+    pub exit_class: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,27 +71,26 @@ impl Default for CheckManyOptions {
 }
 
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, RhError> {
-    let metadata = std::fs::metadata(path).map_err(|err| RhError::Parse(err.to_string()))?;
-    if metadata.len() as usize > MANIFEST_MAX_BYTES {
+    let metadata = std::fs::metadata(path)
+        .map_err(|err| RhError::Parse(format!("check_many_manifest_read: {err}")))?;
+    if !metadata.is_file() || metadata.len() as usize > MANIFEST_MAX_BYTES {
         return Err(RhError::Parse(format!(
-            "manifest exceeds {MANIFEST_MAX_BYTES} bytes"
+            "check_many_manifest_size: manifest must be a file of at most {MANIFEST_MAX_BYTES} bytes"
         )));
     }
-    let bytes = std::fs::read(path).map_err(|err| RhError::Parse(err.to_string()))?;
-    let manifest: CheckManyManifest =
-        serde_json::from_slice(&bytes).map_err(|err| RhError::Parse(err.to_string()))?;
+    let bytes = std::fs::read(path)
+        .map_err(|err| RhError::Parse(format!("check_many_manifest_read: {err}")))?;
+    let manifest: CheckManyManifest = serde_json::from_slice(&bytes)
+        .map_err(|err| RhError::Parse(format!("check_many_manifest_json: {err}")))?;
     if manifest.schema_version != 1 {
-        return Err(RhError::Parse("unsupported manifest schema_version".into()));
+        return Err(RhError::Parse("check_many_manifest_schema".into()));
     }
     if manifest.kind != RH_CHECK_MANIFEST_KIND && manifest.kind != RHAI_CHECK_MANIFEST_KIND {
-        return Err(RhError::Parse(format!(
-            "unexpected manifest kind `{}`",
-            manifest.kind
-        )));
+        return Err(RhError::Parse("check_many_manifest_schema".into()));
     }
     if manifest.files.is_empty() || manifest.files.len() > FILES_MAX {
         return Err(RhError::Parse(format!(
-            "manifest must list 1..={FILES_MAX} files"
+            "check_many_manifest_files: expected from 1 to {FILES_MAX} files"
         )));
     }
     Ok(manifest)
@@ -98,7 +99,37 @@ pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, RhError> {
 pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) -> CheckManyReport {
     let started = Instant::now();
     let deadline = started + Duration::from_millis(options.wall_time_ms);
-    let root = options.project_root;
+    let root = match std::fs::canonicalize(&options.project_root) {
+        Ok(root) if root.is_dir() => root,
+        Ok(_) => {
+            return report(
+                started,
+                0,
+                0,
+                vec![failure(
+                    options.project_root.display().to_string(),
+                    "check_many_project_root",
+                    "project root is not a directory".to_owned(),
+                    0,
+                    "configuration",
+                )],
+            );
+        }
+        Err(error) => {
+            return report(
+                started,
+                0,
+                0,
+                vec![failure(
+                    options.project_root.display().to_string(),
+                    "check_many_project_root",
+                    error.to_string(),
+                    0,
+                    "configuration",
+                )],
+            );
+        }
+    };
     let mut failures = Vec::new();
     let mut checked_files = 0;
     let mut total_source_bytes = 0_usize;
@@ -110,30 +141,75 @@ pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) ->
                 label,
                 "limit_wall_time",
                 "check-many reached its aggregate wall-time budget".to_owned(),
+                ordinal,
+                "limit",
             ));
             continue;
         }
-        if label.is_empty() || label.len() > PATH_MAX_BYTES {
+        if label.is_empty() || label.len() > PATH_MAX_BYTES || Path::new(&label).is_absolute() {
             failures.push(failure(
                 label,
                 "check_many_path",
                 "path label is empty or exceeds byte limit".to_owned(),
+                ordinal,
+                "configuration",
             ));
             continue;
         }
-        if !seen.insert(label.clone()) {
+        let requested = root.join(&label);
+        let path = match std::fs::canonicalize(&requested) {
+            Ok(path) if path.is_file() && path.starts_with(&root) => path,
+            Ok(path) if !path.starts_with(&root) => {
+                failures.push(failure(
+                    label,
+                    "check_many_path",
+                    "manifest path escapes the project root".to_owned(),
+                    ordinal,
+                    "configuration",
+                ));
+                continue;
+            }
+            Ok(_) => {
+                failures.push(failure(
+                    label,
+                    "host_source_read",
+                    "script source is not a file".to_owned(),
+                    ordinal,
+                    "host",
+                ));
+                continue;
+            }
+            Err(error) => {
+                failures.push(failure(
+                    label,
+                    "host_source_resolve",
+                    error.to_string(),
+                    ordinal,
+                    "host",
+                ));
+                continue;
+            }
+        };
+        if !seen.insert(path.clone()) {
             failures.push(failure(
                 label,
                 "check_many_duplicate",
-                "duplicate manifest path".to_owned(),
+                "manifest resolves the same file more than once".to_owned(),
+                ordinal,
+                "configuration",
             ));
             continue;
         }
-        let path = root.join(&label);
         let source = match read_source_file(&path, options.source_bytes) {
             Ok(source) => source,
             Err(error) => {
-                failures.push(failure(label, "check_many_read", error.to_string()));
+                failures.push(failure(
+                    label,
+                    "host_source_read",
+                    error.to_string(),
+                    ordinal,
+                    "host",
+                ));
                 continue;
             }
         };
@@ -143,20 +219,30 @@ pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) ->
                 label,
                 "check_many_total_source_bytes",
                 format!("aggregate source exceeds {TOTAL_SOURCE_MAX_BYTES} bytes"),
+                ordinal,
+                "limit",
             ));
             continue;
         }
         total_source_bytes = next_total;
         checked_files += 1;
         if let Err(error) = check_with_project_validation(&source, Some(&root)) {
-            failures.push(check_failure(label, &error));
-            let _ = ordinal;
+            failures.push(check_failure(label, &error, ordinal));
         }
     }
 
+    report(started, checked_files, total_source_bytes, failures)
+}
+
+fn report(
+    started: Instant,
+    checked_files: usize,
+    total_source_bytes: usize,
+    failures: Vec<CheckManyFailure>,
+) -> CheckManyReport {
     CheckManyReport {
         schema_version: 1,
-        kind: "agenterm-rh-check-many",
+        kind: "agenterm-rhai-check-many",
         ok: failures.is_empty(),
         checked_files,
         total_source_bytes,
@@ -175,26 +261,51 @@ fn read_source_file(path: &Path, max_bytes: usize) -> Result<String, RhError> {
     std::fs::read_to_string(path).map_err(|err| RhError::Parse(err.to_string()))
 }
 
-fn failure(path: String, code: &str, message: String) -> CheckManyFailure {
+fn failure(
+    path: String,
+    code: &str,
+    message: String,
+    ordinal: usize,
+    exit_class: &'static str,
+) -> CheckManyFailure {
     CheckManyFailure {
         path,
         code: code.to_owned(),
         message,
+        invocation_id: format!("check-many-{}-{ordinal}", std::process::id()),
+        exit_class,
     }
 }
 
-fn check_failure(path: String, error: &RhError) -> CheckManyFailure {
+fn check_failure(path: String, error: &RhError, ordinal: usize) -> CheckManyFailure {
     match error {
-        RhError::Parse(message) => failure(path, "rh_subset", message.clone()),
-        RhError::Subset { code, detail } => failure(path, code, detail.clone()),
+        RhError::Parse(message) => failure(path, "rh_subset", message.clone(), ordinal, "script"),
+        RhError::Subset { code, detail } => failure(path, code, detail.clone(), ordinal, "script"),
         RhError::Compile(message) => {
             let (code, detail) = message
                 .split_once(": ")
                 .filter(|(code, _)| !code.is_empty())
                 .unwrap_or(("rh_check", message.as_str()));
-            failure(path, code, detail.to_owned())
+            failure(path, code, detail.to_owned(), ordinal, "script")
         }
-        RhError::Transpile(message) => failure(path, "rh_transpile", message.clone()),
+        RhError::Transpile(message) => {
+            failure(path, "rh_transpile", message.clone(), ordinal, "script")
+        }
+    }
+}
+
+impl CheckManyReport {
+    pub fn exit_code(&self) -> u8 {
+        self.failures
+            .first()
+            .map_or(0, |failure| match failure.exit_class {
+                "configuration" => 2,
+                "limit" => 3,
+                "child" => 4,
+                "cancelled" => 5,
+                "fleet" => 6,
+                _ => 1,
+            })
     }
 }
 
@@ -340,5 +451,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(fixture_dir);
         assert!(!report.ok, "expected failure: {:?}", report.failures);
         assert_eq!(report.failures[0].code, "script_api_unknown");
+    }
+
+    #[test]
+    fn check_many_rejects_absolute_paths_outside_project_root() {
+        let project = tempfile::tempdir().expect("project root");
+        let outside = tempfile::NamedTempFile::new().expect("outside script");
+        std::fs::write(outside.path(), "40 + 2\n").expect("write outside script");
+        let report = run_check_many(
+            super::CheckManyManifest {
+                schema_version: 1,
+                kind: super::RH_CHECK_MANIFEST_KIND.to_owned(),
+                files: vec![outside.path().display().to_string()],
+            },
+            CheckManyOptions {
+                project_root: project.path().to_path_buf(),
+                ..CheckManyOptions::default()
+            },
+        );
+        assert!(!report.ok);
+        assert_eq!(report.failures[0].code, "check_many_path");
+        assert_eq!(report.failures[0].exit_class, "configuration");
     }
 }
