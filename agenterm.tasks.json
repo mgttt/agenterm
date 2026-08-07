@@ -886,7 +886,7 @@
     {
       "id": "native-ipc-compat-smoke",
       "description": "Download exact published v0.1.10/v0.1.11 bytes and prove TCP migration plus native IPC upgrade and rollback against staged HEAD",
-      "entry": "scripts/rhai/native-ipc-compat-smoke.rhai",
+      "entry": "scripts/rh/native-ipc-compat-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

@@ -8861,7 +8861,17 @@ fn emit_string_list_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
                 if index > 0 {
                     out.push_str(", ");
                 }
-                emit_stringish(out, item, ctx)?;
+                if let Expr::Variable(ident, ..) = item
+                    && matches!(
+                        ctx.scope.get(ident.1.as_str()).copied(),
+                        Some(ValueKind::String | ValueKind::Path)
+                    )
+                {
+                    out.push_str(ident.1.as_str());
+                    out.push_str(".clone()");
+                } else {
+                    emit_stringish(out, item, ctx)?;
+                }
             }
             out.push(']');
             Ok(())
@@ -11811,6 +11821,38 @@ fn entry() {
                 .rust
                 .contains("rh_host_eval_int(\"std::process::command_status")
         );
+    }
+
+    #[test]
+    fn local_string_list_literals_clone_reused_bindings() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn consume(values) {
+    let command = std::process::command("tool");
+    command.args(values);
+    0
+}
+
+fn entry() {
+    let marker = "shared";
+    consume(["--marker", marker]);
+    consume(["--marker", marker]);
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert_eq!(
+            output
+                .rust
+                .matches("vec![String::from(\"--marker\"), marker.clone()]")
+                .count(),
+            2,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]
