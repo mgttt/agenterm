@@ -205,7 +205,7 @@ jobs:
           test -n "$manifest"
           test -x "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh"
           "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh" \
-            run scripts/rhai/build-releases-index.rhai --project-root . -- \
+            task run build-releases-index --manifest agenterm.tasks.json -- \
             "$manifest" candidate/payload candidate/releases.json
           test -f candidate/releases.json
           jq -e '
@@ -273,7 +273,7 @@ jobs:
             -name 'agenterm-*-candidate-manifest.json' -print -quit)"
           test -n "$manifest"
           "$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh" \
-            run scripts/rhai/build-releases-index.rhai --project-root . -- \
+            task run build-releases-index --manifest agenterm.tasks.json -- \
             "$manifest" candidate/payload candidate/releases.json
           test -f candidate/releases.json
 

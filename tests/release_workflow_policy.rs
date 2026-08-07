@@ -126,7 +126,8 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(PROMOTION.contains("publish-$tag"));
     assert!(PROMOTION.contains("candidate-verify.rhai"));
     // H1: pure-derive releases.json during verify + publish (not a second truth).
-    assert!(PROMOTION.contains("build-releases-index.rhai"));
+    assert!(PROMOTION.contains("task run build-releases-index"));
+    assert!(!PROMOTION.contains("build-releases-index.rhai"));
     assert!(PROMOTION.contains("candidate/releases.json"));
     assert!(PROMOTION.contains("Derive releases.json index"));
     assert!(PROMOTION.contains("environment: release"));
@@ -157,7 +158,6 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
         "check.sh",
         "release.cmd",
         "release.sh",
-        "task run build",
         "task run check",
         "task run package",
         "notarytool",
@@ -167,6 +167,18 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
             !PROMOTION.contains(forbidden),
             "promotion contains forbidden operation: {forbidden}"
         );
+    }
+    // Forbid the build/check/package orchestrators, but allow leaf tasks whose
+    // ids share a prefix (e.g. build-releases-index).
+    for line in PROMOTION.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("task run ") {
+            let task = rest.split_whitespace().next().unwrap_or("");
+            assert!(
+                task != "build" && task != "check" && task != "package",
+                "promotion contains forbidden operation: task run {task}"
+            );
+        }
     }
 }
 

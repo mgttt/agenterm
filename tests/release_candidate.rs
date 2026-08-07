@@ -221,6 +221,18 @@ fn run_script(script: &str, arguments: &[&Path]) -> Output {
     command.output().expect("run Candidate Rhai script")
 }
 
+fn run_build_releases_index(arguments: &[&Path]) -> Output {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
+    command
+        .current_dir(repo)
+        .args(["task", "run", "build-releases-index", "--manifest"])
+        .arg(repo.join("agenterm.tasks.json"))
+        .arg("--");
+    command.args(arguments);
+    command.output().expect("run build-releases-index")
+}
+
 fn aggregate(fixture: &Fixture) -> Output {
     run_script(
         "candidate-aggregate.rhai",
@@ -285,10 +297,7 @@ fn releases_index_is_pure_derived_from_sealed_candidate() {
     assert!(created.status.success(), "{}", output_text(&created));
 
     let index_path = fixture.root.join("releases.json");
-    let indexed = run_script(
-        "build-releases-index.rhai",
-        &[&fixture.manifest, &fixture.assets, &index_path],
-    );
+    let indexed = run_build_releases_index(&[&fixture.manifest, &fixture.assets, &index_path]);
     assert!(indexed.status.success(), "{}", output_text(&indexed));
     assert!(output_text(&indexed).contains("RELEASES_INDEX"));
     assert!(output_text(&indexed).contains("artifacts=6"));
@@ -332,7 +341,7 @@ fn releases_index_is_pure_derived_from_sealed_candidate() {
         format!("agenterm-{VERSION}-macos-aarch64-unsigned-preview.zip.provenance.json")
     );
 
-    let help = run_script("build-releases-index.rhai", &[Path::new("--help")]);
+    let help = run_build_releases_index(&[Path::new("--help")]);
     assert!(help.status.success(), "{}", output_text(&help));
     assert!(output_text(&help).contains("usage: build-releases-index"));
 }

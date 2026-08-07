@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 23;
+pub const RH_CODEGEN_REVISION: u32 = 24;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -903,12 +903,9 @@ pub fn emit_host_runtime(out: &mut String) {
                      }\n\
                  }\n\
                  Some(serde_json::Value::Null) | None => {\n\
-                     if path.is_empty() {\n\
-                         let _ = rh_fail(\"json_type_name\");\n\
-                     } else {\n\
-                         let _ = rh_fail(&format!(\"json_type_name: {}\", path.join(\".\")));\n\
-                     }\n\
-                     String::new()\n\
+                     // Match Rhai `type_of(())` so optional JSON probes stay native\n\
+                     // without try/catch or hard failure on missing paths.\n\
+                     String::from(\"()\")\n\
                  }\n\
              }\n\
          }\n\n\

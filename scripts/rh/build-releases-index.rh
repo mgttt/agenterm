@@ -1,0 +1,269 @@
+// Derive machine-readable releases.json from one sealed Candidate.
+//
+// Pure index: every field is copied or mapped from the candidate-manifest
+// and per-archive .provenance.json companions.  No second release truth.
+//
+// Args: CANDIDATE_MANIFEST ASSET_DIRECTORY OUTPUT_JSON
+
+fn entry() {
+    if args.len == 1 && (args[0] == "--help" || args[0] == "-h") {
+        print(
+            "usage: build-releases-index CANDIDATE_MANIFEST " +
+                "ASSET_DIRECTORY OUTPUT_JSON"
+        );
+        return 0;
+    }
+    if args.len != 3 {
+        return rh::fail(
+            "releases_index_arguments: expected CANDIDATE_MANIFEST " +
+                "ASSET_DIRECTORY OUTPUT_JSON"
+        );
+    }
+
+    let manifest_path = std::path::absolute(args[0]).display;
+    let asset_root = std::path::absolute(args[1]).display;
+    let output_path = std::path::absolute(args[2]).display;
+    require(
+        std::fs::exists(manifest_path)
+            && std::fs::metadata(manifest_path).is_file,
+        "releases_index_manifest_missing"
+    );
+    require(
+        std::fs::exists(asset_root) && std::fs::metadata(asset_root).is_dir,
+        "releases_index_assets_missing"
+    );
+
+    let manifest = rhai::json::parse_file(manifest_path);
+    require(
+        manifest.schema_version == 1
+            && manifest.product == "AgenTerm"
+            && type_of(manifest.assets) == "array"
+            && manifest.assets.len > 0
+            && manifest.version != ""
+            && manifest.expected_tag == "v" + manifest.version
+            && manifest.source_sha != "",
+        "releases_index_manifest"
+    );
+
+    let artifacts = [];
+    let artifact_count = 0;
+    let has_stable = 0;
+    let has_preview = 0;
+    for asset in manifest.assets {
+        let asset_name = "" + asset.name;
+        let asset_os = "" + asset.os;
+        let asset_arch = "" + asset.arch;
+        let channel = "" + asset.channel;
+        let asset_sha = "" + asset.sha256;
+        let provenance_name = "" + asset.provenance.name;
+        let asset_prov_sha = "" + asset.provenance.sha256;
+        require(
+            asset_name != ""
+                && asset_os != ""
+                && asset_arch != ""
+                && channel != ""
+                && asset_sha != ""
+                && type_of(asset.provenance) == "map"
+                && provenance_name != ""
+                && asset_prov_sha != "",
+            "releases_index_asset:" + asset_name
+        );
+        let distribution = "";
+        let variant = "";
+        if channel == "macos-unsigned-preview" {
+            distribution = "preview";
+            variant = "unsigned-preview";
+        } else if channel == "release" {
+            distribution = "stable";
+            variant = "release";
+        } else {
+            return rh::fail("releases_index_unknown_channel:" + channel);
+        }
+        if distribution == "stable" {
+            has_stable = 1;
+        }
+        if distribution == "preview" {
+            has_preview = 1;
+        }
+
+        let path_sep = "/";
+        let provenance_path = asset_root + path_sep + provenance_name;
+        require(
+            std::fs::exists(provenance_path)
+                && std::fs::metadata(provenance_path).is_file,
+            "releases_index_provenance_missing:" + provenance_name
+        );
+        let provenance_hash = rhai::crypto::sha256_file(provenance_path);
+        require(
+            provenance_hash == asset_prov_sha,
+            "releases_index_provenance_hash:" + provenance_name
+        );
+        let provenance = rhai::json::parse_file(provenance_path);
+        // Force string compares: bare JSON==JSON emits integer paths.
+        let provenance_version = "" + provenance.version;
+        let manifest_version = "" + manifest.version;
+        let provenance_artifact = "" + provenance.artifact;
+        let provenance_sha = "" + provenance.sha256;
+        let provenance_os = "" + provenance.os;
+        let provenance_arch = "" + provenance.arch;
+        let provenance_channel = "" + provenance.channel;
+        let provenance_commit = "" + provenance.source_commit;
+        let manifest_source_sha = "" + manifest.source_sha;
+        let provenance_tag = "" + provenance.source_tag;
+        let expected_tag = "" + manifest.expected_tag;
+        require(
+            provenance.schema_version == 1
+                && provenance.product == "AgenTerm"
+                && provenance_version == manifest_version
+                && provenance_artifact == asset_name
+                && provenance_sha == asset_sha
+                && provenance_os == asset_os
+                && provenance_arch == asset_arch
+                && provenance_channel == channel
+                && provenance.signed == asset.signed
+                && provenance.notarized == asset.notarized
+                && provenance_commit == manifest_source_sha
+                && provenance_tag == expected_tag,
+            "releases_index_provenance_mismatch:" + asset_name
+        );
+
+        // Optional JSON fields: type_of missing/null is "()" (cg24).
+        let checksum_name = asset_name + ".sha256";
+        if type_of(asset.checksum.name) == "string" {
+            let declared_name = "" + asset.checksum.name;
+            if declared_name != "" {
+                checksum_name = declared_name;
+            }
+        }
+        let checksum_sha = "";
+        if type_of(asset.checksum.sha256) == "string" {
+            checksum_sha = "" + asset.checksum.sha256;
+        }
+        let sbom_sha256 = "";
+        if type_of(provenance.sbom_sha256) == "string" {
+            sbom_sha256 = "" + provenance.sbom_sha256;
+        }
+        let build_log = "";
+        if type_of(provenance.build_log) == "string" {
+            build_log = "" + provenance.build_log;
+        }
+
+        artifacts.push(#{
+            os: asset.os,
+            arch: asset.arch,
+            variant: variant,
+            channel: channel,
+            distribution: distribution,
+            name: asset_name,
+            sha256: asset.sha256,
+            size: asset.size,
+            signed: asset.signed,
+            notarized: asset.notarized,
+            provenance: #{
+                name: provenance_name,
+                sha256: asset.provenance.sha256
+            },
+            checksum: #{
+                name: checksum_name,
+                sha256: checksum_sha
+            },
+            source_commit: provenance.source_commit,
+            source_tag: provenance.source_tag,
+            sbom_sha256: sbom_sha256,
+            build_log: build_log
+        });
+        artifact_count += 1;
+    }
+
+    require(
+        artifact_count == manifest.assets.len,
+        "releases_index_artifact_count"
+    );
+
+    let channel_ptr = #{
+        version: manifest.version,
+        tag: manifest.expected_tag,
+        source_commit: manifest.source_sha
+    };
+
+    let release_entry = #{
+        version: manifest.version,
+        tag: manifest.expected_tag,
+        source_commit: manifest.source_sha,
+        artifacts: artifacts
+    };
+
+    let releases = [];
+    releases.push(release_entry);
+
+    let manifest_sha256 = rhai::crypto::sha256_file(manifest_path);
+    let source_block = #{
+        kind: "agenterm-release-candidate",
+        source_sha: manifest.source_sha,
+        version: manifest.version,
+        tag: manifest.expected_tag,
+        candidate_run_id: manifest.run.id,
+        candidate_run_attempt: manifest.run.attempt,
+        manifest_sha256: manifest_sha256
+    };
+
+    let channel_layout = 0;
+    if has_stable {
+        channel_layout = channel_layout + 1;
+    }
+    if has_preview {
+        channel_layout = channel_layout + 2;
+    }
+    require(channel_layout != 0, "releases_index_empty_channels");
+
+    let index_text = "";
+    if channel_layout == 3 {
+        let index = #{
+            schema_version: 1,
+            kind: "agenterm-releases-index",
+            product: "AgenTerm",
+            source: source_block,
+            channels: #{
+                stable: channel_ptr,
+                preview: channel_ptr
+            },
+            releases: releases
+        };
+        index_text = rhai::json::stringify_pretty(index) + "\n";
+    }
+    if channel_layout == 1 {
+        let index = #{
+            schema_version: 1,
+            kind: "agenterm-releases-index",
+            product: "AgenTerm",
+            source: source_block,
+            channels: #{ stable: channel_ptr },
+            releases: releases
+        };
+        index_text = rhai::json::stringify_pretty(index) + "\n";
+    }
+    if channel_layout == 2 {
+        let index = #{
+            schema_version: 1,
+            kind: "agenterm-releases-index",
+            product: "AgenTerm",
+            source: source_block,
+            channels: #{ preview: channel_ptr },
+            releases: releases
+        };
+        index_text = rhai::json::stringify_pretty(index) + "\n";
+    }
+
+    rhai::runtime::atomic_write(output_path, index_text);
+
+    let expected_tag = "" + manifest.expected_tag;
+    print(
+        "RELEASES_INDEX " +
+            expected_tag +
+            " artifacts=" +
+            artifact_count +
+            " " +
+            output_path
+    );
+    0
+}

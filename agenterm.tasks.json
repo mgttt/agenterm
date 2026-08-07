@@ -647,7 +647,7 @@
     {
       "id": "build-releases-index",
       "description": "Derive pure machine-readable releases.json from a sealed candidate manifest and provenance",
-      "entry": "scripts/rhai/build-releases-index.rhai",
+      "entry": "scripts/rh/build-releases-index.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

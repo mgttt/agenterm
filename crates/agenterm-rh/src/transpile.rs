@@ -1233,7 +1233,9 @@ fn emit_stmt(
         }
         Stmt::TryCatch(boxed, ..) if ctx.cdylib => {
             let flow = boxed.as_ref();
-            out.push_str("    match (|| -> Result<INT, INT> {\n");
+            // Statement-form try must discard the INT result; a bare `match`
+            // arm value is not a valid Rust statement expression.
+            out.push_str("    let _ = match (|| -> Result<INT, INT> {\n");
             let mut try_ctx = ctx.clone().enter_try();
             emit_try_block(out, &flow.body, &mut try_ctx)?;
             out.push_str("    })() {\n");
@@ -1241,7 +1243,7 @@ fn emit_stmt(
             out.push_str("        Err(_) => {\n");
             emit_block_tail_expr(out, &flow.branch, ctx)?;
             out.push_str("        }\n");
-            out.push_str("    }\n");
+            out.push_str("    };\n");
         }
         Stmt::TryCatch(..) => {
             let snippet = crate::expr_print::stmt_to_rhai(stmt)?;

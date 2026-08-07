@@ -181,6 +181,21 @@ fn performance_summary_uses_native_bundled_execution() {
 }
 
 #[test]
+fn build_releases_index_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/build-releases-index.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
+    assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
+    assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
+    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+
+#[test]
 fn agenterm_net_research_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/agenterm-net-research.rh");
     assert!(source.contains("fn entry("));
