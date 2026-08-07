@@ -176,39 +176,45 @@ fn ordered_processes(processes) {
     ordered
 }
 
-fn joined(values) {
-    let text = "";
-    for value in values {
-        if text != "" {
-            text += ",";
-        }
-        // Prefer string coerce over `.to_string()` assign RHS (subset gate).
-        text += "" + value;
-    }
-    text
-}
-
 fn exact_terminal_payload(observed, typed) {
-    let first = observed;
-    let second = typed;
-    first.sort();
-    second.sort();
+    observed.sort();
+    typed.sort();
+    let first_count = "" + observed.len;
+    let second_count = "" + typed.len;
+    let first_text = "";
+    let first_index = 0;
+    while first_index < observed.len {
+        if first_text != "" {
+            first_text = first_text + ",";
+        }
+        first_text = first_text + ("" + observed[first_index]);
+        first_index = first_index + 1;
+    }
+    let second_text = "";
+    let second_index = 0;
+    while second_index < typed.len {
+        if second_text != "" {
+            second_text = second_text + ",";
+        }
+        second_text = second_text + ("" + typed[second_index]);
+        second_index = second_index + 1;
+    }
     assert_ok(
-        first.len == second.len && first.len <= 1,
+        observed.len == typed.len && observed.len <= 1,
         "fresh_clone_terminal_payload_not_unique:" +
-            "" + first.len + ":" + second.len
+            first_count + ":" + second_count
     );
-    if first.len == 1 {
+    if observed.len == 1 {
         assert_ok(
-            first[0] == second[0],
+            observed[0] == typed[0],
             "fresh_clone_untyped_powershell:" +
-                joined(first) + ":" + joined(second)
+                first_text + ":" + second_text
         );
     }
     #{
         policy: "exact_remote_ui_terminal_compatibility_payload",
-        observed: first,
-        typed: second
+        observed: observed,
+        typed: typed
     }
 }
 
@@ -342,9 +348,10 @@ if self_test {
         rejected_not_unique,
         "fresh_clone_selftest_expected_rejection:fresh_clone_terminal_payload_not_unique"
     );
+    let self_test_directory = std::env::current_dir().display;
     let archive = release_archive_path(#{
         archive: "candidate.zip",
-        package_directory: std::env::current_dir().display
+        package_directory: self_test_directory
     });
     assert_ok(
         std::path::PathBuf::from(archive).file_name == "candidate.zip",
@@ -354,7 +361,7 @@ if self_test {
     try {
         release_archive_path(#{
             archive: "../candidate.zip",
-            package_directory: std::env::current_dir().display
+            package_directory: self_test_directory
         });
     } catch (error) {
         assert_ok(
@@ -378,14 +385,11 @@ assert_ok(
 );
 let child_deadline_ms = 3300000;
 
-let source =
-    std::path::absolute(
-        if args.len == 1 {
-            args[0]
-        } else {
-            std::env::current_dir().display
-        }
-    ).display;
+let source_input = std::env::current_dir().display;
+if args.len == 1 {
+    source_input = args[0];
+}
+let source = std::path::absolute(source_input).display;
 assert_ok(
     git(source, ["branch", "--show-current"], "fresh_clone_source_branch")
         == "main",
@@ -438,10 +442,11 @@ let stderr_path =
         "fresh-clone-rehearsal.stderr"
     ).display;
 
+let pending_value = rhai::json::parse("null");
 let evidence = #{
     schema_version: 1,
     started_at_utc: std::time::SystemTime::now().rfc3339,
-    completed_at_utc: (),
+    completed_at_utc: pending_value,
     source_commit: head,
     source_branch: "main",
     source_clean: 1,
@@ -454,14 +459,14 @@ let evidence = #{
         dist_absent: 0
     },
     stage0: #{
-        target_observed_at_ms: (),
-        worker_observed_at_ms: (),
+        target_observed_at_ms: pending_value,
+        worker_observed_at_ms: pending_value,
         cargo_observed: 0,
         rustc_observed: 0,
         script_worker_observed: 0
     },
     process_observation: #{
-        root_id: rhai::json::parse("null"),
+        root_id: pending_value,
         scan_interval_ms: 500,
         child_deadline_ms: child_deadline_ms,
         scan_count: 0,
@@ -469,21 +474,21 @@ let evidence = #{
         timeline: [],
         remaining_before_cleanup: [],
         remaining_after_cleanup: [],
-        powershell_policy: rhai::json::parse("null")
+        powershell_policy: pending_value
     },
     qualification: #{
         expected_gate_count: 34,
         gate_count: 0,
         all_passed: 0,
         stress_included: 0,
-        receipt_source_commit: rhai::json::parse("null"),
-        receipt_source_dirty: rhai::json::parse("null")
+        receipt_source_commit: pending_value,
+        receipt_source_dirty: pending_value
     },
     packaging: #{
         ready_to_publish: 0,
-        mode: rhai::json::parse("null"),
-        archive_name: rhai::json::parse("null"),
-        archive_sha256: rhai::json::parse("null")
+        mode: pending_value,
+        archive_name: pending_value,
+        archive_sha256: pending_value
     },
     mutation_proof: #{
         local_tags_unchanged: 0,
@@ -496,12 +501,12 @@ let evidence = #{
     clone_clean_after_rehearsal: 0,
     clone_removed: 0,
     success: 0,
-    failure: ()
+    failure: pending_value
 };
 
-let failure = ();
-let child = ();
-let owned_ids = #{};
+let failure = "";
+let root_id = 0;
+let owned_ids = rhai::json::parse("{}");
 let identities = rhai::json::parse("{}");
 let unique = rhai::json::parse("{}");
 try {
@@ -558,10 +563,12 @@ try {
 
     let clone_target = std::path::join(clone, "target").display;
     let clone_dist = std::path::join(clone, "dist").display;
-    evidence.initial_artifacts.target_absent =
-        !std::fs::exists(clone_target);
-    evidence.initial_artifacts.dist_absent =
-        !std::fs::exists(clone_dist);
+    if std::fs::exists(clone_target) == 0 {
+        evidence.initial_artifacts.target_absent = 1;
+    }
+    if std::fs::exists(clone_dist) == 0 {
+        evidence.initial_artifacts.dist_absent = 1;
+    }
     assert_ok(
         evidence.initial_artifacts.target_absent
             && evidence.initial_artifacts.dist_absent,
@@ -571,12 +578,14 @@ try {
 
     let local_tags_before =
         git(clone, ["tag", "--list"], "fresh_clone_local_tags_before");
-    evidence.mutation_proof.local_candidate_tag_absent_before =
-        git(
+    let local_candidate_before = git(
             clone,
             ["tag", "--list", tag],
             "fresh_clone_local_candidate_before"
-        ) == "";
+        );
+    if local_candidate_before == "" {
+        evidence.mutation_proof.local_candidate_tag_absent_before = 1;
+    }
     let remote_before = git(
         clone,
         [
@@ -585,8 +594,9 @@ try {
         ],
         "fresh_clone_remote_before"
     );
-    evidence.mutation_proof.candidate_tag_absent_before =
-        !remote_before.contains("refs/tags/" + tag);
+    if remote_before.contains("refs/tags/" + tag) == 0 {
+        evidence.mutation_proof.candidate_tag_absent_before = 1;
+    }
 
     let release = std::process::command("cmd.exe");
     release.args(["/d", "/c", "release.cmd", "--rehearse"]);
@@ -597,12 +607,15 @@ try {
     release.env("GIT_TERMINAL_PROMPT", "0");
     release.stdout_file(stdout_path);
     release.stderr_file(stderr_path);
-    child = start_child(release);
-    evidence.process_observation.root_id = child.id;
+    let child = start_child(release);
+    root_id = child.id;
+    evidence.process_observation.root_id = root_id;
 
     let powershell = [];
     let started = std::time::SystemTime::now().unix_millis;
     let next_timeline = started;
+    let target_observed = 0;
+    let worker_observed = 0;
     let keep_waiting = 0;
     if child.state == "running" {
         let deadline_now = std::time::SystemTime::now().unix_millis;
@@ -613,7 +626,7 @@ try {
     while keep_waiting != 0 {
         let now = std::time::SystemTime::now().unix_millis;
         let current =
-            observe_descendants(child.id, owned_ids, identities);
+            observe_descendants(root_id, owned_ids, identities);
         evidence.process_observation.scan_count =
             evidence.process_observation.scan_count + 1;
         for process in current {
@@ -628,18 +641,20 @@ try {
                 }
             }
         }
-        if evidence.stage0.target_observed_at_ms == ()
+        if target_observed == 0
                 && std::fs::exists(clone_target) {
             evidence.stage0.target_observed_at_ms = now - started;
+            target_observed = 1;
         }
         let bootstrap_worker =
             std::path::join(
                 clone_target,
                 "debug/agenterm-rh.exe"
             ).display;
-        if evidence.stage0.worker_observed_at_ms == ()
+        if worker_observed == 0
                 && std::fs::exists(bootstrap_worker) {
             evidence.stage0.worker_observed_at_ms = now - started;
+            worker_observed = 1;
         }
         let names = unique_names(current);
         if names.contains("cargo.exe") {
@@ -674,21 +689,21 @@ try {
     }
     let result =
         child.wait_with_output(std::time::Duration::from_secs(10));
+    let release_diagnostic = "";
+    if std::fs::exists(stderr_path) {
+        release_diagnostic =
+            tail(std::fs::read_to_string(stderr_path), 16384);
+    }
     assert_ok(
         result.success,
-        "fresh_clone_release_failed:" +
-            if std::fs::exists(stderr_path) {
-                tail(std::fs::read_to_string(stderr_path), 16384)
-            } else {
-                ""
-            }
+        "fresh_clone_release_failed:" + release_diagnostic
     );
 
     assert_ok(
         evidence.process_observation.scan_count > 0
             && unique.keys().len > 2
-            && evidence.stage0.target_observed_at_ms != ()
-            && evidence.stage0.worker_observed_at_ms != ()
+            && target_observed != 0
+            && worker_observed != 0
             && evidence.stage0.cargo_observed
             && evidence.stage0.rustc_observed
             && evidence.stage0.script_worker_observed,
@@ -765,12 +780,14 @@ try {
 
     let local_tags_after =
         git(clone, ["tag", "--list"], "fresh_clone_local_tags_after");
-    evidence.mutation_proof.local_candidate_tag_absent_after =
-        git(
+    let local_candidate_after = git(
             clone,
             ["tag", "--list", tag],
             "fresh_clone_local_candidate_after"
-        ) == "";
+        );
+    if local_candidate_after == "" {
+        evidence.mutation_proof.local_candidate_tag_absent_after = 1;
+    }
     let remote_after = git(
         clone,
         [
@@ -779,12 +796,15 @@ try {
         ],
         "fresh_clone_remote_after"
     );
-    evidence.mutation_proof.local_tags_unchanged =
-        local_tags_before == local_tags_after;
-    evidence.mutation_proof.remote_refs_unchanged =
-        remote_before == remote_after;
-    evidence.mutation_proof.candidate_tag_absent_after =
-        !remote_after.contains("refs/tags/" + tag);
+    if local_tags_before == local_tags_after {
+        evidence.mutation_proof.local_tags_unchanged = 1;
+    }
+    if remote_before == remote_after {
+        evidence.mutation_proof.remote_refs_unchanged = 1;
+    }
+    if remote_after.contains("refs/tags/" + tag) == 0 {
+        evidence.mutation_proof.candidate_tag_absent_after = 1;
+    }
     assert_ok(
         evidence.mutation_proof.local_tags_unchanged
             && evidence.mutation_proof.remote_refs_unchanged
@@ -794,12 +814,14 @@ try {
             && evidence.mutation_proof.candidate_tag_absent_after,
         "fresh_clone_mutation_detected"
     );
-    evidence.clone_clean_after_rehearsal =
-        git(
+    let final_status = git(
             clone,
             ["status", "--porcelain", "--untracked-files=all"],
             "fresh_clone_final_status"
-        ) == "";
+        );
+    if final_status == "" {
+        evidence.clone_clean_after_rehearsal = 1;
+    }
     assert_ok(
         evidence.clone_clean_after_rehearsal,
         "fresh_clone_worktree_mutated"
@@ -812,7 +834,7 @@ try {
 
 evidence.process_observation.remaining_before_cleanup =
     live_observed_processes(identities);
-if failure == ()
+if failure == ""
         && evidence.process_observation.remaining_before_cleanup.len > 0 {
     failure = "fresh_clone_owned_processes_remained";
     evidence.failure = failure;
@@ -820,9 +842,9 @@ if failure == ()
 }
 
 try {
-    if child != () && child.state == "running" {
+    if root_id > 0 {
         let final_processes =
-            observe_descendants(child.id, owned_ids, identities);
+            observe_descendants(root_id, owned_ids, identities);
         evidence.process_observation.scan_count =
             evidence.process_observation.scan_count + 1;
         for process in final_processes {
@@ -831,8 +853,6 @@ try {
                 unique[identity] = process;
             }
         }
-        child.kill();
-        child.wait_with_output(std::time::Duration::from_secs(5));
     }
     terminate_observed_processes(identities);
     evidence.process_observation.remaining_after_cleanup =
@@ -874,7 +894,7 @@ try {
     );
 } catch (cleanup_error) {
     evidence.clone_removed = 0;
-    if failure == () {
+    if failure == "" {
         failure = "" + cleanup_error;
         evidence.failure = failure;
     } else {
@@ -891,7 +911,7 @@ rhai::runtime::atomic_write(
     evidence_path,
     rhai::json::stringify_pretty(evidence) + "\n"
 );
-if failure != () {
+if failure != "" {
     throw failure;
 }
 print("PASS: fresh clone qualified, packaged, observed, and removed");
