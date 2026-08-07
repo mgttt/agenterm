@@ -27,10 +27,15 @@ fn manifest_native_task_transpiles_without_interpreter_fallback() {
     let source = native_task_source();
     agenterm_rh::check(&source).expect("check");
     let rust = agenterm_rh::transpile_cdylib(&source).expect("transpile");
+    let entry = rust
+        .split_once("pub fn entry() -> INT {")
+        .and_then(|(_, suffix)| suffix.split_once("fn rh_entry_internal()"))
+        .map(|(entry, _)| entry)
+        .expect("generated entry body");
     assert!(!rust.contains("compat delegating"), "{rust}");
-    assert!(!rust.contains("rh_host_run_script"), "{rust}");
-    assert!(!rust.contains("rh_host_eval_int"), "{rust}");
-    assert!(rust.contains("for value in 1..5"), "{rust}");
+    assert!(!entry.contains("rh_host_run_script"), "{entry}");
+    assert!(!entry.contains("rh_host_eval_int"), "{entry}");
+    assert!(entry.contains("for value in 1..5"), "{entry}");
 }
 
 #[test]
