@@ -1602,6 +1602,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
         _ if path_absolute_display_arg(expr).is_some() => ValueKind::String,
         _ if path_buf_from_display_arg(expr).is_some() => ValueKind::String,
+        _ if path_buf_from_file_name_arg(expr).is_some() => ValueKind::String,
         _ if env_current_dir_display(expr) => ValueKind::String,
         _ if path_buf_from_arg(expr).is_some() => ValueKind::Path,
         _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
@@ -1892,6 +1893,23 @@ fn path_buf_from_is_absolute_arg(expr: &Expr) -> Option<&Expr> {
     path_buf_from_arg(&boxed.lhs)
 }
 
+fn path_buf_from_file_name_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let file_name = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "file_name"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "file_name" && call.args.is_empty()
+    );
+    if !file_name {
+        return None;
+    }
+    path_buf_from_arg(&boxed.lhs)
+}
+
 fn path_binding_is_absolute<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
@@ -1930,6 +1948,26 @@ fn path_binding_display<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
         Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
     );
     display.then_some(ident.1.as_str())
+}
+
+fn path_binding_file_name<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Path) {
+        return None;
+    }
+    let file_name = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "file_name"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "file_name" && call.args.is_empty()
+    );
+    file_name.then_some(ident.1.as_str())
 }
 
 fn env_current_dir_display(expr: &Expr) -> bool {
@@ -2866,7 +2904,9 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || path_join_display_args(expr).is_some()
         || path_absolute_display_arg(expr).is_some()
         || path_buf_from_display_arg(expr).is_some()
+        || path_buf_from_file_name_arg(expr).is_some()
         || path_binding_display(expr, ctx).is_some()
+        || path_binding_file_name(expr, ctx).is_some()
         || env_current_dir_display(expr)
         || std_fs_read_to_string_arg(expr).is_some()
         || crypto_sha256_file_arg(expr).is_some()
@@ -3080,9 +3120,21 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
                 ));
             }
         }
+        _ if let Some(path) = path_buf_from_file_name_arg(expr) => {
+            if !emit_path_file_name(out, path, ctx)? {
+                return Err(RhError::Transpile(
+                    "PathBuf::from.file_name argument must be a string path".into(),
+                ));
+            }
+        }
         _ if let Some(binding) = path_binding_display(expr, ctx) => {
             out.push_str(binding);
             out.push_str(".clone()");
+        }
+        _ if let Some(binding) = path_binding_file_name(expr, ctx) => {
+            out.push_str("rh_path_file_name(&");
+            out.push_str(binding);
+            out.push(')');
         }
         _ if std_time_system_time_now_rfc3339(expr) => {
             out.push_str("rh_system_time_now_rfc3339()");
@@ -4066,6 +4118,11 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
             out.push('&');
             out.push_str(binding);
         }
+        _ if let Some(binding) = path_binding_file_name(expr, ctx) => {
+            out.push_str("&rh_path_file_name(&");
+            out.push_str(binding);
+            out.push_str(")");
+        }
         _ if env_current_dir_display(expr) => {
             out.push_str("&rh_env_current_dir()");
         }
@@ -4533,6 +4590,24 @@ fn emit_path_is_absolute(
     }
     out.push_str("rh_path_is_absolute(");
     out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_path_file_name(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if emit_native_string(&mut path_expr, path, ctx)? {
+        out.push_str("rh_path_file_name(");
+        out.push_str(&path_expr);
+        out.push(')');
+        return Ok(true);
+    }
+    out.push_str("rh_path_file_name(&");
+    emit_stringish(out, path, ctx)?;
     out.push(')');
     Ok(true)
 }
@@ -5296,6 +5371,25 @@ mod tests {
         assert!(output.rust.contains("meta.is_file"));
         assert!(output.rust.contains("meta.is_symlink"));
         assert!(output.rust.contains("meta.is_reparse_point"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_path_file_name_native() {
+        let source = include_str!("../../../fixtures/rh/path-file-name-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_path_file_name("),
+            "{}",
+            output.rust
+        );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }

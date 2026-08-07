@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 28;
+pub const RH_CODEGEN_REVISION: u32 = 29;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -347,6 +347,12 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_path_is_absolute(path: &str) -> INT {\n\
              i64::from(std::path::Path::new(path).is_absolute())\n\
+         }\n\n\
+         fn rh_path_file_name(path: &str) -> String {\n\
+             std::path::Path::new(path)\n\
+                 .file_name()\n\
+                 .map(|name| name.to_string_lossy().into_owned())\n\
+                 .unwrap_or_default()\n\
          }\n\n\
          fn rh_system_time_now_unix_millis() -> INT {\n\
              match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {\n\

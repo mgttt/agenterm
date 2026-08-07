@@ -1,0 +1,25 @@
+// Probe native PathBuf.file_name sugar for candidate asset-name validation.
+// Args: NAME
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: NAME");
+    }
+
+    let name = args[0];
+    let score = 0;
+
+    if name != ""
+        && std::path::PathBuf::from(name).file_name == name
+        && !name.contains("/")
+        && !name.contains("\\")
+    {
+        score += 1;
+    }
+
+    let path = std::path::PathBuf::from(name);
+    if path.file_name == name {
+        score += 10;
+    }
+
+    score
+}
