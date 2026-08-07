@@ -853,32 +853,37 @@ pub fn emit_host_runtime(out: &mut String) {
          ) -> RhOutput {\n\
              let stdout_pipe = child.stdout.take();\n\
              let stderr_pipe = child.stderr.take();\n\
-             let wait_result = match child.wait_timeout(timeout) {\n\
-                 Ok(result) => result,\n\
-                 Err(error) => {\n\
-                     let _ = child.kill();\n\
-                     let _ = child.wait();\n\
-                     let _ = rh_fail(&format!(\"process_wait: {error}\"));\n\
-                     return RhOutput {\n\
-                         success: 0,\n\
-                         exit_code: -1,\n\
-                         stdout: String::new(),\n\
-                         stderr: String::new(),\n\
-                     };\n\
+             let deadline = std::time::Instant::now() + timeout;\n\
+             let status = loop {\n\
+                 match child.try_wait() {\n\
+                     Ok(Some(status)) => break status,\n\
+                     Ok(None) => {\n\
+                         if std::time::Instant::now() >= deadline {\n\
+                             let _ = child.kill();\n\
+                             let _ = child.wait();\n\
+                             let _ = rh_fail(\"process_timeout\");\n\
+                             return RhOutput {\n\
+                                 success: 0,\n\
+                                 exit_code: -1,\n\
+                                 stdout: String::new(),\n\
+                                 stderr: String::new(),\n\
+                             };\n\
+                         }\n\
+                         std::thread::sleep(std::time::Duration::from_millis(10));\n\
+                     }\n\
+                     Err(error) => {\n\
+                         let _ = child.kill();\n\
+                         let _ = child.wait();\n\
+                         let _ = rh_fail(&format!(\"process_wait: {error}\"));\n\
+                         return RhOutput {\n\
+                             success: 0,\n\
+                             exit_code: -1,\n\
+                             stdout: String::new(),\n\
+                             stderr: String::new(),\n\
+                         };\n\
+                     }\n\
                  }\n\
              };\n\
-             if wait_result.is_none() {\n\
-                 let _ = child.kill();\n\
-                 let _ = child.wait();\n\
-                 let _ = rh_fail(\"process_timeout\");\n\
-                 return RhOutput {\n\
-                     success: 0,\n\
-                     exit_code: -1,\n\
-                     stdout: String::new(),\n\
-                     stderr: String::new(),\n\
-                 };\n\
-             }\n\
-             let status = wait_result.expect(\"process wait returned unexpectedly\");\n\
              let (stdout, _) = match stdout_pipe {\n\
                  Some(pipe) => rh_read_pipe_limited(pipe, capture_limit),\n\
                  None => (String::new(), false),\n\
