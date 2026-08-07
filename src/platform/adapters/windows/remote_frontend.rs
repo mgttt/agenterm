@@ -6155,13 +6155,18 @@ impl RemoteWindowState {
         let Some((column, row)) = self.remote_cell(x, y) else {
             return false;
         };
+        // Full-screen TUIs (alt buffer) must keep mouse pass-through even if
+        // scrollback_offset is non-zero from a primary-grid glitch — otherwise
+        // clicks on in-app chrome ([x], lists) become local selection.
+        let scrolled_back =
+            tab.screen.scrollback_offset != 0 && !tab.screen.alternate_screen;
         let input = MouseReportInput {
             mode: product_mode,
             encoding,
             shift: self.pointer_modifiers.shift,
             alt: self.pointer_modifiers.alt,
             control: self.pointer_modifiers.control,
-            scrolled_back: tab.screen.scrollback_offset != 0,
+            scrolled_back,
             motion,
             dragging,
             pressed,
@@ -6701,6 +6706,11 @@ impl RemoteWindowState {
             true
         } else if self.forward_terminal_mouse(x, y, None, true, true) {
             true
+        } else if self.mouse_report_button.is_some() {
+            // Application owns the button-down gesture: do not convert
+            // micro-moves into a local selection drag (PressRelease modes
+            // skip motion reports but still need exclusive ownership).
+            true
         } else {
             self.drag_terminal_selection(x, y)
         }
@@ -6710,7 +6720,7 @@ impl RemoteWindowState {
         if let Some(code) = self.mouse_report_button.take() {
             let _ = self.forward_terminal_mouse(x, y, Some(code), false, false);
             self.mouse_report_cell = None;
-            false
+            true
         } else if self.sidebar_scroll_drag.is_some() {
             self.end_sidebar_scroll_drag();
             false
@@ -8288,8 +8298,25 @@ impl ControlWindowApplication for RemoteWindowApplication {
                 consumed = true;
             }
             ControlWindowEvent::CaptureChanged(false) => {
-                state.mouse_report_button = None;
-                state.mouse_report_cell = None;
+                // If an application mouse gesture was open, emit a release so
+                // TUI buttons are not left thinking the button is still down.
+                if let Some(code) = state.mouse_report_button.take() {
+                    let (x, y) = state
+                        .terminal_selection_pointer
+                        .or_else(|| {
+                            state.last_pointer_cell.map(|(c, r)| {
+                                (
+                                    state.workspace_geometry().terminal.left
+                                        + i32::try_from(c).unwrap_or(0) * state.cell_width.max(1),
+                                    state.workspace_geometry().terminal.top
+                                        + i32::try_from(r).unwrap_or(0) * state.cell_height.max(1),
+                                )
+                            })
+                        })
+                        .unwrap_or((0, 0));
+                    let _ = state.forward_terminal_mouse(x, y, Some(code), false, false);
+                    state.mouse_report_cell = None;
+                }
                 state.tabs_resize_capture_lost();
                 state.sidebar_scrollbar_capture_lost();
                 state.scrollbar_capture_lost();

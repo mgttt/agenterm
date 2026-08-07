@@ -50,6 +50,17 @@ pub enum MouseProtocolEncoding {
     // Urxvt,
 }
 
+/// Ranking for stacked DECSET mouse modes (higher includes lower reporting).
+const fn mouse_mode_rank(mode: MouseProtocolMode) -> u8 {
+    match mode {
+        MouseProtocolMode::None => 0,
+        MouseProtocolMode::Press => 1,
+        MouseProtocolMode::PressRelease => 2,
+        MouseProtocolMode::ButtonMotion => 3,
+        MouseProtocolMode::AnyMotion => 4,
+    }
+}
+
 /// Represents the overall terminal state.
 #[derive(Clone, Debug)]
 pub struct Screen {
@@ -681,10 +692,18 @@ impl Screen {
     }
 
     fn set_mouse_mode(&mut self, mode: MouseProtocolMode) {
-        self.mouse_protocol_mode = mode;
+        // xterm keeps the *highest* enabled tracking level when multiple
+        // DECSET mouse modes are stacked (e.g. 1000 then 1002, or a later
+        // 1000h refresh after 1002h). Replacing blindly would downgrade
+        // button-motion to press-release and break TUI click/drag pass-through.
+        if mouse_mode_rank(mode) >= mouse_mode_rank(self.mouse_protocol_mode) {
+            self.mouse_protocol_mode = mode;
+        }
     }
 
     fn clear_mouse_mode(&mut self, mode: MouseProtocolMode) {
+        // Only clear when the active level matches. Higher levels stay put if a
+        // lower DECRST arrives first (e.g. 1000l while 1002 is still active).
         if self.mouse_protocol_mode == mode {
             self.mouse_protocol_mode = MouseProtocolMode::default();
         }

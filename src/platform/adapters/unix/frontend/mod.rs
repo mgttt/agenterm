@@ -3968,12 +3968,13 @@ impl UnixApp {
         let Some(position) = self.active_position() else {
             return false;
         };
-        let (mode, encoding, scrollback) = {
+        let (mode, encoding, scrollback, alternate_screen) = {
             let screen = self.tabs[position].parser.screen();
             (
                 screen.mouse_protocol_mode(),
                 screen.mouse_protocol_encoding(),
                 screen.scrollback(),
+                screen.alternate_screen(),
             )
         };
         let product_mode = match mode {
@@ -3998,7 +3999,8 @@ impl UnixApp {
             shift: self.pointer_modifiers.shift,
             alt: self.pointer_modifiers.alt,
             control: self.pointer_modifiers.control,
-            scrolled_back: scrollback != 0,
+            // Alt-screen TUIs need pass-through even if offset is stale.
+            scrolled_back: scrollback != 0 && !alternate_screen,
             motion,
             dragging,
             pressed,
@@ -6358,8 +6360,12 @@ impl UnixApp {
                     .is_some_and(|gesture| gesture.active())
                 {
                     self.drag_terminal_selection(x, y);
+                } else if self.forward_terminal_mouse(x, y, None, true, true)
+                    || self.mouse_report_button.is_some()
+                {
+                    // App mouse gesture owns the pointer until release.
                 } else {
-                    let _ = self.forward_terminal_mouse(x, y, None, true, true);
+                    // no local selection drag without an active gesture
                 }
             }
             PixelWindowEvent::MouseWheel {

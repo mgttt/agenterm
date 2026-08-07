@@ -496,13 +496,23 @@ pub(crate) fn mouse_delivery(
     dragging: bool,
     pressed: bool,
 ) -> MouseDelivery {
-    if shift_override || scrolled_back || mode == ApplicationMouseMode::None {
+    // Shift always forces local selection (xterm convention). Scrollback
+    // suppresses reports so cells match what the app drew — except when the
+    // host already owns an in-progress app gesture (`dragging`), in which
+    // case we must finish press/release for TUI buttons.
+    if shift_override || mode == ApplicationMouseMode::None {
+        return MouseDelivery::LocalSelection;
+    }
+    if scrolled_back && !dragging {
         return MouseDelivery::LocalSelection;
     }
     let reportable = match mode {
         ApplicationMouseMode::None => false,
         ApplicationMouseMode::Press => pressed && !motion,
-        ApplicationMouseMode::PressRelease => !motion,
+        // Press-release (1000): no motion reports, but once a button is down
+        // keep owning the gesture so micro-moves do not steal into local
+        // selection (adapters also gate on `dragging`).
+        ApplicationMouseMode::PressRelease => !motion || dragging,
         ApplicationMouseMode::ButtonMotion => !motion || dragging,
         ApplicationMouseMode::AnyMotion => true,
     };
@@ -1072,6 +1082,7 @@ mod tests {
     #[test]
     fn mouse_delivery_follows_xterm_protocol_phases() {
         use ApplicationMouseMode as Mode;
+        // (mode, shift, scrolled_back, motion, dragging, pressed)
         assert_eq!(
             mouse_delivery(Mode::None, false, false, false, false, true),
             MouseDelivery::LocalSelection
@@ -1084,13 +1095,28 @@ mod tests {
             mouse_delivery(Mode::Press, false, false, true, false, true),
             MouseDelivery::LocalSelection
         );
+        // Press-release owns an in-progress button gesture (dragging) so
+        // micro-moves stay application-owned rather than local selection.
         assert_eq!(
             mouse_delivery(Mode::PressRelease, false, false, true, true, true),
+            MouseDelivery::Application
+        );
+        assert_eq!(
+            mouse_delivery(Mode::PressRelease, false, false, true, false, true),
             MouseDelivery::LocalSelection
         );
         assert_eq!(
             mouse_delivery(Mode::ButtonMotion, false, false, true, true, true),
             MouseDelivery::Application
+        );
+        // Scrollback blocks new reports but not finishing a held gesture.
+        assert_eq!(
+            mouse_delivery(Mode::PressRelease, false, true, false, true, false),
+            MouseDelivery::Application
+        );
+        assert_eq!(
+            mouse_delivery(Mode::PressRelease, false, true, false, false, true),
+            MouseDelivery::LocalSelection
         );
         assert_eq!(
             mouse_delivery(Mode::AnyMotion, false, false, true, false, false),
