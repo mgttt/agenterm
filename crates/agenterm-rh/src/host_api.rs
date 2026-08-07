@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 18;
+pub const RH_CODEGEN_REVISION: u32 = 19;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -360,12 +360,152 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
+         fn rh_civil_date_from_unix_days(days: i64) -> (i64, i64, i64) {\n\
+             let z = days + 719_468;\n\
+             let era = if z >= 0 { z } else { z - 146_096 } / 146_097;\n\
+             let day_of_era = z - era * 146_097;\n\
+             let year_of_era =\n\
+                 (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096)\n\
+                     / 365;\n\
+             let mut year = year_of_era + era * 400;\n\
+             let day_of_year =\n\
+                 day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);\n\
+             let month_prime = (5 * day_of_year + 2) / 153;\n\
+             let day = day_of_year - (153 * month_prime + 2) / 5 + 1;\n\
+             let month = month_prime + if month_prime < 10 { 3 } else { -9 };\n\
+             year += i64::from(month <= 2);\n\
+             (year, month, day)\n\
+         }\n\n\
+         fn rh_system_time_now_rfc3339() -> String {\n\
+             match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {\n\
+                 Ok(duration) => {\n\
+                     let Ok(seconds) = i64::try_from(duration.as_secs()) else {\n\
+                         let _ = rh_fail(\"system_time_overflow: seconds exceed supported range\");\n\
+                         return String::new();\n\
+                     };\n\
+                     let days = seconds / 86_400;\n\
+                     let day_seconds = seconds % 86_400;\n\
+                     let (year, month, day) = rh_civil_date_from_unix_days(days);\n\
+                     let hour = day_seconds / 3_600;\n\
+                     let minute = (day_seconds % 3_600) / 60;\n\
+                     let second = day_seconds % 60;\n\
+                     format!(\n\
+                         \"{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{:03}Z\",\n\
+                         duration.subsec_millis()\n\
+                     )\n\
+                 }\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"system_time_before_unix_epoch: {error}\"));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_env_has(name: &str) -> INT {\n\
+             i64::from(std::env::var_os(name).is_some())\n\
+         }\n\n\
+         fn rh_env_get(name: &str) -> String {\n\
+             match std::env::var(name) {\n\
+                 Ok(value) => value,\n\
+                 Err(_) => {\n\
+                     let _ = rh_fail(&format!(\"env_get_missing: {name}\"));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_sha256_hex(bytes: impl AsRef<[u8]>) -> String {\n\
+             const HEX: &[u8; 16] = b\"0123456789abcdef\";\n\
+             let bytes = bytes.as_ref();\n\
+             let mut output = String::with_capacity(bytes.len() * 2);\n\
+             for byte in bytes {\n\
+                 output.push(HEX[usize::from(byte >> 4)] as char);\n\
+                 output.push(HEX[usize::from(byte & 0x0f)] as char);\n\
+             }\n\
+             output\n\
+         }\n\n\
+         fn rh_sha256_file(path: &str) -> String {\n\
+             use sha2::{Digest, Sha256};\n\
+             use std::io::Read;\n\
+             let mut input = match std::fs::File::open(path) {\n\
+                 Ok(file) => file,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"crypto_sha256_file: {path}: {error}\"));\n\
+                     return String::new();\n\
+                 }\n\
+             };\n\
+             let mut digest = Sha256::new();\n\
+             let mut buffer = [0_u8; 64 * 1024];\n\
+             loop {\n\
+                 let count = match input.read(&mut buffer) {\n\
+                     Ok(count) => count,\n\
+                     Err(error) => {\n\
+                         let _ = rh_fail(&format!(\"crypto_sha256_file: {path}: {error}\"));\n\
+                         return String::new();\n\
+                     }\n\
+                 };\n\
+                 if count == 0 {\n\
+                     break;\n\
+                 }\n\
+                 digest.update(&buffer[..count]);\n\
+             }\n\
+             rh_sha256_hex(digest.finalize())\n\
+         }\n\n\
+         fn rh_atomic_write(path: &str, value: &str) -> INT {\n\
+             use std::io::Write;\n\
+             use std::sync::atomic::{AtomicU64, Ordering};\n\
+             static SEQ: AtomicU64 = AtomicU64::new(0);\n\
+             let destination = match std::path::absolute(std::path::Path::new(path)) {\n\
+                 Ok(path) => path,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"runtime_atomic_write: {path}: {error}\"));\n\
+                     return 0;\n\
+                 }\n\
+             };\n\
+             let Some(parent) = destination.parent() else {\n\
+                 let _ = rh_fail(\"runtime_atomic_write_invalid_target: parent directory required\");\n\
+                 return 0;\n\
+             };\n\
+             let Some(name) = destination.file_name() else {\n\
+                 let _ = rh_fail(\"runtime_atomic_write_invalid_target: file name required\");\n\
+                 return 0;\n\
+             };\n\
+             let sequence = SEQ.fetch_add(1, Ordering::Relaxed);\n\
+             let temporary = parent.join(format!(\n\
+                 \".{}.agenterm-atomic-{}-{sequence}\",\n\
+                 name.to_string_lossy(),\n\
+                 std::process::id()\n\
+             ));\n\
+             let cleanup_path = temporary.clone();\n\
+             let mut output = match std::fs::OpenOptions::new()\n\
+                 .write(true)\n\
+                 .create_new(true)\n\
+                 .open(&temporary)\n\
+             {\n\
+                 Ok(file) => file,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"runtime_atomic_write_create: {path}: {error}\"));\n\
+                     return 0;\n\
+                 }\n\
+             };\n\
+             if let Err(error) = output.write_all(value.as_bytes()).and_then(|_| output.sync_all()) {\n\
+                 let _ = std::fs::remove_file(&cleanup_path);\n\
+                 let _ = rh_fail(&format!(\"runtime_atomic_write_data: {path}: {error}\"));\n\
+                 return 0;\n\
+             }\n\
+             drop(output);\n\
+             if let Err(error) = std::fs::rename(&temporary, &destination) {\n\
+                 let _ = std::fs::remove_file(&cleanup_path);\n\
+                 let _ = rh_fail(&format!(\"runtime_atomic_write_promote: {path}: {error}\"));\n\
+                 return 0;\n\
+             }\n\
+             0\n\
+         }\n\n\
          #[derive(Clone, Copy)]\n\
          struct RhMetadata {\n\
              is_file: INT,\n\
              is_dir: INT,\n\
              is_symlink: INT,\n\
              is_reparse_point: INT,\n\
+             len: INT,\n\
          }\n\n\
          fn rh_metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {\n\
              #[cfg(windows)]\n\
@@ -386,6 +526,7 @@ pub fn emit_host_runtime(out: &mut String) {
                      is_dir: metadata.is_dir() as INT,\n\
                      is_symlink: metadata.file_type().is_symlink() as INT,\n\
                      is_reparse_point: rh_metadata_is_reparse_point(&metadata) as INT,\n\
+                     len: metadata.len() as INT,\n\
                  },\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"fs_symlink_metadata: {error}\"));\n\
@@ -394,6 +535,7 @@ pub fn emit_host_runtime(out: &mut String) {
                          is_dir: 0,\n\
                          is_symlink: 0,\n\
                          is_reparse_point: 0,\n\
+                         len: 0,\n\
                      }\n\
                  }\n\
              }\n\

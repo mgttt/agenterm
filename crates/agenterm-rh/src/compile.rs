@@ -174,7 +174,8 @@ fn generated_cargo_toml() -> String {
          [lib]\n\
          crate-type = [\"cdylib\"]\n\n\
          [dependencies]\n\
-         serde_json = \"1\"\n"
+         serde_json = \"1\"\n\
+         sha2 = \"0.10\"\n"
     )
 }
 
@@ -207,6 +208,7 @@ mod tests {
     fn generated_native_pack_has_no_rhai_runtime_dependency() {
         let manifest = generated_cargo_toml();
         assert!(manifest.contains("serde_json = \"1\""));
+        assert!(manifest.contains("sha2 = \"0.10\""));
         assert!(!manifest.contains("rhai"));
     }
 

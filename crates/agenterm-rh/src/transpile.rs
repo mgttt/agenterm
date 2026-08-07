@@ -566,7 +566,7 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
             Expr::MethodCall(call, ..)
                 if matches!(
                     call.name.as_str(),
-                    "contains" | "starts_with" | "ends_with" | "trim" | "replace"
+                    "contains" | "starts_with" | "ends_with" | "trim" | "replace" | "to_lower"
                 )
         )
     {
@@ -1161,6 +1161,9 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if path_absolute_display_arg(expr).is_some() => ValueKind::String,
         _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
+        _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
+        _ if std_env_get_arg(expr).is_some() => ValueKind::String,
+        _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
@@ -1407,6 +1410,72 @@ fn std_fs_read_dir_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "read_dir")
 }
 
+fn std_time_system_time_now_rfc3339(expr: &Expr) -> bool {
+    let Expr::Dot(boxed, ..) = expr else {
+        return false;
+    };
+    let rfc3339 = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "rfc3339"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "rfc3339" && call.args.is_empty()
+    );
+    if !rfc3339 {
+        return false;
+    }
+    let Expr::FnCall(call, ..) = &boxed.lhs else {
+        return false;
+    };
+    call.namespace.to_string() == "std::time::SystemTime" && call.name == "now" && call.args.is_empty()
+}
+
+fn std_env_has_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::env" || call.name != "has" || call.args.len() != 1 {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn std_env_get_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::env" || call.name != "get" || call.args.len() != 1 {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn crypto_sha256_file_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::crypto"
+        || call.name != "sha256_file"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn runtime_atomic_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::runtime"
+        || call.name != "atomic_write"
+        || call.args.len() != 2
+    {
+        return None;
+    }
+    Some((&call.args[0], &call.args[1]))
+}
+
 fn std_time_system_time_now_unix_millis(expr: &Expr) -> bool {
     let Expr::Dot(boxed, ..) = expr else {
         return false;
@@ -1441,7 +1510,7 @@ fn symlink_metadata_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> 
     };
     matches!(
         name,
-        "is_file" | "is_dir" | "is_symlink" | "is_reparse_point"
+        "is_file" | "is_dir" | "is_symlink" | "is_reparse_point" | "len"
     )
     .then_some((path, name))
 }
@@ -1529,7 +1598,7 @@ fn metadata_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a s
     };
     matches!(
         name,
-        "is_file" | "is_dir" | "is_symlink" | "is_reparse_point"
+        "is_file" | "is_dir" | "is_symlink" | "is_reparse_point" | "len"
     )
     .then_some((ident.1.as_str(), name))
 }
@@ -1973,6 +2042,30 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("rh_system_time_now_unix_millis()");
             return Ok(());
         }
+        if std_time_system_time_now_rfc3339(expr) {
+            out.push_str("rh_system_time_now_rfc3339()");
+            return Ok(());
+        }
+        if let Some(name) = std_env_has_arg(expr)
+            && emit_std_env_has(out, name, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(name) = std_env_get_arg(expr)
+            && emit_std_env_get(out, name, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = crypto_sha256_file_arg(expr)
+            && emit_crypto_sha256_file(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((path, value)) = runtime_atomic_write_args(expr)
+            && emit_runtime_atomic_write(out, path, value, ctx)?
+        {
+            return Ok(());
+        }
         if emit_dir_entry_property(out, expr, ctx)? {
             return Ok(());
         }
@@ -2108,6 +2201,69 @@ fn emit_std_fs_exists_case_exact(
     }
     out.push_str("rh_std_fs_exists_case_exact(");
     out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_env_has(
+    out: &mut String,
+    name: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut name_expr = String::new();
+    if !emit_native_string(&mut name_expr, name, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_env_has(");
+    out.push_str(&name_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_env_get(
+    out: &mut String,
+    name: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut name_expr = String::new();
+    if !emit_native_string(&mut name_expr, name, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_env_get(");
+    out.push_str(&name_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_crypto_sha256_file(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_sha256_file(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_runtime_atomic_write(
+    out: &mut String,
+    path: &Expr,
+    value: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_atomic_write(");
+    out.push_str(&path_expr);
+    out.push_str(", &");
+    emit_stringish(out, value, ctx)?;
     out.push(')');
     Ok(true)
 }
@@ -2501,6 +2657,13 @@ fn emit_string_mut_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str(" = ");
             out.push_str(binding);
             out.push_str(".trim().to_string()");
+            Ok(true)
+        }
+        (StringReceiver::Binding(binding), "to_lower") if call.args.is_empty() => {
+            out.push_str(binding);
+            out.push_str(" = ");
+            out.push_str(binding);
+            out.push_str(".to_ascii_lowercase()");
             Ok(true)
         }
         (StringReceiver::JsonBinding(binding), "trim") if call.args.is_empty() => {
@@ -3409,6 +3572,47 @@ fn entry() {
         );
         assert!(output.rust.contains("\"--show-prefix\""), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_eval_int(\"std::process::command_stdout_file"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_env_sha256_atomic_rfc3339_and_to_lower() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    if std::env::has("PATH") {
+        let path = args[0];
+        let digest = rhai::crypto::sha256_file(path);
+        digest.to_lower();
+        let _stamp = std::time::SystemTime::now().rfc3339;
+        rhai::runtime::atomic_write(path, digest);
+        let meta = std::fs::symlink_metadata(path);
+        meta.len
+    } else {
+        0
+    }
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_env_has("), "{}", output.rust);
+        assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
+        assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_system_time_now_rfc3339()"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains(".to_ascii_lowercase()"),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("meta.len"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     }
 
