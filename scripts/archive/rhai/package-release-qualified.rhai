@@ -1,3 +1,6 @@
+// Archived interpreted implementation retained for migration archaeology only.
+// Active task: scripts/rh/package-release-qualified.rh
+
 // Stage the public Windows archive and versioned SBOM from exact qualified
 // candidate bytes. This task never builds, tags, pushes, or publishes.
 //

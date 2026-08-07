@@ -8,11 +8,16 @@ fn entry() {
     if args.len != 3 {
         return rh::fail("expected: REPO RECEIPT_PATH OUTPUT_DIRECTORY");
     }
-    let run_directory = package_qualified::build_package(
-        args[0],
+    let repo = std::path::absolute(args[0]).display;
+    let run_root = std::path::join(repo, args[2]).display;
+    package_qualified::build_package(
+        repo,
         args[1],
         args[2]
     );
-    print("PACKAGE DRY-RUN " + run_directory);
+    let sidecar_path = run_root + "/.latest-package-run";
+    let qualified_run = std::fs::read_to_string(sidecar_path);
+    qualified_run.trim();
+    print("PACKAGE DRY-RUN " + qualified_run);
     0
 }

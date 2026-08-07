@@ -732,7 +732,7 @@
     {
       "id": "package-release-qualified",
       "description": "Stage public Windows release assets from byte-qualified candidate inputs",
-      "entry": "scripts/rhai/package-release-qualified.rhai",
+      "entry": "scripts/rh/package-release-qualified.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "target/qualification/receipt.json", "dist"],

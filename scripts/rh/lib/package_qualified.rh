@@ -1,11 +1,5 @@
 // Byte-qualified offline Windows package construction (INT-only native pack).
 
-fn require(condition, message) {
-    if !condition {
-        throw message;
-    }
-}
-
 fn exact_values(expected, actual) {
     if expected.len != actual.len {
         return false;
@@ -190,13 +184,13 @@ fn build_package_mode(
         "package_artifact_manifest_empty"
     );
     let unique = #{};
-    for idx in 0..artifact_names.len {
-        let name = artifact_names[idx];
+    for executable in artifact_spec.executables {
+        let executable_name = "" + executable.name;
         require(
-            !unique.contains(name),
-            "package_artifact_duplicate:" + name
+            !unique.contains(executable_name),
+            "package_artifact_duplicate:" + executable_name
         );
-        unique[name] = true;
+        unique[executable_name] = true;
     }
     let receipt_artifact_names = [];
     for executable in receipt.provenance.executables {
@@ -231,8 +225,8 @@ fn build_package_mode(
 
     let dist_root = std::path::join(repo, "dist").display;
     let payload = [];
-    for idx in 0..artifact_names.len {
-        let name = artifact_names[idx];
+    for executable in artifact_spec.executables {
+        let name = "" + executable.name;
         let source = std::path::join(dist_root, name).display;
         require(
             std::fs::exists(source) && std::fs::metadata(source).is_file,
@@ -245,7 +239,7 @@ fn build_package_mode(
             let executable_name = "" + executable.name;
             if executable_name == name {
                 receipt_count += 1;
-                receipt_hash = executable.sha256;
+                receipt_hash = "" + executable.sha256;
             }
         }
         require(
@@ -258,7 +252,7 @@ fn build_package_mode(
             let executable_name = "" + executable.name;
             if executable_name == name {
                 metadata_count += 1;
-                metadata_hash = executable.sha256;
+                metadata_hash = "" + executable.sha256;
             }
         }
         require(
@@ -333,9 +327,9 @@ fn build_package_mode(
 
     let version = "" + metadata.version;
     require(valid_version(version), "package_version_invalid:" + version);
-    let run_id = std::time::SystemTime::now().unix_millis;
+    let run_token = "" + std::time::SystemTime::now().unix_millis;
     let run_directory =
-        std::path::join(output_root, run_id).display;
+        std::path::join(output_root, run_token).display;
     let staging =
         std::path::join(run_directory, "staging").display;
     std::fs::create_dir_all(staging);
@@ -396,7 +390,7 @@ fn build_package_mode(
     );
     std::fs::try_remove_file(zip_stdout);
     if zip_code != 0 {
-        throw "package_zip_create";
+        return rh::fail("package_zip_create");
     }
     let external_manifest = std::path::join(
         run_directory,
@@ -412,17 +406,16 @@ fn build_package_mode(
         package_manifest: "package-manifest.json",
         qualified_head: head
     };
-    let result_name = if dry_run {
-        "dry-run-result.json"
+    let result_name = "";
+    if dry_run {
+        result_name = "dry-run-result.json";
     } else {
-        "release-result.json"
-    };
+        result_name = "release-result.json";
+    }
+    let result_path = run_directory + "/" + result_name;
     let result_json =
         rhai::json::stringify_pretty(result) + "\n";
-    rhai::runtime::atomic_write(
-        std::path::join(run_directory, result_name).display,
-        result_json
-    );
+    rhai::runtime::atomic_write(result_path, result_json);
     if std::fs::exists(staging) {
         let cleanup_stdout =
             staging + ".package-qualified.cleanup.stdout.tmp";
@@ -440,7 +433,9 @@ fn build_package_mode(
         std::fs::try_remove_file(cleanup_stdout);
         require(cleanup_code == 0, "package_staging_cleanup:" + staging);
     }
-    run_directory
+    let latest_run_path = output_root + "/.latest-package-run";
+    rhai::runtime::atomic_write(latest_run_path, run_directory + "\n");
+    0
 }
 
 fn build_package(repo_value, receipt_value, output_value) {

@@ -1,0 +1,101 @@
+// Stage the public Windows archive and versioned SBOM from exact qualified
+// candidate bytes. This task never builds, tags, pushes, or publishes.
+//
+// Args: REPO RECEIPT_PATH OUTPUT_DIRECTORY
+
+import "scripts/rh/lib/package_qualified" as package_qualified;
+
+fn entry() {
+    if args.len != 3 {
+        return rh::fail("expected: REPO RECEIPT_PATH OUTPUT_DIRECTORY");
+    }
+    let repo = std::path::absolute(args[0]).display;
+    let output = std::path::join(repo, args[2]).display;
+    std::fs::create_dir_all(output);
+    let run_root =
+        std::path::join(
+            repo,
+            "target/qualification/package-release"
+        ).display;
+    package_qualified::build_release_package(
+        repo,
+        args[1],
+        "target/qualification/package-release"
+    );
+    let sidecar_path = run_root + "/.latest-package-run";
+    let qualified_run = std::fs::read_to_string(sidecar_path);
+    qualified_run.trim();
+    let result_path = qualified_run + "/release-result.json";
+    let result = rhai::json::parse_file(result_path);
+    if result.dry_run {
+        return rh::fail("release_package_marked_dry_run");
+    }
+    let archive_name = "" + result.archive;
+    let archive_source = qualified_run + "/" + archive_name;
+    let archive_destination = output + "/" + archive_name;
+    std::fs::copy(archive_source, archive_destination);
+    let archive_copy_hash = rhai::crypto::sha256_file(archive_destination);
+    let archive_expected_hash = "" + result.archive_sha256;
+    if archive_copy_hash != archive_expected_hash {
+        return rh::fail("release_package_copy_hash");
+    }
+
+    let metadata_path = repo + "/dist/agenterm.json";
+    let metadata = rhai::json::parse_file(metadata_path);
+    let receipt = rhai::json::parse_file(args[1]);
+    let sbom_source = repo + "/dist/agenterm-sbom.spdx.json";
+    let version = "" + metadata.version;
+    let sbom_name = "agenterm-" + version + "-sbom.spdx.json";
+    let sbom_destination = output + "/" + sbom_name;
+    std::fs::copy(sbom_source, sbom_destination);
+    let sbom_copy_hash = rhai::crypto::sha256_file(sbom_destination);
+    let sbom_source_hash = rhai::crypto::sha256_file(sbom_source);
+    if sbom_copy_hash != sbom_source_hash {
+        return rh::fail("release_sbom_copy_hash");
+    }
+
+    let archive_hash = rhai::crypto::sha256_file(archive_destination);
+    let build_log = "";
+    if std::env::has("GITHUB_SERVER_URL")
+            && std::env::has("GITHUB_REPOSITORY")
+            && std::env::has("GITHUB_RUN_ID") {
+        build_log = std::env::get("GITHUB_SERVER_URL") + "/" +
+            std::env::get("GITHUB_REPOSITORY") + "/actions/runs/" +
+            std::env::get("GITHUB_RUN_ID");
+    }
+    let provenance = #{
+        schema_version: 1,
+        product: "AgenTerm",
+        version: version,
+        os: "windows",
+        arch: "x86_64",
+        channel: "release",
+        signed: false,
+        notarized: false,
+        artifact: archive_name,
+        sha256: archive_hash,
+        source_commit: receipt.provenance.git_head,
+        source_tag: "v" + version,
+        artifact_manifest_sha256:
+            receipt.provenance.artifact_manifest_sha256,
+        cargo_lock_sha256: receipt.provenance.cargo_lock_sha256,
+        sbom_sha256: sbom_copy_hash,
+        build_log: build_log
+    };
+    let provenance_destination = archive_destination + ".provenance.json";
+    let checksum_destination = archive_destination + ".sha256";
+    rhai::runtime::atomic_write(
+        provenance_destination,
+        rhai::json::stringify_pretty(provenance) + "\n"
+    );
+    rhai::runtime::atomic_write(
+        checksum_destination,
+        archive_hash + "  " + archive_name + "\n"
+    );
+    print(
+        "RELEASE ASSETS " + archive_destination + " " +
+            sbom_destination + " " + provenance_destination + " " +
+            checksum_destination
+    );
+    0
+}
