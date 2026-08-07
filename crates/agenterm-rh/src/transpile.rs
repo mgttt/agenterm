@@ -894,6 +894,16 @@ fn std_fs_single_arg<'a>(expr: &'a Expr, name: &str) -> Option<&'a Expr> {
     Some(&call.args[0])
 }
 
+fn rh_fail_message(expr: &Expr) -> Option<String> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rh" || call.name != "fail" || call.args.len() != 1 {
+        return None;
+    }
+    throw_message(&call.args[0])
+}
+
 fn path_join_display_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
@@ -931,6 +941,12 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(path) = std_fs_exists_case_exact_arg(expr)
             && emit_std_fs_exists_case_exact(out, path, ctx)?
         {
+            return Ok(());
+        }
+        if let Some(message) = rh_fail_message(expr) {
+            out.push_str("rh_fail(");
+            out.push_str(&format!("{message:?}"));
+            out.push(')');
             return Ok(());
         }
         if let Some(path) = std_fs_read_to_string_arg(expr)

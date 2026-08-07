@@ -59,6 +59,7 @@ pub const SHIPPED_SURFACE_PATHS: &[&str] = &[
     "fleet.workspace.shutdown",
     "import \"relative/module\" as module",
     "print",
+    "rh::fail",
     "rhai::bytes::from_array",
     "rhai::bytes::from_text",
     "rhai::clipboard::get_text",
