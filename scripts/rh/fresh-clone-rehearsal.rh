@@ -18,13 +18,13 @@ fn assert_ok(condition, message) {
 }
 
 fn trimmed(value) {
-    let text = value.to_string();
+    let text = "" + value;
     text.trim();
     text
 }
 
 fn tail(value, maximum) {
-    let text = value.to_string();
+    let text = "" + value;
     if text.len <= maximum {
         return text;
     }
@@ -61,7 +61,10 @@ fn package_version(repo) {
         let line = source_line;
         line.trim();
         if line.starts_with("[") {
-            in_package = line == "[package]";
+            in_package = 0;
+            if line == "[package]" {
+                in_package = 1;
+            }
         } else if in_package && line.starts_with("version") {
             let pieces = line.split("\"");
             assert_ok(pieces.len >= 2, "fresh_clone_version_parse");
@@ -72,13 +75,13 @@ fn package_version(repo) {
 }
 
 fn process_key(process) {
-    process.id.to_string() + ":" +
-        process.parent_id.to_string() + ":" +
+    "" + process.id + ":" +
+        "" + process.parent_id + ":" +
         process.executable_name.to_lower()
 }
 
 fn powershell_token(process) {
-    process.executable_name.to_lower() + ":" + process.id
+    process.executable_name.to_lower() + ":" + ("" + process.id)
 }
 
 fn terminal_compatibility_executable() {
@@ -98,15 +101,15 @@ fn is_powershell(process) {
 fn observe_descendants(root_id, owned_ids, identities) {
     let snapshot = std::process::list();
     let included = rhai::json::parse("{}");
-    included[root_id.to_string()] = true;
+    included["" + root_id] = true;
     for id in owned_ids.keys() {
         included[id] = true;
     }
     for depth in 0..64 {
         let changed = 0;
         for process in snapshot {
-            let id = process.id.to_string();
-            let parent = process.parent_id.to_string();
+            let id = "" + process.id;
+            let parent = "" + process.parent_id;
             if !included.contains(id) && included.contains(parent) {
                 included[id] = true;
                 changed = 1;
@@ -119,7 +122,7 @@ fn observe_descendants(root_id, owned_ids, identities) {
 
     let current = [];
     for process in snapshot {
-        let id = process.id.to_string();
+        let id = "" + process.id;
         if !included.contains(id) {
             continue;
         }
@@ -193,7 +196,7 @@ fn exact_terminal_payload(observed, typed) {
     assert_ok(
         first.len == second.len && first.len <= 1,
         "fresh_clone_terminal_payload_not_unique:" +
-            first.len + ":" + second.len
+            "" + first.len + ":" + second.len
     );
     if first.len == 1 {
         assert_ok(
@@ -235,11 +238,15 @@ fn remove_owned_clone(qualification_root, clone) {
     assert_ok(!std::fs::exists(target), "fresh_clone_cleanup_failed:" + target);
 }
 
+fn start_child(command) {
+    command.start()
+}
+
 fn terminate_observed_processes(identities) {
     for attempt in 0..4 {
         let terminated = 0;
         for process in std::process::list() {
-            let id = process.id.to_string();
+            let id = "" + process.id;
             if process.id != std::process::id()
                     && identities.contains(id)
                     && identities[id] == process_key(process) {
@@ -261,7 +268,7 @@ fn terminate_observed_processes(identities) {
 fn live_observed_processes(identities) {
     let live = [];
     for process in std::process::list() {
-        let id = process.id.to_string();
+        let id = "" + process.id;
         if process.id != std::process::id()
                 && identities.contains(id)
                 && identities[id] == process_key(process) {
@@ -275,24 +282,21 @@ fn live_observed_processes(identities) {
     live
 }
 
-fn rejection_contains(expected, action) {
-    let rejected = 0;
-    try {
-        action.call();
-    } catch (error) {
-        assert_ok(
-            error.to_string().contains(expected),
-            "fresh_clone_selftest_wrong_rejection:" + error
-        );
-        rejected = 1;
-    }
-    assert_ok(rejected, "fresh_clone_selftest_expected_rejection:" + expected);
-}
-
 fn entry() {
-let self_test =
-    (args.len == 1 && args[0] == "--self-test")
-        || (args.len == 2 && args[0] == "." && args[1] == "--self-test");
+// Contract: args.len == 2 && args[0] == "." && args[1] == "--self-test"
+let self_test = 0;
+if args.len == 1 {
+    if args[0] == "--self-test" {
+        self_test = 1;
+    }
+}
+if args.len == 2 {
+    if args[0] == "." {
+        if args[1] == "--self-test" {
+            self_test = 1;
+        }
+    }
+}
 if self_test {
     let accepted = exact_terminal_payload(
         [terminal_compatibility_executable() + ":101"],
@@ -301,22 +305,42 @@ if self_test {
     assert_ok(accepted.observed.len == 1, "fresh_clone_selftest_accept");
     let absent = exact_terminal_payload([], []);
     assert_ok(absent.observed.len == 0, "fresh_clone_selftest_absent");
-    rejection_contains(
-        "fresh_clone_untyped_powershell",
-        || exact_terminal_payload(
+    let rejected_wrong = 0;
+    try {
+        exact_terminal_payload(
             [terminal_compatibility_executable() + ":101"],
             [terminal_compatibility_executable() + ":202"]
-        )
+        );
+    } catch (error) {
+        assert_ok(
+            ("" + error).contains("fresh_clone_untyped_powershell"),
+            "fresh_clone_selftest_wrong_rejection:" + error
+        );
+        rejected_wrong = 1;
+    }
+    assert_ok(
+        rejected_wrong,
+        "fresh_clone_selftest_expected_rejection:fresh_clone_untyped_powershell"
     );
-    rejection_contains(
-        "fresh_clone_terminal_payload_not_unique",
-        || exact_terminal_payload(
+    let rejected_not_unique = 0;
+    try {
+        exact_terminal_payload(
             [
                 terminal_compatibility_executable() + ":101",
                 alternate_powershell_executable() + ":202"
             ],
             [terminal_compatibility_executable() + ":101"]
-        )
+        );
+    } catch (error) {
+        assert_ok(
+            ("" + error).contains("fresh_clone_terminal_payload_not_unique"),
+            "fresh_clone_selftest_wrong_rejection:" + error
+        );
+        rejected_not_unique = 1;
+    }
+    assert_ok(
+        rejected_not_unique,
+        "fresh_clone_selftest_expected_rejection:fresh_clone_terminal_payload_not_unique"
     );
     let archive = release_archive_path(#{
         archive: "candidate.zip",
@@ -326,12 +350,22 @@ if self_test {
         std::path::PathBuf::from(archive).file_name == "candidate.zip",
         "fresh_clone_selftest_archive"
     );
-    rejection_contains(
-        "fresh_clone_package_archive_name",
-        || release_archive_path(#{
+    let rejected_archive = 0;
+    try {
+        release_archive_path(#{
             archive: "../candidate.zip",
             package_directory: std::env::current_dir().display
-        })
+        });
+    } catch (error) {
+        assert_ok(
+            ("" + error).contains("fresh_clone_package_archive_name"),
+            "fresh_clone_selftest_wrong_rejection:" + error
+        );
+        rejected_archive = 1;
+    }
+    assert_ok(
+        rejected_archive,
+        "fresh_clone_selftest_expected_rejection:fresh_clone_package_archive_name"
     );
     print("PASS: fresh-clone process policy fails closed");
     return;
@@ -563,19 +597,25 @@ try {
     release.env("GIT_TERMINAL_PROMPT", "0");
     release.stdout_file(stdout_path);
     release.stderr_file(stderr_path);
-    child = release.start();
+    child = start_child(release);
     evidence.process_observation.root_id = child.id;
 
     let powershell = [];
     let started = std::time::SystemTime::now().unix_millis;
     let next_timeline = started;
-    while child.state == "running"
-            && std::time::SystemTime::now().unix_millis - started
-                < child_deadline_ms {
+    let keep_waiting = 0;
+    if child.state == "running" {
+        let deadline_now = std::time::SystemTime::now().unix_millis;
+        if deadline_now - started < child_deadline_ms {
+            keep_waiting = 1;
+        }
+    }
+    while keep_waiting != 0 {
         let now = std::time::SystemTime::now().unix_millis;
         let current =
             observe_descendants(child.id, owned_ids, identities);
-        evidence.process_observation.scan_count += 1;
+        evidence.process_observation.scan_count =
+            evidence.process_observation.scan_count + 1;
         for process in current {
             let identity = process_key(process);
             if !unique.contains(identity) {
@@ -620,6 +660,13 @@ try {
             next_timeline = now + 1000;
         }
         rhai::task::sleep(std::time::Duration::from_millis(500));
+        keep_waiting = 0;
+        if child.state == "running" {
+            let deadline_now = std::time::SystemTime::now().unix_millis;
+            if deadline_now - started < child_deadline_ms {
+                keep_waiting = 1;
+            }
+        }
     }
     if child.state == "running" {
         child.kill();
@@ -759,7 +806,7 @@ try {
     );
     evidence.success = 1;
 } catch (error) {
-    failure = error.to_string();
+    failure = "" + error;
     evidence.failure = failure;
 }
 
@@ -776,7 +823,8 @@ try {
     if child != () && child.state == "running" {
         let final_processes =
             observe_descendants(child.id, owned_ids, identities);
-        evidence.process_observation.scan_count += 1;
+        evidence.process_observation.scan_count =
+            evidence.process_observation.scan_count + 1;
         for process in final_processes {
             let identity = process_key(process);
             if !unique.contains(identity) {
@@ -827,10 +875,11 @@ try {
 } catch (cleanup_error) {
     evidence.clone_removed = 0;
     if failure == () {
-        failure = cleanup_error.to_string();
+        failure = "" + cleanup_error;
         evidence.failure = failure;
     } else {
-        evidence.failure += "\n" + cleanup_error;
+        evidence.failure =
+            evidence.failure + "\n" + ("" + cleanup_error);
     }
     evidence.success = 0;
 }
