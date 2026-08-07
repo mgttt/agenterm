@@ -41,6 +41,7 @@ pub mod script_runtime;
 pub mod script_stdlib;
 pub mod script_stream;
 pub mod script_task;
+mod script_worker;
 mod settings;
 mod tab_tree;
 mod terminal_cursor;
@@ -92,6 +93,7 @@ pub use platform::{
 pub use frontend::run_gui_entry;
 
 pub use server_app::{run_server_entry, run_server_entry_with_args};
+pub use script_worker::{run_framed_worker_stdio, run_legacy_worker_stdio};
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
