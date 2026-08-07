@@ -232,7 +232,7 @@ fn entry() {
 }
 
 #[test]
-fn rh_backend_localized_host_eval_failure_is_an_error() {
+fn rh_backend_native_file_read_failure_is_an_error() {
     with_rh_backend(|| {
         let missing = std::env::temp_dir().join(format!(
             "agenterm-rh-host-eval-missing-{}/file.txt",
@@ -253,12 +253,10 @@ fn rh_backend_localized_host_eval_failure_is_an_error() {
         );
         let error = match result {
             Err(error) => error,
-            Ok(_) => panic!("localized host-eval failure must fail the entry"),
+            Ok(_) => panic!("native file-read failure must fail the entry"),
         };
         assert!(
-            error
-                .to_string()
-                .contains("rh_host_eval: Runtime error: fs_read_to_string"),
+            error.to_string().contains("rh_std_fs_read_to_string:"),
             "missing stable host error detail: {error}"
         );
     });
