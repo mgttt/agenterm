@@ -83,7 +83,7 @@ fn fixture_check_many_manifest_is_valid() {
         },
     );
     assert!(report.ok, "failures: {:?}", report.failures);
-    assert_eq!(report.checked_files, 7);
+    assert_eq!(report.checked_files, 8);
 }
 
 #[test]
