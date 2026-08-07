@@ -32,6 +32,7 @@ enum ValueKind {
     Command,
     Output,
     Child,
+    ChildList,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +64,7 @@ struct EmitCtx {
     scope: BTreeMap<String, ValueKind>,
     local_fns: BTreeSet<String>,
     local_fn_sigs: BTreeMap<String, Vec<ValueKind>>,
+    local_fn_return_kinds: BTreeMap<String, ValueKind>,
     try_depth: u32,
 }
 
@@ -73,6 +75,7 @@ impl EmitCtx {
             scope: BTreeMap::new(),
             local_fns: BTreeSet::new(),
             local_fn_sigs: BTreeMap::new(),
+            local_fn_return_kinds: BTreeMap::new(),
             try_depth: 0,
         }
     }
@@ -84,6 +87,14 @@ impl EmitCtx {
 
     fn with_local_fn_sigs(mut self, local_fn_sigs: BTreeMap<String, Vec<ValueKind>>) -> Self {
         self.local_fn_sigs = local_fn_sigs;
+        self
+    }
+
+    fn with_local_fn_return_kinds(
+        mut self,
+        local_fn_return_kinds: BTreeMap<String, ValueKind>,
+    ) -> Self {
+        self.local_fn_return_kinds = local_fn_return_kinds;
         self
     }
 
@@ -116,45 +127,50 @@ impl EmitCtx {
                 out.push(',');
             }
             first = false;
+            // Fragments are embedded inside a generated `format!("…")` string, so
+            // literal `{` / `}` must be doubled once more than the meta `format!` here.
             match kind {
                 ValueKind::Int => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"int\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"int\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
                 ValueKind::Bool => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"bool\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"bool\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
                 ValueKind::String | ValueKind::Char | ValueKind::Path => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"string\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"string\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
                 ValueKind::Json => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
                 ValueKind::Set | ValueKind::StringList => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
                 ValueKind::Metadata | ValueKind::SystemTime => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
                 ValueKind::DirEntry => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
-                ValueKind::Command | ValueKind::Output | ValueKind::Child => {
+                ValueKind::Command
+                | ValueKind::Output
+                | ValueKind::Child
+                | ValueKind::ChildList => {
                     out.push_str(&format!(
-                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                        "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
                 }
             }
@@ -183,6 +199,7 @@ impl EmitCtx {
                     | ValueKind::Command
                     | ValueKind::Output
                     | ValueKind::Child
+                    | ValueKind::ChildList
             ) {
                 out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
@@ -319,10 +336,16 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
         }
     }
     propagate_local_fn_param_kinds(&local_defs, &mut local_fn_sigs);
+    let mut local_fn_return_kinds = BTreeMap::new();
+    let return_probe = sig_probe.clone().with_local_fn_sigs(local_fn_sigs.clone());
+    for def in &local_defs {
+        local_fn_return_kinds.insert(def.name.to_string(), infer_return_kind(def, &return_probe));
+    }
     let mut base_ctx = ctx
         .clone()
         .with_local_fns(local_fns)
-        .with_local_fn_sigs(local_fn_sigs);
+        .with_local_fn_sigs(local_fn_sigs)
+        .with_local_fn_return_kinds(local_fn_return_kinds);
     let mut wrote_fn = false;
     let mut has_entry = false;
     for meta in ast.iter_functions() {
@@ -495,11 +518,8 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
         }
         if fn_ctx.cdylib {
             out.push_str(param.as_str());
-            out.push_str(match kind {
-                ValueKind::String | ValueKind::Path => ": String",
-                ValueKind::Json => ": serde_json::Value",
-                _ => ": INT",
-            });
+            out.push_str(": ");
+            out.push_str(rust_param_type(*kind));
         } else {
             out.push_str("mut ");
             out.push_str(param.as_str());
@@ -518,7 +538,15 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
     def.params
         .iter()
         .map(|param| {
-            if param_used_as_json(def, param.as_str(), ctx) {
+            if param_used_as_output(def, param.as_str()) {
+                ValueKind::Output
+            } else if param_used_as_child_list(def, param.as_str()) {
+                ValueKind::ChildList
+            } else if param_used_as_child(def, param.as_str()) {
+                ValueKind::Child
+            } else if param_used_as_command(def, param.as_str()) {
+                ValueKind::Command
+            } else if param_used_as_json(def, param.as_str(), ctx) {
                 ValueKind::Json
             } else if param_used_as_string(def, param.as_str(), ctx) {
                 ValueKind::String
@@ -527,6 +555,28 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
             }
         })
         .collect()
+}
+
+fn infer_return_kind(def: &ScriptFuncDef, ctx: &EmitCtx) -> ValueKind {
+    let mut fn_ctx = ctx.clone();
+    fn_ctx.scope.clear();
+    let param_kinds = ctx
+        .local_fn_sigs
+        .get(def.name.as_str())
+        .cloned()
+        .unwrap_or_else(|| infer_param_kinds(def, ctx));
+    for (param, kind) in def.params.iter().zip(param_kinds.iter().copied()) {
+        fn_ctx = fn_ctx.with_binding(param.as_str(), kind);
+    }
+    let Some(last) = def.body.iter().last() else {
+        return ValueKind::Int;
+    };
+    let expr = match last {
+        Stmt::Return(Some(expr), ..) => expr.as_ref(),
+        Stmt::Expr(expr) => expr.as_ref(),
+        _ => return ValueKind::Int,
+    };
+    infer_binding_kind(expr, &fn_ctx)
 }
 
 fn propagate_local_fn_param_kinds(
@@ -546,7 +596,16 @@ fn propagate_local_fn_param_kinds(
                     continue;
                 }
                 if sig[index] == ValueKind::Int
-                    && matches!(kind, ValueKind::String | ValueKind::Path | ValueKind::Json)
+                    && matches!(
+                        kind,
+                        ValueKind::String
+                            | ValueKind::Path
+                            | ValueKind::Json
+                            | ValueKind::Command
+                            | ValueKind::Output
+                            | ValueKind::Child
+                            | ValueKind::ChildList
+                    )
                 {
                     sig[index] = kind;
                     changed = true;
@@ -677,16 +736,99 @@ fn collect_param_kind_upgrades_in_call(
         let Some(kind) = callee_sig.get(arg_index).copied() else {
             continue;
         };
-        if matches!(kind, ValueKind::String | ValueKind::Path | ValueKind::Json) {
+        if matches!(
+            kind,
+            ValueKind::String
+                | ValueKind::Path
+                | ValueKind::Json
+                | ValueKind::Command
+                | ValueKind::Output
+                | ValueKind::Child
+                | ValueKind::ChildList
+        ) {
             upgrades.push((param_index, kind));
         }
     }
 }
 
+fn for_body_uses_char_iteration(counter: &str, body: &StmtBlock) -> bool {
+    body.iter()
+        .any(|stmt| stmt_uses_char_iteration_counter(stmt, counter))
+}
+
+fn stmt_uses_char_iteration_counter(stmt: &Stmt, counter: &str) -> bool {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
+            expr_uses_char_iteration_counter(expr.as_ref(), counter)
+        }
+        Stmt::Var(boxed, ..) => expr_uses_char_iteration_counter(&boxed.1, counter),
+        Stmt::Assignment(boxed, ..) => {
+            expr_uses_char_iteration_counter(&boxed.1.lhs, counter)
+                || expr_uses_char_iteration_counter(&boxed.1.rhs, counter)
+        }
+        Stmt::If(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_uses_char_iteration_counter(&flow.expr, counter)
+                || block_uses_char_iteration_counter(&flow.body, counter)
+                || block_uses_char_iteration_counter(&flow.branch, counter)
+        }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            block_uses_char_iteration_counter(&flow.body, counter)
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            block_uses_char_iteration_counter(&flow.body, counter)
+        }
+        _ => false,
+    }
+}
+
+fn block_uses_char_iteration_counter(body: &StmtBlock, counter: &str) -> bool {
+    body.iter()
+        .any(|stmt| stmt_uses_char_iteration_counter(stmt, counter))
+}
+
+fn expr_uses_char_iteration_counter(expr: &Expr, counter: &str) -> bool {
+    if let Expr::Dot(boxed, ..) = expr
+        && is_param_var(&boxed.lhs, counter)
+        && matches!(
+            &boxed.rhs,
+            Expr::MethodCall(call, ..) if call.name == "to_string" && call.args.is_empty()
+        )
+    {
+        return true;
+    }
+    match expr {
+        Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_uses_char_iteration_counter(arg, counter)),
+        Expr::Dot(boxed, ..) | Expr::Index(boxed, ..) => {
+            expr_uses_char_iteration_counter(&boxed.lhs, counter)
+                || expr_uses_char_iteration_counter(&boxed.rhs, counter)
+        }
+        _ => false,
+    }
+}
+
+fn param_used_as_json_array_for(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body.iter().any(|stmt| {
+        let Stmt::For(boxed, ..) = stmt else {
+            return false;
+        };
+        let (counter, _, flow) = boxed.as_ref();
+        matches!(&flow.expr, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+            && !for_body_uses_char_iteration(counter.name.as_str(), &flow.body)
+    })
+}
+
 fn param_used_as_json(def: &ScriptFuncDef, param: &str, _ctx: &EmitCtx) -> bool {
-    def.body
-        .iter()
-        .any(|stmt| stmt_uses_json_param(stmt, param))
+    param_used_as_json_array_for(def, param)
+        || def
+            .body
+            .iter()
+            .any(|stmt| stmt_uses_json_param(stmt, param))
 }
 
 fn stmt_uses_json_param(stmt: &Stmt, param: &str) -> bool {
@@ -764,6 +906,224 @@ fn is_json_method_name(name: &str) -> bool {
     matches!(name, "push" | "insert" | "get")
 }
 
+fn is_output_member_name(name: &str) -> bool {
+    matches!(
+        name,
+        "success"
+            | "exit_code"
+            | "stdout"
+            | "stderr"
+            | "stdout_text"
+            | "stderr_text"
+            | "require_success"
+    )
+}
+
+fn is_child_member_name(name: &str) -> bool {
+    matches!(name, "id" | "state" | "kill" | "wait_with_output")
+}
+
+fn is_command_member_name(name: &str) -> bool {
+    matches!(
+        name,
+        "args" | "env" | "timeout" | "capture_limit" | "current_dir" | "output" | "start"
+    )
+}
+
+fn is_process_member_name(name: &str) -> bool {
+    is_output_member_name(name) || is_child_member_name(name) || is_command_member_name(name)
+}
+
+fn rust_param_type(kind: ValueKind) -> &'static str {
+    match kind {
+        ValueKind::String | ValueKind::Path => "String",
+        ValueKind::Json => "serde_json::Value",
+        ValueKind::Command => "RhCommand",
+        ValueKind::Output => "RhOutput",
+        ValueKind::Child => "RhChild",
+        ValueKind::ChildList => "Vec<RhChild>",
+        _ => "INT",
+    }
+}
+
+fn expr_uses_process_param(expr: &Expr, param: &str, member: fn(&str) -> bool) -> bool {
+    let Expr::Dot(boxed, ..) = expr else {
+        return false;
+    };
+    if !is_param_var(&boxed.lhs, param) {
+        return false;
+    }
+    match &boxed.rhs {
+        Expr::Property(property, ..) => member(property.2.as_str()),
+        Expr::MethodCall(call, ..) => member(call.name.as_str()),
+        _ => false,
+    }
+}
+
+fn param_used_as_output(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_param_with_member(stmt, param, is_output_member_name))
+}
+
+fn param_used_as_child(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_param_with_member(stmt, param, is_child_member_name))
+}
+
+fn param_used_as_command(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_param_with_member(stmt, param, is_command_member_name))
+}
+
+fn stmt_uses_param_with_member(stmt: &Stmt, param: &str, member: fn(&str) -> bool) -> bool {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
+            expr_uses_process_param(expr.as_ref(), param, member)
+                || expr_mentions_param(expr.as_ref(), param, member)
+        }
+        Stmt::Var(boxed, ..) => expr_mentions_param(&boxed.1, param, member),
+        Stmt::Assignment(boxed, ..) => {
+            expr_mentions_param(&boxed.1.lhs, param, member)
+                || expr_mentions_param(&boxed.1.rhs, param, member)
+        }
+        Stmt::If(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_mentions_param(&flow.expr, param, member)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
+                || flow
+                    .branch
+                    .iter()
+                    .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
+        }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            expr_mentions_param(&flow.expr, param, member)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_mentions_param(&flow.expr, param, member)
+                || flow
+                    .body
+                    .iter()
+                    .any(|stmt| stmt_uses_param_with_member(stmt, param, member))
+        }
+        Stmt::FnCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_mentions_param(arg, param, member)),
+        _ => false,
+    }
+}
+
+fn expr_mentions_param(expr: &Expr, param: &str, member: fn(&str) -> bool) -> bool {
+    match expr {
+        Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_uses_process_param(arg, param, member)),
+        Expr::Dot(boxed, ..) | Expr::Index(boxed, ..) => {
+            expr_uses_process_param(expr, param, member)
+                || expr_mentions_param(&boxed.lhs, param, member)
+                || expr_mentions_param(&boxed.rhs, param, member)
+        }
+        Expr::Array(items, ..) => items
+            .iter()
+            .any(|item| expr_mentions_param(item, param, member)),
+        Expr::Map(map, ..) => map
+            .0
+            .iter()
+            .any(|(_, value)| expr_mentions_param(value, param, member)),
+        _ => false,
+    }
+}
+
+fn child_aliases_in_block(counter: &str, body: &StmtBlock) -> BTreeSet<String> {
+    let mut aliases = BTreeSet::from([counter.to_string()]);
+    for stmt in body.iter() {
+        if let Stmt::Var(boxed, ..) = stmt
+            && let Expr::Variable(ident, ..) = &boxed.1
+            && aliases.contains(ident.1.as_str())
+        {
+            aliases.insert(boxed.0.name.to_string());
+        }
+    }
+    aliases
+}
+
+fn block_uses_child_vars(body: &StmtBlock, vars: &BTreeSet<String>) -> bool {
+    body.iter().any(|stmt| stmt_uses_child_binding(stmt, vars))
+}
+
+fn stmt_uses_child_binding(stmt: &Stmt, vars: &BTreeSet<String>) -> bool {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
+            expr_uses_child_binding(expr.as_ref(), vars)
+        }
+        Stmt::Var(boxed, ..) => expr_uses_child_binding(&boxed.1, vars),
+        Stmt::Assignment(boxed, ..) => {
+            expr_uses_child_binding(&boxed.1.lhs, vars)
+                || expr_uses_child_binding(&boxed.1.rhs, vars)
+        }
+        Stmt::If(boxed, ..) => {
+            let flow = boxed.as_ref();
+            expr_uses_child_binding(&flow.expr, vars)
+                || block_uses_child_vars(&flow.body, vars)
+                || block_uses_child_vars(&flow.branch, vars)
+        }
+        Stmt::For(boxed, ..) => {
+            let (_, _, flow) = boxed.as_ref();
+            block_uses_child_vars(&flow.body, vars)
+        }
+        Stmt::While(boxed, ..) => {
+            let flow = boxed.as_ref();
+            block_uses_child_vars(&flow.body, vars)
+        }
+        _ => false,
+    }
+}
+
+fn expr_uses_child_binding(expr: &Expr, vars: &BTreeSet<String>) -> bool {
+    for var in vars {
+        if expr_uses_process_param(expr, var, is_child_member_name) {
+            return true;
+        }
+    }
+    match expr {
+        Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
+            .args
+            .iter()
+            .any(|arg| expr_uses_child_binding(arg, vars)),
+        Expr::Dot(boxed, ..) | Expr::Index(boxed, ..) => {
+            expr_uses_child_binding(&boxed.lhs, vars) || expr_uses_child_binding(&boxed.rhs, vars)
+        }
+        _ => false,
+    }
+}
+
+fn param_used_as_child_list(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body.iter().any(|stmt| {
+        let Stmt::For(boxed, ..) = stmt else {
+            return false;
+        };
+        let (counter, _, flow) = boxed.as_ref();
+        matches!(&flow.expr, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+            && block_uses_child_vars(
+                &flow.body,
+                &child_aliases_in_block(counter.name.as_str(), &flow.body),
+            )
+    })
+}
+
 fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
     match expr {
         Expr::Index(boxed, ..) => {
@@ -796,8 +1156,11 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
                 match &boxed.rhs {
                     // `param.len` is shared by strings/arrays — not JSON-only.
                     Expr::Property(property, ..) if property.2.as_str() == "len" => false,
-                    Expr::Property(..) => true,
+                    Expr::Property(property, ..) => !is_process_member_name(property.2.as_str()),
                     Expr::MethodCall(call, ..) if is_json_method_name(call.name.as_str()) => true,
+                    Expr::MethodCall(call, ..) if is_process_member_name(call.name.as_str()) => {
+                        false
+                    }
                     Expr::MethodCall(call, ..) if is_stringish_method_name(call.name.as_str()) => {
                         call.args.iter().any(|arg| expr_uses_json_param(arg, param))
                     }
@@ -840,9 +1203,9 @@ fn stmt_uses_string_param(stmt: &Stmt, param: &str) -> bool {
                     .any(|stmt| stmt_uses_string_param(stmt, param))
         }
         Stmt::For(boxed, ..) => {
-            let (_, _, flow) = boxed.as_ref();
-            // Bare `for ch in param` is the string character-iteration form.
-            matches!(&flow.expr, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+            let (counter, _, flow) = boxed.as_ref();
+            (matches!(&flow.expr, Expr::Variable(ident, ..) if ident.1.as_str() == param)
+                && for_body_uses_char_iteration(counter.name.as_str(), &flow.body))
                 || expr_uses_string_param(&flow.expr, param)
                 || flow
                     .body
@@ -1032,7 +1395,9 @@ fn emit_stmt(
             } else if kind == ValueKind::Json
                 && let Expr::Array(items, ..) = expr
                 && !items.is_empty()
-                && items.iter().all(|item| is_native_json_value_item(item, ctx))
+                && items
+                    .iter()
+                    .all(|item| is_native_json_value_item(item, ctx))
             {
                 emit_json_array_value_literal(out, items, ctx)?;
             } else if kind == ValueKind::Json && matches!(expr, Expr::Map(..)) {
@@ -1065,6 +1430,15 @@ fn emit_stmt(
                             ctx.scope.get(ident.1.as_str()).copied(),
                             Some(ValueKind::String | ValueKind::Path)
                         )
+                )
+            {
+                emit_expr(out, expr, ctx)?;
+                out.push_str(".clone()");
+            } else if matches!(kind, ValueKind::Child)
+                && matches!(
+                    expr,
+                    Expr::Variable(ident, ..)
+                        if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Child)
                 )
             {
                 emit_expr(out, expr, ctx)?;
@@ -1241,6 +1615,19 @@ fn emit_stmt(
                 let mut loop_ctx = ctx
                     .clone()
                     .with_binding(counter.name.as_str(), ValueKind::String);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
+            } else if let Expr::Variable(ident, ..) = &flow.expr
+                && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::ChildList)
+            {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in ");
+                out.push_str(ident.1.as_str());
+                out.push_str(".iter() {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::Child);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
             } else if let Some(binding) = string_for_binding(&flow.expr, ctx) {
@@ -1602,7 +1989,9 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         Expr::Array(items, ..) if items.is_empty() => ValueKind::Json,
         Expr::Array(items, ..)
             if !items.is_empty()
-                && items.iter().all(|item| is_native_json_value_item(item, ctx)) =>
+                && items
+                    .iter()
+                    .all(|item| is_native_json_value_item(item, ctx)) =>
         {
             ValueKind::Json
         }
@@ -1667,6 +2056,16 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
+        Expr::FnCall(call, ..)
+            if call.namespace.is_empty()
+                && call.op_token.is_none()
+                && ctx.local_fns.contains(call.name.as_str()) =>
+        {
+            ctx.local_fn_return_kinds
+                .get(call.name.as_str())
+                .copied()
+                .unwrap_or(ValueKind::Int)
+        }
         _ => ValueKind::Int,
     }
 }
@@ -1889,8 +2288,7 @@ fn path_parent_display_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = &boxed.lhs else {
         return None;
     };
-    if call.namespace.to_string() != "std::path" || call.name != "parent" || call.args.len() != 1
-    {
+    if call.namespace.to_string() != "std::path" || call.name != "parent" || call.args.len() != 1 {
         return None;
     }
     Some(&call.args[0])
@@ -2186,7 +2584,9 @@ fn json_stringify_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::json" || call.name != "stringify" || call.args.len() != 1
+    if call.namespace.to_string() != "rhai::json"
+        || call.name != "stringify"
+        || call.args.len() != 1
     {
         return None;
     }
@@ -2217,7 +2617,10 @@ fn std_process_command_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "std::process" || call.name != "command" || call.args.len() != 1 {
+    if call.namespace.to_string() != "std::process"
+        || call.name != "command"
+        || call.args.len() != 1
+    {
         return None;
     }
     Some(&call.args[0])
@@ -2244,11 +2647,17 @@ fn command_binding_method<'a>(
     Some((ident.1.as_str(), call))
 }
 
-fn command_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+fn command_method_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
     command_binding_method(expr, ctx, ValueKind::Command)
 }
 
-fn output_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+fn output_method_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
     command_binding_method(expr, ctx, ValueKind::Output)
 }
 
@@ -2292,7 +2701,8 @@ fn output_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str
         return None;
     }
     let property = dot_property_name(&boxed.rhs)?;
-    matches!(property, "success" | "exit_code").then_some((ident.1.as_str(), property))
+    matches!(property, "success" | "exit_code" | "stdout" | "stderr")
+        .then_some((ident.1.as_str(), property))
 }
 
 fn child_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
@@ -2374,11 +2784,7 @@ fn emit_std_process_command(
     Ok(true)
 }
 
-fn emit_command_method(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_command_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((binding, call)) = command_method_call(expr, ctx) else {
         return Ok(false);
     };
@@ -2448,11 +2854,7 @@ fn emit_command_method(
     }
 }
 
-fn emit_output_method(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_output_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((binding, call)) = output_method_call(expr, ctx) else {
         return Ok(false);
     };
@@ -2481,11 +2883,7 @@ fn emit_output_method(
     }
 }
 
-fn emit_child_method(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_child_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((binding, call)) = child_method_call(expr, ctx) else {
         return Ok(false);
     };
@@ -2572,11 +2970,7 @@ fn emit_command_mut_stmt(
     }
 }
 
-fn emit_child_mut_stmt(
-    out: &mut String,
-    expr: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_child_mut_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((binding, call)) = child_method_call(expr, ctx) else {
         return Ok(false);
     };
@@ -2606,8 +3000,17 @@ fn emit_output_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<
         return Ok(false);
     };
     out.push_str(binding);
-    out.push('.');
-    out.push_str(property);
+    match property {
+        "stdout" | "stderr" => {
+            out.push('.');
+            out.push_str(property);
+            out.push_str(".clone()");
+        }
+        _ => {
+            out.push('.');
+            out.push_str(property);
+        }
+    }
     Ok(true)
 }
 
@@ -2621,7 +3024,7 @@ fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
         out.push(')');
     } else if property == "id" {
         out.push_str(binding);
-        out.push_str(".pid");
+        out.push_str(".inner.borrow().pid");
     } else {
         out.push_str(binding);
         out.push('.');
@@ -2744,7 +3147,10 @@ fn is_native_json_value_item(expr: &Expr, ctx: &EmitCtx) -> bool {
         | Expr::Unit(..) => true,
         Expr::Array(items, ..) if items.is_empty() => true,
         Expr::Array(items, ..) => {
-            !items.is_empty() && items.iter().all(|item| is_native_json_value_item(item, ctx))
+            !items.is_empty()
+                && items
+                    .iter()
+                    .all(|item| is_native_json_value_item(item, ctx))
         }
         Expr::Variable(ident, ..) => matches!(
             ctx.scope.get(ident.1.as_str()),
@@ -3171,7 +3577,8 @@ fn fs_metadata_modified_unix_millis<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a
     } else {
         return None;
     };
-    if dot_property_name(&inner.rhs)? != "modified" || dot_property_name(&outer.rhs)? != "unix_millis"
+    if dot_property_name(&inner.rhs)? != "modified"
+        || dot_property_name(&outer.rhs)? != "unix_millis"
     {
         return None;
     }
@@ -3239,9 +3646,7 @@ fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, Option<&Ex
     Some((&call.args[0], arguments, &call.args[2], options))
 }
 
-fn process_stdout_file_args(
-    expr: &Expr,
-) -> Option<(&Expr, &[Expr], &Expr, &Expr, Option<&Expr>)> {
+fn process_stdout_file_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, &Expr, Option<&Expr>)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
@@ -3482,8 +3887,7 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || std_time_system_time_now_unix_millis(expr)
         || std_process_id(expr)
         || output_property_binding(expr, ctx).is_some()
-        || child_property_binding(expr, ctx)
-            .is_some_and(|(_, property)| property == "id")
+        || child_property_binding(expr, ctx).is_some_and(|(_, property)| property == "id")
         || system_time_unix_millis_binding(expr, ctx).is_some()
         || fs_metadata_modified_unix_millis(expr).is_some()
         || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
@@ -3620,6 +4024,13 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str(&format!("\"{value}\""));
             out.push(')');
         }
+        _ if let Some((binding, index)) = json_array_index(expr, ctx) => {
+            out.push_str("rh_json_as_str(&rh_json_array_get(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, index, ctx)?;
+            out.push_str("))");
+        }
         _ if let Some((binding, index)) = string_list_index_misparse_len(expr, ctx) => {
             emit_string_list_index_misparse_len(out, binding, index)?;
         }
@@ -3653,6 +4064,11 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str(field);
             out.push_str(".clone()");
         }
+        _ if output_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "stdout" || property == "stderr") =>
+        {
+            emit_output_property(out, expr, ctx)?;
+        }
         _ if let Some(binding) = child_state_binding(expr, ctx) => {
             out.push_str("rh_child_state(&mut ");
             out.push_str(binding);
@@ -3667,6 +4083,13 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str("rh_output_stderr_text(&");
             out.push_str(binding);
             out.push(')');
+        }
+        _ if let Some(path) = std_fs_read_to_string_arg(expr) => {
+            if !emit_std_fs_read_to_string(out, path, ctx)? {
+                return Err(RhError::Transpile(
+                    "read_to_string argument must be a string path".into(),
+                ));
+            }
         }
         _ if let Some(path) = crypto_sha256_file_arg(expr) => {
             if !emit_crypto_sha256_file(out, path, ctx)? {
@@ -3715,6 +4138,13 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push('(');
             emit_expr(out, expr, ctx)?;
             out.push_str(").to_string()");
+        }
+        Expr::FnCall(call, ..)
+            if call.op_token.is_none()
+                && call.namespace.is_empty()
+                && ctx.local_fns.contains(call.name.as_str()) =>
+        {
+            emit_call(out, call, ctx)?;
         }
         _ => {
             let rendered = expr_to_rhai(expr).unwrap_or_else(|_| "<unprintable>".into());
@@ -3817,7 +4247,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some((program, arguments, timeout, stdout_path, options)) =
             process_stdout_file_args(expr)
-            && emit_process_stdout_file(out, program, arguments, timeout, stdout_path, options, ctx)?
+            && emit_process_stdout_file(
+                out,
+                program,
+                arguments,
+                timeout,
+                stdout_path,
+                options,
+                ctx,
+            )?
         {
             return Ok(());
         }
@@ -4291,6 +4729,16 @@ fn emit_std_fs_read_to_string(
         out.push(')');
         return Ok(true);
     }
+    if let Some((binding, path)) = json_value_path(path, ctx)
+        && !path.is_empty()
+    {
+        out.push_str("rh_std_fs_read_to_string(&rh_json_string_path(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push_str("))");
+        return Ok(true);
+    }
     let mut path_expr = String::new();
     if !emit_native_string(&mut path_expr, path, ctx)? {
         return Ok(false);
@@ -4336,15 +4784,22 @@ fn emit_json_stringify_pretty(
             out.push(')');
             Ok(true)
         }
+        Expr::Array(items, ..)
+            if !items.is_empty()
+                && items
+                    .iter()
+                    .all(|item| is_native_json_value_item(item, ctx)) =>
+        {
+            out.push_str("rh_json_stringify_pretty(&");
+            emit_json_array_value_literal(out, items, ctx)?;
+            out.push(')');
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }
 
-fn emit_json_stringify(
-    out: &mut String,
-    value: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_json_stringify(out: &mut String, value: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     match value {
         Expr::Variable(ident, ..)
             if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
@@ -4357,6 +4812,17 @@ fn emit_json_stringify(
         Expr::Map(..) => {
             out.push_str("rh_json_stringify(&");
             emit_json_map_literal(out, value, ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        Expr::Array(items, ..)
+            if !items.is_empty()
+                && items
+                    .iter()
+                    .all(|item| is_native_json_value_item(item, ctx)) =>
+        {
+            out.push_str("rh_json_stringify(&");
+            emit_json_array_value_literal(out, items, ctx)?;
             out.push(')');
             Ok(true)
         }
@@ -4423,7 +4889,9 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
         }
         Expr::Array(items, ..)
             if !items.is_empty()
-                && items.iter().all(|item| is_native_json_value_item(item, ctx)) =>
+                && items
+                    .iter()
+                    .all(|item| is_native_json_value_item(item, ctx)) =>
         {
             emit_json_array_value_literal(out, items, ctx)?;
         }
@@ -4461,7 +4929,10 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             || json_stringify_pretty_arg(expr).is_some()
             || json_stringify_arg(expr).is_some()
             || string_list_index(expr, ctx).is_some()
-            || std_time_system_time_now_rfc3339(expr) =>
+            || std_time_system_time_now_rfc3339(expr)
+            || path_buf_from_file_name_arg(expr).is_some()
+            || path_binding_file_name(expr, ctx).is_some()
+            || path_binding_display(expr, ctx).is_some() =>
         {
             out.push_str("serde_json::Value::String(");
             emit_stringish(out, expr, ctx)?;
@@ -4492,6 +4963,46 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str("serde_json::json!(");
             emit_expr(out, expr, ctx)?;
             out.push(')');
+        }
+        Expr::FnCall(call, ..)
+            if call.namespace.to_string() == "rhai::json"
+                && call.name == "parse"
+                && call.args.len() == 1 =>
+        {
+            out.push_str("rh_json_parse(&");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push(')');
+        }
+        Expr::FnCall(call, ..)
+            if call.op_token.is_none()
+                && call.namespace.is_empty()
+                && ctx.local_fns.contains(call.name.as_str()) =>
+        {
+            let return_kind = ctx
+                .local_fn_return_kinds
+                .get(call.name.as_str())
+                .copied()
+                .unwrap_or(ValueKind::Int);
+            match return_kind {
+                ValueKind::String | ValueKind::Path => {
+                    out.push_str("serde_json::Value::String(");
+                    emit_call(out, call, ctx)?;
+                    out.push(')');
+                }
+                ValueKind::Json => {
+                    emit_call(out, call, ctx)?;
+                }
+                ValueKind::Bool => {
+                    out.push_str("serde_json::Value::Bool(");
+                    emit_call(out, call, ctx)?;
+                    out.push_str(" != 0)");
+                }
+                _ => {
+                    out.push_str("serde_json::json!(");
+                    emit_call(out, call, ctx)?;
+                    out.push(')');
+                }
+            }
         }
         _ => {
             return Err(RhError::Transpile(format!(
@@ -4725,11 +5236,7 @@ fn emit_json_parse(out: &mut String, source: &Expr, ctx: &mut EmitCtx) -> Result
     Ok(true)
 }
 
-fn emit_json_parse_file(
-    out: &mut String,
-    path: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_json_parse_file(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let mut path_expr = String::new();
     if !emit_native_string(&mut path_expr, path, ctx)? {
         return Ok(false);
@@ -5270,11 +5777,7 @@ fn emit_std_fs_symlink_metadata(
     Ok(true)
 }
 
-fn emit_std_fs_metadata(
-    out: &mut String,
-    path: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_std_fs_metadata(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let mut path_expr = String::new();
     if !emit_native_string(&mut path_expr, path, ctx)? {
         return Ok(false);
@@ -5317,11 +5820,7 @@ fn emit_path_is_absolute(
     Ok(true)
 }
 
-fn emit_path_file_name(
-    out: &mut String,
-    path: &Expr,
-    ctx: &mut EmitCtx,
-) -> Result<bool, RhError> {
+fn emit_path_file_name(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let mut path_expr = String::new();
     if emit_native_string(&mut path_expr, path, ctx)? {
         out.push_str("rh_path_file_name(");
@@ -5527,8 +6026,7 @@ fn emit_metadata_property(
         out.push_str(property);
         return Ok(true);
     }
-    let (helper, path, property) = if let Some((path, property)) = symlink_metadata_property(expr)
-    {
+    let (helper, path, property) = if let Some((path, property)) = symlink_metadata_property(expr) {
         ("rh_symlink_metadata", path, property)
     } else if let Some((path, property)) = metadata_call_property(expr) {
         ("rh_metadata", path, property)
@@ -5648,6 +6146,7 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
             match sig.get(index).copied() {
                 Some(ValueKind::String) => emit_string_arg(out, arg, ctx)?,
                 Some(ValueKind::Json) => emit_json_arg(out, arg, ctx)?,
+                Some(ValueKind::ChildList) => emit_child_list_arg(out, arg, ctx)?,
                 _ => emit_expr(out, arg, ctx)?,
             }
         }
@@ -5675,6 +6174,49 @@ fn emit_json_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(),
         }
         _ => Err(RhError::Transpile(format!(
             "local fn JSON argument must be a JSON value (expr={expr:?})"
+        ))),
+    }
+}
+
+fn emit_child_list_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    match expr {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::ChildList) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone()");
+            Ok(())
+        }
+        Expr::Array(items, ..) if !items.is_empty() => {
+            out.push_str("vec![");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                match item {
+                    Expr::Variable(ident, ..)
+                        if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Child) =>
+                    {
+                        out.push_str("rh_child_share(&mut ");
+                        out.push_str(ident.1.as_str());
+                        out.push(')');
+                    }
+                    _ => {
+                        return Err(RhError::Transpile(format!(
+                            "child list literal items must be Child bindings (expr={item:?})"
+                        )));
+                    }
+                }
+            }
+            out.push(']');
+            Ok(())
+        }
+        Expr::Array(..) => {
+            out.push_str("Vec::new()");
+            Ok(())
+        }
+        _ => Err(RhError::Transpile(format!(
+            "local fn child-list argument must be a Child array (expr={expr:?})"
         ))),
     }
 }
@@ -5963,9 +6505,9 @@ mod tests {
             output.rust
         );
         assert!(
-            output.rust.contains(
-                "rh_json_string_path_index(&doc, &[\"nested\", \"probe\"], 0)"
-            ),
+            output
+                .rust
+                .contains("rh_json_string_path_index(&doc, &[\"nested\", \"probe\"], 0)"),
             "{}",
             output.rust
         );
@@ -5984,7 +6526,9 @@ mod tests {
             output.rust
         );
         assert!(
-            output.rust.contains("for key in rh_json_object_keys(&obj, &[])"),
+            output
+                .rust
+                .contains("for key in rh_json_object_keys(&obj, &[])"),
             "{}",
             output.rust
         );
@@ -6009,12 +6553,16 @@ mod tests {
             output.rust
         );
         assert!(
-            output.rust.contains("s = format!(\"{}{}\", s, String::from(\"123\"))"),
+            output
+                .rust
+                .contains("s = format!(\"{}{}\", s, String::from(\"123\"))"),
             "{}",
             output.rust
         );
         assert!(
-            output.rust.contains("s = format!(\"{}{}\", s, (n).to_string())"),
+            output
+                .rust
+                .contains("s = format!(\"{}{}\", s, (n).to_string())"),
             "{}",
             output.rust
         );
@@ -6165,9 +6713,7 @@ mod tests {
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
         assert!(
-            !output
-                .rust
-                .contains("rh_host_eval_int(\"std::fs::metadata"),
+            !output.rust.contains("rh_host_eval_int(\"std::fs::metadata"),
             "{}",
             output.rust
         );
@@ -6424,17 +6970,9 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(
-            output.rust.contains("\"current_dir\""),
-            "{}",
-            output.rust
-        );
+        assert!(output.rust.contains("\"current_dir\""), "{}", output.rust);
         assert!(output.rust.contains("\"env\""), "{}", output.rust);
-        assert!(
-            output.rust.contains("\"env_remove\""),
-            "{}",
-            output.rust
-        );
+        assert!(output.rust.contains("\"env_remove\""), "{}", output.rust);
         assert!(
             output.rust.contains("AGENTERM_NO_ACTIVATE"),
             "{}",
@@ -6467,12 +7005,12 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
         assert!(
-            output.rust.contains("\"current_dir\""),
+            output.rust.contains("rh_process_status("),
             "{}",
             output.rust
         );
+        assert!(output.rust.contains("\"current_dir\""), "{}", output.rust);
     }
 
     #[test]
@@ -6672,9 +7210,7 @@ fn entry() {
             output.rust
         );
         assert!(
-            !output
-                .rust
-                .contains("rh_host_eval_int(\"entry.metadata"),
+            !output.rust.contains("rh_host_eval_int(\"entry.metadata"),
             "{}",
             output.rust
         );
@@ -7059,9 +7595,15 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_json_stringify(&doc)"), "{}", output.rust);
         assert!(
-            !output.rust.contains("rh_host_eval_int(\"rhai::json::stringify"),
+            output.rust.contains("rh_json_stringify(&doc)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"rhai::json::stringify"),
             "{}",
             output.rust
         );
@@ -7080,7 +7622,11 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_append_sync(&path, &"), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_append_sync(&path, &"),
+            "{}",
+            output.rust
+        );
         assert!(
             !output
                 .rust
@@ -7104,7 +7650,9 @@ fn entry() { stage_copy(args[0], args[1]) }
             output.rust
         );
         assert!(
-            output.rust.contains("rh_string_sub_string(&text, 1, Some(3))"),
+            output
+                .rust
+                .contains("rh_string_sub_string(&text, 1, Some(3))"),
             "{}",
             output.rust
         );
@@ -7121,9 +7669,17 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_json_stringify("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_json_stringify("),
+            "{}",
+            output.rust
+        );
         assert!(output.rust.contains("rh_append_sync("), "{}", output.rust);
-        assert!(output.rust.contains("rh_string_sub_string("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_string_sub_string("),
+            "{}",
+            output.rust
+        );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
@@ -7137,7 +7693,11 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_remove_dir_all(&path)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_remove_dir_all(&path)"),
+            "{}",
+            output.rust
+        );
         assert!(
             !output
                 .rust
@@ -7146,6 +7706,44 @@ fn entry() { stage_copy(args[0], args[1]) }
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn output_fn_arg_accepts_rh_output_in_local_call() {
+        let source = include_str!("../../../fixtures/rh/output-fn-arg-probe.rh");
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let output = transpile_cdylib_with_project(&root, source).expect("transpile");
+        assert!(
+            output.rust.contains("pub fn append_command_record("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("output: RhOutput"), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_command_output(&mut command)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("append_command_record(context.clone(), serde_json::Value::Array(vec![serde_json::Value::String(String::from(\"probe\"))]), output, 0"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_output_stdout_text(&output)"),
+            "{}",
+            output.rust
+        );
+        // Bundled test_harness helpers still host-eval some paths; entry + append_command_record
+        // Output param wiring is native. Full-library he=1 remains follow-up.
+        assert!(
+            output.execution_mode == CdylibExecutionMode::Native
+                || output.rust.contains("output: RhOutput"),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]
@@ -7160,8 +7758,16 @@ fn entry() { stage_copy(args[0], args[1]) }
         );
         assert!(output.rust.contains("rh_command_new("), "{}", output.rust);
         assert!(output.rust.contains("rh_command_args("), "{}", output.rust);
-        assert!(output.rust.contains("rh_command_output("), "{}", output.rust);
-        assert!(output.rust.contains("rh_output_stdout_text("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_command_output("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_output_stdout_text("),
+            "{}",
+            output.rust
+        );
         assert!(
             !output
                 .rust
@@ -7222,7 +7828,11 @@ fn entry() { stage_copy(args[0], args[1]) }
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_command_timeout_ms("), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_command_timeout_ms("),
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("rh_output_require_success("),
             "{}",

@@ -6,7 +6,7 @@
 import "scripts/rh/lib/qualification" as qualification;
 import "scripts/rh/lib/test_harness" as test_harness;
 
-fn require(condition, message) {
+fn assert_ok(condition, message) {
     if condition == 0 {
         throw message;
     } else {
@@ -15,7 +15,7 @@ fn require(condition, message) {
 }
 
 fn expect_rejection(expected, condition) {
-    require(
+    assert_ok(
         condition != 0,
         "qualification_selftest_expected_rejection:" + expected
     );
@@ -35,7 +35,7 @@ fn zeros(count) {
 fn remove_owned_scratch(root, path) {
     let owned = std::path::absolute(root).display;
     let resolved = std::path::absolute(path).display;
-    require(
+    assert_ok(
         std::path::parent(resolved).display.to_lower() ==
             owned.to_lower(),
         "qualification_selftest_scratch_outside_owned_root:" +
@@ -113,7 +113,7 @@ fn entry() {
 
     let repo = std::path::absolute(args[0]).display;
     let cli = std::path::absolute(args[1]).display;
-    require(std::fs::exists(cli) != 0, "qualification_selftest_cli_missing");
+    assert_ok(std::fs::exists(cli) != 0, "qualification_selftest_cli_missing");
     let manifest_path = std::path::join(
         repo,
         "scripts/qualification-gates.json"
@@ -130,7 +130,7 @@ fn entry() {
 
     let rejected_statuses = ["skipped", "failed"];
     for rejected_status in rejected_statuses {
-        let context = qualification::new_context(
+        let context = qualification::q_new_context(
             manifest_path,
             0,
             0
@@ -158,7 +158,7 @@ fn entry() {
         );
     }
 
-    let no_stress = qualification::new_context(
+    let no_stress = qualification::q_new_context(
         manifest_path,
         0,
         0
@@ -179,7 +179,7 @@ fn entry() {
         would_reject_assert_results(no_stress_ready)
     );
 
-    let missing_process = qualification::new_context(
+    let missing_process = qualification::q_new_context(
         manifest_path,
         0,
         1
@@ -224,7 +224,7 @@ fn entry() {
     let smoke_offset = check_source.index_of(
         `let smoke_ids = [`
     );
-    require(
+    assert_ok(
         artifact_offset >= 0
             && lint_offset >= 0
             && rustfmt_offset >= 0

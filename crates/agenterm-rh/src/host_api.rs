@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 35;
+pub const RH_CODEGEN_REVISION: u32 = 36;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -771,10 +771,45 @@ pub fn emit_host_runtime(out: &mut String) {
              stderr: String,\n\
          }\n\n\
          struct RhChild {\n\
+             inner: std::rc::Rc<std::cell::RefCell<RhChildInner>>,\n\
+         }\n\n\
+         struct RhChildInner {\n\
              child: Option<std::process::Child>,\n\
              pid: INT,\n\
              state: String,\n\
              capture_limit: usize,\n\
+         }\n\n\
+         impl Clone for RhChild {\n\
+             fn clone(&self) -> Self {\n\
+                 Self {\n\
+                     inner: self.inner.clone(),\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         impl RhChild {\n\
+             fn new(pid: INT, child: Option<std::process::Child>, capture_limit: usize) -> Self {\n\
+                 Self {\n\
+                     inner: std::rc::Rc::new(std::cell::RefCell::new(RhChildInner {\n\
+                         child,\n\
+                         pid,\n\
+                         state: String::from(\"running\"),\n\
+                         capture_limit,\n\
+                     })),\n\
+                 }\n\
+             }\n\n\
+             fn exited(pid: INT, capture_limit: usize) -> Self {\n\
+                 Self {\n\
+                     inner: std::rc::Rc::new(std::cell::RefCell::new(RhChildInner {\n\
+                         child: None,\n\
+                         pid,\n\
+                         state: String::from(\"exited\"),\n\
+                         capture_limit,\n\
+                     })),\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_child_share(child: &mut RhChild) -> RhChild {\n\
+             child.clone()\n\
          }\n\n\
          fn rh_command_new(program: &str) -> RhCommand {\n\
              RhCommand {\n\
@@ -920,20 +955,10 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_start(command: &mut RhCommand) -> RhChild {\n\
              let mut process = rh_command_build(command);\n\
              match process.spawn() {\n\
-                 Ok(child) => RhChild {\n\
-                     pid: child.id() as INT,\n\
-                     child: Some(child),\n\
-                     state: String::from(\"running\"),\n\
-                     capture_limit: command.capture_limit,\n\
-                 },\n\
+                 Ok(child) => RhChild::new(child.id() as INT, Some(child), command.capture_limit),\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
-                     RhChild {\n\
-                         pid: 0,\n\
-                         child: None,\n\
-                         state: String::from(\"exited\"),\n\
-                         capture_limit: command.capture_limit,\n\
-                     }\n\
+                     RhChild::exited(0, command.capture_limit)\n\
                  }\n\
              }\n\
          }\n\n\
@@ -950,25 +975,27 @@ pub fn emit_host_runtime(out: &mut String) {
              rh_fail(message)\n\
          }\n\n\
          fn rh_child_state(child: &mut RhChild) -> String {\n\
-             if child.state == \"exited\" {\n\
-                 return child.state.clone();\n\
+             let mut inner = child.inner.borrow_mut();\n\
+             if inner.state == \"exited\" {\n\
+                 return inner.state.clone();\n\
              }\n\
-             if let Some(process) = child.child.as_mut() {\n\
+             if let Some(process) = inner.child.as_mut() {\n\
                  match process.try_wait() {\n\
-                     Ok(Some(_)) => child.state = String::from(\"exited\"),\n\
+                     Ok(Some(_)) => inner.state = String::from(\"exited\"),\n\
                      Ok(None) => {}\n\
                      Err(error) => {\n\
                          let _ = rh_fail(&format!(\"process_try_wait: {error}\"));\n\
-                         child.state = String::from(\"exited\");\n\
+                         inner.state = String::from(\"exited\");\n\
                      }\n\
                  }\n\
              } else {\n\
-                 child.state = String::from(\"exited\");\n\
+                 inner.state = String::from(\"exited\");\n\
              }\n\
-             child.state.clone()\n\
+             inner.state.clone()\n\
          }\n\n\
          fn rh_child_kill(child: &mut RhChild) -> INT {\n\
-             if let Some(process) = child.child.as_mut() {\n\
+             let mut inner = child.inner.borrow_mut();\n\
+             if let Some(process) = inner.child.as_mut() {\n\
                  if let Err(error) = process.kill() {\n\
                      let _ = rh_fail(&format!(\"process_kill: {error}\"));\n\
                  }\n\
@@ -977,9 +1004,10 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_child_wait_with_output(child: &mut RhChild, timeout_ms: INT) -> RhOutput {\n\
              let timeout = std::time::Duration::from_millis(timeout_ms.max(1).max(0) as u64);\n\
-             let capture_limit = child.capture_limit;\n\
-             child.state = String::from(\"exited\");\n\
-             let Some(process) = child.child.take() else {\n\
+             let mut inner = child.inner.borrow_mut();\n\
+             inner.state = String::from(\"exited\");\n\
+             let capture_limit = inner.capture_limit;\n\
+             let Some(process) = inner.child.take() else {\n\
                  return RhOutput {\n\
                      success: 0,\n\
                      exit_code: -1,\n\

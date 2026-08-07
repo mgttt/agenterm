@@ -1,0 +1,21 @@
+// Probe local fn params typed as RhOutput from call-site/body usage (M42f7g).
+import "scripts/rh/lib/test_harness" as test_harness;
+
+fn entry() {
+    let context = test_harness::new_context(".", "output-fn-arg-probe");
+    let command = std::process::command("/bin/echo");
+    command.args(["probe"]);
+    let output = command.output();
+    test_harness::append_command_record(
+        context,
+        ["probe"],
+        output,
+        0,
+        []
+    );
+    if output.success != 0 {
+        1
+    } else {
+        rh::fail("output_fn_probe_not_success")
+    }
+}

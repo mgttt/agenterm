@@ -2,7 +2,7 @@
 
 import "scripts/rh/lib/bootstrap_timing" as bootstrap_timing;
 
-fn require(condition, code) {
+fn q_require(condition, code) {
     if condition == 0 {
         throw code;
     } else {
@@ -78,7 +78,7 @@ fn valid_id(value, allow_period) {
 }
 
 fn sha256(path) {
-    require(
+    q_require(
         std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
         "qualification_input_missing:" + path
     );
@@ -86,17 +86,17 @@ fn sha256(path) {
 }
 
 fn read_manifest(path) {
-    require(
+    q_require(
         std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
         "qualification_manifest_missing:" + path
     );
     let manifest = rhai::json::parse_file(path);
-    require(
+    q_require(
         0 + manifest.schema_version == 1
             && 0 + manifest.receipt_schema_version == 1,
         "qualification_manifest_schema"
     );
-    require(
+    q_require(
         manifest.required_gates.len > 0,
         "qualification_manifest_empty"
     );
@@ -104,14 +104,14 @@ fn read_manifest(path) {
     let evidence_ids = #{};
     for gate in manifest.required_gates {
         let gate_id = "" + gate.id;
-        require(
+        q_require(
             valid_id(gate_id, 0) != 0 && !gate_ids.contains(gate_id),
             "qualification_gate_id:" + gate_id
         );
         gate_ids[gate_id] = true;
         for id in gate.evidence {
             let evidence_id = "" + id;
-            require(
+            q_require(
                 valid_id(evidence_id, 1) != 0
                     && !evidence_ids.contains(evidence_id),
                 "qualification_evidence_id:" + evidence_id
@@ -122,7 +122,7 @@ fn read_manifest(path) {
     manifest
 }
 
-fn new_context(manifest_path, release, stress_included) {
+fn q_new_context(manifest_path, release, stress_included) {
     let path = std::path::absolute(manifest_path).display;
     #{
         manifest: read_manifest(path),
@@ -166,12 +166,12 @@ fn add_process_observation(
 }
 
 fn assert_process_observation(context) {
-    require(
+    q_require(
         context.process_observation.owned_commands > 0
             && context.process_observation.process_samples > 0,
         "qualification_process_observation_missing"
     );
-    require(
+    q_require(
         context.process_observation.automation_processes.len == 0,
         "qualification_process_observation_powershell"
     );
@@ -185,7 +185,7 @@ fn gate_by_id(manifest, id) {
     for gate in manifest.required_gates {
         let current_id = "" + gate.id;
         if current_id == gate_id {
-            require(
+            q_require(
                 found == 0,
                 "qualification_gate_duplicate:" + gate_id
             );
@@ -214,17 +214,17 @@ fn evidence_from_output(output) {
 fn add_result(context, gate_id, status, duration_ms, output) {
     let status_text = "" + status;
     let gate_key = "" + gate_id;
-    require(
+    q_require(
         status_text == "passed"
             || status_text == "failed"
             || status_text == "skipped",
         "qualification_result_status:" + status_text
     );
-    require(
+    q_require(
         !context.results.contains(gate_key),
         "qualification_result_duplicate:" + gate_key
     );
-    require(
+    q_require(
         gate_by_id(context.manifest, gate_key) != (),
         "qualification_result_undeclared:" + gate_key
     );
@@ -244,7 +244,7 @@ fn command_output(program, arguments, cwd, code) {
     command.timeout(std::time::Duration::from_secs(10));
     command.capture_limit(262144);
     let output = command.output();
-    require(
+    q_require(
         output.success != 0,
         "" + code + ":" + output.stdout_text() + output.stderr_text()
     );
@@ -261,7 +261,7 @@ fn timing_source(repo) {
         "quality_timing_git_head"
     );
     head.to_lower();
-    require(head.len == 40, "quality_timing_git_head_invalid");
+    q_require(head.len == 40, "quality_timing_git_head_invalid");
     let status = command_output(
         "git",
         ["status", "--porcelain", "--untracked-files=normal"],
@@ -305,19 +305,19 @@ fn new_timing(
 ) {
     let lane_text = "" + lane;
     let profile_text = "" + profile;
-    require(
+    q_require(
         timing_allowed_lanes().contains(lane_text),
         "quality_timing_lane"
     );
-    require(profile_text != "", "quality_timing_profile");
-    require(gate_ids.len > 0, "quality_timing_gates_empty");
+    q_require(profile_text != "", "quality_timing_profile");
+    q_require(gate_ids.len > 0, "quality_timing_gates_empty");
     let root = std::path::absolute(repo).display;
     let manifest = std::path::absolute(manifest_path).display;
     let ids = #{};
     let gates = [];
     for id in gate_ids {
         let gate_id = "" + id;
-        require(
+        q_require(
             valid_id(gate_id, 0) != 0 && !ids.contains(gate_id),
             "quality_timing_gate_id:" + gate_id
         );
@@ -370,18 +370,18 @@ fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
     let status_text = "" + status;
     let gate_key = "" + gate_id;
     let allowed = timing_gate_statuses();
-    require(
+    q_require(
         allowed.contains(status_text),
         "quality_timing_gate_status:" + status_text
     );
-    require(0 + duration_ms >= 0, "quality_timing_gate_duration");
+    q_require(0 + duration_ms >= 0, "quality_timing_gate_duration");
     let found = 0;
     let index = 0;
     while index < timing.gates.len {
         let gate_entry_id = "" + timing.gates[index].id;
         if gate_entry_id == gate_key {
-            require(found == 0, "quality_timing_gate_duplicate:" + gate_key);
-            require(
+            q_require(found == 0, "quality_timing_gate_duplicate:" + gate_key);
+            q_require(
                 timing.gates[index].status == "not_run",
                 "quality_timing_gate_transition:" + gate_key
             );
@@ -391,7 +391,7 @@ fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
         }
         index = index + 1;
     }
-    require(found != 0, "quality_timing_gate_undeclared:" + gate_key);
+    q_require(found != 0, "quality_timing_gate_undeclared:" + gate_key);
     if status_text == "failed" && timing.first_failure == () {
         timing.first_failure = #{
             kind: "gate",
@@ -408,7 +408,7 @@ fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
 
 fn timing_fail_stage(timing, stage_id) {
     let stage_text = "" + stage_id;
-    require(
+    q_require(
         valid_id(stage_text, 0) != 0,
         "quality_timing_failure_stage:" + stage_text
     );
@@ -426,7 +426,7 @@ fn timing_fail_stage(timing, stage_id) {
 
 fn timing_finish(timing, status) {
     let status_text = "" + status;
-    require(
+    q_require(
         status_text == "passed" || status_text == "failed",
         "quality_timing_run_status:" + status_text
     );
@@ -456,13 +456,13 @@ fn timing_finish(timing, status) {
 fn assert_results(context) {
     for gate in context.manifest.required_gates {
         let gate_id = "" + gate.id;
-        require(
+        q_require(
             context.results.contains(gate_id),
             "qualification_gate_missing:" + gate_id
         );
         let result = context.results[gate_id];
         let result_status = "" + result.status;
-        require(
+        q_require(
             result_status == "passed",
             "qualification_gate_not_passed:" + gate_id + ":" +
                 result_status
@@ -470,18 +470,18 @@ fn assert_results(context) {
         let unique = #{};
         for id in result.evidence {
             let evidence_id = "" + id;
-            require(
+            q_require(
                 !unique.contains(evidence_id),
                 "qualification_evidence_duplicate:" + gate_id
             );
             unique[evidence_id] = true;
         }
-        require(
+        q_require(
             exact_values(gate.evidence, result.evidence) != 0,
             "qualification_evidence_mismatch:" + gate_id
         );
     }
-    require(
+    q_require(
         context.stress_included,
         "qualification_stress_required"
     );
@@ -503,20 +503,20 @@ fn provenance(
         "qualification_git_head"
     );
     head.to_lower();
-    require(
+    q_require(
         head.len == 40,
         "qualification_git_head_invalid"
     );
     let metadata = rhai::json::parse_file(metadata_path);
-    require(
+    q_require(
         0 + metadata.schema_version == 2,
         "qualification_metadata_schema"
     );
-    require(
+    q_require(
         "" + metadata.git_commit == head,
         "qualification_metadata_commit"
     );
-    require(
+    q_require(
         require_clean == 0
             || metadata.git_dirty == 0
             || metadata.git_dirty == false,
@@ -525,19 +525,19 @@ fn provenance(
     let cargo_hash = sha256(
         std::path::join(root, "Cargo.lock").display
     );
-    require(
+    q_require(
         "" + metadata.cargo_lock_sha256 == cargo_hash,
         "qualification_cargo_lock_hash"
     );
     let artifact_hash = sha256(artifact_manifest_path);
-    require(
+    q_require(
         "" + metadata.artifact_manifest_sha256 == artifact_hash,
         "qualification_artifact_manifest_hash"
     );
     let artifact_spec = rhai::json::parse_file(
         artifact_manifest_path
     );
-    require(
+    q_require(
         artifact_spec.executables.len > 0,
         "qualification_artifact_manifest_empty"
     );
@@ -545,7 +545,7 @@ fn provenance(
     let artifacts = [];
     for executable in artifact_spec.executables {
         let executable_name = "" + executable.name;
-        require(
+        q_require(
             !names.contains(executable_name),
             "qualification_artifact_duplicate:" + executable_name
         );
@@ -560,7 +560,7 @@ fn provenance(
         for entry in metadata.executables {
             let entry_name = "" + entry.name;
             if entry_name == executable_name {
-                require(
+                q_require(
                     metadata_entry == (),
                     "qualification_metadata_artifact_duplicate:" +
                         executable_name
@@ -569,7 +569,7 @@ fn provenance(
                 entry_count += 1;
             }
         }
-        require(
+        q_require(
             metadata_entry != ()
                 && "" + metadata_entry.sha256 == hash,
             "qualification_metadata_artifact_hash:" +
