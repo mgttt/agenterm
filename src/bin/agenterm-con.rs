@@ -326,13 +326,12 @@ impl ConTerminal {
             })
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor");
-        #[cfg(unix)]
+        // Platform-neutral: returns Some("-l") on Unix for bare shells,
+        // None on Windows or when the shell already has explicit args.
+        if let Some(login_arg) =
+            agenterm_platform::pty::login_shell_argument(std::path::Path::new(&shell), 0)
         {
-            if let Some(login_arg) =
-                agenterm_platform::pty::login_shell_argument(std::path::Path::new(&shell), 0)
-            {
-                command = command.arg(login_arg);
-            }
+            command = command.arg(login_arg);
         }
         if let Some(dir) = &self.working_dir {
             command = command.current_dir(dir.clone());
