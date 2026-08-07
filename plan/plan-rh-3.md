@@ -122,6 +122,7 @@
 | M42f6g | 易切叶任务 cutover（依赖 6e/6f）：`mcp-conformance`、`performance-samples`、`agenterm-net-research`、`readme-examples`；INT-only `.rh` + entry 切线 + 归档；全改 `command_*`+options，禁止假兼容 | [x] |
 | M42f6g2 | INT-only `scripts/rh/performance-summary.rh`；entry 切线 + 归档；sccache map 用 `.Rust` 点取（完整 `keys()` 仍属 M42f6h） | [x] |
 | M42f6g3 | INT-only `scripts/rh/build-releases-index.rh`；entry/workflow 切线 + 归档；可选 checksum/sbom/build_log 用 `type_of == "string"` | [x] |
+| M42f6g4 | INT-only `scripts/rh/rh-aot-smoke.rh`；`command_status`/`command_stdout_file`+cwd options；entry 切线 + 归档 | [x] |
 | M42f6h | JSON 集合迭代加强（`for` over JSON array / object keys 已部分具备则补缺口）+ `release_candidate`/`qualification`/`package_qualified` lib 原生移植 | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |

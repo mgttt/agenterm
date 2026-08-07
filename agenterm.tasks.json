@@ -1208,7 +1208,7 @@
     {
       "id": "rh-aot-smoke",
       "description": "Prove rh-0 check, AOT pack build, native_hash receipt, and dlopen entry smoke",
-      "entry": "scripts/rhai/rh-aot-smoke.rhai",
+      "entry": "scripts/rh/rh-aot-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

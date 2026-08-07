@@ -1,0 +1,92 @@
+// Prove rh-0 check, AOT pack build, native_hash receipt, and dlopen entry smoke.
+//
+// Args: REPO [AGENTERM_RH_BINARY]
+
+fn entry() {
+    if args.len != 1 && args.len != 2 {
+        return rh::fail("expected: REPO [AGENTERM_RH_BINARY]");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let fixture = std::path::join(repo, "fixtures/rh/entry.rh").display;
+    require(std::fs::exists(fixture), "rh_aot_missing_fixture");
+
+    // Prefer an explicit binary; otherwise pick host layout by path presence
+    // (std::process::platform is not a shipped Script API).
+    let rh = "";
+    if args.len == 2 {
+        rh = std::path::absolute(args[1]).display;
+    } else {
+        let win = std::path::join(repo, "target/debug/agenterm-rh.exe").display;
+        let unix = std::path::join(repo, "target/debug/agenterm-rh").display;
+        if std::fs::exists(win) {
+            rh = win;
+        } else {
+            rh = unix;
+        }
+    }
+    require(std::fs::exists(rh), "rh_aot_missing_binary:" + rh);
+
+    // Fixed pack dir (INT→String concat is not native yet). pack build overwrites.
+    let pack_dir = std::path::join(repo, "target/rh-aot-smoke").display;
+    std::fs::create_dir_all(pack_dir);
+
+    let check_code = std::process::command_status(
+        rh,
+        ["check", fixture],
+        30000,
+        #{ current_dir: repo }
+    );
+    require(check_code == 0, "rh_aot_check");
+
+    let build_code = std::process::command_status(
+        rh,
+        ["pack", "build", fixture, "--dir", pack_dir],
+        180000,
+        #{ current_dir: repo }
+    );
+    require(build_code == 0, "rh_aot_pack_build");
+
+    let native_dll = std::path::join(pack_dir, "pack.dll").display;
+    let native_dylib = std::path::join(pack_dir, "pack.dylib").display;
+    let native_so = std::path::join(pack_dir, "pack.so").display;
+    let native = "";
+    if std::fs::exists(native_dll) {
+        native = native_dll;
+    } else if std::fs::exists(native_dylib) {
+        native = native_dylib;
+    } else {
+        native = native_so;
+    }
+
+    let smoke_stdout =
+        std::path::join(pack_dir, "run-smoke.stdout.tmp").display;
+    let smoke_code = std::process::command_stdout_file(
+        rh,
+        ["run-smoke", native],
+        30000,
+        smoke_stdout,
+        #{ current_dir: repo }
+    );
+    require(smoke_code == 0, "rh_aot_run_smoke");
+    let smoke_text = std::fs::read_to_string(smoke_stdout);
+    std::fs::try_remove_file(smoke_stdout);
+    require(
+        smoke_text.contains("rh_entry() = 42"),
+        "rh_aot_entry_value"
+    );
+
+    let receipt_path =
+        std::path::join(pack_dir, "qualification.json").display;
+    let qualify_code = std::process::command_status(
+        rh,
+        ["qualify", fixture, "--dir", pack_dir, "-o", receipt_path],
+        180000,
+        #{ current_dir: repo }
+    );
+    require(qualify_code == 0, "rh_aot_qualify");
+    require(std::fs::exists(receipt_path), "rh_aot_receipt_missing");
+
+    print("PASS rh-aot-smoke");
+    0
+}
