@@ -4,7 +4,9 @@ use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
-    expr_print::{expr_to_rhai, is_pure_int_expr, is_var_len_expr, uses_host_surface},
+    expr_print::{
+        expr_to_rhai, is_args_len_expr, is_pure_int_expr, is_var_len_expr, uses_host_surface,
+    },
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
     host_api::{emit_host_runtime, rust_raw_string_literal},
     subset::{compat_validate, validate_ast},
@@ -901,6 +903,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
         Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
+        Expr::Dot(..) if is_args_len_expr(expr) => out.push_str("rh_args_len()"),
         Expr::Dot(..) if is_var_len_expr(expr) => emit_host_expr(out, expr, ctx)?,
         Expr::FnCall(call, ..) => emit_call(out, call, ctx)?,
         Expr::Stmt(block) => {
@@ -1158,12 +1161,16 @@ mod tests {
     }
 
     #[test]
-    fn cdylib_compat_delegates_args_len() {
+    fn cdylib_emits_native_args_len() {
         let rust = transpile_cdylib("fn entry() { args.len() }").expect("transpile");
-        assert!(
-            rust.contains("rh_host_eval_int") || rust.contains("rh_host_run_script"),
-            "expected host fallback in:\n{rust}"
-        );
+        let entry = rust
+            .split_once("pub fn entry() -> INT {")
+            .and_then(|(_, suffix)| suffix.split_once("fn rh_entry_internal()"))
+            .map(|(entry, _)| entry)
+            .expect("entry");
+        assert!(entry.contains("rh_args_len()"), "{entry}");
+        assert!(!entry.contains("rh_host_eval_int"), "{entry}");
+        assert!(!entry.contains("rh_host_run_script"), "{entry}");
     }
 
     #[test]

@@ -3,8 +3,8 @@
 use agenterm_rh::{RH_HOST_API_VERSION, check, transpile_cdylib};
 
 #[test]
-fn rh_host_api_version_is_four() {
-    assert_eq!(RH_HOST_API_VERSION, 4);
+fn rh_host_api_version_is_five() {
+    assert_eq!(RH_HOST_API_VERSION, 5);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn cdylib_transpile_emits_host_runtime_and_entry() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_entry"));
     assert!(rust.contains("rh_host_api_version"));
-    assert!(rust.contains("rh_register_host_v4"));
+    assert!(rust.contains("rh_register_host_v5"));
 }
 
 #[test]

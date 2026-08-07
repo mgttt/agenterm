@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M32 named-task 原生迁移进行中**（首个 `.rh` task 资格门禁止全文兼容回退） |
+| **状态** | **M33 typed invocation context 进行中**（`args.len` 脱离 Rhai host-eval） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -78,6 +78,7 @@
 | M31a | 生成 native/compat pack 使用自有 `i64` ABI，生成 crate 删除 Rhai runtime 依赖；parser/host compat 明确保留 | [x] |
 | M31b | host API v4 为字符串字面量 `std::fs::exists` 提供 typed 快路径；保留 v2/v3 pack 注册兼容 | [x] |
 | M32a | task manifest/corpus 接受 `.rh` entry；公共 CLI 执行首个原生 named-task，生成代码资格门禁止 `rh_host_run_script`/`rh_host_eval_int` | [x] |
+| M33a | host API v5 暴露 typed `args.len`；native task 以两个真实调用参数返回 `12`，旧 v2-v4 pack 注册兼容保留 | [x] |
 
 ---
 

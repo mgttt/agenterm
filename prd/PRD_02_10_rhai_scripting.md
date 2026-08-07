@@ -40,6 +40,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   qualified to contain neither whole-script `rh_host_run_script` nor localized
   `rh_host_eval_int`; production task migration must satisfy the same gate
   before its `.rhai` entry is archived.
+- [x] host API v5 exposes invocation argument count directly to native packs.
+  Both `args.len` and `args.len()` transpile to `rh_args_len()` without a Rhai
+  Engine, the manifest-owned native task proves real appended arguments through
+  the public CLI, and v2-v4 pack registration remains backward compatible.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

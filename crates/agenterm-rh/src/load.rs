@@ -5,7 +5,10 @@ use libloading::{Library, Symbol};
 use crate::{
     RhError,
     compile::hash_file,
-    host_api::{RhHostEvalCall, RhHostFleetCall, RhHostRunScriptCall, RhHostStdFsExistsCall},
+    host_api::{
+        RhHostArgsLenCall, RhHostEvalCall, RhHostFleetCall, RhHostRunScriptCall,
+        RhHostStdFsExistsCall,
+    },
 };
 
 pub struct RhNativeModule {
@@ -28,7 +31,7 @@ impl RhNativeModule {
         fleet_call: RhHostFleetCall,
         eval_call: Option<RhHostEvalCall>,
     ) -> Result<(), RhError> {
-        self.register_host_v4(fleet_call, eval_call, None, None)
+        self.register_host_v5(fleet_call, eval_call, None, None, None)
     }
 
     pub fn register_host_v3(
@@ -37,7 +40,7 @@ impl RhNativeModule {
         eval_call: Option<RhHostEvalCall>,
         run_script_call: Option<RhHostRunScriptCall>,
     ) -> Result<(), RhError> {
-        self.register_host_v4(fleet_call, eval_call, run_script_call, None)
+        self.register_host_v5(fleet_call, eval_call, run_script_call, None, None)
     }
 
     pub fn register_host_v4(
@@ -47,7 +50,43 @@ impl RhNativeModule {
         run_script_call: Option<RhHostRunScriptCall>,
         std_fs_exists_call: Option<RhHostStdFsExistsCall>,
     ) -> Result<(), RhError> {
+        self.register_host_v5(
+            fleet_call,
+            eval_call,
+            run_script_call,
+            std_fs_exists_call,
+            None,
+        )
+    }
+
+    pub fn register_host_v5(
+        &self,
+        fleet_call: RhHostFleetCall,
+        eval_call: Option<RhHostEvalCall>,
+        run_script_call: Option<RhHostRunScriptCall>,
+        std_fs_exists_call: Option<RhHostStdFsExistsCall>,
+        args_len_call: Option<RhHostArgsLenCall>,
+    ) -> Result<(), RhError> {
         unsafe {
+            if let Ok(register_v5) = self.library.get::<Symbol<
+                extern "C" fn(
+                    RhHostFleetCall,
+                    RhHostEvalCall,
+                    RhHostRunScriptCall,
+                    RhHostStdFsExistsCall,
+                    RhHostArgsLenCall,
+                ),
+            >>(b"rh_register_host_v5")
+            {
+                register_v5(
+                    fleet_call,
+                    eval_call.unwrap_or(dummy_eval_call),
+                    run_script_call.unwrap_or(dummy_run_script_call),
+                    std_fs_exists_call.unwrap_or(dummy_std_fs_exists_call),
+                    args_len_call.unwrap_or(dummy_args_len_call),
+                );
+                return Ok(());
+            }
             if let Ok(register_v4) = self.library.get::<Symbol<
                 extern "C" fn(
                     RhHostFleetCall,
@@ -182,6 +221,10 @@ extern "C" fn dummy_run_script_call(
 }
 
 extern "C" fn dummy_std_fs_exists_call(_path: *const u8, _path_len: u32) -> i32 {
+    -4
+}
+
+extern "C" fn dummy_args_len_call() -> i64 {
     -4
 }
 

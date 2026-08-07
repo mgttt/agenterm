@@ -110,6 +110,14 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
+        module.register_host_v5(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+            Some(host_args_len_call),
+        )
+    } else if api >= 4 {
         module.register_host_v4(
             host_fleet_call,
             Some(host_eval_call),
@@ -128,6 +136,26 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
         Err(RhError::Compile(format!(
             "rh pack host api {api} is older than the minimum supported version 2"
         )))
+    }
+}
+
+extern "C" fn host_args_len_call() -> i64 {
+    let Some(context) = crate::script_rh_run::current_run_context() else {
+        return 0;
+    };
+    let Some(arguments) = context.arguments else {
+        return 0;
+    };
+    let Some(arguments) = arguments.as_array() else {
+        record_host_error("rh_args_len", "run context arguments must be an array");
+        return -5;
+    };
+    match i64::try_from(arguments.len()) {
+        Ok(length) => length,
+        Err(error) => {
+            record_host_error("rh_args_len", &error.to_string());
+            -5
+        }
     }
 }
 
