@@ -153,7 +153,8 @@
 | M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [~] |
 | M42f8e | 仓库痕迹清扫：`scripts/rhai` 引用、`agenterm-rhai` 运营串、测试 pin、AGENTS/PRD | [ ] |
 
-**M42f7g / M42f8 进度（2026-08-07 tip `a4814c9`+）：** `[~]` = INT `.rh` 草稿已在树且 `agenterm-rh check` 过，**未** flip `agenterm.tasks.json`（仍约 30 条 `.rhai`）。M42f7g 阻塞：bundled `test_harness` 仍 **HostEval**（约 15 独特 `rh_host_eval_int`：`Duration::from_secs`、动态 `command.args`/`push`、JSON map 字面量、`to_lower`、for-in 目录创建/scrub 等）；Output 形参（rev 36）已通，全量 Native 前禁止 flip。M42f8a–d 草稿齐；额外 flatten 冲突待消：`check.rh`×`qualification::sorted`、`diagnostic-bundle-selftest` 本地 `require`×`test_harness`。Phase A 入口切线严格门禁 = 目标叶 `execution_mode=native` 且 pack 构建通过。
+**M42f7g / M42f8 进度（2026-08-07 tip `88ef269`+）：** `[~]` = INT `.rh` 草稿已在树且 `check` 过，**未** flip `agenterm.tasks.json`（仍约 30 条 `.rhai`）。**rev 37**：bundler 将模块函数前缀为 `alias__name`，双 import 不再 `script_module_fn_conflict`。M42f7g 仍阻塞于 bundled `test_harness` **Compat/HostEval**（Duration/动态 args/JSON map/`to_lower`/for-in 等）。M42f8a–d 草稿齐；`build_identity.facts/environment` 已补。M42f8e 痕迹审计见 `/tmp/agent-handoff-rhai-trace-m42f8e.md`（约 153 文件）。Phase A 切线门禁 = 目标叶 `execution_mode=native` 且 pack 通过。
+
 
 **M42f6 编号说明：** 设计稿曾把「process capture」叫做 M42f6a，但仓库已用 M42f6a–e 承接 prepare-target / build-identity / bootstrap-info / timing-summary / command options；后续缺口从 **M42f6f** 起编号。M42f6e 已覆盖 `command_*` 的 cwd/env；完整 `Command.output()` 文本捕获若仍缺，并入 6g 叶任务改写（`command_stdout_file`+`read_to_string`）而非再开权限向 allowlist。
 
