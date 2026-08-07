@@ -743,7 +743,7 @@
     {
       "id": "package-qualified-selftest",
       "description": "Prove the offline package boundary accepts only qualified bytes",
-      "entry": "scripts/rhai/package-qualified-selftest.rhai",
+      "entry": "scripts/rh/package-qualified-selftest.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

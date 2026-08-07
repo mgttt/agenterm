@@ -138,7 +138,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | 代码现在怎么分层？ | **本文** |
 | 结构如何被自动勾住 / 工具边界？ | **本文 §8** |
 | 本版要修哪些叶？ | 当前版本 `plan/plan-v0.1.*.md`（结构机读化 → **S 组**） |
-| 能力是否 shipped / 验收？ | owning `prd/PRD_*.md` + `prd/alignment-contract.json` + `scripts/rhai/prd-alignment.rhai`（**能力**对齐，**不是**结构树） |
+| 能力是否 shipped / 验收？ | owning `prd/PRD_*.md` + `prd/alignment-contract.json` + `scripts/rh/prd-alignment.rh`（**能力**对齐，**不是**结构树） |
 | Win↔Unix 可见行为差距？ | `plan/plan-unix-gui-win-parity.md` + evidence matrix（**差距地图，不是结构 SSOT**） |
 | Agent 操作纪律？ | `AGENTS.md` |
 | 产品总树？ | `PRD.md` |
@@ -207,7 +207,7 @@ boundary_tests.rs        结构红线闸（不是全文 diff 引擎）
 |------|------|----------------|
 | 本文 | 现行结构叙述 SSOT | 否（人手） |
 | `boundary_tests` | 代码侧可机检红线 | **单向：代码规则** |
-| `prd-alignment.rhai` | PRD 能力/证据/命令目录 | **另一轴**，非结构树 |
+| `prd-alignment.rh` | PRD 能力/证据/命令目录 | **另一轴**，非结构树 |
 | rust-analyzer (LSP) | 跳转/补全/重命名 | **编辑助手**，不校验分层 |
 
 **结论**：已有「钩」，但是 **局部自动 + 全局靠纪律**；**未能**做到「改 md 自动约束代码 / 改目录自动改 md」的全自动双向对齐。
@@ -231,7 +231,7 @@ boundary_tests.rs        结构红线闸（不是全文 diff 引擎）
 | LSP | rust-analyzer | 写代码顺手；**不**消费本文、**不**当对齐证据 |
 | 构建 | `cargo check` / `cargo test` | 模块能编过；orphan `mod` 会红 |
 | **本仓结构闸** | `boundary_tests` | **唯一官方结构红线机闸** |
-| 能力对齐 | `prd-alignment.rhai` + alignment-contract | shipped/证据，**非**分层树 |
+| 能力对齐 | `prd-alignment.rh` + alignment-contract | shipped/证据，**非**分层树 |
 | 静态分析 | clippy / 可选 semgrep·ast-grep | 可补模式禁令；非 SSOT |
 | 依赖图 | `cargo-modules` / depgraph 等 | 发现巨石与环；**辅助**，不替代本文 |
 | 文档生成 | 自写 tree 脚本 / rustdoc | 可做 **代码→文档片段** |

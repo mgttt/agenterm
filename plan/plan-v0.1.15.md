@@ -437,7 +437,7 @@ v0.1.15  Feedback shift-left & release-lane economics
   - **成本**：极小；**依赖**：无
 - [x] **A4 per-gate timing 写进 `GITHUB_STEP_SUMMARY`**
   - **动机**：现在要下载 artifact 才能看每门耗时；R1 的验收也依赖它可读
-  - **落地**：`timing-summary.rhai` 本就会 append 门表到
+  - **落地**：`timing-summary.rh` 本就会 append 门表到
     `GITHUB_STEP_SUMMARY`；Candidate 步改为 bash 明确调用，并追加
     **bootstrap.worker.state** 行便于 R1 观测
   - **验收**：Candidate 运行页直接可见逐门耗时表，无需下载 artifact
@@ -749,7 +749,7 @@ B′. tmux/rmux send-keys + buffer
     本叶是**把该保证扩展到全部六平台**，因为 M14 Hub 信任分级要对
     所有平台复用这个字段
   - **落地**：`package-client-release.rhai` 全平台写 `sbom_sha256`；
-    `package-release-qualified.rhai` Windows 资产补字段。下一次 Candidate
+    `package-release-qualified.rh` Windows 资产补字段。下一次 Candidate
     六平台 provenance 应非空（待打包门验证）。
   - **验收**：新 Candidate 六平台 provenance 的 `sbom_sha256` 均 ==
     实际 SBOM 摘要（windows-x86_64 从「无此字段」变为有值）
@@ -759,13 +759,13 @@ B′. tmux/rmux send-keys + buffer
 - [x] **H1 生成 `releases.json`**（CI 静态产物，纯派生）
   - **动机**：install.sh 靠字符串拼 artifact 名 + latest 重定向猜版本；
     未来 update/下载页/Hub 会各自再 scrape 一遍 → 四个真相源
-  - **落地**：`scripts/rhai/build-releases-index.rhai` 从 sealed candidate
+  - **落地**：`scripts/rh/build-releases-index.rh` 从 sealed candidate
     派生 schema-v1 `agenterm-releases-index`；`release.yml` verify 写出
     `candidate/releases.json`（dry_run 可见），publish 作为 **GitHub
     Release asset** 上传（**不进** sealed payload 文件集）。Pages /
     agenterm.work 多版本索引托管仍属 P5/H5，**不阻塞**本叶验收。
   - **验收**：`releases_index_is_pure_derived_from_sealed_candidate` +
-    workflow 含 `build-releases-index.rhai` + `candidate/releases.json`；
+    workflow 含 `build-releases-index.rh` + `candidate/releases.json`；
     字段全部来自 provenance/candidate-manifest（**不新造事实**）
   - **成本**：中；**依赖**：H4（sbom 摘要写进索引字段）
 - [x] **H3 provenance 用户可见化 + `installed.json`**
@@ -1469,7 +1469,7 @@ click tab row
 | 依赖面 | libp2p 0.56（gossipsub / kad / noise / ping / relay / request-response / tcp / yamux / cbor）+ `cid` 0.11 + `multihash-codetable` + sha2 |
 | CLI 子命令 | `capabilities` / `peer-id` / `self-test` / `mesh-self-test` / `attach-self-test` / `tcp-self-test`（均 `--json`），另有十余个 `--json` 分支 |
 
-**已被 CI 证明跑通的能力**（`scripts/rhai/agenterm-net-research.rhai`
+**已被 CI 证明跑通的能力**（`scripts/rh/agenterm-net-research.rh`
 在每次 release 门里真跑，本轮实测 142.2s，receipt schema
 `agenterm-net/result/v1`，断言逐条列在脚本里）：
 
@@ -1695,7 +1695,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 `agenterm-cli mux` / `agenterm-cli mcp`。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
 | 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
 | 2026-08-06 | **续推 2**：G6 `prune_old_releases`（`AGENTERM_RELEASES_KEEP`）；U3 Win tab PTY resize debounce 100ms；P0-3 文档/单测锁 breakaway autostart。U2 真机/H1 releases.json/B′/M 仍开 |
-| 2026-08-06 | **H1+H3+B′ 勾选对齐**：`build-releases-index.rhai` + release.yml 派生/上传 `releases.json`；install.sh 下载并校验 `.provenance.json` 写入 `installed.json`；B1–B5 与已 shipped buffer/send-keys 对齐。H2（install 消费索引）仍 v0.2.x；B6/U2/M/N 仍开 |
+| 2026-08-06 | **H1+H3+B′ 勾选对齐**：`build-releases-index.rh` + release.yml 派生/上传 `releases.json`；install.sh 下载并校验 `.provenance.json` 写入 `installed.json`；B1–B5 与已 shipped buffer/send-keys 对齐。H2（install 消费索引）仍 v0.2.x；B6/U2/M/N 仍开 |
 | 2026-08-06 | **B′ 尾巴**：`save-buffer` 显式 unsupported；`paste-buffer` 空失败 + UTF-8 规范化/bracketed-paste；`cli-smoke` `cli.named-buffer-paste`（set→paste→capture）。B6 仍开 |
 | 2026-08-06 | **测试门收口（不发布）**：rustfmt/clippy/rh pack Windows dll 名、fleet-smoke `mux_argv`、prd-alignment（mux/rh-pack）、quick unit 超时与 CJK 测试宿主字体条件；`lint`+`check --quick` 绿；隔离 GUI buffer 黑盒绿 |
 

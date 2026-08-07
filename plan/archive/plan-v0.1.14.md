@@ -159,7 +159,7 @@ v0.1.14 Release 推进
 | 修改对象 | 执行 ref | 是否需要新 Candidate |
 |---------|---------|--------------------|
 | `.github/workflows/release.yml` | `--ref main` | **不需要**，改完直接重发 Promotion |
-| `scripts/rhai/promotion-identity.rhai`<br>`scripts/rhai/candidate-verify.rhai` | checkout `ref: source_sha`<br>（= Candidate 的 SHA） | **必须重跑 Candidate** |
+| `scripts/rhai/promotion-identity.rhai`<br>`scripts/rh/candidate-verify.rh` | checkout `ref: source_sha`<br>（= Candidate 的 SHA） | **必须重跑 Candidate** |
 | `scripts/rhai/lib/release_candidate.rhai`<br>及一切 gate/smoke 脚本 | Candidate 自身构建 | **必须重跑 Candidate** |
 
 verify job 用 `ref: ${{ steps.candidate.outputs.source_sha }}` 检出，
@@ -176,7 +176,7 @@ Promotion 每轮只暴露一个断言。与其一次次 20 分钟往返，不如
 gh run download <candidate_run_id> -R mgttt/agenterm \
   -n "release-candidate-<candidate_run_id>" -D /tmp/prom
 # 1) 字节级校验（与 CI 同一脚本，输出应为 VALID CANDIDATE ...）
-./target/debug/agenterm-rhai run scripts/rhai/candidate-verify.rhai \
+./target/debug/agenterm-rhai run scripts/rh/candidate-verify.rh \
   --project-root . -- . /tmp/prom/agenterm-*-candidate-manifest.json /tmp/prom/payload
 # 2) 生成 promotion identity（退出 0 即通过 verify job 的核心断言）
 ./target/debug/agenterm-rhai run scripts/rhai/promotion-identity.rhai \

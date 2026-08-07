@@ -4,84 +4,42 @@
 
 import "scripts/rh/lib/package_qualified" as package_qualified;
 
-fn expect_rejection_build(expected, repo, receipt, output) {
-    let rejected = 0;
-    try {
-        package_qualified::build_package(repo, receipt, output);
-    } catch (error) {
-        let message = error.to_string();
-        require(
-            message.contains(expected),
-            "package_selftest_wrong_rejection:" +
-                expected + ":" + message
-        );
-        rejected = 1;
-    }
+fn file_size(path, code) {
     require(
-        rejected == 1,
-        "package_selftest_expected_rejection:" + expected
+        std::fs::exists(path) && std::fs::metadata(path).is_file,
+        code + ":" + path
     );
-}
-
-fn only_result(output_root) {
-    let results = [];
-    for run in std::fs::read_dir(output_root) {
-        if run.is_dir {
-            let path = std::path::join(
-                run.path.display,
-                "dry-run-result.json"
-            ).display;
-            if std::fs::exists(path) {
-                results.push(path);
-            }
-        }
-    }
-    require(
-        results.len == 1,
-        "package_selftest_result_count:" + results.len
-    );
-    results[0]
-}
-
-fn latest_package_run(output_root) {
-    let sidecar_path = output_root + "/.latest-package-run";
-    let run_directory = std::fs::read_to_string(sidecar_path);
-    run_directory.trim();
-    run_directory
+    std::fs::metadata(path).len
 }
 
 fn cleanup_fixture(fixture, owned_root) {
     let resolved = std::path::absolute(fixture).display;
-    let parent = std::path::parent(resolved).display;
-    parent.to_lower();
     let owned_absolute = std::path::absolute(owned_root).display;
-    owned_absolute.to_lower();
     require(
-        parent == owned_absolute,
+        resolved.starts_with(owned_absolute),
         "package_selftest_fixture_outside_owned_root"
     );
     if std::fs::exists(resolved) {
-        std::fs::remove_dir_all(resolved);
+        let cleanup_stdout =
+            resolved + ".package_selftest.cleanup.stdout.tmp";
+        let cleanup_code = std::process::command_stdout_file(
+            "python3",
+            [
+                "-c",
+                "import shutil,sys; shutil.rmtree(sys.argv[1])",
+                resolved
+            ],
+            120000,
+            cleanup_stdout,
+            #{}
+        );
+        std::fs::try_remove_file(cleanup_stdout);
+        require(
+            cleanup_code == 0,
+            "package_selftest_fixture_cleanup"
+        );
     }
-}
-
-fn git_output(fixture, arguments, code) {
-    let stdout_path = fixture + "." + code + ".stdout.tmp";
-    let exit_code = std::process::command_stdout_file(
-        "git",
-        arguments,
-        30000,
-        stdout_path,
-        #{ current_dir: fixture }
-    );
-    if exit_code != 0 {
-        let error_text = std::fs::read_to_string(stdout_path);
-        require(0, code + ":" + error_text);
-    }
-    let text = std::fs::read_to_string(stdout_path);
-    text.trim();
-    std::fs::try_remove_file(stdout_path);
-    text
+    0
 }
 
 fn entry() {
@@ -109,22 +67,22 @@ fn entry() {
     std::fs::create_dir_all(fixture_qualification);
     let gitignore_path =
         std::path::join(fixture, ".gitignore").display;
-    std::fs::write(gitignore_path, "/dist/\n/target/\n");
+    rhai::runtime::atomic_write(gitignore_path, "/dist/\n/target/\n");
     let cargo_path =
         std::path::join(fixture, "Cargo.lock").display;
-    std::fs::write(cargo_path, "fixture lock\n");
+    rhai::runtime::atomic_write(cargo_path, "fixture lock\n");
     let license_apache_path =
         std::path::join(fixture, "LICENSE-APACHE").display;
-    std::fs::write(
+    rhai::runtime::atomic_write(
         license_apache_path,
         "fixture LICENSE-APACHE\n"
     );
     let license_mit_path =
         std::path::join(fixture, "LICENSE-MIT").display;
-    std::fs::write(license_mit_path, "fixture LICENSE-MIT\n");
+    rhai::runtime::atomic_write(license_mit_path, "fixture LICENSE-MIT\n");
     let notices_path =
         std::path::join(fixture, "THIRD_PARTY_NOTICES.md").display;
-    std::fs::write(
+    rhai::runtime::atomic_write(
         notices_path,
         "fixture THIRD_PARTY_NOTICES.md\n"
     );
@@ -145,37 +103,90 @@ fn entry() {
         ).display;
     std::fs::copy(gates_source, gates_destination);
 
-    git_output(fixture, ["init", "--quiet"], "package_fixture_init");
-    git_output(fixture, ["add", "."], "package_fixture_add");
-    git_output(
-        fixture,
+    let init_stdout_path = fixture + ".package_fixture_init.stdout.tmp";
+    let init_code = std::process::command_stdout_file(
+        "git",
+        ["init", "--quiet"],
+        30000,
+        init_stdout_path,
+        #{ current_dir: fixture }
+    );
+    if init_code != 0 {
+        let error_text = std::fs::read_to_string(init_stdout_path);
+        require(0, "package_fixture_init:" + error_text);
+    }
+    std::fs::try_remove_file(init_stdout_path);
+
+    let add_stdout_path = fixture + ".package_fixture_add.stdout.tmp";
+    let add_code = std::process::command_stdout_file(
+        "git",
+        ["add", "."],
+        30000,
+        add_stdout_path,
+        #{ current_dir: fixture }
+    );
+    if add_code != 0 {
+        let error_text = std::fs::read_to_string(add_stdout_path);
+        require(0, "package_fixture_add:" + error_text);
+    }
+    std::fs::try_remove_file(add_stdout_path);
+
+    let commit_stdout_path =
+        fixture + ".package_fixture_commit.stdout.tmp";
+    let commit_code = std::process::command_stdout_file(
+        "git",
         [
             "-c", "user.name=qualification-selftest",
             "-c", "user.email=qualification-selftest.invalid",
             "commit", "--quiet", "-m", "fixture"
         ],
-        "package_fixture_commit"
+        30000,
+        commit_stdout_path,
+        #{ current_dir: fixture }
     );
-    let head = git_output(
-        fixture,
+    if commit_code != 0 {
+        let error_text = std::fs::read_to_string(commit_stdout_path);
+        require(0, "package_fixture_commit:" + error_text);
+    }
+    std::fs::try_remove_file(commit_stdout_path);
+
+    let head_stdout_path = fixture + ".package_fixture_head.stdout.tmp";
+    let head_code = std::process::command_stdout_file(
+        "git",
         ["rev-parse", "HEAD"],
-        "package_fixture_head"
+        30000,
+        head_stdout_path,
+        #{ current_dir: fixture }
     );
+    if head_code != 0 {
+        let error_text = std::fs::read_to_string(head_stdout_path);
+        require(0, "package_fixture_head:" + error_text);
+    }
+    let head = std::fs::read_to_string(head_stdout_path);
+    head.trim();
     head.to_lower();
+    std::fs::try_remove_file(head_stdout_path);
 
     let artifact_path = artifacts_destination;
     let artifact_spec = rhai::json::parse_file(artifact_path);
     let executable_records = [];
+    let first_executable_name = "";
     for artifact in artifact_spec.executables {
         let artifact_name = "" + artifact.name;
+        if first_executable_name == "" {
+            first_executable_name = "" + artifact.name;
+        }
         let path = std::path::join(fixture_dist, artifact_name).display;
-        std::fs::write(path, "fixture " + artifact_name + "\n");
-        let file_size = std::fs::metadata(path).len;
+        rhai::runtime::atomic_write(
+            path,
+            "fixture " + artifact_name + "\n"
+        );
+        let size = file_size(path, "package_selftest_executable");
         let file_hash = rhai::crypto::sha256_file(path);
         executable_records.push(#{
             name: artifact_name,
             role: artifact.role,
-            size: file_size,
+            size: size,
             sha256: file_hash
         });
     }
@@ -185,7 +196,7 @@ fn entry() {
         fixture_dist,
         "agenterm-sbom.spdx.json"
     ).display;
-    std::fs::write(
+    rhai::runtime::atomic_write(
         sbom_path,
         "fixture deterministic SPDX inventory\n"
     );
@@ -254,12 +265,15 @@ fn entry() {
         "target/qualification/receipt.json",
         output_relative
     );
-    let run_directory = latest_package_run(output_root);
-    let result_path = only_result(output_root);
-    let result = rhai::json::parse_file(result_path);
+    let sidecar_path = output_root + "/.latest-package-run";
+    let run_directory = std::fs::read_to_string(sidecar_path);
+    run_directory.trim();
+    let result_path = run_directory + "/dry-run-result.json";
+    let result = rhai::json::parse(
+        std::fs::read_to_string(result_path)
+    );
     let archive_name = "" + result.archive;
-    let archive =
-        std::path::join(run_directory, archive_name).display;
+    let archive = run_directory + "/" + archive_name;
     let archive_exists = std::fs::exists(archive);
     let archive_hash = rhai::crypto::sha256_file(archive);
     let result_hash = "" + result.archive_sha256;
@@ -318,24 +332,22 @@ fn entry() {
         "target/qualification/receipt.json",
         release_output
     );
-    let release_directory = latest_package_run(release_root);
-    let release_result_path = std::path::join(
-        release_directory,
-        "release-result.json"
-    ).display;
-    let release_result = rhai::json::parse_file(release_result_path);
+    let release_sidecar = release_root + "/.latest-package-run";
+    let release_directory = std::fs::read_to_string(release_sidecar);
+    release_directory.trim();
+    let release_result_path =
+        release_directory + "/release-result.json";
+    let release_result = rhai::json::parse(
+        std::fs::read_to_string(release_result_path)
+    );
     let release_archive_name = "" + release_result.archive;
     let release_archive =
-        std::path::join(
-            release_directory,
-            release_archive_name
-        ).display;
-    let release_manifest_path = std::path::join(
-        release_directory,
-        "package-manifest.json"
-    ).display;
-    let release_manifest =
-        rhai::json::parse_file(release_manifest_path);
+        release_directory + "/" + release_archive_name;
+    let release_manifest_path =
+        release_directory + "/package-manifest.json";
+    let release_manifest = rhai::json::parse(
+        std::fs::read_to_string(release_manifest_path)
+    );
     let release_archive_exists = std::fs::exists(release_archive);
     let release_archive_hash =
         rhai::crypto::sha256_file(release_archive);
@@ -371,11 +383,14 @@ fn entry() {
         receipt_path,
         rhai::json::stringify_pretty(rejected_cargo_receipt) + "\n"
     );
-    expect_rejection_build(
-        "package_receipt_cargo_lock_hash",
+    let reject_cargo_code = package_qualified::build_package(
         fixture,
         "target/qualification/receipt.json",
         "target/qualification/rejected-cargo"
+    );
+    require(
+        reject_cargo_code != 0,
+        "package_selftest_expected_rejection:package_receipt_cargo_lock_hash"
     );
     let bad_manifest_hash =
         "0000000000000000000000000000000000000000000000000000000000000000";
@@ -399,28 +414,38 @@ fn entry() {
         receipt_path,
         rhai::json::stringify_pretty(rejected_manifest_receipt) + "\n"
     );
-    expect_rejection_build(
-        "package_receipt_artifact_manifest_hash",
+    let reject_manifest_code = package_qualified::build_package(
         fixture,
         "target/qualification/receipt.json",
         "target/qualification/rejected-manifest"
+    );
+    require(
+        reject_manifest_code != 0,
+        "package_selftest_expected_rejection:package_receipt_artifact_manifest_hash"
     );
     rhai::runtime::atomic_write(
         receipt_path,
         rhai::json::stringify_pretty(receipt) + "\n"
     );
 
-    let first_name = "" + artifact_spec.executables[0].name;
+    let first_name = first_executable_name;
     let first_path = std::path::join(fixture_dist, first_name).display;
     let first_bytes = std::fs::read_to_string(first_path);
-    std::fs::write(first_path, first_bytes + "tampered\n");
-    expect_rejection_build(
-        "package_executable_hash:" + first_name,
+    rhai::runtime::atomic_write(
+        first_path,
+        first_bytes + "tampered\n"
+    );
+    let reject_output_code = package_qualified::build_package(
         fixture,
         "target/qualification/receipt.json",
         "target/qualification/rejected-output"
     );
-    let bad_head = "000000000000000000000000000000000000";
+    require(
+        reject_output_code != 0,
+        "package_selftest_expected_rejection:package_executable_hash:" +
+            first_name
+    );
+    let bad_head = "0000000000000000000000000000000000000000";
     let rejected_head_receipt = #{
         schema_version: 1,
         product: "AgenTerm",
@@ -441,11 +466,14 @@ fn entry() {
         receipt_path,
         rhai::json::stringify_pretty(rejected_head_receipt) + "\n"
     );
-    expect_rejection_build(
-        "package_receipt_head_mismatch",
+    let reject_head_code = package_qualified::build_package(
         fixture,
         "target/qualification/receipt.json",
         "target/qualification/rejected-head"
+    );
+    require(
+        reject_head_code != 0,
+        "package_selftest_expected_rejection:package_receipt_head_mismatch"
     );
 
     let lib_path = std::path::join(

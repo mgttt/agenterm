@@ -31,14 +31,14 @@
 | M15 | rh-3a：`agenterm-rh eval`（AOT + dlopen 一键 dev） | [x] |
 | M16 | rh-3b：赋值/复合赋值 + `while` 可变异计数 | [x] |
 | M17 | rh-3b：`try`/`catch` 子集 + 原生 throw 路径 | [x] |
-| M18 | rh-3c：`agenterm-rh check-many`（bounded manifest，对齐 lint.rhai） | [x] |
+| M18 | rh-3c：`agenterm-rh check-many`（bounded manifest，对齐 lint.rh） | [x] |
 | M19 | rh-3c：bootstrap / CI 默认构建 `agenterm-rh` 二进制 | [x] |
 | M20 | rh-3d：worker 路径 `Run`/`Eval` 黑盒 parity（rh_backend 扩展） | [x] |
 | M21 | rh-4：task corpus 扫描器（62 脚本 rh-2/3 校验报告，不强制迁移） | [x] |
 | M22a | M22 预备：`caller-inventory` + `corpus-scan --tasks` 机器可读报告 | [x] |
 | M22b | worker parity：`RhRunContext` args/project_root、`host_eval`/`host_run_script` 注入、framed-worker 黑盒 | [x] |
 | M22c | check-many 薄转发兼容：rhai CLI/manifest kind、bootstrap.cmd 对称、forward 黑盒 | [x] |
-| M22d | lint.rhai 优先 `agenterm-rh` check-many；artifacts/stage-build 纳入 dev CLI | [x] |
+| M22d | lint.rh 优先 `agenterm-rh` check-many；artifacts/stage-build 纳入 dev CLI | [x] |
 | M22e | CLI 薄转发黑盒（check/eval/run/version）；framed-worker entry fixture；`for` 整型 range 原生 AOT | [x] |
 | M22f | **默认 rh 后端**（`AGENTERM_SCRIPT_BACKEND=rh`）；bootstrap/worker 注入；删除 Rhai check-many 回退 | [x] |
 | M22 | 替换轨：`agenterm-rhai` 薄壳 + rh 默认执行（Candidate 六 cell 改名仍待人审） | [x] |
