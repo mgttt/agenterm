@@ -30,10 +30,8 @@ impl StandaloneCli {
         fs::create_dir(&root).expect("create standalone CLI directory");
 
         let executable = root.join(binary_name("agenterm-rh"));
-        let copying = root.join(format!("{}.copying", binary_name("agenterm-rh")));
-        fs::copy(env!("CARGO_BIN_EXE_agenterm-rh"), &copying)
-            .expect("copy standalone agenterm-rh");
-        fs::rename(&copying, &executable).expect("publish standalone agenterm-rh");
+        fs::hard_link(env!("CARGO_BIN_EXE_agenterm-rh"), &executable)
+            .expect("hard-link standalone agenterm-rh");
 
         for compatibility_name in [root.join("agenterm-rhai"), root.join("agenterm-rhai.exe")] {
             assert!(
