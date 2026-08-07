@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rhai::{AST, ASTFlags, Expr, ScriptFuncDef, Stmt, StmtBlock, Token};
+use rhai::{AST, ASTFlags, BinaryExpr, Expr, OpAssignment, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
@@ -20,6 +20,7 @@ enum ValueKind {
     String,
     Char,
     Json,
+    Set,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +112,11 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
+                ValueKind::Set => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
             }
         }
         out.push_str("}}}}\"");
@@ -120,6 +126,14 @@ impl EmitCtx {
                 out.push_str("serde_json::to_string(&");
                 out.push_str(name);
                 out.push_str(").unwrap_or_else(|_| \"\\\"\\\"\".to_owned())");
+            } else if matches!(kind, ValueKind::Set) {
+                out.push_str(
+                    "serde_json::to_string(&",
+                );
+                out.push_str(name);
+                out.push_str(
+                    ".iter().cloned().collect::<Vec<_>>()).unwrap_or_else(|_| \"[]\".to_owned())",
+                );
             } else if matches!(kind, ValueKind::Char) {
                 out.push_str(name);
                 out.push_str(".to_string()");
@@ -433,6 +447,8 @@ fn emit_stmt(
                 out.push_str(", ");
                 emit_json_path(out, &path);
                 out.push(')');
+            } else if kind == ValueKind::Set {
+                out.push_str("std::collections::HashSet::<String>::new()");
             } else if kind == ValueKind::String && matches!(expr, Expr::StringConstant(..)) {
                 out.push_str("String::from(");
                 emit_native_string(out, expr, ctx)?;
@@ -454,6 +470,14 @@ fn emit_stmt(
         }
         Stmt::Assignment(boxed, ..) => {
             let (op, bin) = boxed.as_ref();
+            if let Some((set_name, key)) = set_insert_assignment(boxed, ctx) {
+                out.push_str("    ");
+                out.push_str(set_name);
+                out.push_str(".insert(");
+                emit_set_key(out, key, ctx)?;
+                out.push_str(");\n");
+                return Ok(());
+            }
             let Expr::Variable(ident, ..) = &bin.lhs else {
                 return Err(RhError::Transpile(
                     "assignment lhs must be a variable".into(),
@@ -866,6 +890,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
         Expr::StringConstant(..) => ValueKind::String,
+        Expr::Map(map, ..) if map.0.is_empty() => ValueKind::Set,
         Expr::Variable(ident, ..) => match ctx.scope.get(ident.1.as_str()).copied() {
             Some(kind) => kind,
             None => ValueKind::Int,
@@ -1369,6 +1394,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if emit_set_predicate(out, expr, ctx)? {
+            return Ok(());
+        }
         if emit_string_predicate(out, expr, ctx)? {
             return Ok(());
         }
@@ -1657,6 +1685,89 @@ fn emit_string_needle(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bo
         }
         _ => Ok(false),
     }
+}
+
+fn set_insert_assignment<'a>(
+    assign: &'a (OpAssignment, BinaryExpr),
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a Expr)> {
+    let (op, bin) = assign;
+    if op.get_op_assignment_info().is_some() {
+        return None;
+    }
+    let Expr::Index(boxed, ..) = &bin.lhs else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Set) {
+        return None;
+    }
+    matches!(bin.rhs, Expr::BoolConstant(true, ..)).then_some((ident.1.as_str(), &boxed.rhs))
+}
+
+fn emit_set_key(out: &mut String, key: &Expr, ctx: &EmitCtx) -> Result<(), RhError> {
+    match key {
+        Expr::StringConstant(value, ..) => {
+            out.push_str("String::from(");
+            out.push_str(&format!("{value:?}"));
+            out.push(')');
+            Ok(())
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone()");
+            Ok(())
+        }
+        _ => Err(RhError::Transpile(
+            "set index key must be a string binding or literal".into(),
+        )),
+    }
+}
+
+fn parse_set_method_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Set) {
+        return None;
+    }
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    Some((ident.1.as_str(), call))
+}
+
+fn emit_set_predicate(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = parse_set_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    if call.name != "contains" || call.args.len() != 1 {
+        return Ok(false);
+    }
+    let mut needle = String::new();
+    if !emit_string_needle(&mut needle, &call.args[0], ctx)? {
+        return Ok(false);
+    }
+    out.push('(');
+    out.push_str(binding);
+    out.push_str(".contains(");
+    out.push_str(&needle);
+    out.push_str(") as INT)");
+    Ok(true)
 }
 
 fn emit_string_predicate(
@@ -2058,6 +2169,23 @@ mod tests {
         assert!(output.rust.contains("name.ends_with("));
         assert!(output.rust.contains("role.replace("));
         assert!(!output.rust.contains("rh_host_eval_int(\"for"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_map_set_membership() {
+        let source = include_str!("../../../fixtures/rh/map-set-membership.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("HashSet::<String>::new()"));
+        assert!(output.rust.contains(".contains("));
+        assert!(output.rust.contains(".insert("));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]

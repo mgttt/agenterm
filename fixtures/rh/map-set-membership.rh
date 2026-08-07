@@ -1,0 +1,16 @@
+fn entry() {
+    let names = #{};
+    let a = "agenterm-cli.exe";
+    let b = "agenterm-mux.exe";
+    let c = "agenterm-rhai.exe";
+    require(!names.contains(a), "fresh:a");
+    names[a] = true;
+    require(!names.contains(b), "fresh:b");
+    names[b] = true;
+    require(names.contains(a), "has:a");
+    require(names.contains(b), "has:b");
+    require(!names.contains("agenterm.exe"), "missing");
+    names[c] = true;
+    require(names.contains(c), "has:c");
+    3
+}

@@ -69,6 +69,24 @@ fn reject_expr(expr: &Expr) -> Option<RhError> {
 }
 
 fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
+    if let Expr::Index(boxed, ..) = &assign.1.lhs {
+        if assign.0.get_op_assignment_info().is_some() {
+            return Some(subset_error(
+                "RH_SUBSET_ASSIGN_LHS",
+                "set index assignment must use plain `=` in rh-3",
+            ));
+        }
+        if !matches!(assign.1.rhs, Expr::BoolConstant(true, ..)) {
+            return Some(subset_error(
+                "RH_SUBSET_ASSIGN_RHS",
+                "set index assignment rhs must be `true` in rh-3",
+            ));
+        }
+        if let Some(err) = validate_root_expr(&boxed.lhs) {
+            return Some(err);
+        }
+        return validate_root_expr(&boxed.rhs);
+    }
     if !matches!(assign.1.lhs, Expr::Variable(..)) {
         return Some(subset_error(
             "RH_SUBSET_ASSIGN_LHS",
@@ -417,5 +435,22 @@ mod tests {
             )
             .expect("compile");
         validate_ast(&ast).expect("json integer assignment");
+    }
+
+    #[test]
+    fn accepts_map_set_membership_assignment() {
+        let mut engine = Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile(
+                r#"fn entry() {
+                    let names = #{};
+                    let name = "agenterm";
+                    names[name] = true;
+                    names.contains(name)
+                }"#,
+            )
+            .expect("compile");
+        validate_ast(&ast).expect("map set membership");
     }
 }

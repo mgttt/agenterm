@@ -17,6 +17,7 @@
     "fixtures/rh/json-parse-schema.rh",
     "fixtures/rh/json-type-string.rh",
     "fixtures/rh/string-validate.rh",
-    "fixtures/rh/fail-dynamic.rh"
+    "fixtures/rh/fail-dynamic.rh",
+    "fixtures/rh/map-set-membership.rh"
   ]
 }

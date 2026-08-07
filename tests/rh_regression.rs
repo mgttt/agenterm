@@ -50,6 +50,10 @@ fn check_accepts_all_fixtures() {
             "fail-dynamic",
             include_str!("../fixtures/rh/fail-dynamic.rh"),
         ),
+        (
+            "map-set-membership",
+            include_str!("../fixtures/rh/map-set-membership.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -327,4 +331,36 @@ fn fail_dynamic_fixture_executes_natively_without_interpreter() {
     let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify fail-dynamic pack");
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(receipt.entry_value, 1);
+}
+
+#[test]
+fn map_set_membership_fixture_executes_natively_without_interpreter() {
+    let source = include_str!("../fixtures/rh/map-set-membership.rh");
+    let output =
+        agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile map-set-membership");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("HashSet::<String>::new()"),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains(".insert("), "{}", output.rust);
+    assert!(output.rust.contains(".contains("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-map-set-membership-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt =
+        agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify map-set-membership pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 3);
 }
