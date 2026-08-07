@@ -1,0 +1,44 @@
+// Probe native M42f6f sugars: metadata, current_dir, PathBuf.is_absolute, parse_file.
+// Args: JSON_PATH ABSOLUTE_SAMPLE RELATIVE_SAMPLE
+fn entry() {
+    if args.len != 3 {
+        return rh::fail("expected: JSON_PATH ABSOLUTE_SAMPLE RELATIVE_SAMPLE");
+    }
+
+    let score = 0;
+    let json_path = args[0];
+    let absolute_sample = args[1];
+    let relative_sample = args[2];
+
+    let cwd = std::env::current_dir().display;
+    if cwd != "" {
+        score += 1;
+    }
+
+    let abs = std::path::PathBuf::from(absolute_sample);
+    let rel = std::path::PathBuf::from(relative_sample);
+    if abs.is_absolute {
+        score += 10;
+    }
+    if !rel.is_absolute {
+        score += 100;
+    }
+    if std::path::PathBuf::from(absolute_sample).is_absolute {
+        score += 1000;
+    }
+
+    let meta = std::fs::metadata(json_path);
+    if meta.is_file && meta.len > 0 {
+        score += 10000;
+    }
+    if std::fs::metadata(json_path).is_file {
+        score += 100000;
+    }
+
+    let doc = rhai::json::parse_file(json_path);
+    if doc.schema_version == 1 {
+        score += 1000000;
+    }
+
+    score
+}

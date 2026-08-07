@@ -85,10 +85,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   evaluate `type_of`, compare and concatenate strings, run string methods and
   character loops, emit dynamic `rh::fail`/`require` messages, track
   bool-keyed MapSet membership (`#{}` / `.contains` / `[key]=true`), resolve
-  `std::path::absolute(...).display`, inspect `symlink_metadata` file /
-  symlink / reparse flags, and flatten project-relative `import` graphs into
-  one native pack entirely in generated Rust. Public qualification executes
-  the generated native packs. `validate-artifact-manifest` now ships as
+  `std::path::absolute(...).display`, inspect `symlink_metadata` and
+  `std::fs::metadata` file / dir / len / symlink / reparse flags, resolve
+  `std::env::current_dir().display`, `PathBuf::from` plus `.is_absolute` /
+  `.display`, and `rhai::json::parse_file` as `parse(read_to_string)` sugar,
+  and flatten project-relative `import` graphs into one native pack entirely
+  in generated Rust. Public qualification executes the generated native packs.
+  `validate-artifact-manifest` now ships as
   native `scripts/rh/validate-artifact-manifest.rh` plus
   `scripts/rh/lib/artifact_manifest.rh` (import-bundled, no substring or
   task-specific host validator); remaining Rhai callers still import

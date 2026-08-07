@@ -26,6 +26,8 @@ enum ValueKind {
     StringList,
     Metadata,
     DirEntry,
+    /// `std::path::PathBuf` binding stored as a UTF-8 path string.
+    Path,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,7 +123,7 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"bool\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
-                ValueKind::String | ValueKind::Char => {
+                ValueKind::String | ValueKind::Char | ValueKind::Path => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"string\\\",\\\"value\\\":{{}}}}"
                     ));
@@ -153,7 +155,7 @@ impl EmitCtx {
             out.push_str(", ");
             if matches!(
                 kind,
-                ValueKind::String | ValueKind::Json | ValueKind::StringList
+                ValueKind::String | ValueKind::Path | ValueKind::Json | ValueKind::StringList
             ) {
                 out.push_str("serde_json::to_string(&");
                 out.push_str(name);
@@ -471,7 +473,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
         if fn_ctx.cdylib {
             out.push_str(param.as_str());
             out.push_str(match kind {
-                ValueKind::String => ": String",
+                ValueKind::String | ValueKind::Path => ": String",
                 ValueKind::Json => ": serde_json::Value",
                 _ => ": INT",
             });
@@ -521,7 +523,7 @@ fn propagate_local_fn_param_kinds(
                     continue;
                 }
                 if sig[index] == ValueKind::Int
-                    && matches!(kind, ValueKind::String | ValueKind::Json)
+                    && matches!(kind, ValueKind::String | ValueKind::Path | ValueKind::Json)
                 {
                     sig[index] = kind;
                     changed = true;
@@ -652,7 +654,7 @@ fn collect_param_kind_upgrades_in_call(
         let Some(kind) = callee_sig.get(arg_index).copied() else {
             continue;
         };
-        if matches!(kind, ValueKind::String | ValueKind::Json) {
+        if matches!(kind, ValueKind::String | ValueKind::Path | ValueKind::Json) {
             upgrades.push((param_index, kind));
         }
     }
@@ -855,9 +857,23 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         || std_fs_try_rename_args(expr)
             .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
         || std_fs_symlink_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_join_display_args(expr)
             .is_some_and(|(base, child)| is_param_var(base, param) || is_param_var(child, param))
+        || path_buf_from_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || path_buf_from_display_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || path_buf_from_is_absolute_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || json_parse_file_arg(expr).is_some_and(|path| is_param_var(path, param))
         || rh_fail_arg(expr).is_some_and(|message| is_param_var(message, param))
+    {
+        return true;
+    }
+    if let Expr::Dot(boxed, ..) = expr
+        && is_param_var(&boxed.lhs, param)
+        && matches!(
+            &boxed.rhs,
+            Expr::Property(property, ..) if property.2.as_str() == "is_absolute"
+        )
     {
         return true;
     }
@@ -1001,15 +1017,20 @@ fn emit_stmt(
                 }
             } else if kind == ValueKind::Set {
                 out.push_str("std::collections::HashSet::<String>::new()");
-            } else if kind == ValueKind::String && matches!(expr, Expr::StringConstant(..)) {
+            } else if matches!(kind, ValueKind::String | ValueKind::Path)
+                && matches!(expr, Expr::StringConstant(..))
+            {
                 out.push_str("String::from(");
                 emit_native_string(out, expr, ctx)?;
                 out.push(')');
-            } else if kind == ValueKind::String
+            } else if matches!(kind, ValueKind::String | ValueKind::Path)
                 && matches!(
                     expr,
                     Expr::Variable(ident, ..)
-                        if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String)
+                        if matches!(
+                            ctx.scope.get(ident.1.as_str()).copied(),
+                            Some(ValueKind::String | ValueKind::Path)
+                        )
                 )
             {
                 emit_expr(out, expr, ctx)?;
@@ -1524,7 +1545,12 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
         _ if path_absolute_display_arg(expr).is_some() => ValueKind::String,
+        _ if path_buf_from_display_arg(expr).is_some() => ValueKind::String,
+        _ if env_current_dir_display(expr) => ValueKind::String,
+        _ if path_buf_from_arg(expr).is_some() => ValueKind::Path,
         _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
+        _ if std_fs_metadata_arg(expr).is_some() => ValueKind::Metadata,
+        _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
@@ -1737,6 +1763,130 @@ fn path_absolute_display_arg(expr: &Expr) -> Option<&Expr> {
 
 fn std_fs_symlink_metadata_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "symlink_metadata")
+}
+
+fn std_fs_metadata_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "metadata")
+}
+
+fn path_buf_from_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::path::PathBuf"
+        || call.name != "from"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn path_buf_from_display_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let display = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    if !display {
+        return None;
+    }
+    path_buf_from_arg(&boxed.lhs)
+}
+
+fn path_buf_from_is_absolute_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let absolute = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "is_absolute"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "is_absolute" && call.args.is_empty()
+    );
+    if !absolute {
+        return None;
+    }
+    path_buf_from_arg(&boxed.lhs)
+}
+
+fn path_binding_is_absolute<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Path) {
+        return None;
+    }
+    let absolute = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "is_absolute"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "is_absolute" && call.args.is_empty()
+    );
+    absolute.then_some(ident.1.as_str())
+}
+
+fn path_binding_display<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Path) {
+        return None;
+    }
+    let display = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    display.then_some(ident.1.as_str())
+}
+
+fn env_current_dir_display(expr: &Expr) -> bool {
+    let Expr::Dot(boxed, ..) = expr else {
+        return false;
+    };
+    let display = matches!(
+        &boxed.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &boxed.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    if !display {
+        return false;
+    }
+    let Expr::FnCall(call, ..) = &boxed.lhs else {
+        return false;
+    };
+    call.namespace.to_string() == "std::env" && call.name == "current_dir" && call.args.is_empty()
+}
+
+fn json_parse_file_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::json"
+        || call.name != "parse_file"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
 }
 
 fn std_fs_remove_file_arg(expr: &Expr) -> Option<&Expr> {
@@ -1960,10 +2110,18 @@ fn std_time_system_time_now_unix_millis(expr: &Expr) -> bool {
 }
 
 fn symlink_metadata_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    fs_metadata_property(expr, "symlink_metadata")
+}
+
+fn metadata_call_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    fs_metadata_property(expr, "metadata")
+}
+
+fn fs_metadata_property<'a>(expr: &'a Expr, call_name: &str) -> Option<(&'a Expr, &'a str)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
-    let path = std_fs_symlink_metadata_arg(&boxed.lhs)?;
+    let path = std_fs_single_arg(&boxed.lhs, call_name)?;
     let name = match &boxed.rhs {
         Expr::Property(property, ..) => property.2.as_str(),
         Expr::MethodCall(call, ..) if call.args.is_empty() => call.name.as_str(),
@@ -2202,11 +2360,19 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || std_env_get_arg(expr).is_some()
         || path_join_display_args(expr).is_some()
         || path_absolute_display_arg(expr).is_some()
+        || path_buf_from_display_arg(expr).is_some()
+        || path_binding_display(expr, ctx).is_some()
+        || env_current_dir_display(expr)
         || std_fs_read_to_string_arg(expr).is_some()
         || crypto_sha256_file_arg(expr).is_some()
         || json_stringify_pretty_arg(expr).is_some()
         || string_list_index(expr, ctx).is_some()
         || std_time_system_time_now_rfc3339(expr)
+        || matches!(
+            expr,
+            Expr::Variable(ident, ..)
+                if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Path)
+        )
     {
         return true;
     }
@@ -2322,7 +2488,10 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push(')');
         }
         Expr::Variable(ident, ..)
-            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+            if matches!(
+                ctx.scope.get(ident.1.as_str()).copied(),
+                Some(ValueKind::String | ValueKind::Path)
+            ) =>
         {
             out.push_str(ident.1.as_str());
         }
@@ -2365,6 +2534,20 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
                     "env::get argument must be a string name".into(),
                 ));
             }
+        }
+        _ if env_current_dir_display(expr) => {
+            out.push_str("rh_env_current_dir()");
+        }
+        _ if let Some(path) = path_buf_from_display_arg(expr) => {
+            if !emit_path_buf_from(out, path, ctx)? {
+                return Err(RhError::Transpile(
+                    "PathBuf::from.display argument must be a string path".into(),
+                ));
+            }
+        }
+        _ if let Some(binding) = path_binding_display(expr, ctx) => {
+            out.push_str(binding);
+            out.push_str(".clone()");
         }
         _ if std_time_system_time_now_rfc3339(expr) => {
             out.push_str("rh_system_time_now_rfc3339()");
@@ -2469,6 +2652,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some(path) = json_parse_file_arg(expr)
+            && emit_json_parse_file(out, path, ctx)?
+        {
+            return Ok(());
+        }
         if let Some(argument) = type_of_arg(expr)
             && emit_type_of(out, argument, ctx)?
         {
@@ -2556,8 +2744,43 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some(path) = path_buf_from_display_arg(expr)
+            && emit_path_buf_from(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(binding) = path_binding_display(expr, ctx) {
+            out.push_str(binding);
+            out.push_str(".clone()");
+            return Ok(());
+        }
+        if env_current_dir_display(expr) {
+            out.push_str("rh_env_current_dir()");
+            return Ok(());
+        }
+        if let Some(path) = path_buf_from_arg(expr)
+            && emit_path_buf_from(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = path_buf_from_is_absolute_arg(expr)
+            && emit_path_is_absolute(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(binding) = path_binding_is_absolute(expr, ctx) {
+            out.push_str("rh_path_is_absolute(&");
+            out.push_str(binding);
+            out.push(')');
+            return Ok(());
+        }
         if let Some(path) = std_fs_symlink_metadata_arg(expr)
             && emit_std_fs_symlink_metadata(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_metadata_arg(expr)
+            && emit_std_fs_metadata(out, path, ctx)?
         {
             return Ok(());
         }
@@ -3166,11 +3389,29 @@ fn emit_json_parse(out: &mut String, source: &Expr, ctx: &mut EmitCtx) -> Result
     Ok(true)
 }
 
+fn emit_json_parse_file(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_json_parse(&rh_std_fs_read_to_string(");
+    out.push_str(&path_expr);
+    out.push_str("))");
+    Ok(true)
+}
+
 fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     match expr {
         Expr::StringConstant(value, ..) => out.push_str(&format!("{value:?}")),
         Expr::Variable(ident, ..)
-            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+            if matches!(
+                ctx.scope.get(ident.1.as_str()).copied(),
+                Some(ValueKind::String | ValueKind::Path)
+            ) =>
         {
             out.push('&');
             out.push_str(ident.1.as_str());
@@ -3198,6 +3439,13 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
                 .expect("checked dir entry path");
             out.push_str(binding);
             out.push_str(".path");
+        }
+        _ if let Some(binding) = path_binding_display(expr, ctx) => {
+            out.push('&');
+            out.push_str(binding);
+        }
+        _ if env_current_dir_display(expr) => {
+            out.push_str("&rh_env_current_dir()");
         }
         _ => return Ok(false),
     }
@@ -3575,6 +3823,53 @@ fn emit_std_fs_symlink_metadata(
     Ok(true)
 }
 
+fn emit_std_fs_metadata(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_metadata(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_path_buf_from(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    // PathBuf is represented as a UTF-8 path string in native packs.
+    // Clone existing String/Path bindings so later uses of the same name remain valid.
+    if let Expr::Variable(ident, ..) = path
+        && matches!(
+            ctx.scope.get(ident.1.as_str()).copied(),
+            Some(ValueKind::String | ValueKind::Path)
+        )
+    {
+        out.push_str(ident.1.as_str());
+        out.push_str(".clone()");
+        return Ok(true);
+    }
+    emit_stringish(out, path, ctx)?;
+    Ok(true)
+}
+
+fn emit_path_is_absolute(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_path_is_absolute(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_std_fs_remove_file(
     out: &mut String,
     path: &Expr,
@@ -3730,14 +4025,20 @@ fn emit_metadata_property(
         out.push_str(property);
         return Ok(true);
     }
-    let Some((path, property)) = symlink_metadata_property(expr) else {
+    let (helper, path, property) = if let Some((path, property)) = symlink_metadata_property(expr)
+    {
+        ("rh_symlink_metadata", path, property)
+    } else if let Some((path, property)) = metadata_call_property(expr) {
+        ("rh_metadata", path, property)
+    } else {
         return Ok(false);
     };
     let mut path_expr = String::new();
     if !emit_native_string(&mut path_expr, path, ctx)? {
         return Ok(false);
     }
-    out.push_str("rh_symlink_metadata(");
+    out.push_str(helper);
+    out.push('(');
     out.push_str(&path_expr);
     out.push(')');
     out.push('.');
@@ -4186,6 +4487,54 @@ mod tests {
         assert!(output.rust.contains("meta.is_reparse_point"));
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_metadata_current_dir_is_absolute_parse_file() {
+        let source = include_str!("../../../fixtures/rh/path-metadata-sugar.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_env_current_dir()"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_path_is_absolute("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_metadata("), "{}", output.rust);
+        assert!(
+            output
+                .rust
+                .contains("rh_json_parse(&rh_std_fs_read_to_string("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("meta.is_file"), "{}", output.rust);
+        assert!(output.rust.contains("meta.len"), "{}", output.rust);
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::metadata"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"rhai::json::parse_file"),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]

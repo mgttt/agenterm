@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 21;
+pub const RH_CODEGEN_REVISION: u32 = 22;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -345,6 +345,9 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
+         fn rh_path_is_absolute(path: &str) -> INT {\n\
+             i64::from(std::path::Path::new(path).is_absolute())\n\
+         }\n\n\
          fn rh_system_time_now_unix_millis() -> INT {\n\
              match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {\n\
                  Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
@@ -408,6 +411,15 @@ pub fn emit_host_runtime(out: &mut String) {
                  Ok(value) => value,\n\
                  Err(_) => {\n\
                      let _ = rh_fail(&format!(\"env_get_missing: {name}\"));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_env_current_dir() -> String {\n\
+             match std::env::current_dir() {\n\
+                 Ok(path) => path.to_string_lossy().into_owned(),\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"environment_current_dir: {error}\"));\n\
                      String::new()\n\
                  }\n\
              }\n\
@@ -530,6 +542,27 @@ pub fn emit_host_runtime(out: &mut String) {
                  },\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"fs_symlink_metadata: {error}\"));\n\
+                     RhMetadata {\n\
+                         is_file: 0,\n\
+                         is_dir: 0,\n\
+                         is_symlink: 0,\n\
+                         is_reparse_point: 0,\n\
+                         len: 0,\n\
+                     }\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_metadata(path: &str) -> RhMetadata {\n\
+             match std::fs::metadata(path) {\n\
+                 Ok(metadata) => RhMetadata {\n\
+                     is_file: metadata.is_file() as INT,\n\
+                     is_dir: metadata.is_dir() as INT,\n\
+                     is_symlink: metadata.file_type().is_symlink() as INT,\n\
+                     is_reparse_point: rh_metadata_is_reparse_point(&metadata) as INT,\n\
+                     len: metadata.len() as INT,\n\
+                 },\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_metadata: {error}\"));\n\
                      RhMetadata {\n\
                          is_file: 0,\n\
                          is_dir: 0,\n\
