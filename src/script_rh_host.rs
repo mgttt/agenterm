@@ -225,7 +225,16 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
 
 fn host_process_request(
     request: &str,
-) -> Result<(String, Vec<String>, u64, Option<String>), String> {
+) -> Result<
+    (
+        String,
+        Vec<String>,
+        u64,
+        Option<String>,
+        crate::script_process::ProcessHostOptions,
+    ),
+    String,
+> {
     let request: serde_json::Value =
         serde_json::from_str(request).map_err(|error| format!("process_request_json: {error}"))?;
     let program = request["program"]
@@ -273,17 +282,67 @@ fn host_process_request(
             Some(path.to_owned())
         }
     };
-    Ok((program, arguments, timeout_ms, stdout_path))
+    let mut options = crate::script_process::ProcessHostOptions::default();
+    if let Some(current_dir) = request.get("current_dir") {
+        let current_dir = current_dir
+            .as_str()
+            .ok_or_else(|| "process_current_dir_type: expected string".to_owned())?;
+        if current_dir.is_empty() {
+            return Err("process_current_dir_empty".to_owned());
+        }
+        if current_dir.len() > 4096 {
+            return Err("process_current_dir_too_large: maximum is 4096 bytes".to_owned());
+        }
+        options.current_dir = Some(std::path::PathBuf::from(current_dir));
+    }
+    if let Some(env) = request.get("env") {
+        let env = env
+            .as_object()
+            .ok_or_else(|| "process_env_type: expected object".to_owned())?;
+        if env.len() > 256 {
+            return Err("process_env_too_many: maximum is 256 entries".to_owned());
+        }
+        for (name, value) in env {
+            if name.len() > 256 {
+                return Err("process_env_name_too_large: maximum is 256 bytes".to_owned());
+            }
+            let value = value
+                .as_str()
+                .ok_or_else(|| "process_env_type: expected string values".to_owned())?;
+            if value.len() > 4096 {
+                return Err("process_env_value_too_large: maximum is 4096 bytes".to_owned());
+            }
+            options.environment.insert(name.clone(), Some(value.to_owned()));
+        }
+    }
+    if let Some(removes) = request.get("env_remove") {
+        let removes = removes
+            .as_array()
+            .ok_or_else(|| "process_env_remove_type: expected array".to_owned())?;
+        if removes.len() > 256 {
+            return Err("process_env_remove_too_many: maximum is 256 entries".to_owned());
+        }
+        for name in removes {
+            let name = name
+                .as_str()
+                .ok_or_else(|| "process_env_remove_type: expected strings".to_owned())?;
+            if name.len() > 256 {
+                return Err("process_env_remove_name_too_large: maximum is 256 bytes".to_owned());
+            }
+            options.environment.insert(name.to_owned(), None);
+        }
+    }
+    Ok((program, arguments, timeout_ms, stdout_path, options))
 }
 
 fn host_process_status(request: &str) -> Result<i32, String> {
-    let (program, arguments, timeout_ms, _) = host_process_request(request)?;
-    let code = crate::script_process::command_status(&program, &arguments, timeout_ms)?;
+    let (program, arguments, timeout_ms, _, options) = host_process_request(request)?;
+    let code = crate::script_process::command_status(&program, &arguments, timeout_ms, &options)?;
     i32::try_from(code).map_err(|_| format!("process_exit_code_overflow: {code}"))
 }
 
 fn host_process_stdout_file(request: &str) -> Result<i32, String> {
-    let (program, arguments, timeout_ms, stdout_path) = host_process_request(request)?;
+    let (program, arguments, timeout_ms, stdout_path, options) = host_process_request(request)?;
     let stdout_path =
         stdout_path.ok_or_else(|| "process_stdout_path_type: expected string".to_owned())?;
     let code = crate::script_process::run_command_stdout_file(
@@ -291,6 +350,7 @@ fn host_process_stdout_file(request: &str) -> Result<i32, String> {
         &arguments,
         timeout_ms,
         &stdout_path,
+        &options,
     )?;
     i32::try_from(code).map_err(|_| format!("process_exit_code_overflow: {code}"))
 }
@@ -869,6 +929,41 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("stdout file");
         let _ = std::fs::remove_file(&path);
         assert!(text.to_ascii_lowercase().contains("git"), "{text}");
+    }
+
+    #[test]
+    fn host_process_stdout_file_honors_current_dir_and_env() {
+        let repo = std::env::current_dir().expect("cwd");
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-rh-stdout-env-{}.txt",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let request = serde_json::json!({
+            "program": "git",
+            "args": ["rev-parse", "--show-prefix"],
+            "timeout_ms": 2000,
+            "stdout_path": path.to_string_lossy(),
+            "current_dir": repo.to_string_lossy(),
+            "env": {
+                "AGENTERM_RH_HOST_ENV_PROBE": "marker",
+            },
+            "env_remove": ["THIS_ENV_SHOULD_NOT_EXIST_12345"],
+        });
+        assert_eq!(
+            super::host_process_stdout_file(&request.to_string()).expect("git prefix"),
+            0
+        );
+        let text = std::fs::read_to_string(&path).expect("stdout file");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            text.trim().is_empty() || text.contains('/'),
+            "expected repo-relative prefix, got {text:?}"
+        );
+        assert_eq!(
+            std::env::var("AGENTERM_RH_HOST_ENV_PROBE"),
+            Err(std::env::VarError::NotPresent)
+        );
     }
 
     #[test]

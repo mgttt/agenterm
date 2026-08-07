@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 20;
+pub const RH_CODEGEN_REVISION: u32 = 21;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -631,12 +631,27 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_std_fs_exists_case_exact(path: &str) -> INT {\n\
              rh_utility(2, path)\n\
          }\n\n\
-         fn rh_process_status(program: &str, args: &[String], timeout_ms: INT) -> INT {\n\
-             let request = serde_json::json!({\n\
+         fn rh_process_apply_options(request: &mut serde_json::Value, options: Option<&serde_json::Value>) {\n\
+             let Some(options) = options else {\n\
+                 return;\n\
+             };\n\
+             if let Some(current_dir) = options.get(\"current_dir\").and_then(|value| value.as_str()) {\n\
+                 request[\"current_dir\"] = serde_json::Value::String(current_dir.to_owned());\n\
+             }\n\
+             if let Some(env) = options.get(\"env\").and_then(|value| value.as_object()) {\n\
+                 request[\"env\"] = serde_json::Value::Object(env.clone());\n\
+             }\n\
+             if let Some(removes) = options.get(\"env_remove\").and_then(|value| value.as_array()) {\n\
+                 request[\"env_remove\"] = serde_json::Value::Array(removes.clone());\n\
+             }\n\
+         }\n\n\
+         fn rh_process_status(program: &str, args: &[String], timeout_ms: INT, options: Option<&serde_json::Value>) -> INT {\n\
+             let mut request = serde_json::json!({\n\
                  \"program\": program,\n\
                  \"args\": args,\n\
                  \"timeout_ms\": timeout_ms,\n\
              });\n\
+             rh_process_apply_options(&mut request, options);\n\
              rh_utility(3, &request.to_string())\n\
          }\n\n\
          fn rh_process_stdout_file(\n\
@@ -644,13 +659,15 @@ pub fn emit_host_runtime(out: &mut String) {
              args: &[String],\n\
              timeout_ms: INT,\n\
              stdout_path: &str,\n\
+             options: Option<&serde_json::Value>,\n\
          ) -> INT {\n\
-             let request = serde_json::json!({\n\
+             let mut request = serde_json::json!({\n\
                  \"program\": program,\n\
                  \"args\": args,\n\
                  \"timeout_ms\": timeout_ms,\n\
                  \"stdout_path\": stdout_path,\n\
              });\n\
+             rh_process_apply_options(&mut request, options);\n\
              rh_utility(5, &request.to_string())\n\
          }\n\n\
          fn rh_json_parse(source: &str) -> serde_json::Value {\n\

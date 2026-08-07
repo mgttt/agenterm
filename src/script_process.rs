@@ -31,6 +31,12 @@ const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 // tree mechanics (Job Objects / process groups).
 use crate::platform::process as child_process_tree;
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ProcessHostOptions {
+    pub current_dir: Option<PathBuf>,
+    pub environment: BTreeMap<String, Option<String>>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptDuration(pub(crate) Duration);
 
@@ -593,10 +599,35 @@ fn command_output(command: &mut ScriptCommand) -> Result<ScriptOutput, Box<EvalA
     wait_for_child(&spawn_owned(command)?, None)
 }
 
+pub(crate) fn apply_host_options(
+    command: &mut ScriptCommand,
+    options: &ProcessHostOptions,
+) -> Result<(), String> {
+    if let Some(path) = options.current_dir.as_ref() {
+        let path = path.to_string_lossy();
+        validate_text(&path, "process_current_dir").map_err(|error| error.to_string())?;
+        command.current_dir = Some(path.into_owned().into());
+    }
+    for (name, value) in &options.environment {
+        validate_env_name(name).map_err(|error| error.to_string())?;
+        if let Some(value) = value {
+            validate_text(value, "process_environment_value")
+                .map_err(|error| error.to_string())?;
+            command
+                .environment
+                .insert(name.clone(), Some(value.clone()));
+        } else {
+            command.environment.insert(name.clone(), None);
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn command_status(
     program: &str,
     arguments: &[String],
     timeout_ms: u64,
+    options: &ProcessHostOptions,
 ) -> Result<i64, String> {
     if timeout_ms == 0 || timeout_ms > MAX_TIMEOUT_MS {
         return Err(format!(
@@ -610,6 +641,7 @@ pub(crate) fn command_status(
     command.arguments = arguments.to_vec();
     command.timeout = Duration::from_millis(timeout_ms);
     command.capture_bytes = 1;
+    apply_host_options(&mut command, options)?;
     command_output(&mut command)
         .map(|output| output.exit_code)
         .map_err(|error| error.to_string())
@@ -620,6 +652,7 @@ pub(crate) fn run_command_stdout_file(
     arguments: &[String],
     timeout_ms: u64,
     stdout_path: &str,
+    options: &ProcessHostOptions,
 ) -> Result<i64, String> {
     if timeout_ms == 0 || timeout_ms > MAX_TIMEOUT_MS {
         return Err(format!(
@@ -635,6 +668,7 @@ pub(crate) fn run_command_stdout_file(
     command.timeout = Duration::from_millis(timeout_ms);
     command.stdout_file = Some(PathBuf::from(stdout_path));
     command.capture_bytes = 1;
+    apply_host_options(&mut command, options)?;
     command_output(&mut command)
         .map(|output| output.exit_code)
         .map_err(|error| error.to_string())

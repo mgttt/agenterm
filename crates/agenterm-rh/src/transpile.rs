@@ -2064,36 +2064,48 @@ fn metadata_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a s
     .then_some((ident.1.as_str(), name))
 }
 
-fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr)> {
+fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, Option<&Expr>)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "std::process"
-        || call.name != "command_status"
-        || call.args.len() != 3
-    {
+    if call.namespace.to_string() != "std::process" || call.name != "command_status" {
         return None;
     }
+    let options = match call.args.len() {
+        3 => None,
+        4 => Some(&call.args[3]),
+        _ => return None,
+    };
     let Expr::Array(arguments, ..) = &call.args[1] else {
         return None;
     };
-    Some((&call.args[0], arguments, &call.args[2]))
+    Some((&call.args[0], arguments, &call.args[2], options))
 }
 
-fn process_stdout_file_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, &Expr)> {
+fn process_stdout_file_args(
+    expr: &Expr,
+) -> Option<(&Expr, &[Expr], &Expr, &Expr, Option<&Expr>)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "std::process"
-        || call.name != "command_stdout_file"
-        || call.args.len() != 4
-    {
+    if call.namespace.to_string() != "std::process" || call.name != "command_stdout_file" {
         return None;
     }
+    let options = match call.args.len() {
+        4 => None,
+        5 => Some(&call.args[4]),
+        _ => return None,
+    };
     let Expr::Array(arguments, ..) = &call.args[1] else {
         return None;
     };
-    Some((&call.args[0], arguments, &call.args[2], &call.args[3]))
+    Some((
+        &call.args[0],
+        arguments,
+        &call.args[2],
+        &call.args[3],
+        options,
+    ))
 }
 
 fn json_parse_arg(expr: &Expr) -> Option<&Expr> {
@@ -2441,13 +2453,14 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push(')');
             return Ok(());
         }
-        if let Some((program, arguments, timeout)) = process_status_args(expr)
-            && emit_process_status(out, program, arguments, timeout, ctx)?
+        if let Some((program, arguments, timeout, options)) = process_status_args(expr)
+            && emit_process_status(out, program, arguments, timeout, options, ctx)?
         {
             return Ok(());
         }
-        if let Some((program, arguments, timeout, stdout_path)) = process_stdout_file_args(expr)
-            && emit_process_stdout_file(out, program, arguments, timeout, stdout_path, ctx)?
+        if let Some((program, arguments, timeout, stdout_path, options)) =
+            process_stdout_file_args(expr)
+            && emit_process_stdout_file(out, program, arguments, timeout, stdout_path, options, ctx)?
         {
             return Ok(());
         }
@@ -3003,11 +3016,36 @@ fn emit_runtime_atomic_write(
     Ok(true)
 }
 
+fn emit_process_options(
+    out: &mut String,
+    options: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    match options {
+        Expr::Map(..) => {
+            out.push_str("Some(&");
+            emit_json_map_literal(out, options, ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            out.push_str("Some(&");
+            out.push_str(ident.1.as_str());
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 fn emit_process_status(
     out: &mut String,
     program: &Expr,
     arguments: &[Expr],
     timeout: &Expr,
+    options: Option<&Expr>,
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
     let mut program_expr = String::new();
@@ -3022,6 +3060,12 @@ fn emit_process_status(
         }
         argument_exprs.push(argument_expr);
     }
+    let mut options_expr = String::new();
+    if let Some(options) = options {
+        if !emit_process_options(&mut options_expr, options, ctx)? {
+            return Ok(false);
+        }
+    }
     out.push_str("rh_process_status(");
     out.push_str(&program_expr);
     out.push_str(", &vec![");
@@ -3035,6 +3079,12 @@ fn emit_process_status(
     }
     out.push_str("], ");
     emit_expr(out, timeout, ctx)?;
+    out.push_str(", ");
+    if options.is_some() {
+        out.push_str(&options_expr);
+    } else {
+        out.push_str("None");
+    }
     out.push(')');
     Ok(true)
 }
@@ -3045,6 +3095,7 @@ fn emit_process_stdout_file(
     arguments: &[Expr],
     timeout: &Expr,
     stdout_path: &Expr,
+    options: Option<&Expr>,
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
     let mut program_expr = String::new();
@@ -3063,6 +3114,12 @@ fn emit_process_stdout_file(
         }
         argument_exprs.push(argument_expr);
     }
+    let mut options_expr = String::new();
+    if let Some(options) = options {
+        if !emit_process_options(&mut options_expr, options, ctx)? {
+            return Ok(false);
+        }
+    }
     out.push_str("rh_process_stdout_file(");
     out.push_str(&program_expr);
     out.push_str(", &vec![");
@@ -3078,6 +3135,12 @@ fn emit_process_stdout_file(
     emit_expr(out, timeout, ctx)?;
     out.push_str(", ");
     out.push_str(&stdout_path_expr);
+    out.push_str(", ");
+    if options.is_some() {
+        out.push_str(&options_expr);
+    } else {
+        out.push_str("None");
+    }
     out.push(')');
     Ok(true)
 }
@@ -4328,6 +4391,7 @@ fn entry() {
             "{}",
             output.rust
         );
+        assert!(output.rust.contains(", None)"), "{}", output.rust);
         assert!(output.rust.contains("\"--show-prefix\""), "{}", output.rust);
         assert!(
             !output
@@ -4335,6 +4399,88 @@ fn entry() {
                 .contains("rh_host_eval_int(\"std::process::command_stdout_file")
         );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_stdout_file_with_process_options() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let repo = args[0];
+    let out = args[1];
+    std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "--show-prefix"],
+        10000,
+        out,
+        #{
+            current_dir: repo,
+            env: #{ "AGENTERM_NO_ACTIVATE": "1" },
+            env_remove: ["AGENTERM_IPC_ADDRESS"],
+        }
+    )
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_stdout_file("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("\"current_dir\""),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("\"env\""), "{}", output.rust);
+        assert!(
+            output.rust.contains("\"env_remove\""),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("AGENTERM_NO_ACTIVATE"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_stdout_file")
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_status_with_process_options() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let repo = args[0];
+    std::process::command_status(
+        "git",
+        ["status", "--porcelain"],
+        5000,
+        #{ current_dir: repo }
+    )
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+        assert!(
+            output.rust.contains("\"current_dir\""),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]
