@@ -207,13 +207,13 @@ jobs:
             echo "No timing.json; skip quality timing summary." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [[ -x dist/agenterm-rhai.exe ]]; then
-            RHAI=dist/agenterm-rhai.exe
+          if [[ -x dist/agenterm-rh.exe ]]; then
+            dist/agenterm-rh.exe task run timing-summary \
+              --manifest agenterm.tasks.json -- target/qualification/timing.json
           else
-            RHAI=target/debug/agenterm-rhai.exe
+            target/debug/agenterm-rh.exe task run timing-summary \
+              --manifest agenterm.tasks.json -- target/qualification/timing.json
           fi
-          "$RHAI" task run timing-summary --manifest agenterm.tasks.json -- \
-            target/qualification/timing.json
           # Surface bootstrap reuse for R1 acceptance without opening the artifact.
           python - <<'PY'
           import json, os, pathlib
@@ -246,7 +246,7 @@ jobs:
         if: matrix.platform_id == 'windows-x86_64'
         shell: cmd
         run: >-
-          dist\agenterm-rhai.exe task run package-release-qualified
+          dist\agenterm-rh.exe task run package-release-qualified
           --manifest agenterm.tasks.json
 
       - name: Install Windows ARM64 cross-build tooling

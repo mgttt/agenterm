@@ -98,11 +98,12 @@ pub fn try_execute_rh_invocation(
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
             let (pack, native_path) = resolve_rh_pack(source)?;
-            let entry_value = crate::script_rh_host::call_pack_entry_with_host(
+            let entry_result = crate::script_rh_host::call_pack_entry_with_host_result(
                 &native_path,
                 fleet_bridge,
                 run_context,
             )?;
+            let entry_value = entry_result.entry_value;
             let mut stdout = output_capture.finish()?;
             for line in &pack.cc_lines {
                 if stdout.len().saturating_add(line.len()).saturating_add(1) > output_limit {
@@ -115,7 +116,11 @@ pub fn try_execute_rh_invocation(
             }
             Ok(Some(RhInvocationResult {
                 stdout,
-                value: json_value_from_entry(entry_value),
+                value: match entry_result.host_value {
+                    Some(crate::script_rh_host::RhHostEntryValue::Unit) => None,
+                    Some(crate::script_rh_host::RhHostEntryValue::Value(value)) => Some(value),
+                    None => json_value_from_entry(entry_value),
+                },
             }))
         }
     }

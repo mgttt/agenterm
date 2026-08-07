@@ -130,6 +130,60 @@ fn rh_backend_run_matches_eval_for_entry_fixture() {
 }
 
 #[test]
+fn rh_backend_compat_unit_keeps_stdout_without_synthetic_value() {
+    with_rh_backend(|| {
+        let source = r#"
+fn entry() {
+    switch 1 {
+        1 => print("compat-unit"),
+        _ => ()
+    }
+}
+"#;
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            source,
+            RhInvocationOptions {
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        )
+        .expect("run")
+        .expect("rh handled");
+        assert_eq!(result.stdout, "compat-unit\n");
+        assert_eq!(result.value, None);
+    });
+}
+
+#[test]
+fn rh_backend_compat_preserves_typed_non_integer_value() {
+    with_rh_backend(|| {
+        let source = r#"
+fn entry() {
+    switch 1 {
+        1 => true,
+        _ => false
+    }
+}
+"#;
+        let result = try_execute_rh_invocation(
+            ScriptOperation::Run,
+            source,
+            RhInvocationOptions {
+                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        )
+        .expect("run")
+        .expect("rh handled");
+        assert_eq!(result.value, Some(serde_json::json!(true)));
+        assert_eq!(result.stdout, "");
+    });
+}
+
+#[test]
 fn rh_backend_run_while_count_fixture() {
     with_rh_backend(|| {
         let source = include_str!("../fixtures/rh/while-count.rh");

@@ -286,7 +286,10 @@ fn rejection_contains(expected, action) {
     require(rejected, "fresh_clone_selftest_expected_rejection:" + expected);
 }
 
-if args.len == 1 && args[0] == "--self-test" {
+let self_test =
+    (args.len == 1 && args[0] == "--self-test")
+        || (args.len == 2 && args[0] == "." && args[1] == "--self-test");
+if self_test {
     let accepted = exact_terminal_payload(
         [terminal_compatibility_executable() + ":101"],
         [terminal_compatibility_executable() + ":101"]
@@ -588,7 +591,7 @@ try {
         let bootstrap_worker =
             std::path::join(
                 clone_target,
-                "debug/agenterm-rhai.exe"
+                "debug/agenterm-rh.exe"
             ).display;
         if evidence.stage0.worker_observed_at_ms == ()
                 && std::fs::exists(bootstrap_worker) {
@@ -601,7 +604,7 @@ try {
         if names.contains("rustc.exe") {
             evidence.stage0.rustc_observed = true;
         }
-        if names.contains("agenterm-rhai.exe") {
+        if names.contains("agenterm-rh.exe") {
             evidence.stage0.script_worker_observed = true;
         }
         if now >= next_timeline {

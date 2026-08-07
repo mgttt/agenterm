@@ -89,12 +89,12 @@ jobs:
       - name: Install lint components
         run: rustup component add rustfmt clippy
 
-      - name: Build isolated Rhai experiment driver
+      - name: Build isolated Rh experiment driver
         shell: cmd
         run: |
-          @cargo build --quiet --locked --bin agenterm-rhai
+          @cargo build --quiet --locked --bin agenterm-rh
           @if errorlevel 1 exit /b 1
-          @copy /y target\debug\agenterm-rhai.exe "%RUNNER_TEMP%\agenterm-perf-tool.exe" >nul
+          @copy /y target\debug\agenterm-rh.exe "%RUNNER_TEMP%\agenterm-rh.exe" >nul
           @if errorlevel 1 exit /b 1
 
       - name: Run ordered cold-to-warm Quick samples
@@ -102,14 +102,14 @@ jobs:
         env:
           CACHE_STRATEGY: ${{ inputs.compiler_cache }}
         run: |
-          @"%RUNNER_TEMP%\agenterm-perf-tool.exe" run scripts\rhai\performance-samples.rhai --project-root . -- "%CACHE_STRATEGY%" performance-evidence
+          @"%RUNNER_TEMP%\agenterm-rh.exe" task run performance-samples --manifest agenterm.tasks.json -- "%CACHE_STRATEGY%" performance-evidence
           @if errorlevel 1 exit /b 1
 
       - name: Aggregate typed experiment evidence
         shell: cmd
         run: >-
-          cargo run --quiet --bin agenterm-rhai --
-          run scripts/rhai/performance-summary.rhai --project-root . --
+          "%RUNNER_TEMP%\agenterm-rh.exe" task run performance-summary
+          --manifest agenterm.tasks.json --
           performance-evidence\performance-summary.json
           "${{ inputs.runner_class }}"
           "${{ inputs.compiler_cache }}"

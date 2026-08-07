@@ -35,6 +35,9 @@ fn script_worker_ids() {
     for process in std::process::list() {
         if executable_matches(
             process.executable_name,
+            "agenterm-rh"
+        ) || executable_matches(
+            process.executable_name,
             "agenterm-rhai"
         ) {
             result.push(process.id);

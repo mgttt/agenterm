@@ -4,6 +4,11 @@ static WORKFLOW: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/ci.yml").replace("\r\n", "\n"));
 static WINDOWS_FULL_GATE: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/win-full-gate.yml").replace("\r\n", "\n"));
+static CANDIDATE: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/candidate.yml").replace("\r\n", "\n"));
+static PERFORMANCE_EXPERIMENT: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/performance-experiment.yml").replace("\r\n", "\n")
+});
 static CHECK: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rhai/check.rhai").replace("\r\n", "\n"));
 static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
@@ -44,6 +49,8 @@ fn ci_manifest_task_entrypoints_use_rh_front_door() {
     for (name, source) in [
         ("ci", WORKFLOW.as_str()),
         ("win-full-gate", WINDOWS_FULL_GATE.as_str()),
+        ("candidate", CANDIDATE.as_str()),
+        ("performance-experiment", PERFORMANCE_EXPERIMENT.as_str()),
     ] {
         let normalized = normalized_task_callers(source);
         let task_runs = normalized.matches("task run").count();
@@ -58,6 +65,30 @@ fn ci_manifest_task_entrypoints_use_rh_front_door() {
             "{name} regressed to the compatibility CLI"
         );
     }
+}
+
+#[test]
+fn candidate_keeps_only_direct_rhai_compatibility_execution() {
+    assert!(CANDIDATE.contains(
+        "target/aarch64-apple-darwin/release/agenterm-rhai \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
+    ));
+    assert!(CANDIDATE.contains(
+        "target/x86_64-apple-darwin/release/agenterm-rhai \\\n            run scripts/rhai/finalize-macos-provenance.rhai"
+    ));
+    assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rhai\""));
+    assert!(CANDIDATE.contains(
+        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rhai\" \\\n            run scripts/rhai/candidate-aggregate.rhai"
+    ));
+}
+
+#[test]
+fn performance_experiment_uses_rh_for_build_and_manifest_tasks() {
+    let normalized = normalized_task_callers(&PERFORMANCE_EXPERIMENT);
+    assert!(normalized.contains("cargo build --quiet --locked --bin agenterm-rh"));
+    assert!(normalized.contains("target/debug/agenterm-rh"));
+    assert!(normalized.contains("%RUNNER_TEMP%/agenterm-rh task run performance-samples"));
+    assert!(normalized.contains("%RUNNER_TEMP%/agenterm-rh task run performance-summary"));
+    assert!(!normalized.contains("agenterm-rhai"));
 }
 
 #[test]

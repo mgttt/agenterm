@@ -6,11 +6,12 @@ use std::process::Command;
 fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let script = repo.join("scripts/rhai/fresh-clone-rehearsal.rhai");
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    let manifest = repo.join("agenterm.tasks.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
-        .args(["run"])
-        .arg(&script)
-        .args(["--", "--self-test"])
+        .args(["task", "run", "fresh-clone-rehearsal", "--manifest"])
+        .arg(&manifest)
+        .args(["--json", "--", "--self-test"])
         .output()
         .expect("run fresh-clone rehearsal policy self-test");
     assert!(
@@ -19,9 +20,12 @@ fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse self-test task report");
+    assert_eq!(report["ok"], true);
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "PASS: fresh-clone process policy fails closed"
+        report["stdout"],
+        "PASS: fresh-clone process policy fails closed\n"
     );
 
     let source = fs::read_to_string(script).expect("read fresh-clone rehearsal");
@@ -44,6 +48,9 @@ fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
         "scan_interval_ms: 500",
         "rhai::runtime::temp_dir()",
         "unique.keys().len > 2",
+        "args.len == 2 && args[0] == \".\" && args[1] == \"--self-test\"",
+        "debug/agenterm-rh.exe",
+        "names.contains(\"agenterm-rh.exe\")",
         "release_archive_path",
         "receipt.gates.len == 34",
         "receipt.provenance.git_head == head",

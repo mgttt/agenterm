@@ -1509,7 +1509,7 @@ fn assert_supervisor(
         "script_supervisor_hard_timeout_untyped"
     );
 
-    let existing = helper::process_ids("agenterm-rhai.exe");
+    let existing = helper::process_ids("agenterm-rh.exe");
     let crash_client = helper::start_script_client(
         context,
         cli,
@@ -1521,7 +1521,7 @@ fn assert_supervisor(
         audit_path
     );
     let crash_worker = helper::wait_new_process(
-        "agenterm-rhai.exe",
+        "agenterm-rh.exe",
         existing,
         3000
     );

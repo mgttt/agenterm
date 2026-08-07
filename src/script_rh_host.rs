@@ -5,6 +5,18 @@ use agenterm_rh::{RH_HOST_API_VERSION, RhError, RhNativeModule};
 /// Fleet bridge injected into rh host eval: (operation_id, params_json) → result JSON.
 pub type FleetBridgeFn = Box<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>;
 
+#[derive(Debug)]
+pub(crate) enum RhHostEntryValue {
+    Unit,
+    Value(serde_json::Value),
+}
+
+#[derive(Debug)]
+pub(crate) struct RhPackEntryResult {
+    pub entry_value: i64,
+    pub host_value: Option<RhHostEntryValue>,
+}
+
 pub fn broker_fleet_bridge<F>(call: F) -> FleetBridgeFn
 where
     F: Fn(&str, serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync + 'static,
@@ -62,13 +74,30 @@ pub fn call_pack_entry_with_host(
     fleet_bridge: Option<FleetBridgeFn>,
     context: crate::script_rh_run::RhRunContext,
 ) -> Result<i64, RhError> {
+    call_pack_entry_with_host_result(native_path, fleet_bridge, context)
+        .map(|result| result.entry_value)
+}
+
+pub(crate) fn call_pack_entry_with_host_result(
+    native_path: &Path,
+    fleet_bridge: Option<FleetBridgeFn>,
+    context: crate::script_rh_run::RhRunContext,
+) -> Result<RhPackEntryResult, RhError> {
     crate::script_rh_run::with_run_context(context, || {
+        HOST_RUN_SCRIPT_RESULT.with(|slot| {
+            slot.borrow_mut().take();
+        });
         if let Some(bridge) = fleet_bridge {
             set_fleet_bridge(bridge);
         }
         let module = RhNativeModule::load(native_path)?;
         register_native_module(&module)?;
-        Ok(module.call_entry())
+        let entry_value = module.call_entry();
+        let host_value = HOST_RUN_SCRIPT_RESULT.with(|slot| slot.borrow_mut().take());
+        Ok(RhPackEntryResult {
+            entry_value,
+            host_value,
+        })
     })
 }
 
@@ -103,7 +132,25 @@ extern "C" fn host_run_script_call(
         Err(()) => return -2,
     };
     let response = host_run_script_source(&source).map_err(|_| -5);
+    if let Ok(json) = &response
+        && let Some(value) = decode_host_entry_value(json)
+    {
+        HOST_RUN_SCRIPT_RESULT.with(|slot| {
+            *slot.borrow_mut() = Some(value);
+        });
+    }
     write_response(response, out_buf, out_cap)
+}
+
+fn decode_host_entry_value(json: &str) -> Option<RhHostEntryValue> {
+    let encoded: serde_json::Value = serde_json::from_str(json).ok()?;
+    match encoded.get("kind").and_then(serde_json::Value::as_str)? {
+        "unit" => Some(RhHostEntryValue::Unit),
+        "int" | "bool" | "str" | "json" => {
+            encoded.get("value").cloned().map(RhHostEntryValue::Value)
+        }
+        _ => None,
+    }
 }
 
 fn host_run_script_source(source: &str) -> Result<String, String> {
@@ -308,6 +355,8 @@ unsafe fn read_utf8(ptr: *const u8, len: u32) -> Result<String, ()> {
 
 std::thread_local! {
     static FLEET_BRIDGE: std::cell::RefCell<Option<FleetBridgeFn>> =
+        const { std::cell::RefCell::new(None) };
+    static HOST_RUN_SCRIPT_RESULT: std::cell::RefCell<Option<RhHostEntryValue>> =
         const { std::cell::RefCell::new(None) };
 }
 
