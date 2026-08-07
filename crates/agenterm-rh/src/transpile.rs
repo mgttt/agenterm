@@ -4935,9 +4935,9 @@ fn emit_json_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(),
         _ if json_value_path(expr, ctx).is_some() || json_array_index(expr, ctx).is_some() => {
             emit_json_value_expr(out, expr, ctx)
         }
-        _ => Err(RhError::Transpile(
-            "local fn JSON argument must be a JSON value".into(),
-        )),
+        _ => Err(RhError::Transpile(format!(
+            "local fn JSON argument must be a JSON value (expr={expr:?})"
+        ))),
     }
 }
 

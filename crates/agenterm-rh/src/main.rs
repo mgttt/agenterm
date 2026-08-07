@@ -138,6 +138,9 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
                 receipt.cc_line_count
             );
         }
+        "run" => {
+            run_rh_script_command(&mut args)?;
+        }
         "run-smoke" => {
             let path = require_path(&mut args, "run-smoke")?;
             let value = load_and_call_entry(&path)?;
@@ -197,7 +200,7 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
         "--help" | "-h" | "help" => print_usage(),
         other => {
             return Err(RhError::Parse(format!(
-                "unknown command `{other}`; try check | check-many | corpus-scan | caller-inventory | transpile | compile | eval | run-smoke | pack | qualify | hash | version | task"
+                "unknown command `{other}`; try check | check-many | corpus-scan | caller-inventory | transpile | compile | eval | run | run-smoke | pack | qualify | hash | version | task"
             )));
         }
     }
@@ -230,6 +233,136 @@ fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<u8,
         }
     }
     Ok(report.exit_code())
+}
+
+fn run_rh_script_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
+    let (path, project_root, script_args, budgets) = parse_run_cli(args)?;
+    let source = read_source(&path)?;
+    let arguments = if script_args.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Array(
+            script_args
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect(),
+        ))
+    };
+    let result = with_rh_backend(|| {
+        agenterm::script_backend::try_execute_rh_invocation(
+            agenterm::script_protocol::ScriptOperation::Run,
+            &source,
+            agenterm::script_backend::RhInvocationOptions {
+                project_root: Some(project_root),
+                arguments,
+                budgets,
+            },
+            None,
+        )
+    })?;
+    let Some(invocation) = result else {
+        return Err(RhError::Parse(
+            "agenterm-rh run requires the rh script backend".into(),
+        ));
+    };
+    if !invocation.stdout.is_empty() {
+        print!("{}", invocation.stdout);
+    }
+    Ok(())
+}
+
+fn parse_run_cli(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<
+    (
+        PathBuf,
+        PathBuf,
+        Vec<String>,
+        Option<agenterm::script_protocol::ScriptBudgets>,
+    ),
+    RhError,
+> {
+    let path = require_path(args, "run")?;
+    let mut project_root = PathBuf::from(".");
+    let mut script_args = Vec::new();
+    let mut budgets = agenterm::script_protocol::ScriptBudgets::default();
+    let mut budgets_touched = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--project-root" => {
+                project_root = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| RhError::Parse("missing path after --project-root".into()))?,
+                );
+            }
+            // Legacy inert compatibility flag from agenterm-rhai task/run callers.
+            "--profile" => {
+                let _ = args.next().ok_or_else(|| {
+                    RhError::Parse("missing value after --profile".into())
+                })?;
+            }
+            "--timeout-ms" => {
+                let raw = args.next().ok_or_else(|| {
+                    RhError::Parse("missing value after --timeout-ms".into())
+                })?;
+                budgets.wall_time_ms = raw.parse::<u64>().map_err(|_| {
+                    RhError::Parse(format!("invalid --timeout-ms value `{raw}`"))
+                })?;
+                budgets_touched = true;
+            }
+            "--max-operations" => {
+                let raw = args.next().ok_or_else(|| {
+                    RhError::Parse("missing value after --max-operations".into())
+                })?;
+                budgets.operations = raw.parse::<u64>().map_err(|_| {
+                    RhError::Parse(format!("invalid --max-operations value `{raw}`"))
+                })?;
+                budgets_touched = true;
+            }
+            "--max-output-bytes" => {
+                let raw = args.next().ok_or_else(|| {
+                    RhError::Parse("missing value after --max-output-bytes".into())
+                })?;
+                budgets.output_bytes = raw.parse::<usize>().map_err(|_| {
+                    RhError::Parse(format!("invalid --max-output-bytes value `{raw}`"))
+                })?;
+                budgets_touched = true;
+            }
+            "--" => {
+                script_args.extend(args.by_ref());
+                break;
+            }
+            other => {
+                return Err(RhError::Parse(format!(
+                    "unknown run option `{other}`; expected --project-root, --profile, \
+                     --timeout-ms, --max-operations, --max-output-bytes, or --"
+                )));
+            }
+        }
+    }
+    Ok((
+        path,
+        project_root,
+        script_args,
+        budgets_touched.then_some(budgets),
+    ))
+}
+
+fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
+    let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+    unsafe {
+        std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rh");
+    }
+    let output = run();
+    match prior {
+        Some(value) => unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+        },
+        None => unsafe {
+            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+        },
+    }
+    output
 }
 
 fn run_public_check_command(arguments: &[String]) -> Result<u8, RhError> {
@@ -470,6 +603,9 @@ fn print_usage() {
            transpile <file> [-o rs]            emit Rust source for AOT\n\
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
            eval <file>                         check + AOT pack + dlopen entry (dev loop)\n\
+           run <file> [OPTIONS] [--] [ARGS...]  execute rh entry with args\n\
+             options: --project-root DIR --profile NAME --timeout-ms N\n\
+                      --max-operations N --max-output-bytes N\n\
            run-smoke <native>                  dlopen and call rh_entry()\n\
            pack build <file> --dir PATH        build pack dir (native + manifest + entry.rh)\n\
            qualify <file> --dir PATH [-o json] build + load + write qualification receipt\n\
