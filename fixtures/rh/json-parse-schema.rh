@@ -1,0 +1,11 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: JSON_PATH");
+    }
+    let text = std::fs::read_to_string(args[0]);
+    let document = rhai::json::parse(text);
+    if document.schema_version != 2 {
+        return rh::fail("json_schema_unsupported");
+    }
+    document.schema_version
+}

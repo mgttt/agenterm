@@ -30,6 +30,10 @@ fn check_accepts_all_fixtures() {
             "for-span-overflow",
             include_str!("../fixtures/rh/for-span-overflow.rh"),
         ),
+        (
+            "json-parse-schema",
+            include_str!("../fixtures/rh/json-parse-schema.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -69,6 +73,26 @@ fn stdlib_fixture_transpile_uses_std_exists_fast_path() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_std_fs_exists(\"/tmp\")"));
     assert!(!rust.contains("rh_host_eval_int(\"std::fs::exists"));
+}
+
+#[test]
+fn json_schema_fixture_transpiles_without_interpreter_fallback() {
+    let source = include_str!("../fixtures/rh/json-parse-schema.rh");
+    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile JSON fixture");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("rh_json_parse("));
+    assert!(
+        output
+            .rust
+            .contains("rh_json_int_property(&document, \"schema_version\")")
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
 }
 
 #[test]

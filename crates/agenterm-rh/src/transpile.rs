@@ -18,6 +18,7 @@ enum ValueKind {
     Int,
     Bool,
     String,
+    Json,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,12 +105,17 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"string\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
+                ValueKind::Json => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
             }
         }
         out.push_str("}}}}\"");
         for (name, kind) in &self.scope {
             out.push_str(", ");
-            if *kind == ValueKind::String {
+            if matches!(kind, ValueKind::String | ValueKind::Json) {
                 out.push_str("serde_json::to_string(&");
                 out.push_str(name);
                 out.push_str(").unwrap_or_else(|_| \"\\\"\\\"\".to_owned())");
@@ -772,6 +778,7 @@ fn emit_throw_expr(
 fn infer_binding_kind(expr: &Expr) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
+        _ if json_parse_arg(expr).is_some() => ValueKind::Json,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
@@ -953,6 +960,32 @@ fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr)> {
     Some((&call.args[0], arguments, &call.args[2]))
 }
 
+fn json_parse_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "rhai::json" || call.name != "parse" || call.args.len() != 1 {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn json_int_property<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
+        return None;
+    }
+    let Expr::Property(property, ..) = &boxed.rhs else {
+        return None;
+    };
+    Some((ident.1.as_str(), property.2.as_str()))
+}
+
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
     if ctx.cdylib {
         if let Some(index) = args_index_expr(expr) {
@@ -978,6 +1011,19 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some((program, arguments, timeout)) = process_status_args(expr)
             && emit_process_status(out, program, arguments, timeout, ctx)?
         {
+            return Ok(());
+        }
+        if let Some(source) = json_parse_arg(expr)
+            && emit_json_parse(out, source, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((binding, property)) = json_int_property(expr, ctx) {
+            out.push_str("rh_json_int_property(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            out.push_str(&format!("{property:?}"));
+            out.push(')');
             return Ok(());
         }
         if let Some(path) = std_fs_read_to_string_arg(expr)
@@ -1136,6 +1182,17 @@ fn emit_process_status(
     }
     out.push_str("], ");
     emit_expr(out, timeout, ctx)?;
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_json_parse(out: &mut String, source: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let mut source_expr = String::new();
+    if !emit_native_string(&mut source_expr, source, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_json_parse(");
+    out.push_str(&source_expr);
     out.push(')');
     Ok(true)
 }

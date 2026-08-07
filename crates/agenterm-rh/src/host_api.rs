@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 3;
+pub const RH_CODEGEN_REVISION: u32 = 4;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -353,6 +353,24 @@ pub fn emit_host_runtime(out: &mut String) {
                  \"timeout_ms\": timeout_ms,\n\
              });\n\
              rh_utility(3, &request.to_string())\n\
+         }\n\n\
+         fn rh_json_parse(source: &str) -> serde_json::Value {\n\
+             match serde_json::from_str(source) {\n\
+                 Ok(value) => value,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"json_parse: {error}\"));\n\
+                     serde_json::Value::Null\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_int_property(value: &serde_json::Value, key: &str) -> INT {\n\
+             match value.get(key).and_then(serde_json::Value::as_i64) {\n\
+                 Some(value) => value as INT,\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_integer_field: {key}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
          }\n\n\
          fn rh_host_run_script(source: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\
