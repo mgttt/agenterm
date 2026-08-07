@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M29 独立测试扩面完成**（standalone CLI；公共 API；预算矩阵；控制流 AOT） |
+| **状态** | **M30 caller wave 3 完成**（stale gate；Candidate/performance；worker 观测；typed host 结果） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -70,6 +70,11 @@
 | M29c | for range/dynamic range/break-continue 真实 AOT qualify；span 超界 fallback | [x] |
 | M29d | rhai shim 仅转发 `.rh` eval/run，保留 inline eval 与 `.rhai` 解释执行 | [x] |
 | M29e | crate 外部 public API contract 套件纳入 `rh-check` | [x] |
+| M30a | migration-audit 对齐 rh-only bootstrap 与跨平台 `rh-check` 入口；失败保持非零 gate | [x] |
+| M30b | fresh-clone/startup/script smoke 观测 rh primary worker；兼容 REPL/framed/north-star 明确保留 | [x] |
+| M30c | Candidate/performance 的 manifest task caller 改走 rh；密封 artifact 身份与 Promotion 路径不变 | [x] |
+| M30d | compat unit/非整数结果保留类型，host callback 错误返回 typed failure；黑盒与后续健康调用覆盖 | [x] |
+| M30e | caller inventory 降至 399，CI 19→12、rhai-script 39→32；继续以分类下限防扫描器静默失效 | [x] |
 
 ---
 
