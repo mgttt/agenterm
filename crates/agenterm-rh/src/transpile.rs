@@ -1135,8 +1135,8 @@ mod tests {
             "expected native for-range in:\n{rust}"
         );
         assert!(
-            rust.contains("args.len"),
-            "expected args.len bound in:\n{rust}"
+            rust.contains("rh_args_len()"),
+            "expected native args length bound in:\n{rust}"
         );
         assert!(!rust.contains("rh_host_eval_int(\"for"));
     }
