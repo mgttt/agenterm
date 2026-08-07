@@ -7037,7 +7037,7 @@ fn emit_runtime_atomic_write(
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
     let mut path_expr = String::new();
-    if !emit_native_string(&mut path_expr, path, ctx)? {
+    if !emit_native_path_ref(&mut path_expr, path, ctx)? {
         return Ok(false);
     }
     out.push_str("rh_atomic_write(");
@@ -7362,6 +7362,56 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// Path refs for FS/runtime calls: string bindings plus `parent/join/absolute/.display`
+/// and JSON-scalar path locals (e.g. `timing.output_path`).
+fn emit_native_path_ref(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    if emit_native_string(out, expr, ctx)? {
+        return Ok(true);
+    }
+    if let Expr::Variable(ident, ..) = expr
+        && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+    {
+        out.push_str("&rh_json_as_str(&");
+        out.push_str(ident.1.as_str());
+        out.push(')');
+        return Ok(true);
+    }
+    if let Some(path) = path_parent_display_arg(expr) {
+        out.push_str("&rh_path_parent(");
+        if !emit_native_path_ref(out, path, ctx)? {
+            return Ok(false);
+        }
+        out.push(')');
+        return Ok(true);
+    }
+    if let Some((base, child)) = path_join_display_args(expr) {
+        out.push_str("&rh_path_join(");
+        if !emit_native_path_ref(out, base, ctx)? {
+            return Ok(false);
+        }
+        out.push_str(", ");
+        if !emit_native_path_ref(out, child, ctx)? {
+            return Ok(false);
+        }
+        out.push(')');
+        return Ok(true);
+    }
+    if let Some(path) = path_absolute_display_arg(expr) {
+        out.push_str("&rh_path_absolute(");
+        if !emit_native_path_ref(out, path, ctx)? {
+            return Ok(false);
+        }
+        out.push(')');
+        return Ok(true);
+    }
+    if let Some(path) = path_buf_from_display_arg(expr) {
+        // PathBuf::from is a UTF-8 path string in native packs.
+        emit_native_path_ref(out, path, ctx)
+    } else {
+        Ok(false)
+    }
 }
 
 fn string_for_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a str> {
@@ -8034,7 +8084,7 @@ fn emit_std_fs_create_dir_all(
     ctx: &mut EmitCtx,
 ) -> Result<bool, RhError> {
     let mut path_expr = String::new();
-    if !emit_native_string(&mut path_expr, path, ctx)? {
+    if !emit_native_path_ref(&mut path_expr, path, ctx)? {
         return Ok(false);
     }
     out.push_str("rh_create_dir_all(");
@@ -9926,6 +9976,86 @@ fn entry() { clean_locked_for_name(args[0], args[1]) }
                 .rust
                 .contains("rh_host_eval_int(\"std::fs::create_dir_all")
         );
+    }
+
+    #[test]
+    fn create_dir_all_parent_display_native() {
+        let source = r#"
+fn entry() {
+    let output_path = "target/tmp/out.json";
+    std::fs::create_dir_all(std::path::parent(output_path).display);
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output
+                .rust
+                .contains("rh_create_dir_all(&rh_path_parent(&String::from(\"target/tmp/out.json\")))")
+                || output.rust.contains("rh_create_dir_all(&rh_path_parent("),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::fs::create_dir_all"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn timing_finish_parent_atomic_native() {
+        let source = r#"
+fn finish(timing) {
+    let output_path = timing.output_path;
+    std::fs::create_dir_all(std::path::parent(output_path).display);
+    rhai::runtime::atomic_write(output_path, "{}\n");
+    0
+}
+fn entry() {
+    let timing = #{ output_path: "target/tmp/timing.json" };
+    finish(timing)
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_create_dir_all(&rh_path_parent(")
+                && output.rust.contains("rh_atomic_write("),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn write_receipt_parent_atomic_native() {
+        let source = r#"
+fn write_receipt(report, output_path) {
+    std::fs::create_dir_all(std::path::parent(output_path).display);
+    rhai::runtime::atomic_write(
+        output_path,
+        rhai::json::stringify_pretty(report) + "\n"
+    );
+    0
+}
+fn entry() {
+    write_receipt(#{ ok: 1 }, "target/tmp/receipt.json")
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_create_dir_all(&rh_path_parent(")
+                && output.rust.contains("rh_atomic_write("),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]
