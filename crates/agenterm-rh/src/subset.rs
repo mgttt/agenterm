@@ -75,10 +75,10 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
             "assignment lhs must be a simple variable in rh-3",
         ));
     }
-    if !is_pure_int_expr(&assign.1.rhs) {
+    if !is_pure_int_expr(&assign.1.rhs) && !uses_host_surface(&assign.1.rhs) {
         return Some(subset_error(
             "RH_SUBSET_ASSIGN_RHS",
-            "assignment rhs must be a pure int expression in rh-3",
+            "assignment rhs must be a pure int or native host expression in rh-3",
         ));
     }
     None
@@ -94,8 +94,12 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
         }
         Stmt::If(boxed, ..) => {
             let flow = boxed.as_ref();
-            validate_root_expr(&flow.expr)?;
-            validate_stmt_block(&flow.body)?;
+            if let Some(err) = validate_root_expr(&flow.expr) {
+                return Some(err);
+            }
+            if let Some(err) = validate_stmt_block(&flow.body) {
+                return Some(err);
+            }
             if !flow.branch.is_empty() {
                 for stmt in flow.branch.iter() {
                     if let Some(err) = validate_stmt(stmt) {
@@ -107,7 +111,9 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
         }
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
-            validate_root_expr(&flow.expr)?;
+            if let Some(err) = validate_root_expr(&flow.expr) {
+                return Some(err);
+            }
             validate_stmt_block(&flow.body)
         }
         Stmt::While(boxed, ..) => {
@@ -134,7 +140,9 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
                     "break/continue is not allowed inside try/catch in rh-3",
                 ));
             }
-            validate_stmt_block(&flow.body)?;
+            if let Some(err) = validate_stmt_block(&flow.body) {
+                return Some(err);
+            }
             validate_stmt_block(&flow.branch)
         }
         Stmt::BreakLoop(expr, ..) if expr.is_some() => Some(subset_error(
@@ -381,5 +389,33 @@ mod tests {
     fn rejects_eval() {
         let ast = Engine::new().compile("eval(\"1\");").expect("compile");
         assert!(validate_ast(&ast).is_err());
+    }
+
+    #[test]
+    fn validates_for_body_after_valid_iterable() {
+        let mut engine = Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile("fn entry() { for x in [1, 2] { eval(\"1\"); } 0 }")
+            .expect("compile");
+        let error = validate_ast(&ast).expect_err("for body must be validated");
+        assert!(error.to_string().contains("RH_SUBSET_NO_EVAL"), "{error}");
+    }
+
+    #[test]
+    fn accepts_json_integer_property_assignment() {
+        let mut engine = Engine::new();
+        engine.set_optimization_level(rhai::OptimizationLevel::None);
+        let ast = engine
+            .compile(
+                r#"fn entry() {
+                    let document = rhai::json::parse("{\"n\":1}");
+                    let total = 0;
+                    total += document.n;
+                    total
+                }"#,
+            )
+            .expect("compile");
+        validate_ast(&ast).expect("json integer assignment");
     }
 }
