@@ -24,6 +24,7 @@ enum ValueKind {
     Json,
     Set,
     Metadata,
+    DirEntry,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,6 +140,11 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
+                ValueKind::DirEntry => {
+                    out.push_str(&format!(
+                        "\\\"{name}\\\":{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}"
+                    ));
+                }
             }
         }
         out.push_str("}}}}\"");
@@ -156,7 +162,7 @@ impl EmitCtx {
                 out.push_str(
                     ".iter().cloned().collect::<Vec<_>>()).unwrap_or_else(|_| \"[]\".to_owned())",
                 );
-            } else if matches!(kind, ValueKind::Metadata) {
+            } else if matches!(kind, ValueKind::Metadata | ValueKind::DirEntry) {
                 out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
                 out.push_str(name);
@@ -534,6 +540,10 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
     if path_absolute_display_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_exists_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_read_to_string_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_read_dir_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_remove_file_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_try_remove_file_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_symlink_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_join_display_args(expr)
             .is_some_and(|(base, child)| is_param_var(base, param) || is_param_var(child, param))
     {
@@ -549,6 +559,24 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
                     "contains" | "starts_with" | "ends_with" | "trim" | "replace"
                 )
         )
+    {
+        return true;
+    }
+    // Dynamic needles for string methods are themselves strings.
+    if let Expr::Dot(boxed, ..) = expr
+        && let Expr::MethodCall(call, ..) = &boxed.rhs
+        && matches!(call.name.as_str(), "contains" | "starts_with" | "ends_with")
+        && call.args.len() == 1
+        && is_param_var(&call.args[0], param)
+    {
+        return true;
+    }
+    if let Expr::Dot(boxed, ..) = expr
+        && let Expr::Dot(inner, ..) = &boxed.rhs
+        && let Expr::MethodCall(call, ..) = &inner.rhs
+        && matches!(call.name.as_str(), "contains" | "starts_with" | "ends_with")
+        && call.args.len() == 1
+        && is_param_var(&call.args[0], param)
     {
         return true;
     }
@@ -769,6 +797,26 @@ fn emit_stmt(
                     .with_binding(counter.name.as_str(), ValueKind::Char);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
+            } else if let Some(path) = std_fs_read_dir_arg(&flow.expr) {
+                let mut path_expr = String::new();
+                if emit_native_string(&mut path_expr, path, ctx)? {
+                    out.push_str("    for ");
+                    out.push_str(counter.name.as_str());
+                    out.push_str(" in rh_read_dir(");
+                    out.push_str(&path_expr);
+                    out.push_str(") {\n");
+                    let mut loop_ctx = ctx
+                        .clone()
+                        .with_binding(counter.name.as_str(), ValueKind::DirEntry);
+                    emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                    out.push_str("    }\n");
+                } else {
+                    let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
+                    out.push_str("    let _for = rh_host_eval_int(");
+                    out.push_str(&format!("{:?}, ", snippet));
+                    ctx.emit_scope_json_expr(out);
+                    out.push_str(";\n");
+                }
             } else {
                 let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
                 out.push_str("    let _for = rh_host_eval_int(");
@@ -1299,16 +1347,102 @@ fn path_absolute_display_arg(expr: &Expr) -> Option<&Expr> {
 }
 
 fn std_fs_symlink_metadata_arg(expr: &Expr) -> Option<&Expr> {
-    let Expr::FnCall(call, ..) = expr else {
+    std_fs_single_arg(expr, "symlink_metadata")
+}
+
+fn std_fs_remove_file_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "remove_file")
+}
+
+fn std_fs_try_remove_file_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "try_remove_file")
+}
+
+fn std_fs_read_dir_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "read_dir")
+}
+
+fn symlink_metadata_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "std::fs"
-        || call.name != "symlink_metadata"
-        || call.args.len() != 1
-    {
+    let path = std_fs_symlink_metadata_arg(&boxed.lhs)?;
+    let name = match &boxed.rhs {
+        Expr::Property(property, ..) => property.2.as_str(),
+        Expr::MethodCall(call, ..) if call.args.is_empty() => call.name.as_str(),
+        _ => return None,
+    };
+    matches!(
+        name,
+        "is_file" | "is_dir" | "is_symlink" | "is_reparse_point"
+    )
+    .then_some((path, name))
+}
+
+fn dir_entry_variable<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    (ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::DirEntry))
+        .then_some(ident.1.as_str())
+}
+
+fn dir_entry_field_name<'a>(rhs: &'a Expr) -> Option<&'a str> {
+    match rhs {
+        Expr::Property(property, ..) => Some(property.2.as_str()),
+        Expr::Dot(boxed, ..) => match &boxed.lhs {
+            Expr::Property(property, ..) => Some(property.2.as_str()),
+            _ => None,
+        },
+        Expr::MethodCall(call, ..) if call.args.is_empty() => Some(call.name.as_str()),
+        _ => None,
+    }
+}
+
+fn dir_entry_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let binding = dir_entry_variable(expr, ctx)?;
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let field = dir_entry_field_name(&boxed.rhs)?;
+    Some((binding, field))
+}
+
+fn dir_entry_int_field<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let (binding, field) = dir_entry_binding(expr, ctx)?;
+    matches!(field, "is_file" | "is_dir" | "is_symlink").then_some((binding, field))
+}
+
+fn dir_entry_string_field<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let (binding, field) = dir_entry_binding(expr, ctx)?;
+    matches!(field, "file_name" | "path").then_some((binding, field))
+}
+
+fn dir_entry_path_display_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a str> {
+    let binding = dir_entry_variable(expr, ctx)?;
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Dot(inner, ..) = &boxed.rhs else {
+        return None;
+    };
+    let Expr::Property(path, ..) = &inner.lhs else {
+        return None;
+    };
+    if path.2.as_str() != "path" {
         return None;
     }
-    Some(&call.args[0])
+    let display = matches!(
+        &inner.rhs,
+        Expr::Property(property, ..) if property.2.as_str() == "display"
+    ) || matches!(
+        &inner.rhs,
+        Expr::MethodCall(call, ..) if call.name == "display" && call.args.is_empty()
+    );
+    display.then_some(binding)
 }
 
 fn metadata_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
@@ -1680,6 +1814,16 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some(path) = std_fs_remove_file_arg(expr)
+            && emit_std_fs_remove_file(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_try_remove_file_arg(expr)
+            && emit_std_fs_try_remove_file(out, path, ctx)?
+        {
+            return Ok(());
+        }
         if emit_set_predicate(out, expr, ctx)? {
             return Ok(());
         }
@@ -1705,6 +1849,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_metadata_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_dir_entry_property(out, expr, ctx)? {
             return Ok(());
         }
         if let Some(call) = parse_fleet_call(expr) {
@@ -1913,6 +2060,16 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
             out.push('&');
             emit_args_index(out, args_index_expr(expr).expect("checked args index"), ctx)?;
         }
+        _ if dir_entry_path_display_binding(expr, ctx).is_some()
+            || dir_entry_string_field(expr, ctx).is_some_and(|(_, field)| field == "path") =>
+        {
+            out.push('&');
+            let binding = dir_entry_path_display_binding(expr, ctx)
+                .or_else(|| dir_entry_string_field(expr, ctx).map(|(name, _)| name))
+                .expect("checked dir entry path");
+            out.push_str(binding);
+            out.push_str(".path");
+        }
         _ => return Ok(false),
     }
     Ok(true)
@@ -1931,6 +2088,7 @@ enum StringReceiver<'a> {
     Binding(&'a str),
     JsonBinding(&'a str),
     Literal(&'a str),
+    DirEntryField { binding: &'a str, field: &'a str },
 }
 
 fn parse_string_method_call<'a>(
@@ -1951,11 +2109,33 @@ fn parse_string_method_call<'a>(
         {
             StringReceiver::JsonBinding(ident.1.as_str())
         }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::DirEntry) =>
+        {
+            let Expr::Dot(inner, ..) = &boxed.rhs else {
+                return None;
+            };
+            let Expr::Property(property, ..) = &inner.lhs else {
+                return None;
+            };
+            if !matches!(property.2.as_str(), "file_name" | "path") {
+                return None;
+            }
+            StringReceiver::DirEntryField {
+                binding: ident.1.as_str(),
+                field: property.2.as_str(),
+            }
+        }
         Expr::StringConstant(value, ..) => StringReceiver::Literal(value.as_str()),
         _ => return None,
     };
-    let Expr::MethodCall(call, ..) = &boxed.rhs else {
-        return None;
+    let call = match &boxed.rhs {
+        Expr::MethodCall(call, ..) => call,
+        Expr::Dot(inner, ..) => match &inner.rhs {
+            Expr::MethodCall(call, ..) => call,
+            _ => return None,
+        },
+        _ => return None,
     };
     Some((receiver, call))
 }
@@ -1970,6 +2150,11 @@ fn emit_string_receiver(out: &mut String, receiver: StringReceiver<'_>) {
         }
         StringReceiver::Literal(value) => {
             out.push_str(&format!("{value:?}"));
+        }
+        StringReceiver::DirEntryField { binding, field } => {
+            out.push_str(binding);
+            out.push('.');
+            out.push_str(field);
         }
     }
 }
@@ -2258,18 +2443,80 @@ fn emit_std_fs_symlink_metadata(
     Ok(true)
 }
 
+fn emit_std_fs_remove_file(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_remove_file(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_try_remove_file(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_try_remove_file(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_metadata_property(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    if let Some((binding, property)) = metadata_property_binding(expr, ctx) {
+        out.push_str(binding);
+        out.push('.');
+        out.push_str(property);
+        return Ok(true);
+    }
+    let Some((path, property)) = symlink_metadata_property(expr) else {
+        return Ok(false);
+    };
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_symlink_metadata(");
+    out.push_str(&path_expr);
+    out.push(')');
+    out.push('.');
+    out.push_str(property);
+    Ok(true)
+}
+
+fn emit_dir_entry_property(
     out: &mut String,
     expr: &Expr,
     ctx: &EmitCtx,
 ) -> Result<bool, RhError> {
-    let Some((binding, property)) = metadata_property_binding(expr, ctx) else {
-        return Ok(false);
-    };
-    out.push_str(binding);
-    out.push('.');
-    out.push_str(property);
-    Ok(true)
+    if let Some((binding, field)) = dir_entry_int_field(expr, ctx) {
+        out.push_str(binding);
+        out.push('.');
+        out.push_str(field);
+        return Ok(true);
+    }
+    if let Some((binding, field)) = dir_entry_string_field(expr, ctx) {
+        out.push_str(binding);
+        out.push('.');
+        out.push_str(field);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn emit_args_index(out: &mut String, index: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -2537,8 +2784,6 @@ fn binary(
 
 #[cfg(test)]
 mod tests {
-    use rhai::Stmt;
-
     use super::{CdylibExecutionMode, transpile, transpile_cdylib, transpile_cdylib_with_mode};
 
     #[test]
@@ -2860,5 +3105,124 @@ fn entry() {
         let rust = transpile_cdylib("fn entry() { fleet.protocol.info(); 9 }").expect("transpile");
         assert!(rust.contains("rh_fleet_call"));
         assert!(rust.contains("protocol.info"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_remove_file_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let path = args[0]; std::fs::remove_file(path); std::fs::remove_file(path) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_remove_file(&path)").count(), 2);
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::remove_file"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_try_remove_file_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let path = args[0]; std::fs::try_remove_file(path) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_try_remove_file(&path)"));
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::try_remove_file"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_read_dir_for_loop_native() {
+        let source = r#"
+fn entry() {
+    let removed = 0;
+    let directory = args[0];
+    for dir_entry in std::fs::read_dir(directory) {
+        if dir_entry.is_file
+                && dir_entry.file_name.starts_with("agenterm")
+                && dir_entry.file_name.ends_with(".exe") {
+            if std::fs::try_remove_file(dir_entry.path.display) != 0 {
+                removed += 1;
+            }
+        }
+    }
+    if std::fs::symlink_metadata(directory).is_dir {
+        removed += 100;
+    }
+    std::fs::remove_file(args[1]);
+    removed
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("for dir_entry in rh_read_dir(&directory)"));
+        assert!(output.rust.contains("dir_entry.is_file"));
+        assert!(output.rust.contains("dir_entry.file_name.starts_with("));
+        assert!(output.rust.contains("rh_try_remove_file(&dir_entry.path)"));
+        assert!(output.rust.contains("rh_symlink_metadata(&directory).is_dir"));
+        assert!(output.rust.contains("rh_remove_file("));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_infers_string_params_for_read_dir_prefix() {
+        let source = r#"
+fn clean_locked_for_name(directory, prefix) {
+    let removed = 0;
+    for dir_entry in std::fs::read_dir(directory) {
+        if dir_entry.is_file && dir_entry.file_name.starts_with(prefix) {
+            removed += std::fs::try_remove_file(dir_entry.path.display);
+        }
+    }
+    removed
+}
+fn entry() { clean_locked_for_name(args[0], args[1]) }
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("directory: String"), "{}", output.rust);
+        assert!(output.rust.contains("prefix: String"), "{}", output.rust);
+        assert!(
+            output.rust.contains("starts_with(prefix.as_str())"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_eval_int(\"for dir_entry"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_chained_symlink_metadata_property_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let path = args[0]; if std::fs::symlink_metadata(path).is_file { 1 } else { 0 } }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_symlink_metadata(&path).is_file"));
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::symlink_metadata"));
     }
 }

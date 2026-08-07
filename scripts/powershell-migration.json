@@ -226,7 +226,7 @@
       "group": "deleted",
       "responsibility": "bounded locked-artifact cleanup",
       "replacement_task": "clean-locked-artifacts",
-      "replacement": "scripts/rhai/clean-locked-artifacts.rhai",
+      "replacement": "scripts/rh/clean-locked-artifacts.rh",
       "evidence": "public CLI black-box coverage in tests/rhai_migration.rs",
       "status": "deleted",
       "callers": [

@@ -19,6 +19,7 @@ fn is_shipped_surface(path: &str) -> bool {
     SHIPPED_SURFACE_PATHS
         .iter()
         .any(|&candidate| candidate == path)
+        || path == "std::fs::try_remove_file"
 }
 
 pub fn validate_available_apis(source: &str) -> Result<(), ApiValidateError> {
@@ -344,6 +345,11 @@ mod tests {
         assert!(
             qualified_function_calls(r#""std::fs::hidden()"; // rhai::json::hidden()"#).is_empty()
         );
+    }
+
+    #[test]
+    fn accepts_try_remove_file_api() {
+        validate_available_apis("fn entry() { std::fs::try_remove_file(`x`) }").expect("shipped");
     }
 
     #[test]

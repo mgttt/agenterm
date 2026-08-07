@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 14;
+pub const RH_CODEGEN_REVISION: u32 = 15;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -379,6 +379,46 @@ pub fn emit_host_runtime(out: &mut String) {
                          is_symlink: 0,\n\
                          is_reparse_point: 0,\n\
                      }\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_remove_file(path: &str) -> INT {\n\
+             match std::fs::remove_file(path) {\n\
+                 Ok(()) => 0,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_remove_file: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_try_remove_file(path: &str) -> INT {\n\
+             i64::from(std::fs::remove_file(path).is_ok())\n\
+         }\n\n\
+         struct RhDirEntry {\n\
+             file_name: String,\n\
+             path: String,\n\
+             is_file: INT,\n\
+             is_dir: INT,\n\
+             is_symlink: INT,\n\
+         }\n\n\
+         fn rh_read_dir(path: &str) -> Vec<RhDirEntry> {\n\
+             match std::fs::read_dir(path) {\n\
+                 Ok(entries) => entries\n\
+                     .filter_map(|entry| {\n\
+                         let entry = entry.ok()?;\n\
+                         let file_type = entry.file_type().ok()?;\n\
+                         Some(RhDirEntry {\n\
+                             file_name: entry.file_name().to_string_lossy().into_owned(),\n\
+                             path: entry.path().to_string_lossy().into_owned(),\n\
+                             is_file: file_type.is_file() as INT,\n\
+                             is_dir: file_type.is_dir() as INT,\n\
+                             is_symlink: file_type.is_symlink() as INT,\n\
+                         })\n\
+                     })\n\
+                     .collect(),\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_read_dir: {error}\"));\n\
+                     Vec::new()\n\
                  }\n\
              }\n\
          }\n\n\

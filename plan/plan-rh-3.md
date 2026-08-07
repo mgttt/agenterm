@@ -100,7 +100,7 @@
 | M42e2 | `project_import` / corpus 原生门优先解析 `.rh` 模块，并对任务入口使用 `transpile_cdylib_with_project` | [x] |
 | M42e3 | 语句位置 `if` 不再强制分支尾 `return`；`require` 在 `Stmt::Expr` 下按语句发射；codegen revision 14；原生嵌套 `json::parse(read_to_string(...))`；`validate-artifact-manifest` 真实执行返回可执行文件计数 | [x] |
 | M42f0 | `internal-version-policy` 已原生 `.rh` 任务入口并真实执行（print + process_status + string contains） | [x] |
-| M42f1 | 原生 `read_dir` / `remove_file` / `try_remove_file` + 链式 metadata 标志，以解锁 `clean-locked-artifacts` | [ ] |
+| M42f1 | 原生 `read_dir` / `remove_file` / `try_remove_file` + 链式 metadata 标志；`clean-locked-artifacts` 任务入口切到 `.rh`；codegen revision 15 | [x] |
 
 ---
 
