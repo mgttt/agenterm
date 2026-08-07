@@ -18,6 +18,7 @@ enum ValueKind {
     Int,
     Bool,
     String,
+    Char,
     Json,
 }
 
@@ -100,7 +101,7 @@ impl EmitCtx {
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"bool\\\",\\\"value\\\":{{}}}}"
                     ));
                 }
-                ValueKind::String => {
+                ValueKind::String | ValueKind::Char => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{\\\"kind\\\":\\\"string\\\",\\\"value\\\":{{}}}}"
                     ));
@@ -119,6 +120,9 @@ impl EmitCtx {
                 out.push_str("serde_json::to_string(&");
                 out.push_str(name);
                 out.push_str(").unwrap_or_else(|_| \"\\\"\\\"\".to_owned())");
+            } else if matches!(kind, ValueKind::Char) {
+                out.push_str(name);
+                out.push_str(".to_string()");
             } else {
                 out.push_str(name);
             }
@@ -433,6 +437,15 @@ fn emit_stmt(
                 out.push_str("String::from(");
                 emit_native_string(out, expr, ctx)?;
                 out.push(')');
+            } else if kind == ValueKind::String
+                && matches!(
+                    expr,
+                    Expr::Variable(ident, ..)
+                        if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String)
+                )
+            {
+                emit_expr(out, expr, ctx)?;
+                out.push_str(".clone()");
             } else {
                 emit_expr(out, expr, ctx)?;
             }
@@ -536,6 +549,17 @@ fn emit_stmt(
                     .with_binding(counter.name.as_str(), ValueKind::Json);
                 emit_block(out, &flow.body, &mut loop_ctx, false)?;
                 out.push_str("    }\n");
+            } else if let Some(binding) = string_for_binding(&flow.expr, ctx) {
+                out.push_str("    for ");
+                out.push_str(counter.name.as_str());
+                out.push_str(" in ");
+                out.push_str(binding);
+                out.push_str(".chars() {\n");
+                let mut loop_ctx = ctx
+                    .clone()
+                    .with_binding(counter.name.as_str(), ValueKind::Char);
+                emit_block(out, &flow.body, &mut loop_ctx, false)?;
+                out.push_str("    }\n");
             } else {
                 let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
                 out.push_str("    let _for = rh_host_eval_int(");
@@ -587,6 +611,7 @@ fn emit_stmt(
             emit_block(out, boxed, ctx, implicit_return)?;
             out.push_str("    }\n");
         }
+        Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if implicit_return => {
             out.push_str("    return ");
             emit_expr(out, expr, ctx)?;
@@ -807,6 +832,10 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
         Expr::StringConstant(..) => ValueKind::String,
+        Expr::Variable(ident, ..) => match ctx.scope.get(ident.1.as_str()).copied() {
+            Some(kind) => kind,
+            None => ValueKind::Int,
+        },
         _ if json_parse_arg(expr).is_some() => ValueKind::Json,
         _ if json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty()) => {
             ValueKind::Json
@@ -1283,7 +1312,10 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
-        if emit_string_contains(out, expr, ctx) {
+        if emit_string_predicate(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_string_mut_expr(out, expr, ctx)? {
             return Ok(());
         }
         if let Some((base, child)) = path_join_display_args(expr)
@@ -1298,6 +1330,17 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(&format!("{:?}, {:?}", call.operation_id, params));
             out.push(')');
             return Ok(());
+        }
+        if let Expr::FnCall(call, ..) = expr
+            && call.op_token.is_some()
+        {
+            return emit_call(out, call, ctx);
+        }
+        if let Expr::And(args, ..) = expr {
+            return logical_nary(out, "&&", args, ctx);
+        }
+        if let Expr::Or(args, ..) = expr {
+            return logical_nary(out, "||", args, ctx);
         }
         if !is_pure_int_expr(expr)
             && !is_native_json_int_expr(expr, ctx)
@@ -1474,31 +1517,171 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
     Ok(true)
 }
 
-fn emit_string_contains(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> bool {
+fn string_for_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a str> {
+    let Expr::Variable(ident, ..) = expr else {
+        return None;
+    };
+    (ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String)).then_some(ident.1.as_str())
+}
+
+#[derive(Clone, Copy)]
+enum StringReceiver<'a> {
+    Binding(&'a str),
+    Literal(&'a str),
+}
+
+fn parse_string_method_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(StringReceiver<'a>, &'a rhai::FnCallExpr)> {
     let Expr::Dot(boxed, ..) = expr else {
-        return false;
+        return None;
+    };
+    let receiver = match &boxed.lhs {
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+        {
+            StringReceiver::Binding(ident.1.as_str())
+        }
+        Expr::StringConstant(value, ..) => StringReceiver::Literal(value.as_str()),
+        _ => return None,
+    };
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    Some((receiver, call))
+}
+
+fn emit_string_receiver(out: &mut String, receiver: StringReceiver<'_>) {
+    match receiver {
+        StringReceiver::Binding(name) => out.push_str(name),
+        StringReceiver::Literal(value) => {
+            out.push_str(&format!("{value:?}"));
+        }
+    }
+}
+
+fn char_to_string_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
     };
     let Expr::Variable(ident, ..) = &boxed.lhs else {
-        return false;
+        return None;
     };
-    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::String) {
-        return false;
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Char) {
+        return None;
     }
     let Expr::MethodCall(call, ..) = &boxed.rhs else {
-        return false;
+        return None;
     };
-    if call.name != "contains" || call.args.len() != 1 {
-        return false;
+    (call.name == "to_string" && call.args.is_empty()).then_some(ident.1.as_str())
+}
+
+fn emit_string_needle(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    match expr {
+        Expr::StringConstant(value, ..) => {
+            out.push_str(&format!("{value:?}"));
+            Ok(true)
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".as_str()");
+            Ok(true)
+        }
+        _ if char_to_string_binding(expr, ctx).is_some() => {
+            let binding = char_to_string_binding(expr, ctx).expect("checked char to_string");
+            out.push('&');
+            out.push_str(binding);
+            out.push_str(".to_string()");
+            Ok(true)
+        }
+        _ => Ok(false),
     }
-    let Expr::StringConstant(needle, ..) = &call.args[0] else {
-        return false;
+}
+
+fn emit_string_predicate(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((receiver, call)) = parse_string_method_call(expr, ctx) else {
+        return Ok(false);
     };
+    if !matches!(
+        call.name.as_str(),
+        "contains" | "starts_with" | "ends_with"
+    ) || call.args.len()
+        != 1
+    {
+        return Ok(false);
+    }
+    let mut needle = String::new();
+    if !emit_string_needle(&mut needle, &call.args[0], ctx)? {
+        return Ok(false);
+    }
     out.push('(');
-    out.push_str(ident.1.as_str());
-    out.push_str(".contains(");
-    out.push_str(&format!("{needle:?}"));
+    emit_string_receiver(out, receiver);
+    out.push('.');
+    out.push_str(call.name.as_str());
+    out.push('(');
+    out.push_str(&needle);
     out.push_str(") as INT)");
-    true
+    Ok(true)
+}
+
+fn emit_string_mut_expr(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((StringReceiver::Binding(binding), call)) = parse_string_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "trim" if call.args.is_empty() => {
+            out.push_str(binding);
+            out.push_str(" = ");
+            out.push_str(binding);
+            out.push_str(".trim().to_string()");
+            Ok(true)
+        }
+        "replace" if call.args.len() == 2 => {
+            let mut from = String::new();
+            let mut to = String::new();
+            if !emit_native_string(&mut from, &call.args[0], ctx)?
+                || !emit_native_string(&mut to, &call.args[1], ctx)?
+            {
+                return Ok(false);
+            }
+            out.push_str(binding);
+            out.push_str(" = ");
+            out.push_str(binding);
+            out.push_str(".replace(");
+            out.push_str(&from);
+            out.push_str(", ");
+            out.push_str(&to);
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_string_mut_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut inner = String::new();
+    if !emit_string_mut_expr(&mut inner, expr, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("    ");
+    out.push_str(&inner);
+    out.push_str(";\n");
+    Ok(true)
 }
 
 fn emit_path_join(
@@ -1607,10 +1790,18 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
         (Token::LessThanEqualsTo, 2) => comparison_binary(out, "<=", &args[0], &args[1], ctx),
         (Token::And, 2) => logical_binary(out, "&&", &args[0], &args[1], ctx),
         (Token::Or, 2) => logical_binary(out, "||", &args[0], &args[1], ctx),
+        (Token::And, n) if ctx.cdylib && n > 2 => logical_nary(out, "&&", args, ctx),
+        (Token::Or, n) if ctx.cdylib && n > 2 => logical_nary(out, "||", args, ctx),
         (Token::Minus, 1) => {
             out.push_str("(-(");
             emit_intish(out, &args[0], ctx)?;
             out.push_str("))");
+            Ok(())
+        }
+        (Token::Bang, 1) if ctx.cdylib => {
+            out.push_str("(((");
+            emit_expr(out, &args[0], ctx)?;
+            out.push_str(" == 0)) as INT)");
             Ok(())
         }
         (Token::Bang, 1) => {
@@ -1675,16 +1866,37 @@ fn logical_binary(
     ctx: &mut EmitCtx,
 ) -> Result<(), RhError> {
     if ctx.cdylib {
-        out.push('(');
+        out.push_str("(((");
         emit_expr(out, lhs, ctx)?;
-        out.push(' ');
+        out.push_str(" != 0) ");
         out.push_str(op);
-        out.push(' ');
+        out.push_str(" (");
         emit_expr(out, rhs, ctx)?;
-        out.push_str(") as INT");
+        out.push_str(" != 0)) as INT");
     } else {
         binary(out, op, lhs, rhs, ctx)?;
     }
+    Ok(())
+}
+
+fn logical_nary(
+    out: &mut String,
+    op: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push('(');
+    for (index, arg) in args.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+            out.push_str(op);
+            out.push(' ');
+        }
+        out.push('(');
+        emit_expr(out, arg, ctx)?;
+        out.push_str(" != 0)");
+    }
+    out.push_str(") as INT");
     Ok(())
 }
 
@@ -1779,6 +1991,23 @@ mod tests {
         );
         assert!(output.rust.contains("rh_std_fs_read_to_string(&path)"));
         assert!(output.rust.contains("text.contains(\"agenterm\") as INT"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_string_methods_and_char_iteration() {
+        let source = include_str!("../../../fixtures/rh/string-validate.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("for character in role.chars()"));
+        assert!(output.rust.contains("name.starts_with("));
+        assert!(output.rust.contains("name.ends_with("));
+        assert!(output.rust.contains("role.replace("));
+        assert!(!output.rust.contains("rh_host_eval_int(\"for"));
     }
 
     #[test]

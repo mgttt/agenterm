@@ -170,6 +170,8 @@ fn print_expr(out: &mut String, expr: &Expr) -> Result<(), RhError> {
             print_expr(out, &boxed.rhs)?;
         }
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => print_call(out, call.as_ref())?,
+        Expr::And(args, ..) => logical_nary_print(out, "&&", args)?,
+        Expr::Or(args, ..) => logical_nary_print(out, "||", args)?,
         Expr::Array(items, ..) => {
             out.push('[');
             for (index, item) in items.iter().enumerate() {
@@ -244,6 +246,20 @@ fn print_call(out: &mut String, call: &FnCallExpr) -> Result<(), RhError> {
     for (index, arg) in call.args.iter().enumerate() {
         if index > 0 {
             out.push_str(", ");
+        }
+        print_expr(out, arg)?;
+    }
+    out.push(')');
+    Ok(())
+}
+
+fn logical_nary_print(out: &mut String, op: &str, args: &[Expr]) -> Result<(), RhError> {
+    out.push('(');
+    for (index, arg) in args.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+            out.push_str(op);
+            out.push(' ');
         }
         print_expr(out, arg)?;
     }

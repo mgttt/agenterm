@@ -1,0 +1,53 @@
+fn entry() {
+    let score = 0;
+
+    let name = "agenterm-cli.exe";
+    if name == "agenterm.exe" {
+        score += 1;
+    } else if name.starts_with("agenterm-") && name.ends_with(".exe")
+            && !name.contains("/") && !name.contains("\\") {
+        let role = name;
+        role.replace("agenterm-", "");
+        role.replace(".exe", "");
+        if role != "" {
+            let valid_chars = 1;
+            for character in role {
+                if !"abcdefghijklmnopqrstuvwxyz".contains(character.to_string()) {
+                    valid_chars = 0;
+                }
+            }
+            if valid_chars != 0 {
+                score += 1;
+            }
+        }
+    }
+
+    let bad_case = "agenterm-CLI.exe";
+    if bad_case.starts_with("agenterm-") && bad_case.ends_with(".exe") {
+        let role = bad_case;
+        role.replace("agenterm-", "");
+        role.replace(".exe", "");
+        let invalid = 0;
+        for character in role {
+            if !"abcdefghijklmnopqrstuvwxyz".contains(character.to_string()) {
+                invalid = 1;
+            }
+        }
+        if invalid != 0 {
+            score += 10;
+        }
+    }
+
+    let bad_sep = "agenterm-/bad.exe";
+    if bad_sep.contains("/") || bad_sep.contains("\\") {
+        score += 100;
+    }
+
+    let trimmed = "  cli  ";
+    trimmed.trim();
+    if trimmed != "cli" {
+        return rh::fail("trim_failed");
+    }
+
+    score
+}

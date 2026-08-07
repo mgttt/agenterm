@@ -42,6 +42,10 @@ fn check_accepts_all_fixtures() {
             "json-type-string",
             include_str!("../fixtures/rh/json-type-string.rh"),
         ),
+        (
+            "string-validate",
+            include_str!("../fixtures/rh/string-validate.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -252,4 +256,34 @@ fn fleet_fixture_transpile_uses_fleet_call() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_fleet_call"));
     assert!(rust.contains("protocol.info"));
+}
+
+#[test]
+fn string_validate_fixture_executes_natively_without_interpreter() {
+    let source = include_str!("../fixtures/rh/string-validate.rh");
+    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile string validate");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains(".starts_with("));
+    assert!(output.rust.contains(".ends_with("));
+    assert!(output.rust.contains(".contains("));
+    assert!(output.rust.contains(".replace("));
+    assert!(output.rust.contains(".trim().to_string()"));
+    assert!(output.rust.contains("for character in role.chars()"));
+    assert!(output.rust.contains("character.to_string()"));
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-string-validate-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify string validate pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 111);
 }

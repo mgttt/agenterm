@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn source_cache_key_owns_abi_and_codegen_compatibility() {
         let key = cache_key("fn entry() { 1 }");
-        assert!(key.ends_with("-api9-cg6"), "{key}");
+        assert!(key.ends_with("-api9-cg7"), "{key}");
         assert!(!key.contains(':'));
     }
 
