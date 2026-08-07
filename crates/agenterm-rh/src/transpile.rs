@@ -416,11 +416,26 @@ fn emit_stmt(
     match stmt {
         Stmt::Var(boxed, ..) => {
             let (ident, expr, _) = boxed.as_ref();
-            let kind = infer_binding_kind(expr);
+            let kind = infer_binding_kind(expr, ctx);
             out.push_str("    let mut ");
             out.push_str(ident.name.as_str());
             out.push_str(" = ");
-            emit_expr(out, expr, ctx)?;
+            if kind == ValueKind::Json
+                && let Some((binding, path)) = json_value_path(expr, ctx)
+                && !path.is_empty()
+            {
+                out.push_str("rh_json_get_path(&");
+                out.push_str(binding);
+                out.push_str(", ");
+                emit_json_path(out, &path);
+                out.push(')');
+            } else if kind == ValueKind::String && matches!(expr, Expr::StringConstant(..)) {
+                out.push_str("String::from(");
+                emit_native_string(out, expr, ctx)?;
+                out.push(')');
+            } else {
+                emit_expr(out, expr, ctx)?;
+            }
             out.push_str(";\n");
             *ctx = ctx.clone().with_binding(ident.name.as_str(), kind);
         }
@@ -788,16 +803,31 @@ fn emit_throw_expr(
     Ok(())
 }
 
-fn infer_binding_kind(expr: &Expr) -> ValueKind {
+fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
     match expr {
         Expr::BoolConstant(..) => ValueKind::Bool,
+        Expr::StringConstant(..) => ValueKind::String,
         _ if json_parse_arg(expr).is_some() => ValueKind::Json,
+        _ if json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty()) => {
+            ValueKind::Json
+        }
+        _ if string_concat_args(expr, ctx).is_some() => ValueKind::String,
         _ if args_index_expr(expr).is_some() => ValueKind::String,
         _ if std_fs_read_to_string_arg(expr).is_some() => ValueKind::String,
         _ if path_join_display_args(expr).is_some() => ValueKind::String,
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
     }
+}
+
+fn string_concat_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'a Expr)> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if !matches!(call.op_token.as_ref(), Some(Token::Plus)) || call.args.len() != 2 {
+        return None;
+    }
+    prefers_string_ops(&call.args[0], &call.args[1], ctx).then_some((&call.args[0], &call.args[1]))
 }
 
 const MAX_NATIVE_FOR_SPAN: i64 = 4096;
@@ -1044,17 +1074,50 @@ fn emit_json_path(out: &mut String, path: &[&str]) {
     out.push(']');
 }
 
+fn type_of_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.is_empty() && call.name == "type_of" && call.args.len() == 1 {
+        Some(&call.args[0])
+    } else {
+        None
+    }
+}
+
+fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
+    matches!(expr, Expr::StringConstant(..))
+        || type_of_arg(expr).is_some()
+        || matches!(
+            expr,
+            Expr::Variable(ident, ..)
+                if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String)
+        )
+}
+
+fn prefers_string_ops(lhs: &Expr, rhs: &Expr, ctx: &EmitCtx) -> bool {
+    is_explicit_string_expr(lhs, ctx) || is_explicit_string_expr(rhs, ctx)
+}
+
 fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
     if json_array_len_path(expr, ctx).is_some()
         || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
+        || type_of_arg(expr).is_some_and(|argument| {
+            json_value_path(argument, ctx).is_some()
+                || matches!(
+                    argument,
+                    Expr::Variable(ident, ..)
+                        if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+                )
+        })
     {
         return true;
     }
     match expr {
-        Expr::IntegerConstant(..) | Expr::BoolConstant(..) => true,
+        Expr::IntegerConstant(..) | Expr::BoolConstant(..) | Expr::StringConstant(..) => true,
         Expr::Variable(ident, ..) => matches!(
             ctx.scope.get(ident.1.as_str()),
-            Some(ValueKind::Int | ValueKind::Bool)
+            Some(ValueKind::Int | ValueKind::Bool | ValueKind::String | ValueKind::Json)
         ),
         Expr::FnCall(call, ..) if call.op_token.is_some() => call
             .args
@@ -1062,6 +1125,102 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
             .all(|argument| is_native_json_int_expr(argument, ctx)),
         _ => false,
     }
+}
+
+fn emit_type_of(out: &mut String, argument: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    if let Some((binding, path)) = json_value_path(argument, ctx) {
+        out.push_str("rh_json_type_name(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push(')');
+        return Ok(true);
+    }
+    if let Expr::Variable(ident, ..) = argument
+        && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+    {
+        out.push_str("rh_json_type_name_value(&");
+        out.push_str(ident.1.as_str());
+        out.push(')');
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    if let Some(argument) = type_of_arg(expr) {
+        if emit_type_of(out, argument, ctx)? {
+            return Ok(());
+        }
+        return Err(RhError::Transpile(
+            "type_of argument must be a JSON value or JSON path".into(),
+        ));
+    }
+    if let Some((binding, path)) = json_value_path(expr, ctx)
+        && !path.is_empty()
+    {
+        out.push_str("rh_json_string_path(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push(')');
+        return Ok(());
+    }
+    match expr {
+        Expr::StringConstant(value, ..) => {
+            out.push_str("String::from(");
+            out.push_str(&format!("{value:?}"));
+            out.push(')');
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::String) =>
+        {
+            out.push_str(ident.1.as_str());
+        }
+        Expr::Variable(ident, ..)
+            if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
+        {
+            out.push_str("rh_json_as_str(&");
+            out.push_str(ident.1.as_str());
+            out.push(')');
+        }
+        _ => {
+            return Err(RhError::Transpile(
+                "unsupported string expression in native rh".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn emit_intish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    if let Some((binding, path)) = json_array_len_path(expr, ctx) {
+        out.push_str("rh_json_array_len(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push(')');
+        return Ok(());
+    }
+    if let Some((binding, path)) = json_value_path(expr, ctx)
+        && !path.is_empty()
+    {
+        out.push_str("rh_json_int_path(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push(')');
+        return Ok(());
+    }
+    if let Expr::Variable(ident, ..) = expr
+        && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+    {
+        out.push_str("rh_json_as_i64(&");
+        out.push_str(ident.1.as_str());
+        out.push(')');
+        return Ok(());
+    }
+    emit_expr(out, expr, ctx)
 }
 
 fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
@@ -1093,6 +1252,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some(source) = json_parse_arg(expr)
             && emit_json_parse(out, source, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(argument) = type_of_arg(expr)
+            && emit_type_of(out, argument, ctx)?
         {
             return Ok(());
         }
@@ -1166,9 +1330,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             }
         }
         Expr::StringConstant(value, ..) => {
-            out.push_str("Dynamic::from(");
-            out.push_str(&format!("{value:?}"));
-            out.push(')');
+            if ctx.cdylib {
+                out.push_str("String::from(");
+                out.push_str(&format!("{value:?}"));
+                out.push(')');
+            } else {
+                out.push_str("Dynamic::from(");
+                out.push_str(&format!("{value:?}"));
+                out.push(')');
+            }
         }
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
         Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
@@ -1368,6 +1538,14 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
     if let Some(op) = &call.op_token {
         return emit_op(out, op, &call.args, ctx);
     }
+    if call.namespace.is_empty() && call.name == "type_of" && call.args.len() == 1 {
+        if emit_type_of(out, &call.args[0], ctx)? {
+            return Ok(());
+        }
+        return Err(RhError::Transpile(
+            "type_of argument must be a JSON value or JSON path".into(),
+        ));
+    }
     if call.name == "print" && !ctx.cdylib {
         out.push_str("println!(");
         for (index, arg) in call.args.iter().enumerate() {
@@ -1406,11 +1584,19 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
 
 fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Result<(), RhError> {
     match (op, args.len()) {
-        (Token::Plus, 2) => binary(out, "+", &args[0], &args[1], ctx),
-        (Token::Minus, 2) => binary(out, "-", &args[0], &args[1], ctx),
-        (Token::Multiply, 2) => binary(out, "*", &args[0], &args[1], ctx),
-        (Token::Divide, 2) => binary(out, "/", &args[0], &args[1], ctx),
-        (Token::Modulo, 2) => binary(out, "%", &args[0], &args[1], ctx),
+        (Token::Plus, 2) if ctx.cdylib && prefers_string_ops(&args[0], &args[1], ctx) => {
+            out.push_str("format!(\"{}{}\", ");
+            emit_stringish(out, &args[0], ctx)?;
+            out.push_str(", ");
+            emit_stringish(out, &args[1], ctx)?;
+            out.push(')');
+            Ok(())
+        }
+        (Token::Plus, 2) => int_binary(out, "+", &args[0], &args[1], ctx),
+        (Token::Minus, 2) => int_binary(out, "-", &args[0], &args[1], ctx),
+        (Token::Multiply, 2) => int_binary(out, "*", &args[0], &args[1], ctx),
+        (Token::Divide, 2) => int_binary(out, "/", &args[0], &args[1], ctx),
+        (Token::Modulo, 2) => int_binary(out, "%", &args[0], &args[1], ctx),
         (Token::Equals, 2) | (Token::EqualsTo, 2) => {
             comparison_binary(out, "==", &args[0], &args[1], ctx)
         }
@@ -1423,7 +1609,7 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
         (Token::Or, 2) => logical_binary(out, "||", &args[0], &args[1], ctx),
         (Token::Minus, 1) => {
             out.push_str("(-(");
-            emit_expr(out, &args[0], ctx)?;
+            emit_intish(out, &args[0], ctx)?;
             out.push_str("))");
             Ok(())
         }
@@ -1448,11 +1634,36 @@ fn comparison_binary(
 ) -> Result<(), RhError> {
     if ctx.cdylib {
         out.push('(');
-        binary(out, op, lhs, rhs, ctx)?;
+        if prefers_string_ops(lhs, rhs, ctx) {
+            emit_stringish(out, lhs, ctx)?;
+            out.push(' ');
+            out.push_str(op);
+            out.push(' ');
+            emit_stringish(out, rhs, ctx)?;
+        } else {
+            int_binary(out, op, lhs, rhs, ctx)?;
+        }
         out.push_str(") as INT");
     } else {
         binary(out, op, lhs, rhs, ctx)?;
     }
+    Ok(())
+}
+
+fn int_binary(
+    out: &mut String,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push('(');
+    emit_intish(out, lhs, ctx)?;
+    out.push(' ');
+    out.push_str(op);
+    out.push(' ');
+    emit_intish(out, rhs, ctx)?;
+    out.push(')');
     Ok(())
 }
 

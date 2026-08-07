@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 5;
+pub const RH_CODEGEN_REVISION: u32 = 6;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -401,6 +401,68 @@ pub fn emit_host_runtime(out: &mut String) {
                      Vec::new()\n\
                  }\n\
              }\n\
+         }\n\n\
+         fn rh_json_get_path(value: &serde_json::Value, path: &[&str]) -> serde_json::Value {\n\
+             match rh_json_path(value, path) {\n\
+                 Some(value) => value.clone(),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_path: {}\", path.join(\".\")));\n\
+                     serde_json::Value::Null\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_as_i64(value: &serde_json::Value) -> INT {\n\
+             match value.as_i64() {\n\
+                 Some(value) => value as INT,\n\
+                 None => {\n\
+                     let _ = rh_fail(\"json_integer_value\");\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_as_str(value: &serde_json::Value) -> String {\n\
+             match value.as_str() {\n\
+                 Some(value) => value.to_owned(),\n\
+                 None => {\n\
+                     let _ = rh_fail(\"json_string_value\");\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_string_path(value: &serde_json::Value, path: &[&str]) -> String {\n\
+             match rh_json_path(value, path).and_then(serde_json::Value::as_str) {\n\
+                 Some(value) => value.to_owned(),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_string_path: {}\", path.join(\".\")));\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_type_name(value: &serde_json::Value, path: &[&str]) -> String {\n\
+             match rh_json_path(value, path) {\n\
+                 Some(serde_json::Value::Array(_)) => String::from(\"array\"),\n\
+                 Some(serde_json::Value::Object(_)) => String::from(\"map\"),\n\
+                 Some(serde_json::Value::String(_)) => String::from(\"string\"),\n\
+                 Some(serde_json::Value::Bool(_)) => String::from(\"bool\"),\n\
+                 Some(serde_json::Value::Number(number)) => {\n\
+                     if number.is_i64() {\n\
+                         String::from(\"i64\")\n\
+                     } else {\n\
+                         String::from(\"f64\")\n\
+                     }\n\
+                 }\n\
+                 Some(serde_json::Value::Null) | None => {\n\
+                     if path.is_empty() {\n\
+                         let _ = rh_fail(\"json_type_name\");\n\
+                     } else {\n\
+                         let _ = rh_fail(&format!(\"json_type_name: {}\", path.join(\".\")));\n\
+                     }\n\
+                     String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_type_name_value(value: &serde_json::Value) -> String {\n\
+             rh_json_type_name(value, &[])\n\
          }\n\n\
          fn rh_host_run_script(source: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\

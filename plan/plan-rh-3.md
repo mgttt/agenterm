@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M42 通用 JSON 原生能力推进中；解析、整数属性与数组遍历已完成** |
+| **状态** | **M42 通用 JSON 原生能力推进中；解析、数组、type_of 与字符串比较/拼接已完成** |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -89,7 +89,8 @@
 | M41a | 无显式 `fn entry()` 的顶层 `.rhai` 强制整脚本 compatibility execution，禁止生成返回 0 的 Native stub；无 entry 的 `.rh` named task 由资格门 fail-closed 拒绝，codegen cache revision 同步失效旧包 | [x] |
 | M42a | native pack 直接解析通用 JSON Value，并原生读取、比较整数对象属性；资格测试执行真实 native pack，静态门证明零 `host_eval` / `run_script`，codegen cache revision 同步失效旧包 | [x] |
 | M42b | JSON 对象属性链原生读取数组长度，`for` 原生遍历数组 Value 并读取元素整数属性；fixture 真实编译、加载、执行且静态门证明零 `host_eval` / `run_script` | [x] |
-| M42c | 补齐 JSON 类型判断、字符串操作、MapSet、动态失败、metadata 与 import bundling，无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [ ] |
+| M42c | 原生 `type_of`、JSON 字符串属性绑定、字符串比较与字面量拼接；fixture 真实执行且静态门证明零 `host_eval` / `run_script` | [x] |
+| M42d | 补齐字符串方法、MapSet、动态失败、metadata 与 import bundling，无损迁移 `validate-artifact-manifest`；不得用 substring 或任务专用宿主校验器替代脚本不变量 | [ ] |
 
 ---
 

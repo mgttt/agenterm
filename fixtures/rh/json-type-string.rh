@@ -1,0 +1,28 @@
+fn entry() {
+    let document = rhai::json::parse(
+        "{\"executables\":[{\"name\":\"agenterm.exe\",\"n\":4}]}"
+    );
+    if type_of(document.executables) != "array" {
+        return rh::fail("executables_type");
+    }
+    if document.executables.len != 1 {
+        return rh::fail("executables_len");
+    }
+    let expected = "agenterm.exe";
+    let total = 0;
+    for entry in document.executables {
+        let name = entry.name;
+        if type_of(name) != "string" {
+            return rh::fail("name_type");
+        }
+        if name != expected {
+            return rh::fail("name_mismatch");
+        }
+        total += entry.n;
+    }
+    let label = "ok:" + expected;
+    if label != "ok:agenterm.exe" {
+        return rh::fail("concat_mismatch");
+    }
+    total
+}
