@@ -704,7 +704,7 @@ fn entry() { 42 }"#;
         let dir =
             std::env::temp_dir().join(format!("agenterm-rh-host-args-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let source = "fn entry() { args.len() + args[0].len }";
+        let source = "fn entry() { let first = args[0]; args.len() + first.len }";
         agenterm_rh::build_pack_dir(source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
         let module = agenterm_rh::RhNativeModule::load(&native).expect("load");
