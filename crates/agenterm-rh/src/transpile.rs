@@ -692,11 +692,14 @@ fn emit_stmt(
             out.push_str("    if ");
             emit_expr(out, &flow.expr, ctx)?;
             out.push_str(" != 0 {\n");
-            emit_block(out, &flow.body, ctx, true)?;
+            // Only treat branch tails as returns when this `if` itself is the
+            // function/block result. Nested statement `if` bodies must not
+            // early-return (e.g. trailing `require` inside a `for` loop).
+            emit_block(out, &flow.body, ctx, implicit_return)?;
             out.push_str("    }");
             if !flow.branch.is_empty() {
                 out.push_str(" else {\n");
-                emit_block(out, &flow.branch, ctx, true)?;
+                emit_block(out, &flow.branch, ctx, implicit_return)?;
                 out.push_str("    }\n");
             } else {
                 out.push('\n');
@@ -818,6 +821,18 @@ fn emit_stmt(
             out.push_str("    }\n");
         }
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr)
+            if ctx.cdylib
+                && let Expr::FnCall(call, ..) = expr.as_ref()
+                && call.namespace.is_empty()
+                && call.name == "require"
+                && call.args.len() == 2 =>
+        {
+            emit_require_stmt(out, &call.args[0], &call.args[1], ctx)?;
+            if implicit_return {
+                out.push_str("    return 0;\n");
+            }
+        }
         Stmt::Expr(expr) if implicit_return => {
             out.push_str("    return ");
             emit_expr(out, expr, ctx)?;
@@ -2670,6 +2685,37 @@ mod tests {
         assert!(output.rust.contains("add(40, 2)"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_keeps_require_inside_statement_if() {
+        let source = r#"
+fn entry() {
+    let total = 0;
+    for index in 1..=2 {
+        if index == 1 {
+            require(index > 0, "pos");
+        } else {
+            require(index > 1, "gt");
+        }
+        total += index;
+    }
+    total
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("return {\n    if "),
+            "statement if/require must not early-return:\n{}",
+            output.rust
+        );
+        assert!(output.rust.contains("total += index"), "{}", output.rust);
     }
 
     #[test]
