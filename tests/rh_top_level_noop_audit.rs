@@ -14,15 +14,13 @@ fn repo() -> PathBuf {
 
 #[derive(Debug, Clone)]
 struct AuditRow {
-    id: String,
-    entry: String,
     has_entry_fn: bool,
     mode: String,
     noop_stub: bool,
     compat: bool,
 }
 
-fn audit_entry(id: &str, entry: &str) -> AuditRow {
+fn audit_entry(entry: &str) -> AuditRow {
     let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
         panic!("read {entry}: {error}");
     });
@@ -31,8 +29,6 @@ fn audit_entry(id: &str, entry: &str) -> AuditRow {
         panic!("transpile {entry}: {error}");
     });
     AuditRow {
-        id: id.to_owned(),
-        entry: entry.to_owned(),
         has_entry_fn,
         mode: output.execution_mode.as_str().to_owned(),
         noop_stub: output
@@ -48,10 +44,7 @@ fn affected(row: &AuditRow) -> bool {
 
 #[test]
 fn validate_artifact_manifest_uses_top_level_compatibility_execution() {
-    let row = audit_entry(
-        "validate-artifact-manifest",
-        "scripts/rhai/validate-artifact-manifest.rhai",
-    );
+    let row = audit_entry("scripts/rhai/validate-artifact-manifest.rhai");
     eprintln!("{row:?}");
     assert!(!row.has_entry_fn);
     assert_eq!(row.mode, "compat-delegating");
@@ -72,10 +65,10 @@ fn manifest_has_no_top_level_rhai_tasks_with_noop_or_non_compat_native_entry() {
         if !entry.ends_with(".rhai") {
             continue;
         }
-        let row = audit_entry(id, entry);
+        let row = audit_entry(entry);
         if affected(&row) {
             eprintln!(
-                "AFFECTED {id}: mode={} has_entry_fn={} noop_stub={} compat={}",
+                "AFFECTED {id} ({entry}): mode={} has_entry_fn={} noop_stub={} compat={}",
                 row.mode, row.has_entry_fn, row.noop_stub, row.compat
             );
             rows.push(row);
