@@ -66,6 +66,10 @@ fn check_accepts_all_fixtures() {
             "string-fn-bundle",
             include_str!("../fixtures/rh/string-fn-bundle.rh"),
         ),
+        (
+            "fs-mutation-probe",
+            include_str!("../fixtures/rh/fs-mutation-probe.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }

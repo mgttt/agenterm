@@ -9,7 +9,7 @@ use agenterm_rh::{
     transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 20] = [
+const FIXTURE_NAMES: [&str; 21] = [
     "break-continue.rh",
     "entry.rh",
     "fail-dynamic.rh",
@@ -17,6 +17,7 @@ const FIXTURE_NAMES: [&str; 20] = [
     "for-dyn-range.rh",
     "for-range.rh",
     "for-span-overflow.rh",
+    "fs-mutation-probe.rh",
     "import-bundle-probe.rh",
     "json-array-walk.rh",
     "json-parse-schema.rh",

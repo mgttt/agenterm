@@ -1,0 +1,18 @@
+fn entry() {
+    let score = 0;
+    let root = args[0];
+    let nested = std::path::join(root, "nested").display;
+    let source = std::path::join(nested, "source.txt").display;
+    let copied = std::path::join(nested, "copied.txt").display;
+    let renamed = std::path::join(nested, "renamed.txt").display;
+    if std::fs::try_create_dir_all(nested) != 0 {
+        score += 1;
+    }
+    if std::fs::try_copy(source, copied) != 0 {
+        score += 10;
+    }
+    if std::fs::try_rename(copied, renamed) != 0 {
+        score += 100;
+    }
+    score
+}

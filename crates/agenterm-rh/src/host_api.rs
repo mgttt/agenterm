@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 15;
+pub const RH_CODEGEN_REVISION: u32 = 16;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -393,6 +393,42 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_try_remove_file(path: &str) -> INT {\n\
              i64::from(std::fs::remove_file(path).is_ok())\n\
+         }\n\n\
+         fn rh_copy(src: &str, dst: &str) -> INT {\n\
+             match std::fs::copy(src, dst) {\n\
+                 Ok(_) => 0,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_copy: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_try_copy(src: &str, dst: &str) -> INT {\n\
+             i64::from(std::fs::copy(src, dst).is_ok())\n\
+         }\n\n\
+         fn rh_create_dir_all(path: &str) -> INT {\n\
+             match std::fs::create_dir_all(path) {\n\
+                 Ok(()) => 0,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_create_dir_all: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_try_create_dir_all(path: &str) -> INT {\n\
+             i64::from(std::fs::create_dir_all(path).is_ok())\n\
+         }\n\n\
+         fn rh_rename(src: &str, dst: &str) -> INT {\n\
+             match std::fs::rename(src, dst) {\n\
+                 Ok(()) => 0,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_rename: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_try_rename(src: &str, dst: &str) -> INT {\n\
+             i64::from(std::fs::rename(src, dst).is_ok())\n\
          }\n\n\
          struct RhDirEntry {\n\
              file_name: String,\n\

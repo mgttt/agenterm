@@ -20,6 +20,9 @@ fn is_shipped_surface(path: &str) -> bool {
         .iter()
         .any(|&candidate| candidate == path)
         || path == "std::fs::try_remove_file"
+        || path == "std::fs::try_copy"
+        || path == "std::fs::try_create_dir_all"
+        || path == "std::fs::try_rename"
 }
 
 pub fn validate_available_apis(source: &str) -> Result<(), ApiValidateError> {
@@ -350,6 +353,14 @@ mod tests {
     #[test]
     fn accepts_try_remove_file_api() {
         validate_available_apis("fn entry() { std::fs::try_remove_file(`x`) }").expect("shipped");
+    }
+
+    #[test]
+    fn accepts_try_copy_and_rename_apis() {
+        validate_available_apis(
+            "fn entry() { std::fs::try_copy(`a`, `b`); std::fs::try_create_dir_all(`d`); std::fs::try_rename(`a`, `c`) }",
+        )
+        .expect("shipped");
     }
 
     #[test]

@@ -543,6 +543,16 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         || std_fs_read_dir_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_remove_file_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_try_remove_file_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_copy_args(expr)
+            .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
+        || std_fs_try_copy_args(expr)
+            .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
+        || std_fs_create_dir_all_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_try_create_dir_all_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_rename_args(expr)
+            .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
+        || std_fs_try_rename_args(expr)
+            .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
         || std_fs_symlink_metadata_arg(expr).is_some_and(|path| is_param_var(path, param))
         || path_join_display_args(expr)
             .is_some_and(|(base, child)| is_param_var(base, param) || is_param_var(child, param))
@@ -1289,6 +1299,16 @@ fn std_fs_single_arg<'a>(expr: &'a Expr, name: &str) -> Option<&'a Expr> {
     Some(&call.args[0])
 }
 
+fn std_fs_two_arg<'a>(expr: &'a Expr, name: &str) -> Option<(&'a Expr, &'a Expr)> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::fs" || call.name != name || call.args.len() != 2 {
+        return None;
+    }
+    Some((&call.args[0], &call.args[1]))
+}
+
 fn rh_fail_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
@@ -1356,6 +1376,30 @@ fn std_fs_remove_file_arg(expr: &Expr) -> Option<&Expr> {
 
 fn std_fs_try_remove_file_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "try_remove_file")
+}
+
+fn std_fs_copy_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    std_fs_two_arg(expr, "copy")
+}
+
+fn std_fs_try_copy_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    std_fs_two_arg(expr, "try_copy")
+}
+
+fn std_fs_create_dir_all_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "create_dir_all")
+}
+
+fn std_fs_try_create_dir_all_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "try_create_dir_all")
+}
+
+fn std_fs_rename_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    std_fs_two_arg(expr, "rename")
+}
+
+fn std_fs_try_rename_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    std_fs_two_arg(expr, "try_rename")
 }
 
 fn std_fs_read_dir_arg(expr: &Expr) -> Option<&Expr> {
@@ -1821,6 +1865,36 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some(path) = std_fs_try_remove_file_arg(expr)
             && emit_std_fs_try_remove_file(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((src, dst)) = std_fs_copy_args(expr)
+            && emit_std_fs_copy(out, src, dst, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((src, dst)) = std_fs_try_copy_args(expr)
+            && emit_std_fs_try_copy(out, src, dst, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_create_dir_all_arg(expr)
+            && emit_std_fs_create_dir_all(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_try_create_dir_all_arg(expr)
+            && emit_std_fs_try_create_dir_all(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((src, dst)) = std_fs_rename_args(expr)
+            && emit_std_fs_rename(out, src, dst, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some((src, dst)) = std_fs_try_rename_args(expr)
+            && emit_std_fs_try_rename(out, src, dst, ctx)?
         {
             return Ok(());
         }
@@ -2473,6 +2547,120 @@ fn emit_std_fs_try_remove_file(
     Ok(true)
 }
 
+fn emit_std_fs_copy(
+    out: &mut String,
+    src: &Expr,
+    dst: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut src_expr = String::new();
+    let mut dst_expr = String::new();
+    if !emit_native_string(&mut src_expr, src, ctx)?
+        || !emit_native_string(&mut dst_expr, dst, ctx)?
+    {
+        return Ok(false);
+    }
+    out.push_str("rh_copy(");
+    out.push_str(&src_expr);
+    out.push_str(", ");
+    out.push_str(&dst_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_try_copy(
+    out: &mut String,
+    src: &Expr,
+    dst: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut src_expr = String::new();
+    let mut dst_expr = String::new();
+    if !emit_native_string(&mut src_expr, src, ctx)?
+        || !emit_native_string(&mut dst_expr, dst, ctx)?
+    {
+        return Ok(false);
+    }
+    out.push_str("rh_try_copy(");
+    out.push_str(&src_expr);
+    out.push_str(", ");
+    out.push_str(&dst_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_create_dir_all(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_create_dir_all(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_try_create_dir_all(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_try_create_dir_all(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_rename(
+    out: &mut String,
+    src: &Expr,
+    dst: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut src_expr = String::new();
+    let mut dst_expr = String::new();
+    if !emit_native_string(&mut src_expr, src, ctx)?
+        || !emit_native_string(&mut dst_expr, dst, ctx)?
+    {
+        return Ok(false);
+    }
+    out.push_str("rh_rename(");
+    out.push_str(&src_expr);
+    out.push_str(", ");
+    out.push_str(&dst_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_try_rename(
+    out: &mut String,
+    src: &Expr,
+    dst: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut src_expr = String::new();
+    let mut dst_expr = String::new();
+    if !emit_native_string(&mut src_expr, src, ctx)?
+        || !emit_native_string(&mut dst_expr, dst, ctx)?
+    {
+        return Ok(false);
+    }
+    out.push_str("rh_try_rename(");
+    out.push_str(&src_expr);
+    out.push_str(", ");
+    out.push_str(&dst_expr);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_metadata_property(
     out: &mut String,
     expr: &Expr,
@@ -3010,7 +3198,7 @@ fn entry() {
         let def = ast.iter_fn_def().next().expect("fn");
         let stmt = def.body.iter().next().expect("stmt");
         let call = match stmt {
-            Stmt::Expr(expr) => {
+            rhai::Stmt::Expr(expr) => {
                 super::super::fleet::parse_fleet_call(expr.as_ref()).expect("fleet")
             }
             other => panic!("unexpected stmt: {other:?}"),
@@ -3224,5 +3412,99 @@ fn entry() { clean_locked_for_name(args[0], args[1]) }
         );
         assert!(output.rust.contains("rh_symlink_metadata(&path).is_file"));
         assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::symlink_metadata"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_copy_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let src = args[0]; let dst = args[1]; std::fs::copy(src, dst) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_copy(&src, &dst)"));
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::copy"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_try_copy_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let src = args[0]; let dst = args[1]; std::fs::try_copy(src, dst) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_try_copy(&src, &dst)"));
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::try_copy"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_create_dir_all_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let path = args[0]; std::fs::create_dir_all(path); std::fs::create_dir_all(path) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_create_dir_all(&path)").count(), 2);
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::create_dir_all"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_std_fs_rename_native() {
+        let output = transpile_cdylib_with_mode(
+            "fn entry() { let src = args[0]; let dst = args[1]; std::fs::rename(src, dst) }",
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_rename(&src, &dst)"));
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::rename"));
+    }
+
+    #[test]
+    fn cdylib_transpile_infers_string_params_for_copy_and_rename() {
+        let source = r#"
+fn stage_copy(source, destination) {
+    std::fs::create_dir_all(destination);
+    if std::fs::try_copy(source, destination) != 0 {
+        std::fs::rename(source, destination);
+        1
+    } else {
+        0
+    }
+}
+fn entry() { stage_copy(args[0], args[1]) }
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("source: String"), "{}", output.rust);
+        assert!(output.rust.contains("destination: String"), "{}", output.rust);
+        assert!(output.rust.contains("rh_create_dir_all(&destination)"));
+        assert!(output.rust.contains("rh_try_copy(&source, &destination)"));
+        assert!(output.rust.contains("rh_rename(&source, &destination)"));
+        assert!(!output.rust.contains("rh_host_eval_int(\"std::fs::copy"));
     }
 }
