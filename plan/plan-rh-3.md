@@ -3,8 +3,8 @@
 | 字段 | 值 |
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
-| **日期** | 2026-08-06 |
-| **状态** | **M42 推进中；M42d1–d5 + M42e1 已就绪；validate-artifact-manifest 原生 `.rh` 迁移落地中** |
+| **日期** | 2026-08-07 |
+| **状态** | **M42d–M42f4 已落地**（`validate-artifact-manifest` / `clean-locked-artifacts` / `stage-artifact` 原生 `.rh`；codegen 17）。**下一切片 M42f5：`stage-build` + 共享 artifact 编排**（PRD：`stage-build` 仍挂 Rhai `artifact_files`/`artifact_manifest` lib） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -104,6 +104,11 @@
 | M42f2 | 原生 `copy` / `create_dir_all` / `rename`（及 try_*）；codegen revision 16；解锁 `stage-artifact` | [x] |
 | M42f3 | 原生 `std::time::SystemTime::now().unix_millis`；codegen revision 17 | [x] |
 | M42f4 | 无损迁移 `stage-artifact`（INT-only `stage`/`stage_as`，try_copy/try_rename，无 try 内 return） | [x] |
+| M42f5 | 无损迁移 `stage-build`：复用原生 `stage`/`stage_as`/`clean_locked`，收口仍挂 Rhai 的共享 artifact 编排；任务入口切 `.rh` 并归档旧 `.rhai` | [ ] |
+
+**M42f4 park 后缀说明：** M42f3 已接线 `unix_millis`，但 `park_running_destination` 仍用 **`0..4096` 的 `try_rename` 序号**（`stem.locked-<n>.exe`），不取 wall-clock millis。原因：序号在同一目录内对冲突做确定性探测、不依赖时钟单调/并发同毫秒碰撞，且 `while` + INT 计数保持纯原生；millis API 留给其它需要墙钟戳的调用方。`stage`/`stage_as` 成功返回 **0**（直拷）/ **1**（park 后替换）；`stage-artifact` 任务入口丢弃该 INT。旧 Rhai 返回 `#{ destination, parked }` map——原生 INT 边界下，依赖 map 形返回的调用方（如未来的 `stage-build`）必须改为读 INT 或 print 侧效应，不得假设 map。
+
+**manifest cutover 约定：** 任务入口切换只改 `agenterm.tasks.json` 对应 `entry` 行；禁止整表 JSON 重排（`fe645201` 曾误排，已由 `f9842005` 收回）。
 
 ---
 
