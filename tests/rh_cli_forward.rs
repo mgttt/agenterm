@@ -79,7 +79,16 @@ fn rh_is_the_task_front_door_via_explicit_compat_bridge() {
     );
     let value: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("task list JSON from rh front door");
-    assert!(value.is_array(), "unexpected task list: {value}");
+    assert!(
+        value["tasks"]
+            .as_array()
+            .is_some_and(|tasks| !tasks.is_empty()),
+        "unexpected task list: {value}"
+    );
+    assert_eq!(
+        value["provenance"]["producer"], "agenterm-rhai",
+        "compatibility execution must remain explicit until the task engine migrates"
+    );
 }
 
 #[test]
