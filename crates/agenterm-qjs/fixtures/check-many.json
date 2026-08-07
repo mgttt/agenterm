@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "kind": "agenterm-qjs-check-manifest",
+  "files": ["ok.js", "syntax-error.js"]
+}

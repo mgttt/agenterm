@@ -277,8 +277,8 @@ lua 雏形来去规避这个风险。
 | **Rh-default** | [x] **M22f 已默认** `AGENTERM_SCRIPT_BACKEND=rh`；显式 `=rhai` 可回退 |
 | **Lua-proto** | FYI；Win 现场 grok.ds 实现中，目标能力对齐 rh；无本 plan 验收叶 |
 | **QJS-M0** | [x] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型（`rquickjs` 0.12.2，bundled quickjs-ng，MSVC `cc` 自动探测编译）+ 最小 eval 跑通（算术/字符串/语法错误捕获，3 单测绿）；**暂未接入根 workspace**——lua 侧当时在同一工作树有未提交的 `Cargo.toml`/`Cargo.lock` 改动，用嵌套空 `[workspace]` 表隔离，避免撞车；lua 已提交（`8b3764f5`），接入根 workspace 留给 QJS-M1 |
-| **QJS-M1** | [ ] CLI 动词对齐 `agenterm-rh`（check/eval/pack/check-many/task 皮子） |
-| **QJS-M2** | [ ] L2 facade/catalog 接入（`fleet.*`/`std.*`，对齐 rh 语义） |
+| **QJS-M1** | [~] `check`/`eval`/`check-many` 三个动词已对齐 `agenterm-rh`：`check` 用 `Module::declare`（真·parse-only，不执行顶层代码，已用会抛异常的顶层语句验证）；`eval` 遵循 rh 现行的 `fn entry()` 强约定（无 entry 直接 fail-closed，不猜整脚本补全值——对齐 rh 的前进方向，不是 rhai 的兼容期整脚本回退）；`check-many` manifest/report JSON 形状、失败 code 分类、exit_class→退出码映射与 rh 逐字段一致，只把 `kind` 换成 `agenterm-qjs-*`（诚实标注引擎，不冒用 rh/rhai 的 kind 字符串）。18 个单测 + clippy 零警告 + 端到端 CLI smoke 全绿。仍差：`pack`/`qualify`/`task`/`run`（见 QJS-M2）；`check` 无项目级 import 图校验（rh 有，见风险表） |
+| **QJS-M2** | [ ] L2 facade/catalog 接入（`fleet.*`/`std.*`，对齐 rh 语义）+ `task`/`run`/`pack`/`qualify` 动词；需要先解决根 workspace 接入（当前独立 workspace） |
 | **QJS-risks** | [ ] 7 条已知风险已记录（并行摸索规格对账、根 workspace C 依赖冲突、线程模型、无 AOT 性能特征、unrestricted 哲学是否走样、版本/哈希可复现性、CI 构建耗时）；详见 PRD §「Script engine family」→「Future」→**qjs execution backend**；QJS-M1/M2 落地前逐条回访，不默认「能跑就是没问题」 |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
