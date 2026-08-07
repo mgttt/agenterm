@@ -2,7 +2,6 @@ pub mod api_validate;
 pub mod caller_inventory;
 pub mod check;
 pub mod check_many;
-pub mod compat_cli;
 pub mod compile;
 pub mod corpus;
 pub mod error;
@@ -27,7 +26,6 @@ pub use check_many::{
     CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
     read_manifest, run_check_many,
 };
-pub use compat_cli::{resolve_compat_cli, try_forward_compat_cli};
 pub use compile::{
     CompileOutput, compile_native, compile_native_for_target, hash_bytes, hash_file,
 };

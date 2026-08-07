@@ -9,20 +9,19 @@ use agenterm_rh::{
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
-    if let Some(result) = agenterm_rh::try_forward_compat_cli(&arguments) {
-        return match result {
-            Ok(status) => status
-                .code()
-                .and_then(|code| u8::try_from(code).ok())
-                .map(ExitCode::from)
-                .unwrap_or(ExitCode::FAILURE),
-            Err(err) => {
-                eprintln!("{err}");
-                ExitCode::FAILURE
-            }
-        };
+    match arguments.as_slice() {
+        [mode] if mode == "--worker" => {
+            return worker_exit_code(agenterm::run_legacy_worker_stdio());
+        }
+        [mode] if mode == "--framed-worker" => {
+            return worker_exit_code(agenterm::run_framed_worker_stdio());
+        }
+        [command, ..] if command == "task" => {
+            return script_exit_code(agenterm::run_script_entry_with_args(arguments));
+        }
+        _ => {}
     }
-    match run() {
+    match run(arguments.into_iter()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("{err}");
@@ -31,15 +30,30 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), RhError> {
-    let mut args = env::args().skip(1);
+fn worker_exit_code(result: anyhow::Result<u8>) -> ExitCode {
+    match result {
+        Ok(code) => ExitCode::from(code),
+        Err(error) => {
+            eprintln!("{error:#}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn script_exit_code(code: i32) -> ExitCode {
+    u8::try_from(code)
+        .map(ExitCode::from)
+        .unwrap_or(ExitCode::FAILURE)
+}
+
+fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
     let Some(command) = args.next() else {
         print_usage();
         return Ok(());
     };
 
     match command.as_str() {
-        "version" => {
+        "version" | "--version" | "-V" => {
             println!("agenterm-rh {RH_VERSION}");
         }
         "check" => {
@@ -358,6 +372,8 @@ fn print_usage() {
            qualify <file> --dir PATH [-o json] build + load + write qualification receipt\n\
            hash <file>                         sha256 receipt\n\
            version\n\
-           task list|show|check|run ...        temporary compatibility bridge\n"
+           task list|show|check|run ...        run a Script Runtime task\n\
+           --worker                           run the legacy JSON worker protocol\n\
+           --framed-worker                    run the framed worker protocol\n"
     );
 }
