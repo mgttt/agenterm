@@ -697,7 +697,7 @@ fn emit_throw_stmt(
 ) -> Result<(), RhError> {
     if ctx.cdylib
         && !ctx.in_try()
-        && let Some(Expr::StringConstant(message, ..)) = call.args.first()
+        && let Some(message) = call.args.first().and_then(throw_message)
     {
         out.push_str("    return rh_fail(");
         out.push_str(&format!("{message:?}"));
@@ -722,6 +722,16 @@ fn emit_throw_stmt(
         }
     }
     Ok(())
+}
+
+fn throw_message(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::StringConstant(message, ..) => Some(message.to_string()),
+        Expr::DynamicConstant(value, ..) if value.is::<rhai::ImmutableString>() => {
+            Some(value.clone_cast::<rhai::ImmutableString>().to_string())
+        }
+        _ => None,
+    }
 }
 
 fn emit_throw_expr(
@@ -1142,7 +1152,7 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
     }
     if call.name == "throw" && ctx.cdylib {
         if !ctx.in_try()
-            && let Some(Expr::StringConstant(message, ..)) = call.args.first()
+            && let Some(message) = call.args.first().and_then(throw_message)
         {
             out.push_str("return rh_fail(");
             out.push_str(&format!("{message:?}"));
