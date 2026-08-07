@@ -7,11 +7,6 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = [
-    "ux.working-context-proxy",
-    "ux.persistent-workspace"
-];
-
 fn require_no_secret(text, secret, location) {
     test_harness::require(
         text.contains(secret) == 0,
@@ -19,20 +14,24 @@ fn require_no_secret(text, secret, location) {
     );
 }
 
-fn active_tab(snapshot) {
-    let found = rhai::json::parse("{}");
-    for tab in snapshot.tabs {
+fn active_tab_index(snapshot) {
+    // Touch JSON path so the param infers Json (bare tabs.len loops stay INT).
+    let tabs = snapshot.tabs;
+    let found_index = -1;
+    for index in 0..tabs.len {
+        let tab = snapshot.tabs[index];
         if tab.active != 0 {
-            found = tab;
+            found_index = index;
         }
     }
-    if found.active == 0 {
+    if found_index < 0 {
         throw "working_context_active_tab_missing";
     }
-    rhai::json::parse(rhai::json::stringify(found))
+    found_index
 }
 
 fn wait_for_server(context, cli, gui_child, redactions) {
+    // Callers only need readiness; keep return kind INT for native pack.
     for attempt in 0..200 {
         let probe = test_harness::run_cli(
             context,
@@ -42,26 +41,28 @@ fn wait_for_server(context, cli, gui_child, redactions) {
             redactions
         );
         if probe.success != 0 {
-            return probe.stdout;
+            return 0;
         }
         if gui_child.state == "exited" {
             let output = gui_child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
+            let early_stderr = "" + output.stderr;
             throw "working_context_gui_early_exit:" +
-                test_harness::redact_text(output.stderr_text(), redactions);
+                test_harness::redact_text(early_stderr, redactions);
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "working_context_server_timeout";
+    0
 }
 
 fn wait_for_exit(child, code) {
+    // Discard Output; callers re-wait for stderr separately.
+    let code_text = "" + code;
     for attempt in 0..40 {
         if child.state == "exited" {
-            return child.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
@@ -69,10 +70,15 @@ fn wait_for_exit(child, code) {
         child.kill();
     }
     try {
-        child.wait_with_output(std::time::Duration::from_secs(3))
+        let _drained = child.wait_with_output(
+            std::time::Duration::from_secs(3)
+        );
+        0
     } catch (error) {
-        throw code + ":" + ("" + error);
+        throw code_text + ":" + ("" + error);
+        0
     }
+    0
 }
 
 fn start_gui(context, gui, proxy) {
@@ -93,9 +99,9 @@ fn start_gui(context, gui, proxy) {
 
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in declared_evidence {
-            print(id);
-        }
+        // Unroll: module string-list for-in is not native-emitted yet.
+        print("ux.working-context-proxy");
+        print("ux.persistent-workspace");
         return 0;
     }
 
@@ -151,7 +157,7 @@ fn entry() {
         let snapshot_text = "" + snapshot_result.stdout;
         require_no_secret(snapshot_text, secret, "launch_ui_snapshot");
         let snapshot = rhai::json::parse(snapshot_text);
-        let tab = active_tab(snapshot);
+        let tab = snapshot.tabs[active_tab_index(snapshot)];
         let proxy_source = "" + tab.working_context.proxy.source;
         test_harness::require(
             tab.working_context.proxy.configured != 0
@@ -330,7 +336,7 @@ fn entry() {
             std::time::Duration::from_secs(2)
         );
         require_no_secret(
-            first_output.stderr_text(),
+            "" + first_output.stderr,
             secret,
             "first_gui_stderr"
         );
@@ -363,12 +369,15 @@ fn entry() {
         let restored_text = "" + restored_result.stdout;
         require_no_secret(restored_text, secret, "restart_ui_snapshot");
         let restored_snapshot = rhai::json::parse(restored_text);
-        let restored_tab = active_tab(restored_snapshot);
-        let restored_proxy_source = "" + restored_tab.working_context.proxy.source;
+        let restored_tab =
+            restored_snapshot.tabs[active_tab_index(restored_snapshot)];
+        let restored_proxy_source =
+            "" + restored_tab.working_context.proxy.source;
         let restored_id = "" + restored_tab.id;
         let restored_name = "" + restored_tab.name;
         let restored_note = "" + restored_tab.note;
-        let restored_cwd_source = "" + restored_tab.working_context.cwd.source;
+        let restored_cwd_source =
+            "" + restored_tab.working_context.cwd.source;
         let restored_cwd_path = "" + restored_tab.working_context.cwd.path;
         let restored_cwd_confirmed =
             "" + restored_tab.working_context.cwd.confirmed_path;
@@ -407,14 +416,27 @@ fn entry() {
             std::time::Duration::from_secs(2)
         );
         require_no_secret(
-            second_output.stderr_text(),
+            "" + second_output.stderr,
             secret,
             "second_gui_stderr"
         );
 
-        for id in declared_evidence {
-            test_harness::emit_evidence(context, declared_evidence, id);
-        }
+        test_harness::emit_evidence(
+            context,
+            [
+                "ux.working-context-proxy",
+                "ux.persistent-workspace"
+            ],
+            "ux.working-context-proxy"
+        );
+        test_harness::emit_evidence(
+            context,
+            [
+                "ux.working-context-proxy",
+                "ux.persistent-workspace"
+            ],
+            "ux.persistent-workspace"
+        );
         print(
             "PASS: archived Proxy facts remain private while workspace metadata " +
             "survives restart"

@@ -754,7 +754,7 @@
     {
       "id": "working-context-smoke",
       "description": "Prove redacted launch proxy facts and persistent workspace metadata through an isolated GUI restart",
-      "entry": "scripts/rhai/working-context-smoke.rhai",
+      "entry": "scripts/rh/working-context-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
