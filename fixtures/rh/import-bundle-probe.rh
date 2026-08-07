@@ -1,0 +1,5 @@
+import "fixtures/rh/modules/import_helper" as helper;
+
+fn entry() {
+    helper::add(40, 2)
+}

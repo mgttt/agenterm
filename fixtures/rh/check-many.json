@@ -19,6 +19,7 @@
     "fixtures/rh/string-validate.rh",
     "fixtures/rh/fail-dynamic.rh",
     "fixtures/rh/map-set-membership.rh",
-    "fixtures/rh/path-metadata-probe.rh"
+    "fixtures/rh/path-metadata-probe.rh",
+    "fixtures/rh/import-bundle-probe.rh"
   ]
 }

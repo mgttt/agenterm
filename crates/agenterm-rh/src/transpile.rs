@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use rhai::{AST, ASTFlags, BinaryExpr, Expr, OpAssignment, ScriptFuncDef, Stmt, StmtBlock, Token};
 
 use crate::{
     RhError,
+    bundle::bundle_project_source,
     expr_print::{
         args_index_expr, expr_to_rhai, is_args_len_expr, is_pure_int_expr, is_var_len_expr,
         uses_host_surface, var_len_name,
@@ -51,6 +53,7 @@ pub struct CdylibTranspileOutput {
 struct EmitCtx {
     cdylib: bool,
     scope: BTreeMap<String, ValueKind>,
+    local_fns: BTreeSet<String>,
     try_depth: u32,
 }
 
@@ -59,8 +62,14 @@ impl EmitCtx {
         Self {
             cdylib,
             scope: BTreeMap::new(),
+            local_fns: BTreeSet::new(),
             try_depth: 0,
         }
+    }
+
+    fn with_local_fns(mut self, local_fns: BTreeSet<String>) -> Self {
+        self.local_fns = local_fns;
+        self
     }
 
     fn in_try(&self) -> bool {
@@ -177,7 +186,7 @@ pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput,
     // delegation below, while manifest qualification can reject that mode for
     // `.rh` tasks.
     if validate_ok && has_entry_fn {
-        if let Ok(rust) = emit(&ast, EmitCtx::new(true)) {
+        if let Ok(rust) = emit(&ast, EmitCtx::new(true).with_local_fns(local_fn_names(&ast))) {
             let execution_mode = if rust.matches("rh_host_eval_int(").count() > 1 {
                 CdylibExecutionMode::HostEval
             } else {
@@ -194,6 +203,22 @@ pub fn transpile_cdylib_with_mode(source: &str) -> Result<CdylibTranspileOutput,
         rust: emit_compat_delegating(source)?,
         execution_mode: CdylibExecutionMode::CompatDelegating,
     })
+}
+
+/// Bundle project-relative imports, then transpile the flattened source.
+pub fn transpile_cdylib_with_project(
+    project_root: &Path,
+    source: &str,
+) -> Result<CdylibTranspileOutput, RhError> {
+    let bundled = bundle_project_source(project_root, source)?;
+    transpile_cdylib_with_mode(&bundled)
+}
+
+fn local_fn_names(ast: &AST) -> BTreeSet<String> {
+    ast.iter_functions()
+        .filter(|meta| meta.name != "entry" && meta.name != "cc_lines")
+        .map(|meta| meta.name.to_string())
+        .collect()
 }
 
 fn ast_has_entry_fn(ast: &AST) -> bool {
@@ -240,13 +265,14 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
         out.push_str("use rhai::Dynamic;\n\n");
     }
 
+    let mut base_ctx = ctx.clone().with_local_fns(local_fn_names(ast));
     let mut wrote_fn = false;
     let mut has_entry = false;
     for meta in ast.iter_functions() {
         if meta.name == "entry" {
             has_entry = true;
         }
-        if ctx.cdylib && meta.name == "cc_lines" {
+        if base_ctx.cdylib && meta.name == "cc_lines" {
             let Some(def) = find_fn_def(ast, meta.name) else {
                 return Err(RhError::Transpile("missing cc_lines body".into()));
             };
@@ -260,7 +286,7 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
                 meta.name
             )));
         };
-        emit_fn(&mut out, def, &mut EmitCtx::new(ctx.cdylib))?;
+        emit_fn(&mut out, def, &mut base_ctx)?;
         wrote_fn = true;
     }
 
@@ -392,6 +418,7 @@ fn find_fn_def<'a>(ast: &'a AST, name: &str) -> Option<&'a ScriptFuncDef> {
 
 fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(), RhError> {
     let mut fn_ctx = ctx.clone();
+    fn_ctx.scope.clear();
     for param in &def.params {
         fn_ctx = fn_ctx.with_binding(param.as_str(), ValueKind::Int);
     }
@@ -1503,6 +1530,13 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return emit_call(out, call, ctx);
         }
+        if let Expr::FnCall(call, ..) = expr
+            && call.op_token.is_none()
+            && call.namespace.is_empty()
+            && ctx.local_fns.contains(call.name.as_str())
+        {
+            return emit_call(out, call, ctx);
+        }
         if let Expr::And(args, ..) = expr {
             return logical_nary(out, "&&", args, ctx);
         }
@@ -2042,6 +2076,18 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         out.push_str("    0\n}");
         return Ok(());
     }
+    if call.namespace.is_empty() && ctx.local_fns.contains(call.name.as_str()) && ctx.cdylib {
+        out.push_str(call.name.as_str());
+        out.push('(');
+        for (index, arg) in call.args.iter().enumerate() {
+            if index > 0 {
+                out.push_str(", ");
+            }
+            emit_expr(out, arg, ctx)?;
+        }
+        out.push(')');
+        return Ok(());
+    }
     Err(RhError::Transpile(format!(
         "unsupported call `{}` in rh-2",
         call.name
@@ -2341,6 +2387,23 @@ mod tests {
         assert!(output.rust.contains("meta.is_file"));
         assert!(output.rust.contains("meta.is_symlink"));
         assert!(output.rust.contains("meta.is_reparse_point"));
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_with_project_bundles_import_calls() {
+        let source = include_str!("../../../fixtures/rh/import-bundle-probe.rh");
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let output = super::transpile_cdylib_with_project(&root, source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("pub fn add("), "{}", output.rust);
+        assert!(output.rust.contains("add(40, 2)"), "{}", output.rust);
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }

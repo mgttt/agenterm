@@ -1,4 +1,5 @@
 pub mod api_validate;
+pub mod bundle;
 pub mod caller_inventory;
 pub mod check;
 pub mod check_many;
@@ -20,6 +21,7 @@ pub mod transpile;
 pub use caller_inventory::{
     CallerHit, CallerInventoryOptions, CallerInventoryReport, scan_caller_inventory,
 };
+pub use bundle::bundle_project_source;
 pub use check::check;
 pub use check::{RH_MAX_EXPR_DEPTH, check_with_project_validation};
 pub use check_many::{
@@ -46,7 +48,7 @@ pub use pack::{PackBuildOutput, RhPack, build_pack_dir};
 pub use qualify::{RhQualificationReceipt, qualify_pack_dir, write_receipt};
 pub use transpile::{
     CdylibExecutionMode, CdylibTranspileOutput, transpile, transpile_cdylib,
-    transpile_cdylib_with_mode,
+    transpile_cdylib_with_mode, transpile_cdylib_with_project,
 };
 
 pub const RH_VERSION: &str = env!("CARGO_PKG_VERSION");
