@@ -130,7 +130,7 @@
 | M42f6g9 | INT-only `scripts/rh/preflight-benchmark.rh`；entry 切线 + 归档 | [x] |
 | M42f6g10 | INT-only `scripts/rh/cross-platform-automation-audit.rh`；entry 切线 + 归档 | [x] |
 | M42f6g11 | INT-only `scripts/rh/artifact-verification.rh`；entry 切线 + 归档 | [x] |
-| M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + 剩余叶（`candidate-*`、`migration-audit`）；`target-report` 仍缺 `pop`/float | [ ] |
+| M42f6h | `release_candidate`/`qualification`/`package_qualified` lib 原生移植 + 剩余叶（`candidate-*`、`migration-audit`）；`target-report` 仍缺 `pop`/float。**候选叶探测（2026-08-07）**：薄包装 cutover 被 codegen 挡住——`for` 内 `array.push`、变量拼 JSON 数组字面量、`path.parent` 仍非 Native；入口仍停 `.rhai`，待本里程碑补 emit 后再切 | [ ] |
 | M42f6i | INT-only `scripts/rh/finalize-macos-provenance.rh`（`symlink_metadata`+`parse(read_to_string)`、重建 JSON 设 `notarized:true`）；candidate workflow 切 `.rh` 并归档 | [x] |
 | M42f7 | 延后：`check`/`fresh-clone` 的 Child+sleep、全量 `*-smoke`（`test_harness`）、`switch`/`do` 编排体 | [ ] |
 | M42f8 | **Shim 收口顺序（非并行捷径）**：Phase A 先清零 manifest `.rhai` 入口与工作流硬编码 `.rhai`；Phase B 才把 `agenterm-rhai` 收成纯 forwarder（含 `run *.rhai`/`task`）；Phase C 再拆主库 Rhai `Engine`/`script_rh_host` compat。禁止在 A 未完成时宣称 rhai 已归档——compat-delegating 仍是 Rhai | [ ] |
