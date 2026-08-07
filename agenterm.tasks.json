@@ -1080,7 +1080,7 @@
     {
       "id": "stage-artifact",
       "description": "Stage one AgenTerm executable while preserving an in-use Windows image",
-      "entry": "scripts/rhai/stage-artifact.rhai",
+      "entry": "scripts/rh/stage-artifact.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

@@ -1,3 +1,6 @@
+// Archived interpreted implementation retained for migration archaeology only.
+// Active task: scripts/rh/stage-artifact.rh
+
 // Stage one validated AgenTerm executable, parking an in-use Windows image.
 //
 // Args:

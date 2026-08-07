@@ -1,0 +1,13 @@
+// Stage one validated AgenTerm executable, parking an in-use Windows image.
+//
+// Args:
+//   SOURCE_DIRECTORY DESTINATION_DIRECTORY ARTIFACT_NAME
+
+import "scripts/rh/lib/artifact_files" as artifact_files;
+
+fn entry() {
+    if args.len != 3 {
+        return rh::fail("expected: SOURCE_DIRECTORY DESTINATION_DIRECTORY ARTIFACT_NAME");
+    }
+    artifact_files::stage(args[0], args[1], args[2])
+}

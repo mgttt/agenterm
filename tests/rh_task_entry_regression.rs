@@ -42,6 +42,18 @@ fn validate_artifact_manifest_uses_native_bundled_execution() {
 }
 
 #[test]
+fn stage_artifact_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/stage-artifact.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("pub fn stage("), "{}", output.rust);
+    assert!(output.rust.contains("pub fn stage_as("), "{}", output.rust);
+    assert!(output.rust.contains("rh_try_copy("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+}
+
+#[test]
 fn manifest_top_level_rhai_tasks_use_compatibility_execution() {
     let manifest: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(repo().join("agenterm.tasks.json")).expect("manifest"),

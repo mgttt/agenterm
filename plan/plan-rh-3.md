@@ -103,6 +103,7 @@
 | M42f1 | 原生 `read_dir` / `remove_file` / `try_remove_file` + 链式 metadata 标志；`clean-locked-artifacts` 任务入口切到 `.rh`；codegen revision 15 | [x] |
 | M42f2 | 原生 `copy` / `create_dir_all` / `rename`（及 try_*）；codegen revision 16；解锁 `stage-artifact` | [x] |
 | M42f3 | 原生 `std::time::SystemTime::now().unix_millis`；codegen revision 17 | [x] |
+| M42f4 | 无损迁移 `stage-artifact`（INT-only `stage`/`stage_as`，try_copy/try_rename，无 try 内 return） | [x] |
 
 ---
 
