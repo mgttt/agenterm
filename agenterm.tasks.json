@@ -95,6 +95,20 @@
       "network": [],
       "evidence": ["task.timing-summary"]
     },
+    "performance-samples": {
+      "inputs": ["exact-source", "compiler-cache-strategy"],
+      "outputs": ["three-ordered-quick-samples", "compiler-cache-statistics"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.performance-samples"]
+    },
+    "performance-summary": {
+      "inputs": ["three-ordered-quick-samples", "compiler-cache-statistics"],
+      "outputs": ["typed-performance-summary"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.performance-summary"]
+    },
     "release": {
       "inputs": ["clean-source", "qualification-receipt", "candidate-workflow", "promotion-workflow"],
       "outputs": ["release-rehearsal", "promotion-instructions"],
@@ -571,6 +585,26 @@
       "cwd": ".",
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
+    },
+    {
+      "id": "performance-samples",
+      "description": "Run three ordered cold-to-warm Quick samples for the isolated Windows performance experiment",
+      "entry": "scripts/rhai/performance-samples.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
+      "id": "performance-summary",
+      "description": "Validate and aggregate three isolated Quick timing samples without claiming release qualification",
+      "entry": "scripts/rhai/performance-summary.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows"],
       "side_effects": ["artifact_write"]
     },
     {
