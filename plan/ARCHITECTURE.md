@@ -91,6 +91,7 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
 | `agenterm-rhai` | `src/bin/agenterm-rhai.rs` | 本地 Rhai 运行时（无权限策略） |
 | `agenterm-rh` | `crates/agenterm-rh/src/main.rs` | pack **rh** 子集校验 / transpile / AOT（并行轨） |
+| `agenterm-cmd` | `src/bin/agenterm-cmd.rs` | 最小后备终端（单窗 ConPTY/PTY，无 server/Fleet；平台 pixel-window 直调） |
 
 **rh 切换：** 宿主经 [`src/script_backend.rs`](../src/script_backend.rs) 选择 backend；详见 [`plan/design-rh-aot.md`](design-rh-aot.md)。
 

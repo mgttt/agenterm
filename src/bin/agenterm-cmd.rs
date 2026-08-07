@@ -255,9 +255,8 @@ impl CmdTerminal {
         self.master = Some(master);
         self.pty_rx = rx;
 
-        // Reap the child on a background thread so its exit is observed; we do
-        // not need the status, only to not leave a zombie on Unix.
-        let _ = child;
+        // Detach the child handle so its resources are released when the
+        // process exits. The reader thread's Disconnected signal drives exit.
         thread::Builder::new()
             .name("agenterm-cmd-reaper".into())
             .spawn(move || drop(child))
@@ -430,20 +429,24 @@ impl PixelWindowApplication for CmdTerminal {
             }
         }
 
-        // Solid block cursor at the current position.
-        if !cursor_hidden && cursor.0 < rows && cursor.1 < cols {
+        // Solid block cursor at the current position. Guard against the
+        // resize-debounce window where the VT grid can be larger than the
+        // live frame (the frame shrank but apply_resize hasn't fired yet).
+        if !cursor_hidden {
             let cx = u32::from(cursor.1) * self.cell_w;
             let cy = u32::from(cursor.0) * self.cell_h;
-            fill_rect(
-                pixels,
-                fw,
-                fh,
-                cx,
-                cy,
-                self.cell_w,
-                self.cell_h,
-                self.default_fg.to_xrgb(),
-            );
+            if cx < fw && cy < fh {
+                fill_rect(
+                    pixels,
+                    fw,
+                    fh,
+                    cx,
+                    cy,
+                    self.cell_w,
+                    self.cell_h,
+                    self.default_fg.to_xrgb(),
+                );
+            }
         }
 
         Ok(PixelWindowDirective::Continue)
@@ -451,7 +454,7 @@ impl PixelWindowApplication for CmdTerminal {
 
     fn about_to_wait(
         &mut self,
-        _window: &PixelWindow,
+        window: &PixelWindow,
         now: Instant,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         if self.exit || self.child_gone {
@@ -462,6 +465,7 @@ impl PixelWindowApplication for CmdTerminal {
             if now.duration_since(self.last_geometry_at) >= RESIZE_DEBOUNCE {
                 self.apply_resize(pw, ph, scale);
                 self.pending_geometry = None;
+                window.request_redraw();
                 return Ok(PixelWindowDirective::Continue);
             }
             return Ok(PixelWindowDirective::WaitUntil(
@@ -478,6 +482,9 @@ impl PixelWindowApplication for CmdTerminal {
 // ---------------------------------------------------------------------------
 
 fn fill_rect(pixels: &mut [u32], fw: u32, fh: u32, x: u32, y: u32, w: u32, h: u32, color: u32) {
+    if x >= fw || y >= fh {
+        return;
+    }
     let max_x = x.saturating_add(w).min(fw);
     let max_y = y.saturating_add(h).min(fh);
     for py in y..max_y {
@@ -485,7 +492,6 @@ fn fill_rect(pixels: &mut [u32], fw: u32, fh: u32, x: u32, y: u32, w: u32, h: u3
         let row = &mut pixels[base..(base + (max_x - x) as usize)];
         row.fill(color);
     }
-    let _ = fh;
 }
 
 fn blit_glyph(

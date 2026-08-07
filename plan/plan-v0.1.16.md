@@ -153,8 +153,8 @@ O. Unix multi-instance reachability
 
 ```text
 C. Fallback terminal (agenterm-cmd.exe)
-├─ [ ] C1 最小 ConPTY 窗：开窗、起 shell、pty 泵、渲染（platform 直调）
-├─ [ ] C2 键盘输入 + 鼠标选择 + 剪贴板（复用 platform 的 input/clipboard 封装）
+├─ [x] C1 最小 ConPTY 窗：开窗、起 shell、pty 泵、渲染（platform 直调）
+├─ [x] C2 键盘输入 + 鼠标选择 + 剪贴板（复用 platform 的 input/clipboard 封装）
 ├─ [ ] C3 滚动缓冲区 + 字体/DPI 跟随（复用 platform 的 font/screenshot）
 └─ [ ] C4 server attach 预留：实现与 remote frontend 相同的 IPC 帧协议（仅接线，不接 Fleet）
 ```

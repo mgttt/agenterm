@@ -200,7 +200,7 @@ pub fn resolved_name() -> &'static str {
 
 /// Public entry point: cell metrics for a pixel size.
 pub fn cell_metrics(size_px: u16) -> CellMetrics {
-    renderer().cell_metrics(size_px)
+    renderer().cell_metrics(size_px.clamp(8, 72))
 }
 
 /// Public entry point: rasterize a single character, cached.
