@@ -657,7 +657,7 @@
     {
       "id": "bootstrap-info",
       "description": "Report the repository, Git, Cargo, Rust and Script Runtime bootstrap identity",
-      "entry": "scripts/rhai/bootstrap-info.rhai",
+      "entry": "scripts/rh/bootstrap-info.rh",
       "profile": "local",
       "cwd": ".",
       "dependencies": [],

@@ -1,0 +1,69 @@
+// Report stage-0 inputs without performing a build or changing the repository.
+//
+// Named task:
+//   agenterm-rh task run bootstrap-info --json
+
+fn entry() {
+    let repo_joined = std::path::join(".", "").display;
+    let repo = std::path::absolute(repo_joined).display;
+
+    let stdout_joined =
+        std::path::join(repo, "bootstrap-info.stdout.tmp").display;
+    let stdout_path = std::path::absolute(stdout_joined).display;
+
+    let commit_code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        10000,
+        stdout_path
+    );
+    require(commit_code == 0, "bootstrap-git-head");
+    let commit = std::fs::read_to_string(stdout_path);
+    commit.trim();
+
+    let branch_code = std::process::command_stdout_file(
+        "git",
+        ["branch", "--show-current"],
+        10000,
+        stdout_path
+    );
+    require(branch_code == 0, "bootstrap-git-branch");
+    let branch = std::fs::read_to_string(stdout_path);
+    branch.trim();
+
+    let cargo_code = std::process::command_stdout_file(
+        "cargo",
+        ["--version"],
+        10000,
+        stdout_path
+    );
+    require(cargo_code == 0, "bootstrap-cargo");
+    let cargo = std::fs::read_to_string(stdout_path);
+    cargo.trim();
+
+    let rustc_code = std::process::command_stdout_file(
+        "rustc",
+        ["--version"],
+        10000,
+        stdout_path
+    );
+    require(rustc_code == 0, "bootstrap-rustc");
+    let rustc = std::fs::read_to_string(stdout_path);
+    rustc.trim();
+
+    std::fs::try_remove_file(stdout_path);
+
+    let report = #{
+        schema_version: 1,
+        task_id: "bootstrap-info",
+        repository: repo,
+        commit: commit,
+        branch: branch,
+        cargo: cargo,
+        rustc: rustc,
+        script_api_version: 2,
+        task_manifest_schema_version: 3
+    };
+    print(rhai::json::stringify_pretty(report));
+    0
+}
