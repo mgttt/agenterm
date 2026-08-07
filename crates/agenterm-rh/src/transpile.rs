@@ -573,11 +573,7 @@ fn emit_block_tail_expr(
     Ok(())
 }
 
-fn emit_try_block(
-    out: &mut String,
-    block: &StmtBlock,
-    ctx: &mut EmitCtx,
-) -> Result<(), RhError> {
+fn emit_try_block(out: &mut String, block: &StmtBlock, ctx: &mut EmitCtx) -> Result<(), RhError> {
     let stmts: Vec<_> = block.iter().collect();
     if stmts.is_empty() {
         out.push_str("        Ok(0)\n");
@@ -726,11 +722,7 @@ fn int_for_bound(expr: &Expr) -> Option<IntForBound> {
         .or_else(|| is_pure_int_expr(expr).then(|| IntForBound::Expr(expr.clone())))
 }
 
-fn emit_for_bound(
-    out: &mut String,
-    bound: &IntForBound,
-    ctx: &mut EmitCtx,
-) -> Result<(), RhError> {
+fn emit_for_bound(out: &mut String, bound: &IntForBound, ctx: &mut EmitCtx) -> Result<(), RhError> {
     match bound {
         IntForBound::Const(value) => out.push_str(&value.to_string()),
         IntForBound::Expr(expr) => emit_expr(out, expr, ctx)?,
@@ -913,9 +905,7 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
         }
         (Token::NotEqualsTo, 2) => comparison_binary(out, "!=", &args[0], &args[1], ctx),
         (Token::GreaterThan, 2) => comparison_binary(out, ">", &args[0], &args[1], ctx),
-        (Token::GreaterThanEqualsTo, 2) => {
-            comparison_binary(out, ">=", &args[0], &args[1], ctx)
-        }
+        (Token::GreaterThanEqualsTo, 2) => comparison_binary(out, ">=", &args[0], &args[1], ctx),
         (Token::LessThan, 2) => comparison_binary(out, "<", &args[0], &args[1], ctx),
         (Token::LessThanEqualsTo, 2) => comparison_binary(out, "<=", &args[0], &args[1], ctx),
         (Token::And, 2) => logical_binary(out, "&&", &args[0], &args[1], ctx),
@@ -1017,10 +1007,7 @@ mod tests {
     fn cdylib_transpile_emits_while_loop() {
         let source = include_str!("../../../fixtures/rh/while.rh");
         let rust = transpile_cdylib(source).expect("transpile");
-        assert!(
-            rust.contains("while "),
-            "expected while in:\n{rust}"
-        );
+        assert!(rust.contains("while "), "expected while in:\n{rust}");
     }
 
     #[test]

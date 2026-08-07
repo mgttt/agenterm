@@ -56,11 +56,8 @@ mod tests {
 
     #[test]
     fn check_with_project_validation_rejects_unknown_api() {
-        let error = check_with_project_validation(
-            "fn entry() { std::fs::not_shipped(`x`) }",
-            None,
-        )
-        .expect_err("unknown API");
+        let error = check_with_project_validation("fn entry() { std::fs::not_shipped(`x`) }", None)
+            .expect_err("unknown API");
         assert!(error.to_string().contains("script_api_unknown"));
     }
 }

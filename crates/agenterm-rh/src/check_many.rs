@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{check_with_project_validation, RhError};
+use crate::{RhError, check_with_project_validation};
 
 pub const MANIFEST_MAX_BYTES: usize = 64 * 1024;
 pub const FILES_MAX: usize = 256;
@@ -95,10 +95,7 @@ pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, RhError> {
     Ok(manifest)
 }
 
-pub fn run_check_many(
-    manifest: CheckManyManifest,
-    options: CheckManyOptions,
-) -> CheckManyReport {
+pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) -> CheckManyReport {
     let started = Instant::now();
     let deadline = started + Duration::from_millis(options.wall_time_ms);
     let root = options.project_root;
@@ -240,11 +237,15 @@ where
                 let _ = next_value(&mut args, arg.as_str())?;
             }
             "--json" => json = true,
-            other => return Err(RhError::Parse(format!("unknown check-many option `{other}`"))),
+            other => {
+                return Err(RhError::Parse(format!(
+                    "unknown check-many option `{other}`"
+                )));
+            }
         }
     }
-    let manifest_path =
-        manifest_path.ok_or_else(|| RhError::Parse("check-many requires --manifest FILE".into()))?;
+    let manifest_path = manifest_path
+        .ok_or_else(|| RhError::Parse("check-many requires --manifest FILE".into()))?;
     Ok(ParsedCheckManyCli {
         manifest_path,
         options: CheckManyOptions {
@@ -268,7 +269,7 @@ where
 mod tests {
     use std::path::PathBuf;
 
-    use super::{parse_check_many_cli, read_manifest, run_check_many, CheckManyOptions};
+    use super::{CheckManyOptions, parse_check_many_cli, read_manifest, run_check_many};
 
     #[test]
     fn accepts_rhai_manifest_kind_and_compat_flags() {
@@ -311,11 +312,7 @@ mod tests {
                 ..CheckManyOptions::default()
             },
         );
-        assert!(
-            report.ok,
-            "failures: {:?}",
-            report.failures
-        );
+        assert!(report.ok, "failures: {:?}", report.failures);
         assert_eq!(report.checked_files, 8);
     }
 

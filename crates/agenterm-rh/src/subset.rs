@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use rhai::{AST, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt, ASTFlags};
+use rhai::{AST, ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt};
 
 use crate::RhError;
 use crate::expr_print::{is_pure_int_expr, uses_host_surface};
@@ -210,10 +210,7 @@ fn validate_root_expr(expr: &Expr) -> Option<RhError> {
 pub fn compat_validate(source: &str, ast: &AST) -> Result<(), RhError> {
     let _ = source;
     if ast_contains_eval(ast) {
-        return Err(subset_error(
-            "RH_SUBSET_NO_EVAL",
-            "eval is forbidden in rh",
-        ));
+        return Err(subset_error("RH_SUBSET_NO_EVAL", "eval is forbidden in rh"));
     }
     Ok(())
 }
@@ -291,7 +288,9 @@ mod tests {
     #[test]
     fn accepts_for_dyn_int_range() {
         let ast = Engine::new()
-            .compile("fn entry() { let count = 5; for x in 1..count { if x == 4 { return 7; } } 0 }")
+            .compile(
+                "fn entry() { let count = 5; for x in 1..count { if x == 4 { return 7; } } 0 }",
+            )
             .expect("compile");
         validate_ast(&ast).expect("subset");
     }

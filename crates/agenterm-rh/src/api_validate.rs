@@ -16,7 +16,9 @@ fn script_error(code: &'static str, message: impl Into<String>) -> ApiValidateEr
 }
 
 fn is_shipped_surface(path: &str) -> bool {
-    SHIPPED_SURFACE_PATHS.iter().any(|&candidate| candidate == path)
+    SHIPPED_SURFACE_PATHS
+        .iter()
+        .any(|&candidate| candidate == path)
 }
 
 pub fn validate_available_apis(source: &str) -> Result<(), ApiValidateError> {

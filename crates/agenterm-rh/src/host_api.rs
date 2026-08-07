@@ -21,12 +21,8 @@ pub type RhHostEvalCall = extern "C" fn(
     out_cap: u32,
 ) -> i32;
 
-pub type RhHostRunScriptCall = extern "C" fn(
-    source: *const u8,
-    source_len: u32,
-    out_buf: *mut u8,
-    out_cap: u32,
-) -> i32;
+pub type RhHostRunScriptCall =
+    extern "C" fn(source: *const u8, source_len: u32, out_buf: *mut u8, out_cap: u32) -> i32;
 
 pub fn rust_raw_string_literal(source: &str) -> String {
     let mut hashes = 0_usize;
