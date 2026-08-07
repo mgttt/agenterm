@@ -110,4 +110,77 @@ fn task_corpus_accepts_native_and_compatibility_entries() {
     assert!(entries.iter().any(|entry| entry.ends_with(".rh")));
     assert!(entries.iter().any(|entry| entry.ends_with(".rhai")));
     assert!(entries.contains(&"scripts/rh/native-task-probe.rh".to_owned()));
+    assert!(entries.contains(&"scripts/rh/verify-docs-site.rh".to_owned()));
+}
+
+#[test]
+fn verify_docs_site_is_native_and_archives_interpreted_source() {
+    let repo = repo_root();
+    let source = std::fs::read_to_string(repo.join("scripts/rh/verify-docs-site.rh"))
+        .expect("native docs task");
+    let output = agenterm_rh::transpile_cdylib_with_mode(&source).expect("transpile docs task");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("rh_fail("));
+    assert!(output.rust.contains("rh_std_fs_exists_case_exact(&image)"));
+    assert!(!output.rust.contains("compat delegating"));
+
+    let manifest = std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
+    assert!(manifest.contains("\"entry\": \"scripts/rh/verify-docs-site.rh\""));
+    assert!(!manifest.contains("\"entry\": \"scripts/rhai/verify-docs-site.rhai\""));
+    assert!(
+        repo.join("scripts/archive/rhai/verify-docs-site.rhai")
+            .is_file()
+    );
+    assert!(!repo.join("scripts/rhai/verify-docs-site.rhai").exists());
+}
+
+#[test]
+fn public_cli_runs_native_docs_task_and_preserves_failure() {
+    let repo = repo_root();
+    let manifest = repo.join("agenterm.tasks.json");
+    let success = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        .current_dir(&repo)
+        .args(["task", "run", "verify-docs-site", "--manifest"])
+        .arg(&manifest)
+        .arg("--json")
+        .output()
+        .expect("run docs task");
+    assert!(
+        success.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&success.stdout),
+        String::from_utf8_lossy(&success.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&success.stdout).expect("success JSON");
+    assert_eq!(envelope["ok"], true);
+    assert!(
+        envelope["stdout"]
+            .as_str()
+            .is_some_and(|stdout| stdout.contains("PASS: bilingual docs site"))
+    );
+
+    let failure = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        .current_dir(&repo)
+        .args(["task", "run", "verify-docs-site", "--manifest"])
+        .arg(&manifest)
+        .arg("--json")
+        .arg("--")
+        .arg("missing-extra-argument")
+        .output()
+        .expect("run invalid docs task");
+    assert_eq!(failure.status.code(), Some(2));
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&failure.stdout).expect("failure JSON");
+    assert_eq!(envelope["ok"], false);
+    assert!(
+        envelope["failure"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expected: DOCS_ROOT"))
+    );
 }

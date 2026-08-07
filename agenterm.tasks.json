@@ -1153,7 +1153,7 @@
     {
       "id": "verify-docs-site",
       "description": "Verify the bilingual documentation site, preview safety, and asset contract",
-      "entry": "scripts/rhai/verify-docs-site.rhai",
+      "entry": "scripts/rh/verify-docs-site.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["docs"],

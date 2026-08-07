@@ -1,7 +1,9 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 7;
+pub const RH_HOST_API_VERSION: u32 = 8;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
+pub const RH_HOST_UTILITY_FAIL: u32 = 1;
+pub const RH_HOST_UTILITY_EXISTS_CASE_EXACT: u32 = 2;
 
 pub type RhHostFleetCall = extern "C" fn(
     operation_id: *const u8,
@@ -29,6 +31,7 @@ pub type RhHostArgsLenCall = extern "C" fn() -> i64;
 pub type RhHostArgCall = extern "C" fn(index: u32, out_buf: *mut u8, out_cap: u32) -> i32;
 pub type RhHostFsReadCall =
     extern "C" fn(path: *const u8, path_len: u32, out_buf: *mut u8, out_cap: u32) -> i32;
+pub type RhHostUtilityCall = extern "C" fn(operation: u32, input: *const u8, input_len: u32) -> i32;
 
 pub fn rust_raw_string_literal(source: &str) -> String {
     let mut hashes = 0_usize;
@@ -51,6 +54,7 @@ pub fn emit_host_runtime(out: &mut String) {
          type RhHostArgsLenCall = extern \"C\" fn() -> i64;\n\n\
          type RhHostArgCall = extern \"C\" fn(u32, *mut u8, u32) -> i32;\n\n\
          type RhHostFsReadCall = extern \"C\" fn(*const u8, u32, *mut u8, u32) -> i32;\n\n\
+         type RhHostUtilityCall = extern \"C\" fn(u32, *const u8, u32) -> i32;\n\n\
          static mut RH_HOST_FLEET_CALL: Option<RhHostFleetCall> = None;\n\
          static mut RH_HOST_EVAL_CALL: Option<RhHostEvalCall> = None;\n\
          static mut RH_HOST_RUN_SCRIPT_CALL: Option<RhHostRunScriptCall> = None;\n\
@@ -58,6 +62,7 @@ pub fn emit_host_runtime(out: &mut String) {
          static mut RH_HOST_ARGS_LEN_CALL: Option<RhHostArgsLenCall> = None;\n\
          static mut RH_HOST_ARG_CALL: Option<RhHostArgCall> = None;\n\
          static mut RH_HOST_FS_READ_CALL: Option<RhHostFsReadCall> = None;\n\
+         static mut RH_HOST_UTILITY_CALL: Option<RhHostUtilityCall> = None;\n\
          static mut RH_HOST_OUT_LEN: usize = 0;\n\
          static RH_HOST_OUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();\n\n\
          #[no_mangle]\n\
@@ -158,6 +163,28 @@ pub fn emit_host_runtime(out: &mut String) {
                  RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
                  RH_HOST_ARG_CALL = Some(arg_call);\n\
                  RH_HOST_FS_READ_CALL = Some(fs_read_call);\n\
+             }\n\
+         }\n\n\
+         #[no_mangle]\n\
+         pub extern \"C\" fn rh_register_host_v8(\n\
+             fleet_call: RhHostFleetCall,\n\
+             eval_call: RhHostEvalCall,\n\
+             run_script_call: RhHostRunScriptCall,\n\
+             std_fs_exists_call: RhHostStdFsExistsCall,\n\
+             args_len_call: RhHostArgsLenCall,\n\
+             arg_call: RhHostArgCall,\n\
+             fs_read_call: RhHostFsReadCall,\n\
+             utility_call: RhHostUtilityCall,\n\
+         ) {\n\
+             unsafe {\n\
+                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
+                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
+                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
+                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
+                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
+                 RH_HOST_ARG_CALL = Some(arg_call);\n\
+                 RH_HOST_FS_READ_CALL = Some(fs_read_call);\n\
+                 RH_HOST_UTILITY_CALL = Some(utility_call);\n\
              }\n\
          }\n\n\
          fn rh_host_store(wrote: i32, scratch: Vec<u8>) -> i32 {\n\
@@ -281,6 +308,18 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_path_join(base: &str, child: &str) -> String {\n\
              std::path::Path::new(base).join(child).to_string_lossy().into_owned()\n\
+         }\n\n\
+         fn rh_utility(operation: u32, input: &str) -> INT {\n\
+             let Some(call) = (unsafe { RH_HOST_UTILITY_CALL }) else {\n\
+                 return -4;\n\
+             };\n\
+             call(operation, input.as_ptr(), input.len() as u32) as INT\n\
+         }\n\n\
+         fn rh_fail(message: &str) -> INT {\n\
+             rh_utility(1, message)\n\
+         }\n\n\
+         fn rh_std_fs_exists_case_exact(path: &str) -> INT {\n\
+             rh_utility(2, path)\n\
          }\n\n\
          fn rh_host_run_script(source: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\

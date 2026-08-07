@@ -1,0 +1,84 @@
+fn entry() {
+    if args.len != 1 {
+        throw "expected: DOCS_ROOT";
+    }
+
+    let docs = args[0];
+    let index_path = std::path::join(docs, "index.html").display;
+    let preview_path = std::path::join(docs, "macos-unsigned-preview.md").display;
+    let preview_zh_path =
+        std::path::join(docs, "macos-unsigned-preview.zh-Hant.md").display;
+    let html = std::fs::read_to_string(index_path);
+    let preview = std::fs::read_to_string(preview_path);
+    let preview_zh = std::fs::read_to_string(preview_zh_path);
+
+    let image_reference = html.contains("src=\"assets/agenterm-workspace.png\"");
+    if image_reference == 0 {
+        throw "docs index must use the case-exact workspace image reference";
+    }
+    let script_specification = html.contains("docs/agenterm-rhai-runtime.md");
+    if script_specification == 0 {
+        throw "docs index must use the case-exact script specification path";
+    }
+    let copyright = html.contains("© 2026 PARTNERNET SOFTWARE PTY LTD");
+    if copyright == 0 {
+        throw "docs index must publish the product copyright owner";
+    }
+    let locale_en = html.contains("hreflang=\"en\"");
+    let locale_zh = html.contains("hreflang=\"zh-Hant\"");
+    let locale_choice = html.contains("data-locale-choice=\"zh-Hant\"");
+    if locale_en == 0 {
+        throw "docs index must publish English discovery";
+    }
+    if locale_zh == 0 {
+        throw "docs index must publish Traditional Chinese discovery";
+    }
+    if locale_choice == 0 {
+        throw "docs index must publish the Traditional Chinese locale choice";
+    }
+    let zh_product = html.contains("本機 Agent 艦隊工作 OS");
+    let windows_delivered = html.contains("Windows 已交付");
+    let preview_guidance = html.contains("macos-unsigned-preview.md");
+    if zh_product == 0 {
+        throw "docs index must include reviewed Traditional Chinese product copy";
+    }
+    if windows_delivered == 0 {
+        throw "docs index must include the Windows delivery statement";
+    }
+    if preview_guidance == 0 {
+        throw "docs index must include preview guidance";
+    }
+
+    let preview_prd = preview.contains("../prd/PRD_02_17_delivery_quality.md");
+    let preview_peer = preview.contains("macos-unsigned-preview.zh-Hant.md");
+    if preview_prd == 0 {
+        throw "English macOS preview guidance must link its owning PRD";
+    }
+    if preview_peer == 0 {
+        throw "English macOS preview guidance must link its Traditional Chinese peer";
+    }
+    let preview_zh_prd = preview_zh.contains("../prd/PRD_02_17_delivery_quality.md");
+    let preview_zh_peer = preview_zh.contains("macos-unsigned-preview.md");
+    let preview_zh_safety = preview_zh.contains("請勿停用整個系統的保護");
+    if preview_zh_prd == 0 {
+        throw "Traditional Chinese preview guidance must link its owning PRD";
+    }
+    if preview_zh_peer == 0 {
+        throw "Traditional Chinese preview guidance must link its English peer";
+    }
+    if preview_zh_safety == 0 {
+        throw "Traditional Chinese preview guidance must preserve safety boundaries";
+    }
+
+    let assets = std::path::join(docs, "assets").display;
+    let image = std::path::join(assets, "agenterm-workspace.png").display;
+    let image_exists = std::fs::exists_case_exact(image);
+    if image_exists == 0 {
+        throw "docs assets must contain the case-exact workspace image";
+    }
+    0
+}
+
+fn cc_lines() {
+    ["PASS: bilingual docs site, preview safety guidance, and asset casing agree"]
+}

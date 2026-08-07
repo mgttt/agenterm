@@ -92,6 +92,7 @@ pub const SHIPPED_SURFACE_PATHS: &[&str] = &[
     "std::fs::create_dir",
     "std::fs::create_dir_all",
     "std::fs::exists",
+    "std::fs::exists_case_exact",
     "std::fs::metadata",
     "std::fs::read",
     "std::fs::read_dir",

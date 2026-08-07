@@ -695,6 +695,15 @@ fn emit_throw_stmt(
     ctx: &mut EmitCtx,
     implicit_return: bool,
 ) -> Result<(), RhError> {
+    if ctx.cdylib
+        && !ctx.in_try()
+        && let Some(Expr::StringConstant(message, ..)) = call.args.first()
+    {
+        out.push_str("    return rh_fail(");
+        out.push_str(&format!("{message:?}"));
+        out.push_str(");\n");
+        return Ok(());
+    }
     if ctx.in_try() {
         out.push_str("    ");
         emit_throw_expr(out, call, ctx)?;
@@ -857,6 +866,10 @@ fn std_fs_exists_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "exists")
 }
 
+fn std_fs_exists_case_exact_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "exists_case_exact")
+}
+
 fn std_fs_read_to_string_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "read_to_string")
 }
@@ -902,6 +915,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some(path) = std_fs_exists_arg(expr)
             && emit_std_fs_exists(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_exists_case_exact_arg(expr)
+            && emit_std_fs_exists_case_exact(out, path, ctx)?
         {
             return Ok(());
         }
@@ -1009,6 +1027,21 @@ fn emit_std_fs_read_to_string(
         return Ok(false);
     }
     out.push_str("rh_std_fs_read_to_string(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_exists_case_exact(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_std_fs_exists_case_exact(");
     out.push_str(&path_expr);
     out.push(')');
     Ok(true)

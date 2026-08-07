@@ -59,6 +59,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `std::path::join(base, child).display` lowers to native Rust path
   composition when both operands are native strings. The result remains a typed
   string binding consumable by filesystem callbacks without host evaluation.
+- [x] host API v8 provides typed native task failure and case-exact file-name
+  checks. `verify-docs-site` is the first production named task migrated from
+  active `.rhai` to a zero-fallback `.rh` entry; its interpreted implementation
+  is retained only under `scripts/archive/rhai/` for migration archaeology.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and

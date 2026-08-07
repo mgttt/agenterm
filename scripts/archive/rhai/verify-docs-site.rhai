@@ -1,4 +1,5 @@
-// Case-exact static-site resource check for case-insensitive dev hosts.
+// Archived interpreted implementation retained for migration archaeology only.
+// Active task: scripts/rh/verify-docs-site.rh
 
 fn require(condition, message) {
     if !condition {

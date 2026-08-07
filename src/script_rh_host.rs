@@ -110,6 +110,17 @@ pub(crate) fn call_pack_entry_with_host_result(
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
     if api >= RH_HOST_API_VERSION {
+        module.register_host_v8(
+            host_fleet_call,
+            Some(host_eval_call),
+            Some(host_run_script_call),
+            Some(host_std_fs_exists_call),
+            Some(host_args_len_call),
+            Some(host_arg_call),
+            Some(host_fs_read_call),
+            Some(host_utility_call),
+        )
+    } else if api >= 7 {
         module.register_host_v7(
             host_fleet_call,
             Some(host_eval_call),
@@ -156,6 +167,52 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             "rh pack host api {api} is older than the minimum supported version 2"
         )))
     }
+}
+
+extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32) -> i32 {
+    if input.is_null() {
+        return -1;
+    }
+    let input = match unsafe { read_utf8(input, input_len) } {
+        Ok(value) => value,
+        Err(()) => return -2,
+    };
+    match operation {
+        agenterm_rh::RH_HOST_UTILITY_FAIL => {
+            record_host_error("rh_fail", &input);
+            -5
+        }
+        agenterm_rh::RH_HOST_UTILITY_EXISTS_CASE_EXACT => {
+            match path_exists_case_exact(Path::new(&input)) {
+                Ok(true) => 1,
+                Ok(false) => 0,
+                Err(error) => {
+                    record_host_error("rh_std_fs_exists_case_exact", &error.to_string());
+                    -5
+                }
+            }
+        }
+        _ => {
+            record_host_error("rh_utility", &format!("unknown operation {operation}"));
+            -5
+        }
+    }
+}
+
+fn path_exists_case_exact(path: &Path) -> std::io::Result<bool> {
+    let Some(parent) = path.parent() else {
+        return Ok(false);
+    };
+    let Some(expected_name) = path.file_name() else {
+        return Ok(false);
+    };
+    for entry in std::fs::read_dir(parent)? {
+        let entry = entry?;
+        if entry.file_name() == expected_name {
+            return entry.file_type().map(|kind| kind.is_file());
+        }
+    }
+    Ok(false)
 }
 
 extern "C" fn host_fs_read_call(
@@ -629,6 +686,46 @@ mod tests {
                 .expect("typed host error")
                 .to_string()
                 .contains("rh_std_fs_read_to_string")
+        );
+    }
+
+    #[test]
+    fn host_utility_reports_failure_and_case_exact_file_names() {
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let file = file.to_string_lossy();
+        assert_eq!(
+            super::host_utility_call(
+                agenterm_rh::RH_HOST_UTILITY_EXISTS_CASE_EXACT,
+                file.as_ptr(),
+                file.len() as u32,
+            ),
+            1
+        );
+        let wrong_case = file.replace("Cargo.toml", "cargo.toml");
+        assert_eq!(
+            super::host_utility_call(
+                agenterm_rh::RH_HOST_UTILITY_EXISTS_CASE_EXACT,
+                wrong_case.as_ptr(),
+                wrong_case.len() as u32,
+            ),
+            0
+        );
+
+        super::clear_host_error();
+        let message = "native task failure";
+        assert_eq!(
+            super::host_utility_call(
+                agenterm_rh::RH_HOST_UTILITY_FAIL,
+                message.as_ptr(),
+                message.len() as u32,
+            ),
+            -5
+        );
+        assert!(
+            super::take_host_error()
+                .expect("typed failure")
+                .to_string()
+                .contains(message)
         );
     }
 
