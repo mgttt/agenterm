@@ -1,13 +1,3 @@
-# Standalone workspace root (deliberate, temporary): the parent repo's root
-# Cargo.toml is a live shared checkout with another agent's uncommitted lua
-# work touching [workspace] members / Cargo.lock right now. An empty
-# [workspace] table here stops Cargo auto-detecting the parent workspace, so
-# this crate builds/tests fully in isolation (`cargo build --manifest-path
-# crates/agenterm-qjs/Cargo.toml`) without touching the parent's Cargo.lock
-# or members list. Remove this table when wiring into the root workspace
-# (QJS-M1+, once that collision risk is gone) — see plan/plan-v0.1.16.md §1 Rh.
-[workspace]
-
 [package]
 name = "agenterm-qjs"
 version = "0.1.15"
@@ -17,14 +7,16 @@ description = "AgenTerm qjs pack language: QuickJS-backed script engine, capabil
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mgttt/agenterm"
 publish = false
+# No [[bin]] here — mirrors agenterm-rh's shape (see crates/agenterm-rh/Cargo.toml):
+# the real `agenterm-qjs` binary is declared in the ROOT Cargo.toml's [[bin]]
+# list with path = "crates/agenterm-qjs/src/main.rs", compiled as part of the
+# root `agenterm` package so it can reach `agenterm::` internals (needed once
+# QJS-M2 wires in task/run/L2 facade, same as agenterm-rh's main.rs already
+# does for its --worker/--framed-worker/task modes).
 
 [lib]
 name = "agenterm_qjs"
 path = "src/lib.rs"
-
-[[bin]]
-name = "agenterm-qjs"
-path = "src/main.rs"
 
 [dependencies]
 rquickjs = "0.12.2"

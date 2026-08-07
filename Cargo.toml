@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-platform", "crates/agenterm-rh", "crates/agenterm-lua"]
+members = [".", "crates/agenterm-platform", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs"]
 resolver = "2"
 
 [package]
@@ -32,6 +32,10 @@ name = "agenterm-lua"
 path = "crates/agenterm-lua/src/main.rs"
 
 [[bin]]
+name = "agenterm-qjs"
+path = "crates/agenterm-qjs/src/main.rs"
+
+[[bin]]
 name = "agenterm-cc"
 path = "src/bin/agenterm-cc.rs"
 
@@ -43,6 +47,7 @@ path = "src/bin/agenterm-con.rs"
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
 agenterm-rh = { path = "crates/agenterm-rh" }
 agenterm-lua = { path = "crates/agenterm-lua" }
+agenterm-qjs = { path = "crates/agenterm-qjs" }
 ab_glyph = "0.2.32"
 anyhow = "1"
 png = "0.17"
