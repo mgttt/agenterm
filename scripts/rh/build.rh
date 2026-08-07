@@ -20,65 +20,12 @@ fn bootstrap_facts() {
     bootstrap_timing::facts()
 }
 
-fn frozen_identity(repo_value, profile) {
-    build_identity::facts(repo_value, profile)
-}
-
-fn frozen_environment(identity) {
-    build_identity::environment(identity)
-}
-
-fn frozen_environment_with_incremental(
-    identity,
-    stable_wrapper,
-    incremental_invocation,
-    cargo_output,
-    incremental_root,
-    incremental_state
-) {
-    build_identity::environment_with_incremental(
-        identity,
-        stable_wrapper,
-        incremental_invocation,
-        cargo_output,
-        incremental_root,
-        incremental_state
-    )
-}
-
-fn frozen_environment_with_cargo_target(identity, cargo_target_dir) {
-    build_identity::environment_with_cargo_target(identity, cargo_target_dir)
-}
-
 fn require(condition, message) {
     if condition == 0 {
         throw message;
     } else {
         0;
     }
-}
-
-fn run_command(program, arguments, repo, environment, timeout_ms, code) {
-    let stdout_path = repo + ".build.stdout.tmp";
-    let options = #{
-        current_dir: repo,
-        env: environment,
-    };
-    let exit_code = std::process::command_stdout_file(
-        program,
-        arguments,
-        timeout_ms,
-        stdout_path,
-        options
-    );
-    require(exit_code == 0, code);
-    let stdout = std::fs::read_to_string(stdout_path);
-    stdout.trim();
-    if stdout != "" {
-        print(stdout);
-    }
-    std::fs::try_remove_file(stdout_path);
-    0
 }
 
 fn direct_file(path) {
@@ -133,21 +80,32 @@ fn target_facts(target) {
     #{ os: "", arch: "" }
 }
 
-fn platform_executables(repo, os_name, arch) {
-    let manifest = rhai::json::parse_file(
-        std::path::join(repo, "scripts/artifacts.json").display
-    );
-    let matches = [];
+fn platform_executables(repo, os_name, target_arch_name) {
+    // Bind path before parse_file; keep JSON return type by ending on `executables`
+    // (a trailing require poisons infer_return_kind as INT).
+    let arch_label = "" + target_arch_name;
+    let manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    let manifest = rhai::json::parse_file(manifest_path);
+    let executables = [];
+    let found = 0;
     for platform in manifest.platforms {
-        if platform.os == os_name && platform.arch == arch {
-            matches.push(platform);
+        if platform.os == os_name && platform.arch == arch_label {
+            require(
+                found == 0,
+                "build_platform_manifest_match:" + os_name + "-" + arch_label
+            );
+            found = 1;
+            for executable in platform.executables {
+                executables.push(executable);
+            }
         }
     }
     require(
-        matches.len == 1,
-        "build_platform_manifest_match:" + os_name + "-" + arch
+        found == 1,
+        "build_platform_manifest_match:" + os_name + "-" + arch_label
     );
-    matches[0].executables
+    executables
 }
 
 fn cargo_binary(name) {
@@ -157,9 +115,14 @@ fn cargo_binary(name) {
     name
 }
 
+fn repo_dir(repo_arg) {
+    std::path::absolute(repo_arg).display
+}
+
 fn entry() {
     require(args.len >= 1, "expected: REPO [PROFILE] [OPTIONS]");
-    let repo = std::path::absolute(args[0]).display;
+    let repo_arg = args[0];
+    let repo = repo_dir(repo_arg);
     let bootstrap = bootstrap_facts();
     print("AgenTerm bootstrap timing: " + rhai::json::stringify(bootstrap));
     // Stage optimized PE by default. Debug PE stays under target/debug unless the
@@ -286,13 +249,14 @@ fn entry() {
     let profile_directory =
         std::path::join(cargo_profile_root, profile_name).display;
 
-    let identity = frozen_identity(repo, profile);
-    let environment = frozen_environment(identity);
+    let identity = build_identity::facts(repo, profile);
+    let environment = build_identity::environment(identity);
 
     let incremental_producer = 0;
     let incremental_invocation = "";
     let incremental_state = "";
     let incremental_manifest = "";
+    let incremental_root = "";
     let stable_wrapper = "";
     if profile == "dev"
             && action == "build"
@@ -308,7 +272,7 @@ fn entry() {
                 incremental_invocation =
                     "build-" + std::process::id() + "-" +
                         std::time::SystemTime::now().unix_millis;
-                let incremental_root = std::path::join(
+                incremental_root = std::path::join(
                     cargo_output,
                     "debug/incremental"
                 ).display;
@@ -358,7 +322,7 @@ fn entry() {
     }
 
     if incremental_producer != 0 {
-        environment = frozen_environment_with_incremental(
+        environment = build_identity::environment_with_incremental(
             identity,
             stable_wrapper,
             incremental_invocation,
@@ -370,7 +334,7 @@ fn entry() {
             && profile == "release"
             && cross_client == 0
             && unix_bootstrap == 0 {
-        environment = frozen_environment_with_cargo_target(
+        environment = build_identity::environment_with_cargo_target(
             identity,
             cargo_output
         );
@@ -407,16 +371,15 @@ fn entry() {
     }
 
     let stdout_path = repo + ".build.stdout.tmp";
-    let command_options = #{
-        current_dir: repo,
-        env: environment,
-    };
     let cargo_code = std::process::command_stdout_file(
         "cargo",
         cargo_args,
         3600000,
         stdout_path,
-        command_options
+        #{
+            current_dir: repo,
+            env: environment,
+        }
     );
     if cargo_code != 0 {
         if incremental_producer != 0 {
@@ -470,7 +433,10 @@ fn entry() {
             "--", repo, profile_directory, dist, profile
         ],
         30000,
-        command_options
+        #{
+            current_dir: repo,
+            env: environment,
+        }
     );
     if stage_code != 0 {
         if incremental_producer != 0 {
@@ -492,12 +458,17 @@ fn entry() {
                     incremental_invocation
                 ],
                 300000,
-                command_options
+                #{
+                    current_dir: repo,
+                    env: environment,
+                }
             );
             if finalize_code != 0 {
                 dev_cleanup_failed = 1;
             }
         }
+        repo = repo_dir(repo_arg);
+        task_manifest = std::path::join(repo, "agenterm.tasks.json").display;
         let prune_arguments = [
             "task", "run", "prune-target-incremental",
             "--manifest", task_manifest,
@@ -514,7 +485,10 @@ fn entry() {
                 worker,
                 prune_arguments,
                 300000,
-                command_options
+                #{
+                    current_dir: repo,
+                    env: environment,
+                }
             );
             if prune_code != 0 {
                 dev_cleanup_failed = 1;
@@ -532,72 +506,142 @@ fn entry() {
     }
 
     if profile == "release" && external_target == 0 {
-        run_command(
+        repo = repo_dir(repo_arg);
+        task_manifest = std::path::join(repo, "agenterm.tasks.json").display;
+        cargo_output = std::path::join(repo, "target-release").display;
+        development_target = std::path::join(repo, "target").display;
+        let stdout_path = repo + ".build.stdout.tmp";
+        let report_code = std::process::command_stdout_file(
             worker,
             [
                 "task", "run", "target-report",
                 "--manifest", task_manifest,
                 "--", cargo_output
             ],
-            repo,
-            environment,
             30000,
-            "build_target_report"
+            stdout_path,
+            #{
+                current_dir: repo,
+                env: environment,
+            }
         );
-        run_command(
+        require(report_code == 0, "build_target_report");
+        let report_stdout = std::fs::read_to_string(stdout_path);
+        report_stdout.trim();
+        if report_stdout != "" {
+            print(report_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
+
+        task_manifest = std::path::join(repo_dir(repo_arg), "agenterm.tasks.json").display;
+        repo = repo_dir(repo_arg);
+        cargo_output = std::path::join(repo, "target-release").display;
+        let prepare_code = std::process::command_stdout_file(
             worker,
             [
                 "task", "run", "prepare-target-clean",
                 "--manifest", task_manifest,
                 "--", repo, cargo_output
             ],
-            repo,
-            environment,
             30000,
-            "build_target_clean_prepare"
+            stdout_path,
+            #{
+                current_dir: repo,
+                env: environment,
+            }
         );
-        run_command(
+        require(prepare_code == 0, "build_target_clean_prepare");
+        let prepare_stdout = std::fs::read_to_string(stdout_path);
+        prepare_stdout.trim();
+        if prepare_stdout != "" {
+            print(prepare_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
+
+        cargo_output = std::path::join(repo_dir(repo_arg), "target-release").display;
+        let clean_code = std::process::command_stdout_file(
             "cargo",
             ["clean", "--target-dir", cargo_output],
-            repo,
-            environment,
             3600000,
-            "build_target_clean"
+            stdout_path,
+            #{
+                current_dir: repo,
+                env: environment,
+            }
         );
-        // bootstrap.cmd invokes this worker outside Cargo output, so a staged
-        // release can also reclaim the development target without a locked EXE.
-        run_command(
+        require(clean_code == 0, "build_target_clean");
+        let clean_stdout = std::fs::read_to_string(stdout_path);
+        clean_stdout.trim();
+        if clean_stdout != "" {
+            print(clean_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
+
+        task_manifest = std::path::join(repo_dir(repo_arg), "agenterm.tasks.json").display;
+        let dev_report_code = std::process::command_stdout_file(
             worker,
             [
                 "task", "run", "target-report",
                 "--manifest", task_manifest,
                 "--", development_target
             ],
-            repo,
-            environment,
             30000,
-            "build_development_target_report"
+            stdout_path,
+            #{
+                current_dir: repo,
+                env: environment,
+            }
         );
-        run_command(
+        require(dev_report_code == 0, "build_development_target_report");
+        let dev_report_stdout = std::fs::read_to_string(stdout_path);
+        dev_report_stdout.trim();
+        if dev_report_stdout != "" {
+            print(dev_report_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
+
+        task_manifest = std::path::join(repo_dir(repo_arg), "agenterm.tasks.json").display;
+        repo = repo_dir(repo_arg);
+        let dev_prepare_code = std::process::command_stdout_file(
             worker,
             [
                 "task", "run", "prepare-target-clean",
                 "--manifest", task_manifest,
                 "--", repo, development_target
             ],
-            repo,
-            environment,
             30000,
-            "build_development_target_clean_prepare"
+            stdout_path,
+            #{
+                current_dir: repo,
+                env: environment,
+            }
         );
-        run_command(
+        require(dev_prepare_code == 0, "build_development_target_clean_prepare");
+        let dev_prepare_stdout = std::fs::read_to_string(stdout_path);
+        dev_prepare_stdout.trim();
+        if dev_prepare_stdout != "" {
+            print(dev_prepare_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
+
+        development_target = std::path::join(repo_dir(repo_arg), "target").display;
+        let dev_clean_code = std::process::command_stdout_file(
             "cargo",
             ["clean", "--target-dir", development_target],
-            repo,
-            environment,
             3600000,
-            "build_development_target_clean"
+            stdout_path,
+            #{
+                current_dir: repo,
+                env: environment,
+            }
         );
+        require(dev_clean_code == 0, "build_development_target_clean");
+        let dev_clean_stdout = std::fs::read_to_string(stdout_path);
+        dev_clean_stdout.trim();
+        if dev_clean_stdout != "" {
+            print(dev_clean_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
     }
 
     print("");

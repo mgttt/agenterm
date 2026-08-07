@@ -554,8 +554,8 @@
   "tasks": [
     {
       "id": "build",
-      "description": "Build and stage AgenTerm through one Rhai-owned lifecycle",
-      "entry": "scripts/rhai/build.rhai",
+      "description": "Build and stage AgenTerm through one native Script lifecycle",
+      "entry": "scripts/rh/build.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],
@@ -1175,7 +1175,7 @@
     {
       "id": "client-build",
       "description": "Build one manifest-defined cross-platform client set with Cargo or cargo-xwin",
-      "entry": "scripts/rhai/build.rhai",
+      "entry": "scripts/rh/build.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "--clients-only"],
@@ -1186,7 +1186,7 @@
     {
       "id": "client-clippy",
       "description": "Clippy one manifest-defined cross-platform client set with Cargo or cargo-xwin",
-      "entry": "scripts/rhai/build.rhai",
+      "entry": "scripts/rh/build.rh",
       "profile": "local",
       "cwd": ".",
       "args": [".", "--clients-only", "--action", "clippy"],

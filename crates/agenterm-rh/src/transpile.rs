@@ -597,12 +597,14 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
                 ValueKind::ChildList
             } else if param_used_as_string_list(def, param.as_str()) {
                 ValueKind::StringList
+            } else if param_used_as_json(def, param.as_str(), ctx) {
+                // JSON before Child/Command: `.state`/`.id` are also RhChild members, so a
+                // timing/doc object that reads `.state` plus `.setup_ms` must stay Json.
+                ValueKind::Json
             } else if param_used_as_child(def, param.as_str()) {
                 ValueKind::Child
             } else if param_used_as_command(def, param.as_str()) {
                 ValueKind::Command
-            } else if param_used_as_json(def, param.as_str(), ctx) {
-                ValueKind::Json
             } else if param_used_as_string(def, param.as_str(), ctx) {
                 ValueKind::String
             } else {
@@ -795,6 +797,9 @@ fn collect_param_kind_upgrades_in_expr(
                     .position(|param| param.as_str() == ident.1.as_str())
             {
                 upgrades.push((param_index, ValueKind::StringList));
+            }
+            if let Some(upgrade) = process_command_argv_param_upgrade(call, def) {
+                upgrades.push(upgrade);
             }
             collect_param_kind_upgrades_in_call(call, def, local_fn_sigs, upgrades);
             for arg in &call.args {
@@ -1245,6 +1250,9 @@ fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
             {
                 return true;
             }
+            if call.name == "push" && is_param_var(&boxed.lhs, param) {
+                return true;
+            }
         }
         if is_param_var(&boxed.lhs, param) {
             if let Expr::Property(property, ..) = &boxed.rhs {
@@ -1252,6 +1260,13 @@ fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
                     return true;
                 }
             }
+        }
+    }
+    if let Expr::FnCall(call, ..) = expr {
+        if let Some(argv_index) = process_command_argv_arg_index(call)
+            && is_param_var(&call.args[argv_index], param)
+        {
+            return true;
         }
     }
     if let Expr::Index(boxed, ..) = expr {
@@ -1612,7 +1627,13 @@ fn emit_stmt(
                         if index > 0 {
                             out.push_str(", ");
                         }
-                        emit_stringish(out, item, ctx)?;
+                        // Owned Vec<String> elements must clone bindings; bare
+                        // `emit_stringish` would move String variables into the vec.
+                        if !emit_owned_string_element(out, item, ctx)? {
+                            return Err(RhError::Transpile(
+                                "string list literal items must be stringish values".into(),
+                            ));
+                        }
                     }
                     out.push(']');
                 } else {
@@ -1640,6 +1661,10 @@ fn emit_stmt(
             {
                 emit_expr(out, expr, ctx)?;
                 out.push_str(".clone()");
+            } else if matches!(kind, ValueKind::String | ValueKind::Path) {
+                // Concat / JSON string fields / path displays — never fall through to
+                // emit_expr's INT Plus lane.
+                emit_stringish(out, expr, ctx)?;
             } else if matches!(kind, ValueKind::Child)
                 && matches!(
                     expr,
@@ -1649,6 +1674,8 @@ fn emit_stmt(
             {
                 emit_expr(out, expr, ctx)?;
                 out.push_str(".clone()");
+            } else if matches!(kind, ValueKind::Int | ValueKind::Bool) {
+                emit_intish(out, expr, ctx)?;
             } else {
                 emit_expr(out, expr, ctx)?;
             }
@@ -1730,6 +1757,14 @@ fn emit_stmt(
                 } else {
                     emit_expr(out, &bin.rhs, ctx)?;
                 }
+            } else if op.get_op_assignment_info().is_none()
+                && matches!(
+                    ctx.scope.get(ident.1.as_str()).copied(),
+                    Some(ValueKind::Int | ValueKind::Bool)
+                )
+            {
+                // INT binding ← JSON field must use rh_json_int_path, not host-eval.
+                emit_intish(out, &bin.rhs, ctx)?;
             } else {
                 emit_expr(out, &bin.rhs, ctx)?;
             }
@@ -3103,6 +3138,19 @@ fn std_env_get_arg(expr: &Expr) -> Option<&Expr> {
         return None;
     }
     Some(&call.args[0])
+}
+
+fn std_env_get_parse_int_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    if call.name != "parse_int" || !call.args.is_empty() {
+        return None;
+    }
+    std_env_get_arg(&boxed.lhs)
 }
 
 fn crypto_sha256_file_arg(expr: &Expr) -> Option<&Expr> {
@@ -4719,7 +4767,54 @@ fn metadata_modified_property_binding<'a>(
     matches!(property, "unix_millis" | "rfc3339").then_some((ident.1.as_str(), property))
 }
 
-fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, Option<&Expr>)> {
+enum ProcessArguments<'a> {
+    Literal(&'a [Expr]),
+    StringList(&'a str),
+    JsonArray(&'a str),
+}
+
+fn process_command_argv_arg_index(call: &rhai::FnCallExpr) -> Option<usize> {
+    if call.namespace.to_string() != "std::process" {
+        return None;
+    }
+    match call.name.as_str() {
+        "command_status" if (3..=4).contains(&call.args.len()) => Some(1),
+        "command_stdout_file" if (4..=5).contains(&call.args.len()) => Some(1),
+        _ => None,
+    }
+}
+
+fn process_command_argv_param_upgrade(
+    call: &rhai::FnCallExpr,
+    def: &ScriptFuncDef,
+) -> Option<(usize, ValueKind)> {
+    let argv_index = process_command_argv_arg_index(call)?;
+    let Expr::Variable(ident, ..) = &call.args[argv_index] else {
+        return None;
+    };
+    let param_index = def
+        .params
+        .iter()
+        .position(|param| param.as_str() == ident.1.as_str())?;
+    Some((param_index, ValueKind::StringList))
+}
+
+fn process_arguments_arg<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<ProcessArguments<'a>> {
+    match expr {
+        Expr::Array(items, ..) => Some(ProcessArguments::Literal(items)),
+        Expr::Variable(ident, ..) => match ctx.scope.get(ident.1.as_str()).copied()? {
+            ValueKind::StringList => Some(ProcessArguments::StringList(ident.1.as_str())),
+            ValueKind::Json => Some(ProcessArguments::JsonArray(ident.1.as_str())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn process_status_args<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a Expr, ProcessArguments<'a>, &'a Expr, Option<&'a Expr>)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
@@ -4731,13 +4826,20 @@ fn process_status_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, Option<&Ex
         4 => Some(&call.args[3]),
         _ => return None,
     };
-    let Expr::Array(arguments, ..) = &call.args[1] else {
-        return None;
-    };
+    let arguments = process_arguments_arg(&call.args[1], ctx)?;
     Some((&call.args[0], arguments, &call.args[2], options))
 }
 
-fn process_stdout_file_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, &Expr, Option<&Expr>)> {
+fn process_stdout_file_args<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(
+    &'a Expr,
+    ProcessArguments<'a>,
+    &'a Expr,
+    &'a Expr,
+    Option<&'a Expr>,
+)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
@@ -4749,9 +4851,7 @@ fn process_stdout_file_args(expr: &Expr) -> Option<(&Expr, &[Expr], &Expr, &Expr
         5 => Some(&call.args[4]),
         _ => return None,
     };
-    let Expr::Array(arguments, ..) = &call.args[1] else {
-        return None;
-    };
+    let arguments = process_arguments_arg(&call.args[1], ctx)?;
     Some((
         &call.args[0],
         arguments,
@@ -5021,7 +5121,39 @@ fn prefers_string_ops(lhs: &Expr, rhs: &Expr, ctx: &EmitCtx) -> bool {
     {
         return false;
     }
+    // String literals always select the string lane (`"" + doc.field`, `x == "measured"`).
+    if matches!(lhs, Expr::StringConstant(..)) || matches!(rhs, Expr::StringConstant(..)) {
+        return true;
+    }
+    // JSON field + INT-typed operand must stay arithmetic. `is_explicit_string_expr`
+    // treats every non-empty JSON path as stringish, which otherwise turns
+    // `bootstrap.setup_ms + task_ms` into format! and poisons return kinds.
+    if (json_field_path(lhs, ctx) && is_int_typed_operand(rhs, ctx))
+        || (json_field_path(rhs, ctx) && is_int_typed_operand(lhs, ctx))
+    {
+        return false;
+    }
     is_explicit_string_expr(lhs, ctx) || is_explicit_string_expr(rhs, ctx)
+}
+
+fn json_field_path(expr: &Expr, ctx: &EmitCtx) -> bool {
+    json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
+        && json_array_len_path(expr, ctx).is_none()
+        && !is_var_len_expr(expr)
+}
+
+/// Operand that should keep `+` with a JSON field in the INT lane.
+fn is_int_typed_operand(expr: &Expr, ctx: &EmitCtx) -> bool {
+    matches!(expr, Expr::IntegerConstant(..))
+        || matches!(
+            expr,
+            Expr::Variable(ident, ..)
+                if matches!(
+                    ctx.scope.get(ident.1.as_str()).copied(),
+                    Some(ValueKind::Int | ValueKind::Bool)
+                )
+        )
+        || json_field_path(expr, ctx)
 }
 
 fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
@@ -5415,6 +5547,11 @@ fn emit_intish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), R
         out.push(')');
         return Ok(());
     }
+    if let Some(name) = std_env_get_parse_int_arg(expr)
+        && emit_std_env_get_parse_int(out, name, ctx)?
+    {
+        return Ok(());
+    }
     if let Expr::Variable(ident, ..) = expr
         && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
     {
@@ -5466,13 +5603,13 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push(')');
             return Ok(());
         }
-        if let Some((program, arguments, timeout, options)) = process_status_args(expr)
+        if let Some((program, arguments, timeout, options)) = process_status_args(expr, ctx)
             && emit_process_status(out, program, arguments, timeout, options, ctx)?
         {
             return Ok(());
         }
         if let Some((program, arguments, timeout, stdout_path, options)) =
-            process_stdout_file_args(expr)
+            process_stdout_file_args(expr, ctx)
             && emit_process_stdout_file(
                 out,
                 program,
@@ -5882,6 +6019,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
                 out.push_str(&stringish);
                 return Ok(());
             }
+        }
+        if let Some(name) = std_env_get_parse_int_arg(expr)
+            && emit_std_env_get_parse_int(out, name, ctx)?
+        {
+            return Ok(());
         }
         if !is_pure_int_expr(expr)
             && !is_native_json_int_expr(expr, ctx)
@@ -6411,6 +6553,21 @@ fn emit_std_env_get(out: &mut String, name: &Expr, ctx: &mut EmitCtx) -> Result<
     Ok(true)
 }
 
+fn emit_std_env_get_parse_int(
+    out: &mut String,
+    name: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut name_expr = String::new();
+    if !emit_native_string(&mut name_expr, name, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_env_parse_int(");
+    out.push_str(&name_expr);
+    out.push(')');
+    Ok(true)
+}
+
 fn emit_crypto_sha256_file(
     out: &mut String,
     path: &Expr,
@@ -6535,7 +6692,7 @@ fn emit_process_options(
 fn emit_process_status(
     out: &mut String,
     program: &Expr,
-    arguments: &[Expr],
+    arguments: ProcessArguments<'_>,
     timeout: &Expr,
     options: Option<&Expr>,
     ctx: &mut EmitCtx,
@@ -6543,14 +6700,6 @@ fn emit_process_status(
     let mut program_expr = String::new();
     if !emit_native_string(&mut program_expr, program, ctx)? || !is_pure_int_expr(timeout) {
         return Ok(false);
-    }
-    let mut argument_exprs = Vec::with_capacity(arguments.len());
-    for argument in arguments {
-        let mut argument_expr = String::new();
-        if !emit_native_string(&mut argument_expr, argument, ctx)? {
-            return Ok(false);
-        }
-        argument_exprs.push(argument_expr);
     }
     let mut options_expr = String::new();
     if let Some(options) = options {
@@ -6560,16 +6709,11 @@ fn emit_process_status(
     }
     out.push_str("rh_process_status(");
     out.push_str(&program_expr);
-    out.push_str(", &vec![");
-    for (index, argument) in argument_exprs.iter().enumerate() {
-        if index > 0 {
-            out.push_str(", ");
-        }
-        out.push_str("String::from(");
-        out.push_str(argument);
-        out.push(')');
+    out.push_str(", ");
+    if !emit_process_arguments(out, arguments, ctx)? {
+        return Ok(false);
     }
-    out.push_str("], ");
+    out.push_str(", ");
     emit_expr(out, timeout, ctx)?;
     out.push_str(", ");
     if options.is_some() {
@@ -6584,7 +6728,7 @@ fn emit_process_status(
 fn emit_process_stdout_file(
     out: &mut String,
     program: &Expr,
-    arguments: &[Expr],
+    arguments: ProcessArguments<'_>,
     timeout: &Expr,
     stdout_path: &Expr,
     options: Option<&Expr>,
@@ -6598,14 +6742,6 @@ fn emit_process_stdout_file(
     {
         return Ok(false);
     }
-    let mut argument_exprs = Vec::with_capacity(arguments.len());
-    for argument in arguments {
-        let mut argument_expr = String::new();
-        if !emit_native_string(&mut argument_expr, argument, ctx)? {
-            return Ok(false);
-        }
-        argument_exprs.push(argument_expr);
-    }
     let mut options_expr = String::new();
     if let Some(options) = options {
         if !emit_process_options(&mut options_expr, options, ctx)? {
@@ -6614,16 +6750,11 @@ fn emit_process_stdout_file(
     }
     out.push_str("rh_process_stdout_file(");
     out.push_str(&program_expr);
-    out.push_str(", &vec![");
-    for (index, argument) in argument_exprs.iter().enumerate() {
-        if index > 0 {
-            out.push_str(", ");
-        }
-        out.push_str("String::from(");
-        out.push_str(argument);
-        out.push(')');
+    out.push_str(", ");
+    if !emit_process_arguments(out, arguments, ctx)? {
+        return Ok(false);
     }
-    out.push_str("], ");
+    out.push_str(", ");
     emit_expr(out, timeout, ctx)?;
     out.push_str(", ");
     out.push_str(&stdout_path_expr);
@@ -6635,6 +6766,74 @@ fn emit_process_stdout_file(
     }
     out.push(')');
     Ok(true)
+}
+
+fn emit_owned_string_element(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    match expr {
+        Expr::StringConstant(value, ..) => {
+            out.push_str("String::from(");
+            out.push_str(&format!("{value:?}"));
+            out.push(')');
+            Ok(true)
+        }
+        Expr::Variable(ident, ..)
+            if matches!(
+                ctx.scope.get(ident.1.as_str()).copied(),
+                Some(ValueKind::String | ValueKind::Path)
+            ) =>
+        {
+            out.push_str(ident.1.as_str());
+            out.push_str(".clone()");
+            Ok(true)
+        }
+        _ => {
+            let mut borrowed = String::new();
+            if !emit_native_string(&mut borrowed, expr, ctx)? {
+                return Ok(false);
+            }
+            out.push_str("String::from(");
+            out.push_str(&borrowed);
+            out.push(')');
+            Ok(true)
+        }
+    }
+}
+
+fn emit_process_arguments(
+    out: &mut String,
+    arguments: ProcessArguments<'_>,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    match arguments {
+        ProcessArguments::Literal(items) => {
+            out.push_str("&vec![");
+            for (index, argument) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                if !emit_owned_string_element(out, argument, ctx)? {
+                    return Ok(false);
+                }
+            }
+            out.push(']');
+            Ok(true)
+        }
+        ProcessArguments::StringList(binding) => {
+            out.push('&');
+            out.push_str(binding);
+            Ok(true)
+        }
+        ProcessArguments::JsonArray(binding) => {
+            out.push_str("&rh_json_string_argv(&");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+    }
 }
 
 fn emit_json_parse(out: &mut String, source: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
@@ -6659,6 +6858,32 @@ fn emit_json_parse(out: &mut String, source: &Expr, ctx: &mut EmitCtx) -> Result
 }
 
 fn emit_json_parse_file(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    if let Some((base, child)) = path_join_display_args(path) {
+        let mut join_expr = String::new();
+        if !emit_path_join(&mut join_expr, base, child, ctx)? {
+            return Ok(false);
+        }
+        out.push_str("rh_json_parse(&rh_std_fs_read_to_string(&");
+        out.push_str(&join_expr);
+        out.push_str("))");
+        return Ok(true);
+    }
+    if let Some(source) = path_absolute_display_arg(path) {
+        let mut source_expr = String::new();
+        if !emit_path_absolute(&mut source_expr, source, ctx)? {
+            return Ok(false);
+        }
+        out.push_str("rh_json_parse(&rh_std_fs_read_to_string(&");
+        out.push_str(&source_expr);
+        out.push_str("))");
+        return Ok(true);
+    }
+    if let Some(binding) = path_binding_display(path, ctx) {
+        out.push_str("rh_json_parse(&rh_std_fs_read_to_string(&");
+        out.push_str(binding);
+        out.push_str("))");
+        return Ok(true);
+    }
     let mut path_expr = String::new();
     if !emit_native_string(&mut path_expr, path, ctx)? {
         return Ok(false);
@@ -8584,6 +8809,124 @@ fn entry() {
     }
 
     #[test]
+    fn cdylib_transpile_emits_command_stdout_file_with_argv_variable() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let repo = args[0];
+    let cargo_args = [];
+    cargo_args.push("xwin");
+    cargo_args.push("build");
+    let stdout_path = repo + ".stdout.tmp";
+    std::process::command_stdout_file(
+        "cargo",
+        cargo_args,
+        3600000,
+        stdout_path,
+        #{ current_dir: repo }
+    )
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_stdout_file("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_string_argv(&cargo_args)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_stdout_file")
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_status_with_argv_variable() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let worker = args[0];
+    let prune_arguments = [
+        "task", "run", "prune-target-incremental",
+        "--manifest", "agenterm.tasks.json",
+        "--", "."
+    ];
+    prune_arguments.push("--invocation");
+    prune_arguments.push("abc123");
+    std::process::command_status(worker, prune_arguments, 300000)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_status("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_status(&worker, &prune_arguments,")
+                || output.rust.contains("rh_process_status(&worker, &prune_arguments, "),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_status")
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_status_with_argv_param() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn run_status(arguments, timeout_ms) {
+    std::process::command_status("worker", arguments, timeout_ms)
+}
+fn entry() {
+    let argv = ["task", "run", "stage-build"];
+    run_status(argv, 30000)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_status("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_status(\"worker\", &arguments,")
+                || output.rust.contains("rh_process_status(\"worker\", &arguments, "),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_status")
+        );
+    }
+
+    #[test]
     fn cdylib_transpile_emits_json_builder_split_and_stringify() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
@@ -8739,6 +9082,182 @@ fn entry() { env_value("AGENTERM_BOOTSTRAP_SETUP_MS") }"#,
             output.rust
         );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_env_get_parse_int_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() { std::env::get("AGENTERM_BOOTSTRAP_SETUP_MS").parse_int() }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_env_parse_int(\"AGENTERM_BOOTSTRAP_SETUP_MS\")"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::env::get(`AGENTERM_BOOTSTRAP_SETUP_MS`).parse_int()"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_env_get_parse_int_param_binding() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn read_ms(name) {
+    if !std::env::has(name) {
+        return -1;
+    }
+    std::env::get(name).parse_int()
+}
+fn entry() { read_ms("AGENTERM_BOOTSTRAP_SETUP_MS") }"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_env_parse_int(&name)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"std::env::get(name).parse_int()"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_json_state_field_plus_int_stays_native() {
+        // `.state` is also an RhChild member name; JSON evidence (`.setup_ms`) must win,
+        // string coerce must use rh_json_string_path, and `field + int` must stay INT.
+        let output = transpile_cdylib_with_mode(
+            r#"fn wall_time(bootstrap, task_ms) {
+    let timing_state = "" + bootstrap.state;
+    if timing_state == "measured" {
+        bootstrap.setup_ms + task_ms
+    } else {
+        task_ms
+    }
+}
+fn entry() {
+    let bootstrap = #{ state: "measured", setup_ms: 3 };
+    wall_time(bootstrap, 1)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("pub fn wall_time(bootstrap: serde_json::Value, task_ms: INT) -> INT"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_string_path(&bootstrap, &[\"state\"])"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_int_path(&bootstrap, &[\"setup_ms\"])"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"bootstrap.setup_ms"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn build_rh_project_transpiles_native() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        let source = std::fs::read_to_string(root.join("scripts/rh/build.rh")).expect("entry");
+        let output = transpile_cdylib_with_project(&root, &source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"std::process::command_"),
+            "{}",
+            output.rust
+        );
+        let bundled = crate::bundle_project_source(&root, &source).expect("bundle");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack = crate::build_pack_dir(&bundled, dir.path()).expect("pack");
+        assert!(pack.native_path.is_file(), "{:?}", pack.native_path);
+    }
+
+    #[test]
+    fn cdylib_transpile_bootstrap_timing_env_get_parse_int_native() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        let mut source =
+            std::fs::read_to_string(root.join("scripts/rh/lib/bootstrap_timing.rh")).expect("read");
+        source.push_str("\nfn entry() { read_setup_ms() }\n");
+        let output = transpile_cdylib_with_project(&root, &source).expect("transpile");
+        for name in [
+            "AGENTERM_BOOTSTRAP_SETUP_MS",
+            "AGENTERM_BOOTSTRAP_CARGO_BUILD_MS",
+            "AGENTERM_BOOTSTRAP_WORKER_COPY_MS",
+            "AGENTERM_BOOTSTRAP_OTHER_SETUP_MS",
+            "AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS",
+        ] {
+            assert!(
+                output
+                    .rust
+                    .contains(&format!("rh_env_parse_int({name:?})")),
+                "{}",
+                output.rust
+            );
+        }
+        assert!(
+            !output.rust.contains(".parse_int()"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .lines()
+                .all(|line| !(line.contains("rh_host_eval_int") && line.contains("parse_int"))),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]
@@ -9831,6 +10350,145 @@ fn entry() {
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_stdout_file_with_dynamic_args_and_options_var() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let repo = args[0];
+    let out = args[1];
+    let cargo_args = [];
+    cargo_args.push("build");
+    cargo_args.push("--locked");
+    let command_options = #{
+        current_dir: repo,
+        env: #{ "AGENTERM_NO_ACTIVATE": "1" },
+    };
+    std::process::command_stdout_file("cargo", cargo_args, 3600000, out, command_options)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_stdout_file("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_string_argv(&cargo_args)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("Some(&command_options)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_stdout_file")
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_command_status_with_string_list_args_and_options_var() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let repo = args[0];
+    let worker = args[1];
+    let task_manifest = args[2];
+    let prune_arguments = [
+        "task", "run", "prune-target-incremental",
+        "--manifest", task_manifest,
+        "--", repo
+    ];
+    let command_options = #{ current_dir: repo };
+    std::process::command_status(worker, prune_arguments, 300000, command_options)
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_status("),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("&prune_arguments"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("Some(&command_options)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_status")
+        );
+    }
+
+    #[test]
+    fn build_rh_project_transpiles_command_options_native() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        let source = std::fs::read_to_string(root.join("scripts/rh/build.rh")).expect("read");
+        let output = transpile_cdylib_with_project(&root, &source).expect("transpile");
+        let command_host_eval: Vec<_> = output
+            .rust
+            .lines()
+            .filter(|line| {
+                line.contains("rh_host_eval_int")
+                    && (line.contains("command_stdout_file") || line.contains("command_status"))
+            })
+            .collect();
+        assert!(
+            command_host_eval.is_empty(),
+            "command HostEval sites:\n{command_host_eval:#?}\n{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_process_stdout_file("),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+        assert!(
+            output.rust.contains("Some(&command_options)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_string_argv(&cargo_args)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_stdout_file")
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_host_eval_int(\"std::process::command_status")
+        );
     }
 
     #[test]

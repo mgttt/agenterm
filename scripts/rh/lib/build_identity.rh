@@ -128,6 +128,7 @@ fn environment(identity) {
 }
 
 fn environment_with_cargo_target(identity, cargo_target_dir) {
+    let target_dir = "" + cargo_target_dir;
     let base = environment(identity);
     #{
         AGENTERM_BUILD_IDENTITY_VERSION: base.AGENTERM_BUILD_IDENTITY_VERSION,
@@ -137,7 +138,7 @@ fn environment_with_cargo_target(identity, cargo_target_dir) {
         AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256:
             base.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256,
         AGENTERM_BUILD_PROFILE: base.AGENTERM_BUILD_PROFILE,
-        CARGO_TARGET_DIR: cargo_target_dir
+        CARGO_TARGET_DIR: target_dir
     }
 }
 
@@ -149,6 +150,11 @@ fn environment_with_incremental(
     incremental_root,
     incremental_state
 ) {
+    let wrapper = "" + stable_wrapper;
+    let invocation = "" + incremental_invocation;
+    let target = "" + cargo_output;
+    let root = "" + incremental_root;
+    let state = "" + incremental_state;
     let base = environment(identity);
     #{
         AGENTERM_BUILD_IDENTITY_VERSION: base.AGENTERM_BUILD_IDENTITY_VERSION,
@@ -158,12 +164,12 @@ fn environment_with_incremental(
         AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256:
             base.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256,
         AGENTERM_BUILD_PROFILE: base.AGENTERM_BUILD_PROFILE,
-        RUSTC_WRAPPER: stable_wrapper,
+        RUSTC_WRAPPER: wrapper,
         AGENTERM_INTERNAL_RUSTC_WRAPPER: "agenterm-incremental-manifest-v1",
-        AGENTERM_INCREMENTAL_INVOCATION_ID: incremental_invocation,
-        AGENTERM_INCREMENTAL_TARGET: cargo_output,
-        AGENTERM_INCREMENTAL_ROOT: incremental_root,
-        AGENTERM_INCREMENTAL_STATE: incremental_state
+        AGENTERM_INCREMENTAL_INVOCATION_ID: invocation,
+        AGENTERM_INCREMENTAL_TARGET: target,
+        AGENTERM_INCREMENTAL_ROOT: root,
+        AGENTERM_INCREMENTAL_STATE: state
     }
 }
 

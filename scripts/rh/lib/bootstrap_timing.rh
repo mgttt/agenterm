@@ -4,7 +4,8 @@ fn null_json() {
     rhai::json::parse("null")
 }
 
-fn unavailable(reason) {
+fn unavailable(unavailable_reason) {
+    let reason = "" + unavailable_reason;
     let json_null = null_json();
     #{
         schema_version: 1,
@@ -190,7 +191,10 @@ fn facts() {
 }
 
 fn wall_time(bootstrap, task_ms) {
-    if bootstrap.state == "measured" {
+    // Never read bootstrap.state: `.state` is a RhChild member name and mis-types
+    // JSON timing objects as RhChild, forcing host-eval on setup_ms.
+    let unavailable_reason = "" + bootstrap.reason;
+    if unavailable_reason == "" {
         let setup_ms = bootstrap.setup_ms;
         let accounted_ms = setup_ms + task_ms;
         return #{

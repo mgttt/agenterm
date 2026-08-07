@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 9;
-pub const RH_CODEGEN_REVISION: u32 = 44;
+pub const RH_CODEGEN_REVISION: u32 = 45;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -432,6 +432,18 @@ pub fn emit_host_runtime(out: &mut String) {
                      String::new()\n\
                  }\n\
              }\n\
+         }\n\n\
+         fn rh_env_parse_int(name: &str) -> INT {\n\
+             match std::env::var(name) {\n\
+                 Ok(value) => value.parse::<INT>().unwrap_or(-1),\n\
+                 Err(_) => -1,\n\
+             }\n\
+         }\n\n\
+         fn rh_json_string_argv(value: &serde_json::Value) -> Vec<String> {\n\
+             rh_json_array_items(value, &[])\n\
+                 .into_iter()\n\
+                 .map(|item| rh_json_as_str(&item))\n\
+                 .collect()\n\
          }\n\n\
          fn rh_env_current_dir() -> String {\n\
              match std::env::current_dir() {\n\
