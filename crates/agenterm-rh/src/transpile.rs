@@ -2605,6 +2605,11 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if child_state_binding(expr, ctx).is_some() => ValueKind::String,
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
+        _ if parse_string_method_call(expr, ctx)
+            .is_some_and(|(_, call)| call.name == "parse_int" && call.args.is_empty()) =>
+        {
+            ValueKind::Int
+        }
         _ if crypto_sha256_file_arg(expr).is_some() => ValueKind::String,
         _ if hash_fnv1a64_arg(expr).is_some() => ValueKind::String,
         _ if dir_entry_path_display_binding(expr, ctx).is_some() => ValueKind::String,
@@ -5929,6 +5934,9 @@ fn emit_intish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), R
     {
         return Ok(());
     }
+    if emit_string_parse_int(out, expr, ctx)? {
+        return Ok(());
+    }
     if let Expr::Variable(ident, ..) = expr
         && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
     {
@@ -6413,6 +6421,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(name) = std_env_get_parse_int_arg(expr)
             && emit_std_env_get_parse_int(out, name, ctx)?
         {
+            return Ok(());
+        }
+        if emit_string_parse_int(out, expr, ctx)? {
             return Ok(());
         }
         if !is_pure_int_expr(expr)
@@ -7782,6 +7793,23 @@ fn emit_string_predicate(
     out.push('(');
     out.push_str(&needle);
     out.push_str(") as INT)");
+    Ok(true)
+}
+
+fn emit_string_parse_int(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((receiver, call)) = parse_string_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    if call.name != "parse_int" || !call.args.is_empty() {
+        return Ok(false);
+    }
+    out.push_str("rh_string_parse_int(&");
+    emit_string_receiver(out, receiver);
+    out.push(')');
     Ok(true)
 }
 
@@ -9684,6 +9712,33 @@ fn entry() { env_value("AGENTERM_BOOTSTRAP_SETUP_MS") }"#,
             output.rust
         );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_string_binding_parse_int_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let budget_text = args[0];
+    let budget = budget_text.parse_int();
+    require(budget > 0, "budget");
+    budget
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("let mut budget = rh_string_parse_int(&budget_text);"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
     #[test]
