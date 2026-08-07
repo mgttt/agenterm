@@ -78,6 +78,45 @@ fn find_metadata(metadata, name) {
     found
 }
 
+fn artifact_for_role(manifest, role) {
+    let found = ();
+    for artifact in manifest.executables {
+        if artifact.role == role {
+            require(found == (), "artifact_role_duplicate:" + role);
+            found = artifact;
+        }
+    }
+    require(found != (), "artifact_role_missing:" + role);
+    found
+}
+
+fn verify_version_artifact(
+    artifact,
+    probe_argument,
+    banner,
+    version,
+    dist,
+    repo,
+    code
+) {
+    require(
+        artifact.offline_probe.len == 1
+            && artifact.offline_probe[0] == probe_argument,
+        "artifact_version_probe_missing:" + artifact.role
+    );
+    let path = std::path::join(dist, artifact.name).display;
+    require(
+        std::fs::metadata(path).is_file
+            && std::fs::metadata(path).len > 0,
+        "artifact_version_file_invalid:" + artifact.name
+    );
+    require(
+        output(path, artifact.offline_probe, repo, code)
+            == banner + " " + version,
+        code + "_mismatch"
+    );
+}
+
 require(
     args.len == 1 || args.len == 2,
     "expected: REPO [release|development]"
@@ -171,13 +210,25 @@ require(metadata.rust_version != "", "artifact_metadata_rust_version");
 require(!release || !metadata.git_dirty, "artifact_release_dirty");
 
 let cli = std::path::join(dist, "agenterm-cli.exe").display;
-let rhai = std::path::join(dist, "agenterm-rhai.exe").display;
 let control_center =
     std::path::join(dist, "agenterm-cc.exe").display;
-require(
-    output(rhai, ["--version"], repo, "artifact_rhai_version")
-        == "agenterm-rhai " + metadata.version,
-    "artifact_rhai_version_mismatch"
+verify_version_artifact(
+    artifact_for_role(manifest, "scripting-cli"),
+    "--version",
+    "agenterm-rhai",
+    metadata.version,
+    dist,
+    repo,
+    "artifact_rhai_version"
+);
+verify_version_artifact(
+    artifact_for_role(manifest, "rh-dev-cli"),
+    "version",
+    "agenterm-rh",
+    metadata.version,
+    dist,
+    repo,
+    "artifact_rh_version"
 );
 require(
     output(cli, ["--version"], repo, "artifact_cli_version")
