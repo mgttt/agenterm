@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-07 |
-| **状态** | **进行中 M42f6**（cg20）：M42f6d `timing-summary` 已切 `.rh`。**下一步**：继续 M42f6 剩余 `.rhai` 任务入口 |
+| **状态** | **进行中 M42f6**（cg21）：M42f6d `timing-summary` + M42f6e `command_*` cwd/env 已落地。**下一步**：继续 M42f6 剩余 `.rhai` 任务入口 |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -115,6 +115,7 @@
 | M42f6b | INT-only `scripts/rh/lib/build_identity.rh` + `build-identity.rh`（写 batch env，返回 0）；entry 切 `.rh` 并归档 | [x] |
 | M42f6c | INT-only `scripts/rh/bootstrap-info.rh`（`command_stdout_file`+JSON report）；entry 切 `.rh` 并归档 | [x] |
 | M42f6d | INT-only `scripts/rh/timing-summary.rh`（`read_to_string`+JSON validate、`atomic_write` summary）；entry 切 `.rh` 并归档 | [x] |
+| M42f6e | 原生 `command_status`/`command_stdout_file` 可选 trailing options map（`current_dir`/`env`/`env_remove`）；codegen 21 | [x] |
 
 **M42f5 依赖说明：** `stage-build.rhai` 本身编排（clean → stage/stage_as 循环 → metadata → clean）在 M42f4 后已大半可复用原生 `artifact_files`；真正阻塞是 (1) `git rev-parse --show-prefix` 需要 stdout（仅有 `command_status` 不够），(2) 内联 `build_metadata::write` 需要哈希/原子写/环境/RFC3339/JSON 序列化。禁止用 shell 包装或 `host_eval` 假迁移；禁止把 metadata 改成子进程调 Rhai 任务冒充原生入口。
 
