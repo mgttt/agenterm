@@ -101,10 +101,14 @@ script_backend.rs   ← 唯一切换点（AGENTERM_SCRIPT_BACKEND=rhai|rh）
 pack/*.rh  →  parse (Rhai AST)
           →  subset validate (rh-2)
           →  transpile → generated.rs (native + host eval calls)
-          →  rustc → rh_pack.so
+          →  rustc → rh_pack.so (owned i64 ABI; no Rhai crate dependency)
           →  manifest native_hash
           →  dlopen @ load / script_rh_cache
 ```
+
+The parser and host compatibility callbacks still use Rhai during migration,
+but neither native subset packs nor compatibility-delegating pack stubs embed
+the Rhai runtime.
 
 ---
 

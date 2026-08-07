@@ -4,7 +4,7 @@
 |------|-----|
 | **前置** | rh-0→rh-2 已合并 `main`（试切换、`./rh-check.sh`、M15 PRD） |
 | **日期** | 2026-08-06 |
-| **状态** | **M30 caller wave 3 完成**（stale gate；Candidate/performance；worker 观测；typed host 结果） |
+| **状态** | **M31 原生 pack 独立化进行中**（生成产物已移除 Rhai runtime 依赖） |
 | **SSOT** | [`design-rh-aot.md`](design-rh-aot.md) |
 
 ---
@@ -75,6 +75,7 @@
 | M30c | Candidate/performance 的 manifest task caller 改走 rh；密封 artifact 身份与 Promotion 路径不变 | [x] |
 | M30d | compat unit/非整数结果保留类型，host callback 错误返回 typed failure；黑盒与后续健康调用覆盖 | [x] |
 | M30e | caller inventory 降至 399，CI 19→12、rhai-script 39→32；继续以分类下限防扫描器静默失效 | [x] |
+| M31a | 生成 native/compat pack 使用自有 `i64` ABI，生成 crate 删除 Rhai runtime 依赖；parser/host compat 明确保留 | [x] |
 
 ---
 

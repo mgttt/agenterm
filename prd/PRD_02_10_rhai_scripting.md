@@ -25,6 +25,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   CLI-hosted Script route is not available there. The existing one-shot
   supervisor routes retain their single worker topology. All expose the same
   catalog, parser, supervisor, and runtime.
+- [x] rh-generated native packs use an AgenTerm-owned `i64` entry ABI and their
+  generated Cargo manifest no longer depends on the Rhai crate. Native subset
+  packs and compatibility-delegating pack stubs therefore contain no embedded
+  Rhai runtime; parsing and explicit host-eval/host-run compatibility remain
+  host responsibilities until their later migration slices.
 - [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
   has no complete external-usage inventory or migration/removal evidence, and
