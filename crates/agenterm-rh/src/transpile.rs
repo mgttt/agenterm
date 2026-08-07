@@ -3381,7 +3381,7 @@ fn image_inspect_png_arg(expr: &Expr) -> Option<&Expr> {
     (call.namespace.to_string() == "rhai::image"
         && call.name == "inspect_png"
         && call.args.len() == 1)
-        .then_some(&call.args[0])
+        .then(|| &call.args[0])
 }
 
 fn std_process_command_arg(expr: &Expr) -> Option<&Expr> {
