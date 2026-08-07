@@ -190,8 +190,8 @@ mod tests {
             report.categories
         );
         assert!(
-            report.categories.get("ci").copied().unwrap_or(0) >= 5,
-            "ci callers: {:?}",
+            report.categories.get("ci").copied().unwrap_or(0) == 0,
+            "active CI must not call the compatibility executable: {:?}",
             report.categories
         );
         assert!(

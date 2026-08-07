@@ -36,12 +36,13 @@ fn caller_inventory_hit_count_baseline_guard() {
     let baseline_path = repo.join("fixtures/rh/caller-inventory-baseline.json");
     let baseline_raw = std::fs::read_to_string(&baseline_path).expect("baseline fixture");
     let baseline: serde_json::Value = serde_json::from_str(&baseline_raw).expect("baseline json");
-    let min_hit_count = baseline["min_hit_count"]
-        .as_u64()
-        .expect("min_hit_count") as usize;
+    let min_hit_count = baseline["min_hit_count"].as_u64().expect("min_hit_count") as usize;
     let min_categories = baseline["min_categories"]
         .as_object()
         .expect("min_categories");
+    let max_categories = baseline["max_categories"]
+        .as_object()
+        .expect("max_categories");
 
     let report = agenterm_rh::scan_caller_inventory(agenterm_rh::CallerInventoryOptions {
         project_root: repo,
@@ -66,8 +67,20 @@ fn caller_inventory_hit_count_baseline_guard() {
             "category {category}: {actual} below baseline {min}"
         );
     }
+    for (category, max) in max_categories {
+        let max = max.as_u64().expect("category max") as usize;
+        let actual = report
+            .categories
+            .get(category.as_str())
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            actual <= max,
+            "category {category}: {actual} above migration ceiling {max}"
+        );
+    }
     assert!(report.categories.contains_key("bootstrap"));
-    assert!(report.categories.contains_key("ci"));
+    assert!(!report.categories.contains_key("ci"));
 }
 
 #[test]
@@ -89,8 +102,7 @@ fn fixture_check_many_manifest_is_valid() {
 
 #[test]
 fn while_count_fixture_qualifies_to_zero() {
-    let dir =
-        std::env::temp_dir().join(format!("agenterm-rh-while-count-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-while-count-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let source = include_str!("../fixtures/rh/while-count.rh");
     let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
