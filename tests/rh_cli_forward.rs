@@ -3,6 +3,34 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+struct TestDirectory(PathBuf);
+
+impl TestDirectory {
+    fn new(label: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-rh-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create test directory");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -101,7 +129,7 @@ fn rh_is_the_task_front_door_via_explicit_compat_bridge() {
 fn rh_task_front_door_fails_closed_without_compat_binary() {
     let repo = repo_root();
     ensure_adjacent_rh_cli(&repo.join("target/debug"));
-    let isolated = tempfile::tempdir().expect("isolated CLI directory");
+    let isolated = TestDirectory::new("missing-compat");
     let isolated_rh = isolated.path().join(binary_name("agenterm-rh"));
     fs::copy(
         repo.join("target/debug").join(binary_name("agenterm-rh")),
