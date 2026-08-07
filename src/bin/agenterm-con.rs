@@ -113,6 +113,11 @@ const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
 /// Read buffer for the PTY pump thread.
 const READ_BUF: usize = 8192;
 
+/// How long after a click a second one still counts as a double-click.
+/// Matches the common Windows default rather than reading SPI_GETDBLCLKTIME,
+/// which would drag a Win32 dependency into a platform-neutral binary.
+const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(500);
+
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
 
@@ -361,6 +366,10 @@ struct ConTerminal {
     /// Gates the logical-key fallback, which would otherwise double-type keys
     /// the IME consumed. See `TerminalKeyMode::ime_active`.
     ime_attached: bool,
+
+    /// Time and place of the last left press, plus how many clicks it
+    /// continued, for double/triple-click selection.
+    last_click: Option<(Instant, TerminalPoint, u8)>,
     /// Current scale factor (for pointer hit-test DIP→pixel conversion).
     scale: f64,
 }
@@ -398,6 +407,7 @@ impl ConTerminal {
             active_button: None,
             ime_preedit: String::new(),
             ime_attached: false,
+            last_click: None,
             scale: 1.0,
         }
     }
@@ -560,6 +570,113 @@ impl ConTerminal {
             _ => self.ime_preedit.clear(),
         }
         window.request_redraw();
+    }
+
+    /// Records a left press and returns the click count (1, 2, or 3).
+    ///
+    /// A repeat only counts when it lands on the same cell inside the
+    /// multi-click window; moving to a different cell starts a fresh count, so
+    /// a fast click in two places does not select a word by accident.
+    fn register_click(&mut self, point: TerminalPoint) -> u8 {
+        let now = Instant::now();
+        let count = match self.last_click {
+            Some((at, at_point, count))
+                if at_point == point && now.duration_since(at) <= MULTI_CLICK_WINDOW =>
+            {
+                // Cycle 1 → 2 → 3 → 1 so a fourth click returns to character
+                // selection rather than sticking on whole-line.
+                count % 3 + 1
+            }
+            _ => 1,
+        };
+        self.last_click = Some((now, point, count));
+        count
+    }
+
+    /// Expands to the word around `point`, or `None` if that cell is blank.
+    fn word_at(&self, point: TerminalPoint) -> Option<(TerminalPoint, TerminalPoint)> {
+        let screen = self.parser.screen();
+        let (_, cols) = screen.size();
+        if !self.is_word_cell(point.row, point.col) {
+            return None;
+        }
+        let mut start = point.col;
+        while start > 0 && self.is_word_cell(point.row, start - 1) {
+            start -= 1;
+        }
+        let mut end = point.col;
+        while end + 1 < cols && self.is_word_cell(point.row, end + 1) {
+            end += 1;
+        }
+        Some((
+            TerminalPoint {
+                row: point.row,
+                col: start,
+            },
+            TerminalPoint {
+                row: point.row,
+                col: end,
+            },
+        ))
+    }
+
+    /// Whether a cell participates in a double-click word.
+    ///
+    /// Deliberately more permissive than conhost's space-only rule: `/`, `.`,
+    /// `-`, and `:` stay inside the word so a path or URL selects in one click,
+    /// which is the common case in a terminal.
+    fn is_word_cell(&self, row: u16, col: u16) -> bool {
+        let Some(cell) = self.parser.screen().cell(row, col) else {
+            return false;
+        };
+        if !cell.has_contents() {
+            return false;
+        }
+        cell.contents().chars().next().is_some_and(|character| {
+            !character.is_whitespace()
+                && !matches!(
+                    character,
+                    '(' | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '\''
+                        | '"'
+                        | '`'
+                        | '|'
+                        | ';'
+                        | ','
+                )
+        })
+    }
+
+    /// Expands to the whole *logical* line, following soft wrapping, so a
+    /// triple-click on a long wrapped command selects all of it rather than
+    /// just the visual row the pointer happened to land on.
+    fn line_at(&self, point: TerminalPoint) -> (TerminalPoint, TerminalPoint) {
+        let screen = self.parser.screen();
+        let (rows, cols) = screen.size();
+        let mut start = point.row;
+        while start > 0 && screen.row_wrapped(start - 1) {
+            start -= 1;
+        }
+        let mut end = point.row;
+        while end + 1 < rows && screen.row_wrapped(end) {
+            end += 1;
+        }
+        (
+            TerminalPoint {
+                row: start,
+                col: 0,
+            },
+            TerminalPoint {
+                row: end,
+                col: cols.saturating_sub(1),
+            },
+        )
     }
 
     /// Draws the in-progress composition starting at the cursor cell and
@@ -903,8 +1020,21 @@ impl ConTerminal {
         // Local handling.
         match (button, pressed) {
             (PointerButton::Left, true) => {
-                self.selection = Some((point, point));
-                self.selecting = true;
+                match self.register_click(point) {
+                    1 => {
+                        self.selection = Some((point, point));
+                        self.selecting = true;
+                    }
+                    2 => {
+                        self.selection = self.word_at(point);
+                        self.selecting = false;
+                    }
+                    // Third click and beyond select the whole logical line.
+                    _ => {
+                        self.selection = Some(self.line_at(point));
+                        self.selecting = false;
+                    }
+                }
                 window.request_redraw();
             }
             (PointerButton::Left, false) => {
@@ -1137,21 +1267,44 @@ impl PixelWindowApplication for ConTerminal {
             self.draw_preedit(pixels, fw, fh, cursor)
         };
 
-        // Solid block cursor at the current position. Hide when scrolled back.
+        // Block cursor, drawn as a properly inverted cell rather than an opaque
+        // fill: the character under the cursor stays readable, as it does in
+        // conhost. Hidden while scrolled back, where it would point at a cell
+        // the application is no longer writing to.
         if !cursor_hidden && self.scroll_offset == 0 {
-            let cx = (u32::from(cursor.1) + preedit_cells) * self.cell_w;
+            let cursor_col = u32::from(cursor.1) + preedit_cells;
+            let cx = cursor_col * self.cell_w;
             let cy = u32::from(cursor.0) * self.cell_h;
             if cx < fw && cy < fh {
-                fill_rect(
-                    pixels,
-                    fw,
-                    fh,
-                    cx,
-                    cy,
-                    self.cell_w,
-                    self.cell_h,
-                    self.default_fg.to_xrgb(),
-                );
+                // A wide (CJK) glyph under the cursor must be covered whole,
+                // otherwise the cursor bisects it.
+                let under = (preedit_cells == 0)
+                    .then(|| screen.cell(cursor.0, cursor.1))
+                    .flatten();
+                let span = match under {
+                    Some(cell) if cell.is_wide() => self.cell_w * 2,
+                    _ => self.cell_w,
+                };
+                fill_rect(pixels, fw, fh, cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
+
+                let glyph = under
+                    .filter(|cell| cell.has_contents())
+                    .and_then(|cell| {
+                        font::raster(first_grapheme(cell.contents()), self.font_size_px)
+                    });
+                if let Some(glyph) = glyph {
+                    blit_glyph(
+                        pixels,
+                        fw,
+                        fh,
+                        &glyph,
+                        cx,
+                        cy,
+                        self.default_bg,
+                        span,
+                        self.cell_h,
+                    );
+                }
             }
         }
 
@@ -1380,6 +1533,61 @@ mod tests {
         // ...and scrolling down from the bottom must not underflow.
         app.scroll_by(-10);
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn double_click_selects_a_word_and_keeps_paths_whole() {
+        let mut app = ConTerminal::new(None);
+        app.parser.screen_mut().set_size(4, 40);
+        app.parser.process(b"cd /usr/local/bin (note)");
+
+        // Inside the path: the whole path is one word, because '/', '.', '-'
+        // and ':' are word characters here — more useful than conhost's
+        // space-only rule.
+        let hit = TerminalPoint { row: 0, col: 8 };
+        let (start, end) = app.word_at(hit).expect("word under a path cell");
+        assert_eq!((start.col, end.col), (3, 16));
+
+        // Parentheses are delimiters, so "note" selects without them.
+        let hit = TerminalPoint { row: 0, col: 19 };
+        let (start, end) = app.word_at(hit).expect("word inside parens");
+        assert_eq!((start.col, end.col), (19, 22));
+
+        // A blank cell yields no word rather than an empty selection.
+        assert!(app.word_at(TerminalPoint { row: 0, col: 2 }).is_none());
+    }
+
+    #[test]
+    fn triple_click_follows_soft_wrapping_to_the_whole_logical_line() {
+        let mut app = ConTerminal::new(None);
+        app.parser.screen_mut().set_size(4, 10);
+        // 15 characters over a 10-column grid soft-wraps onto row 1.
+        app.parser.process(b"abcdefghijklmno");
+        assert!(app.parser.screen().row_wrapped(0), "row 0 should be wrapped");
+
+        // Clicking the continuation row still selects from the start of the
+        // logical line, not just the visual row under the pointer.
+        let (start, end) = app.line_at(TerminalPoint { row: 1, col: 2 });
+        assert_eq!((start.row, start.col), (0, 0));
+        assert_eq!((end.row, end.col), (1, 9));
+    }
+
+    #[test]
+    fn click_counting_requires_the_same_cell_within_the_window() {
+        let mut app = ConTerminal::new(None);
+        let here = TerminalPoint { row: 1, col: 1 };
+        let elsewhere = TerminalPoint { row: 5, col: 5 };
+
+        assert_eq!(app.register_click(here), 1);
+        assert_eq!(app.register_click(here), 2);
+        assert_eq!(app.register_click(here), 3);
+        // A fourth click cycles back to character selection.
+        assert_eq!(app.register_click(here), 1);
+
+        // Moving restarts the count, so a fast click in two places cannot
+        // accidentally select a word.
+        assert_eq!(app.register_click(here), 2);
+        assert_eq!(app.register_click(elsewhere), 1);
     }
 
     #[test]
