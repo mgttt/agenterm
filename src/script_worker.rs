@@ -1361,6 +1361,9 @@ fn execute_inner(
         }
     });
     if invocation.operation == ScriptOperation::Check {
+        crate::script_api_validate::validate_available_apis(&invocation.source).map_err(
+            |failure| classify_compile_error(format!("{}: {}", failure.code, failure.message)),
+        )?;
         engine
             .compile(&invocation.source)
             .map_err(|error| classify_compile_error(error.to_string()))?;
@@ -1379,9 +1382,6 @@ fn execute_inner(
                 )?;
             }
         }
-        crate::script_api_validate::validate_available_apis(&invocation.source).map_err(
-            |failure| classify_compile_error(format!("{}: {}", failure.code, failure.message)),
-        )?;
         return Ok((String::new(), None));
     }
 
