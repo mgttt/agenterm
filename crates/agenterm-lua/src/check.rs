@@ -59,7 +59,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
 ];
 
 fn shipped(path: &str) -> bool {
-    SHIPPED_SURFACES.iter().any(|s| *s == path)
+    SHIPPED_SURFACES.contains(&path)
 }
 
 /// Result of a Lua API surface audit.
@@ -107,12 +107,10 @@ pub fn audit_api_surface(source: &str) -> Vec<String> {
             let path = &source[start..end];
             // Only flag if it looks like a function call (followed by `(` or `:`)
             let after = source[end..].trim_start();
-            if after.starts_with('(') || after.starts_with(':') {
-                if !shipped(path) {
-                    let entry = path.to_string();
-                    if !unknown.contains(&entry) {
-                        unknown.push(entry);
-                    }
+            if (after.starts_with('(') || after.starts_with(':')) && !shipped(path) {
+                let entry = path.to_string();
+                if !unknown.contains(&entry) {
+                    unknown.push(entry);
                 }
             }
             pos = end;
