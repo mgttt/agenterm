@@ -1017,7 +1017,7 @@
     {
       "id": "lint",
       "description": "Run static, Rust, and production Rhai repository lint without PowerShell",
-      "entry": "scripts/rhai/lint.rhai",
+      "entry": "scripts/rh/lint.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["."],

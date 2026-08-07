@@ -1,0 +1,380 @@
+// Fail-fast repository lint without a PowerShell dependency.
+//
+// Args:
+//   REPO [WORKER] [all|static|rust|rhai] [--json] [--self-test]
+
+fn entry() {
+    if args.len < 1 {
+        return rh::fail("expected: REPO [WORKER] [MODE] [OPTIONS]");
+    }
+
+    let repo = std::path::absolute(args[0]).display;
+    let worker = std::path::join(repo, "target/debug/agenterm-rhai").display;
+    let mode = "all";
+    let json = 0;
+    let internal_selftest = 0;
+
+    let rh_target = std::path::join(repo, "target/debug/agenterm-rh").display;
+    if std::fs::exists(rh_target)
+            && std::fs::metadata(rh_target).is_file
+            && std::fs::metadata(rh_target).len > 0 {
+        worker = rh_target;
+    }
+    let rh_dist = std::path::join(repo, "dist/agenterm-rh").display;
+    if std::fs::exists(rh_dist)
+            && std::fs::metadata(rh_dist).is_file
+            && std::fs::metadata(rh_dist).len > 0 {
+        worker = rh_dist;
+    }
+
+    let index = 1;
+    while index < args.len {
+        let value = args[index];
+        if value == "--json" {
+            json = 1;
+        } else if value == "--self-test" {
+            internal_selftest = 1;
+        } else if value == "all"
+                || value == "static"
+                || value == "rust"
+                || value == "rhai" {
+            mode = value;
+        } else if value == "--worker" {
+            require(index + 1 < args.len, "lint_worker_value_missing");
+            worker = std::path::absolute(args[index + 1]).display;
+            index += 1;
+        } else if std::fs::exists(value) {
+            worker = std::path::absolute(value).display;
+        } else {
+            return rh::fail("lint_unknown_argument:" + value);
+        }
+        index += 1;
+    }
+
+    let stdout_path = repo + ".lint.stdout.tmp";
+    let manifest_path = repo + ".lint-check-many.json";
+    let started = std::time::SystemTime::now().unix_millis;
+
+    if internal_selftest == 1 {
+        let bad_json = repo + ".lint-selftest-bad.json";
+        let bad_utf8 = repo + ".lint-selftest-bad.md";
+        let conflict = repo + ".lint-selftest-conflict.md";
+        let bad_rhai = repo + ".lint-selftest-bad.rhai";
+        let selftest_manifest = repo + ".lint-selftest-check-many.json";
+        let write_json_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "open(sys.argv[1],'w',encoding='utf-8').write('{\\\"missing\\\":')",
+                bad_json
+            ],
+            5000
+        );
+        require(write_json_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+        let write_utf8_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "open(sys.argv[1],'wb').write(bytes([255,254,253]))",
+                bad_utf8
+            ],
+            5000
+        );
+        require(write_utf8_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+        let write_conflict_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "open(sys.argv[1],'w',encoding='utf-8').write('<<<<<<< ours\\n=======\\n>>>>>>> theirs\\n')",
+                conflict
+            ],
+            5000
+        );
+        require(
+            write_conflict_code == 0,
+            "lint_selftest_did_not_reject_malformed_inputs"
+        );
+        let write_rhai_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "open(sys.argv[1],'w',encoding='utf-8').write('let broken = ;')",
+                bad_rhai
+            ],
+            5000
+        );
+        require(write_rhai_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+
+        let json_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "import json,sys; json.load(open(sys.argv[1]))",
+                bad_json
+            ],
+            5000
+        );
+        require(json_code != 0, "lint_selftest_did_not_reject_malformed_inputs");
+
+        let utf8_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "open(sys.argv[1], encoding='utf-8').read()",
+                bad_utf8
+            ],
+            5000
+        );
+        require(utf8_code != 0, "lint_selftest_did_not_reject_malformed_inputs");
+
+        let conflict_text = std::fs::read_to_string(conflict);
+        let conflict_bad = 0;
+        if conflict_text.starts_with("<<<<<<<")
+                || conflict_text.starts_with("=======")
+                || conflict_text.starts_with(">>>>>>>")
+                || conflict_text.contains("\n<<<<<<<")
+                || conflict_text.contains("\n=======")
+                || conflict_text.contains("\n>>>>>>>") {
+            conflict_bad = 1;
+        }
+        require(
+            conflict_bad == 1,
+            "lint_selftest_did_not_reject_malformed_inputs"
+        );
+
+        let manifest_code = std::process::command_status(
+            "python3",
+            [
+                "-c",
+                "import json,sys; open(sys.argv[2],'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rhai-check-manifest','files':[sys.argv[1]]}, indent=2)+'\\n')",
+                bad_rhai,
+                selftest_manifest
+            ],
+            10000
+        );
+        require(manifest_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+
+        let program = worker;
+        let program_rh_target =
+            std::path::join(repo, "target/debug/agenterm-rh").display;
+        if std::fs::exists(program_rh_target)
+                && std::fs::metadata(program_rh_target).is_file
+                && std::fs::metadata(program_rh_target).len > 0 {
+            program = program_rh_target;
+        }
+        let program_rh_dist = std::path::join(repo, "dist/agenterm-rh").display;
+        if std::fs::exists(program_rh_dist)
+                && std::fs::metadata(program_rh_dist).is_file
+                && std::fs::metadata(program_rh_dist).len > 0 {
+            program = program_rh_dist;
+        }
+        let rhai_code = std::process::command_stdout_file(
+            program,
+            [
+                "check-many", "--manifest", selftest_manifest,
+                "--profile", "local",
+                "--project-root", repo,
+                "--timeout-ms", "10000",
+                "--max-operations", "1000000"
+            ],
+            60000,
+            stdout_path,
+            #{ current_dir: repo }
+        );
+        require(
+            rhai_code != 0,
+            "lint_selftest_did_not_reject_malformed_inputs"
+        );
+
+        std::fs::try_remove_file(bad_json);
+        std::fs::try_remove_file(bad_utf8);
+        std::fs::try_remove_file(conflict);
+        std::fs::try_remove_file(bad_rhai);
+        std::fs::try_remove_file(selftest_manifest);
+    } else {
+        if mode == "all" || mode == "static" {
+            let code = std::process::command_stdout_file(
+                "git",
+                ["-C", repo, "ls-files", "--", "*.json"],
+                10000,
+                stdout_path,
+                #{ current_dir: repo }
+            );
+            require(code == 0, "lint_git_ls_files");
+            let output = std::fs::read_to_string(stdout_path);
+            for source_line in output.split("\n") {
+                let relative_path = source_line;
+                relative_path.trim();
+                if relative_path == "" {
+                    continue;
+                }
+                let path = std::path::join(repo, relative_path).display;
+                if std::fs::exists(path) == 0 {
+                    continue;
+                }
+                if std::fs::metadata(path).is_file == 0 {
+                    continue;
+                }
+                rhai::json::parse_file(path);
+            }
+
+            let text_code = std::process::command_stdout_file(
+                "git",
+                [
+                    "-C", repo, "ls-files", "--",
+                    "*.rs", "*.toml", "*.rhai", "*.json", "*.md", "*.html",
+                    "*.yml", "*.yaml", "*.sh", "*.bat", "*.cmd"
+                ],
+                10000,
+                stdout_path,
+                #{ current_dir: repo }
+            );
+            require(text_code == 0, "lint_git_ls_files");
+            let text_output = std::fs::read_to_string(stdout_path);
+            for source_line in text_output.split("\n") {
+                let relative_path = source_line;
+                relative_path.trim();
+                if relative_path == "" {
+                    continue;
+                }
+                let path = std::path::join(repo, relative_path).display;
+                if std::fs::exists(path) == 0 {
+                    continue;
+                }
+                if std::fs::metadata(path).is_file == 0 {
+                    continue;
+                }
+                let nul_code = std::process::command_status(
+                    "python3",
+                    [
+                        "-c",
+                        "import sys; data=open(sys.argv[1],'rb').read(); sys.exit(1 if b'\\x00' in data else 0)",
+                        path
+                    ],
+                    5000
+                );
+                if nul_code != 0 {
+                    return rh::fail(
+                        "Tracked text hygiene errors:\n" +
+                            relative_path +
+                            ": embedded NUL byte"
+                    );
+                }
+                let text = std::fs::read_to_string(path);
+                if text.starts_with("<<<<<<<")
+                        || text.starts_with("=======")
+                        || text.starts_with(">>>>>>>")
+                        || text.contains("\n<<<<<<<")
+                        || text.contains("\n=======")
+                        || text.contains("\n>>>>>>>") {
+                    return rh::fail(
+                        "Tracked text hygiene errors:\n" +
+                            relative_path +
+                            ": unresolved merge-conflict marker"
+                    );
+                }
+            }
+        }
+
+        if mode == "all" || mode == "rust" {
+            let fmt_code = std::process::command_stdout_file(
+                "cargo",
+                ["fmt", "--all", "--", "--check"],
+                60000,
+                stdout_path,
+                #{ current_dir: repo }
+            );
+            if fmt_code != 0 {
+                let output = std::fs::read_to_string(stdout_path);
+                return rh::fail("lint_rustfmt:\n" + output);
+            }
+            let clippy_code = std::process::command_stdout_file(
+                "cargo",
+                [
+                    "clippy", "--locked", "--all-targets", "--all-features",
+                    "--", "-D", "warnings"
+                ],
+                60000,
+                stdout_path,
+                #{ current_dir: repo }
+            );
+            if clippy_code != 0 {
+                let output = std::fs::read_to_string(stdout_path);
+                return rh::fail("lint_clippy:\n" + output);
+            }
+        }
+
+        if mode == "all" || mode == "rhai" {
+            require(
+                std::fs::exists(worker) && std::fs::metadata(worker).is_file,
+                "lint_worker_missing:" + worker
+            );
+            let manifest_code = std::process::command_status(
+                "python3",
+                [
+                    "-c",
+                    "import json,subprocess,sys; repo,out=sys.argv[1],sys.argv[2]; proc=subprocess.run(['git','-C',repo,'ls-files','--','scripts/rhai/*.rhai'], capture_output=True, text=True); proc.returncode and sys.exit(proc.returncode); files=[line.strip() for line in proc.stdout.splitlines() if line.strip()]; (not files) and sys.exit(3); open(out,'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rhai-check-manifest','files':files}, indent=2)+chr(10))",
+                    repo,
+                    manifest_path
+                ],
+                10000
+            );
+            require(manifest_code == 0, "lint_rhai_files_empty");
+
+            let program = worker;
+            let program_rh_target =
+                std::path::join(repo, "target/debug/agenterm-rh").display;
+            if std::fs::exists(program_rh_target)
+                    && std::fs::metadata(program_rh_target).is_file
+                    && std::fs::metadata(program_rh_target).len > 0 {
+                program = program_rh_target;
+            }
+            let program_rh_dist =
+                std::path::join(repo, "dist/agenterm-rh").display;
+            if std::fs::exists(program_rh_dist)
+                    && std::fs::metadata(program_rh_dist).is_file
+                    && std::fs::metadata(program_rh_dist).len > 0 {
+                program = program_rh_dist;
+            }
+            let check_code = std::process::command_stdout_file(
+                program,
+                [
+                    "check-many", "--manifest", manifest_path,
+                    "--profile", "local",
+                    "--project-root", repo,
+                    "--timeout-ms", "10000",
+                    "--max-operations", "1000000"
+                ],
+                60000,
+                stdout_path,
+                #{ current_dir: repo }
+            );
+            if check_code != 0 {
+                let check_output = std::fs::read_to_string(stdout_path);
+                return rh::fail("Rhai lint errors:\n" + check_output);
+            }
+        }
+    }
+
+    std::fs::try_remove_file(stdout_path);
+    std::fs::try_remove_file(manifest_path);
+
+    let duration_ms = std::time::SystemTime::now().unix_millis - started;
+    let report_mode = mode;
+    if internal_selftest == 1 {
+        report_mode = "self-test";
+    }
+    let report = #{
+        schema_version: 1,
+        ok: 1,
+        mode: report_mode,
+        duration_ms: duration_ms,
+        phases: []
+    };
+    if json == 1 {
+        print(rhai::json::stringify_pretty(report));
+    } else {
+        print("PASS: repository lint (" + duration_ms + " ms)");
+    }
+    0
+}

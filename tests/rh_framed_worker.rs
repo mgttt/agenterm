@@ -151,7 +151,7 @@ fn framed_worker_run_entry_fixture_with_rh_backend() {
 fn framed_worker_captures_compat_fallback_print_output() {
     with_rh_backend(|| {
         let source =
-            std::fs::read_to_string("scripts/rhai/lint.rhai").expect("read lint task source");
+            std::fs::read_to_string("scripts/archive/rhai/lint.rhai").expect("read lint task source");
         let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
             .arg("--framed-worker")
             .stdin(Stdio::piped())
@@ -171,7 +171,7 @@ fn framed_worker_captures_compat_fallback_print_output() {
             api_version: SCRIPT_API_VERSION,
             operation: ScriptOperation::Run,
             profile: ScriptProfile::Local,
-            source_label: "scripts/rhai/lint.rhai".into(),
+            source_label: "scripts/archive/rhai/lint.rhai".into(),
             source,
             project_root: Some(env!("CARGO_MANIFEST_DIR").into()),
             invocation_temp_root: None,

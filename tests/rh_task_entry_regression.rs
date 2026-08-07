@@ -260,6 +260,18 @@ fn artifact_verification_uses_native_bundled_execution() {
 }
 
 #[test]
+fn lint_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/lint.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+}
+
+#[test]
 fn agenterm_net_research_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/agenterm-net-research.rh");
     assert!(source.contains("fn entry("));
