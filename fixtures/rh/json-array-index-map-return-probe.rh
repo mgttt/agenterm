@@ -1,0 +1,19 @@
+fn only_match(root) {
+    let matches = [];
+    matches.push(std::path::join(root, "a").display);
+    if matches.len != 1 {
+        return #{
+            error: "count",
+            path: ""
+        };
+    }
+    #{
+        error: "",
+        path: matches[0]
+    }
+}
+
+fn entry() {
+    only_match(".");
+    0
+}

@@ -1,0 +1,13 @@
+fn entry() {
+    let identities = #{};
+    let unique = #{};
+    let owned_ids = #{};
+    let id = "proc-1";
+    identities[id] = "identity-a";
+    owned_ids[id] = 1;
+    unique[id] = #{ executable_name: "agenterm.exe" };
+    if !identities.contains(id) {
+        return rh::fail("missing_identity");
+    }
+    3
+}

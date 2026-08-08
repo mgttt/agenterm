@@ -1,0 +1,16 @@
+fn set_state(states) {
+    let evidence_key = "gate-a";
+    states[evidence_key] = #{
+        executed: true,
+        failed: false,
+        root_cause: "",
+        observed: true
+    };
+    states
+}
+
+fn entry() {
+    let states = #{ failed: false };
+    set_state(states);
+    0
+}

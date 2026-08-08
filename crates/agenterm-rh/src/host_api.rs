@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 70;
+pub const RH_CODEGEN_REVISION: u32 = 73;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1358,6 +1358,23 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
+         fn rh_json_int_path_key_field(\n\
+             value: &serde_json::Value,\n\
+             path: &[&str],\n\
+             key: &str,\n\
+             field: &str,\n\
+         ) -> INT {\n\
+             match rh_json_get_path_key(value, path, key).get(field) {\n\
+                 Some(node) => rh_json_as_i64(node),\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\n\
+                         \"json_int_path_key_field: {}.{key}.{field}\",\n\
+                         path.join(\".\")\n\
+                     ));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
          fn rh_json_array_get(value: &serde_json::Value, index: INT) -> serde_json::Value {\n\
              match value.as_array().and_then(|items| {\n\
                  usize::try_from(index).ok().and_then(|index| items.get(index))\n\
@@ -1398,6 +1415,18 @@ pub fn emit_host_runtime(out: &mut String) {
                  None => {\n\
                      let _ = rh_fail(&format!(\"string_list_index: {index}\"));\n\
                      String::new()\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_string_list_set(items: &mut Vec<String>, index: INT, value: &str) -> INT {\n\
+             match usize::try_from(index) {\n\
+                 Ok(index) if index < items.len() => {\n\
+                     items[index] = value.to_owned();\n\
+                     0\n\
+                 }\n\
+                 _ => {\n\
+                     let _ = rh_fail(&format!(\"string_list_index: {index}\"));\n\
+                     0\n\
                  }\n\
              }\n\
          }\n\n\
@@ -1593,6 +1622,50 @@ pub fn emit_host_runtime(out: &mut String) {
                  },\n\
                  None => {\n\
                      let _ = rh_fail(&format!(\"json_set_path_key: {}\", path.join(\".\")));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
+         fn rh_json_set_path_index(\n\
+             target: &mut serde_json::Value,\n\
+             path: &[&str],\n\
+             index: INT,\n\
+             value: serde_json::Value,\n\
+         ) -> INT {\n\
+             match rh_json_path_mut(target, path) {\n\
+                 Some(node) => match node.as_array_mut() {\n\
+                     Some(items) => match usize::try_from(index) {\n\
+                         Ok(index) => {\n\
+                             if index <= items.len() {\n\
+                                 if index == items.len() {\n\
+                                     items.push(value);\n\
+                                 } else {\n\
+                                     items[index] = value;\n\
+                                 }\n\
+                                 0\n\
+                             } else {\n\
+                                 let _ = rh_fail(&format!(\n\
+                                     \"json_set_path_index: {}[{index}]\",\n\
+                                     path.join(\".\")\n\
+                                 ));\n\
+                                 0\n\
+                             }\n\
+                         }\n\
+                         Err(_) => {\n\
+                             let _ = rh_fail(&format!(\n\
+                                 \"json_set_path_index: {}[{index}]\",\n\
+                                 path.join(\".\")\n\
+                             ));\n\
+                             0\n\
+                         }\n\
+                     },\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_set_path_index: {}\", path.join(\".\")));\n\
+                         0\n\
+                     }\n\
+                 },\n\
+                 None => {\n\
+                     let _ = rh_fail(&format!(\"json_set_path_index: {}\", path.join(\".\")));\n\
                      0\n\
                  }\n\
              }\n\
