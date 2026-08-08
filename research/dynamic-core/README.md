@@ -41,6 +41,98 @@ Q0's code sits at the top level of this directory.
 
 ---
 
+# 技术清单 — the horizontal read
+
+The question board above is **vertical**: one question, one verdict, one experiment.
+This section is **horizontal**: one *class of technique* per line, with the number that
+was actually measured and where it came from. It is the cross-cut of Q0–Q10, and it is
+the thing you hand to someone who has to *choose* mechanisms rather than *settle* a
+question.
+
+**Provenance is mandatory and is the point of this section.** Every line carries one of:
+
+- **[实测]** — a number produced by a Q in this track, on the host stated below, with a
+  reproduce command in that Q's `RESULTS.md`.
+- **[转述未验]** — carried from [`plan/reference-cross-target-execution.md`](../../plan/reference-cross-target-execution.md)
+  (below: **R1**) and **never reproduced here**. R1's own §11 warns that its §2/§3/§5/§7/§8
+  had **no working WebSearch/WebFetch** — those are model knowledge. R1 §4/§6 *were*
+  checked against live primary sources on 2026-08-08; they are still **not our
+  measurements**, and are marked **[转述·一手查证]**.
+
+**No third category is allowed.** A transcription is never promoted to a conclusion.
+
+> **Host for every [实测] number unless stated otherwise:** Windows Server 2022
+> Datacenter 10.0.20348 (real machine), x86_64, `rustc 1.97.0`, `-O`.
+> **Linux/SysV artifacts and all aarch64 artifacts are byte-measured and
+> encoder-validated, NOT executed** (no WSL, no ARM host) — track-wide posture, restated
+> here so no row is read as "runs on Linux".
+
+## ① Execution — how the payload's own logic runs
+
+| technique | verdict | measured | provenance |
+|---|---|---|---|
+| **Interpretation** | **Required, and must be first-class** — not a patch bolted onto a JIT-shaped design | eval-core **55 LOC / 1908 B**, whole interpreter 136 LOC / **3177 B** (= 21% of the Q1 lowerer's 14819 B); **ISA-specific LOC in eval-core = 0** (grep-verified), which collapses Q5's per-ISA 307–350 LOC bucket to ≈0; **OS-bound payloads 1.0×**, compute-bound **≈77× vs optimized native** (≈5× vs Q1's naive lowering); runs the **byte-identical unchanged** Q1 IR — the IR is a *complete* interpretable backend surface, not a subset | **[实测] Q9** ([`interp/RESULTS.md`](./interp/RESULTS.md)); the "must be first-class" follows from **[实测] Q8** |
+| **JIT / lowering to native** | **A conditional accelerator, not a floor** — it is the piece the platform can take away | X = **3003 B** flat-safe (in-kernel jump-table version ~2777) against a minimal kernel of **~2.93 KB** → **X ≈ the whole kernel**; in-kernel wins total delivery by ~1.5 KB, out-of-kernel halves the frozen TCB (~2.93 KB vs ~6.2–6.4 KB) — a real no-free-lunch tradeoff. Under ACG it is simply unavailable (see ⑥) | **[实测] Q2** ([`lowering/README.md`](./lowering/README.md)) + **[实测] Q8** ([`platform/RESULTS.md`](./platform/RESULTS.md)) |
+| **copy-and-patch stencil** | **Measured, and it does not pay at this scale.** R1 §10.1 ranked it #1 of the untried techniques on the argument that it dissolves the Q2 tradeoff. **It does not** — X *grew* | The pure `memcpy` + relocation applier **is** tiny as predicted (**651 B**) — but that was never the expensive part: **opcode decode/dispatch survives as code and dominates** (`emit` 3541 B). Whole runtime code **4515 B**, whole footprint code+data in Q2's own口径 **5826 B ≈ 1.94× Q2's 3003 B**, frozen TCB in-kernel ~8.7 KB vs Q2's ~6.2 KB. **Both endpoints of the tradeoff move up; its shape is preserved.** Bigger than Q2's hand-written lowerer *and* than Q9's interpreter (3177 B). All three payloads execute byte-identically, so the numbers rest on a working mechanism. Boundaries found: control flow **will not stencilize** (a stencil cannot leave CPU flags live across its boundary; a branch target is a layout-time offset) → ~20 B of residual encoder; `CALL` arity is structural, not a hole → per-`argc` variants; stencil table scales **opcodes × ISAs** | **[实测] Q10** ([`stencil/RESULTS.md`](./stencil/RESULTS.md)); the hypothesis it refutes is **[转述未验] R1 §7.4/§8.1/§10.1** |
+| **AOT (pre-lowered native, no runtime codegen)** | **Trivially available**, and it is the one codegen route that survives a hardened process — at the cost of being one-shot | Q0's variant-B payloads *are* precompiled flat native blobs, mapped and jumped, executed on Windows. Q8-T1 measured that memory flipped to RX **before** ACG is enabled still executes **after** — i.e. "lay all the code down before the lock" works, but you can never generate more | **[实测] Q0** ([`RESULTS.md`](./RESULTS.md)) + **[实测] Q8 J5-T1** |
+
+## ② Reach — getting to code that already exists
+
+| technique | verdict | measured | provenance |
+|---|---|---|---|
+| **Symbol resolution** (`GetProcAddress` / `dlsym`) | **First-class and constantly available** — the one reach mechanism nothing has taken away | ACG (`ProhibitDynamicCode`) does **not** touch `LoadLibraryA`/`GetProcAddress`; with ACG on, the probe keeps calling kernel32 exports and printing normally. It needs no executable memory | **[实测] Q8 J6** |
+| **FFI — invoke any address from a data description of its args** | **The load-bearing wall.** With ③+④ the kernel implements *nothing* and still covers new capabilities — but only over the integer/pointer word subset | Three capabilities of divergent shape (mmap-file arity 7, dir arity 2, socket arity 3) added **0 kernel bytes** and did **not** force ④'s arity ceiling (11) up — max observed native arity **7**. Q0's 7→11 was a **one-time step, not a per-capability slope**. **Boundary (honest):** float/SIMD args, struct-by-value, varargs, `sret` are *shape* limits ④ cannot express at any arity — out of scope, not solved | **[实测] Q6** ([`primitives/RESULTS.md`](./primitives/RESULTS.md)); exec-memory independence **[实测] Q8 J6** |
+| **Raw syscall** | **Split the primitive: this half has a completely different foundation from symbol resolution** | Windows: unused by construction — Q0's kernel `raw_syscall` returns −1 and the Windows path goes entirely through ③-symbol + ④. Linux: the adapters' only reach mechanism (**byte-measured, not executed** — no WSL) | **[实测] Q8 J6 / Q0** for the Windows half; Linux half **byte-measured only** |
+| — the OpenBSD hazard | If true, raw syscall issued **from generated code** kills the process (`msyscall`/pinsyscalls, 7.3+) — which would make the "raw-syscall primitive + emit it into JIT memory" design fatal-by-construction there | **not measured — no OpenBSD host.** Q8 files it explicitly as an unverified transcription | **[转述未验] R1 §7.1**, restated as unverified in Q8's credibility table |
+
+## ③ Description — the class the four-primitive model made invisible
+
+| technique | verdict | measured | provenance |
+|---|---|---|---|
+| **`Declare` / layout query** (`GetSystemInfo`, `RtlAddFunctionTable`, Linux BTF) | **A real, distinct concern — mechanically not a new primitive, conceptually yes.** The diagnosis: **reaching an *address* ≠ reaching a *description*.** `sym` resolves symbol→address; **no amount of `sym` answers `offsetof`**, and nothing in ①②③④ produces an offset | Q6 ran all three capabilities with **baked** offsets (`WIN32_FIND_DATAA.cFileName`@44, `sockaddr_in.sin_port`@2, `SYSTEM_INFO.dwPageSize`@4 — baked *even to read the host's own answer*). Kernel cost of promoting Declare to a uniform in-kernel query channel = **+182 B `.text`** (550→732), and it is **avoidable → 0** if left as a ③+④ usage pattern + a payload-side baked table. **Claim R of §1.1 ("nothing unreachable") is falsified** for the layout class | **[实测] Q6 ②③**; the query-form requirement independently reached by **[实测] Q7 L3a**; the CO-RE/BTF mechanism itself is **[转述·一手查证] R1 §4.1e** |
+| **Cost of not doing it** | Layout constants get **baked into the artifact**, and the failure mode when the platform's struct changes is a **silently wrong offset, not an error** | Q7's oracle is a **stub** (`FieldSrc::Queried` carries the answer inline) — the finding is "L3a needs a query channel", **not** "here is the oracle". Where a host publishes nothing machine-readable (Windows system structs), the fact is **irreducibly baked** | **[实测] Q6 ②** + **[实测] Q7 deviation 3** |
+
+## ④ Distribution & reuse
+
+| technique | verdict | measured | provenance |
+|---|---|---|---|
+| **Content addressing** | Dedup + version coexistence + **no registry, no anointing** — at a cost that is **O(1) in adapter count** | Loader mechanism = **+609 B** in-kernel over the Q0 embed loader (Linux, the clean number); **+1648 B** more to *verify* content on load. Two payloads sharing a file adapter: CA 1058 B vs baked 1274 B at N=2, saving **linear in N**. Incompatible v1/v2 coexist by hash and **both run**. Boundary: it dedups **bytes, not behavior**, and provides **no name→hash discovery** — the one place anointing could re-enter | **[实测] Q3** ([`reuse/RESULTS.md`](./reuse/RESULTS.md)) |
+| **Table-driven marshalling** (OS-interface content as data) | For the **single-native-call family**, capability growth becomes **pure data** over a fixed engine | Engine = **70 LOC fixed** single-call core (+42 L3a struct-building, +47 schema types → ~70–112 fixed LOC), vs Q1's **~90–110 LOC/target that grows per intent AND per target**. Marginal **code** cost of +1 intent = **0**, of +1 same-ISA target = **0**; all growth is data (~5–13 LOC/intent, ~57–58 LOC/target). Discipline is structurally checked: `grep -c 'abi.name ==' marshal.rs` → **0** (no per-target branch); `match .*intent` hits **only a doc comment**. Emitted bytes ≤ Q1 (Win64 rhp 1216 vs 1249). Executes | **[实测] Q7** ([`tables/RESULTS.md`](./tables/RESULTS.md)) |
+| — where it stops | **L3b orchestration/control flow** (multi-call dataflow, SysV `fork`+branch — *no flat table has a branch*) and **I2 cross-ISA restructuring** (aarch64 has no `open`/`fork`: the syscall *set* changes shape, not just its number). Forcing either into data = inventing a call-sequencing bytecode = **the IDL slide** | `spawn_boundary()`: tablable-as-data **1**, needs-query-channel **2**, **irreducibly code 5**. Also unchecked by any schema: whether symbol index 1 *really is* `CreateFileA` — the naming *binding truth* stays trust | **[实测] Q7 ⑤**; I2 folded in from **[实测] Q5**, analyzed not executed |
+| **Relocation / flat-blob discipline** | A flat, non-relocated blob that is itself a **code generator** carries constraints Q0's precompiled payloads never had: it must be **memset-free and jump-table-free** | `llvm-objdump` located a real `jmpq *%rcx` jump table in the emit path; suppressed with `-C llvm-args=-min-jump-table-entries=200` plus taking scratch from primitive ① instead of `memset`. **Measured cost: +8% on X** (2777 → 3003 B) and a more fragile build | **[实测] Q2** (spec §8 decision trace; build scripts carry the flag) |
+| — placement reach | **Real, and hit in practice.** `R_X86_64_PC32` holes silently truncate beyond **±2 GB**; a "give me N bytes" memory primitive that does not guarantee proximity **fails silently, not loudly** | Q10's applier had to co-locate code / register file / const pool / *a copy of the env table* in **one arena** (flipping only the code sub-range to RX) so every rip-relative hole stays in reach. **This confirms R1 §10.3: primitive ① is missing a placement-constraint parameter.** The aarch64 `CALL26` ±128 MB half remains **[转述未验]** (no ARM host) | **[实测] Q10 ④** for the x86 PC32 half; **[转述未验] R1 §7.4/§10.3** for the rest |
+
+## ⑤ Verifiability
+
+| technique | verdict | measured | provenance |
+|---|---|---|---|
+| **Structural equivalence guard + diverse double-compilation** | **A construction gate, not an after-the-fact check** — and it is nearly free | **~55 LOC** of guard (riding on ~60 LOC of region instrumentation coextensive with the lowerer's own control flow); **0 extra bytes in the artifact**; needs **no execution** and no second OS. A mutated Neutral byte makes `build` return `Err` and yields **no runnable bytes** (negative test passes) | **[实测] Q4** ([`equiv/RESULTS.md`](./equiv/RESULTS.md)) |
+| — why a whole-image `memcmp` cannot be the invariant | It passes **only** for `pure_compute`; it would reject every real payload | The strict **Neutral** regions *are* byte-identical across targets (246 / 676 / 623 bytes) — but the shared path also contains **frame size (M1)** and the **entry ctx register (M2)**, which are **baked ABI facts** and byte-*divergent* while behaviourally trivial. Hence: compare **by region** (Neutral = bytes, Control = target label, Frame/CtxReg/Intent = quarantined). **Byte-identity is strictly stronger than equivalence even inside the shared core** | **[实测] Q4** (a Q4-new finding Q1 did not surface) |
+| — the ceiling | Structurally unverifiable fraction = the intent regions = Q1's L1–L5: **0% pure → ~30–41% file-I/O → ~45–56% spawn**. Below that: after-the-fact differential testing (Tier B), collapsing to Tier C where a target is un-runnable or (L5) where equivalence **cannot even be stated** neutrally | **[实测] Q4 ②④** |
+
+## ⑥ Platform-imposed — not chosen, must be handled
+
+| technique | verdict | measured | provenance |
+|---|---|---|---|
+| **Three ways to obtain executable memory** (`RW→RX` flip / direct RWX / section object) | **Primitive ② must be polymorphic.** Under default policy all three work; under ACG **all three die** | Default `DynamicCode` policy reads **0x0** (ACG is **opt-in**): M1/M2/M3 each jump in and return 42. With ACG on: M1 fails at `VirtualProtect(→RX)`, M2 at `VirtualAlloc(RWX)`, M3 at `MapViewOfFile(FILE_MAP_EXECUTE)` — **all three, all `1655 = ERROR_DYNAMIC_CODE_BLOCKED`** (code from this machine's own `winerror.h`). Two conditional windows measured: pre-ACG RX survives (one-shot AOT), and `AllowThreadOptOut` + per-thread opt-out restores the flip | **[实测] Q8 J1–J5**. This **corrects R1 §7.1**, which says ACG cuts *two* paths |
+| — consequence | On an externally-imposed ACG process (and, if R1 is right, iOS), the only general legal path left is **interpretation** | Q8 → Q9: interpretation is measured at 3177 B and 1.0× on OS-bound work — the fallback is affordable | **[实测] Q8 §对四原语模型的影响** + **[实测] Q9** |
+| **Not yet handled by any experiment** | I-cache coherence across threads (ARM/RISC-V; the *other* thread needs its own `ISB`); CET-IBT `ENDBR64` / ARM BTI landing pads / arm64e PAC signing; Windows x64 unwind registration (`RtlAddFunctionTable`, and the leaf-function exemption); TLS access models; code retirement | **nothing measured.** Q6's Publish half is an explicit **stub** (call shape only, not a real unwind registration) | **[转述未验] R1 §7.2/§10.5**; stub status **[实测] Q6 deviation 4** |
+| **Other platforms' policies** (Linux `MemoryDenyWriteExecute` / `MFD_NOEXEC_SEAL`, macOS `MAP_JIT` + entitlement, iOS "no legal path at all", OpenBSD `wxallowed`) | If iOS is as described it is the one **hard** gap; everything else looks policy-configurable | **not measurable here** (no WSL, not macOS/iOS/OpenBSD). Q8 keeps every one of these as an unverified transcription rather than folding them into its verdict | **[转述未验] R1 §7.1**, listed row-by-row in Q8's credibility table |
+
+## ⑦ In the space, not yet used by us
+
+Everything in this group is **[转述未验]** or **[转述·一手查证]** — *no* line here has a
+number of ours behind it. It is here so the space is visible, not so it can be cited.
+
+| technique | why it is on the list | provenance |
+|---|---|---|
+| **Binary translation** (QEMU TCG, Rosetta 2, FX!32) | The survivors all **avoid** the OS axis rather than solving it (jacket into native libs / sit on an already-ported OS). The one project that really carried a foreign OS surface (Lx86) died of it. Directly usable idea: **persist the lowering result instead of redoing it every load** — three independent convergences (FX!32, Windows XTA cache, Rosetta 2) | **[转述未验] R1 §3.1–3.9, §10.8** |
+| **eBPF-style verifier + load-time JIT** | The only shipping system whose constraints resemble ours. Also the clearest "you cannot have both": kernel `verifier.c` = **20,065 lines**, three orders of magnitude over our kernel; userspace eBPF runtimes simply **do not** reimplement it (rbpf's `verifier.rs` = 13 KB) | **[转述·一手查证] R1 §4.1b/§4.1f** (kernel source + GitHub, checked 2026-08-08) |
+| **CO-RE / load-time binding against a host description** | The shipping answer to "keep layout out of the payload": payload carries *name + type + relocation record*, loader carries the **layout oracle**, offsets are computed at bind time and folded in. Q7 reached the same shape from the other direction but built **no oracle** | **[转述·一手查证] R1 §4.1e**; our half **[实测] Q7 L3a** |
+| **"Take the intersection, not the union"** | eBPF's 11 registers are the **intersection of real 64-bit ABIs**, not a neutral choice — deliberately sacrificing neutrality (11 regs, 32-bit zero-extension) buys a per-arch JIT of **~4k lines** instead of a register allocator, and pushes edge architectures onto the interpreter. We have never priced this option | **[转述·一手查证] R1 §4.1a/§10.7** |
+
+---
+
 # Q0 — 1 layer vs 2 layer, measured
 
 Builds one dynamic core two ways — **1 layer** (mechanism + platform adaptation
