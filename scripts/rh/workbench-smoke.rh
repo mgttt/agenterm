@@ -8,16 +8,14 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
+let workbench_declared_evidence = [
+    "ux.workbench-inline-edit",
+    "ux.workbench-compact-tree",
+    "ux.workbench-proxy-archived"
+];
+
 fn json_null() {
     rhai::json::parse("null")
-}
-
-fn declared_evidence_ids() {
-    [
-        "ux.workbench-inline-edit",
-        "ux.workbench-compact-tree",
-        "ux.workbench-proxy-archived"
-    ]
 }
 
 fn json_cli(context, cli, arguments) {
@@ -43,11 +41,12 @@ fn text_cli(context, cli, arguments) {
 }
 
 fn tab_index(snapshot, target) {
-    let tabs = snapshot.tabs;
-    for index in 0..tabs.len {
-        if tabs[index].id == target {
+    let index = 0;
+    for tab in snapshot.tabs {
+        if tab.id == target {
             return index;
         }
+        index += 1;
     }
     throw "workbench_tab_missing:" + target;
 }
@@ -107,10 +106,9 @@ fn double_click_tab_message(gui_child, snapshot, target) {
 fn wait_tab_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tabs = snapshot.tabs;
-        for index in 0..tabs.len {
-            if tabs[index].id == target
-                    && tabs[index].render.text.width > 0 {
+        for tab in snapshot.tabs {
+            if tab.id == target
+                    && tab.render.text.width > 0 {
                 return 0;
             }
         }
@@ -122,9 +120,7 @@ fn wait_tab_render(context, cli, target) {
 fn wait_tab_label_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tabs = snapshot.tabs;
-        for index in 0..tabs.len {
-            let tab = tabs[index];
+        for tab in snapshot.tabs {
             if tab.id == target {
                 let tab_render = tab.render;
                 let tab_actions = tab.actions;
@@ -143,11 +139,12 @@ fn wait_tab_label_render(context, cli, target) {
 }
 
 fn active_tab_index(snapshot) {
-    let tabs = snapshot.tabs;
-    for index in 0..tabs.len {
-        if tabs[index].active != 0 {
+    let index = 0;
+    for tab in snapshot.tabs {
+        if tab.active != 0 {
             return index;
         }
+        index += 1;
     }
     throw "workbench_active_tab_missing";
 }
@@ -364,7 +361,7 @@ fn retain_failure_snapshot(context, cli) {
 
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in declared_evidence_ids() {
+        for id in workbench_declared_evidence {
             print(id);
         }
         return 0;

@@ -8,9 +8,7 @@
 import "scripts/rh/lib/test_harness" as test_harness;
 // Inlined from scripts/rh/lib/script_smoke_helpers.rh for native AOT (do not edit lib copy).
 
-fn script_smoke_empty_env() {
-    #{}
-}
+let script_smoke_empty_env = #{};
 
 // Public-process and binary-protocol helpers for the Script Runtime journey (INT-only).
 
@@ -91,19 +89,31 @@ fn safe_command_arguments(program, arguments) {
                     || safe[operation_index] == "run"
                     || safe[operation_index] == "check"
             ) {
-        safe[operation_index + 1] = "<content>";
-        let index = operation_index + 2;
+        let redacted = [];
+        let index = 0;
         while index < safe.len {
-            if safe[index] == "--" {
-                let content_index = index + 1;
-                while content_index < safe.len {
-                    safe[content_index] = "<content>";
-                    content_index += 1;
+            if index == operation_index + 1 {
+                redacted.push("<content>");
+            } else if index > operation_index + 1 {
+                let after_dash = 0;
+                let scan = operation_index + 2;
+                while scan < index {
+                    if safe[scan] == "--" {
+                        after_dash = 1;
+                    }
+                    scan += 1;
                 }
-                index = safe.len;
+                if after_dash != 0 {
+                    redacted.push("<content>");
+                } else {
+                    redacted.push(safe[index]);
+                }
+            } else {
+                redacted.push(safe[index]);
             }
             index += 1;
         }
+        return redacted;
     }
     safe
 }
@@ -242,7 +252,7 @@ fn cli_text(context, cli, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env(),
+        script_smoke_empty_env,
         []
     );
     let text = result.stdout;
@@ -257,7 +267,7 @@ fn cli_json(context, cli, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env(),
+        script_smoke_empty_env,
         []
     );
     rhai::json::parse(result.stdout)
@@ -270,7 +280,7 @@ fn direct_text(context, script, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env(),
+        script_smoke_empty_env,
         []
     );
     let text = result.stdout;
@@ -285,7 +295,7 @@ fn direct_json(context, script, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env(),
+        script_smoke_empty_env,
         []
     );
     rhai::json::parse(result.stdout)
@@ -304,7 +314,7 @@ fn failure_text(
         arguments,
         expected_exit,
         audit_path,
-        script_smoke_empty_env(),
+        script_smoke_empty_env,
         []
     );
     result.stdout + result.stderr
@@ -366,7 +376,7 @@ fn start_script_client(
         cli,
         command_arguments,
         audit_path,
-        script_smoke_empty_env()
+        script_smoke_empty_env
     ).start()
 }
 
@@ -401,7 +411,7 @@ fn start_http_fixture(
             "10000"
         ],
         "",
-        script_smoke_empty_env()
+        script_smoke_empty_env
     ).start()
 }
 
@@ -522,7 +532,7 @@ fn invoke_framed_worker(
         script,
         ["--framed-worker"],
         "",
-        script_smoke_empty_env()
+        script_smoke_empty_env
     );
     command.stdin_bytes(input_bytes);
     command.capture_limit(262144);
@@ -1921,14 +1931,31 @@ fn assert_runtime_and_framing(
             && recovered.payload.value == 42,
         "script_framed_recovery_mismatch"
     );
-    let cancel_invoke = framed_invocation(
-        "cancel-invoke",
-        "cancel-running",
-        "loop {}",
-        1
-    );
-    cancel_invoke.payload.budgets.wall_time_ms = 10000;
-    cancel_invoke.payload.budgets.operations = 10000000;
+    let cancel_invoke = #{
+        frame_version: 1,
+        frame_id: "cancel-invoke",
+        kind: "invoke",
+        payload: #{
+            envelope_version: 2,
+            invocation_id: "cancel-running",
+            api_version: 2,
+            operation: "eval",
+            profile: "pure",
+            source_label: "smoke",
+            source: "loop {}",
+            arguments: [],
+            budgets: #{
+                source_bytes: 262144,
+                operations: 10000000,
+                call_depth: 64,
+                expression_depth: 64,
+                collection_items: 10000,
+                string_bytes: 262144,
+                output_bytes: 65536,
+                wall_time_ms: 10000
+            }
+        }
+    };
     let cancel_bytes = json_frame(cancel_invoke);
     cancel_bytes.append(
         json_frame(#{
@@ -3022,7 +3049,11 @@ fn assert_audit(
         }
     }
     test_harness::require(records.len >= 10, "script_audit_record_count");
-    let failure_codes = #{};
+    let saw_script_api_unavailable = 0;
+    let saw_limit_wall_time = 0;
+    let saw_host_hard_timeout = 0;
+    let saw_host_worker_crash = 0;
+    let saw_host_concurrency_limit = 0;
     let timeout_record = 0;
     let crash_record = 0;
     let concurrency_record = 0;
@@ -3030,8 +3061,20 @@ fn assert_audit(
     let pure_record = 0;
     for record in records {
         let failure_code = "" + record.failure_code;
-        if failure_code != "" {
-            failure_codes[failure_code] = true;
+        if failure_code == "script_api_unavailable" {
+            saw_script_api_unavailable = 1;
+        }
+        if failure_code == "limit_wall_time" {
+            saw_limit_wall_time = 1;
+        }
+        if failure_code == "host_hard_timeout" {
+            saw_host_hard_timeout = 1;
+        }
+        if failure_code == "host_worker_crash" {
+            saw_host_worker_crash = 1;
+        }
+        if failure_code == "host_concurrency_limit" {
+            saw_host_concurrency_limit = 1;
         }
         if record.cancelled == 1 && record.timed_out == 1 {
             timeout_record = 1;
@@ -3063,18 +3106,26 @@ fn assert_audit(
             "script_audit_fingerprint_mismatch"
         );
     }
-    for required_code in [
-        "script_api_unavailable",
-        "limit_wall_time",
-        "host_hard_timeout",
-        "host_worker_crash",
-        "host_concurrency_limit"
-    ] {
-        test_harness::require(
-            failure_codes.contains(required_code),
-            "script_audit_failure_code_missing:" + required_code
-        );
-    }
+    test_harness::require(
+        saw_script_api_unavailable != 0,
+        "script_audit_failure_code_missing:script_api_unavailable"
+    );
+    test_harness::require(
+        saw_limit_wall_time != 0,
+        "script_audit_failure_code_missing:limit_wall_time"
+    );
+    test_harness::require(
+        saw_host_hard_timeout != 0,
+        "script_audit_failure_code_missing:host_hard_timeout"
+    );
+    test_harness::require(
+        saw_host_worker_crash != 0,
+        "script_audit_failure_code_missing:host_worker_crash"
+    );
+    test_harness::require(
+        saw_host_concurrency_limit != 0,
+        "script_audit_failure_code_missing:host_concurrency_limit"
+    );
     test_harness::require(
         timeout_record
             && crash_record

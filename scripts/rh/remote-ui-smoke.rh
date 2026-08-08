@@ -9,28 +9,28 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-fn declared_evidence_ids() {
-    [
-        "ui.replaceable-client",
-        "ux.adaptive-tabs",
-        "ux.hierarchical-tabs",
-        "ux.detach-first-window-close",
-        "ux.live-close-confirmation",
-        "ux.locale-consistency",
-        "ux.keyboard-surface-navigation",
-        "ux.modal-wait",
-        "ux.mouse-scrollback",
-        "ux.semantic-ui-automation",
-        "ux.semantic-window-control",
-        "ux.settings-isolation",
-        "ux.system-menu-clipboard",
-        "ux.theme-render-parity",
-        "ux.terminal-selection-copy",
-        "ux.working-context-cwd",
-        "ux-parity.remote-ui.replaceable-client",
-        "ux-parity.remote-ui.selection",
-        "ux-parity.window-focus-contract"
-    ]
+fn remote_ui_declared_evidence() {
+    return [
+    "ui.replaceable-client",
+    "ux.adaptive-tabs",
+    "ux.hierarchical-tabs",
+    "ux.detach-first-window-close",
+    "ux.live-close-confirmation",
+    "ux.locale-consistency",
+    "ux.keyboard-surface-navigation",
+    "ux.modal-wait",
+    "ux.mouse-scrollback",
+    "ux.semantic-ui-automation",
+    "ux.semantic-window-control",
+    "ux.settings-isolation",
+    "ux.system-menu-clipboard",
+    "ux.theme-render-parity",
+    "ux.terminal-selection-copy",
+    "ux.working-context-cwd",
+    "ux-parity.remote-ui.replaceable-client",
+    "ux-parity.remote-ui.selection",
+    "ux-parity.window-focus-contract"
+    ];
 }
 
 fn json_null() {
@@ -637,7 +637,21 @@ let failure = "";
 
 try {
     print("STEP start replaceable UI and let it start the independent server");
-    let gui = start_gui(context, gui_exe, cli);
+    let gui_command = configured_gui_command(
+        gui_exe,
+        context.address,
+        context.workspace_path,
+        context.settings_path,
+        context.instance_directory
+    );
+    let gui = gui_command.start();
+    wait_for_lease(
+        context,
+        cli,
+        gui,
+        1200,
+        "remote_ui_lease_timeout"
+    );
     owned_children.push(gui);
     let lease = json_cli(context, cli, ["ui-lease", "status"]);
 
@@ -663,7 +677,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        remote_ui_declared_evidence(),
         "ux-parity.remote-ui.replaceable-client"
     );
 
@@ -950,8 +964,22 @@ try {
     );
 
     print("STEP replace the GUI and recover the same live server state");
-    gui = start_gui(context, gui_exe, cli);
-    owned_children.push(gui);
+    let replacement_gui_command = configured_gui_command(
+        gui_exe,
+        context.address,
+        context.workspace_path,
+        context.settings_path,
+        context.instance_directory
+    );
+    let replacement_gui = replacement_gui_command.start();
+    wait_for_lease(
+        context,
+        cli,
+        replacement_gui,
+        1200,
+        "remote_ui_lease_timeout"
+    );
+    owned_children.push(replacement_gui);
     let replacement_lease = json_cli(context, cli, ["ui-lease", "status"]);
     let replacement_bootstrap = json_cli(
         context,
@@ -981,13 +1009,13 @@ try {
     );
 
     print("STEP recover hidden Tabs from toolbar, system menu, and status bar");
-    let tabs_button = require_window_control(gui.window_control(2104), "tabs_button");
-    let control_center_button = require_window_control(gui.window_control(2138), "control_center_button");
-    let settings_button = require_window_control(gui.window_control(2112), "settings_button");
-    let new_button = require_window_control(gui.window_control(2103), "new_button");
-    let locale_button = require_window_control(gui.window_control(2129), "locale_button");
-    let font_decrease_button = require_window_control(gui.window_control(2130), "font_decrease_button");
-    let font_increase_button = require_window_control(gui.window_control(2131), "font_increase_button");
+    let tabs_button = require_window_control(replacement_gui.window_control(2104), "tabs_button");
+    let control_center_button = require_window_control(replacement_gui.window_control(2138), "control_center_button");
+    let settings_button = require_window_control(replacement_gui.window_control(2112), "settings_button");
+    let new_button = require_window_control(replacement_gui.window_control(2103), "new_button");
+    let locale_button = require_window_control(replacement_gui.window_control(2129), "locale_button");
+    let font_decrease_button = require_window_control(replacement_gui.window_control(2130), "font_decrease_button");
+    let font_increase_button = require_window_control(replacement_gui.window_control(2131), "font_increase_button");
     let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
     let toolbar_layout = toolbar.layout.toolbar;
     let toolbar_locale = toolbar.locale;
@@ -1042,23 +1070,23 @@ try {
     );
     tabs_button.click();
     test_harness::require(tabs_button.visible, "remote_ui_toolbar_restore_invalid");
-    gui.window_message(0x0112, 0x1F20, 0);
+    replacement_gui.window_message(0x0112, 0x1F20, 0);
     test_harness::require(tabs_button.visible, "remote_ui_system_menu_hide_invalid");
-    gui.window_message(0x0112, 0x1F20, 0);
+    replacement_gui.window_message(0x0112, 0x1F20, 0);
     test_harness::require(tabs_button.visible, "remote_ui_system_menu_restore_invalid");
     tabs_button.click();
-    let hidden_rect = gui.window_client_rect();
-    gui.window_pointer("click", 36, hidden_rect.bottom - 13);
+    let hidden_rect = replacement_gui.window_client_rect();
+    replacement_gui.window_pointer("click", 36, hidden_rect.bottom - 13);
     test_harness::require(
         tabs_button.visible,
         "remote_ui_status_tabs_recovery_invalid"
     );
 
     print("STEP configure a new terminal before creation");
-    let initial_command = require_window_control(gui.window_control(2124), "initial_command");
-    let http_proxy = require_window_control(gui.window_control(2125), "http_proxy");
-    let https_proxy = require_window_control(gui.window_control(2126), "https_proxy");
-    let create_button = require_window_control(gui.window_control(2127), "create_button");
+    let initial_command = require_window_control(replacement_gui.window_control(2124), "initial_command");
+    let http_proxy = require_window_control(replacement_gui.window_control(2125), "http_proxy");
+    let https_proxy = require_window_control(replacement_gui.window_control(2126), "https_proxy");
+    let create_button = require_window_control(replacement_gui.window_control(2127), "create_button");
     let before_new_count = json_cli(
         context,
         cli,
@@ -1147,71 +1175,71 @@ try {
     let focus_message = 0x8003;
     let shortcut_message = 0x8002;
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 1,
+        replacement_gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_initial_focus_invalid"
     );
-    gui.window_message(shortcut_message, 0x28, 1);
+    replacement_gui.window_message(shortcut_message, 0x28, 1);
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 2,
+        replacement_gui.window_message(focus_message, 0, 0) == 2,
         "remote_ui_ctrl_down_invalid"
     );
-    gui.window_message(shortcut_message, 0x26, 1);
+    replacement_gui.window_message(shortcut_message, 0x26, 1);
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 1,
+        replacement_gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_ctrl_up_invalid"
     );
-    gui.window_message(shortcut_message, 0x25, 1);
+    replacement_gui.window_message(shortcut_message, 0x25, 1);
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 3,
+        replacement_gui.window_message(focus_message, 0, 0) == 3,
         "remote_ui_ctrl_left_invalid"
     );
-    gui.window_message(shortcut_message, 0x27, 1);
+    replacement_gui.window_message(shortcut_message, 0x27, 1);
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 1,
+        replacement_gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_ctrl_right_invalid"
     );
-    gui.window_message(shortcut_message, 0x28, 3);
+    replacement_gui.window_message(shortcut_message, 0x28, 3);
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 1,
+        replacement_gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_ctrl_shift_down_stole_focus"
     );
-    let shift_tab_input_before = text_cli(
+    let shift_tab_input_before_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    shift_tab_input_before.trim();
-    shift_tab_input_before = shift_tab_input_before.parse_int();
+    shift_tab_input_before_text.trim();
+    let shift_tab_input_before = shift_tab_input_before_text.parse_int();
     test_harness::require(
-        gui.window_message(shortcut_message, 0x09, 2) == 1,
+        replacement_gui.window_message(shortcut_message, 0x09, 2) == 1,
         "remote_ui_shift_tab_not_consumed"
     );
-    let shift_tab_input_after = text_cli(
+    let shift_tab_input_after_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    shift_tab_input_after.trim();
-    shift_tab_input_after = shift_tab_input_after.parse_int();
+    shift_tab_input_after_text.trim();
+    let shift_tab_input_after = shift_tab_input_after_text.parse_int();
     test_harness::require(
         shift_tab_input_after == shift_tab_input_before + 3,
         "remote_ui_shift_tab_pty_bytes_invalid"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        remote_ui_declared_evidence(),
         "ux-parity.window-focus-contract"
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
 
     print("STEP preview, cancel, and apply client-owned Settings");
-    let replacement_composer = require_window_control(gui.window_control(2101), "replacement_composer");
-    let settings_font = require_window_control(gui.window_control(2113), "settings_font");
-    let settings_size = require_window_control(gui.window_control(2114), "settings_size");
-    let settings_dark = require_window_control(gui.window_control(2115), "settings_dark");
-    let settings_light = require_window_control(gui.window_control(2116), "settings_light");
-    let settings_apply = require_window_control(gui.window_control(2117), "settings_apply");
-    let settings_cancel = require_window_control(gui.window_control(2118), "settings_cancel");
+    let replacement_composer = require_window_control(replacement_gui.window_control(2101), "replacement_composer");
+    let settings_font = require_window_control(replacement_gui.window_control(2113), "settings_font");
+    let settings_size = require_window_control(replacement_gui.window_control(2114), "settings_size");
+    let settings_dark = require_window_control(replacement_gui.window_control(2115), "settings_dark");
+    let settings_light = require_window_control(replacement_gui.window_control(2116), "settings_light");
+    let settings_apply = require_window_control(replacement_gui.window_control(2117), "settings_apply");
+    let settings_cancel = require_window_control(replacement_gui.window_control(2118), "settings_cancel");
     settings_button.click();
     test_harness::require(
         settings_font.visible
@@ -1265,19 +1293,19 @@ try {
     // same target click, synchronous public screenshot, and renderer-counter
     // sample.  AB/BA order counterbalances warmup and phase-order effects.
     let dark_round_one = measure_theme_render(
-        context, cli, gui, settings_button, settings_cancel,
+        context, cli, replacement_gui, settings_button, settings_cancel,
         settings_light, settings_dark, "dark", 1
     );
     let light_round_one = measure_theme_render(
-        context, cli, gui, settings_button, settings_cancel,
+        context, cli, replacement_gui, settings_button, settings_cancel,
         settings_dark, settings_light, "light", 1
     );
     let light_round_two = measure_theme_render(
-        context, cli, gui, settings_button, settings_cancel,
+        context, cli, replacement_gui, settings_button, settings_cancel,
         settings_dark, settings_light, "light", 2
     );
     let dark_round_two = measure_theme_render(
-        context, cli, gui, settings_button, settings_cancel,
+        context, cli, replacement_gui, settings_button, settings_cancel,
         settings_light, settings_dark, "dark", 2
     );
     let dark_duration_ms =
@@ -1306,10 +1334,10 @@ try {
     print(
         "THEME_RENDER_AB totals dark_ms=" + dark_duration_ms + " light_ms=" + light_duration_ms + " dark_redraws=" + dark_redraws + " light_redraws=" + light_redraws + " dark_paints=" + dark_paints + " light_paints=" + light_paints
     );
-    let render_before_zoom = sample_render_activity(context, cli, gui, 0);
+    let render_before_zoom = sample_render_activity(context, cli, replacement_gui, 0);
     font_increase_button.click();
     test_harness::require(
-        gui.window_message(focus_message, 0, 0) == 1,
+        replacement_gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_font_button_stole_terminal_focus"
     );
     let overridden_font = wait_effective_font_size(context, cli, 15, 1);
@@ -1333,7 +1361,7 @@ try {
     let render_after_zoom = sample_render_activity(
         context,
         cli,
-        gui,
+        replacement_gui,
         render_before_zoom.sequence
     );
     test_harness::require(
@@ -1365,7 +1393,7 @@ try {
     let render_after_idle = sample_render_activity(
         context,
         cli,
-        gui,
+        replacement_gui,
         render_after_zoom.sequence
     );
     let idle_redraws =
@@ -1383,27 +1411,30 @@ try {
                 == render_after_zoom.control_visibility_updates,
         "remote_ui_idle_mutated_native_controls"
     );
-    print(
-        "RENDER_ACTIVITY zoom_redraws=" + zoom_redraws + " zoom_paints=" + zoom_paints + " idle_redraws=" + idle_redraws + " idle_paints=" + idle_paints
-    );
-    let zoom_shift_tab_before = text_cli(
+    let render_activity =
+        "RENDER_ACTIVITY zoom_redraws=" + "" + zoom_redraws +
+        " zoom_paints=" + "" + zoom_paints +
+        " idle_redraws=" + "" + idle_redraws +
+        " idle_paints=" + "" + idle_paints;
+    print(render_activity);
+    let zoom_shift_tab_before_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    zoom_shift_tab_before.trim();
-    zoom_shift_tab_before = zoom_shift_tab_before.parse_int();
+    zoom_shift_tab_before_text.trim();
+    let zoom_shift_tab_before = zoom_shift_tab_before_text.parse_int();
     test_harness::require(
-        gui.window_message(shortcut_message, 0x09, 2) == 1,
+        replacement_gui.window_message(shortcut_message, 0x09, 2) == 1,
         "remote_ui_zoom_shift_tab_not_consumed"
     );
-    let zoom_shift_tab_after = text_cli(
+    let zoom_shift_tab_after_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    zoom_shift_tab_after.trim();
-    zoom_shift_tab_after = zoom_shift_tab_after.parse_int();
+    zoom_shift_tab_after_text.trim();
+    let zoom_shift_tab_after = zoom_shift_tab_after_text.parse_int();
     test_harness::require(
         zoom_shift_tab_after == zoom_shift_tab_before + 3,
         "remote_ui_zoom_shift_tab_pty_bytes_invalid"
@@ -1425,8 +1456,8 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    let settings_current_scope = require_window_control(gui.window_control(2133), "settings_current_scope");
-    let settings_reset_overrides = require_window_control(gui.window_control(2137), "settings_reset_overrides");
+    let settings_current_scope = require_window_control(replacement_gui.window_control(2133), "settings_current_scope");
+    let settings_reset_overrides = require_window_control(replacement_gui.window_control(2137), "settings_reset_overrides");
     settings_button.click();
     settings_current_scope.click();
     settings_reset_overrides.click();
@@ -1454,13 +1485,13 @@ try {
     );
     let cwd_x = cwd_bounds.left + cwd_width / 2;
     let cwd_y = cwd_bounds.top + cwd_height / 2;
-    gui.window_pointer("click", cwd_x, cwd_y);
+    replacement_gui.window_pointer("click", cwd_x, cwd_y);
     let cwd_path = std::path::join(
         context.run_directory,
         "cwd target"
     ).display;
     replacement_composer.set_text(cwd_path);
-    let replacement_send = require_window_control(gui.window_control(2102), "replacement_send");
+    let replacement_send = require_window_control(replacement_gui.window_control(2102), "replacement_send");
     replacement_send.click();
     let cwd_prepared = json_cli(context, cli, ["ui-bootstrap"]);
     let cwd_tab = find_tab(cwd_prepared, tab_id);
@@ -1477,9 +1508,9 @@ try {
             && cwd_composer.contains(cwd_path),
         "remote_ui_cwd_prepare_invalid"
     );
-    gui.window_pointer("click", cwd_x, cwd_y);
+    replacement_gui.window_pointer("click", cwd_x, cwd_y);
     replacement_composer.set_text("must-not-prepare");
-    gui.window_pointer("click", cwd_x, cwd_y);
+    replacement_gui.window_pointer("click", cwd_x, cwd_y);
     let cwd_after_cancel = text_cli(
         context,
         cli,
@@ -1805,8 +1836,8 @@ try {
             && child_bootstrap.tabs.len == 2,
         "remote_ui_new_child_invalid"
     );
-    let child_title_editor = require_window_control(gui.window_control(2105), "child_title_editor");
-    let child_edit_cancel = require_window_control(gui.window_control(2108), "child_edit_cancel");
+    let child_title_editor = require_window_control(replacement_gui.window_control(2105), "child_title_editor");
+    let child_edit_cancel = require_window_control(replacement_gui.window_control(2108), "child_edit_cancel");
     test_harness::require(
         child_title_editor.visible,
         "remote_ui_new_child_editor_missing"
@@ -1840,9 +1871,9 @@ try {
         "remote_ui_tree_expand_invalid"
     );
 
-    gui.window_pointer("click", 330, 64);
-    let tab_close_confirm = require_window_control(gui.window_control(2119), "tab_close_confirm");
-    let tab_close_cancel = require_window_control(gui.window_control(2120), "tab_close_cancel");
+    replacement_gui.window_pointer("click", 330, 64);
+    let tab_close_confirm = require_window_control(replacement_gui.window_control(2119), "tab_close_confirm");
+    let tab_close_cancel = require_window_control(replacement_gui.window_control(2120), "tab_close_cancel");
     test_harness::require(
         tab_close_confirm.visible && tab_close_cancel.visible,
         "remote_ui_tab_close_modal_missing"
@@ -1858,9 +1889,9 @@ try {
             && !tab_close_confirm.visible,
         "remote_ui_tab_close_cancel_invalid"
     );
-    gui.window_pointer("click", 330, 64);
-    let reopened_tab_close_confirm = require_window_control(gui.window_control(2119), "reopened_tab_close_confirm");
-    let reopened_tab_close_cancel = require_window_control(gui.window_control(2120), "reopened_tab_close_cancel");
+    replacement_gui.window_pointer("click", 330, 64);
+    let reopened_tab_close_confirm = require_window_control(replacement_gui.window_control(2119), "reopened_tab_close_confirm");
+    let reopened_tab_close_cancel = require_window_control(replacement_gui.window_control(2120), "reopened_tab_close_cancel");
     test_harness::require(
         reopened_tab_close_confirm.visible
             && reopened_tab_close_cancel.visible,
@@ -2021,11 +2052,11 @@ try {
     print("STEP edit title and note in place with Save and Cancel");
     let edited_title = "remote-edited-" + context.run_id;
     let edited_note = "note-" + context.run_id;
-    double_click_tab_text(context, cli, gui, tab_id);
-    let title_editor = require_window_control(gui.window_control(2105), "title_editor");
-    let note_editor = require_window_control(gui.window_control(2106), "note_editor");
-    let save_button = require_window_control(gui.window_control(2107), "save_button");
-    let cancel_button = require_window_control(gui.window_control(2108), "cancel_button");
+    double_click_tab_text(context, cli, replacement_gui, tab_id);
+    let title_editor = require_window_control(replacement_gui.window_control(2105), "title_editor");
+    let note_editor = require_window_control(replacement_gui.window_control(2106), "note_editor");
+    let save_button = require_window_control(replacement_gui.window_control(2107), "save_button");
+    let cancel_button = require_window_control(replacement_gui.window_control(2108), "cancel_button");
     test_harness::require(
         title_editor.visible && save_button.visible,
         "remote_ui_inline_editor_missing"
@@ -2044,7 +2075,7 @@ try {
             && !title_editor.visible,
         "remote_ui_inline_save_invalid"
     );
-    double_click_tab_text(context, cli, gui, tab_id);
+    double_click_tab_text(context, cli, replacement_gui, tab_id);
     title_editor.set_text(repeat_text("x", 4097));
     save_button.click();
     let rejected = json_cli(
@@ -2058,7 +2089,7 @@ try {
         "remote_ui_inline_oversize_not_rejected"
     );
     cancel_button.click();
-    double_click_tab_text(context, cli, gui, tab_id);
+    double_click_tab_text(context, cli, replacement_gui, tab_id);
     title_editor.set_text("must-not-save");
     cancel_button.click();
     let edit_cancelled = json_cli(
@@ -2087,7 +2118,7 @@ try {
         fixture_id.trim();
         sidebar_fixture_ids.push(fixture_id);
     }
-    gui.window_resize(900, 320);
+    replacement_gui.window_resize(900, 320);
     let sidebar_ui = json_null();
     let sidebar_ready = 0;
     for attempt in 0..1200 {
@@ -2102,7 +2133,7 @@ try {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     test_harness::require(
-        sidebar_ready && gui.state == "running",
+        sidebar_ready && replacement_gui.state == "running",
         "remote_ui_sidebar_projection_timeout"
     );
     let sidebar_scrollbar = sidebar_ui.layout.sidebar.scrollbar;
@@ -2135,14 +2166,14 @@ try {
     let sidebar_bottom_y =
         sidebar_scrollbar.track.top
             + sidebar_scrollbar.track.height - 2;
-    gui.window_pointer("down", sidebar_x, sidebar_thumb_y);
-    gui.window_pointer(
+    replacement_gui.window_pointer("down", sidebar_x, sidebar_thumb_y);
+    replacement_gui.window_pointer(
         "move-held",
         sidebar_x,
         sidebar_bottom_y
     );
-    gui.window_pointer("up", sidebar_x, sidebar_bottom_y);
-    gui.window_message(0x0113, 0, 0);
+    replacement_gui.window_pointer("up", sidebar_x, sidebar_bottom_y);
+    replacement_gui.window_message(0x0113, 0, 0);
     let sidebar_scrolled = json_null();
     for attempt in 0..400 {
         sidebar_scrolled = json_cli(context, cli, ["ui-snapshot"]);
@@ -2155,7 +2186,7 @@ try {
         sidebar_scrolled.layout.sidebar.scrollbar.offset > 0,
         "remote_ui_sidebar_scroll_did_not_move"
     );
-    gui.window_resize(1100, 760);
+    replacement_gui.window_resize(1100, 760);
     for fixture_id in sidebar_fixture_ids {
         text_cli(
             context,
@@ -2168,7 +2199,7 @@ try {
     let render_before_output = sample_render_activity(
         context,
         cli,
-        gui,
+        replacement_gui,
         render_after_idle.sequence
     );
     let scroll_marker =
@@ -2217,7 +2248,7 @@ try {
     let render_after_output = sample_render_activity(
         context,
         cli,
-        gui,
+        replacement_gui,
         render_before_output.sequence
     );
     let output_redraws =
@@ -2243,8 +2274,8 @@ try {
         scroll_tab.screen.max_scrollback > 0,
         "remote_ui_scrollback_bound_missing"
     );
-    gui.window_message(0x0113, 0, 0);
-    let client_rect = gui.window_client_rect();
+    replacement_gui.window_message(0x0113, 0, 0);
+    let client_rect = replacement_gui.window_client_rect();
     let track_height = client_rect.bottom - 26 - 104;
     let visible_rows = scroll_tab.screen.rows;
     let maximum_scroll = scroll_tab.screen.max_scrollback;
@@ -2265,9 +2296,9 @@ try {
         ["ui-snapshot"]
     );
     let top_baseline = top_snapshot.event_position;
-    gui.window_pointer("down", scrollbar_x, bottom_thumb_y);
-    gui.window_pointer("move-held", scrollbar_x, top_thumb_y);
-    gui.window_pointer("up", scrollbar_x, top_thumb_y);
+    replacement_gui.window_pointer("down", scrollbar_x, bottom_thumb_y);
+    replacement_gui.window_pointer("move-held", scrollbar_x, top_thumb_y);
+    replacement_gui.window_pointer("up", scrollbar_x, top_thumb_y);
     wait_viewport_mutation(context, cli, top_baseline, tab_id);
     let dragged_top = json_cli(
         context,
@@ -2284,9 +2315,9 @@ try {
         ["ui-snapshot"]
     );
     let live_baseline = live_snapshot.event_position;
-    gui.window_pointer("down", scrollbar_x, top_thumb_y);
-    gui.window_pointer("move-held", scrollbar_x, bottom_thumb_y);
-    gui.window_pointer("up", scrollbar_x, bottom_thumb_y);
+    replacement_gui.window_pointer("down", scrollbar_x, top_thumb_y);
+    replacement_gui.window_pointer("move-held", scrollbar_x, bottom_thumb_y);
+    replacement_gui.window_pointer("up", scrollbar_x, bottom_thumb_y);
     wait_viewport_mutation(context, cli, live_baseline, tab_id);
     let dragged_live = json_cli(
         context,
@@ -2303,7 +2334,7 @@ try {
         ["ui-snapshot"]
     );
     let wheel_up_baseline = wheel_up_snapshot.event_position;
-    gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
+    replacement_gui.window_message(0x020A, 7864320, wheel_message_lparam(replacement_gui));
     wait_viewport_mutation(
         context,
         cli,
@@ -2325,7 +2356,7 @@ try {
         ["ui-snapshot"]
     );
     let wheel_down_baseline = wheel_down_snapshot.event_position;
-    gui.window_message(0x020A, 4287102976, wheel_message_lparam(gui));
+    replacement_gui.window_message(0x020A, 4287102976, wheel_message_lparam(replacement_gui));
     wait_viewport_mutation(
         context,
         cli,
@@ -2443,13 +2474,13 @@ try {
     }
     test_harness::require(alternate_active, "remote_ui_raw_application_not_active");
 
-    gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
+    replacement_gui.window_message(0x020A, 7864320, wheel_message_lparam(replacement_gui));
     wait_file_text(
         alternate_result,
         "up=27,79,65,27,79,65,27,79,65",
         "remote_ui_alternate_wheel_up_input_invalid"
     );
-    gui.window_message(0x020A, 4287102976, wheel_message_lparam(gui));
+    replacement_gui.window_message(0x020A, 4287102976, wheel_message_lparam(replacement_gui));
     wait_file_text(
         alternate_result,
         "up=27,79,65,27,79,65,27,79,65;down=27,79,66,27,79,66,27,79,66",
@@ -2506,7 +2537,7 @@ try {
     );
     let marker_column =
         marker_run.column + marker_run.text.index_of(copy_marker);
-    let selection_rect = gui.window_client_rect();
+    let selection_rect = replacement_gui.window_client_rect();
     let terminal_left = 360;
     let terminal_width = selection_rect.right - terminal_left - 12;
     let terminal_height = selection_rect.bottom - 26 - 104;
@@ -2526,7 +2557,7 @@ try {
         terminal_left
             + (marker_column + copy_marker.len - 1) * cell_width
             + cell_width / 2;
-    gui.window_pointer("down", selection_start_x, selection_y);
+    replacement_gui.window_pointer("down", selection_start_x, selection_y);
     // Selection ownership must survive a real screen-generation advance while
     // the mouse gesture is active.  Typing at the prompt changes another row
     // without moving the marker row, and reproduces the live dogfood failure
@@ -2559,7 +2590,7 @@ try {
         "terminal-selection-prepared.png"
     ).display;
     screenshot(context, cli, selection_prepared_png);
-    gui.window_pointer(
+    replacement_gui.window_pointer(
         "move-held",
         selection_end_x,
         selection_y
@@ -2592,7 +2623,7 @@ try {
                     .highlight.bounds.len,
         "remote_ui_terminal_selection_live_highlight_invalid"
     );
-    gui.window_pointer("up", selection_end_x, selection_y);
+    replacement_gui.window_pointer("up", selection_end_x, selection_y);
     let selection_completed = wait_terminal_selection(
         context,
         cli,
@@ -2605,34 +2636,34 @@ try {
         selection_completed.system_menu.copy.enabled,
         "remote_ui_terminal_selection_copy_not_enabled"
     );
-    let copy_input_before = text_cli(
+    let copy_input_before_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    copy_input_before.trim();
-    copy_input_before = copy_input_before.parse_int();
+    copy_input_before_text.trim();
+    let copy_input_before = copy_input_before_text.parse_int();
     rhai::clipboard::set_text("REMOTE_COPY_SENTINEL");
     test_harness::require(
-        gui.window_message(0x8002, 0x43, 1) == 1,
+        replacement_gui.window_message(0x8002, 0x43, 1) == 1,
         "remote_ui_terminal_ctrl_c_not_consumed"
     );
     let copied = rhai::clipboard::get_text();
     copied.trim();
-    let copy_input_after = text_cli(
+    let copy_input_after_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    copy_input_after.trim();
-    copy_input_after = copy_input_after.parse_int();
+    copy_input_after_text.trim();
+    let copy_input_after = copy_input_after_text.parse_int();
     test_harness::require(
         copied == copy_marker
             && copy_input_after == copy_input_before,
         "remote_ui_terminal_copy_invalid:" + copied
     );
     rhai::clipboard::set_text("REMOTE_MENU_COPY_SENTINEL");
-    gui.window_message(0x0112, 0x1F00, 0);
+    replacement_gui.window_message(0x0112, 0x1F00, 0);
     let menu_copied = rhai::clipboard::get_text();
     menu_copied.trim();
     test_harness::require(
@@ -2641,21 +2672,21 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        remote_ui_declared_evidence(),
         "ux-parity.remote-ui.selection"
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let paste_marker = "REMOTE_PASTE_" + context.run_id;
     let paste_text = "echo " + paste_marker;
     rhai::clipboard::set_text(paste_text);
-    let paste_input_before = text_cli(
+    let paste_input_before_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    paste_input_before.trim();
-    paste_input_before = paste_input_before.parse_int();
-    gui.window_message(0x0112, 0x1F10, 0);
+    paste_input_before_text.trim();
+    let paste_input_before = paste_input_before_text.parse_int();
+    replacement_gui.window_message(0x0112, 0x1F10, 0);
     wait_pane_input_bytes(
         context,
         cli,
@@ -2663,7 +2694,7 @@ try {
         paste_input_before + paste_text.len,
         "remote_ui_async_terminal_paste_timeout"
     );
-    gui.window_message(0x0102, 13, 0);
+    replacement_gui.window_message(0x0102, 13, 0);
     text_cli(
         context,
         cli,
@@ -2799,13 +2830,13 @@ try {
         ]
     );
     rhai::clipboard::set_text(bracketed_payload);
-    let bracketed_input_before = text_cli(
+    let bracketed_input_before_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
     );
-    bracketed_input_before.trim();
-    bracketed_input_before = bracketed_input_before.parse_int();
+    bracketed_input_before_text.trim();
+    let bracketed_input_before = bracketed_input_before_text.parse_int();
     // Paste delivery has been observed to be lost outright on loaded CI
     // runners: the result file never appears and the pane input counter
     // never moves. Re-issue the paste only while nothing at all has been
@@ -2813,7 +2844,7 @@ try {
     // corrupt the framing comparison, so from then on just wait.
     let bracketed_delivered = 0;
     for paste_attempt in 0..6 {
-        gui.window_message(0x0112, 0x1F10, 0);
+        replacement_gui.window_message(0x0112, 0x1F10, 0);
         for poll in 0..40 {
             if std::fs::exists(bracketed_result) {
                 bracketed_delivered = 1;
@@ -2852,9 +2883,9 @@ try {
     text_cli(context, cli, ["kill-window", "-t", bracketed_id]);
 
     print("STEP close remains local and GUI recovers its missing server");
-    let reconnect_gui_pid = gui.id;
+    let reconnect_gui_pid = replacement_gui.id;
     let reconnect_window_id =
-        gui.platform_facts.top_level_window_id;
+        replacement_gui.platform_facts.top_level_window_id;
     let old_server_pid = replacement_bootstrap.server_pid;
     let old_server_epoch = replacement_bootstrap.server_epoch;
     std::process::kill(old_server_pid);
@@ -2863,7 +2894,7 @@ try {
         "remote_ui_fault_server_did_not_exit"
     );
 
-    let composer_send = require_window_control(gui.window_control(2102), "composer_send");
+    let composer_send = require_window_control(replacement_gui.window_control(2102), "composer_send");
     let offline_observed = 0;
     for attempt in 0..3000 {
         if !composer_send.visible {
@@ -2876,18 +2907,18 @@ try {
         offline_observed,
         "remote_ui_server_loss_left_stale_input"
     );
-    gui.window_message(0x0010, 0, 0);
-    let disconnected_keep = require_window_control(gui.window_control(2109), "disconnected_keep");
+    replacement_gui.window_message(0x0010, 0, 0);
+    let disconnected_keep = require_window_control(replacement_gui.window_control(2109), "disconnected_keep");
     test_harness::require(
         disconnected_keep.visible,
         "remote_ui_disconnected_close_modal_missing"
     );
-    gui.window_message(0x0111, 2111, 0);
+    replacement_gui.window_message(0x0111, 2111, 0);
 
     let reconnected_lease = wait_for_lease(
         context,
         cli,
-        gui,
+        replacement_gui,
         1200,
         "remote_ui_in_place_reconnect_timeout"
     );
@@ -2898,8 +2929,8 @@ try {
     );
     known_server_pids.push(reconnected_bootstrap.server_pid);
     test_harness::require(
-        gui.id == reconnect_gui_pid
-            && gui.platform_facts.top_level_window_id
+        replacement_gui.id == reconnect_gui_pid
+            && replacement_gui.platform_facts.top_level_window_id
                 == reconnect_window_id
             && reconnected_bootstrap.server_pid != old_server_pid
             && process_present(reconnected_bootstrap.server_pid)
@@ -2925,7 +2956,7 @@ try {
         "relay-close.json"
     );
     test_harness::require(
-        require_window_control(gui.window_control(2109), "relay_keep_modal").visible,
+        require_window_control(replacement_gui.window_control(2109), "relay_keep_modal").visible,
         "remote_ui_relay_close_modal_invalid"
     );
     discard_cli(
@@ -2935,7 +2966,7 @@ try {
         "keep-server-running",
         "relay-detach.json"
     );
-    wait_for_exit(gui, "remote_ui_replacement_exit_timeout");
+    wait_for_exit(replacement_gui, "remote_ui_replacement_exit_timeout");
     test_harness::require(
         !json_cli(
             context,
@@ -2946,7 +2977,21 @@ try {
     );
 
     print("STEP stop the server through the third close choice");
-    let stop_gui = start_gui(context, gui_exe, cli);
+    let stop_gui_command = configured_gui_command(
+        gui_exe,
+        context.address,
+        context.workspace_path,
+        context.settings_path,
+        context.instance_directory
+    );
+    let stop_gui = stop_gui_command.start();
+    wait_for_lease(
+        context,
+        cli,
+        stop_gui,
+        1200,
+        "remote_ui_lease_timeout"
+    );
     owned_children.push(stop_gui);
     discard_cli(
         context,
@@ -2974,25 +3019,25 @@ try {
     text_cli(context, cli, ["server-list", "--prune"]);
     assert_instance_directory_empty(context);
 
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ui.replaceable-client");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.adaptive-tabs");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.hierarchical-tabs");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.detach-first-window-close");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.live-close-confirmation");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.locale-consistency");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.keyboard-surface-navigation");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.modal-wait");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.mouse-scrollback");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.semantic-ui-automation");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.semantic-window-control");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.settings-isolation");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.system-menu-clipboard");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.theme-render-parity");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.terminal-selection-copy");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.working-context-cwd");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux-parity.remote-ui.replaceable-client");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux-parity.remote-ui.selection");
-    test_harness::emit_evidence(context, declared_evidence_ids(), "ux-parity.window-focus-contract");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ui.replaceable-client");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.adaptive-tabs");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.hierarchical-tabs");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.detach-first-window-close");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.live-close-confirmation");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.locale-consistency");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.keyboard-surface-navigation");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.modal-wait");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.mouse-scrollback");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.semantic-ui-automation");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.semantic-window-control");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.settings-isolation");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.system-menu-clipboard");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.theme-render-parity");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.terminal-selection-copy");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux.working-context-cwd");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux-parity.remote-ui.replaceable-client");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux-parity.remote-ui.selection");
+    test_harness::emit_evidence(context, remote_ui_declared_evidence(), "ux-parity.window-focus-contract");
     print(
         "PASS: replaceable GUI attaches, renders, detaches, preserves PTYs, " +
         "and reconnects in place across server restart"

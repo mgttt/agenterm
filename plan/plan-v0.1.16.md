@@ -449,7 +449,7 @@ lua 雏形来去规避这个风险。
 | **Win-UX** | Windows | W*、U2、T-debt 若本地 | `remote_frontend*`、lease 相关、最小 PRD | 不抢 workflow |
 | **Unix-UX** | **OSX 单写** frontend | O-* | `unix/frontend/**`、shared 仅真共享 | 不与 Lnx 同写 frontend |
 | **Lnx-env** | Linux | F 环境、Linux smoke 复验、T-debt | `adapters/linux/**`、环境笔记 | 不写 unix frontend 巨石 |
-| **CI-R** | 任意独占 | R′ 观测/最小 workflow 修 | workflows / check.rhai | 不扩 scope 到 GUI |
+| **CI-R** | 任意独占 | R′ 观测/最小 workflow 修 | workflows / scripts/rh/check.rh | 不扩 scope 到 GUI |
 | **Rh** | 任意 | Rh-M23 | `crates/agenterm-rh/**`、caller 清单、wave 1 CI/bootstrap | 不删 `agenterm-rhai` PE；Candidate 改名仍 HOLD |
 | **C-fallback** | 任意 | C1–C3 | `src/bin/agenterm-con.rs`、`crates/agenterm-platform` consumer | 不引入 Fleet/server workspace；不扩成全功能终端 |
 

@@ -4,15 +4,15 @@
 
 ## 并发执行入口
 
-- Windows: `agenterm-rhai task run platform-ux-parity-smoke -- --list-evidence`
-  - fallback: `agenterm-rhai task run platform-ux-parity-smoke -- --list-evidence`
-  - 回归: `agenterm-rhai task run platform-ux-parity-smoke -- --emit-matrix`
-- Linux: `agenterm-rhai task run platform-ux-parity-smoke-linux -- --list-evidence`
+- Windows: `agenterm-rh task run platform-ux-parity-smoke -- --list-evidence`
+  - fallback: `agenterm-rhai task run platform-ux-parity-smoke -- --list-evidence` (compatibility shim)
+  - 回归: `agenterm-rh task run platform-ux-parity-smoke -- --emit-matrix`
+- Linux: `agenterm-rh task run platform-ux-parity-smoke-linux -- --list-evidence`
   - fallback: `agenterm-rhai task run platform-ux-parity-smoke-linux -- --list-evidence`
-  - 回归: `agenterm-rhai task run platform-ux-parity-smoke-linux -- --emit-matrix`
-- macOS: `agenterm-rhai task run platform-ux-parity-smoke-macos -- --list-evidence`
+  - 回归: `agenterm-rh task run platform-ux-parity-smoke-linux -- --emit-matrix`
+- macOS: `agenterm-rh task run platform-ux-parity-smoke-macos -- --list-evidence`
   - fallback: `agenterm-rhai task run platform-ux-parity-smoke-macos -- --list-evidence`
-  - 回归: `agenterm-rhai task run platform-ux-parity-smoke-macos -- --emit-matrix`
+  - 回归: `agenterm-rh task run platform-ux-parity-smoke-macos -- --emit-matrix`
 
 ## 分支-场景归并表（按循环填充）
 

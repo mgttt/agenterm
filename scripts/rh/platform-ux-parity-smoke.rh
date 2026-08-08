@@ -27,8 +27,7 @@ let declared_evidence = [
 let evidence_profile_count = 10;
 let declared_evidence_count = 10;
 
-fn evidence_profiles_data() {
-    [
+let evidence_profiles = [
     #{
         id: "ux-parity.startup",
         branch: "startup",
@@ -129,26 +128,33 @@ fn evidence_profiles_data() {
         macos_supported: true,
         unsupported_root_cause: ""
     }
-    ]
+];
+
+fn blank_profile_state() {
+    #{
+        executed: false,
+        failed: false,
+        root_cause: "",
+        observed: false
+    }
 }
 
 fn init_evidence_states(profiles) {
-    let states = #{
-        failed: false
-    };
-    let profile_index = 0;
-    while profile_index < evidence_profile_count {
-        let profile = profiles[profile_index];
-        let profile_id = "" + profile.id;
-        states[profile_id] = #{
-            executed: false,
-            failed: false,
-            root_cause: "",
-            observed: false
-        };
-        profile_index = profile_index + 1;
+    let _profiles = profiles;
+    let blank = blank_profile_state();
+    #{
+        failed: false,
+        "ux-parity.startup": blank,
+        "ux-parity.startup-title": blank,
+        "ux-parity.wake-coalescing": blank,
+        "ux-parity.linux.unix-frontend.workbench": blank,
+        "ux-parity.linux.unix-frontend.clipboard": blank,
+        "ux-parity.macos.unix-frontend.workbench": blank,
+        "ux-parity.macos.unix-frontend.clipboard": blank,
+        "ux-parity.remote-ui.replaceable-client": blank,
+        "ux-parity.remote-ui.selection": blank,
+        "ux-parity.window-focus-contract": blank
     }
-    states
 }
 
 fn set_evidence_state(states, evidence_id, failure_message) {
@@ -157,21 +163,237 @@ fn set_evidence_state(states, evidence_id, failure_message) {
     if states.contains(evidence_key) == 0 {
         return states;
     }
-    if failure_text == "" {
-        states[evidence_key] = #{
+    let next_state = if failure_text == "" {
+        #{
             executed: true,
             failed: false,
             root_cause: "",
             observed: true
-        };
+        }
     } else {
-        states[evidence_key] = #{
+        #{
             executed: true,
             failed: true,
             root_cause: classify_failure_root(failure_text),
             observed: true
+        }
+    };
+    let next_failed = states.failed;
+    if failure_text != "" {
+        next_failed = true;
+    }
+    if evidence_key == "ux-parity.startup" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": next_state,
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
         };
-        states.failed = true;
+    }
+    if evidence_key == "ux-parity.startup-title" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": next_state,
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.wake-coalescing" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": next_state,
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.linux.unix-frontend.workbench" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench": next_state,
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.linux.unix-frontend.clipboard" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard": next_state,
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.macos.unix-frontend.workbench" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench": next_state,
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.macos.unix-frontend.clipboard" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard": next_state,
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.remote-ui.replaceable-client" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client": next_state,
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.remote-ui.selection" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection": next_state,
+            "ux-parity.window-focus-contract":
+                states["ux-parity.window-focus-contract"]
+        };
+    }
+    if evidence_key == "ux-parity.window-focus-contract" {
+        return #{
+            failed: next_failed,
+            "ux-parity.startup": states["ux-parity.startup"],
+            "ux-parity.startup-title": states["ux-parity.startup-title"],
+            "ux-parity.wake-coalescing": states["ux-parity.wake-coalescing"],
+            "ux-parity.linux.unix-frontend.workbench":
+                states["ux-parity.linux.unix-frontend.workbench"],
+            "ux-parity.linux.unix-frontend.clipboard":
+                states["ux-parity.linux.unix-frontend.clipboard"],
+            "ux-parity.macos.unix-frontend.workbench":
+                states["ux-parity.macos.unix-frontend.workbench"],
+            "ux-parity.macos.unix-frontend.clipboard":
+                states["ux-parity.macos.unix-frontend.clipboard"],
+            "ux-parity.remote-ui.replaceable-client":
+                states["ux-parity.remote-ui.replaceable-client"],
+            "ux-parity.remote-ui.selection":
+                states["ux-parity.remote-ui.selection"],
+            "ux-parity.window-focus-contract": next_state
+        };
     }
     states
 }
@@ -251,9 +473,7 @@ fn classify_failure_root(failure) {
 fn fail_supported_profiles_for_platform(evidence_states, platform, message, profiles) {
     let platform_text = "" + platform;
     let ids = [];
-    let profile_index = 0;
-    while profile_index < evidence_profile_count {
-        let profile = profiles[profile_index];
+    for profile in profiles {
         let supported = 0;
         if platform_text == "windows" {
             if profile.windows_supported != 0 {
@@ -271,7 +491,6 @@ fn fail_supported_profiles_for_platform(evidence_states, platform, message, prof
         if supported != 0 {
             ids.push("" + profile.id);
         }
-        profile_index = profile_index + 1;
     }
     mark_evidence_state(evidence_states, ids, message)
 }
@@ -458,9 +677,7 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
     ).display;
 
     let matrix_result = [];
-    let profile_index = 0;
-    while profile_index < evidence_profile_count {
-        let profile = profiles[profile_index];
+    for profile in profiles {
         let profile_branch = "" + profile.branch;
         let profile_scenario = "" + profile.scenario;
         let profile_id = "" + profile.id;
@@ -488,7 +705,6 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
             owner: profile_owner
         };
         matrix_result.push(record);
-        profile_index = profile_index + 1;
     }
 
     let json_payload = #{
@@ -511,9 +727,7 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
     let csv_rows = [
         "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
     ];
-    profile_index = 0;
-    while profile_index < evidence_profile_count {
-        let profile = profiles[profile_index];
+    for profile in profiles {
         let profile_branch = "" + profile.branch;
         let profile_scenario = "" + profile.scenario;
         let profile_id = "" + profile.id;
@@ -533,7 +747,6 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
             profile_branch + "," + profile_scenario + "," + profile_id + "," +
             platform_text + "," + row_state + "," + row_root + "," + profile_owner;
         csv_rows.push(row);
-        profile_index = profile_index + 1;
     }
     let csv_body = "";
     let row_index = 0;
@@ -585,13 +798,6 @@ fn parse_platform_args(positional_args) {
     let attempt_repo = absolute(positional_args[args_len - 4]);
     let attempt_gui = absolute(positional_args[args_len - 3]);
     let attempt_cli = absolute(positional_args[args_len - 2]);
-    let short = #{
-        repository: attempt_repo,
-        gui_exe: attempt_gui,
-        script_exe: "",
-        cli_exe: attempt_cli,
-        platform: platform
-    };
     if args_len >= 5 {
         let maybe_repo = absolute(positional_args[args_len - 5]);
         let maybe_gui = absolute(positional_args[args_len - 4]);
@@ -603,13 +809,22 @@ fn parse_platform_args(positional_args) {
         if maybe_script_text.to_lower().contains("agenterm-rh") &&
                 maybe_gui_text.ends_with("agenterm.exe") &&
                 maybe_cli_text.ends_with("agenterm-cli.exe") {
-            short.repository = maybe_repo;
-            short.gui_exe = maybe_gui;
-            short.script_exe = maybe_script;
-            short.cli_exe = maybe_cli;
+            return #{
+                repository: maybe_repo,
+                gui_exe: maybe_gui,
+                script_exe: maybe_script,
+                cli_exe: maybe_cli,
+                platform: platform
+            };
         }
     }
-    short
+    #{
+        repository: attempt_repo,
+        gui_exe: attempt_gui,
+        script_exe: "",
+        cli_exe: attempt_cli,
+        platform: platform
+    }
 }
 
 fn emit_phase_evidence(context, evidence_id) {
@@ -883,7 +1098,7 @@ fn entry() {
     let cli_exe = "" + parsed.cli_exe;
     let platform = "" + parsed.platform;
 
-    let profiles = evidence_profiles_data();
+    let profiles = evidence_profiles;
     let evidence_states = init_evidence_states(profiles);
     let failure_messages = [];
     let succeeded = true;

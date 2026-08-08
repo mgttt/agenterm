@@ -95,7 +95,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  │     动机：v0.1.14 发布日它贡献 2 次腐化（operation 计数 22→24、
 │  │     sidebar 投影竞态），左移后 6 分钟内暴露
 │  │     现状（review，已核）：script-smoke 确认只在 release lane
-│  │     （check.rhai smoke_ids）；94c3227 已把 remote-ui/fleet-smoke
+│  │     （check.rh smoke_ids）；94c3227 已把 remote-ui/fleet-smoke
 │  │     并入 windows CI 的 release-lane-smokes 步骤，script-smoke 可
 │  │     并入同一步骤而非新建步骤
 │  └─ [ ] A4 per-gate timing 表写进 GITHUB_STEP_SUMMARY

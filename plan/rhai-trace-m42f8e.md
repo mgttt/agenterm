@@ -2,6 +2,11 @@
 
 > Durable copy of the read-only audit handoff. Cleanup (Phase A/B/C) remains gated on Native+pack flips; do not treat this file as permission to flip `agenterm.tasks.json` early.
 
+> **Phase B status (2026-08-08):** The live `scripts/rhai/` tree audited below
+> is **archived** at `scripts/archive/rhai/`; operational automation runs
+> native `.rh` under `scripts/rh/` via `agenterm-rh`. Counts in this document
+> reflect the 2026-08-07 audit snapshot, not the post-archive tree.
+
 **Tip SHA (audit snapshot):** `1dea2772521e810269baa8f75cd80c89fabd6a62`
 **Persisted at tip:** `096fb157d2819d1c1867a8ba88c461ca618bed83`  
 **Branch:** main  

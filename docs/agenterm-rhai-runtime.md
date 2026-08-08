@@ -1,8 +1,17 @@
-# AgenTerm Script Runtime Specification
+# AgenTerm Script Runtime Specification (Rhai-era archive)
 
-Status: Stable Script API v2 specification for v0.1.9
+> **Operational note (2026-08):** Live repository automation runs native `.rh`
+> tasks under `scripts/rh/` through **`agenterm-rh`** (task/worker/check-many
+> front door). Legacy Rhai sources live under `scripts/archive/rhai/`. The
+> shipped **`agenterm-rhai`** binary remains a **compatibility shim** for
+> `.rhai` callers, `run`/`eval`/`repl`/`check`/`api`, and Windows
+> `agenterm-cli script …` forwarding — not the live script tree owner.
+> For current capability status see
+> [PRD_02_10](../prd/PRD_02_10_rhai_scripting.md).
 
-Specification ID: `agenterm-rhai-runtime`
+Status: Stable Script API v2 specification for v0.1.9 (historical Rhai contract)
+
+Specification ID: `agenterm-rhai-runtime` (retained for catalog compatibility)
 
 Script API currently shipped: v2
 
@@ -1295,8 +1304,12 @@ The named task manifest is `agenterm.tasks.json`. It describes local task
 execution and is not a package manifest. `task list`, `task show`, and
 `task check` MUST NOT execute user code. Invalid tasks remain discoverable with
 a degraded reason.
-The public executable is `agenterm-rhai.exe`; `agenterm-cli.exe script ...`
-is a compatibility route to the same parser, catalog, supervisor, and runtime.
+The live task/worker front door is `agenterm-rh` / `agenterm-rh.exe`; named
+tasks in `agenterm.tasks.json` resolve `.rh` entries under `scripts/rh/`.
+The shipped `agenterm-rhai.exe` binary remains a compatibility shim for
+`.rhai` sources, `run`/`eval`/`repl`/`check`/`api`, and Windows
+`agenterm-cli.exe script ...` forwarding to the same parser, catalog,
+supervisor, and runtime.
 The reserved `--worker` and `--framed-worker` modes are internal host protocol
 entry points, not alternate user APIs.
 
@@ -1306,8 +1319,8 @@ aliases. They share one generic `scripts/bootstrap.cmd` stage-0 mechanism that
 builds and copies the Script worker, forwards the selected task and caller
 arguments, preserves its exit status, and cleans the owned copy. All profile,
 dependency, build, test, qualification, packaging, cleanup, rehearsal, and
-publication decisions execute in Rhai; the batch layer contains no fallback
-business implementation.
+publication decisions execute in native `.rh` tasks (`scripts/rh/`); the batch
+layer contains no fallback business implementation.
 
 Linux and macOS provide matching `build.sh`, `check.sh`, `lint.sh`, and
 `release.sh` aliases over `scripts/bootstrap.sh`. Native Unix `build` compiles
@@ -1355,7 +1368,7 @@ readable for existing projects, but it does not claim the v3 contract facts.
     {
       "id": "daily-check",
       "description": "Run the local daily check",
-      "entry": "tasks/daily-check.rhai",
+      "entry": "tasks/daily-check.rh",
       "profile": "local",
       "cwd": ".",
       "args": [],
@@ -1552,7 +1565,7 @@ std::fs::write(
     output.display,
     rhai::json::stringify_pretty(#{
         ok: true,
-        source: "agenterm-rhai",
+        source: "agenterm-rh",
         input_extension: path.extension
     })
 );
@@ -1605,7 +1618,8 @@ print(#{
 
 ## 19.1 Persistent REPL contract
 
-`agenterm-rhai repl [OPTIONS] [--] [ARGS...]` MUST create one explicit
+`agenterm-rhai repl [OPTIONS] [--] [ARGS...]` (compatibility shim; live tasks
+use `agenterm-rh`) MUST create one explicit
 foreground session. It MUST NOT implement persistence by repeatedly invoking
 the one-shot `eval` command.
 

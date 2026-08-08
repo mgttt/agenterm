@@ -56,9 +56,11 @@ client, and a deliberately bounded tmux/RMUX frontend.
   clipboard.
 - Snapshot-positioned bounded event reads and waits expose explicit restart,
   gap, and timeout results.
-- `agenterm-rhai.exe` is the public Rhai CLI for local automation, persistent
-  REPL sessions, observable Fleet tools, and versioned named tasks without
-  linking the scripting engine into the GUI.
+- `agenterm-rh` / `agenterm-rh.exe` is the default task and worker CLI for
+  repository automation (`scripts/rh/*.rh`), observable Fleet tools, and
+  versioned named tasks without linking the scripting engine into the GUI.
+  `agenterm-rhai.exe` remains a compatibility shim for `.rhai` callers,
+  persistent REPL sessions, and one-shot `run`/`eval`/`check`/`api`.
 - `agenterm-cli mcp` is the on-demand read-only MCP surface (no separate
   `agenterm-mcp` PE). Its first v0.1.10 slice serves four metadata-only Fleet
   resources and one bounded `agenterm_wait` tool over stdio; it exposes no
@@ -167,8 +169,11 @@ build metadata under `dist/`:
   `snapshot --json`.
 - `dist/agenterm-cli.exe` — full native observation and automation client,
   including `mux` (tmux/RMUX) and `mcp` (stdio sidecar) subcommands.
-- `dist/agenterm-rhai.exe` — public Rhai scripting CLI and worker, including
-  persistent REPL and one-shot execution modes.
+- `dist/agenterm-rh` — default native `.rh` task/worker CLI (live automation
+  under `scripts/rh/`).
+- `dist/agenterm-rhai.exe` — compatibility Rhai shim (`run`/`eval`/`repl`/
+  `check`/`api`, legacy `.rhai`); archived Rhai sources live under
+  `scripts/archive/rhai/`.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 

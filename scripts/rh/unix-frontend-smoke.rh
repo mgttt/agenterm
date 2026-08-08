@@ -13,25 +13,11 @@ fn json_null() {
     rhai::json::parse("null")
 }
 
-fn declared_evidence_ids() {
-    [
-        "ux.unix-frontend-linux-no-activate",
-        "ux.unix-frontend-linux-workbench",
-        "ux.unix-frontend-linux-native-clipboard",
-        "ux.unix-frontend-linux-stale-paste",
-        "ux.unix-frontend-macos-no-activate",
-        "ux.unix-frontend-macos-workbench",
-        "ux.unix-frontend-macos-native-clipboard",
-        "ux.unix-frontend-macos-stale-paste"
-    ]
-}
-
-fn require(condition, message) {
-    test_harness::require(condition != 0, message);
-}
-
 fn environment_or_empty(name) {
-    if std::env::has(name) { std::env::get(name) } else { "" }
+    if std::env::has(name) == 0 {
+        return "";
+    }
+    "" + std::env::get(name);
 }
 
 fn unsupported(platform, code, message) {
@@ -687,13 +673,21 @@ fn entry() {
         let active_tab = focused.active_window_id;
         let paste_marker = "AGENTERM_NATIVE_PASTE_" + context.run_id;
         let clipboard_text = "echo " + paste_marker;
-        let clipboard_owner = set_native_clipboard(
-            context, platform, clipboard_writer, clipboard_text
-        );
         if platform == "linux" {
+            let clipboard_command = std::process::command(clipboard_writer);
+            clipboard_command.args([
+                "-selection", "clipboard", "-loops", "2", "-silent"
+            ]);
+            clipboard_command.stdin_text(clipboard_text);
+            clipboard_command.timeout(std::time::Duration::from_secs(30));
+            let clipboard_owner = clipboard_command.start();
             owned_children.push(clipboard_owner);
             wait_linux_clipboard_owner(
                 context, clipboard_reader, clipboard_text, clipboard_owner
+            );
+        } else {
+            set_native_clipboard(
+                context, platform, clipboard_writer, clipboard_text
             );
         }
         let paste_baseline = json_cli(context, cli_exe, ["ui-snapshot"]);

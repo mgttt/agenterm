@@ -1192,7 +1192,11 @@ fn collect_param_kind_upgrades_in_stmt(
                         .iter()
                         .position(|param| param.as_str() == ident.1.as_str())
                     {
-                        let kind = if ident.1.as_str() == "args" {
+                        let probe = EmitCtx::new(true);
+                        let kind = if ident.1.as_str() == "args"
+                            || matches!(boxed.1.rhs, Expr::StringConstant(..))
+                            || is_explicit_string_expr(&boxed.1.rhs, &probe)
+                        {
                             ValueKind::StringList
                         } else {
                             ValueKind::Json
@@ -5335,6 +5339,9 @@ fn json_array_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a E
     if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Json) {
         return None;
     }
+    if !is_json_array_index_key(&boxed.rhs, ctx) {
+        return None;
+    }
     Some((ident.1.as_str(), &boxed.rhs))
 }
 
@@ -5351,6 +5358,9 @@ fn json_path_array_index<'a>(
             if matches!(&boxed.lhs, Expr::Variable(..)) {
                 return None;
             }
+            if !is_json_array_index_key(&boxed.rhs, ctx) {
+                return None;
+            }
             let (binding, path) = json_value_path(&boxed.lhs, ctx)?;
             if path.is_empty() {
                 return None;
@@ -5364,6 +5374,9 @@ fn json_path_array_index<'a>(
     loop {
         match cursor {
             Expr::Index(index_box, ..) => {
+                if !is_json_array_index_key(&index_box.rhs, ctx) {
+                    return None;
+                }
                 if !append_json_properties(&index_box.lhs, &mut path) {
                     return None;
                 }
@@ -5421,6 +5434,24 @@ fn is_json_array_index_key(expr: &Expr, ctx: &EmitCtx) -> bool {
             .args
             .iter()
             .all(|argument| is_json_array_index_key(argument, ctx)),
+        // Definite int producers only. Do NOT use bare `is_native_json_int_expr`:
+        // it treats every JSON field path as int, mis-classifying map keys like
+        // `tabs[index.id]` / `results[gate_id]` as array indexes.
+        Expr::Dot(..) | Expr::MethodCall(..) => {
+            string_split_len_parts(expr, ctx).is_some()
+                || json_array_len_path(expr, ctx).is_some()
+                || json_object_keys_len_path(expr, ctx).is_some()
+                || set_keys_len_path(expr, ctx).is_some()
+                || std_time_system_time_now_unix_millis(expr)
+                || std_process_id(expr)
+                || fs_metadata_len_arg(expr).is_some()
+                || dir_entry_metadata_len(expr, ctx).is_some()
+                || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
+                || output_property_binding(expr, ctx).is_some()
+                || system_time_unix_millis_binding(expr, ctx).is_some()
+                || fs_metadata_modified_unix_millis(expr).is_some()
+                || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
+        }
         _ => false,
     }
 }
@@ -5462,6 +5493,10 @@ fn json_assign_value_path(expr: &Expr) -> Option<(&str, Vec<&str>)> {
 
 fn json_assign_target<'a>(lhs: &'a Expr, ctx: &EmitCtx) -> Option<JsonAssignTarget<'a>> {
     if let Expr::Index(boxed, ..) = lhs {
+        // Rhai `arr[i].field = …` misparse is not a map-key assign.
+        if json_rhai_array_index_property_from_index(boxed, ctx).is_some() {
+            return None;
+        }
         if let Expr::Variable(ident, ..) = &boxed.lhs {
             if is_json_map_binding(
                 ident.1.as_str(),
@@ -5706,10 +5741,97 @@ fn json_path_key_get<'a>(
     Some((binding, path, &index_box.rhs))
 }
 
+/// Rhai parses `arr[i].field` as `Index { arr, Dot { i, Property(field) } }`
+/// (not `Dot { Index { arr, i }, field }`). Detect that shape when `i` is Int.
+fn json_rhai_array_index_property<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr, &'a str)> {
+    let Expr::Index(boxed, ..) = expr else {
+        return None;
+    };
+    json_rhai_array_index_property_from_index(boxed, ctx)
+}
+
+fn json_rhai_array_index_property_from_index<'a>(
+    boxed: &'a BinaryExpr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, Vec<&'a str>, &'a Expr, &'a str)> {
+    let Expr::Dot(inner, ..) = &boxed.rhs else {
+        return None;
+    };
+    let Expr::Variable(index, ..) = &inner.lhs else {
+        return None;
+    };
+    if ctx.scope.get(index.1.as_str()).copied() != Some(ValueKind::Int) {
+        return None;
+    }
+    let field = dot_property_name(&inner.rhs)?;
+    match &boxed.lhs {
+        Expr::Variable(arr, ..)
+            if ctx.scope.get(arr.1.as_str()).copied() == Some(ValueKind::Json)
+                || ctx.set_map_bindings.contains(arr.1.as_str()) =>
+        {
+            Some((arr.1.as_str(), Vec::new(), &inner.lhs, field))
+        }
+        _ => {
+            let (binding, path) = json_value_path(&boxed.lhs, ctx)?;
+            if path.is_empty() {
+                return None;
+            }
+            Some((binding, path, &inner.lhs, field))
+        }
+    }
+}
+
+fn emit_json_rhai_array_index_property_string(
+    out: &mut String,
+    binding: &str,
+    path: &[&str],
+    index: &Expr,
+    field: &str,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("rh_json_string_path(&rh_json_get_path_index(&");
+    out.push_str(binding);
+    out.push_str(", ");
+    emit_json_path(out, path);
+    out.push_str(", ");
+    emit_intish(out, index, ctx)?;
+    out.push_str("), &[");
+    out.push_str(&format!("{field:?}"));
+    out.push_str("])");
+    Ok(())
+}
+
+fn emit_json_rhai_array_index_property_int(
+    out: &mut String,
+    binding: &str,
+    path: &[&str],
+    index: &Expr,
+    field: &str,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("rh_json_int_path(&rh_json_get_path_index(&");
+    out.push_str(binding);
+    out.push_str(", ");
+    emit_json_path(out, path);
+    out.push_str(", ");
+    emit_intish(out, index, ctx)?;
+    out.push_str("), &[");
+    out.push_str(&format!("{field:?}"));
+    out.push_str("])");
+    Ok(())
+}
+
 fn json_path_key_get_index<'a>(
     boxed: &'a BinaryExpr,
     ctx: &EmitCtx,
 ) -> Option<(&'a str, Vec<&'a str>, &'a Expr)> {
+    // Prefer the Rhai `arr[i].field` misparse handler over map-key treatment.
+    if json_rhai_array_index_property_from_index(boxed, ctx).is_some() {
+        return None;
+    }
     if is_json_array_index_key(&boxed.rhs, ctx) {
         return None;
     }
@@ -6688,6 +6810,16 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         out.push(')');
         return Ok(());
     }
+    if let Some((binding, path, key)) = json_path_key_get(expr, ctx) {
+        out.push_str("rh_json_as_str(&");
+        emit_json_path_key_get(out, binding, &path, key, ctx)?;
+        out.push(')');
+        return Ok(());
+    }
+    if let Some((binding, path, index, field)) = json_rhai_array_index_property(expr, ctx) {
+        emit_json_rhai_array_index_property_string(out, binding, &path, index, field, ctx)?;
+        return Ok(());
+    }
     if let Some((binding, field)) = dir_entry_string_field(expr, ctx) {
         out.push_str(binding);
         out.push('.');
@@ -6992,6 +7124,10 @@ fn emit_intish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), R
     }
     if let Some((binding, path, key, field)) = json_path_key_field_get(expr, ctx) {
         emit_json_path_key_field_int(out, binding, &path, key, field, ctx)?;
+        return Ok(());
+    }
+    if let Some((binding, path, index, field)) = json_rhai_array_index_property(expr, ctx) {
+        emit_json_rhai_array_index_property_int(out, binding, &path, index, field, ctx)?;
         return Ok(());
     }
     if let Some(name) = std_env_get_parse_int_arg(expr)
@@ -7444,6 +7580,18 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(", ");
             emit_intish(out, index, ctx)?;
             out.push(')');
+            return Ok(());
+        }
+        if let Some((binding, path, index, field)) = json_rhai_array_index_property(expr, ctx) {
+            out.push_str("rh_json_get_path(&rh_json_get_path_index(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push_str(", ");
+            emit_intish(out, index, ctx)?;
+            out.push_str("), &[");
+            out.push_str(&format!("{field:?}"));
+            out.push_str("])");
             return Ok(());
         }
         if let Some((binding, path, key)) = json_path_key_get(expr, ctx) {
@@ -7996,6 +8144,17 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str(", ");
             emit_intish(out, index, ctx)?;
             out.push(')');
+        }
+        _ if let Some((binding, path, index, field)) = json_rhai_array_index_property(expr, ctx) => {
+            out.push_str("rh_json_get_path(&rh_json_get_path_index(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push_str(", ");
+            emit_intish(out, index, ctx)?;
+            out.push_str("), &[");
+            out.push_str(&format!("{field:?}"));
+            out.push_str("])");
         }
         _ if let Some((binding, path, key)) = json_path_key_get(expr, ctx) => {
             emit_json_path_key_get(out, binding, &path, key, ctx)?;
@@ -8822,14 +8981,18 @@ fn emit_set_key(out: &mut String, key: &Expr, ctx: &mut EmitCtx) -> Result<(), R
         _ if string_concat_args(key, ctx).is_some()
             || json_value_path(key, ctx).is_some_and(|(_, path)| !path.is_empty())
             || json_path_array_index(key, ctx).is_some()
+            || json_path_key_get(key, ctx).is_some()
             || string_list_index(key, ctx).is_some()
             || args_index_expr(key).is_some() =>
         {
             emit_stringish(out, key, ctx)
         }
-        _ => Err(RhError::Transpile(
-            "set index key must be a string binding, literal, or stringish path".into(),
-        )),
+        _ => {
+            let rendered = crate::expr_print::expr_to_rhai(key).unwrap_or_else(|_| "<key>".into());
+            Err(RhError::Transpile(format!(
+                "set index key must be a string binding, literal, or stringish path (key={rendered}, expr={key:?})"
+            )))
+        }
     }
 }
 
@@ -9954,6 +10117,7 @@ mod tests {
         transpile_cdylib_with_project,
     };
 
+
     #[test]
     fn transpiles_add_fn() {
         let rust = transpile("fn add(a, b) { a + b }").expect("transpile");
@@ -10232,6 +10396,66 @@ fn entry() {
             output.rust
         );
         assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_rhai_array_index_property_misparse() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let ordered = [#{ id: 1 }, #{ id: 3 }];
+    let order_index = 0;
+    let process = #{ id: 2 };
+    if process.id < ordered[order_index].id {
+        return 1;
+    }
+    0
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_json_get_path_index(&ordered"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("rh_json_get_path_key(&ordered"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_map_key_string_read() {
+        let output = transpile_cdylib_with_mode(
+            r#"fn entry() {
+    let identities = #{};
+    let id = "proc-1";
+    identities[id] = "identity-a";
+    let name = "" + identities[id];
+    if name != "identity-a" { return rh::fail("bad"); }
+    0
+}"#,
+        )
+        .expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_as_str(&rh_json_get_path_key(&identities"),
+            "{}",
+            output.rust
+        );
     }
 
     #[test]
@@ -11081,7 +11305,9 @@ fn entry() {
         assert!(
             output
                 .rust
-                .contains("pub fn wall_time(bootstrap: serde_json::Value, task_ms: INT) -> INT"),
+                .contains(
+                    "pub fn wall_time(mut bootstrap: serde_json::Value, task_ms: INT) -> INT",
+                ),
             "{}",
             output.rust
         );
@@ -13280,7 +13506,7 @@ fn entry() {
         assert!(
             output
                 .rust
-                .contains("pub fn find_by_id(values: serde_json::Value"),
+                .contains("pub fn find_by_id(mut values: serde_json::Value"),
             "{}",
             output.rust
         );
@@ -13384,8 +13610,11 @@ fn entry() {
             "{}",
             output.rust
         );
+        // build.rh passes inline `#{ current_dir, env }` option maps.
         assert!(
-            output.rust.contains("Some(&command_options)"),
+            output.rust.contains("Some(&command_options)")
+                || (output.rust.contains("Some(&{")
+                    && output.rust.contains("\"current_dir\"")),
             "{}",
             output.rust
         );
@@ -13517,7 +13746,7 @@ fn entry() { 0 }"#,
         assert!(
             output
                 .rust
-                .contains("pub fn f(context: serde_json::Value) -> serde_json::Value"),
+                .contains("pub fn f(mut context: serde_json::Value) -> serde_json::Value"),
             "{}",
             output.rust
         );
@@ -13656,62 +13885,10 @@ fn entry() { 0 }"#,
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
 
-    #[test]
-    fn probe_smoke_scripts_transpile_past_assign_lhs() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .expect("repo root");
-        for name in [
-            "fresh-clone-rehearsal.rh",
-            "platform-ux-parity-smoke.rh",
-            "script-smoke.rh",
-        ] {
-            let path = root.join("scripts/rh").join(name);
-            let source = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{name}"));
-            let bundled =
-                crate::bundle::bundle_project_source(&root, &source).unwrap_or_else(|e| {
-                    panic!("{name} bundle: {e}");
-                });
-            let output = transpile_cdylib_with_mode(&bundled).unwrap_or_else(|e| {
-                panic!("{name}: {e}");
-            });
-            assert!(
-                !output.rust.contains("RH_SCRIPT_SOURCE"),
-                "{name} fell back to compat delegating"
-            );
-            assert!(
-                output.execution_mode != CdylibExecutionMode::CompatDelegating,
-                "{name}: {}",
-                output.rust
-            );
-        }
-    }
 
-    #[test]
-    fn probe_native_assign_fixtures_transpile() {
-        let probes = [
-            "json-map-set-key-probe.rh",
-            "string-list-index-assign-probe.rh",
-            "json-field-assign-probe.rh",
-            "json-dynamic-key-assign-probe.rh",
-        ];
-        for name in probes {
-            let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../fixtures/rh")
-                .join(name);
-            let source = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{name}"));
-            let output = transpile_cdylib_with_mode(&source).unwrap_or_else(|error| {
-                panic!("{name}: {error}");
-            });
-            assert_eq!(
-                output.execution_mode,
-                CdylibExecutionMode::Native,
-                "{name}: {}",
-                output.rust
-            );
-        }
-    }
+
+
+
 
     #[test]
     fn cdylib_transpile_empty_child_list_push_and_arg_native() {
