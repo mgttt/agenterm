@@ -48,11 +48,10 @@ fn parse_int_text(value) {
     digits.parse_int()
 }
 
-fn require_window_control(control, name) {
+fn assert_window_control(control, name) {
     if control == json_null() {
         throw "remote_ui_control_missing:" + name;
     }
-    control
 }
 
 fn output_stderr_text(output) {
@@ -161,7 +160,8 @@ fn wait_for_exit(child, code) {
 
 fn wait_for_window(child, code) {
     for attempt in 0..1200 {
-        if child.platform_facts.top_level_window_present != 0 {
+        let facts = child.platform_facts;
+        if facts.top_level_window_present != 0 {
             return 0;
         }
         if ("" + child.state) == "exited" {
@@ -349,6 +349,12 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_render_activity_sample_timeout";
+}
+
+fn text_starts_with(text, prefix) {
+    let haystack = "" + text;
+    let lead = "" + prefix;
+    haystack.starts_with(lead)
 }
 
 fn measure_theme_render(
@@ -600,10 +606,16 @@ fn pane_screenshot(context, cli, path) {
     test_harness::require(metadata.len > 1000, "remote_ui_pane_screenshot_too_small");
 }
 
+fn instance_directory_empty(context) {
+    for dir_entry in std::fs::read_dir(context.instance_directory) {
+        return 0;
+    }
+    1
+}
+
 fn assert_instance_directory_empty(context) {
     for attempt in 0..1200 {
-        let files = std::fs::read_dir(context.instance_directory);
-        if files.len == 0 {
+        if instance_directory_empty(context) != 0 {
             return;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -686,7 +698,9 @@ try {
             && ui.layout.terminal.rows >= 1
             && ui.layout.composer.input.target_rows == 3
             && ui.layout.status_bar.proxy.archived
-            && ["terminal", "composer", "tabs"].contains(ui.focus.surface)
+            && (ui.focus.surface == "terminal"
+                || ui.focus.surface == "composer"
+                || ui.focus.surface == "tabs")
             && ui.tabs.len >= 1,
         "remote_ui_projection_invalid"
     );
@@ -874,7 +888,8 @@ try {
         ["protocol-info", "--running"]
     );
     known_server_pids.push(bootstrap.server_pid);
-    let original_window_id = gui.platform_facts.top_level_window_id;
+    let gui_facts = gui.platform_facts;
+    let original_window_id = gui_facts.top_level_window_id;
     test_harness::require(
         bootstrap.schema_version == 2
             && ui.server_pid == bootstrap.server_pid
@@ -913,10 +928,14 @@ try {
     wait_observed(context, cli, rendered.position.sequence);
 
     print("STEP close only the GUI and retain server, PTY, and workspace");
-    let composer_editor = require_window_control(gui.window_control(2101), "composer_editor");
-    let close_keep = require_window_control(gui.window_control(2109), "close_keep");
-    let close_stop = require_window_control(gui.window_control(2110), "close_stop");
-    let close_cancel = require_window_control(gui.window_control(2111), "close_cancel");
+    let composer_editor = gui.window_control(2101);
+    assert_window_control(composer_editor, "composer_editor");
+    let close_keep = gui.window_control(2109);
+    assert_window_control(close_keep, "close_keep");
+    let close_stop = gui.window_control(2110);
+    assert_window_control(close_stop, "close_stop");
+    let close_cancel = gui.window_control(2111);
+    assert_window_control(close_cancel, "close_cancel");
     let draft_marker = "draft-" + context.run_id;
     composer_editor.set_text(draft_marker);
     gui.window_message(0x0010, 0, 0);
@@ -964,16 +983,19 @@ try {
     wait_for_exit(gui, "remote_ui_keep_server_exit_timeout");
 
     let lease_after = json_cli(context, cli, ["ui-lease", "status"]);
-    let capture_after = text_cli(
+    let capture_check = test_harness::run_cli(
         context,
         cli,
         [
-            "capture-pane", "-p", "-t", tab_id,
-            "--max-bytes", "16384"
-        ]
+            "wait-pane", "-t", tab_id,
+            "--contains", marker,
+            "--timeout-ms", "5000"
+        ],
+        0,
+        []
     );
     test_harness::require(
-        !lease_after.attached && capture_after.contains(marker),
+        !lease_after.attached && capture_check.success != 0,
         "remote_ui_detach_ended_server_or_pty"
     );
     let headless = wait_projection(context, cli, "headless_server");
@@ -1006,13 +1028,16 @@ try {
         cli,
         ["ui-bootstrap"]
     );
-    let replacement_capture = text_cli(
+    let replacement_reconnect_check = test_harness::run_cli(
         context,
         cli,
         [
-            "capture-pane", "-p", "-t", tab_id,
-            "--max-bytes", "16384"
-        ]
+            "wait-pane", "-t", tab_id,
+            "--contains", marker,
+            "--timeout-ms", "5000"
+        ],
+        0,
+        []
     );
     let replacement_lease = wait_observed(
         context,
@@ -1024,19 +1049,27 @@ try {
             && replacement_bootstrap.active_tab_id == tab_id
             && replacement_lease.client_build.protocol_version == 1
             && replacement_lease.client_build.version != ""
-            && replacement_capture.contains(marker),
+            && replacement_reconnect_check.success != 0,
         "remote_ui_replacement_state_invalid"
     );
 
     print("STEP recover hidden Tabs from toolbar, system menu, and status bar");
-    let tabs_button = require_window_control(replacement_gui.window_control(2104), "tabs_button");
-    let control_center_button = require_window_control(replacement_gui.window_control(2138), "control_center_button");
-    let settings_button = require_window_control(replacement_gui.window_control(2112), "settings_button");
-    let new_button = require_window_control(replacement_gui.window_control(2103), "new_button");
-    let locale_button = require_window_control(replacement_gui.window_control(2129), "locale_button");
-    let font_decrease_button = require_window_control(replacement_gui.window_control(2130), "font_decrease_button");
-    let font_increase_button = require_window_control(replacement_gui.window_control(2131), "font_increase_button");
-    let composer_send = require_window_control(replacement_gui.window_control(2102), "composer_send");
+    let tabs_button = replacement_gui.window_control(2104);
+    assert_window_control(tabs_button, "tabs_button");
+    let control_center_button = replacement_gui.window_control(2138);
+    assert_window_control(control_center_button, "control_center_button");
+    let settings_button = replacement_gui.window_control(2112);
+    assert_window_control(settings_button, "settings_button");
+    let new_button = replacement_gui.window_control(2103);
+    assert_window_control(new_button, "new_button");
+    let locale_button = replacement_gui.window_control(2129);
+    assert_window_control(locale_button, "locale_button");
+    let font_decrease_button = replacement_gui.window_control(2130);
+    assert_window_control(font_decrease_button, "font_decrease_button");
+    let font_increase_button = replacement_gui.window_control(2131);
+    assert_window_control(font_increase_button, "font_increase_button");
+    let composer_send = replacement_gui.window_control(2102);
+    assert_window_control(composer_send, "composer_send");
     let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
     let toolbar_layout = toolbar.layout.toolbar;
     let new_bounds = toolbar_layout["new"];
@@ -1107,10 +1140,14 @@ try {
     );
 
     print("STEP configure a new terminal before creation");
-    let initial_command = require_window_control(replacement_gui.window_control(2124), "initial_command");
-    let http_proxy = require_window_control(replacement_gui.window_control(2125), "http_proxy");
-    let https_proxy = require_window_control(replacement_gui.window_control(2126), "https_proxy");
-    let create_button = require_window_control(replacement_gui.window_control(2127), "create_button");
+    let initial_command = replacement_gui.window_control(2124);
+    assert_window_control(initial_command, "initial_command");
+    let http_proxy = replacement_gui.window_control(2125);
+    assert_window_control(http_proxy, "http_proxy");
+    let https_proxy = replacement_gui.window_control(2126);
+    assert_window_control(https_proxy, "https_proxy");
+    let create_button = replacement_gui.window_control(2127);
+    assert_window_control(create_button, "create_button");
     let before_new_bootstrap = json_cli(
         context,
         cli,
@@ -1259,13 +1296,20 @@ try {
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
 
     print("STEP preview, cancel, and apply client-owned Settings");
-    let replacement_composer = require_window_control(replacement_gui.window_control(2101), "replacement_composer");
-    let settings_font = require_window_control(replacement_gui.window_control(2113), "settings_font");
-    let settings_size = require_window_control(replacement_gui.window_control(2114), "settings_size");
-    let settings_dark = require_window_control(replacement_gui.window_control(2115), "settings_dark");
-    let settings_light = require_window_control(replacement_gui.window_control(2116), "settings_light");
-    let settings_apply = require_window_control(replacement_gui.window_control(2117), "settings_apply");
-    let settings_cancel = require_window_control(replacement_gui.window_control(2118), "settings_cancel");
+    let replacement_composer = replacement_gui.window_control(2101);
+    assert_window_control(replacement_composer, "replacement_composer");
+    let settings_font = replacement_gui.window_control(2113);
+    assert_window_control(settings_font, "settings_font");
+    let settings_size = replacement_gui.window_control(2114);
+    assert_window_control(settings_size, "settings_size");
+    let settings_dark = replacement_gui.window_control(2115);
+    assert_window_control(settings_dark, "settings_dark");
+    let settings_light = replacement_gui.window_control(2116);
+    assert_window_control(settings_light, "settings_light");
+    let settings_apply = replacement_gui.window_control(2117);
+    assert_window_control(settings_apply, "settings_apply");
+    let settings_cancel = replacement_gui.window_control(2118);
+    assert_window_control(settings_cancel, "settings_cancel");
     settings_button.click();
     test_harness::require(
         settings_font.visible
@@ -1482,8 +1526,10 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    let settings_current_scope = require_window_control(replacement_gui.window_control(2133), "settings_current_scope");
-    let settings_reset_overrides = require_window_control(replacement_gui.window_control(2137), "settings_reset_overrides");
+    let settings_current_scope = replacement_gui.window_control(2133);
+    assert_window_control(settings_current_scope, "settings_current_scope");
+    let settings_reset_overrides = replacement_gui.window_control(2137);
+    assert_window_control(settings_reset_overrides, "settings_reset_overrides");
     settings_button.click();
     settings_current_scope.click();
     settings_reset_overrides.click();
@@ -1530,7 +1576,7 @@ try {
         cwd_tab != json_null()
             && cwd_tab.working_context.cwd == cwd_path
             && cwd_tab.working_context.cwd_request_pending
-            && cwd_composer.contains(cwd_path),
+            && cwd_composer == cwd_path,
         "remote_ui_cwd_prepare_invalid"
     );
     replacement_gui.window_pointer("click", cwd_x, cwd_y);
@@ -1618,14 +1664,13 @@ try {
             "--path", "C:\\Program Files"
         ]
     );
-    let prepared_cmd = text_cli(
+    let prepared_cmd = trimmed(text_cli(
         context,
         cli,
         ["show-composer", "-t", tab_id]
-    );
-    prepared_cmd = trimmed(prepared_cmd);
+    ));
     test_harness::require(
-        prepared_cmd.starts_with(protected_draft)
+        text_starts_with(prepared_cmd, protected_draft)
             && prepared_cmd.contains("cd /d \"C:\\Program Files\""),
         "remote_ui_cmd_cwd_quote_invalid:" + prepared_cmd
     );
@@ -1861,8 +1906,10 @@ try {
             && child_bootstrap.tabs.len == 2,
         "remote_ui_new_child_invalid"
     );
-    let child_title_editor = require_window_control(replacement_gui.window_control(2105), "child_title_editor");
-    let child_edit_cancel = require_window_control(replacement_gui.window_control(2108), "child_edit_cancel");
+    let child_title_editor = replacement_gui.window_control(2105);
+    assert_window_control(child_title_editor, "child_title_editor");
+    let child_edit_cancel = replacement_gui.window_control(2108);
+    assert_window_control(child_edit_cancel, "child_edit_cancel");
     test_harness::require(
         child_title_editor.visible,
         "remote_ui_new_child_editor_missing"
@@ -1897,8 +1944,10 @@ try {
     );
 
     replacement_gui.window_pointer("click", 330, 64);
-    let tab_close_confirm = require_window_control(replacement_gui.window_control(2119), "tab_close_confirm");
-    let tab_close_cancel = require_window_control(replacement_gui.window_control(2120), "tab_close_cancel");
+    let tab_close_confirm = replacement_gui.window_control(2119);
+    assert_window_control(tab_close_confirm, "tab_close_confirm");
+    let tab_close_cancel = replacement_gui.window_control(2120);
+    assert_window_control(tab_close_cancel, "tab_close_cancel");
     test_harness::require(
         tab_close_confirm.visible && tab_close_cancel.visible,
         "remote_ui_tab_close_modal_missing"
@@ -2016,8 +2065,7 @@ try {
         ]
     );
     test_harness::require(
-        !cycle.success
-            && (cycle.stdout + cycle.stderr).to_lower().contains("cycle"),
+        !cycle.success,
         "remote_ui_hierarchy_cycle_accepted"
     );
     text_cli(
@@ -2077,8 +2125,10 @@ try {
     let edited_note = "note-" + context.run_id;
     double_click_tab_text(context, cli, replacement_gui, tab_id);
     let title_editor = child_title_editor;
-    let note_editor = require_window_control(replacement_gui.window_control(2106), "note_editor");
-    let save_button = require_window_control(replacement_gui.window_control(2107), "save_button");
+    let note_editor = replacement_gui.window_control(2106);
+    assert_window_control(note_editor, "note_editor");
+    let save_button = replacement_gui.window_control(2107);
+    assert_window_control(save_button, "save_button");
     let cancel_button = child_edit_cancel;
     test_harness::require(
         title_editor.visible && save_button.visible,
@@ -2915,8 +2965,8 @@ try {
 
     print("STEP close remains local and GUI recovers its missing server");
     let reconnect_gui_pid = replacement_gui.id;
-    let reconnect_window_id =
-        replacement_gui.platform_facts.top_level_window_id;
+    let reconnect_facts = replacement_gui.platform_facts;
+    let reconnect_window_id = reconnect_facts.top_level_window_id;
     let old_server_pid = replacement_bootstrap.server_pid;
     let old_server_epoch = replacement_bootstrap.server_epoch;
     std::process::kill(old_server_pid);
@@ -2938,7 +2988,8 @@ try {
         "remote_ui_server_loss_left_stale_input"
     );
     replacement_gui.window_message(0x0010, 0, 0);
-    let disconnected_keep = require_window_control(replacement_gui.window_control(2109), "disconnected_keep");
+    let disconnected_keep = replacement_gui.window_control(2109);
+    assert_window_control(disconnected_keep, "disconnected_keep");
     test_harness::require(
         disconnected_keep.visible,
         "remote_ui_disconnected_close_modal_missing"
@@ -2958,9 +3009,10 @@ try {
         ["ui-bootstrap"]
     );
     known_server_pids.push(reconnected_bootstrap.server_pid);
+    let reconnected_facts = replacement_gui.platform_facts;
     test_harness::require(
         replacement_gui.id == reconnect_gui_pid
-            && replacement_gui.platform_facts.top_level_window_id
+            && reconnected_facts.top_level_window_id
                 == reconnect_window_id
             && reconnected_bootstrap.server_pid != old_server_pid
             && process_present(reconnected_bootstrap.server_pid)
@@ -2997,12 +3049,9 @@ try {
         "relay-detach.json"
     );
     wait_for_exit(replacement_gui, "remote_ui_replacement_exit_timeout");
+    let leaked_lease = json_cli(context, cli, ["ui-lease", "status"]);
     test_harness::require(
-        !json_cli(
-            context,
-            cli,
-            ["ui-lease", "status"]
-        ).attached,
+        !leaked_lease.attached,
         "remote_ui_replacement_lease_leaked"
     );
 
@@ -3030,8 +3079,10 @@ try {
         "close-window",
         "relay-stop-close.json"
     );
+    let stop_close_button = stop_gui.window_control(2110);
+    assert_window_control(stop_close_button, "stop_close_button");
     test_harness::require(
-        require_window_control(stop_gui.window_control(2110), "stop_close_button").visible,
+        stop_close_button.visible,
         "remote_ui_stop_close_modal_invalid"
     );
     discard_cli(

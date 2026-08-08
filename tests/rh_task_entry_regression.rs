@@ -569,6 +569,29 @@ fn workbench_smoke_uses_native_bundled_execution() {
     assert!(!output.rust.contains("compat delegating"));
 }
 
+
+#[test]
+fn unix_frontend_smoke_host_eval_he_ceiling() {
+    let (source, output) = transpile_project_entry("scripts/rh/unix-frontend-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert!(
+        matches!(
+            output.execution_mode,
+            agenterm_rh::CdylibExecutionMode::HostEval
+                | agenterm_rh::CdylibExecutionMode::Native
+        ),
+        "unix-frontend-smoke: {:?}",
+        output.execution_mode
+    );
+    let he = output.rust.matches("rh_host_eval_int(").count();
+    assert!(
+        he <= 12,
+        "unix-frontend-smoke HostEval ceiling exceeded: he={he} (expected <= 12)"
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+}
+
 #[test]
 fn remote_ui_smoke_host_eval_he_ceiling() {
     let (source, output) = transpile_project_entry("scripts/rh/remote-ui-smoke.rh");
@@ -583,10 +606,10 @@ fn remote_ui_smoke_host_eval_he_ceiling() {
         output.execution_mode
     );
     let he = output.rust.matches("rh_host_eval_int(").count();
-    // Pre-rev78 tip was ~229 HE; GUI window-control native emit lands ~119.
+    // Pre-rev78 tip was ~229 HE; after native GUI typing rewrite lands ~19.
     assert!(
-        he <= 140,
-        "remote-ui-smoke HostEval ceiling exceeded: he={he} (expected <= 140 after rev78 GUI emit)"
+        he <= 30,
+        "remote-ui-smoke HostEval ceiling exceeded: he={he} (expected <= 30 after rev78 window_control typing)"
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));

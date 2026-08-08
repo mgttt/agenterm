@@ -15,7 +15,7 @@ fn json_null() {
 
 fn trimmed(value) {
     let text = "" + value;
-    text.trim()
+    return text.trim();
 }
 
 fn text_contains(text, needle) {
@@ -60,37 +60,52 @@ fn resolve_tool(name) {
     if output.success == 0 {
         return "";
     }
-    trimmed(output.stdout_text())
+    let path = "" + output.stdout_text();
+    path = path.trim();
+    return path;
 }
 
-fn invoke_tool(context, program, arguments, input) {
-    let command = std::process::command(program);
-    let tool_args = [];
-    for arg in arguments {
-        tool_args.push(arg);
-    }
-    command.args(tool_args);
-    if input != "" {
-        command.stdin_text(input);
-    }
+fn clipboard_payload_path(context) {
+    std::path::join(
+        context.run_directory, "clipboard-payload.txt"
+    ).display
+}
+
+fn osascript_eval(context, script, record_summary) {
+    let command = std::process::command("/usr/bin/osascript");
+    command.args(["-e", script]);
     command.timeout(std::time::Duration::from_secs(5));
     let output = command.output();
-    let recorded_arguments = [
-        std::path::PathBuf::from(program).file_name
-    ];
-    recorded_arguments.append(tool_args);
     test_harness::append_command_record(
         context,
-        recorded_arguments,
+        ["osascript", "-e", record_summary],
         output,
         output.success == 0,
         []
     );
     require(
         output.success != 0,
-        "unix_frontend_native_tool_failed:" +
-            std::path::PathBuf::from(program).file_name + ":" +
-            output.stderr_text()
+        "unix_frontend_osascript_failed:" +
+            record_summary + ":" + output.stderr_text()
+    );
+    output
+}
+
+fn chmod_executable(context, path) {
+    let command = std::process::command("/bin/chmod");
+    command.args(["0700", path]);
+    command.timeout(std::time::Duration::from_secs(5));
+    let output = command.output();
+    test_harness::append_command_record(
+        context,
+        ["chmod", "0700", path],
+        output,
+        output.success == 0,
+        []
+    );
+    require(
+        output.success != 0,
+        "unix_frontend_chmod_failed:" + output.stderr_text()
     );
     output
 }
@@ -107,7 +122,7 @@ fn text_cli(context, cli, arguments) {
     let response = test_harness::invoke_cli(
         context, cli, arguments, 0, []
     );
-    trimmed("" + response.stdout)
+    return trimmed("" + response.stdout);
 }
 
 fn wait_for_server(context, cli, gui) {
@@ -145,17 +160,11 @@ fn wait_for_window(gui) {
     throw "unix_frontend_window_timeout";
 }
 
-fn xdotool(context, arguments, expected_failure) {
-    let command = std::process::command("xdotool");
-    let tool_args = [];
-    for arg in arguments {
-        tool_args.push(arg);
-    }
-    command.args(tool_args);
-    command.timeout(std::time::Duration::from_secs(3));
-    let output = command.output();
+fn xdotool_record(
+    context, record_args, output, expected_failure
+) {
     test_harness::append_command_record(
-        context, tool_args, output, expected_failure, []
+        context, record_args, output, expected_failure, []
     );
     if expected_failure == 0 {
         require(
@@ -163,25 +172,78 @@ fn xdotool(context, arguments, expected_failure) {
             "unix_frontend_xdotool_failed:" + output.stderr_text()
         );
     }
+}
+
+fn xdotool_search_name(context, title) {
+    let command = std::process::command("xdotool");
+    command.args(["search", "--onlyvisible", "--name", title]);
+    command.timeout(std::time::Duration::from_secs(3));
+    let output = command.output();
+    xdotool_record(
+        context,
+        ["search", "--onlyvisible", "--name", title],
+        output,
+        1
+    );
+    output
+}
+
+fn xdotool_getwindowname(context, window_id) {
+    let command = std::process::command("xdotool");
+    command.args(["getwindowname", window_id]);
+    command.timeout(std::time::Duration::from_secs(3));
+    let output = command.output();
+    xdotool_record(
+        context,
+        ["getwindowname", window_id],
+        output,
+        1
+    );
+    output
+}
+
+fn xdotool_getactivewindow(context) {
+    let command = std::process::command("xdotool");
+    command.args(["getactivewindow"]);
+    command.timeout(std::time::Duration::from_secs(3));
+    let output = command.output();
+    xdotool_record(
+        context,
+        ["getactivewindow"],
+        output,
+        0
+    );
+    output
+}
+
+fn xdotool_windowactivate(context, window_id) {
+    let command = std::process::command("xdotool");
+    command.args(["windowactivate", "--sync", window_id]);
+    command.timeout(std::time::Duration::from_secs(3));
+    let output = command.output();
+    xdotool_record(
+        context,
+        ["windowactivate", "--sync", window_id],
+        output,
+        0
+    );
     output
 }
 
 fn wait_x11_window(context, title, child) {
     for attempt in 0..160 {
-        let output = xdotool(
-            context, ["search", "--onlyvisible", "--name", title], 1
-        );
+        let output = xdotool_search_name(context, title);
         if output.success != 0 {
             let lines = ("" + output.stdout_text()).split("\n");
             let line_index = 0;
             while line_index < lines.len {
                 let raw = lines[line_index];
-                let id = trimmed(raw);
+                let id = "" + raw;
+                id = id.trim();
                 if id != "" {
-                    let name = xdotool(
-                        context, ["getwindowname", id], 1
-                    );
-                    let actual = trimmed(name.stdout_text());
+                    let name = xdotool_getwindowname(context, id);
+                    let actual = "" + name.stdout_text();
+                    actual = actual.trim();
                     if name.success != 0 && actual == title {
                         return id;
                     }
@@ -198,10 +260,11 @@ fn wait_x11_window(context, title, child) {
 }
 
 fn active_x11_window(context) {
-    let output = xdotool(context, ["getactivewindow"], 0);
-    let id = trimmed(output.stdout_text());
+    let output = xdotool_getactivewindow(context);
+    let id = "" + output.stdout_text();
+    id = id.trim();
     require(id != "", "unix_frontend_x11_active_window_empty");
-    id
+    return id;
 }
 
 fn wait_x11_active(context, id, code) {
@@ -225,26 +288,22 @@ fn start_x11_witness(title) {
 }
 
 fn frontmost_macos(context) {
-    let output = invoke_tool(
+    let output = osascript_eval(
         context,
-        "/usr/bin/osascript",
-        [
-            "-e",
-            "tell application \"System Events\" to get name of first application process whose frontmost is true"
-        ],
-        ""
+        "tell application \"System Events\" to get name of first application process whose frontmost is true",
+        "frontmost application query"
     );
-    let name = trimmed(output.stdout_text());
-    require(name != "", "unix_frontend_macos_frontmost_empty");
-    name
+    let frontmost = "" + output.stdout_text();
+    frontmost = frontmost.trim();
+    require(frontmost != "", "unix_frontend_macos_frontmost_empty");
+    return frontmost;
 }
 
 fn activate_finder_witness(context) {
-    invoke_tool(
+    osascript_eval(
         context,
-        "/usr/bin/osascript",
-        ["-e", "tell application \"Finder\" to activate"],
-        ""
+        "tell application \"Finder\" to activate",
+        "activate Finder witness"
     );
     for attempt in 0..100 {
         if frontmost_macos(context) == "Finder" {
@@ -256,9 +315,15 @@ fn activate_finder_witness(context) {
 }
 
 fn macos_frontmost_contains(context, needle) {
-    let frontmost = frontmost_macos(context);
+    let output = osascript_eval(
+        context,
+        "tell application \"System Events\" to get name of first application process whose frontmost is true",
+        "frontmost contains query"
+    );
+    let frontmost = "" + output.stdout_text();
+    frontmost = frontmost.trim();
     let lowered = frontmost.to_lower();
-    lowered.contains(needle)
+    return text_contains(lowered, needle);
 }
 
 fn linux_window_focused(context, native_window_id) {
@@ -302,18 +367,33 @@ fn wait_native_focus(context, cli, platform, native_window_id) {
 }
 
 fn set_native_clipboard(context, platform, helper, text) {
+    let payload_path = clipboard_payload_path(context);
+    rhai::runtime::atomic_write(payload_path, text);
     if platform == "linux" {
         let command = std::process::command(helper);
-        let clip_args = [
-            "-selection", "clipboard", "-loops", "2", "-silent"
-        ];
-        command.args(clip_args);
-        command.stdin_text(text);
+        command.args([
+            "-selection", "clipboard", "-loops", "2", "-silent", payload_path
+        ]);
         command.timeout(std::time::Duration::from_secs(30));
         return command.start();
-    } else {
-        invoke_tool(context, helper, [], text);
     }
+    let command = std::process::command("/bin/sh");
+    command.args([
+        "-c", "cat \"$1\" | \"$2\"", "sh", payload_path, helper
+    ]);
+    command.timeout(std::time::Duration::from_secs(5));
+    let output = command.output();
+    test_harness::append_command_record(
+        context,
+        ["sh", "-c", "pbcopy from payload file"],
+        output,
+        output.success == 0,
+        []
+    );
+    require(
+        output.success != 0,
+        "unix_frontend_pbcopy_failed:" + output.stderr_text()
+    );
 }
 
 fn wait_linux_clipboard_owner(context, helper, expected, owner) {
@@ -326,8 +406,7 @@ fn wait_linux_clipboard_owner(context, helper, expected, owner) {
                 output.stderr_text();
         }
         let command = std::process::command(helper);
-        let read_args = ["-selection", "clipboard", "-o"];
-        command.args(read_args);
+        command.args(["-selection", "clipboard", "-o"]);
         command.timeout(std::time::Duration::from_secs(2));
         let output = command.output();
         test_harness::append_command_record(
@@ -337,7 +416,8 @@ fn wait_linux_clipboard_owner(context, helper, expected, owner) {
             output.success == 0,
             []
         );
-        let observed = trimmed(output.stdout_text());
+        let observed = "" + output.stdout_text();
+        observed = observed.trim();
         if output.success != 0 && observed == expected {
             return 0;
         }
@@ -544,7 +624,7 @@ fn entry() {
         "fi\n" +
         "exec \"" + clipboard_reader + "\" \"$@\"\n";
     rhai::runtime::atomic_write(wrapper_path, wrapper_source);
-    invoke_tool(context, "/bin/chmod", ["0700", wrapper_path], "");
+    chmod_executable(context, wrapper_path);
 
     let stale_marker = "AGENTERM_STALE_PASTE_" + context.run_id;
     let witness_title = "AgenTerm foreground witness " + context.run_id;
@@ -554,9 +634,7 @@ fn entry() {
         let witness = start_x11_witness(witness_title);
         owned_children.push(witness);
         witness_id = wait_x11_window(context, witness_title, witness);
-        xdotool(
-            context, ["windowactivate", "--sync", witness_id], 0
-        );
+        xdotool_windowactivate(context, witness_id);
         wait_x11_active(
             context, witness_id, "unix_frontend_witness_activation_timeout"
         );
@@ -569,7 +647,9 @@ fn entry() {
     let failure = "";
     try {
         print("STEP no-activate launch preserves an independent native foreground witness");
-        let gui_command = test_harness::configured_command(context, gui_exe, []);
+        let gui_command = test_harness::configured_command(
+            context, gui_exe, ["--no-activate"]
+        );
         gui_command.env(
             "PATH", wrapper_directory + ":" + environment_or_empty("PATH")
         );
@@ -716,12 +796,13 @@ fn entry() {
         let paste_marker = "AGENTERM_NATIVE_PASTE_" + context.run_id;
         let clipboard_text = "echo " + paste_marker;
         if platform == "linux" {
+            let payload_path = clipboard_payload_path(context);
+            rhai::runtime::atomic_write(payload_path, clipboard_text);
             let clipboard_command = std::process::command(clipboard_writer);
-            let clip_args = [
-                "-selection", "clipboard", "-loops", "2", "-silent"
-            ];
-            clipboard_command.args(clip_args);
-            clipboard_command.stdin_text(clipboard_text);
+            clipboard_command.args([
+                "-selection", "clipboard", "-loops", "2", "-silent",
+                payload_path
+            ]);
             clipboard_command.timeout(std::time::Duration::from_secs(30));
             let clipboard_owner = clipboard_command.start();
             owned_children.push(clipboard_owner);
