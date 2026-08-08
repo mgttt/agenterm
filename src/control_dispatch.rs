@@ -1,5 +1,9 @@
 use std::{collections::BTreeSet, mem};
 
+// Wheel button codes are protocol constants, not UX policy, so they come from
+// the platform contract rather than being re-spelled here.
+use agenterm_platform::terminal_input::{MOUSE_WHEEL_DOWN, MOUSE_WHEEL_UP};
+
 use crate::{
     SCROLLBACK_LINES,
     commands::{
@@ -465,6 +469,123 @@ pub(crate) fn render_format(
         .replace("#W", &tab.title)
         .replace("#S", session_name)
         .replace("#P", "0")
+}
+
+/// One parsed `send-mouse` request, in **terminal cell** coordinates.
+///
+/// This is the PTY-level mouse: it reports to the application running inside
+/// the pane (the thing a human clicks when they click inside `htop`), and is a
+/// different layer from `ui-input pointer`, which drives window chrome in
+/// **pixel** coordinates. Neither replaces the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SendMouseRequest {
+    pub(crate) column: u16,
+    pub(crate) row: u16,
+    /// Base xterm button code before the motion bit is folded in.
+    pub(crate) button: u8,
+    pub(crate) action: SendMouseAction,
+    /// Explicit `--protocol`; `None` means "use whatever the app negotiated".
+    pub(crate) encoding: Option<MouseReportEncoding>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SendMouseAction {
+    Press,
+    Release,
+    Move,
+}
+
+/// Parses `send-mouse` arguments. Kept separate from dispatch so the argument
+/// contract is unit-testable without a live host.
+pub(crate) fn parse_send_mouse_request(
+    args: &[String],
+) -> Result<SendMouseRequest, (String, &'static str)> {
+    let column = parse_cell_coordinate(option_value(args, "-x"), "-x")?;
+    let row = parse_cell_coordinate(option_value(args, "-y"), "-y")?;
+    let button = match option_value(args, "--button").unwrap_or("left") {
+        "left" => 0,
+        "middle" => 1,
+        "right" => 2,
+        "wheel-up" => MOUSE_WHEEL_UP,
+        "wheel-down" => MOUSE_WHEEL_DOWN,
+        other => {
+            return Err((
+                format!(
+                    "send-mouse --button must be left|middle|right|wheel-up|wheel-down, got `{other}`"
+                ),
+                "operation_argument_invalid",
+            ));
+        }
+    };
+    let action = match option_value(args, "--action").unwrap_or("press") {
+        "press" => SendMouseAction::Press,
+        "release" => SendMouseAction::Release,
+        "move" => SendMouseAction::Move,
+        other => {
+            return Err((
+                format!("send-mouse --action must be press|release|move, got `{other}`"),
+                "operation_argument_invalid",
+            ));
+        }
+    };
+    // A wheel notch is a press-only event in every xterm encoding; releasing or
+    // dragging one is not expressible, so reject instead of emitting a report
+    // the application would misread as button 3.
+    if button >= MOUSE_WHEEL_UP && action != SendMouseAction::Press {
+        return Err((
+            "send-mouse wheel buttons support only --action press".to_owned(),
+            "operation_argument_conflict",
+        ));
+    }
+    let encoding = match option_value(args, "--protocol") {
+        None => None,
+        Some("default") => Some(MouseReportEncoding::Default),
+        Some("utf8") => Some(MouseReportEncoding::Utf8),
+        Some("sgr") => Some(MouseReportEncoding::Sgr),
+        Some(other) => {
+            return Err((
+                format!("send-mouse --protocol must be default|utf8|sgr, got `{other}`"),
+                "operation_argument_invalid",
+            ));
+        }
+    };
+    Ok(SendMouseRequest {
+        column,
+        row,
+        button,
+        action,
+        encoding,
+    })
+}
+
+fn parse_cell_coordinate(value: Option<&str>, flag: &str) -> Result<u16, (String, &'static str)> {
+    let Some(value) = value else {
+        return Err((
+            format!("send-mouse requires {flag} (zero-based terminal cell)"),
+            "operation_usage",
+        ));
+    };
+    value.parse::<u16>().map_err(|_| {
+        (
+            format!("send-mouse {flag} must be a zero-based cell index, got `{value}`"),
+            "operation_argument_invalid",
+        )
+    })
+}
+
+/// Whether the application's negotiated mode actually reports this action.
+///
+/// Mirrors xterm: X10 (`?9h`) reports presses only, `?1000h` adds release, and
+/// motion needs `?1002h`/`?1003h`. An action the mode does not cover is not an
+/// error — the human path silently keeps it local — so dispatch reports
+/// `ignored:mode`, matching `send-keys --native`'s existing `ignored:cooked`.
+pub(crate) fn send_mouse_mode_reports(mode: ApplicationMouseMode, action: SendMouseAction) -> bool {
+    match mode {
+        ApplicationMouseMode::None => false,
+        ApplicationMouseMode::Press => action == SendMouseAction::Press,
+        ApplicationMouseMode::PressRelease => action != SendMouseAction::Move,
+        ApplicationMouseMode::ButtonMotion | ApplicationMouseMode::AnyMotion => true,
+    }
 }
 
 pub(crate) fn resolve_target_position(
@@ -1464,6 +1585,97 @@ pub(crate) fn dispatch_shared_command(
             }
             Some(IpcResponse::success(""))
         }
+        "send-mouse" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::typed_failure(
+                    "can't find pane",
+                    "operation_target_not_found",
+                    "not_found",
+                    false,
+                ));
+            };
+            let request = match parse_send_mouse_request(args) {
+                Ok(request) => request,
+                Err((message, code)) => {
+                    return Some(IpcResponse::typed_failure(&message, code, "usage", false));
+                }
+            };
+            let (mode, negotiated_encoding, rows, columns) = {
+                let screen = host.tabs()[position].parser.screen();
+                let mode = match screen.mouse_protocol_mode() {
+                    vt100::MouseProtocolMode::None => ApplicationMouseMode::None,
+                    vt100::MouseProtocolMode::Press => ApplicationMouseMode::Press,
+                    vt100::MouseProtocolMode::PressRelease => ApplicationMouseMode::PressRelease,
+                    vt100::MouseProtocolMode::ButtonMotion => ApplicationMouseMode::ButtonMotion,
+                    vt100::MouseProtocolMode::AnyMotion => ApplicationMouseMode::AnyMotion,
+                };
+                let encoding = match screen.mouse_protocol_encoding() {
+                    vt100::MouseProtocolEncoding::Default => MouseReportEncoding::Default,
+                    vt100::MouseProtocolEncoding::Sgr => MouseReportEncoding::Sgr,
+                    vt100::MouseProtocolEncoding::Utf8 => MouseReportEncoding::Utf8,
+                };
+                let (rows, columns) = screen.size();
+                (mode, encoding, rows, columns)
+            };
+            // Fail closed rather than writing bytes the application never asked
+            // for: with reporting off, the report would land in the shell as
+            // literal text. Retryable, because the app may enable it later.
+            if mode == ApplicationMouseMode::None {
+                return Some(IpcResponse::typed_failure(
+                    "the application in this pane has not enabled mouse reporting; \
+                     check `ui-screen`'s mouse_protocol_mode before sending",
+                    "terminal_mouse_reporting_inactive",
+                    "precondition",
+                    true,
+                ));
+            }
+            if request.column >= columns || request.row >= rows {
+                return Some(IpcResponse::typed_failure(
+                    format!(
+                        "send-mouse cell ({}, {}) is outside the {columns}x{rows} grid",
+                        request.column, request.row
+                    ),
+                    "operation_argument_invalid",
+                    "usage",
+                    false,
+                ));
+            }
+            if !send_mouse_mode_reports(mode, request.action) {
+                return Some(IpcResponse::success("ignored:mode"));
+            }
+            let motion = request.action == SendMouseAction::Move;
+            let mut code = request.button;
+            if motion {
+                code |= 32;
+            }
+            let encoding = request.encoding.unwrap_or(negotiated_encoding);
+            let Some(bytes) = crate::frontend::interaction::mouse_report_bytes(
+                encoding,
+                code,
+                request.column,
+                request.row,
+                request.action != SendMouseAction::Release,
+            ) else {
+                return Some(IpcResponse::typed_failure(
+                    "this cell cannot be expressed in the negotiated mouse encoding; \
+                     use --protocol sgr or ask the application to enable SGR (?1006h)",
+                    "terminal_mouse_encoding_range",
+                    "unsupported",
+                    false,
+                ));
+            };
+            if !host.tabs_mut()[position].send(&bytes) {
+                return Some(IpcResponse::typed_failure(
+                    "terminal input was not accepted because the pane is no longer writable",
+                    "terminal_not_writable",
+                    "precondition",
+                    false,
+                ));
+            }
+            Some(IpcResponse::success("sent:mouse"))
+        }
         "set-buffer" | "setb" => {
             let name = option_value(args, "-b");
             let data = buffer_data_from_args(args);
@@ -2344,6 +2556,180 @@ fn native_key_failure(error: PtyError) -> IpcResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mouse_args(rest: &[&str]) -> Vec<String> {
+        std::iter::once("send-mouse")
+            .chain(rest.iter().copied())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn send_mouse_defaults_to_left_press_and_negotiated_protocol() {
+        let request = parse_send_mouse_request(&mouse_args(&["-x", "10", "-y", "4"]))
+            .expect("defaults parse");
+        assert_eq!(request.column, 10);
+        assert_eq!(request.row, 4);
+        assert_eq!(request.button, 0);
+        assert_eq!(request.action, SendMouseAction::Press);
+        // `None` means "whatever the application negotiated" — dispatch must not
+        // silently substitute a fixed encoding.
+        assert_eq!(request.encoding, None);
+    }
+
+    #[test]
+    fn send_mouse_parses_every_button_and_action() {
+        for (name, code) in [
+            ("left", 0),
+            ("middle", 1),
+            ("right", 2),
+            ("wheel-up", MOUSE_WHEEL_UP),
+            ("wheel-down", MOUSE_WHEEL_DOWN),
+        ] {
+            let request =
+                parse_send_mouse_request(&mouse_args(&["-x", "0", "-y", "0", "--button", name]))
+                    .expect("button parses");
+            assert_eq!(request.button, code, "button {name}");
+        }
+        for (name, action) in [
+            ("press", SendMouseAction::Press),
+            ("release", SendMouseAction::Release),
+            ("move", SendMouseAction::Move),
+        ] {
+            let request =
+                parse_send_mouse_request(&mouse_args(&["-x", "0", "-y", "0", "--action", name]))
+                    .expect("action parses");
+            assert_eq!(request.action, action, "action {name}");
+        }
+    }
+
+    #[test]
+    fn send_mouse_rejects_wheel_release_and_wheel_drag() {
+        for action in ["release", "move"] {
+            let error = parse_send_mouse_request(&mouse_args(&[
+                "-x", "1", "-y", "1", "--button", "wheel-up", "--action", action,
+            ]))
+            .expect_err("wheel is press-only");
+            assert_eq!(error.1, "operation_argument_conflict", "action {action}");
+        }
+    }
+
+    #[test]
+    fn send_mouse_requires_both_coordinates_and_rejects_garbage() {
+        assert_eq!(
+            parse_send_mouse_request(&mouse_args(&["-y", "1"]))
+                .expect_err("missing -x")
+                .1,
+            "operation_usage"
+        );
+        assert_eq!(
+            parse_send_mouse_request(&mouse_args(&["-x", "1"]))
+                .expect_err("missing -y")
+                .1,
+            "operation_usage"
+        );
+        // Not silently coerced to 0 — a typo must be reported, matching the
+        // `--cols twenty` lesson from the console host's argument parser.
+        assert_eq!(
+            parse_send_mouse_request(&mouse_args(&["-x", "ten", "-y", "1"]))
+                .expect_err("non-numeric -x")
+                .1,
+            "operation_argument_invalid"
+        );
+        assert_eq!(
+            parse_send_mouse_request(&mouse_args(&["-x", "-1", "-y", "1"]))
+                .expect_err("negative -x")
+                .1,
+            "operation_argument_invalid"
+        );
+    }
+
+    #[test]
+    fn send_mouse_rejects_unknown_button_action_and_protocol() {
+        for (flag, value) in [
+            ("--button", "scroll"),
+            ("--action", "click"),
+            ("--protocol", "x11"),
+        ] {
+            let error = parse_send_mouse_request(&mouse_args(&["-x", "1", "-y", "1", flag, value]))
+                .expect_err("unknown value rejected");
+            assert_eq!(error.1, "operation_argument_invalid", "{flag} {value}");
+        }
+    }
+
+    #[test]
+    fn send_mouse_protocol_override_is_honoured() {
+        for (name, encoding) in [
+            ("default", MouseReportEncoding::Default),
+            ("utf8", MouseReportEncoding::Utf8),
+            ("sgr", MouseReportEncoding::Sgr),
+        ] {
+            let request =
+                parse_send_mouse_request(&mouse_args(&["-x", "1", "-y", "1", "--protocol", name]))
+                    .expect("protocol parses");
+            assert_eq!(request.encoding, Some(encoding), "protocol {name}");
+        }
+    }
+
+    #[test]
+    fn send_mouse_mode_gating_matches_xterm() {
+        use SendMouseAction::{Move, Press, Release};
+        // Reporting off: nothing is delivered, so dispatch fails closed rather
+        // than writing a report the shell would render as literal text.
+        for action in [Press, Release, Move] {
+            assert!(!send_mouse_mode_reports(ApplicationMouseMode::None, action));
+        }
+        // X10 (?9h) is press-only.
+        assert!(send_mouse_mode_reports(ApplicationMouseMode::Press, Press));
+        assert!(!send_mouse_mode_reports(
+            ApplicationMouseMode::Press,
+            Release
+        ));
+        assert!(!send_mouse_mode_reports(ApplicationMouseMode::Press, Move));
+        // ?1000h adds release but still no motion.
+        assert!(send_mouse_mode_reports(
+            ApplicationMouseMode::PressRelease,
+            Release
+        ));
+        assert!(!send_mouse_mode_reports(
+            ApplicationMouseMode::PressRelease,
+            Move
+        ));
+        // ?1002h / ?1003h report motion too.
+        for mode in [
+            ApplicationMouseMode::ButtonMotion,
+            ApplicationMouseMode::AnyMotion,
+        ] {
+            for action in [Press, Release, Move] {
+                assert!(send_mouse_mode_reports(mode, action), "{mode:?} {action:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn send_mouse_move_sets_the_motion_bit_in_the_encoded_report() {
+        // Guards the dispatch-side `code |= 32` against silent loss: without it
+        // a drag would be indistinguishable from a fresh press.
+        let press = crate::frontend::interaction::mouse_report_bytes(
+            MouseReportEncoding::Sgr,
+            0,
+            9,
+            3,
+            true,
+        )
+        .expect("press encodes");
+        const MOTION_BIT: u8 = 32;
+        let motion = crate::frontend::interaction::mouse_report_bytes(
+            MouseReportEncoding::Sgr,
+            MOTION_BIT,
+            9,
+            3,
+            true,
+        )
+        .expect("motion encodes");
+        assert_eq!(press, b"\x1b[<0;10;4M");
+        assert_eq!(motion, b"\x1b[<32;10;4M");
+    }
 
     #[test]
     fn bounded_utf8_prefix_respects_char_boundaries() {

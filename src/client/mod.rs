@@ -5036,7 +5036,10 @@ Usage:
   agenterm-cli script check|run FILE|- [--project-root DIR] [--cwd DIR]
   agenterm-cli script eval EXPRESSION [--cwd DIR]
   agenterm-cli script task list|show|check|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
-  agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
+  agenterm-cli send-mouse [-t target] -x col -y row [--button left|middle|right|wheel-up|wheel-down] [--action press|release|move] [--protocol default|utf8|sgr]
+  agenterm-cli ui-input pointer --x PX --y PX [--button left|middle|right] [--action press|release|move] [--count 1..3] [--mods shift,ctrl,alt,meta]
+  agenterm-cli ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels] [--mods ...]
+  agenterm-cli ui-input key --key NAME [--mods shift,ctrl,alt,meta]
   agenterm-cli ui-snapshot
   agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
   agenterm-cli ui-bootstrap
@@ -5143,7 +5146,7 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
         "extensions": [
             "ui-snapshot", "ui-action", "focus", "protocol-info", "control-center", "rh-pack",
             "inspect", "screenshot", "screenshot-pane", "dump-cells",
-            "wait-pane", "send-mouse", "show-composer",
+            "wait-pane", "send-mouse", "ui-input", "show-composer",
             "set-composer", "send-composer", "get-settings",
             "set-setting", "set-tab-note", "show-tab-note",
             "list-tab-tree", "set-tab-parent", "show-tab-parent",
