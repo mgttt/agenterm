@@ -139,8 +139,7 @@ fn entry() {
         let executable = executable_name.to_lower();
         if executable == "agenterm-rh"
                 || executable == "agenterm-rh.exe"
-                || executable == "agenterm-rhai"
-                || executable == "agenterm-rhai.exe" {
+                || false {
             worker_ids_before.push(process.id);
         }
         process_before_index = process_before_index + 1;
@@ -329,8 +328,6 @@ fn entry() {
             let executable = executable_name.to_lower();
             if executable == "agenterm-rh"
                     || executable == "agenterm-rh.exe"
-                    || executable == "agenterm-rhai"
-                    || executable == "agenterm-rhai.exe" {
             test_harness::require(
                     worker_ids_before.contains(process.id) != 0,
                     "startup_nested_script_worker:" + process.id

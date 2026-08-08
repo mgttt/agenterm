@@ -2,7 +2,7 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
-Runtime contract (historical Rhai): [AgenTerm Script Runtime specification](../docs/agenterm-rhai-runtime.md)
+Runtime contract (historical Rhai): [AgenTerm Script Runtime specification](../docs/agenterm-rh-runtime.md)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 

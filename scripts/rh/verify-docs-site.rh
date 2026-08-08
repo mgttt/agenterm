@@ -16,7 +16,7 @@ fn entry() {
     if image_reference == 0 {
         return rh::fail("docs index must use the case-exact workspace image reference");
     }
-    let script_specification = html.contains("docs/agenterm-rhai-runtime.md");
+    let script_specification = html.contains("docs/agenterm-rh-runtime.md");
     if script_specification == 0 {
         return rh::fail("docs index must use the case-exact script specification path");
     }

@@ -965,7 +965,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     );
     let spec = std::path::join(
         context.owned_root,
-        "../../../docs/agenterm-rhai-runtime.md"
+        "../../../docs/agenterm-rh-runtime.md"
     ).display;
     // Resolve from the repository supplied to the context rather than trusting
     // the current directory of a nested child.
@@ -982,7 +982,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             "--profile", "local", "--",
             std::path::join(
                 repo,
-                "docs/agenterm-rhai-runtime.md"
+                "docs/agenterm-rh-runtime.md"
             ).display,
             catalog_path
         ],
@@ -2821,7 +2821,7 @@ fn run_fleet_journey(
         test_harness::require(
             (
                 direct_help.contains("AgenTerm Script Runtime")
-                    && direct_help.contains("agenterm-rhai task run")
+                    && direct_help.contains("agenterm-rh task run")
             ) || (
                 direct_help.contains("agenterm-rh")
                     && direct_help.contains("task list")
@@ -2863,7 +2863,7 @@ fn run_fleet_journey(
         let direct_show_task0 = direct_show.tasks[0];
         test_harness::require(
             direct_catalog.project_id ==
-                "agenterm-rhai-daily-check"
+                "agenterm-rh-daily-check"
                 && direct_catalog.schema_version == 3
                 && direct_catalog.compatible
                 && direct_catalog.tasks.len == 1

@@ -620,7 +620,6 @@ fn resolve_script_executable(executable_directory) {
     }
     let rhai_candidate = std::path::join(
         executable_directory,
-        "agenterm-rhai.exe"
     ).display;
     if std::fs::exists(rhai_candidate) {
         return rhai_candidate;

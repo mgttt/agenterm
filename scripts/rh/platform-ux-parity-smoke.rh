@@ -7,7 +7,7 @@
 //   REPO GUI_EXE SCRIPT_EXE CLI_EXE PLATFORM
 // platform: windows|linux|macos
 // SCRIPT_EXE is optional and defaults to dist/{agenterm-rh(.exe)|agenterm-rh},
-// with a compatibility fallback to agenterm-rhai when rh is unavailable.
+//
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
@@ -960,8 +960,6 @@ fn resolve_script_binary(script_exe, repository) {
         script_exe_text,
         std::path::join(repository_path, "dist/agenterm-rh.exe").display,
         std::path::join(repository_path, "dist/agenterm-rh").display,
-        std::path::join(repository_path, "dist/agenterm-rhai.exe").display,
-        std::path::join(repository_path, "dist/agenterm-rhai").display
     ];
 
     let candidate_index = 0;

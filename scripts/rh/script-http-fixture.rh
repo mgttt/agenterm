@@ -75,7 +75,8 @@ fn serve_request(stream, log_path, handled) {
     while request.len < 65536 {
         let chunk = ();
         try {
-            chunk = stream.read(2048);
+            let read_result = stream.read(2048);
+            chunk = read_result;
         } catch (error) {
             let message = error.to_string();
             if request.len == 0 && message.contains("net_read_timeout") {
