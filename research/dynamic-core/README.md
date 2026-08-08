@@ -48,7 +48,7 @@ Q0's code sits at the top level of this directory.
 
 The question board above is **vertical**: one question, one verdict, one experiment.
 This section is **horizontal**: one *class of technique* per line, with the number that
-was actually measured and where it came from. It is the cross-cut of Q0–Q10, and it is
+was actually measured and where it came from. It is the cross-cut of Q0–Q13, and it is
 the thing you hand to someone who has to *choose* mechanisms rather than *settle* a
 question.
 
@@ -93,7 +93,8 @@ question.
 | technique | verdict | measured | provenance |
 |---|---|---|---|
 | **`Declare` / layout query** (`GetSystemInfo`, `RtlAddFunctionTable`, Linux BTF) | **A real, distinct concern — mechanically not a new primitive, conceptually yes.** The diagnosis: **reaching an *address* ≠ reaching a *description*.** `sym` resolves symbol→address; **no amount of `sym` answers `offsetof`**, and nothing in ①②③④ produces an offset | Q6 ran all three capabilities with **baked** offsets (`WIN32_FIND_DATAA.cFileName`@44, `sockaddr_in.sin_port`@2, `SYSTEM_INFO.dwPageSize`@4 — baked *even to read the host's own answer*). Kernel cost of promoting Declare to a uniform in-kernel query channel = **+182 B `.text`** (550→732), and it is **avoidable → 0** if left as a ③+④ usage pattern + a payload-side baked table. **Claim R of §1.1 ("nothing unreachable") is falsified** for the layout class | **[实测] Q6 ②③**; the query-form requirement independently reached by **[实测] Q7 L3a**; the CO-RE/BTF mechanism itself is **[转述·一手查证] R1 §4.1e** |
-| **Cost of not doing it** | Layout constants get **baked into the artifact**, and the failure mode when the platform's struct changes is a **silently wrong offset, not an error** | Q7's oracle is a **stub** (`FieldSrc::Queried` carries the answer inline) — the finding is "L3a needs a query channel", **not** "here is the oracle". Where a host publishes nothing machine-readable (Windows system structs), the fact is **irreducibly baked** | **[实测] Q6 ②** + **[实测] Q7 deviation 3** |
+| **Is a wrong bake detectable?** (the `Declare` follow-up) | **只能烤，但可检测 (bake-only, but detectable).** Windows has **no runtime `offsetof` oracle**, so baking is unavoidable — **but a wrong bake is DETECTABLE, converting Q6's silent per-target trust into explicit fail-fast**. `GetSystemInfo` publishes machine-fact *values*, yet each value sits behind an offset the host does **not** publish (**bootstrap circularity**: you need the layout to read the layout's own answer) | All three of Q6's baked facts fired a ③+④-only self-check on a **deliberately corrupted offset** on the real box (constructive filename read-back; socket `bind`+`getsockname` round-trip → WSAEAFNOSUPPORT 10047; `GetSystemInfo` cross-field), at **~18–38 LOC/fact, +0 kernel bytes** (pure payload-side). Detection has a **strength gradient** — constructive/round-trip airtight *modulo naming*, cross-field **weak** (bootstraps from *other* baked offsets; it caught a real 32-bit-vs-x64 offset bug live). Against Q4 the trust set shrinks **{naming + layout} → {naming}** — layout exits the hole, modulo naming | **[实测] Q13** ([`declare/RESULTS.md`](./declare/RESULTS.md)) |
+| **Cost of not doing it** | Layout constants get **baked into the artifact**; the pre-Q13 failure mode was a **silently wrong offset, not an error**. **Q13 narrows this**: only the *no-semantic-round-trip* residue stays silent-trust — write-only-unvalidated flags, unpredictable-read (`WIN32_FIND_DATAA.ftCreationTime`), loosely-validated `cb` (`STARTUPINFOA.cb=104`); everything with a round-trip is now fail-fast | Q7's oracle is a **stub** (`FieldSrc::Queried` carries the answer inline) — the finding is "L3a needs a query channel", **not** "here is the oracle". Where a host publishes nothing machine-readable (Windows system structs) the fact is **irreducibly baked** — but a wrong bake is **detectable** wherever the field participates in an API round-trip | **[实测] Q6 ②** + **[实测] Q7 deviation 3** + **[实测] Q13 ④** |
 
 ## ④ Distribution & reuse
 
@@ -119,7 +120,12 @@ question.
 |---|---|---|---|
 | **Three ways to obtain executable memory** (`RW→RX` flip / direct RWX / section object) | **Primitive ② must be polymorphic.** Under default policy all three work; under ACG **all three die** | Default `DynamicCode` policy reads **0x0** (ACG is **opt-in**): M1/M2/M3 each jump in and return 42. With ACG on: M1 fails at `VirtualProtect(→RX)`, M2 at `VirtualAlloc(RWX)`, M3 at `MapViewOfFile(FILE_MAP_EXECUTE)` — **all three, all `1655 = ERROR_DYNAMIC_CODE_BLOCKED`** (code from this machine's own `winerror.h`). Two conditional windows measured: pre-ACG RX survives (one-shot AOT), and `AllowThreadOptOut` + per-thread opt-out restores the flip | **[实测] Q8 J1–J5**. This **corrects R1 §7.1**, which says ACG cuts *two* paths |
 | — consequence | On an externally-imposed ACG process (and, if R1 is right, iOS), the only general legal path left is **interpretation** | Q8 → Q9: interpretation is measured at 3177 B and 1.0× on OS-bound work — the fallback is affordable | **[实测] Q8 §对四原语模型的影响** + **[实测] Q9** |
-| **Not yet handled by any experiment** | I-cache coherence across threads (ARM/RISC-V; the *other* thread needs its own `ISB`); CET-IBT `ENDBR64` / ARM BTI landing pads / arm64e PAC signing; Windows x64 unwind registration (`RtlAddFunctionTable`, and the leaf-function exemption); TLS access models; code retirement | **nothing measured.** Q6's Publish half is an explicit **stub** (call shape only, not a real unwind registration) | **[转述未验] R1 §7.2/§10.5**; stub status **[实测] Q6 deviation 4** |
+| **The landing (second) gate — CET-IBT / `ENDBR64`** | **Not biting on this box, and no runtime toggle to force it.** The second gate's forward-edge check needs CET hardware this machine does not have | `CPUID.7.0` reports **CET_SS=0 / CET_IBT=0** — the silicon has **no CET at all** (not "supported-but-off"); CFG & shadow-stack policy off. Our three products carry **0 `ENDBR64`** (scanned Q2/Q9/Q8 binaries); Q2's only indirect targets (entry `transmute+entry()`, callback `call [r15+idx*8]`) have no landing pad — yet **all four jump patterns (P0/P0b/P1-entry/P2-callback) jump in and return 42**. **Methodology limit worth stating:** Windows exposes **no runtime forward-edge-IBT switch** (unlike ACG), so this cannot be "turned on and re-tested" here — the empirical jump-test is the judgement, not docs | **[实测] Q12 ①②** ([`landing/RESULTS.md`](./landing/RESULTS.md)); ARM BTI / arm64e PAC equivalents **[转述未验] R1 §7.2** |
+| **The landing (second) gate — ±2GB placement (`call rel32`)** | **Real, and the worst kind: MEASURED silent — no crash, no error, wrong callee.** Q2 is structurally immune; a switch to copy-and-patch detonates it | A >2GB `call rel32` (3GB delta) truncated via Q2's verbatim `as i32` with **no emit error** and **silently returned the wrong decoy callee (99, not 42), no crash**. **Q2 is structurally immune** — it never emits a PC-relative reference to an external symbol (OS calls go through absolute-indirect `call [mem]`; rel32 only for intra-buffer jumps). **copy-and-patch is not** — Q10 actually hit it and had to co-locate code / regfile / const-pool / a copy of the env table in **one arena**. (This is the execution-jump form; the rip-relative data-hole form is ④'s placement-reach row) | **[实测] Q12 ③** + **[实测] Q10 ④**; the aarch64 `CALL26` ±128 MB half **[转述未验] R1 §7.4** |
+| **The landing (second) gate — Windows x64 unwind registration** | **Latent, not biting.** Generated frames register no unwind info, but current payloads never unwind through them | `RtlLookupFunctionEntry` on Q2-generated code = **NULL** (no `RUNTIME_FUNCTION`). UB only if an SEH/C++ exception unwinds *through* a generated frame; our payloads exit or return normally, so it does **not** fire today. Hardening ≈ **~40 LOC + ~34 B/function** (deferrable) — or make the frame a leaf (Q2's prologue pushes 5 regs, so that needs vreg-alloc rework) | **[实测] Q12 ②④**; the publish-side *registration* itself is still only Q6's **stub** — **[实测] Q6 deviation 4** |
+| **The landing (second) gate — I-cache coherence** | **Free on x86.** | Every hand-assembled stub executed correctly immediately after being written in the same thread, **no `IC/DSB/ISB` barrier** — x86_64 keeps I/D coherent in hardware. The ARM protocol (each *other* thread needs its own `ISB`) is untestable here | **[实测] Q12 ②** for x86; ARM `IC/DSB/ISB` **[转述未验] R1 §7.2** |
+| — interpretation's answer to all four second gates | **Structurally immune to every one** — no generated bytes to land on / flush / unwind / relocate. The hardest of interpretation's structural advantages, after Q9's size & ISA | Proven by source **and measured under ACG**: the clean-room match-interpreter computes `((7*191)^0xABCD)<<3 = 358304` correctly with **zero executable pages**, while the Q2-style codegen path in the *same* process dies at **1655** at gate 1. The ENDBR/unwind/placement work codegen must add, interpretation adds **zero** | **[实测] Q12 ⑤** |
+| **Still not handled by any experiment** | ARM BTI / arm64e PAC landing pads & the ARM `IC/DSB/ISB` cross-thread I-cache protocol (no ARM host); TLS access models; code retirement; the **publish side** of unwind — a real `RtlAddFunctionTable` registration (vs Q12's *detection* that the frame is unregistered) and the leaf-function exemption | **nothing measured** on these. Q6's Publish half is an explicit **stub** (call shape only, not a real unwind registration) | **[转述未验] R1 §7.2/§10.5**; stub status **[实测] Q6 deviation 4** |
 | **Other platforms' policies** (Linux `MemoryDenyWriteExecute` / `MFD_NOEXEC_SEAL`, macOS `MAP_JIT` + entitlement, iOS "no legal path at all", OpenBSD `wxallowed`) | If iOS is as described it is the one **hard** gap; everything else looks policy-configurable | **not measurable here** (no WSL, not macOS/iOS/OpenBSD). Q8 keeps every one of these as an unverified transcription rather than folding them into its verdict | **[转述未验] R1 §7.1**, listed row-by-row in Q8's credibility table |
 
 ## ⑦ In the space, not yet used by us
@@ -133,6 +139,45 @@ number of ours behind it. It is here so the space is visible, not so it can be c
 | **eBPF-style verifier + load-time JIT** | The only shipping system whose constraints resemble ours. Also the clearest "you cannot have both": kernel `verifier.c` = **20,065 lines**, three orders of magnitude over our kernel; userspace eBPF runtimes simply **do not** reimplement it (rbpf's `verifier.rs` = 13 KB) | **[转述·一手查证] R1 §4.1b/§4.1f** (kernel source + GitHub, checked 2026-08-08) |
 | **CO-RE / load-time binding against a host description** | The shipping answer to "keep layout out of the payload": payload carries *name + type + relocation record*, loader carries the **layout oracle**, offsets are computed at bind time and folded in. Q7 reached the same shape from the other direction but built **no oracle** | **[转述·一手查证] R1 §4.1e**; our half **[实测] Q7 L3a** |
 | **"Take the intersection, not the union"** | eBPF's 11 registers are the **intersection of real 64-bit ABIs**, not a neutral choice — deliberately sacrificing neutrality (11 regs, 32-bit zero-extension) buys a per-arch JIT of **~4k lines** instead of a register allocator, and pushes edge architectures onto the interpreter. We have never priced this option | **[转述·一手查证] R1 §4.1a/§10.7** |
+
+---
+
+# 执行层判决 — the three landing routes, judged
+
+The 技术清单 above is *"which techniques exist."* This section is the newer, harder
+question the landing experiments (Q10 stencil / Q12 landing gate / Q13 declare) forced:
+**three execution routes were built and run to the metal — what is the verdict?** One
+four-axis table.
+
+| route | size | ISA cost | gate 1 — get executable memory | gate 2 — will the hardware run it |
+|---|---|---|---|---|
+| **interpret** (Q9 / Q12) | **1908 B** eval-core / **3177 B** whole interpreter | **0** (ISA-specific LOC in eval-core = 0, grep-verified) | **not needed** — never asks for RX memory | **structurally immune** to all four second gates (nothing generated to land on / flush / unwind / relocate) |
+| **JIT lowering** (Q2 / Q12) | **3003 B** | **~307 LOC/ISA** (Q5) | **cut by ACG** — all three exec-memory routes → 1655 | needs **~1%** hardening (ENDBR +4 B/entry; unwind ~40 LOC / ~34 B, deferrable); **placement immune by construction** |
+| **stencil** (Q10 / Q12) | **5826 B** (code+data, Q2口径) | data + an irreducible per-ISA code residual | **cut by ACG** (same `VirtualAlloc`/`VirtualProtect` path — structural, *not* separately measured under ACG) | **placement detonates on contact** — the ±2GB `PC32` hole; Q10 hit it and had to arena-co-locate |
+
+**Two limits that MUST travel with this table**, or the section will be read as
+over-claiming:
+
+1. **Interpretation's price is compute-density ≈77×** (Q9): OS-bound payloads are **1.0×**,
+   but hot compute inner loops run **≈77×** slower than optimized native. The route wins
+   all four axes above *only with this one hard caveat attached*.
+2. **Immunity here is a usability argument, not a security argument.** Q9 measured only
+   size / speed / coverage; Q12 measured that the interpreter still *runs* on a hardened
+   platform where codegen is blocked. **"The interpreter is safer" was never measured** and
+   must not be implied (see R1 §12.3 B7).
+
+**Verdict — the default framing is inverted.** "JIT as the main path, interpretation as
+the fallback" is turned over by four *independent* measurements: interpretation is
+**ISA-free** (0 vs ~307 LOC/ISA — the lowerer's *bulk is* the per-ISA encoder the
+interpreter simply lacks), **needs no executable memory** (survives ACG at gate 1), and is
+**structurally immune to every second gate**, while the two codegen routes grow *larger the
+more platform they must satisfy* — stencil, the fullest codegen form, is the **largest of
+the three (5826 B)** and detonates on placement. (Note the honest size nuance: on *raw
+single-ISA* bytes the interpreter's 3177 B is **not** smaller than Q2's minimal 3003 B
+lowerer — the inversion rests on ISA-scaling + the two platform gates, not on single-ISA
+byte count.) So: **interpretation is the floor; JIT is the conditional accelerator you add
+back where the ≈77× compute tax is worth paying and the platform still permits codegen** —
+holding the 77× and the un-measured security question as the two standing caveats.
 
 ---
 
