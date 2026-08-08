@@ -60,8 +60,8 @@ fn assert_native_fixture(name: &str, needles: &[&str], anti_needles: &[&str]) {
 }
 
 #[test]
-fn codegen_revision_is_seventy_eight() {
-    assert_eq!(RH_CODEGEN_REVISION, 78);
+fn codegen_revision_is_seventy_nine() {
+    assert_eq!(RH_CODEGEN_REVISION, 79);
 }
 
 #[test]
@@ -234,5 +234,17 @@ fn tab_active_map_key_vs_dot_fixture_emits_native_key_and_field_reads() {
             "rh_json_get_path_key(&tab, &[], &String::from(\"active\"))",
         ],
         &[],
+    );
+}
+
+#[test]
+fn clipboard_get_set_text_fixture_emits_native_host_json_calls() {
+    assert_native_fixture(
+        "rh_clipboard_get_set_text.rh",
+        &[
+            "rh_clipboard_get_text()",
+            "rh_clipboard_set_text(&String::from(\"native-clipboard-probe\"))",
+        ],
+        &["rh_host_eval_int(\"rhai::clipboard::"],
     );
 }

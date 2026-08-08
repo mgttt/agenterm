@@ -102,8 +102,8 @@ fn assert_compile_code(error: RhError, expected_code: &str) {
 }
 
 #[test]
-fn public_codegen_revision_is_seventy_eight() {
-    assert_eq!(RH_CODEGEN_REVISION, 78);
+fn public_codegen_revision_is_seventy_nine() {
+    assert_eq!(RH_CODEGEN_REVISION, 79);
 }
 
 #[test]

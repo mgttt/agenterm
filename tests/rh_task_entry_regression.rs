@@ -608,8 +608,8 @@ fn remote_ui_smoke_host_eval_he_ceiling() {
     let he = output.rust.matches("rh_host_eval_int(").count();
     // Pre-rev78 tip was ~229 HE; after native GUI typing rewrite lands ~19.
     assert!(
-        he <= 30,
-        "remote-ui-smoke HostEval ceiling exceeded: he={he} (expected <= 30 after rev78 window_control typing)"
+        he <= 15,
+        "remote-ui-smoke HostEval ceiling exceeded: he={he} (expected <= 15 after rev79 clipboard native)"
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));

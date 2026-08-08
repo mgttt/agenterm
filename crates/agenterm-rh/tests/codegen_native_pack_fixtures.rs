@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 9] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 10] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -73,6 +73,14 @@ const FIXTURES: [(&str, &[&str], &[&str]); 9] = [
             "rh_host_eval_int(\"settings_button.click",
         ],
     ),
+    (
+        "rh_clipboard_get_set_text.rh",
+        &[
+            "rh_clipboard_get_text()",
+            "rh_clipboard_set_text(&String::from(\"native-clipboard-probe\"))",
+        ],
+        &["rh_host_eval_int(\"rhai::clipboard::"],
+    ),
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -125,8 +133,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_seventy_eight() {
-    assert_eq!(RH_CODEGEN_REVISION, 78);
+fn codegen_revision_is_seventy_nine() {
+    assert_eq!(RH_CODEGEN_REVISION, 79);
 }
 
 #[test]
@@ -212,6 +220,25 @@ fn gui_window_control_visible_click_emits_native_gui_host_calls() {
     assert_native_or_host_eval(FIXTURES[8].0, FIXTURES[8].1, FIXTURES[8].2);
     let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[8].0))
         .expect("transpile gui window-control fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn clipboard_get_set_text_emits_native_host_json_calls() {
+    assert_native_or_host_eval(FIXTURES[9].0, FIXTURES[9].1, FIXTURES[9].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[9].0))
+        .expect("transpile clipboard fixture");
     assert_eq!(
         output.execution_mode,
         CdylibExecutionMode::Native,

@@ -3216,6 +3216,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if image_inspect_png_arg(expr).is_some() => ValueKind::Json,
+        _ if clipboard_get_text_arg(expr) => ValueKind::String,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
         _ if std_process_list(expr) => ValueKind::Json,
         _ if std_process_id(expr) => ValueKind::Int,
@@ -4071,6 +4072,25 @@ fn image_inspect_png_arg(expr: &Expr) -> Option<&Expr> {
     };
     (call.namespace.to_string() == "rhai::image"
         && call.name == "inspect_png"
+        && call.args.len() == 1)
+        .then(|| &call.args[0])
+}
+
+fn clipboard_get_text_arg(expr: &Expr) -> bool {
+    let Expr::FnCall(call, ..) = expr else {
+        return false;
+    };
+    call.namespace.to_string() == "rhai::clipboard"
+        && call.name == "get_text"
+        && call.args.is_empty()
+}
+
+fn clipboard_set_text_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    (call.namespace.to_string() == "rhai::clipboard"
+        && call.name == "set_text"
         && call.args.len() == 1)
         .then(|| &call.args[0])
 }
@@ -7341,6 +7361,9 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
                 ));
             }
         }
+        _ if clipboard_get_text_arg(expr) => {
+            out.push_str("rh_clipboard_get_text()");
+        }
         _ if hash_fnv1a64_arg(expr).is_some() => {
             if !emit_hash_fnv1a64(out, expr, ctx)? {
                 return Err(RhError::Transpile(
@@ -7582,6 +7605,16 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("rh_host_json_call(\"image.inspect_png\", &serde_json::json!({\"path\": ");
             emit_stringish(out, path, ctx)?;
             out.push_str("}))");
+            return Ok(());
+        }
+        if clipboard_get_text_arg(expr) {
+            out.push_str("rh_clipboard_get_text()");
+            return Ok(());
+        }
+        if let Some(text) = clipboard_set_text_arg(expr) {
+            out.push_str("rh_clipboard_set_text(&");
+            emit_stringish(out, text, ctx)?;
+            out.push(')');
             return Ok(());
         }
         if let Some(argument) = type_of_arg(expr)
@@ -13756,6 +13789,41 @@ fn entry() {
             output
                 .rust
                 .contains("rh_host_json_call(\"image.inspect_png\""),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn clipboard_get_set_text_uses_structured_native_host_call() {
+        let source = r#"
+fn entry() {
+    let before = rhai::clipboard::get_text();
+    rhai::clipboard::set_text("probe");
+    let after = rhai::clipboard::get_text();
+    before.len() + after.len()
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_clipboard_get_text()"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_clipboard_set_text(&String::from(\"probe\"))"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"rhai::clipboard::"),
             "{}",
             output.rust
         );

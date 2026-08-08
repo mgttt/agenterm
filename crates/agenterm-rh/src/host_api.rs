@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 78;
+pub const RH_CODEGEN_REVISION: u32 = 79;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1335,6 +1335,30 @@ pub fn emit_host_runtime(out: &mut String) {
                     right: 0,\n\
                     bottom: 0,\n\
                 }\n\
+            }\n\
+        }\n\n\
+        fn rh_clipboard_get_text() -> String {\n\
+            let result = rh_host_json_call(\n\
+                \"clipboard.get_text\",\n\
+                &serde_json::json!({}),\n\
+            );\n\
+            match result.get(\"text\").and_then(serde_json::Value::as_str) {\n\
+                Some(text) => text.to_owned(),\n\
+                None => {\n\
+                    let _ = rh_fail(\"clipboard_get_text\");\n\
+                    String::new()\n\
+                }\n\
+            }\n\
+        }\n\n\
+        fn rh_clipboard_set_text(text: &str) -> INT {\n\
+            let result = rh_host_json_call(\n\
+                \"clipboard.set_text\",\n\
+                &serde_json::json!({ \"text\": text }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                0\n\
+            } else {\n\
+                rh_fail(\"clipboard_set_text\")\n\
             }\n\
         }\n\n\
          fn rh_child_kill(child: &mut RhChild) -> INT {\n\

@@ -837,6 +837,15 @@ extern "C" fn host_json_call(
                 Err(code) => Err(code),
             }
         }
+        "clipboard.get_text" => crate::platform::services::script_clipboard::get_text()
+            .map(|text| serde_json::json!({ "text": text }))
+            .map_err(|_| -5),
+        "clipboard.set_text" => match input.get("text").and_then(serde_json::Value::as_str) {
+            Some(text) => crate::platform::services::script_clipboard::set_text(text)
+                .map(|()| serde_json::json!({ "ok": true }))
+                .map_err(|_| -5),
+            None => Err(-5),
+        },
         _ => Err(-4),
     }
     .and_then(|value| serde_json::to_string(&value).map_err(|_| -5));
