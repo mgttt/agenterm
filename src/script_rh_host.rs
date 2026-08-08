@@ -86,9 +86,6 @@ pub(crate) fn call_pack_entry_with_host_result(
     context: crate::script_rh_run::RhRunContext,
 ) -> Result<RhPackEntryResult, RhError> {
     crate::script_rh_run::with_run_context(context, || {
-        HOST_RUN_SCRIPT_RESULT.with(|slot| {
-            slot.borrow_mut().take();
-        });
         if let Some(bridge) = fleet_bridge {
             set_fleet_bridge(bridge);
         }
@@ -96,13 +93,12 @@ pub(crate) fn call_pack_entry_with_host_result(
         register_native_module(&module)?;
         clear_host_error();
         let entry_value = module.call_entry();
-        let host_value = HOST_RUN_SCRIPT_RESULT.with(|slot| slot.borrow_mut().take());
         if let Some(error) = take_host_error() {
             return Err(error);
         }
         Ok(RhPackEntryResult {
             entry_value,
-            host_value,
+            host_value: None,
         })
     })
 }
@@ -112,8 +108,6 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     if api >= RH_HOST_API_VERSION {
         module.register_host_v10(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
             Some(host_args_len_call),
             Some(host_arg_call),
@@ -124,8 +118,6 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     } else if api >= 9 {
         module.register_host_v9(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
             Some(host_args_len_call),
             Some(host_arg_call),
@@ -135,8 +127,6 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     } else if api >= 8 {
         module.register_host_v8(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
             Some(host_args_len_call),
             Some(host_arg_call),
@@ -146,8 +136,6 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     } else if api >= 7 {
         module.register_host_v7(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
             Some(host_args_len_call),
             Some(host_arg_call),
@@ -156,8 +144,6 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     } else if api >= 6 {
         module.register_host_v6(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
             Some(host_args_len_call),
             Some(host_arg_call),
@@ -165,26 +151,18 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     } else if api >= 5 {
         module.register_host_v5(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
             Some(host_args_len_call),
         )
     } else if api >= 4 {
         module.register_host_v4(
             host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
             Some(host_std_fs_exists_call),
         )
     } else if api >= 3 {
-        module.register_host_v3(
-            host_fleet_call,
-            Some(host_eval_call),
-            Some(host_run_script_call),
-        )
+        module.register_host_v3(host_fleet_call, None)
     } else if api >= 2 {
-        module.register_host_v2(host_fleet_call, Some(host_eval_call))
+        module.register_host_v2(host_fleet_call)
     } else {
         Err(RhError::Compile(format!(
             "rh pack host api {api} is older than the minimum supported version 2"
@@ -512,87 +490,6 @@ extern "C" fn host_std_fs_exists_call(path: *const u8, path_len: u32) -> i32 {
     }
 }
 
-extern "C" fn host_run_script_call(
-    source: *const u8,
-    source_len: u32,
-    out_buf: *mut u8,
-    out_cap: u32,
-) -> i32 {
-    if source.is_null() || out_buf.is_null() || out_cap == 0 {
-        return -1;
-    }
-    let source = match unsafe { read_utf8(source, source_len) } {
-        Ok(value) => value,
-        Err(()) => return -2,
-    };
-    let response = host_run_script_source(&source);
-    if let Err(error) = &response {
-        record_host_error("rh_host_run_script", error);
-    }
-    let response = response.map_err(|_| -5);
-    if let Ok(json) = &response
-        && let Some(value) = decode_host_entry_value(json)
-    {
-        HOST_RUN_SCRIPT_RESULT.with(|slot| {
-            *slot.borrow_mut() = Some(value);
-        });
-    }
-    write_response(response, out_buf, out_cap)
-}
-
-fn decode_host_entry_value(json: &str) -> Option<RhHostEntryValue> {
-    let encoded: serde_json::Value = serde_json::from_str(json).ok()?;
-    match encoded.get("kind").and_then(serde_json::Value::as_str)? {
-        "unit" => Some(RhHostEntryValue::Unit),
-        "int" | "bool" | "str" | "json" => {
-            encoded.get("value").cloned().map(RhHostEntryValue::Value)
-        }
-        _ => None,
-    }
-}
-
-fn host_run_script_source(source: &str) -> Result<String, String> {
-    use rhai::{Dynamic, Engine, Scope};
-
-    let context = crate::script_rh_run::current_run_context().unwrap_or_default();
-    let project_root = context
-        .project_root
-        .clone()
-        .or_else(|| {
-            std::env::var("AGENTERM_WORKSPACE_PATH")
-                .ok()
-                .map(std::path::PathBuf::from)
-        })
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| "project root unavailable".to_owned())?;
-    let budgets = context.budgets.clone().unwrap_or_default();
-    let mut engine = Engine::new();
-    crate::script_runtime::configure_engine(&mut engine, &budgets);
-    capture_compat_print(&mut engine, &context);
-    let resolver = crate::script_project::ProjectModuleResolver::new(&project_root)
-        .map_err(|error| error.to_string())?;
-    engine.set_module_resolver(resolver);
-    let mut scope = Scope::new();
-    if let Some(arguments) = context.arguments {
-        let dynamic = rhai::serde::to_dynamic(&arguments).map_err(|error| error.to_string())?;
-        scope.push_dynamic("args", dynamic);
-    }
-    let ast = engine
-        .compile_into_self_contained(&scope, source)
-        .map_err(|error| error.to_string())?;
-    let has_entry = ast.iter_functions().any(|meta| meta.name == "entry");
-    let value = if has_entry {
-        engine
-            .call_fn::<Dynamic>(&mut scope, &ast, "entry", ())
-            .map_err(|error| error.to_string())?
-    } else {
-        engine
-            .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
-            .map_err(|error| error.to_string())?
-    };
-    encode_host_result(&value)
-}
-
 extern "C" fn host_fleet_call(
     operation_id: *const u8,
     operation_id_len: u32,
@@ -852,33 +749,6 @@ extern "C" fn host_json_call(
     write_response(response, out_buf, out_cap)
 }
 
-extern "C" fn host_eval_call(
-    snippet: *const u8,
-    snippet_len: u32,
-    scope_json: *const u8,
-    scope_json_len: u32,
-    out_buf: *mut u8,
-    out_cap: u32,
-) -> i32 {
-    if snippet.is_null() || scope_json.is_null() || out_buf.is_null() || out_cap == 0 {
-        return -1;
-    }
-    let snippet = match unsafe { read_utf8(snippet, snippet_len) } {
-        Ok(value) => value,
-        Err(()) => return -2,
-    };
-    let scope_json = match unsafe { read_utf8(scope_json, scope_json_len) } {
-        Ok(value) => value,
-        Err(()) => return -3,
-    };
-    let response = host_eval_snippet(&snippet, &scope_json);
-    if let Err(error) = &response {
-        record_host_error("rh_host_eval", error);
-    }
-    let response = response.map_err(|_| -5);
-    write_response(response, out_buf, out_cap)
-}
-
 fn clear_host_error() {
     HOST_ERROR.with(|slot| {
         slot.borrow_mut().take();
@@ -896,88 +766,6 @@ fn record_host_error(code: &'static str, detail: &str) {
 
 fn take_host_error() -> Option<RhError> {
     HOST_ERROR.with(|slot| slot.borrow_mut().take())
-}
-
-fn host_eval_snippet(snippet: &str, scope_json: &str) -> Result<String, String> {
-    use rhai::{Dynamic, Engine, Scope};
-
-    let context = crate::script_rh_run::current_run_context().unwrap_or_default();
-    let scope_value: serde_json::Value =
-        serde_json::from_str(scope_json).unwrap_or_else(|_| serde_json::json!({}));
-    let mut engine = Engine::new();
-    let budgets = context.budgets.clone().unwrap_or_default();
-    crate::script_runtime::configure_engine(&mut engine, &budgets);
-    capture_compat_print(&mut engine, &context);
-    if let Some(project_root) = context
-        .project_root
-        .or_else(|| {
-            std::env::var("AGENTERM_WORKSPACE_PATH")
-                .ok()
-                .map(std::path::PathBuf::from)
-        })
-        .or_else(|| std::env::current_dir().ok())
-    {
-        if let Ok(resolver) = crate::script_project::ProjectModuleResolver::new(&project_root) {
-            engine.set_module_resolver(resolver);
-        }
-    }
-    let mut scope = Scope::new();
-    if let Some(arguments) = context.arguments {
-        let dynamic = rhai::serde::to_dynamic(&arguments).map_err(|error| error.to_string())?;
-        scope.push_dynamic("args", dynamic);
-    }
-    if let Some(vars) = scope_value.get("vars").and_then(|value| value.as_object()) {
-        for (name, binding) in vars {
-            if let Some(value) = binding.get("value") {
-                if let Some(number) = value.as_i64() {
-                    scope.push(name.as_str(), number);
-                    continue;
-                }
-                if let Some(flag) = value.as_bool() {
-                    scope.push(name.as_str(), flag);
-                    continue;
-                }
-                if let Some(text) = value.as_str() {
-                    scope.push(name.as_str(), text.to_owned());
-                }
-            }
-        }
-    }
-    let result = engine
-        .eval_with_scope::<Dynamic>(&mut scope, snippet)
-        .map_err(|error| error.to_string())?;
-    encode_host_result(&result)
-}
-
-fn capture_compat_print(engine: &mut rhai::Engine, context: &crate::script_rh_run::RhRunContext) {
-    let capture = context.output_capture.clone();
-    engine.on_print(move |text| {
-        if let Some(capture) = &capture {
-            capture.push_line(text);
-        }
-    });
-}
-
-fn encode_host_result(value: &rhai::Dynamic) -> Result<String, String> {
-    if value.is_unit() {
-        return Ok("{\"kind\":\"unit\"}".to_owned());
-    }
-    if let Ok(number) = value.as_int() {
-        return Ok(format!("{{\"kind\":\"int\",\"value\":{number}}}"));
-    }
-    if let Ok(flag) = value.as_bool() {
-        return Ok(format!("{{\"kind\":\"bool\",\"value\":{flag}}}"));
-    }
-    if let Ok(text) = value.clone().into_string() {
-        return Ok(format!(
-            "{{\"kind\":\"str\",\"value\":{}}}",
-            serde_json::to_string(&text).map_err(|error| error.to_string())?
-        ));
-    }
-    if let Ok(json) = rhai::serde::from_dynamic::<serde_json::Value>(value) {
-        return Ok(format!("{{\"kind\":\"json\",\"value\":{json}}}"));
-    }
-    Err("unsupported host eval result type".to_owned())
 }
 
 fn write_response(response: Result<String, i32>, out_buf: *mut u8, out_cap: u32) -> i32 {
@@ -1007,26 +795,14 @@ unsafe fn read_utf8(ptr: *const u8, len: u32) -> Result<String, ()> {
 std::thread_local! {
     static FLEET_BRIDGE: std::cell::RefCell<Option<FleetBridgeFn>> =
         const { std::cell::RefCell::new(None) };
-    static HOST_RUN_SCRIPT_RESULT: std::cell::RefCell<Option<RhHostEntryValue>> =
-        const { std::cell::RefCell::new(None) };
     static HOST_ERROR: std::cell::RefCell<Option<RhError>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{call_pack_entry_with_host, clear_fleet_bridge, host_eval_snippet};
+    use super::{call_pack_entry_with_host, clear_fleet_bridge};
     use std::sync::{Arc, Mutex};
-
-    #[test]
-    fn host_eval_runs_std_fs_exists() {
-        let dir = std::env::temp_dir();
-        let snippet = format!("std::fs::exists(`{}`)", dir.display());
-        let json = host_eval_snippet(&snippet, "{}").expect("eval");
-        let value: serde_json::Value = serde_json::from_str(&json).expect("json");
-        assert_eq!(value["kind"], "bool");
-        assert!(value["value"].as_bool().unwrap());
-    }
 
     #[test]
     fn host_std_fs_exists_call_reports_present_and_missing_paths() {
@@ -1357,56 +1133,6 @@ fn entry() { 42 }"#;
             .call_fn::<Dynamic>(&mut scope, &ast, "entry", ())
             .expect("call entry");
         assert_eq!(value.as_int().ok(), Some(2));
-    }
-
-    #[test]
-    fn host_run_script_call_ffi_honors_args() {
-        let context = crate::script_rh_run::RhRunContext {
-            arguments: Some(serde_json::json!(["alpha", "beta"])),
-            project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-            ..Default::default()
-        };
-        let source = "fn entry() { args.len() }";
-        crate::script_rh_run::with_run_context(context, || {
-            let mut out = vec![0u8; 256];
-            let wrote = super::host_run_script_call(
-                source.as_ptr(),
-                source.len() as u32,
-                out.as_mut_ptr(),
-                out.len() as u32,
-            );
-            assert!(wrote > 0, "host_run_script_call failed with {wrote}");
-            let json = std::str::from_utf8(&out[..wrote as usize]).expect("utf8");
-            assert_eq!(json, "{\"kind\":\"int\",\"value\":2}");
-        });
-    }
-
-    #[test]
-    fn host_eval_snippet_honors_args() {
-        let context = crate::script_rh_run::RhRunContext {
-            arguments: Some(serde_json::json!(["alpha", "beta"])),
-            ..Default::default()
-        };
-        let json = crate::script_rh_run::with_run_context(context, || {
-            super::host_eval_snippet("args.len()", "{}").expect("eval")
-        });
-        let value: serde_json::Value = serde_json::from_str(&json).expect("json");
-        assert_eq!(value["kind"], "int");
-        assert_eq!(value["value"], 2);
-    }
-
-    #[test]
-    fn host_run_script_source_honors_args() {
-        let context = crate::script_rh_run::RhRunContext {
-            arguments: Some(serde_json::json!(["alpha", "beta"])),
-            project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-            ..Default::default()
-        };
-        let source = "fn entry() { args.len() }";
-        let err = crate::script_rh_run::with_run_context(context, || {
-            super::host_run_script_source(source).map_err(|error| error.to_string())
-        });
-        assert_eq!(err.as_deref(), Ok("{\"kind\":\"int\",\"value\":2}"));
     }
 
     #[test]

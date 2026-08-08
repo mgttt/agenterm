@@ -1,6 +1,6 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 10;
+pub const RH_HOST_API_VERSION: u32 = 11;
 pub const RH_CODEGEN_REVISION: u32 = 83;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
@@ -40,18 +40,6 @@ pub type RhHostFleetCall = extern "C" fn(
     out_cap: u32,
 ) -> i32;
 
-pub type RhHostEvalCall = extern "C" fn(
-    snippet: *const u8,
-    snippet_len: u32,
-    scope_json: *const u8,
-    scope_json_len: u32,
-    out_buf: *mut u8,
-    out_cap: u32,
-) -> i32;
-
-pub type RhHostRunScriptCall =
-    extern "C" fn(source: *const u8, source_len: u32, out_buf: *mut u8, out_cap: u32) -> i32;
-
 pub type RhHostStdFsExistsCall = extern "C" fn(path: *const u8, path_len: u32) -> i32;
 pub type RhHostArgsLenCall = extern "C" fn() -> i64;
 pub type RhHostArgCall = extern "C" fn(index: u32, out_buf: *mut u8, out_cap: u32) -> i32;
@@ -82,8 +70,6 @@ pub fn rust_raw_string_literal(source: &str) -> String {
 pub fn emit_host_runtime(out: &mut String) {
     out.push_str(
         "type RhHostFleetCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\
-         type RhHostEvalCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\
-         type RhHostRunScriptCall = extern \"C\" fn(*const u8, u32, *mut u8, u32) -> i32;\n\
          type RhHostStdFsExistsCall = extern \"C\" fn(*const u8, u32) -> i32;\n\
          type RhHostArgsLenCall = extern \"C\" fn() -> i64;\n\n\
          type RhHostArgCall = extern \"C\" fn(u32, *mut u8, u32) -> i32;\n\n\
@@ -91,8 +77,6 @@ pub fn emit_host_runtime(out: &mut String) {
          type RhHostUtilityCall = extern \"C\" fn(u32, *const u8, u32) -> i32;\n\n\
          type RhHostJsonCall = extern \"C\" fn(*const u8, u32, *const u8, u32, *mut u8, u32) -> i32;\n\n\
          static mut RH_HOST_FLEET_CALL: Option<RhHostFleetCall> = None;\n\
-         static mut RH_HOST_EVAL_CALL: Option<RhHostEvalCall> = None;\n\
-         static mut RH_HOST_RUN_SCRIPT_CALL: Option<RhHostRunScriptCall> = None;\n\
          static mut RH_HOST_STD_FS_EXISTS_CALL: Option<RhHostStdFsExistsCall> = None;\n\
          static mut RH_HOST_ARGS_LEN_CALL: Option<RhHostArgsLenCall> = None;\n\
          static mut RH_HOST_ARG_CALL: Option<RhHostArgCall> = None;\n\
@@ -112,144 +96,8 @@ pub fn emit_host_runtime(out: &mut String) {
              unsafe { RH_HOST_FLEET_CALL = Some(fleet_call); }\n\
          }\n\n\
          #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v2(\n\
+         pub extern \"C\" fn rh_register_host_v11(\n\
              fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v3(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v4(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-             std_fs_exists_call: RhHostStdFsExistsCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
-                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v5(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-             std_fs_exists_call: RhHostStdFsExistsCall,\n\
-             args_len_call: RhHostArgsLenCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
-                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
-                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v6(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-             std_fs_exists_call: RhHostStdFsExistsCall,\n\
-             args_len_call: RhHostArgsLenCall,\n\
-             arg_call: RhHostArgCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
-                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
-                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
-                 RH_HOST_ARG_CALL = Some(arg_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v7(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-             std_fs_exists_call: RhHostStdFsExistsCall,\n\
-             args_len_call: RhHostArgsLenCall,\n\
-             arg_call: RhHostArgCall,\n\
-             fs_read_call: RhHostFsReadCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
-                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
-                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
-                 RH_HOST_ARG_CALL = Some(arg_call);\n\
-                 RH_HOST_FS_READ_CALL = Some(fs_read_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v8(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-             std_fs_exists_call: RhHostStdFsExistsCall,\n\
-             args_len_call: RhHostArgsLenCall,\n\
-             arg_call: RhHostArgCall,\n\
-             fs_read_call: RhHostFsReadCall,\n\
-             utility_call: RhHostUtilityCall,\n\
-         ) {\n\
-             unsafe {\n\
-                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
-                 RH_HOST_EVAL_CALL = Some(eval_call);\n\
-                 RH_HOST_RUN_SCRIPT_CALL = Some(run_script_call);\n\
-                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
-                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
-                 RH_HOST_ARG_CALL = Some(arg_call);\n\
-                 RH_HOST_FS_READ_CALL = Some(fs_read_call);\n\
-                 RH_HOST_UTILITY_CALL = Some(utility_call);\n\
-             }\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v9(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
-             std_fs_exists_call: RhHostStdFsExistsCall,\n\
-             args_len_call: RhHostArgsLenCall,\n\
-             arg_call: RhHostArgCall,\n\
-             fs_read_call: RhHostFsReadCall,\n\
-             utility_call: RhHostUtilityCall,\n\
-         ) {\n\
-             rh_register_host_v8(\n\
-                 fleet_call,\n\
-                 eval_call,\n\
-                 run_script_call,\n\
-                 std_fs_exists_call,\n\
-                 args_len_call,\n\
-                 arg_call,\n\
-                 fs_read_call,\n\
-                 utility_call,\n\
-             );\n\
-         }\n\n\
-         #[no_mangle]\n\
-         pub extern \"C\" fn rh_register_host_v10(\n\
-             fleet_call: RhHostFleetCall,\n\
-             eval_call: RhHostEvalCall,\n\
-             run_script_call: RhHostRunScriptCall,\n\
              std_fs_exists_call: RhHostStdFsExistsCall,\n\
              args_len_call: RhHostArgsLenCall,\n\
              arg_call: RhHostArgCall,\n\
@@ -257,17 +105,15 @@ pub fn emit_host_runtime(out: &mut String) {
              utility_call: RhHostUtilityCall,\n\
              json_call: RhHostJsonCall,\n\
          ) {\n\
-             rh_register_host_v9(\n\
-                 fleet_call,\n\
-                 eval_call,\n\
-                 run_script_call,\n\
-                 std_fs_exists_call,\n\
-                 args_len_call,\n\
-                 arg_call,\n\
-                 fs_read_call,\n\
-                 utility_call,\n\
-             );\n\
-             unsafe { RH_HOST_JSON_CALL = Some(json_call); }\n\
+             unsafe {\n\
+                 RH_HOST_FLEET_CALL = Some(fleet_call);\n\
+                 RH_HOST_STD_FS_EXISTS_CALL = Some(std_fs_exists_call);\n\
+                 RH_HOST_ARGS_LEN_CALL = Some(args_len_call);\n\
+                 RH_HOST_ARG_CALL = Some(arg_call);\n\
+                 RH_HOST_FS_READ_CALL = Some(fs_read_call);\n\
+                 RH_HOST_UTILITY_CALL = Some(utility_call);\n\
+                 RH_HOST_JSON_CALL = Some(json_call);\n\
+             }\n\
          }\n\n\
          fn rh_host_store(wrote: i32, scratch: Vec<u8>) -> i32 {\n\
              if wrote <= 0 {\n\
@@ -323,40 +169,6 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
              serde_json::from_slice(&scratch[..(wrote as usize).min(scratch.len())])\n\
                  .unwrap_or(serde_json::Value::Null)\n\
-         }\n\n\
-         fn rh_host_eval_raw(snippet: &str, scope_json: &str) -> i32 {\n\
-             let Some(call) = (unsafe { RH_HOST_EVAL_CALL }) else {\n\
-                 return -4;\n\
-             };\n\
-             let mut scratch = vec![0u8; ",
-    );
-    out.push_str(&RH_HOST_OUT_CAP.to_string());
-    out.push_str(
-        "usize];\n\
-             let wrote = call(\n\
-                 snippet.as_ptr(),\n\
-                 snippet.len() as u32,\n\
-                 scope_json.as_ptr(),\n\
-                 scope_json.len() as u32,\n\
-                 scratch.as_mut_ptr(),\n\
-                 scratch.len() as u32,\n\
-             );\n\
-             rh_host_store(wrote, scratch)\n\
-         }\n\n\
-         fn rh_host_eval_int(snippet: &str, scope_json: &str) -> INT {\n\
-             let wrote = rh_host_eval_raw(snippet, scope_json);\n\
-             if wrote <= 0 {\n\
-                 return wrote as INT;\n\
-             }\n\
-             if let Some(value) = rh_host_json() {\n\
-                 if let Some(number) = value.get(\"value\").and_then(|v| v.as_i64()) {\n\
-                     return number as INT;\n\
-                 }\n\
-                 if let Some(flag) = value.get(\"value\").and_then(|v| v.as_bool()) {\n\
-                     return if flag { 1 } else { 0 };\n\
-                 }\n\
-             }\n\
-             -6\n\
          }\n\n\
          fn rh_std_fs_exists(path: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_STD_FS_EXISTS_CALL }) else {\n\
@@ -2068,36 +1880,6 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_json_type_name_value(value: &serde_json::Value) -> String {\n\
              rh_json_type_name(value, &[])\n\
-         }\n\n\
-         fn rh_host_run_script(source: &str) -> INT {\n\
-             let Some(call) = (unsafe { RH_HOST_RUN_SCRIPT_CALL }) else {\n\
-                 return -4;\n\
-             };\n\
-             let mut scratch = vec![0u8; ",
-    );
-    out.push_str(&RH_HOST_OUT_CAP.to_string());
-    out.push_str(
-        "usize];\n\
-             let wrote = call(\n\
-                 source.as_ptr(),\n\
-                 source.len() as u32,\n\
-                 scratch.as_mut_ptr(),\n\
-                 scratch.len() as u32,\n\
-             );\n\
-             if wrote <= 0 {\n\
-                 return wrote as INT;\n\
-             }\n\
-             unsafe { RH_HOST_OUT_LEN = wrote as usize; }\n\
-             let _ = RH_HOST_OUT.set(scratch);\n\
-             if let Some(value) = rh_host_json() {\n\
-                 if let Some(number) = value.get(\"value\").and_then(|v| v.as_i64()) {\n\
-                     return number as INT;\n\
-                 }\n\
-                 if let Some(flag) = value.get(\"value\").and_then(|v| v.as_bool()) {\n\
-                     return if flag { 1 } else { 0 };\n\
-                 }\n\
-             }\n\
-             -6\n\
          }\n\n",
     );
 }
