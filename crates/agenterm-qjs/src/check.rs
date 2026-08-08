@@ -10,13 +10,36 @@
 //! top-level statements (verified in tests below: a script that would set a
 //! global as a side effect leaves it unset after `check`).
 //!
-//! Known gap vs. rh (tracked, not silently assumed away): rh's
-//! `check_with_project_validation` additionally walks a project-relative
-//! `import` graph and validates every shipped-API reference
-//! (`crates/agenterm-rh/src/project_import.rs`, `api_validate.rs`). qjs has
-//! no analogous project-import/API-catalog validation yet — see PRD
-//! "qjs execution backend" risk list. `check()` here is intentionally
-//! narrower until that lands.
+//! Known gap vs. rh, re-verified and corrected 2026-08-08 (the previous
+//! version of this note, written before QJS-M5, lumped two separate
+//! things together — worth being precise about which half is actually
+//! done, not just re-stating "known gap" indefinitely):
+//!
+//! - **Closed** (QJS-M5c): rh's `check_with_project_validation` walks a
+//!   project-relative `import` graph
+//!   (`crates/agenterm-rh/src/project_import.rs`) — qjs's
+//!   [`check_with_project_validation`] does this too now, via a real
+//!   ES-module resolver + QuickJS's own linker (see
+//!   `plan/design-qjs-module-imports.md`), not a hand-written walker.
+//! - **Still open, confirmed by testing, not assumed**: rh's version
+//!   *also* validates every shipped-API reference against a static
+//!   catalog (`crates/agenterm-rh/src/api_validate.rs`,
+//!   `shipped_surfaces.rs`) — e.g. `fn entry() {
+//!   std::fs::not_shipped(...) }` fails rh's check even though it's
+//!   syntactically valid. qjs's `check_with_project_validation` has no
+//!   equivalent: `check`ing a script that calls
+//!   `__host.fleet_call('tabs.totallyNotARealOperation', '{}')` currently
+//!   returns `ok` (verified against the real binary, not inferred) —
+//!   there's no shipped-operation catalog wired into check for qjs, and
+//!   `fleet_call`'s operation id is a plain runtime string, not something
+//!   `Module::declare` can statically catch the way it catches syntax
+//!   errors. Closing this needs a shared/exported operation catalog
+//!   (`shipped_surfaces.rs` is rh-internal Rust today, not a portable
+//!   format) plus a JS-source scanner for `__host.fleet_call('literal',
+//!   ...)` call sites — and even then, only *string-literal* operation
+//!   ids are staticly checkable; a computed id
+//!   (`__host.fleet_call(someVariable, ...)`) can't be, which rh's own
+//!   textual scanner presumably has the same limitation for. Not started.
 
 use std::path::Path;
 
@@ -66,10 +89,16 @@ pub fn check(source: &str, label: &str) -> Result<(), QjsError> {
 /// (and, since `Module::declare` eagerly links the whole static import
 /// graph, recursively parse-validates) every file it imports — named
 /// "aligned with rh" deliberately: this is qjs's answer to
-/// `agenterm_rh::check_with_project_validation`, same name, same "does
-/// this project's scripts hang together" contract, different mechanism
-/// (rh hand-walks its own import graph; qjs lets QuickJS's real module
-/// linker do it).
+/// `agenterm_rh::check_with_project_validation`'s *import-graph* half,
+/// same name, different mechanism (rh hand-walks its own import graph;
+/// qjs lets QuickJS's real module linker do it). It is **not** the whole
+/// contract yet — rh's version also validates shipped-API references
+/// (`std::fs::not_shipped(...)` fails rh's check even though it parses);
+/// qjs has no equivalent (a script calling a nonexistent
+/// `__host.fleet_call('made.up', ...)` operation still passes this
+/// function's check). See this file's module doc for the full,
+/// re-verified gap note — don't read "aligned with rh" here as "fully
+/// equivalent to rh's function of the same name".
 ///
 /// `label` here, unlike plain `check()`, **is** used for path resolution
 /// (it's the base every relative import in `source` resolves against) —
@@ -209,5 +238,33 @@ mod tests {
         let error = check_with_project_validation(&source, &entry_path, &inner)
             .expect_err("root-escaping import must fail check");
         assert!(error.to_string().contains("Error resolving module"), "{error}");
+    }
+
+    #[test]
+    fn known_gap_check_does_not_yet_validate_shipped_api_references() {
+        // This is a GAP MARKER, not a feature test — it locks in the
+        // current, known-incomplete behavior described in this file's
+        // module doc (QJS-M6, not started) so the gap is a visible,
+        // permanent fact instead of a claim that could quietly drift.
+        // `agenterm_rh::check_with_project_validation` rejects a script
+        // calling a shipped-API-unknown reference
+        // (`std::fs::not_shipped(...)`, see
+        // `crates/agenterm-rh/tests`/`api_validate.rs`'s own tests) even
+        // though it's syntactically valid; qjs's version does not, and
+        // this test proves that's still true right now, not asserted from
+        // memory. If this test starts failing, that's QJS-M6 having
+        // landed — update this test (and the module/function doc "known
+        // gap" notes above) to match, don't just delete the inconvenient
+        // assertion.
+        let dir = TempDir::new().expect("tempdir");
+        let entry_path = dir.path().join("entry.js");
+        std::fs::write(
+            &entry_path,
+            "function entry() { return __host.fleet_call('tabs.totallyNotARealOperation', '{}'); }",
+        )
+        .unwrap();
+        let source = std::fs::read_to_string(&entry_path).unwrap();
+        check_with_project_validation(&source, &entry_path, dir.path())
+            .expect("known gap: an unshipped fleet_call operation id is NOT caught by check yet");
     }
 }
