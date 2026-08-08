@@ -27,7 +27,7 @@ use crate::script_repl::{
     ReplCancelHandle, ReplCellFailure, ReplCellResult, ReplInputState, ReplSession,
     ReplSessionConfig,
 };
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::EvalAltResult;
 
 type PendingBroker = Option<(String, mpsc::SyncSender<ScriptBrokerResponse>)>;
 type SharedFrameOutput = Arc<Mutex<Box<dyn Write + Send>>>;
@@ -1253,7 +1253,7 @@ fn execute_with_cancellation_and_broker(
 
 fn execute_inner(
     invocation: &ScriptInvocation,
-    cancellation: Option<Arc<AtomicBool>>,
+    _cancellation: Option<Arc<AtomicBool>>,
     broker: Option<BrokerClient>,
 ) -> Result<(String, Option<serde_json::Value>), ScriptFailure> {
     let _temp_scope = crate::script_stdlib::enter_invocation_temp_root(
@@ -1291,9 +1291,6 @@ fn execute_inner(
         return Ok((String::new(), Some(crate::script_catalog::catalog())));
     }
 
-    // These migrated unit tests assert the complete legacy interpreter budget and API
-    // contract. Production and integration-test builds still exercise the default rh path.
-    #[cfg(not(test))]
     if let Some(result) = crate::script_backend::try_execute_rh_invocation(
         invocation.operation,
         &invocation.source,
@@ -1396,128 +1393,10 @@ fn execute_inner(
         return Ok((result.stdout, result.value));
     }
 
-    let output = Arc::new(Mutex::new(String::new()));
-    let output_exceeded = Arc::new(AtomicBool::new(false));
-    let wall_time_exceeded = Arc::new(AtomicBool::new(false));
-    let cancellation = cancellation.unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-    let output_for_print = Arc::clone(&output);
-    let exceeded_for_print = Arc::clone(&output_exceeded);
-    let output_limit = invocation.budgets.output_bytes;
-    let deadline = Instant::now()
-        .checked_add(std::time::Duration::from_millis(
-            invocation.budgets.wall_time_ms,
-        ))
-        .unwrap_or_else(Instant::now);
-    let wall_time_for_progress = Arc::clone(&wall_time_exceeded);
-    let cancellation_for_progress = Arc::clone(&cancellation);
-    let mut engine = Engine::new();
-    crate::script_runtime::configure_engine(&mut engine, &invocation.budgets);
-    engine.on_print(move |text| {
-        let mut output = output_for_print
-            .lock()
-            .expect("script output lock poisoned");
-        let remaining = output_limit.saturating_sub(output.len());
-        if text.len().saturating_add(1) > remaining {
-            exceeded_for_print.store(true, Ordering::Relaxed);
-        }
-        let mut take = text.len().min(remaining);
-        while take > 0 && !text.is_char_boundary(take) {
-            take -= 1;
-        }
-        output.push_str(&text[..take]);
-        if output.len() < output_limit {
-            output.push('\n');
-        }
-    });
-    engine.on_progress(move |_| {
-        if cancellation_for_progress.load(Ordering::Relaxed) {
-            Some(Dynamic::from("script cancellation requested"))
-        } else if Instant::now() >= deadline {
-            wall_time_for_progress.store(true, Ordering::Relaxed);
-            Some(Dynamic::from("wall-time budget exceeded"))
-        } else {
-            None
-        }
-    });
-    if invocation.operation == ScriptOperation::Check {
-        crate::script_api_validate::validate_available_apis(&invocation.source)?;
-        engine
-            .compile(&invocation.source)
-            .map_err(|error| classify_compile_error(error.to_string()))?;
-        if let Some(project_root) = invocation.project_root.as_deref() {
-            let module_sources = crate::script_project::validate_project_imports(
-                &engine,
-                std::path::Path::new(project_root),
-                &invocation.source,
-            )
-            .map_err(classify_compile_error)?;
-            for module_source in module_sources {
-                crate::script_api_validate::validate_available_apis(&module_source)?;
-            }
-        }
-        return Ok((String::new(), None));
-    }
-
-    if let Some(project_root) = invocation.project_root.as_deref() {
-        let resolver =
-            crate::script_project::ProjectModuleResolver::new(std::path::Path::new(project_root))
-                .map_err(|error| configuration_error("script_project_root", error))?;
-        engine.set_module_resolver(resolver);
-    }
-    let ast = engine
-        .compile_into_self_contained(&Scope::new(), &invocation.source)
-        .map_err(|error| classify_compile_error(error.to_string()))?;
-
-    let mut scope = Scope::new();
-    let arguments = rhai::serde::to_dynamic(&invocation.arguments)
-        .map_err(|error| configuration_error("configuration_arguments", error.to_string()))?;
-    scope.push_dynamic("args", arguments);
-    if let Some(broker) = broker {
-        let call = Arc::new(move |operation: &str, arguments: serde_json::Value| {
-            broker.call_json(operation, arguments)
-        });
-        scope.push("fleet", crate::script_fleet::bind(call));
-    }
-    let value = engine
-        .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
-        .map_err(|error| {
-            let message = error.to_string();
-            if cancellation.load(Ordering::Relaxed) {
-                cancelled_error("limit_cancelled", message)
-            } else if wall_time_exceeded.load(Ordering::Relaxed) {
-                limit_error("limit_wall_time", message)
-            } else if message.contains("Too many operations") {
-                limit_error("limit_operations", message)
-            } else if message.contains("exceeds the maximum")
-                || message.contains("Maximum call stack depth")
-                || message.contains("Stack overflow")
-            {
-                classify_engine_limit(message)
-            } else if output_exceeded.load(Ordering::Relaxed) {
-                limit_error("limit_output_bytes", message)
-            } else {
-                classify_runtime_error(&error, message)
-            }
-        })?;
-    let value = if value.is_unit() {
-        None
-    } else {
-        Some(
-            rhai::serde::from_dynamic(&value)
-                .map_err(|error| script_error("script_result_type", error.to_string()))?,
-        )
-    };
-    let stdout = output
-        .lock()
-        .map(|output| output.clone())
-        .unwrap_or_default();
-    if output_exceeded.load(Ordering::Relaxed) {
-        return Err(limit_error(
-            "limit_output_bytes",
-            "script output reached its byte budget",
-        ));
-    }
-    Ok((stdout, value))
+    Err(configuration_error(
+        "script_backend_unavailable",
+        "no script backend handled this invocation; set AGENTERM_SCRIPT_BACKEND to rh, lua, or qjs with matching source",
+    ))
 }
 
 fn validate_budgets(budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
@@ -1550,48 +1429,6 @@ fn validate_budgets(budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
     validate!(event_items);
     validate!(wait_time_ms);
     Ok(())
-}
-
-fn classify_engine_limit(message: String) -> ScriptFailure {
-    let lowercase = message.to_ascii_lowercase();
-    let code = if lowercase.contains("call") || lowercase.contains("stack") {
-        "limit_call_depth"
-    } else if lowercase.contains("expression") {
-        "limit_expression_depth"
-    } else if lowercase.contains("string") {
-        "limit_string_bytes"
-    } else {
-        "limit_collection_items"
-    };
-    limit_error(code, message)
-}
-
-fn classify_compile_error(message: String) -> ScriptFailure {
-    let lowercase = message.to_ascii_lowercase();
-    if lowercase.contains("script_module_root_escape") {
-        script_error("script_module_root_escape", message)
-    } else if lowercase.contains("script_module_cycle") {
-        script_error("script_module_cycle", message)
-    } else if lowercase.contains("script_module_missing") || lowercase.contains("module not found")
-    {
-        script_error("script_module_missing", message)
-    } else if lowercase.contains("script_module_import_literal") {
-        script_error("script_module_import_literal", message)
-    } else if lowercase.contains("script_module_") {
-        script_error("script_module_invalid", message)
-    } else if lowercase.contains("expression")
-        && (lowercase.contains("depth") || lowercase.contains("complexity"))
-    {
-        limit_error("limit_expression_depth", message)
-    } else if (lowercase.contains("array") || lowercase.contains("map"))
-        && lowercase.contains("maximum")
-    {
-        limit_error("limit_collection_items", message)
-    } else if lowercase.contains("string") && lowercase.contains("maximum") {
-        limit_error("limit_string_bytes", message)
-    } else {
-        script_error("script_parse", message)
-    }
 }
 
 fn protocol_failure(code: impl Into<String>, message: impl Into<String>) -> ScriptResult {
@@ -1729,9 +1566,7 @@ fn failure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script_api_validate::{
-        agent_method_calls, external_function_calls, fleet_method_calls,
-    };
+    use crate::script_api_validate::external_function_calls;
     use std::io::{Cursor, Read, Write};
 
     struct ChannelReader {
@@ -1851,7 +1686,19 @@ mod tests {
         }
     }
 
+    fn rh_entry_source(body: &str) -> String {
+        if body.contains("fn entry") {
+            body.to_owned()
+        } else {
+            format!("fn entry() {{ {body} }}")
+        }
+    }
+
     fn invocation(operation: ScriptOperation, source: &str) -> ScriptInvocation {
+        let source = match operation {
+            ScriptOperation::Run | ScriptOperation::Eval => rh_entry_source(source),
+            _ => source.to_owned(),
+        };
         ScriptInvocation {
             envelope_version: SCRIPT_ENVELOPE_VERSION,
             invocation_id: "unit-invocation".to_owned(),
@@ -2035,88 +1882,6 @@ mod tests {
     }
 
     #[test]
-    fn check_rejects_unknown_and_unavailable_apis() {
-        let unknown = execute(invocation(ScriptOperation::Check, "made_up_api()"));
-        assert_eq!(failure_code(&unknown), "script_api_unknown");
-        assert_eq!(unknown.exit_class, ScriptExitClass::Script);
-
-        let unavailable = execute(invocation(ScriptOperation::Check, "new_tab()"));
-        assert_eq!(failure_code(&unavailable), "script_api_unavailable");
-        assert_eq!(unavailable.exit_class, ScriptExitClass::Script);
-    }
-
-    #[test]
-    fn check_accepts_shipped_api_methods_and_user_functions() {
-        let source = r#"
-            fn twice(value) { value * 2 }
-            let values = [1, 2];
-            print(twice(values.len()));
-        "#;
-        assert!(execute(invocation(ScriptOperation::Check, source)).ok);
-    }
-
-    #[test]
-    fn check_exposes_typed_fleet_api_to_every_legacy_label_and_reports_v2_migration() {
-        let mut observe = invocation(ScriptOperation::Check, "fleet.workspace.info()");
-        observe.profile = ScriptProfile::Observe;
-        assert!(execute(observe).ok);
-
-        let pure = execute(invocation(ScriptOperation::Check, "fleet.workspace.info()"));
-        assert!(pure.ok);
-
-        let mut unknown = invocation(ScriptOperation::Check, "fleet.not_shipped()");
-        unknown.profile = ScriptProfile::Observe;
-        assert_eq!(failure_code(&execute(unknown)), "script_api_unknown");
-
-        let mut migrated = invocation(ScriptOperation::Check, "agent.workspace()");
-        migrated.profile = ScriptProfile::Observe;
-        let migrated = execute(migrated);
-        assert_eq!(failure_code(&migrated), "script_api_migrated");
-        assert!(
-            migrated
-                .failure
-                .as_ref()
-                .is_some_and(|failure| failure.message.contains("fleet.workspace.info()"))
-        );
-        assert!(agent_method_calls(r#""agent.hidden()"; // agent.comment()"#).is_empty());
-        assert_eq!(
-            fleet_method_calls(
-                r#"fleet.workspace.info(); fleet.ui.tabs.set_width(240); fleet.terminal("@1").capture(32)"#
-            ),
-            [
-                "fleet.workspace.info",
-                "fleet.ui.tabs.set_width",
-                "fleet.terminal"
-            ]
-        );
-    }
-
-    #[test]
-    fn local_profile_runs_base_rhai_and_accepts_fleet_contract() {
-        let mut local = invocation(ScriptOperation::Eval, "40 + 2");
-        local.profile = ScriptProfile::Local;
-        let local = execute(local);
-        assert!(local.ok);
-        assert_eq!(local.value, Some(serde_json::json!(42)));
-        assert_eq!(local.profile, Some(ScriptProfile::Local));
-
-        let mut fleet = invocation(ScriptOperation::Check, "fleet.workspace.info()");
-        fleet.profile = ScriptProfile::Local;
-        assert!(execute(fleet).ok);
-
-        let mut shipped = invocation(
-            ScriptOperation::Check,
-            r#"rh::json::parse(`{"answer":42}`)"#,
-        );
-        shipped.profile = ScriptProfile::Local;
-        assert!(execute(shipped).ok);
-
-        let mut unknown = invocation(ScriptOperation::Check, "std::fs::not_shipped(`x`)");
-        unknown.profile = ScriptProfile::Local;
-        assert_eq!(failure_code(&execute(unknown)), "script_api_unknown");
-    }
-
-    #[test]
     fn invalid_or_excessive_budget_is_configuration_failure() {
         let mut zero = invocation(ScriptOperation::Eval, "1");
         zero.budgets.operations = 0;
@@ -2130,37 +1895,6 @@ mod tests {
             failure_code(&execute(excessive)),
             "configuration_budget_output_bytes"
         );
-    }
-
-    #[test]
-    fn operation_output_and_wall_time_limits_are_typed() {
-        let mut operations = invocation(ScriptOperation::Eval, "loop {}");
-        operations.budgets.operations = 100;
-        let operations = execute(operations);
-        assert_eq!(failure_code(&operations), "limit_operations");
-        assert_eq!(operations.exit_class, ScriptExitClass::Limit);
-
-        let mut output = invocation(ScriptOperation::Eval, r#"print("abcdef")"#);
-        output.budgets.output_bytes = 3;
-        assert_eq!(failure_code(&execute(output)), "limit_output_bytes");
-
-        let mut wall_time = invocation(ScriptOperation::Eval, "loop {}");
-        wall_time.budgets.operations = ScriptBudgets::hard_limits().operations;
-        wall_time.budgets.wall_time_ms = 1;
-        let wall_time = execute(wall_time);
-        assert_eq!(failure_code(&wall_time), "limit_wall_time");
-        assert_eq!(wall_time.exit_class, ScriptExitClass::Limit);
-    }
-
-    #[test]
-    fn cooperative_cancellation_is_typed_before_wall_time() {
-        let mut invocation = invocation(ScriptOperation::Eval, "loop {}");
-        invocation.budgets.wall_time_ms = ScriptBudgets::hard_limits().wall_time_ms;
-        invocation.budgets.operations = ScriptBudgets::hard_limits().operations;
-        let cancellation = Arc::new(AtomicBool::new(true));
-        let result = execute_with_cancellation(invocation, Some(cancellation));
-        assert_eq!(failure_code(&result), "limit_cancelled");
-        assert_eq!(result.exit_class, ScriptExitClass::Cancelled);
     }
 
     #[test]
@@ -2187,47 +1921,10 @@ mod tests {
     }
 
     #[test]
-    fn source_and_expression_limits_are_typed() {
+    fn source_byte_limit_is_typed() {
         let mut source = invocation(ScriptOperation::Check, "12345");
         source.budgets.source_bytes = 4;
         assert_eq!(failure_code(&execute(source)), "limit_source_bytes");
-
-        let mut expression = invocation(
-            ScriptOperation::Check,
-            "((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))",
-        );
-        expression.budgets.expression_depth = 4;
-        let expression = execute(expression);
-        assert_eq!(
-            failure_code(&expression),
-            "limit_expression_depth",
-            "{:?}",
-            expression.failure
-        );
-    }
-
-    #[test]
-    fn call_collection_and_string_limits_are_typed() {
-        let mut call_depth = invocation(
-            ScriptOperation::Eval,
-            "fn recurse() { recurse(); } recurse();",
-        );
-        call_depth.budgets.call_depth = 2;
-        assert_eq!(failure_code(&execute(call_depth)), "limit_call_depth");
-
-        let mut collection = invocation(ScriptOperation::Eval, "[1, 2, 3]");
-        collection.budgets.collection_items = 2;
-        let collection = execute(collection);
-        assert_eq!(
-            failure_code(&collection),
-            "limit_collection_items",
-            "{:?}",
-            collection.failure
-        );
-
-        let mut string = invocation(ScriptOperation::Eval, r#""abcdef""#);
-        string.budgets.string_bytes = 3;
-        assert_eq!(failure_code(&execute(string)), "limit_string_bytes");
     }
 
     #[test]

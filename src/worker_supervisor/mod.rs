@@ -300,7 +300,11 @@ fn configure_script_backend(command: &mut Command) {
 }
 
 fn script_backend_environment(inherited: Option<OsString>) -> OsString {
-    inherited.unwrap_or_else(|| OsString::from("rh"))
+    match inherited {
+        Some(value) if value == "rhai" => OsString::from("rh"),
+        Some(value) => value,
+        None => OsString::from("rh"),
+    }
 }
 
 fn try_acquire_permit() -> Result<ConcurrencyPermit, SupervisorError> {
@@ -363,11 +367,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn worker_backend_defaults_to_rh_and_preserves_an_explicit_value() {
+    fn worker_backend_defaults_to_rh_and_normalizes_retired_rhai() {
         assert_eq!(script_backend_environment(None), OsString::from("rh"));
         assert_eq!(
             script_backend_environment(Some(OsString::from("rhai"))),
-            OsString::from("rhai")
+            OsString::from("rh")
+        );
+        assert_eq!(
+            script_backend_environment(Some(OsString::from("lua"))),
+            OsString::from("lua")
         );
     }
 

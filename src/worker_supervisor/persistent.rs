@@ -1232,10 +1232,10 @@ mod tests {
             .parent()
             .and_then(Path::parent)
             .expect("target profile directory")
-            .join(format!("agenterm-rhai{suffix}"));
+            .join(format!("agenterm-rh{suffix}"));
         assert!(
             target.is_file(),
-            "build agenterm-rhai first or set AGENTERM_TEST_SCRIPT_WORKER: {}",
+            "build agenterm-rh first or set AGENTERM_TEST_SCRIPT_WORKER: {}",
             target.display()
         );
         target

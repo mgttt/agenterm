@@ -25,16 +25,11 @@ pub(crate) fn terminal_default_font_size() -> u16 {
 }
 
 pub(crate) fn script_worker_executable_names() -> Vec<ScriptWorkerExecutableCandidate> {
-    let mut candidates = Vec::with_capacity(4);
+    let mut candidates = Vec::with_capacity(2);
     push_worker_names(
         &mut candidates,
         crate::platform::script_worker_default_executable_name(),
         ScriptWorkerExecutableRole::Primary,
-    );
-    push_worker_names(
-        &mut candidates,
-        crate::platform::policy::paths::script_worker_compatibility_executable_name(),
-        ScriptWorkerExecutableRole::CompatibilityFallback,
     );
     candidates
 }
@@ -88,33 +83,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn script_worker_candidates_keep_primary_before_compatibility_fallback() {
+    fn script_worker_candidates_list_primary_worker_only() {
         let candidates = script_worker_executable_names();
-        let first_fallback = candidates
-            .iter()
-            .position(|candidate| {
-                candidate.role == ScriptWorkerExecutableRole::CompatibilityFallback
-            })
-            .expect("compatibility fallback");
-
-        assert!(first_fallback > 0);
         assert!(
-            candidates[..first_fallback]
+            candidates
                 .iter()
                 .all(|candidate| candidate.role == ScriptWorkerExecutableRole::Primary)
-        );
-        assert!(
-            candidates[first_fallback..].iter().all(
-                |candidate| candidate.role == ScriptWorkerExecutableRole::CompatibilityFallback
-            )
         );
         assert_eq!(
             candidates[0].name,
             crate::platform::filesystem::executable_name("agenterm-rh")
-        );
-        assert_eq!(
-            candidates[first_fallback].name,
-            crate::platform::filesystem::executable_name("agenterm-rhai")
         );
     }
 

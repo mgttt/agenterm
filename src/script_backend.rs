@@ -1,7 +1,7 @@
 //! Script execution backend selection.
 //!
-//! Pack execution defaults to the rh AOT backend. Set `AGENTERM_SCRIPT_BACKEND=rhai`
-//! to force the legacy Rhai interpreter path.
+//! Pack execution defaults to the rh AOT backend. Legacy `AGENTERM_SCRIPT_BACKEND=rhai`
+//! and `.rhai` entry paths are retired and normalize to `rh`.
 
 use std::{
     path::{Path, PathBuf},
@@ -16,7 +16,6 @@ use crate::script_rh_run::RhRunContext;
 /// Active script backend for pack execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScriptBackend {
-    Rhai,
     Rh,
     Lua,
     Qjs,
@@ -31,7 +30,7 @@ impl ScriptBackend {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("rhai") => Self::Rhai,
+            Some("rhai") => Self::Rh,
             Some("lua") => Self::Lua,
             Some("qjs") => Self::Qjs,
             _ => Self::Rh,
@@ -40,7 +39,6 @@ impl ScriptBackend {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Rhai => "rhai",
             Self::Rh => "rh",
             Self::Lua => "lua",
             Self::Qjs => "qjs",
@@ -59,7 +57,7 @@ impl ScriptBackend {
             return Self::Rh;
         }
         if path.ends_with(".rhai") {
-            return Self::Rhai;
+            return Self::Rh;
         }
         Self::Rh
     }
@@ -461,7 +459,7 @@ mod tests {
         );
         assert_eq!(
             ScriptBackend::from_entry_path("test.rhai"),
-            ScriptBackend::Rhai
+            ScriptBackend::Rh
         );
     }
 
@@ -469,7 +467,25 @@ mod tests {
     fn lua_backend_as_str() {
         assert_eq!(ScriptBackend::Lua.as_str(), "lua");
         assert_eq!(ScriptBackend::Rh.as_str(), "rh");
-        assert_eq!(ScriptBackend::Rhai.as_str(), "rhai");
+    }
+
+    #[test]
+    fn retired_rhai_backend_env_defaults_to_rh() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rhai");
+        }
+        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rh);
+        assert!(rh_backend_enabled());
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
     }
 
     #[test]
