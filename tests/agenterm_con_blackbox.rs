@@ -596,6 +596,79 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
 }
 
 #[test]
+fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
+    let _guard = gui_test_guard();
+    // Reproduction attempt for a user-reported bug: "Ctrl+wheel zoom past a
+    // certain size and the process exits" (self-terminates, no error
+    // dialog — consistent with a panic under this binary's release profile,
+    // which sets `panic = "abort"`, not a graceful error path). An earlier
+    // investigation (`3d23dfde`) swept `apply_resize`/`font::raster` as
+    // *independent, single-shot* unit-test calls at every font size and
+    // found nothing — which cannot rule out a bug that only manifests
+    // across a *sequence* of real, cumulative zoom steps against a live
+    // ConPTY session (each one resizing the real pseudoconsole via
+    // `master.resize`, not a mocked/isolated call). This drives that exact
+    // sequence for real: 20 full zoom-in-to-max, zoom-out-to-min cycles
+    // (1600 individual, back-to-back `zoom_font` calls — no `wait_ms`
+    // between them, deliberately, to match a fast real wheel spin rather
+    // than a gentle one) through `wheel` with `ctrl: true` (added alongside
+    // this test specifically because `--script` had no way to reach the
+    // Ctrl+wheel code path at all before now).
+    //
+    // Result of this investigation, stated plainly: did not reproduce. An
+    // earlier ad hoc run of this same scenario driven from outside the Rust
+    // test harness (a raw shell script backgrounding the process and
+    // polling `--emit-snapshot` for `child_alive`) did show `child_alive:
+    // false` with the process still running — but re-run through this
+    // harness's real `Child`/`try_wait` process handle, which is the
+    // trustworthy source of truth here (Git Bash's `timeout` + background
+    // job control has known quirks signaling a detached Windows GUI
+    // process), that result did not reproduce. Left as permanent
+    // regression coverage — if this ever does catch a real crash, that is
+    // exactly the point of keeping it, not a sign the earlier investigation
+    // (or this one) was wrong to look.
+    let dir = scratch_dir("ctrl-wheel-zoom-cycles");
+    let mut commands = vec![r#"{"text": "echo ZOOM_TEST_MARKER\r"}"#.to_owned(), r#"{"wait_ms": 300}"#.to_owned()];
+    // 8..=36 is the real clamp range (`zoom_font`); overshoot on each leg so
+    // every cycle actually touches both ends rather than assuming the step
+    // count lines up exactly.
+    for _ in 0..20 {
+        commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": 40}, "ctrl": true}"#.to_owned());
+        commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": -40}, "ctrl": true}"#.to_owned());
+    }
+    commands.push(r#"{"wait_ms": 300}"#.to_owned());
+    let script_json = format!("[{}]", commands.join(","));
+    let script = write_script(&dir, &script_json);
+
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    let snapshot = session.wait_for(Duration::from_secs(15), |snapshot| {
+        ConSession::screen_text(snapshot).contains("ZOOM_TEST_MARKER")
+    });
+    assert_eq!(snapshot["child_alive"], true, "process must still be alive: {snapshot}");
+
+    // The real assertion: the *process itself* must still be running after
+    // every zoom cycle, not just that the last snapshot read looked fine —
+    // a crashed process stops writing new snapshots entirely, which the
+    // text check above cannot distinguish from "still alive but slow."
+    // Polls rather than checking once, since a crash could land anywhere
+    // in the last zoom cycle, slightly after this point in real time.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Ok(Some(status)) = session.child.try_wait() {
+            panic!(
+                "agenterm-con exited on its own during/after Ctrl+wheel zoom cycling \
+                 (status: {status:?}) — this is the crash under investigation"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let _ = session.child.kill();
+}
+
+#[test]
 fn real_tui_less_scrolls_via_character_and_space_keys() {
     let _guard = gui_test_guard();
     // Every other test in this file drives cmd.exe — a cooked-mode line

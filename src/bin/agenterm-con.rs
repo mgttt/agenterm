@@ -1180,8 +1180,8 @@ impl ConTerminal {
                 ScriptCommand::MouseMove { row, col } => {
                     self.execute_script_mouse_move(window, row, col);
                 }
-                ScriptCommand::Wheel { row, col, notches } => {
-                    self.execute_script_wheel(window, row, col, notches);
+                ScriptCommand::Wheel { row, col, notches, ctrl } => {
+                    self.execute_script_wheel(window, row, col, notches, ctrl);
                 }
             }
         }
@@ -1274,7 +1274,26 @@ impl ConTerminal {
     /// redraw (real wheel events get that from the `MouseWheel` dispatch
     /// arm that calls it), so this mirrors that call site rather than
     /// leaving a scripted scroll invisible until the next unrelated redraw.
-    fn execute_script_wheel(&mut self, window: &PixelWindow, row: u16, col: u16, notches: f32) {
+    fn execute_script_wheel(
+        &mut self,
+        window: &PixelWindow,
+        row: u16,
+        col: u16,
+        notches: f32,
+        ctrl: bool,
+    ) {
+        if ctrl {
+            // Mirrors the real event: one `zoom_font` call per whole notch,
+            // not one call scaled by magnitude — a real Ctrl+wheel session
+            // is a *stream* of individual notch events, and reproducing a
+            // crash tied to repeated cumulative resizes means replaying
+            // that shape, not collapsing it into a single jump.
+            let count = notches.abs().round().max(1.0) as usize;
+            for _ in 0..count.min(64) {
+                self.zoom_font(window, notches > 0.0);
+            }
+            return;
+        }
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
         self.handle_wheel(notches, &ModifierState::default(), Some(position));
         window.request_redraw();
@@ -1385,6 +1404,23 @@ impl ConTerminal {
         self.last_reported_cell = Some(point);
         self.write_pty(&bytes);
         true
+    }
+
+    /// One Ctrl+wheel notch's worth of font-size zoom: `grow = true` is one
+    /// step larger, `false` one step smaller, clamped to `[8.0, 36.0]`
+    /// logical px. Factored out of the `MouseWheel` event arm so a
+    /// `--script` `wheel` command with `ctrl: true` drives the identical
+    /// path a real Ctrl+wheel notch does — this is the exact repeated,
+    /// cumulative resize path a reported "zoom past a certain size and the
+    /// process exits" crash needs a live session (not an isolated
+    /// `apply_resize` call) to actually exercise.
+    fn zoom_font(&mut self, window: &PixelWindow, grow: bool) {
+        let delta_size = if grow { 1.0 } else { -1.0 };
+        self.font_size_logical = (self.font_size_logical + delta_size).clamp(8.0, 36.0);
+        if let Ok(m) = window.metrics() {
+            self.apply_resize(m.physical_width, m.physical_height, m.scale_factor);
+        }
+        window.request_redraw();
     }
 
     /// Routes a wheel notch: application report → alternate-screen cursor keys
@@ -1630,13 +1666,7 @@ impl PixelWindowApplication for ConTerminal {
                         _ => 0.0,
                     };
                     if dir.abs() > 0.0 {
-                        let delta_size = if dir > 0.0 { 1.0 } else { -1.0 };
-                        self.font_size_logical = (self.font_size_logical + delta_size).clamp(8.0, 36.0);
-                        let metrics = window.metrics().ok();
-                        if let Some(m) = metrics {
-                            self.apply_resize(m.physical_width, m.physical_height, m.scale_factor);
-                        }
-                        window.request_redraw();
+                        self.zoom_font(window, dir > 0.0);
                     }
                 } else {
                     let lines = match delta {
