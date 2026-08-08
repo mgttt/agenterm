@@ -115,6 +115,10 @@ if defined AGENTERM_BOOTSTRAP_POST_IDENTITY del /q "%AGENTERM_BOOTSTRAP_POST_IDE
 if defined AGENTERM_BOOTSTRAP_UNTRACKED del /q "%AGENTERM_BOOTSTRAP_UNTRACKED%" >nul 2>nul
 if defined AGENTERM_BOOTSTRAP_CACHE_TEMP del /q "%AGENTERM_BOOTSTRAP_CACHE_TEMP%" >nul 2>nul
 if defined AGENTERM_BOOTSTRAP_STAMP_TEMP del /q "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" >nul 2>nul
+rem Cargo never reclaims orphaned incremental crate-unit directories, so they
+rem grow without bound (this repo reached 12 GB). Runs on both the success and
+rem failure paths; the script always exits 0 so a build result never changes.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%AGENTERM_BOOTSTRAP_REPO%\scripts\prune-incremental.ps1" >nul 2>nul
 exit /b 0
 
 :write_identity

@@ -166,3 +166,11 @@ export AGENTERM_BOOTSTRAP_FINGERPRINT
 "$WORKER" task run "$AGENTERM_BOOTSTRAP_TASK" \
     --manifest "$REPO/agenterm.tasks.json" \
     -- "$@"
+AGENTERM_BOOTSTRAP_STATUS=$?
+
+# Cargo never reclaims orphaned incremental crate-unit directories, so they
+# grow without bound (this repo reached 12 GB). Prune after the task, and
+# preserve the task's exit status — cleanup must never change a build result.
+sh "$REPO/scripts/prune-incremental.sh" || true
+
+exit "$AGENTERM_BOOTSTRAP_STATUS"

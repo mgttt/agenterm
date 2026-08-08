@@ -15,6 +15,20 @@ impl Rgb {
     }
 }
 
+/// Mixes `from` toward `to` by `amount` (0.0 = `from`, 1.0 = `to`).
+///
+/// Used for the dim attribute, which is expressed as a colour blended toward
+/// the background rather than a separate palette entry.
+#[inline]
+pub fn blend(from: Rgb, to: Rgb, amount: f32) -> Rgb {
+    let mix = |a: u8, b: u8| {
+        let a = f32::from(a);
+        let b = f32::from(b);
+        (a + (b - a) * amount.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8
+    };
+    Rgb(mix(from.0, to.0), mix(from.1, to.1), mix(from.2, to.2))
+}
+
 /// Builds the standard 256-entry xterm palette once.
 fn palette() -> &'static [Rgb; 256] {
     use std::sync::OnceLock;

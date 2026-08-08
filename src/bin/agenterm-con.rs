@@ -118,6 +118,10 @@ const READ_BUF: usize = 8192;
 /// which would drag a Win32 dependency into a platform-neutral binary.
 const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
+/// Horizontal lean per pixel of height for faux italic (SGR 3), roughly the
+/// 12-degree slant real italic faces use.
+const ITALIC_SHEAR: f32 = 0.21;
+
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
 
@@ -767,13 +771,7 @@ impl ConTerminal {
     /// Draws the in-progress composition starting at the cursor cell and
     /// returns how many cells it occupied, so the caller can push the cursor
     /// past it. Wide (CJK) characters take two cells, matching the grid.
-    fn draw_preedit(
-        &self,
-        pixels: &mut [u32],
-        fw: u32,
-        fh: u32,
-        cursor: (u16, u16),
-    ) -> u32 {
+    fn draw_preedit(&self, surface: &mut Surface<'_>, cursor: (u16, u16)) -> u32 {
         let y0 = u32::from(cursor.0) * self.cell_h;
         let mut advance = 0u32;
         // Inverted so the provisional text is unmistakable against committed
@@ -785,17 +783,17 @@ impl ConTerminal {
             let wide = unicode_width::UnicodeWidthChar::width(character).unwrap_or(1) > 1;
             let cells = if wide { 2 } else { 1 };
             let x0 = (u32::from(cursor.1) + advance) * self.cell_w;
-            if x0 >= fw || y0 >= fh {
+            if x0 >= surface.width || y0 >= surface.height {
                 break;
             }
             let span = self.cell_w * cells;
-            fill_rect(pixels, fw, fh, x0, y0, span, self.cell_h, bg.to_xrgb());
+            surface.fill_rect(x0, y0, span, self.cell_h, bg.to_xrgb());
             if let Some(glyph) = font::raster(character, self.font_size_px) {
-                blit_glyph(pixels, fw, fh, &glyph, x0, y0, fg, span, self.cell_h);
+                surface.blit_glyph(&glyph, CellRect { x: x0, y: y0, w: span, h: self.cell_h }, fg, 0.0);
             }
             // Underline: the standard "this is not committed yet" affordance.
             let underline_y = y0 + self.cell_h.saturating_sub(1);
-            fill_rect(pixels, fw, fh, x0, underline_y, span, 1, fg.to_xrgb());
+            surface.fill_rect(x0, underline_y, span, 1, fg.to_xrgb());
             advance += cells;
         }
         advance
@@ -1279,68 +1277,18 @@ impl PixelWindowApplication for ConTerminal {
 
         let fw = frame.width();
         let fh = frame.height();
-        let pixels = frame.pixels_mut();
         let bg_word = self.default_bg.to_xrgb();
-        pixels.fill(bg_word);
+        let mut surface = Surface {
+            pixels: frame.pixels_mut(),
+            width: fw,
+            height: fh,
+        };
+        surface.pixels.fill(bg_word);
 
         let screen = self.parser.screen();
-        let (rows, cols) = screen.size();
         let cursor = screen.cursor_position();
         let cursor_hidden = screen.hide_cursor();
-
-        for row in 0..rows {
-            let y0 = u32::from(row) * self.cell_h;
-            if y0 >= fh {
-                break;
-            }
-            for col in 0..cols {
-                let x0 = u32::from(col) * self.cell_w;
-                if x0 >= fw {
-                    break;
-                }
-                let Some(cell) = screen.cell(row, col) else {
-                    continue;
-                };
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-
-                let mut fg = palette::resolve(cell.fgcolor(), self.default_fg, cell.bold());
-                let mut bg = palette::resolve(cell.bgcolor(), self.default_bg, false);
-
-                // Selection highlight: invert fg/bg for selected cells.
-                if let Some((sa, sb)) = self.selection {
-                    let (lo, hi) = TerminalPoint::normalize(sa, sb);
-                    if row >= lo.row && row <= hi.row {
-                        let col_start = if row == lo.row { lo.col } else { 0 };
-                        let col_end = if row == hi.row { hi.col } else { u16::MAX };
-                        if col >= col_start && col <= col_end {
-                            std::mem::swap(&mut fg, &mut bg);
-                        }
-                    }
-                }
-
-                if cell.inverse() {
-                    std::mem::swap(&mut fg, &mut bg);
-                }
-
-                // Wide (CJK/emoji) cells span 2 columns for background + glyph clip.
-                let span_w = if cell.is_wide() { self.cell_w * 2 } else { self.cell_w };
-
-                // Only repaint backgrounds that differ from the frame clear.
-                if bg != self.default_bg {
-                    fill_rect(pixels, fw, fh, x0, y0, span_w, self.cell_h, bg.to_xrgb());
-                }
-
-                let glyph = cell
-                    .has_contents()
-                    .then(|| font::raster(first_grapheme(cell.contents()), self.font_size_px))
-                    .flatten();
-                if let Some(glyph) = glyph {
-                    blit_glyph(pixels, fw, fh, &glyph, x0, y0, fg, span_w, self.cell_h);
-                }
-            }
-        }
+        paint_cells(&mut surface, screen, self.selection, self.cell_w, self.cell_h, self.default_fg, self.default_bg, self.font_size_px);
 
         // IME composition, drawn over the cells to the right of the cursor and
         // underlined so it reads as provisional rather than committed text.
@@ -1349,7 +1297,7 @@ impl PixelWindowApplication for ConTerminal {
         let preedit_cells = if self.ime_preedit.is_empty() {
             0
         } else {
-            self.draw_preedit(pixels, fw, fh, cursor)
+            self.draw_preedit(&mut surface, cursor)
         };
 
         // Block cursor, drawn as a properly inverted cell rather than an opaque
@@ -1370,7 +1318,7 @@ impl PixelWindowApplication for ConTerminal {
                     Some(cell) if cell.is_wide() => self.cell_w * 2,
                     _ => self.cell_w,
                 };
-                fill_rect(pixels, fw, fh, cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
+                surface.fill_rect(cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
 
                 let glyph = under
                     .filter(|cell| cell.has_contents())
@@ -1378,16 +1326,11 @@ impl PixelWindowApplication for ConTerminal {
                         font::raster(first_grapheme(cell.contents()), self.font_size_px)
                     });
                 if let Some(glyph) = glyph {
-                    blit_glyph(
-                        pixels,
-                        fw,
-                        fh,
+                    surface.blit_glyph(
                         &glyph,
-                        cx,
-                        cy,
+                        CellRect { x: cx, y: cy, w: span, h: self.cell_h },
                         self.default_bg,
-                        span,
-                        self.cell_h,
+                        0.0,
                     );
                 }
             }
@@ -1426,57 +1369,184 @@ impl PixelWindowApplication for ConTerminal {
 // Pixel helpers
 // ---------------------------------------------------------------------------
 
-fn fill_rect(pixels: &mut [u32], fw: u32, fh: u32, x: u32, y: u32, w: u32, h: u32, color: u32) {
-    if x >= fw || y >= fh {
-        return;
+/// A cell's pixel rectangle. The four values are always derived together from
+/// the grid position, so passing them separately only invited transposition.
+#[derive(Clone, Copy)]
+struct CellRect {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+/// The pixel target for one frame: the buffer and its dimensions, which always
+/// travel together. Bundling them keeps the drawing calls readable — the free
+/// functions this replaced took nine positional arguments, most of them the
+/// same three values threaded through every call.
+struct Surface<'a> {
+    pixels: &'a mut [u32],
+    width: u32,
+    height: u32,
+}
+
+impl Surface<'_> {
+    fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let max_x = x.saturating_add(w).min(self.width);
+        let max_y = y.saturating_add(h).min(self.height);
+        for py in y..max_y {
+            let base = (py * self.width) as usize;
+            // The slice must start at column `x` within the row, not at the
+            // row's own start — `base` alone is column 0. Omitting `+ x` here
+            // was a real, shipped bug: every non-default background color,
+            // the underline, text selection, the block cursor, and the IME
+            // preedit background all rendered flush against the left edge of
+            // their row instead of at their actual column. Glyphs were
+            // unaffected (blit_glyph already offsets correctly), which is why
+            // text always looked right and this went unnoticed until a
+            // pixel-level test checked fills specifically.
+            let start = base + x as usize;
+            let row = &mut self.pixels[start..(start + (max_x - x) as usize)];
+            row.fill(color);
+        }
     }
-    let max_x = x.saturating_add(w).min(fw);
-    let max_y = y.saturating_add(h).min(fh);
-    for py in y..max_y {
-        let base = (py * fw) as usize;
-        let row = &mut pixels[base..(base + (max_x - x) as usize)];
-        row.fill(color);
+
+    /// Blits a rasterized glyph into a cell, clipped to that cell.
+    ///
+    /// `shear` slants the glyph for faux italic: a per-row horizontal offset
+    /// proportional to height above the baseline. Synthesizing the slant beats
+    /// loading a real italic face, which would have a different advance width
+    /// and break the fixed cell grid.
+    fn blit_glyph(&mut self, glyph: &font::RasterGlyph, cell: CellRect, fg: Rgb, shear: f32) {
+        let start_x = cell.x as i32 + glyph.offset_x;
+        let start_y = cell.y as i32 + glyph.offset_y;
+        let clip_x0 = cell.x as i32;
+        let clip_y0 = cell.y as i32;
+        let clip_x1 = cell.x as i32 + cell.w as i32;
+        let clip_y1 = cell.y as i32 + cell.h as i32;
+
+        for gy in 0..glyph.height {
+            let py = start_y + gy as i32;
+            if py < clip_y0 || py >= clip_y1 || py < 0 || py as u32 >= self.height {
+                continue;
+            }
+            // Rows nearer the top lean further right, pivoting on the bottom
+            // of the cell so the glyph stays seated on its baseline.
+            let slant = if shear == 0.0 {
+                0
+            } else {
+                ((clip_y1 - py) as f32 * shear).round() as i32
+            };
+            let row_base = (py as u32 * self.width) as usize;
+            for gx in 0..glyph.width {
+                let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
+                if alpha == 0 {
+                    continue;
+                }
+                let px = start_x + gx as i32 + slant;
+                if px < clip_x0 || px >= clip_x1 || px < 0 || px as u32 >= self.width {
+                    continue;
+                }
+                let idx = row_base + px as usize;
+                if idx >= self.pixels.len() {
+                    continue;
+                }
+                self.pixels[idx] = blend_xrgb(self.pixels[idx], fg, alpha);
+            }
+        }
     }
 }
 
-fn blit_glyph(
-    pixels: &mut [u32],
-    fw: u32,
-    fh: u32,
-    glyph: &font::RasterGlyph,
-    cell_x: u32,
-    cell_y: u32,
-    fg: Rgb,
+/// Paints every cell of one screen into `surface`. Pure with respect to
+/// window/frame types so it is directly unit-testable — see the `tests`
+/// module, which renders into a plain `Vec<u32>` and asserts on pixel colors.
+#[allow(clippy::too_many_arguments)]
+fn paint_cells(
+    surface: &mut Surface<'_>,
+    screen: &vt100::Screen,
+    selection: Option<(TerminalPoint, TerminalPoint)>,
     cell_w: u32,
     cell_h: u32,
+    default_fg: Rgb,
+    default_bg: Rgb,
+    font_size_px: u16,
 ) {
-    let start_x = cell_x as i32 + glyph.offset_x;
-    let start_y = cell_y as i32 + glyph.offset_y;
-    let clip_x0 = cell_x as i32;
-    let clip_y0 = cell_y as i32;
-    let clip_x1 = cell_x as i32 + cell_w as i32;
-    let clip_y1 = cell_y as i32 + cell_h as i32;
-
-    for gy in 0..glyph.height {
-        let py = start_y + gy as i32;
-        if py < clip_y0 || py >= clip_y1 || py < 0 || py as u32 >= fh {
-            continue;
+    let (rows, cols) = screen.size();
+    for row in 0..rows {
+        let y0 = u32::from(row) * cell_h;
+        if y0 >= surface.height {
+            break;
         }
-        let row_base = (py as u32 * fw) as usize;
-        for gx in 0..glyph.width {
-            let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
-            if alpha == 0 {
+        for col in 0..cols {
+            let x0 = u32::from(col) * cell_w;
+            if x0 >= surface.width {
+                break;
+            }
+            let Some(cell) = screen.cell(row, col) else {
+                continue;
+            };
+            if cell.is_wide_continuation() {
                 continue;
             }
-            let px = start_x + gx as i32;
-            if px < clip_x0 || px >= clip_x1 || px < 0 || px as u32 >= fw {
-                continue;
+
+            let mut fg = palette::resolve(cell.fgcolor(), default_fg, cell.bold());
+            let mut bg = palette::resolve(cell.bgcolor(), default_bg, false);
+
+            // Selection highlight: invert fg/bg for selected cells.
+            if let Some((sa, sb)) = selection {
+                let (lo, hi) = TerminalPoint::normalize(sa, sb);
+                if row >= lo.row && row <= hi.row {
+                    let col_start = if row == lo.row { lo.col } else { 0 };
+                    let col_end = if row == hi.row { hi.col } else { u16::MAX };
+                    if col >= col_start && col <= col_end {
+                        std::mem::swap(&mut fg, &mut bg);
+                    }
+                }
             }
-            let idx = row_base + px as usize;
-            if idx >= pixels.len() {
-                continue;
+
+            if cell.inverse() {
+                std::mem::swap(&mut fg, &mut bg);
             }
-            pixels[idx] = blend_xrgb(pixels[idx], fg, alpha);
+
+            // Dim (SGR 2) is a real attribute tools use for secondary text;
+            // ignoring it renders de-emphasized output at full strength.
+            // Blending toward the background is how terminals express it.
+            if cell.dim() {
+                fg = palette::blend(fg, bg, 0.55);
+            }
+
+            // Wide (CJK/emoji) cells span 2 columns for background + glyph clip.
+            let span_w = if cell.is_wide() { cell_w * 2 } else { cell_w };
+
+            // Only repaint backgrounds that differ from the frame clear.
+            if bg != default_bg {
+                surface.fill_rect(x0, y0, span_w, cell_h, bg.to_xrgb());
+            }
+
+            let glyph = cell
+                .has_contents()
+                .then(|| font::raster(first_grapheme(cell.contents()), font_size_px))
+                .flatten();
+            if let Some(glyph) = glyph {
+                // Faux italic: shear the glyph rather than loading a second
+                // face, which would break the fixed cell advance.
+                let shear = if cell.italic() { ITALIC_SHEAR } else { 0.0 };
+                surface.blit_glyph(
+                    &glyph,
+                    CellRect { x: x0, y: y0, w: span_w, h: cell_h },
+                    fg,
+                    shear,
+                );
+            }
+
+            // Underline (SGR 4). conhost draws this; skipping it silently
+            // drops emphasis that tools rely on to mark links and headings.
+            if cell.underline() {
+                let y = y0 + cell_h.saturating_sub(2);
+                surface.fill_rect(x0, y, span_w, 1, fg.to_xrgb());
+            }
         }
     }
 }
@@ -1718,6 +1788,102 @@ mod tests {
         let error = parse_args(&argv(&["--nope"])).expect_err("should reject");
         assert!(error.contains("--nope"), "{error}");
         assert!(error.contains("Usage:"), "{error}");
+    }
+
+    /// Renders one screen and returns (pixel buffer, cell_w, cell_h) for exact
+    /// pixel assertions — the deterministic alternative to eyeballing a
+    /// screenshot, which is what actually caught this bug: a screenshot
+    /// suggested underline/background/inverse were shifted by a couple of
+    /// columns, but that could just as easily have been the screenshot
+    /// harness. This settles it in-process.
+    fn render_to_buffer(bytes: &[u8], cols: u16, rows: u16) -> (Vec<u32>, u32, u32) {
+        let cell_w = 10u32;
+        let cell_h = 20u32;
+        let mut screen_parser =
+            vt100::Parser::<ConCallbacks>::new_with_callbacks(rows, cols, 0, ConCallbacks::default());
+        screen_parser.process(bytes);
+        let fw = u32::from(cols) * cell_w;
+        let fh = u32::from(rows) * cell_h;
+        let mut pixels = vec![Rgb(0, 0, 0).to_xrgb(); (fw * fh) as usize];
+        let mut surface = Surface {
+            pixels: &mut pixels,
+            width: fw,
+            height: fh,
+        };
+        paint_cells(
+            &mut surface,
+            screen_parser.screen(),
+            None,
+            cell_w,
+            cell_h,
+            Rgb(0xCC, 0xCC, 0xCC),
+            Rgb(0, 0, 0),
+            10,
+        );
+        (pixels, cell_w, cell_h)
+    }
+
+    #[test]
+    fn underline_paints_under_the_correct_columns_not_shifted() {
+        // "AA" plain, then underlined "BB". If underline were misplaced (the
+        // shift a screenshot seemed to show), it would land under "AA".
+        let (pixels, cell_w, cell_h) = render_to_buffer(b"AA\x1b[4mBB\x1b[0m", 10, 1);
+        let underline_y = cell_h - 2;
+        let bg = Rgb(0, 0, 0).to_xrgb();
+
+        // No underline under the plain run (cols 0-1).
+        for col in 0..2u32 {
+            let x = col * cell_w + cell_w / 2;
+            assert_eq!(
+                pixels[(underline_y * cell_w * 10 + x) as usize],
+                bg,
+                "col {col} must not be underlined"
+            );
+        }
+        // Underline present under the attributed run (cols 2-3).
+        for col in 2..4u32 {
+            let x = col * cell_w + cell_w / 2;
+            assert_ne!(
+                pixels[(underline_y * cell_w * 10 + x) as usize],
+                bg,
+                "col {col} must be underlined"
+            );
+        }
+    }
+
+    #[test]
+    fn background_fill_spans_exactly_the_attributed_columns() {
+        // "XX" plain, then red-background "RR", then plain "YY" again — the
+        // fill must start exactly at column 2 and end exactly at column 3.
+        let (pixels, cell_w, cell_h) = render_to_buffer(b"XX\x1b[41mRR\x1b[0mYY", 10, 1);
+        let mid_y = cell_h / 2;
+        let row_base = (mid_y * cell_w * 10) as usize;
+        let red = palette::resolve(vt100::Color::Idx(1), Rgb(0, 0, 0), false).to_xrgb();
+
+        let sample = |col: u32| pixels[row_base + (col * cell_w + cell_w / 2) as usize];
+        assert_ne!(sample(0), red, "col 0 (plain) must not be red");
+        assert_ne!(sample(1), red, "col 1 (plain) must not be red");
+        assert_eq!(sample(2), red, "col 2 must be red");
+        assert_eq!(sample(3), red, "col 3 must be red");
+        assert_ne!(sample(4), red, "col 4 (plain again) must not be red");
+    }
+
+    #[test]
+    fn inverse_swaps_the_full_attributed_span_not_one_cell() {
+        let (pixels, cell_w, cell_h) = render_to_buffer(b"NN\x1b[7mIIII\x1b[0m", 10, 1);
+        let mid_y = cell_h / 2;
+        let row_base = (mid_y * cell_w * 10) as usize;
+        let fg = Rgb(0xCC, 0xCC, 0xCC).to_xrgb();
+
+        // Inverse fills the background with the swapped color across all 4
+        // attributed cells (2..6), not just the first one.
+        for col in 2..6u32 {
+            assert_eq!(
+                pixels[row_base + (col * cell_w + cell_w / 2) as usize],
+                fg,
+                "col {col} must show the inverted background"
+            );
+        }
     }
 
     #[test]
