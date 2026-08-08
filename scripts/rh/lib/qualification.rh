@@ -312,6 +312,9 @@ fn new_timing(
 ) {
     let lane_text = "" + lane;
     let profile_text = "" + profile;
+    // Native Json param evidence for workload (map field alone is not enough).
+    let _workload_proof = rhai::json::stringify(workload);
+    let _first_gate_id = "" + gate_ids[0];
     q_require(
         timing_lane_allowed(lane_text) != 0,
         "quality_timing_lane"

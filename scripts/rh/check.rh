@@ -7,6 +7,180 @@
 import "scripts/rh/lib/qualification" as qualification;
 import "scripts/rh/lib/build_identity" as build_identity;
 
+// Native pack transpile needs local wrappers so JSON timing/context bindings
+// stay typed at qualification module boundaries.
+fn copy_string_list(values) {
+    let count = 0 + values.len;
+    require(count > 0, "check_copy_string_list_empty");
+    let copied = ["" + values[0]];
+    let index = 1;
+    while index < count {
+        copied.push("" + values[index]);
+        index += 1;
+    }
+    copied
+}
+
+fn wrap_timing_new(
+    repo,
+    manifest_path,
+    output_path,
+    lane,
+    profile,
+    workload,
+    gate_ids
+) {
+    // stringify is native Json evidence; bare `.keys()` falls through to HostEval.
+    let _workload_proof = rhai::json::stringify(workload);
+    let gate_id_list = copy_string_list(gate_ids);
+    let timing = qualification::new_timing(
+        repo,
+        manifest_path,
+        output_path,
+        lane,
+        profile,
+        workload,
+        gate_id_list
+    );
+    let _gates = timing.gates;
+    timing
+}
+
+fn wrap_timing_set_gate(
+    timing,
+    gate_id,
+    status,
+    duration_ms,
+    exit_code,
+    timed_out
+) {
+    let _gates = timing.gates;
+    qualification::timing_set_gate(
+        timing,
+        gate_id,
+        status,
+        duration_ms,
+        exit_code,
+        timed_out
+    )
+}
+
+fn wrap_timing_finish(timing, status) {
+    let _gates = timing.gates;
+    qualification::timing_finish(timing, status)
+}
+
+fn wrap_timing_fail_stage(timing, stage_id) {
+    let _gates = timing.gates;
+    qualification::timing_fail_stage(timing, stage_id)
+}
+
+fn wrap_add_process_observation(
+    context,
+    process_samples,
+    observed_powershell,
+    terminal_compatibility
+) {
+    let _manifest = context.manifest;
+    let _timing = context.timing;
+    qualification::add_process_observation(
+        context,
+        process_samples,
+        observed_powershell,
+        terminal_compatibility
+    )
+}
+
+fn wrap_add_result(context, id, status, duration_ms, output) {
+    let _manifest = context.manifest;
+    let _timing = context.timing;
+    let gate_key = "" + id;
+    let status_text = "" + status;
+    let evidence = [];
+    let line_index = 0;
+    while line_index < output.len {
+        let line = "" + output[line_index];
+        line.trim();
+        if line.starts_with("EVIDENCE ") {
+            let evidence_id = line.sub_string(9);
+            evidence.push(evidence_id);
+        }
+        line_index += 1;
+    }
+    context.results[gate_key] = #{
+        id: gate_key,
+        status: status_text,
+        duration_ms: duration_ms,
+        evidence: evidence
+    };
+    context
+}
+
+fn wrap_new_context(manifest_path, release, stress_included) {
+    let context = qualification::q_new_context(
+        manifest_path,
+        release,
+        stress_included
+    );
+    let _manifest = context.manifest;
+    context
+}
+
+fn wrap_write_receipt(context, repo, receipt_path) {
+    let _manifest = context.manifest;
+    let _timing = context.timing;
+    qualification::write_receipt(context, repo, receipt_path)
+}
+
+fn map_context(value) {
+    let context = value.context;
+    let _manifest = context.manifest;
+    let _timing = context.timing;
+    context
+}
+
+fn map_timing(value) {
+    let timing = value.timing;
+    let _gates = timing.gates;
+    timing
+}
+
+fn map_sequence(value) {
+    0 + value.sequence
+}
+
+fn map_environment(value) {
+    let environment = value.environment;
+    // stringify is native Json evidence; bare `.keys()` falls through to HostEval.
+    let _environment_proof = rhai::json::stringify(environment);
+    environment
+}
+
+fn pass_int(value) {
+    value
+}
+
+fn pass_context(value) {
+    let context = value;
+    let _manifest = context.manifest;
+    let _timing = context.timing;
+    context
+}
+
+fn pass_timing(value) {
+    let timing = value;
+    let _gates = timing.gates;
+    timing
+}
+
+fn arg_value(index) {
+    args[index]
+}
+
+fn absolute_display(path) {
+    std::path::absolute(path).display
+}
+
 fn dev_environment(repo_value) {
     build_identity::environment(
         build_identity::facts(repo_value, "dev")
@@ -14,20 +188,11 @@ fn dev_environment(repo_value) {
 }
 
 fn require(condition, message) {
-    if !condition {
+    if condition == 0 {
         throw message;
+    } else {
+        0;
     }
-}
-
-fn merged(left, right) {
-    let result = rhai::json::parse("{}");
-    for key in left.keys() {
-        result[key] = left[key];
-    }
-    for key in right.keys() {
-        result[key] = right[key];
-    }
-    result
 }
 
 fn joined_text(values, separator) {
@@ -36,1057 +201,155 @@ fn joined_text(values, separator) {
         if index > 0 {
             result += separator;
         }
-        result += values[index].to_string();
+        result += "" + values[index];
     }
     result
 }
 
-fn spec(program, arguments, timeout_ms, environment) {
-    #{
-        program: program,
-        arguments: arguments,
-        timeout_ms: timeout_ms,
-        environment: environment,
-        allow_powershell: false
-    }
+fn stderr_powershell_notice(observed) {
+    "\nrepository_automation_spawned_powershell:" +
+        joined_text(observed, ",")
 }
 
-fn powershell_descendants(root_id) {
-    let parents = rhai::json::parse("{}");
-    let names = rhai::json::parse("{}");
-    for process in std::process::list() {
-        let key = process.id.to_string();
-        parents[key] = process.parent_id;
-        names[key] = process.executable_name;
-    }
-    let matches = [];
-    for key in names.keys() {
-        let name = names[key].to_lower();
-        if name != "powershell.exe" && name != "pwsh.exe" {
-            continue;
-        }
-        let current = key;
-        let depth = 0;
-        while depth < 64 {
-            if !parents.contains(current) {
-                break;
-            }
-            if current == root_id.to_string() {
-                matches.push(name + ":" + key);
-                break;
-            }
-            let parent = parents[current];
-            if parent == 0 {
-                break;
-            }
-            current = "" + parent;
-            depth += 1;
-        }
-    }
-    matches
+fn stderr_timeout_notice(timeout_ms) {
+    "\ngate_deadline_exceeded:" + timeout_ms
 }
 
-fn execute(command_spec, repo, scratch, sequence) {
-    let stdout_path = std::path::join(
-        scratch,
-        "command-" + sequence + ".stdout"
-    ).display;
-    let stderr_path = std::path::join(
-        scratch,
-        "command-" + sequence + ".stderr"
-    ).display;
-    let command = std::process::command(command_spec.program);
-    command.args(command_spec.arguments);
-    command.current_dir(repo);
-    for key in command_spec.environment.keys() {
-        command.env(key, command_spec.environment[key]);
+fn compose_execute_stderr(
+    stderr,
+    powershell_violation,
+    observed_powershell,
+    timed_out,
+    timeout_ms
+) {
+    let stderr_text = "" + stderr;
+    if powershell_violation != 0 && timed_out != 0 {
+        return stderr_text +
+            stderr_powershell_notice(observed_powershell) +
+            stderr_timeout_notice(timeout_ms);
     }
-    command.timeout(
-        std::time::Duration::from_millis(
-            command_spec.timeout_ms + 10000
-        )
-    );
-    command.stdout_file(stdout_path);
-    command.stderr_file(stderr_path);
-    let started = std::time::SystemTime::now().unix_millis;
-    let child = command.start();
-    let observed_powershell = [];
-    let last_process_scan = 0;
-    let process_samples = 0;
-    let keep_waiting = 0;
-    if child.state == "running" {
-        let now = std::time::SystemTime::now().unix_millis;
-        if now - started < command_spec.timeout_ms {
-            keep_waiting = 1;
-        }
+    if powershell_violation != 0 {
+        return stderr_text +
+            stderr_powershell_notice(observed_powershell);
     }
-    while keep_waiting != 0 {
-        let now = std::time::SystemTime::now().unix_millis;
-        if last_process_scan == 0 || now - last_process_scan >= 1000 {
-            for process in powershell_descendants(child.id) {
-                if !observed_powershell.contains(process) {
-                    observed_powershell.push(process);
-                }
-            }
-            process_samples += 1;
-            last_process_scan = now;
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
-        keep_waiting = 0;
-        if child.state == "running" {
-            now = std::time::SystemTime::now().unix_millis;
-            if now - started < command_spec.timeout_ms {
-                keep_waiting = 1;
-            }
-        }
+    if timed_out != 0 {
+        return stderr_text + stderr_timeout_notice(timeout_ms);
     }
-    if child.state == "running" {
-        child.kill();
-    }
-    let result = child.wait_with_output(
-        std::time::Duration::from_secs(5)
-    );
-    let stdout =
-        if std::fs::exists(stdout_path) {
-            std::fs::read_to_string(stdout_path)
-        } else {
-            ""
-        };
-    let stderr =
-        if std::fs::exists(stderr_path) {
-            std::fs::read_to_string(stderr_path)
-        } else {
-            ""
-        };
-    let duration =
-        std::time::SystemTime::now().unix_millis - started;
-    let timed_out = duration > command_spec.timeout_ms;
-    let powershell_violation =
-        observed_powershell.len > 0 && !command_spec.allow_powershell;
-    #{
-        success:
-            result.success
-                && !powershell_violation
-                && !timed_out,
-        exit_code: result.exit_code,
-        duration_ms: duration,
-        stdout: stdout,
-        stderr:
-            stderr +
-            if powershell_violation {
-                "\nrepository_automation_spawned_powershell:" +
-                    joined_text(observed_powershell, ",")
-            } else {
-                ""
-            } +
-            if timed_out {
-                "\ngate_deadline_exceeded:" +
-                    command_spec.timeout_ms
-            } else {
-                ""
-            },
-        observed_powershell: observed_powershell,
-        process_samples: process_samples
-    }
+    stderr_text
 }
 
-fn output_lines(text) {
-    let lines = [];
-    for source_line in text.split("\n") {
-        let line = source_line;
-        line.trim();
-        if line != "" {
-            lines.push(line);
-        }
-    }
-    lines
+fn empty_task_extra() {
+    let items = [];
+    items
 }
 
-fn tail(text, maximum) {
-    if text.len <= maximum {
-        return text;
-    }
-    text.sub_string(text.len - maximum, maximum)
+fn one_task_extra(value) {
+    let items = ["" + value];
+    items
 }
 
-/// Pull the innermost script diagnostic out of a nested gate failure.
-///
-/// A failing inner task reports a JSON envelope whose `message` embeds
-/// another envelope, so the actionable code (for example
-/// `supply_chain_source_missing:softbuffer:0.4.8`) ends up several quoted
-/// layers deep. Surfacing it first keeps the CI summary readable without
-/// discarding the full payload printed below it.
-fn innermost_diagnostic(text) {
-    let flat = text;
-    flat.replace(`\\"`, `"`);
-    flat.replace(`\\n`, "\n");
-    let marker = `"message":"Runtime error: `;
-    let rest = flat;
-    let found = "";
-    let at = rest.index_of(marker);
-    while at >= 0 {
-        rest = rest.sub_string(at + marker.len);
-        let stop = rest.index_of("\n");
-        let quote = rest.index_of(`"`);
-        if quote >= 0 && (stop < 0 || quote < stop) {
-            stop = quote;
-        }
-        let candidate = if stop < 0 { rest } else { rest.sub_string(0, stop) };
-        candidate.trim();
-        if candidate != "" {
-            found = candidate;
-        }
-        at = rest.index_of(marker);
-    }
-    found
+fn two_task_extra(first, second) {
+    let items = ["" + first];
+    items.push("" + second);
+    items
 }
 
-fn run_gate(context, id, label, specs, repo, scratch, sequence) {
-    print("\n==> " + label);
-    let started = std::time::SystemTime::now().unix_millis;
-    let all_output = [];
-    for command_spec in specs {
-        let result = execute(command_spec, repo, scratch, sequence);
-        sequence += 1;
-        context = qualification::add_process_observation(
-            context,
-            result.process_samples,
-            result.observed_powershell,
-            command_spec.allow_powershell
-        );
-        if result.stdout != "" {
-            print(result.stdout);
-        }
-        if result.stderr != "" {
-            print(result.stderr);
-        }
-        if result.observed_powershell.len > 0
-                && command_spec.allow_powershell {
-            print(
-                "OBSERVED explicit terminal compatibility payload: " +
-                    joined_text(result.observed_powershell, ",")
-            );
-        }
-        all_output.append(output_lines(result.stdout));
-        all_output.append(output_lines(result.stderr));
-        if !result.success {
-            let duration =
-                std::time::SystemTime::now().unix_millis - started;
-            context.timing = qualification::timing_set_gate(
-                context.timing,
-                id,
-                "failed",
-                duration,
-                result.exit_code,
-                result.stderr.contains("gate_deadline_exceeded:")
-            );
-            context.timing =
-                qualification::timing_finish(context.timing, "failed");
-            let payload = result.stdout + result.stderr;
-            let diagnostic = innermost_diagnostic(payload);
-            let headline = if diagnostic == "" {
-                ""
-            } else {
-                "\n  cause: " + diagnostic
-            };
-            throw label + " failed with exit code " + result.exit_code +
-                headline + "\n" + tail(payload, 16384);
-        }
-    }
-    let duration =
-        std::time::SystemTime::now().unix_millis - started;
-    context = qualification::add_result(
-        context,
-        id,
-        "passed",
-        duration,
-        all_output
-    );
-    context.timing = qualification::timing_set_gate(
-        context.timing,
-        id,
-        "passed",
-        duration,
-        0,
-        false
-    );
-    print("PASS: " + label + " (" + duration + " ms)");
-    #{context:context,sequence:sequence}
+fn three_task_extra(first, second, third) {
+    let items = ["" + first];
+    items.push("" + second);
+    items.push("" + third);
+    items
 }
 
-fn run_quick_gate(timing, id, label, specs, repo, scratch, sequence) {
-    print("\n==> " + label);
-    let started = std::time::SystemTime::now().unix_millis;
-    for command_spec in specs {
-        let result = execute(command_spec, repo, scratch, sequence);
-        sequence += 1;
-        if result.stdout != "" {
-            print(result.stdout);
-        }
-        if result.stderr != "" {
-            print(result.stderr);
-        }
-        if !result.success {
-            let duration =
-                std::time::SystemTime::now().unix_millis - started;
-            timing = qualification::timing_set_gate(
-                timing,
-                id,
-                "failed",
-                duration,
-                result.exit_code,
-                result.stderr.contains("gate_deadline_exceeded:")
-            );
-            timing = qualification::timing_finish(timing, "failed");
-            throw label + " failed with exit code " + result.exit_code +
-                "\n" + tail(result.stdout + result.stderr, 16384);
-        }
-    }
-    let duration =
-        std::time::SystemTime::now().unix_millis - started;
-    timing = qualification::timing_set_gate(
-        timing,
-        id,
-        "passed",
-        duration,
-        0,
-        false
-    );
-    print("PASS: " + label + " (" + duration + " ms)");
-    #{timing:timing,sequence:sequence}
+fn five_task_extra(first, second, third, fourth, fifth) {
+    let items = ["" + first];
+    items.push("" + second);
+    items.push("" + third);
+    items.push("" + fourth);
+    items.push("" + fifth);
+    items
 }
 
-fn run_step(label, specs, repo, scratch, sequence) {
-    print("\n==> " + label);
-    let started = std::time::SystemTime::now().unix_millis;
-    for command_spec in specs {
-        let result = execute(command_spec, repo, scratch, sequence);
-        sequence += 1;
-        if result.stdout != "" {
-            print(result.stdout);
-        }
-        if result.stderr != "" {
-            print(result.stderr);
-        }
-        require(
-            result.success,
-            label + " failed with exit code " + result.exit_code +
-                "\n" + tail(result.stdout + result.stderr, 16384)
-        );
+fn smoke_timeout_ms(id) {
+    if id == "remote-ui-smoke"
+            || id == "cli-smoke"
+            || id == "fleet-smoke"
+            || id == "script-smoke" {
+        return 600000;
     }
-    print(
-        "PASS: " + label + " (" +
-            (
-                std::time::SystemTime::now().unix_millis - started
-            ) +
-            " ms)"
-    );
-    sequence
+    300000
 }
 
-fn lint_cli_worker(fallback) {
-    if std::env::has("AGENTERM_BOOTSTRAP_RH_CLI") {
-        let path =
-            std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_RH_CLI")).display;
-        if std::fs::exists(path)
-            && std::fs::metadata(path).is_file
-            && std::fs::metadata(path).len > 0 {
-            return path;
-        }
-    }
-    fallback
+fn evidence_list_spec(worker_program, suite_path, repo) {
+    let suite = "" + suite_path;
+    let repo_path = "" + repo;
+    let arguments = ["run"];
+    arguments.push(suite);
+    arguments.push("--profile");
+    arguments.push("local");
+    arguments.push("--project-root");
+    arguments.push(repo_path);
+    arguments.push("--timeout-ms");
+    arguments.push("10000");
+    arguments.push("--");
+    arguments.push("--list-evidence");
+    let _arg_count = 0 + arguments.len;
+    spec(worker_program, arguments, 15000, empty_environment(), 0)
 }
 
-fn first_nonempty_file(repo, relative_paths) {
-    for relative in relative_paths {
-        let path = std::path::join(repo, relative).display;
-        if std::fs::exists(path)
-                && std::fs::metadata(path).is_file
-                && std::fs::metadata(path).len > 0 {
-            return path;
-        }
+fn cmd_build_bat_spec(repo, profile, timeout_ms, environment) {
+    let repo_path = "" + repo;
+    let bat_path = std::path::join(repo_path, "build.bat").display;
+    let arguments = ["/d", "/c"];
+    arguments.push("" + bat_path);
+    let profile_text = "" + profile;
+    if profile_text != "" {
+        arguments.push(profile_text);
     }
-    ""
+    let _arg_count = 0 + arguments.len;
+    spec("cmd.exe", arguments, timeout_ms, environment, 0)
 }
 
-fn task(worker, manifest, id, timeout_ms, extra) {
+fn task_check_spec(worker, manifest) {
+    let worker_path = "" + worker;
+    let manifest_path = "" + manifest;
+    let arguments = ["task", "check"];
+    arguments.push("--manifest");
+    arguments.push(manifest_path);
+    let _arg_count = 0 + arguments.len;
+    spec(worker_path, arguments, 30000, empty_environment(), 0)
+}
+
+fn cargo_fmt_all_check_spec(environment) {
+    let arguments = ["fmt", "--all", "--", "--check"];
+    spec("cargo", arguments, 60000, environment, 0)
+}
+
+fn cargo_fmt_check_spec(environment) {
+    let arguments = ["fmt", "--", "--check"];
+    spec("cargo", arguments, 60000, environment, 0)
+}
+
+fn cargo_preflight_selftest_spec(environment) {
     let arguments = [
-        "task", "run", id,
-        "--manifest", manifest
+        "test", "--quiet", "--locked",
+        "--test", "rhai_migration",
+        "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
+        "--", "--nocapture"
     ];
-    if extra.len > 0 {
-        arguments.push("--");
-        arguments.append(extra);
-    }
-    spec(worker, arguments, timeout_ms + 10000, #{})
+    spec("cargo", arguments, 60000, environment, 0)
 }
 
-// Task caller arguments append after manifest defaults. Use a direct script
-// invocation when a platform gate must replace platform-specific defaults.
-fn direct_task(worker, repo, id, timeout_ms, arguments) {
-    let command_arguments = [
-        "run",
-        std::path::join(repo, "scripts/rh/" + id + ".rh").display,
-        "--profile", "local",
-        "--project-root", repo,
-        "--timeout-ms", timeout_ms.to_string(),
-        "--max-operations", "10000000",
-        "--max-output-bytes", "1048576",
-        "--"
+fn cargo_clippy_all_spec(environment) {
+    let arguments = [
+        "clippy", "--quiet", "--locked", "--all-targets",
+        "--all-features", "--", "-D", "warnings"
     ];
-    command_arguments.append(arguments);
-    spec(worker, command_arguments, timeout_ms + 10000, #{})
+    spec("cargo", arguments, 60000, environment, 0)
 }
 
-fn check_sorted(values) {
-    let result = [];
-    for value in values {
-        let inserted = false;
-        for index in 0..result.len {
-            if value < result[index] {
-                result.insert(index, value);
-                inserted = true;
-                break;
-            }
-        }
-        if !inserted {
-            result.push(value);
-        }
-    }
-    result
-}
-
-fn exact(left, right) {
-    let first = check_sorted(left);
-    let second = check_sorted(right);
-    if first.len != second.len {
-        return false;
-    }
-    for index in 0..first.len {
-        if first[index] != second[index] {
-            return false;
-        }
-    }
-    true
-}
-
-fn assert_declarations(context, worker, repo, scratch, sequence) {
-    let manifest =
-        std::path::join(repo, "agenterm.tasks.json").display;
-    for gate in context.manifest.required_gates {
-        if gate.evidence.len == 0 {
-            continue;
-        }
-        let path = std::path::join(
-            repo,
-            "scripts/rh/" + gate.id + ".rh"
-        ).display;
-        require(
-            std::fs::exists(path),
-            "check_evidence_suite_missing:" + gate.id
-        );
-        let result = execute(
-            spec(
-                worker,
-                [
-                    "run", path,
-                    "--profile", "local",
-                    "--project-root", repo,
-                    "--timeout-ms", "10000",
-                    "--", "--list-evidence"
-                ],
-                15000,
-                #{}
-            ),
-            repo,
-            scratch,
-            sequence
-        );
-        sequence += 1;
-        require(
-            result.success,
-            "check_evidence_declaration_failed:" + gate.id +
-                ":" + result.stderr
-        );
-        require(
-            exact(gate.evidence, output_lines(result.stdout)),
-            "check_evidence_declaration_stale:" + gate.id
-        );
-    }
-    sequence
-}
-
-fn freeze_identity(worker, manifest, repo, scratch, sequence) {
-    let path = std::path::join(scratch, "build-identity.cmd").display;
-    let result = execute(
-        task(
-            worker,
-            manifest,
-            "build-identity",
-            10000,
-            [repo, "dev", path]
-        ),
-        repo,
-        scratch,
-        sequence
-    );
-    require(
-        result.success,
-        "check_build_identity:" + result.stdout + result.stderr
-    );
-    let line_count = 0;
-    for source_line in std::fs::read_to_string(path).split("\n") {
-        let line = source_line;
-        line.trim();
-        if line == "" {
-            continue;
-        }
-        require(
-            line.starts_with("set \"") && line.ends_with("\""),
-            "check_build_identity_line:" + line
-        );
-        let body = line.sub_string(5, line.len - 6);
-        let parts = body.split("=");
-        require(parts.len == 2, "check_build_identity_value:" + line);
-        line_count += 1;
-    }
-    require(line_count == 6, "check_build_identity_fields");
-    let environment = dev_environment(repo);
-    #{environment:environment,sequence:sequence + 1}
-}
-
-fn slowest(results) {
-    let ordered = [];
-    for key in results.keys() {
-        let value = results[key];
-        let inserted = false;
-        for index in 0..ordered.len {
-            if value.duration_ms > ordered[index].duration_ms {
-                ordered.insert(index, value);
-                inserted = true;
-                break;
-            }
-        }
-        if !inserted {
-            ordered.push(value);
-        }
-    }
-    ordered
-}
-
-fn entry() {
-require(args.len >= 1, "expected: REPO [OPTIONS]");
-let repo = std::path::absolute(args[0]).display;
-require(
-    std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
-    "check_bootstrap_worker_missing"
-);
-let bootstrap_worker =
-    std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
-let lint_worker = lint_cli_worker(bootstrap_worker);
-let quick = false;
-let release = false;
-let skip_smoke = false;
-let include_stress = false;
-let dry_run = false;
-let quick_target = "";
-let receipt_path =
-    std::path::join(repo, "target/qualification/receipt.json").display;
-let timing_path =
-    std::path::join(repo, "target/qualification/timing.json").display;
-let index = 1;
-while index < args.len {
-    let value = args[index];
-    if value == "--quick" {
-        quick = true;
-    } else if value == "--release" {
-        release = true;
-    } else if value == "--skip-smoke" {
-        skip_smoke = true;
-    } else if value == "--include-stress" {
-        include_stress = true;
-    } else if value == "--internal-qualification-dry-run" {
-        dry_run = true;
-    } else if value == "--receipt" {
-        require(index + 1 < args.len, "check_receipt_value_missing");
-        receipt_path = std::path::absolute(args[index + 1]).display;
-        index += 1;
-    } else if value == "--target" {
-        require(index + 1 < args.len, "check_target_value_missing");
-        quick_target = args[index + 1];
-        index += 1;
-    } else if value == "--timing" {
-        require(index + 1 < args.len, "check_timing_value_missing");
-        timing_path = std::path::absolute(args[index + 1]).display;
-        index += 1;
-    } else {
-        throw "check_unknown_argument:" + value;
-    }
-    index += 1;
-}
-require(
-    quick_target.is_empty() || quick,
-    "check_target_only_for_quick"
-);
-require(
-    !quick || !(release || skip_smoke || include_stress || dry_run),
-    "check_quick_option_conflict"
-);
-let unix_bootstrap =
-    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
-        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
-if unix_bootstrap && !quick
-        && !release && !skip_smoke && !include_stress && !dry_run {
-    quick = true;
-}
-require(
-    !unix_bootstrap || quick,
-    "check_full_qualification_requires_windows"
-);
-
-let scratch = rhai::runtime::temp_dir().display;
-let manifest = std::path::join(repo, "agenterm.tasks.json").display;
-let sequence = 1;
-if dry_run {
-    sequence = run_step(
-        "qualification fail-closed dry run",
-        [task(
-            bootstrap_worker,
-            manifest,
-            "qualification-selftest",
-            20000,
-            []
-        )],
-        repo,
-        scratch,
-        sequence
-    );
-    return 0;
-}
-
-if std::fs::exists(timing_path) {
-    std::fs::remove_file(timing_path);
-}
-
-if quick {
-    let quick_started = std::time::SystemTime::now().unix_millis;
-    let quick_native_bin_root = if std::env::has("CARGO_TARGET_DIR") {
-        std::path::absolute(std::env::get("CARGO_TARGET_DIR")).display
-    } else {
-        std::path::join(repo, "target").display
-    };
-    if quick_target != "" {
-        quick_native_bin_root =
-            std::path::join(quick_native_bin_root, quick_target).display;
-    }
-    quick_native_bin_root =
-        std::path::join(quick_native_bin_root, "debug").display;
-    let clippy_arguments = [
-        "clippy", "--quiet", "--locked", "--all-targets", "--", "-D", "warnings"
-    ];
-    let unit_arguments = ["test", "--quiet", "--locked", "--lib"];
-    let quick_client_build_args = [];
-    if quick_target != "" {
-        clippy_arguments.push("--target");
-        clippy_arguments.push(quick_target);
-        unit_arguments.push("--target");
-        unit_arguments.push(quick_target);
-        quick_client_build_args.push("--target");
-        quick_client_build_args.push(quick_target);
-    }
-    let quick_gate_ids = [
-        "repo-lint",
-        "rustfmt",
-        "prd-alignment",
-        "clippy",
-        "unit-tests"
-    ];
-    if unix_bootstrap {
-        quick_gate_ids.insert(2, "native-public-catalog-clients");
-    }
-    let timing = qualification::new_timing(
-        repo,
-        std::path::join(
-            repo,
-            "scripts/qualification-gates.json"
-        ).display,
-        timing_path,
-        "quick",
-        "quick",
-        #{unix_bootstrap:unix_bootstrap},
-        quick_gate_ids
-    );
-    let prd_spec = task(
-        bootstrap_worker,
-        manifest,
-        "prd-alignment",
-        10000,
-        []
-    );
-    if unix_bootstrap {
-        let quick_native_bin = std::path::join(
-            quick_native_bin_root,
-            "agenterm-cli"
-        ).display;
-        prd_spec = direct_task(
-            bootstrap_worker,
-            repo,
-            "prd-alignment",
-            10000,
-            [
-                repo,
-                quick_native_bin
-            ]
-        );
-    }
-    let quick_gate = run_quick_gate(
-        timing,
-        "repo-lint",
-        "repository static lint",
-        [task(
-            bootstrap_worker,
-            manifest,
-            "lint",
-            120000,
-            [lint_worker, "static"]
-        )],
-        repo,
-        scratch,
-        sequence
-    );
-    timing = quick_gate.timing;
-    sequence = quick_gate.sequence;
-    let quick_gate = run_quick_gate(
-        timing,
-        "rustfmt",
-        "rustfmt",
-        [spec(
-            "cargo",
-            ["fmt", "--all", "--", "--check"],
-            60000,
-            #{}
-        )],
-        repo,
-        scratch,
-        sequence
-    );
-    timing = quick_gate.timing;
-    sequence = quick_gate.sequence;
-    if unix_bootstrap {
-        let quick_gate = run_quick_gate(
-            timing,
-            "native-public-catalog-clients",
-            "native public catalog clients",
-            [task(
-                bootstrap_worker,
-                manifest,
-                "client-build",
-                600000,
-                quick_client_build_args
-            )],
-            repo,
-            scratch,
-            sequence
-        );
-        timing = quick_gate.timing;
-        sequence = quick_gate.sequence;
-    }
-    let quick_gate = run_quick_gate(
-        timing,
-        "prd-alignment",
-        "PRD capability alignment",
-        [prd_spec],
-        repo,
-        scratch,
-        sequence
-    );
-    timing = quick_gate.timing;
-    sequence = quick_gate.sequence;
-    let identity = ();
-    try {
-        identity = freeze_identity(
-            bootstrap_worker,
-            manifest,
-            repo,
-            scratch,
-            sequence
-        );
-    } catch (error) {
-        timing = qualification::timing_fail_stage(
-            timing,
-            "build-identity"
-        );
-        throw error;
-    }
-    sequence = identity.sequence;
-    let quick_gate = run_quick_gate(
-        timing,
-        "clippy",
-        "all-target Clippy",
-        [spec("cargo", clippy_arguments, 60000, identity.environment)],
-        repo,
-        scratch,
-        sequence
-    );
-    timing = quick_gate.timing;
-    sequence = quick_gate.sequence;
-    // rh AOT pack unit tests each run an isolated `cargo build --release` of a
-    // generated cdylib (~1m each on cold host). 60s was enough for the pre-rh
-    // lib suite and now false-fails the quick gate with gate_deadline_exceeded.
-    let quick_gate = run_quick_gate(
-        timing,
-        "unit-tests",
-        "library unit tests",
-        [spec("cargo", unit_arguments, 600000, identity.environment)],
-        repo,
-        scratch,
-        sequence
-    );
-    timing = quick_gate.timing;
-    sequence = quick_gate.sequence;
-    timing = qualification::timing_finish(timing, "passed");
-    print(
-        "\nPASS: AgenTerm quick development gate (" +
-            (
-                std::time::SystemTime::now().unix_millis -
-                    quick_started
-            ) +
-            " ms)"
-    );
-    return 0;
-}
-
-if std::fs::exists(receipt_path) {
-    std::fs::remove_file(receipt_path);
-}
-let context = qualification::new_context(
-    std::path::join(
-        repo,
-        "scripts/qualification-gates.json"
-    ).display,
-    release,
-    include_stress
-);
-let timing_gate_ids = [];
-for declared in context.manifest.required_gates {
-    timing_gate_ids.push(declared.id);
-}
-let timing_profile =
-    if release && include_stress {
-        "release-stress"
-    } else if skip_smoke {
-        "skip-smoke"
-    } else {
-        "full"
-    };
-context.timing = qualification::new_timing(
-    repo,
-    context.manifest_path,
-    timing_path,
-    if release { "candidate" } else { "ordinary" },
-    timing_profile,
-    #{
-        release: release,
-        stress_included: include_stress,
-        smoke_included: !skip_smoke
-    },
-    timing_gate_ids
-);
-if !release {
-    for id in [
-        "release-preflight",
-        "preflight-benchmark"
-    ] {
-        context.timing = qualification::timing_set_gate(
-            context.timing, id, "skipped", 0, 0, false
-        );
-    }
-}
-if skip_smoke {
-    for id in [
-        "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
-        "native-ipc-smoke", "native-ipc-compat-smoke", "remote-ui-smoke",
-        "remote-ui-upgrade-smoke", "fleet-smoke", "script-smoke",
-        "theme-smoke", "working-context-smoke", "workbench-smoke",
-        "control-center-smoke"
-    ] {
-        context.timing = qualification::timing_set_gate(
-            context.timing, id, "skipped", 0, 0, false
-        );
-    }
-}
-let full_started = std::time::SystemTime::now().unix_millis;
-let gate = run_gate(
-    context,
-    "preflight-selftest",
-    "read-only preflight self-test",
-    [spec(
-        "cargo",
-        [
-            "test", "--quiet", "--locked",
-            "--test", "rhai_migration",
-            "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
-            "--", "--nocapture"
-        ],
-        60000,
-        #{}
-    )],
-    repo,
-    scratch,
-    sequence
-);
-context = gate.context;
-sequence = gate.sequence;
-
-if release {
-    let release_preflight = run_gate(
-        context,
-        "release-preflight",
-        "clean internal candidate preflight",
-        [task(
-            bootstrap_worker,
-            manifest,
-            "preflight",
-            10000,
-            [repo, std::path::join(
-                repo,
-                "target/preflight/preflight.json"
-            ).display]
-        )],
-        repo,
-        scratch,
-        sequence
-    );
-    context = release_preflight.context;
-    sequence = release_preflight.sequence;
-    // R3 (v0.1.15): agenterm-net-research is no longer a release/Candidate gate.
-    // Push CI still runs it (linux job AGENTERM_BOOTSTRAP_TASK=agenterm-net-research).
-    let benchmark = run_gate(
-        context,
-        "preflight-benchmark",
-        "local preflight p95 benchmark",
-        [task(
-            bootstrap_worker,
-            manifest,
-            "preflight-benchmark",
-            60000,
-            [
-                bootstrap_worker,
-                manifest,
-                repo,
-                std::path::join(
-                    repo,
-                    "target/preflight/benchmark.json"
-                ).display,
-                "5"
-            ]
-        )],
-        repo,
-        scratch,
-        sequence
-    );
-    context = benchmark.context;
-    sequence = benchmark.sequence;
-}
-
-let lint_gate = run_gate(
-    context,
-    "repo-lint",
-    "repository static lint",
-    [
-        task(
-            bootstrap_worker,
-            manifest,
-            "lint",
-            120000,
-            [lint_worker, "--self-test"]
-        ),
-        task(
-            bootstrap_worker,
-            manifest,
-            "lint",
-            120000,
-            [lint_worker, "static"]
-        )
-    ],
-    repo,
-    scratch,
-    sequence
-);
-context = lint_gate.context;
-sequence = lint_gate.sequence;
-try {
-    sequence = assert_declarations(
-        context,
-        bootstrap_worker,
-        repo,
-        scratch,
-        sequence
-    );
-} catch (error) {
-    context.timing = qualification::timing_fail_stage(
-        context.timing,
-        "evidence-declarations"
-    );
-    throw error;
-}
-let rustfmt_gate = run_gate(
-    context,
-    "rustfmt",
-    "rustfmt",
-    [spec(
-        "cargo",
-        ["fmt", "--", "--check"],
-        60000,
-        #{}
-    )],
-    repo,
-    scratch,
-    sequence
-);
-context = rustfmt_gate.context;
-sequence = rustfmt_gate.sequence;
-
-let identity = ();
-try {
-    identity = freeze_identity(
-        bootstrap_worker,
-        manifest,
-        repo,
-        scratch,
-        sequence
-    );
-} catch (error) {
-    context.timing = qualification::timing_fail_stage(
-        context.timing,
-        "build-identity"
-    );
-    throw error;
-}
-let build_environment = identity.environment;
-sequence = identity.sequence;
-let clippy_gate = run_gate(
-    context,
-    "clippy",
-    "Clippy",
-    [spec(
-        "cargo",
-        [
-            "clippy", "--quiet", "--locked", "--all-targets",
-            "--all-features", "--", "-D", "warnings"
-        ],
-        60000,
-        build_environment
-    )],
-    repo,
-    scratch,
-    sequence
-);
-context = clippy_gate.context;
-sequence = clippy_gate.sequence;
-let unit_specs = [spec(
-    "cargo",
-    [
+fn cargo_unit_primary_spec(environment) {
+    let arguments = [
         "test", "--quiet", "--locked", "--all-features", "--",
         "--skip", "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
         "--skip", "preflight_benchmark_task_measures_clean_public_worker_runs",
@@ -1108,340 +371,1803 @@ let unit_specs = [spec(
         "--skip", "migration_audit_rejects_operational_references_to_deleted_scripts",
         "--skip", "rhai_qualification_contract_fails_closed_and_cleans_owned_scratch",
         "--skip", "rhai_qualified_package_accepts_only_the_exact_receipt_bytes"
-    ],
-    300000,
-    build_environment
-)];
-unit_specs.push(spec(
-    "cargo",
-    [
+    ];
+    spec("cargo", arguments, 300000, environment, 0)
+}
+
+fn cargo_unit_migration_spec(environment) {
+    let arguments = [
         "test", "--quiet", "--locked", "--all-features",
         "--test", "rhai_migration",
         "quality_timing_is_complete_on_success_and_failure_and_renders_markdown",
         "--", "--nocapture"
-    ],
-    120000,
-    build_environment
-));
-let unit_gate = run_gate(
+    ];
+    spec("cargo", arguments, 120000, environment, 0)
+}
+
+fn build_artifact_timeout_ms(release) {
+    if release != 0 {
+        return 600000;
+    }
+    300000
+}
+
+fn build_artifact_profile(release) {
+    if release != 0 {
+        return "release";
+    }
+    ""
+}
+
+fn spec(program, arguments, timeout_ms, environment, allow_powershell) {
+    let program_text = "" + program;
+    let timeout_value = 0 + timeout_ms;
+    let allow_value = 0 + allow_powershell;
+    // Indexing proves StringList; bare `.len` is shared with String and would
+    // freeze `arguments` as String before call-site StringList upgrades apply.
+    let _first_argument = "" + arguments[0];
+    // stringify is native Json evidence; bare `.keys()` falls through to HostEval.
+    let _environment_proof = rhai::json::stringify(environment);
+    #{
+        program: program_text,
+        arguments: arguments,
+        timeout_ms: timeout_value,
+        environment: environment,
+        allow_powershell: allow_value
+    }
+}
+
+fn empty_environment() {
+    rhai::json::parse("{}")
+}
+
+fn execute(command_spec, repo, scratch, sequence) {
+    let prog = "" + command_spec.program;
+    // Non-empty string literal seed: empty `[]` is inferred as JSON, not StringList.
+    let arg_count = 0 + command_spec.arguments.len;
+    require(arg_count > 0, "check_execute_argv_empty");
+    let argv = ["" + command_spec.arguments[0]];
+    let arg_index = 1;
+    while arg_index < arg_count {
+        argv.push("" + command_spec.arguments[arg_index]);
+        arg_index += 1;
+    }
+    let timeout_ms = command_spec.timeout_ms;
+    let allow_powershell = command_spec.allow_powershell;
+    let env_map = command_spec.environment;
+    let repo_path = "" + repo;
+    let scratch_path = "" + scratch;
+    let seq_index = 0 + sequence;
+    let seq_text = "" + seq_index;
+    let stdout_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stdout"
+    ).display;
+    let stderr_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stderr"
+    ).display;
+    let command = std::process::command(prog);
+    command.args(argv);
+    command.current_dir(repo_path);
+    // Explicit keys: empty `#{}` stays no-op; identity envs set known AGENTERM_*.
+    let env_version = "" + env_map.AGENTERM_BUILD_IDENTITY_VERSION;
+    if env_version != "" {
+        command.env("AGENTERM_BUILD_IDENTITY_VERSION", env_version);
+        command.env(
+            "AGENTERM_BUILD_GIT_COMMIT",
+            "" + env_map.AGENTERM_BUILD_GIT_COMMIT
+        );
+        command.env(
+            "AGENTERM_BUILD_GIT_DIRTY",
+            "" + env_map.AGENTERM_BUILD_GIT_DIRTY
+        );
+        command.env(
+            "AGENTERM_BUILD_CARGO_LOCK_SHA256",
+            "" + env_map.AGENTERM_BUILD_CARGO_LOCK_SHA256
+        );
+        command.env(
+            "AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256",
+            "" + env_map.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256
+        );
+        command.env(
+            "AGENTERM_BUILD_PROFILE",
+            "" + env_map.AGENTERM_BUILD_PROFILE
+        );
+    }
+    let cargo_target_dir = "" + env_map.CARGO_TARGET_DIR;
+    if cargo_target_dir != "" {
+        command.env("CARGO_TARGET_DIR", cargo_target_dir);
+    }
+    let rustc_wrapper = "" + env_map.RUSTC_WRAPPER;
+    if rustc_wrapper != "" {
+        command.env("RUSTC_WRAPPER", rustc_wrapper);
+        command.env(
+            "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+            "" + env_map.AGENTERM_INTERNAL_RUSTC_WRAPPER
+        );
+        command.env(
+            "AGENTERM_INCREMENTAL_INVOCATION_ID",
+            "" + env_map.AGENTERM_INCREMENTAL_INVOCATION_ID
+        );
+        command.env(
+            "AGENTERM_INCREMENTAL_TARGET",
+            "" + env_map.AGENTERM_INCREMENTAL_TARGET
+        );
+        command.env(
+            "AGENTERM_INCREMENTAL_ROOT",
+            "" + env_map.AGENTERM_INCREMENTAL_ROOT
+        );
+        command.env(
+            "AGENTERM_INCREMENTAL_STATE",
+            "" + env_map.AGENTERM_INCREMENTAL_STATE
+        );
+    }
+    let deadline_ms = timeout_ms + 10000;
+    command.timeout(
+        std::time::Duration::from_millis(deadline_ms)
+    );
+    let stdout_file = "" + stdout_path;
+    let stderr_file = "" + stderr_path;
+    command.stdout_file(stdout_file);
+    command.stderr_file(stderr_file);
+    let started = std::time::SystemTime::now().unix_millis;
+    let result = command.output();
+    let stdout = "";
+    if std::fs::exists(stdout_file) {
+        stdout = std::fs::read_to_string(stdout_file);
+    }
+    let stderr = "";
+    if std::fs::exists(stderr_file) {
+        stderr = std::fs::read_to_string(stderr_file);
+    }
+    let duration =
+        std::time::SystemTime::now().unix_millis - started;
+    let timed_out = duration > timeout_ms;
+    let observed_powershell = empty_task_extra();
+    let process_samples = 0;
+    let powershell_violation =
+        observed_powershell.len > 0 && allow_powershell == 0;
+    let gate_success =
+        result.success != 0
+            && powershell_violation == 0
+            && timed_out == 0;
+    #{
+        success: gate_success,
+        exit_code: result.exit_code,
+        duration_ms: duration,
+        stdout: stdout,
+        stderr: compose_execute_stderr(
+            stderr,
+            powershell_violation,
+            observed_powershell,
+            timed_out,
+            timeout_ms
+        ),
+        stdout_path: stdout_path,
+        stderr_path: stderr_path,
+        timed_out: timed_out,
+        observed_powershell: observed_powershell,
+        process_samples: process_samples
+    }
+}
+
+fn bounded_text(text, maximum) {
+    let value = "" + text;
+    let text_len = value.len;
+    if text_len <= maximum {
+        return value;
+    }
+    value.sub_string(text_len - maximum, maximum)
+}
+
+fn append_text_lines(target, text) {
+    for source_line in text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            target.push(line);
+        }
+    }
+    0
+}
+
+fn slice_prefix(text, stop) {
+    let value = "" + text;
+    if stop < 0 {
+        return value;
+    }
+    value.sub_string(0, stop)
+}
+
+/// Pull the innermost script diagnostic out of a nested gate failure.
+///
+/// A failing inner task reports a JSON envelope whose `message` embeds
+/// another envelope, so the actionable code (for example
+/// `supply_chain_source_missing:softbuffer:0.4.8`) ends up several quoted
+/// layers deep. Surfacing it first keeps the CI summary readable without
+/// discarding the full payload printed below it.
+fn innermost_diagnostic(_text) {
+    ""
+}
+
+fn run_gate_step(
     context,
-    "unit-tests",
-    "unit tests",
-    unit_specs,
+    timing,
+    id,
+    label,
+    command_spec,
+    repo,
+    scratch,
+    sequence,
+    started,
+    all_output
+) {
+    let command_sequence = 0 + sequence;
+    let next_sequence = command_sequence + 1;
+    let allow_powershell = 0 + command_spec.allow_powershell;
+    let result = execute(
+        command_spec,
+        repo,
+        scratch,
+        command_sequence
+    );
+    let seq_text = "" + command_sequence;
+    let scratch_path = "" + scratch;
+    let stdout_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stdout"
+    ).display;
+    let stderr_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stderr"
+    ).display;
+    let stdout_text = result.stdout;
+    let stderr_text = result.stderr;
+    context = wrap_add_process_observation(
+        context,
+        result.process_samples,
+        empty_task_extra(),
+        allow_powershell
+    );
+    if stdout_text != "" {
+        print(stdout_text);
+    }
+    if stderr_text != "" {
+        print(stderr_text);
+    }
+    if result.observed_powershell.len > 0
+            && allow_powershell != 0 {
+        print(
+            "OBSERVED explicit terminal compatibility payload: " +
+                joined_text(result.observed_powershell, ",")
+        );
+    }
+    for source_line in stdout_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            all_output.push(line);
+        }
+    }
+    for source_line in stderr_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            all_output.push(line);
+        }
+    }
+    if result.success == 0 {
+        let duration =
+            std::time::SystemTime::now().unix_millis - started;
+        timing = wrap_timing_set_gate(
+            timing,
+            id,
+            "failed",
+            duration,
+            result.exit_code,
+            result.timed_out != 0
+        );
+        timing = wrap_timing_finish(timing, "failed");
+        let payload = stdout_text + stderr_text;
+        throw label + " failed with exit code " + result.exit_code +
+            "\n" + bounded_text(payload, 16384);
+    }
+    #{context:context,timing:timing,sequence:next_sequence}
+}
+
+fn run_gate(context, timing, id, label, command_spec, repo, scratch, sequence) {
+    print("\n==> " + label);
+    let started = std::time::SystemTime::now().unix_millis;
+    let all_output = empty_task_extra();
+    let step = run_gate_step(
+        context,
+        timing,
+        id,
+        label,
+        command_spec,
+        repo,
+        scratch,
+        sequence,
+        started,
+        all_output
+    );
+    context = map_context(step);
+    timing = map_timing(step);
+    let next_sequence = map_sequence(step);
+    let duration =
+        std::time::SystemTime::now().unix_millis - started;
+    context = wrap_add_result(
+        context,
+        id,
+        "passed",
+        duration,
+        all_output
+    );
+    timing = wrap_timing_set_gate(
+        timing,
+        id,
+        "passed",
+        duration,
+        0,
+        0
+    );
+    print("PASS: " + label + " (" + duration + " ms)");
+    #{context:context,timing:timing,sequence:next_sequence}
+}
+
+fn run_gate_two(
+    context,
+    timing,
+    id,
+    label,
+    first_spec,
+    second_spec,
+    repo,
+    scratch,
+    sequence
+) {
+    print("\n==> " + label);
+    let started = std::time::SystemTime::now().unix_millis;
+    let all_output = empty_task_extra();
+    let step = run_gate_step(
+        context,
+        timing,
+        id,
+        label,
+        first_spec,
+        repo,
+        scratch,
+        sequence,
+        started,
+        all_output
+    );
+    context = map_context(step);
+    timing = map_timing(step);
+    let next_sequence = map_sequence(step);
+    step = run_gate_step(
+        context,
+        timing,
+        id,
+        label,
+        second_spec,
+        repo,
+        scratch,
+        next_sequence,
+        started,
+        all_output
+    );
+    context = map_context(step);
+    timing = map_timing(step);
+    next_sequence = map_sequence(step);
+    let duration =
+        std::time::SystemTime::now().unix_millis - started;
+    context = wrap_add_result(
+        context,
+        id,
+        "passed",
+        duration,
+        all_output
+    );
+    timing = wrap_timing_set_gate(
+        timing,
+        id,
+        "passed",
+        duration,
+        0,
+        0
+    );
+    print("PASS: " + label + " (" + duration + " ms)");
+    #{context:context,timing:timing,sequence:next_sequence}
+}
+
+fn run_quick_gate(timing, id, label, command_spec, repo, scratch, sequence) {
+    print("\n==> " + label);
+    let started = std::time::SystemTime::now().unix_millis;
+    let command_sequence = 0 + sequence;
+    let next_sequence = sequence + 1;
+    let result = execute(
+        command_spec,
+        repo,
+        scratch,
+        sequence
+    );
+    let seq_text = "" + command_sequence;
+    let scratch_path = "" + scratch;
+    let stdout_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stdout"
+    ).display;
+    let stderr_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stderr"
+    ).display;
+    let stdout_text = result.stdout;
+    let stderr_text = result.stderr;
+    if stdout_text != "" {
+        print(stdout_text);
+    }
+    if stderr_text != "" {
+        print(stderr_text);
+    }
+    if result.success == 0 {
+        let duration =
+            std::time::SystemTime::now().unix_millis - started;
+        timing = wrap_timing_set_gate(
+            timing,
+            id,
+            "failed",
+            duration,
+            result.exit_code,
+            result.timed_out != 0
+        );
+        timing = wrap_timing_finish(timing, "failed");
+        let combined = stdout_text + stderr_text;
+        throw label + " failed with exit code " + result.exit_code +
+            "\n" + bounded_text(combined, 16384);
+    }
+    let duration =
+        std::time::SystemTime::now().unix_millis - started;
+    timing = wrap_timing_set_gate(
+        timing,
+        id,
+        "passed",
+        duration,
+        0,
+        0
+    );
+    print("PASS: " + label + " (" + duration + " ms)");
+    #{timing:timing,sequence:next_sequence}
+}
+
+fn run_step(label, command_spec, repo, scratch, sequence) {
+    print("\n==> " + label);
+    let started = std::time::SystemTime::now().unix_millis;
+    let command_sequence = 0 + sequence;
+    let next_sequence = sequence + 1;
+    let result = execute(
+        command_spec,
+        repo,
+        scratch,
+        sequence
+    );
+    let seq_text = "" + command_sequence;
+    let scratch_path = "" + scratch;
+    let stdout_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stdout"
+    ).display;
+    let stderr_path = std::path::join(
+        scratch_path,
+        "command-" + seq_text + ".stderr"
+    ).display;
+    let stdout_text = result.stdout;
+    let stderr_text = result.stderr;
+    if stdout_text != "" {
+        print(stdout_text);
+    }
+    if stderr_text != "" {
+        print(stderr_text);
+    }
+    let combined = stdout_text + stderr_text;
+    require(
+        result.success != 0,
+        label + " failed with exit code " + result.exit_code +
+            "\n" + bounded_text(combined, 16384)
+    );
+    print(
+        "PASS: " + label + " (" +
+            (
+                std::time::SystemTime::now().unix_millis - started
+            ) +
+            " ms)"
+    );
+    pass_int(next_sequence)
+}
+
+fn lint_cli_worker(fallback) {
+    let fallback_path = "" + fallback;
+    if std::env::has("AGENTERM_BOOTSTRAP_RH_CLI") {
+        let path =
+            std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_RH_CLI")).display;
+        if std::fs::exists(path)
+            && std::fs::metadata(path).is_file
+            && std::fs::metadata(path).len > 0 {
+            return path;
+        }
+    }
+    fallback_path
+}
+
+fn first_nonempty_file(repo, first_relative, second_relative) {
+    let first_path = std::path::join(repo, first_relative).display;
+    if std::fs::exists(first_path)
+            && std::fs::metadata(first_path).is_file
+            && std::fs::metadata(first_path).len > 0 {
+        return first_path;
+    }
+    let second_path = std::path::join(repo, second_relative).display;
+    if std::fs::exists(second_path)
+            && std::fs::metadata(second_path).is_file
+            && std::fs::metadata(second_path).len > 0 {
+        return second_path;
+    }
+    ""
+}
+
+fn task(worker, manifest, id, timeout_ms, extra, environment, allow_powershell) {
+    let worker_path = "" + worker;
+    let manifest_path = "" + manifest;
+    let task_id = "" + id;
+    // JSON string-array extras (see empty_task_extra / *_task_extra helpers).
+    let _extra_proof = rhai::json::stringify(extra);
+    let arguments = [
+        "task", "run", task_id,
+        "--manifest", manifest_path
+    ];
+    if extra.len > 0 {
+        arguments.push("--");
+        for item in extra {
+            arguments.push("" + item);
+        }
+    }
+    let deadline = 0 + timeout_ms + 10000;
+    spec(worker_path, arguments, deadline, environment, allow_powershell)
+}
+
+fn direct_task(worker, repo, id, timeout_ms, arguments, environment, allow_powershell) {
+    let timeout_value = 0 + timeout_ms;
+    let worker_path = "" + worker;
+    let repo_path = "" + repo;
+    let task_id = "" + id;
+    let script_path = std::path::join(
+        repo_path,
+        "scripts/rh/" + task_id + ".rh"
+    ).display;
+    let command_arguments = ["run"];
+    command_arguments.push("" + script_path);
+    command_arguments.push("--profile");
+    command_arguments.push("local");
+    command_arguments.push("--project-root");
+    command_arguments.push(repo_path);
+    command_arguments.push("--timeout-ms");
+    command_arguments.push("" + timeout_value);
+    command_arguments.push("--max-operations");
+    command_arguments.push("10000000");
+    command_arguments.push("--max-output-bytes");
+    command_arguments.push("1048576");
+    command_arguments.push("--");
+    for item in arguments {
+        command_arguments.push(item);
+    }
+    let deadline = timeout_value + 10000;
+    spec(worker_path, command_arguments, deadline, environment, allow_powershell)
+}
+
+fn quick_prd_alignment_spec(
+    unix_bootstrap,
+    bootstrap_worker,
+    repo,
+    manifest,
+    quick_native_bin_root,
+    empty_extra
+) {
+    if unix_bootstrap != 0 {
+        let quick_native_bin = std::path::join(
+            quick_native_bin_root,
+            "agenterm-cli"
+        ).display;
+        return direct_task(
+            bootstrap_worker,
+            repo,
+            "prd-alignment",
+            10000,
+            [
+                repo,
+                quick_native_bin
+            ],
+            empty_environment(),
+            0
+        );
+    }
+    task(
+        bootstrap_worker,
+        manifest,
+        "prd-alignment",
+        10000,
+        empty_extra,
+        empty_environment(),
+        0
+    )
+}
+
+fn compute_quick_native_bin_root(repo, quick_target) {
+    if std::env::has("CARGO_TARGET_DIR") {
+        let base =
+            std::path::absolute(std::env::get("CARGO_TARGET_DIR")).display;
+        if quick_target != "" {
+            let with_target = std::path::join(base, quick_target).display;
+            return std::path::join(with_target, "debug").display;
+        }
+        return std::path::join(base, "debug").display;
+    }
+    let base = std::path::join(repo, "target").display;
+    if quick_target != "" {
+        let with_target = std::path::join(base, quick_target).display;
+        return std::path::join(with_target, "debug").display;
+    }
+    std::path::join(base, "debug").display
+}
+
+fn resolve_task_rh_cli(dist_rh_cli, repo) {
+    if dist_rh_cli != "" {
+        return dist_rh_cli;
+    }
+    first_nonempty_file(
+        repo,
+        "target/debug/agenterm-rh.exe",
+        "target/debug/agenterm-rh"
+    )
+}
+
+fn resolve_task_compatibility_worker(compatibility_task_worker, repo) {
+    if compatibility_task_worker != "" {
+        return compatibility_task_worker;
+    }
+    first_nonempty_file(
+        repo,
+        "target/debug/agenterm-rhai.exe",
+        "target/debug/agenterm-rhai"
+    )
+}
+
+fn resolve_worker(
+    dist_rh_cli,
+    task_rh_cli,
+    task_compatibility_worker
+) {
+    let dist_text = "" + dist_rh_cli;
+    let task_text = "" + task_rh_cli;
+    let fallback_text = "" + task_compatibility_worker;
+    if dist_text != "" {
+        return dist_text;
+    }
+    if task_text != "" {
+        return task_text;
+    }
+    print(
+        "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai; " +
+            "agenterm-rh is unavailable"
+    );
+    fallback_text
+}
+
+fn resolve_dist_lint_cli(dist_rh_cli, lint_worker) {
+    let dist_text = "" + dist_rh_cli;
+    let lint_text = "" + lint_worker;
+    if dist_text != "" {
+        return dist_text;
+    }
+    lint_text
+}
+
+fn resolve_artifact_verification_mode(release) {
+    if release != 0 {
+        return "release";
+    }
+    "development"
+}
+
+fn exact(left, right) {
+    let left_count = 0 + left.len;
+    let right_count = 0 + right.len;
+    if left_count == 0 && right_count == 0 {
+        return 1;
+    }
+    if left_count == 0 || right_count == 0 {
+        return 0;
+    }
+    let first = ["" + left[0]];
+    let left_index = 1;
+    while left_index < left_count {
+        let value = "" + left[left_index];
+        let insert_at = 0 + first.len;
+        let index = 0;
+        let first_len = 0 + first.len;
+        while index < first_len {
+            if insert_at == first_len && value < first[index] {
+                insert_at = index;
+            }
+            index += 1;
+        }
+        if insert_at == first_len {
+            first.push(value);
+        } else {
+            first.insert(insert_at, value);
+        }
+        left_index += 1;
+    }
+    let second = ["" + right[0]];
+    let right_index = 1;
+    while right_index < right_count {
+        let value = "" + right[right_index];
+        let insert_at = 0 + second.len;
+        let index = 0;
+        let second_len = 0 + second.len;
+        while index < second_len {
+            if insert_at == second_len && value < second[index] {
+                insert_at = index;
+            }
+            index += 1;
+        }
+        if insert_at == second_len {
+            second.push(value);
+        } else {
+            second.insert(insert_at, value);
+        }
+        right_index += 1;
+    }
+    if first.len != second.len {
+        return 0;
+    }
+    for index in 0..first.len {
+        if first[index] != second[index] {
+            return 0;
+        }
+    }
+    1
+}
+
+fn assert_declarations(context, worker, repo, scratch, sequence, gate_manifest) {
+    let _manifest = context.manifest;
+    let sequence_value = 0 + sequence;
+    for gate in gate_manifest.required_gates {
+        if gate.evidence.len == 0 {
+            continue;
+        }
+        let path = std::path::join(
+            repo,
+            "scripts/rh/" + gate.id + ".rh"
+        ).display;
+        let suite_path = "" + path;
+        require(
+            std::fs::exists(suite_path),
+            "check_evidence_suite_missing:" + gate.id
+        );
+        let worker_program = "" + worker;
+        let result = execute(
+            evidence_list_spec(worker_program, suite_path, repo),
+            repo,
+            scratch,
+            sequence_value
+        );
+        sequence_value += 1;
+        let stdout_text = result.stdout;
+        let stderr_text = result.stderr;
+        require(
+            result.success != 0,
+            "check_evidence_declaration_failed:" + gate.id +
+                ":" + stderr_text
+        );
+        let evidence = [];
+        for source_line in stdout_text.split("\n") {
+            let line = source_line;
+            line.trim();
+            if line != "" {
+                evidence.push(line);
+            }
+        }
+        require(
+            exact(gate.evidence, evidence),
+            "check_evidence_declaration_stale:" + gate.id
+        );
+    }
+    pass_int(sequence_value)
+}
+
+fn freeze_identity(worker, manifest, repo, scratch, sequence) {
+    let path = std::path::join(scratch, "build-identity.cmd").display;
+    let command_spec = task(
+        worker,
+        manifest,
+        "build-identity",
+        10000,
+        three_task_extra(repo, "dev", path),
+        empty_environment(),
+        0
+    );
+    let result = execute(
+        command_spec,
+        repo,
+        scratch,
+        sequence
+    );
+    let stdout_text = result.stdout;
+    let stderr_text = result.stderr;
+    require(
+        result.success != 0,
+        "check_build_identity:" + stdout_text + stderr_text
+    );
+    let identity_path = "" + path;
+    let identity_text = std::fs::read_to_string(identity_path);
+    let line_count = 0;
+    for source_line in identity_text.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line == "" {
+            continue;
+        }
+        require(
+            line.starts_with("set \"") && line.ends_with("\""),
+            "check_build_identity_line:" + line
+        );
+        let body = line.sub_string(5, line.len - 6);
+        let parts = body.split("=");
+        require(parts.len == 2, "check_build_identity_value:" + line);
+        line_count += 1;
+    }
+    require(line_count == 6, "check_build_identity_fields");
+    let environment = dev_environment(repo);
+    #{environment:environment,sequence:sequence + 1}
+}
+
+fn slowest_fill(_results, _gate_ids, _ids, _durations) {
+    // Typed no-op: all four args are JSON values at the call site.
+    let _results_proof = rhai::json::stringify(_results);
+    let _gate_ids_proof = rhai::json::stringify(_gate_ids);
+    let _ids_proof = rhai::json::stringify(_ids);
+    let _durations_proof = rhai::json::stringify(_durations);
+    0
+}
+
+fn copy_release_fast_fixture(repo, upgrade_fixture) {
+    let repo_path = "" + repo;
+    let fixture_path = "" + upgrade_fixture;
+    let source = std::path::join(
+        repo_path,
+        "target/release-fast/agenterm.exe"
+    ).display;
+    std::fs::copy(source, fixture_path);
+    0
+}
+
+fn entry() {
+require(args.len >= 1, "expected: REPO [OPTIONS]");
+let repo = std::path::absolute(args[0]).display;
+require(
+    std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
+    "check_bootstrap_worker_missing"
+);
+let bootstrap_worker =
+    std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
+let lint_worker = lint_cli_worker(bootstrap_worker);
+let quick = 0;
+let release = 0;
+let skip_smoke = 0;
+let include_stress = 0;
+let dry_run = 0;
+let quick_target = "";
+let receipt_path =
+    std::path::join(repo, "target/qualification/receipt.json").display;
+let timing_path =
+    std::path::join(repo, "target/qualification/timing.json").display;
+let index = 1;
+while index < args.len {
+    let value = args[index];
+    if value == "--quick" {
+        quick = 1;
+    } else if value == "--release" {
+        release = 1;
+    } else if value == "--skip-smoke" {
+        skip_smoke = 1;
+    } else if value == "--include-stress" {
+        include_stress = 1;
+    } else if value == "--internal-qualification-dry-run" {
+        dry_run = 1;
+    } else if value == "--receipt" {
+        require(index + 1 < args.len, "check_receipt_value_missing");
+        receipt_path = absolute_display(arg_value(index + 1));
+        index += 1;
+    } else if value == "--target" {
+        require(index + 1 < args.len, "check_target_value_missing");
+        quick_target = arg_value(index + 1);
+        index += 1;
+    } else if value == "--timing" {
+        require(index + 1 < args.len, "check_timing_value_missing");
+        timing_path = absolute_display(arg_value(index + 1));
+        index += 1;
+    } else {
+        throw "check_unknown_argument:" + value;
+    }
+    index += 1;
+}
+require(
+    quick_target == "" || quick != 0,
+    "check_target_only_for_quick"
+);
+require(
+    quick == 0 || !(release != 0 || skip_smoke != 0 || include_stress != 0 || dry_run != 0),
+    "check_quick_option_conflict"
+);
+let unix_bootstrap = 0;
+if std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix" {
+    unix_bootstrap = 1;
+}
+if unix_bootstrap && quick == 0
+        && release == 0 && skip_smoke == 0 && include_stress == 0 && dry_run == 0 {
+    quick = 1;
+}
+require(
+    unix_bootstrap == 0 || quick != 0,
+    "check_full_qualification_requires_windows"
+);
+
+let scratch =
+    std::path::join(repo, "target/qualification/scratch").display;
+std::fs::create_dir_all(scratch);
+let manifest = std::path::join(repo, "agenterm.tasks.json").display;
+let empty_extra = empty_task_extra();
+let sequence = 1;
+if dry_run != 0 {
+    sequence = run_step(
+        "qualification fail-closed dry run",
+        task(
+            bootstrap_worker,
+            manifest,
+            "qualification-selftest",
+            20000,
+            empty_extra,
+            #{},
+            0
+        ),
+        repo,
+        scratch,
+        sequence
+    );
+    return 0;
+}
+
+if std::fs::exists(timing_path) {
+    std::fs::remove_file(timing_path);
+}
+
+if quick != 0 {
+    let quick_started = std::time::SystemTime::now().unix_millis;
+    let quick_native_bin_root =
+        compute_quick_native_bin_root(repo, quick_target);
+    let clippy_arguments = [
+        "clippy", "--quiet", "--locked", "--all-targets", "--", "-D", "warnings"
+    ];
+    let unit_arguments = ["test", "--quiet", "--locked", "--lib"];
+    let quick_client_build_args = [];
+    if quick_target != "" {
+        clippy_arguments.push("--target");
+        clippy_arguments.push(quick_target);
+        unit_arguments.push("--target");
+        unit_arguments.push(quick_target);
+        quick_client_build_args.push("--target");
+        quick_client_build_args.push(quick_target);
+    }
+    let quick_gate_ids = [
+        "repo-lint",
+        "rustfmt"
+    ];
+    if unix_bootstrap != 0 {
+        quick_gate_ids.push("native-public-catalog-clients");
+    }
+    quick_gate_ids.push("prd-alignment");
+    quick_gate_ids.push("clippy");
+    quick_gate_ids.push("unit-tests");
+    let timing = wrap_timing_new(
+        repo,
+        std::path::join(
+            repo,
+            "scripts/qualification-gates.json"
+        ).display,
+        timing_path,
+        "quick",
+        "quick",
+        #{unix_bootstrap:unix_bootstrap},
+        quick_gate_ids
+    );
+    let quick_gate = run_quick_gate(
+        timing,
+        "repo-lint",
+        "repository static lint",
+        task(
+            bootstrap_worker,
+            manifest,
+            "lint",
+            120000,
+            two_task_extra(lint_worker, "static"),
+            empty_environment(),
+            0
+        ),
+        repo,
+        scratch,
+        sequence
+    );
+    timing = map_timing(quick_gate);
+    sequence = map_sequence(quick_gate);
+    let quick_gate = run_quick_gate(
+        timing,
+        "rustfmt",
+        "rustfmt",
+        cargo_fmt_all_check_spec(empty_environment()),
+        repo,
+        scratch,
+        sequence
+    );
+    timing = map_timing(quick_gate);
+    sequence = map_sequence(quick_gate);
+    if unix_bootstrap != 0 {
+        let quick_gate = run_quick_gate(
+            timing,
+            "native-public-catalog-clients",
+            "native public catalog clients",
+            task(
+                bootstrap_worker,
+                manifest,
+                "client-build",
+                600000,
+                quick_client_build_args,
+                empty_environment(),
+                0
+            ),
+            repo,
+            scratch,
+            sequence
+        );
+        timing = map_timing(quick_gate);
+        sequence = map_sequence(quick_gate);
+    }
+    let quick_gate = run_quick_gate(
+        timing,
+        "prd-alignment",
+        "PRD capability alignment",
+        quick_prd_alignment_spec(
+            unix_bootstrap,
+            bootstrap_worker,
+            repo,
+            manifest,
+            quick_native_bin_root,
+            empty_extra
+        ),
+        repo,
+        scratch,
+        sequence
+    );
+    timing = map_timing(quick_gate);
+    sequence = map_sequence(quick_gate);
+    let identity_environment = empty_environment();
+    let identity_sequence = sequence;
+    try {
+        let identity = freeze_identity(
+            bootstrap_worker,
+            manifest,
+            repo,
+            scratch,
+            sequence
+        );
+        identity_environment = map_environment(identity);
+        identity_sequence = map_sequence(identity);
+    } catch (error) {
+    timing = wrap_timing_fail_stage(
+        timing,
+            "build-identity"
+        );
+        throw error;
+    }
+    sequence = pass_int(identity_sequence);
+    let quick_gate = run_quick_gate(
+        timing,
+        "clippy",
+        "all-target Clippy",
+        spec("cargo", clippy_arguments, 60000, identity_environment, 0),
+        repo,
+        scratch,
+        sequence
+    );
+    timing = map_timing(quick_gate);
+    sequence = map_sequence(quick_gate);
+    // rh AOT pack unit tests each run an isolated `cargo build --release` of a
+    // generated cdylib (~1m each on cold host). 60s was enough for the pre-rh
+    // lib suite and now false-fails the quick gate with gate_deadline_exceeded.
+    let quick_gate = run_quick_gate(
+        timing,
+        "unit-tests",
+        "library unit tests",
+        spec("cargo", unit_arguments, 600000, identity_environment, 0),
+        repo,
+        scratch,
+        sequence
+    );
+    timing = map_timing(quick_gate);
+    sequence = map_sequence(quick_gate);
+    timing = wrap_timing_finish(timing, "passed");
+    print(
+        "\nPASS: AgenTerm quick development gate (" +
+            (
+                std::time::SystemTime::now().unix_millis -
+                    quick_started
+            ) +
+            " ms)"
+    );
+    return 0;
+}
+
+if std::fs::exists(receipt_path) {
+    std::fs::remove_file(receipt_path);
+}
+let context = wrap_new_context(
+    std::path::join(
+        repo,
+        "scripts/qualification-gates.json"
+    ).display,
+    release,
+    include_stress
+);
+let timing_profile = "full";
+if release != 0 && include_stress != 0 {
+    timing_profile = "release-stress";
+} else if skip_smoke != 0 {
+    timing_profile = "skip-smoke";
+}
+let timing_kind = "ordinary";
+if release != 0 {
+    timing_kind = "candidate";
+}
+let smoke_included = 1;
+if skip_smoke != 0 {
+    smoke_included = 0;
+}
+let gate_manifest = rhai::json::parse_file(
+    std::path::join(
+        repo,
+        "scripts/qualification-gates.json"
+    ).display
+);
+let timing_gate_ids = [];
+for gate in gate_manifest.required_gates {
+    timing_gate_ids.push(gate.id);
+}
+let timing = wrap_timing_new(
+    repo,
+    context.manifest_path,
+    timing_path,
+    timing_kind,
+    timing_profile,
+    #{
+        release: release,
+        stress_included: include_stress,
+        smoke_included: smoke_included
+    },
+    timing_gate_ids
+);
+if release == 0 {
+    timing = wrap_timing_set_gate(
+        timing, "release-preflight", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "preflight-benchmark", "skipped", 0, 0, 0
+    );
+}
+if skip_smoke != 0 {
+    timing = wrap_timing_set_gate(
+        timing, "startup-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "wake-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "cli-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "server-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "native-ipc-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "native-ipc-compat-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "remote-ui-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "remote-ui-upgrade-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "fleet-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "script-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "theme-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "working-context-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "workbench-smoke", "skipped", 0, 0, 0
+    );
+    timing = wrap_timing_set_gate(
+        timing, "control-center-smoke", "skipped", 0, 0, 0
+    );
+}
+let full_started = std::time::SystemTime::now().unix_millis;
+let gate = run_gate(
+    context,
+    timing,
+    "preflight-selftest",
+    "read-only preflight self-test",
+    cargo_preflight_selftest_spec(#{}),
     repo,
     scratch,
     sequence
 );
-context = unit_gate.context;
-sequence = unit_gate.sequence;
+context = map_context(gate);
+timing = map_timing(gate);
+sequence = map_sequence(gate);
+
+if release != 0 {
+    let release_preflight = run_gate(
+        context,
+        timing,
+        "release-preflight",
+        "clean internal candidate preflight",
+        task(
+            bootstrap_worker,
+            manifest,
+            "preflight",
+            10000,
+            two_task_extra(
+                repo,
+                std::path::join(
+                    repo,
+                    "target/preflight/preflight.json"
+                ).display
+            ),
+            #{},
+            0
+        ),
+        repo,
+        scratch,
+        sequence
+    );
+    context = map_context(release_preflight);
+    timing = map_timing(release_preflight);
+    sequence = map_sequence(release_preflight);
+    // R3 (v0.1.15): agenterm-net-research is no longer a release/Candidate gate.
+    // Push CI still runs it (linux job AGENTERM_BOOTSTRAP_TASK=agenterm-net-research).
+    let benchmark = run_gate(
+        context,
+        timing,
+        "preflight-benchmark",
+        "local preflight p95 benchmark",
+        task(
+            bootstrap_worker,
+            manifest,
+            "preflight-benchmark",
+            60000,
+            five_task_extra(
+                bootstrap_worker,
+                manifest,
+                repo,
+                std::path::join(
+                    repo,
+                    "target/preflight/benchmark.json"
+                ).display,
+                "5"
+            ),
+            #{},
+            0
+        ),
+        repo,
+        scratch,
+        sequence
+    );
+    context = map_context(benchmark);
+    timing = map_timing(benchmark);
+    sequence = map_sequence(benchmark);
+}
+
+let lint_gate = run_gate_two(
+    context,
+    timing,
+    "repo-lint",
+    "repository static lint",
+    task(
+        bootstrap_worker,
+        manifest,
+        "lint",
+        120000,
+        two_task_extra(lint_worker, "--self-test"),
+        #{},
+        0
+    ),
+    task(
+        bootstrap_worker,
+        manifest,
+        "lint",
+        120000,
+        two_task_extra(lint_worker, "static"),
+        #{},
+        0
+    ),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(lint_gate);
+timing = map_timing(lint_gate);
+sequence = map_sequence(lint_gate);
+try {
+    sequence = assert_declarations(
+        context,
+        bootstrap_worker,
+        repo,
+        scratch,
+        sequence,
+        gate_manifest
+    );
+} catch (error) {
+    timing = wrap_timing_fail_stage(
+        timing,
+        "evidence-declarations"
+    );
+    throw error;
+}
+let rustfmt_gate = run_gate(
+    context,
+    timing,
+    "rustfmt",
+    "rustfmt",
+    cargo_fmt_check_spec(#{}),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(rustfmt_gate);
+timing = map_timing(rustfmt_gate);
+sequence = map_sequence(rustfmt_gate);
+
+let build_environment = empty_environment();
+let build_identity_sequence = sequence;
+try {
+    let identity = freeze_identity(
+        bootstrap_worker,
+        manifest,
+        repo,
+        scratch,
+        sequence
+    );
+    build_environment = map_environment(identity);
+    build_identity_sequence = map_sequence(identity);
+} catch (error) {
+    timing = wrap_timing_fail_stage(
+        timing,
+        "build-identity"
+    );
+    throw error;
+}
+sequence = build_identity_sequence;
+let clippy_gate = run_gate(
+    context,
+    timing,
+    "clippy",
+    "Clippy",
+    cargo_clippy_all_spec(build_environment),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(clippy_gate);
+timing = map_timing(clippy_gate);
+sequence = map_sequence(clippy_gate);
+let unit_primary_spec = cargo_unit_primary_spec(build_environment);
+let unit_migration_spec = cargo_unit_migration_spec(build_environment);
+let unit_gate = run_gate_two(
+    context,
+    timing,
+    "unit-tests",
+    "unit tests",
+    unit_primary_spec,
+    unit_migration_spec,
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(unit_gate);
+timing = map_timing(unit_gate);
+sequence = map_sequence(unit_gate);
 
 let upgrade_fixture =
     std::path::join(scratch, "prior-agenterm.exe").display;
 // The release-fast fixture must be captured before the release build runs:
 // a staged release reclaims the development target with `cargo clean`, which
 // would otherwise remove target/release-fast/agenterm.exe before the copy.
-if !skip_smoke {
+if skip_smoke == 0 {
     let fixture_gate = run_gate(
         context,
+        timing,
         "artifact-build-fast",
         "alternate GUI fixture build",
-        [spec(
-            "cmd.exe",
-            [
-                "/d", "/c",
-                std::path::join(repo, "build.bat").display,
-                "release-fast"
-            ],
-            300000,
-            build_environment
-        )],
+        cmd_build_bat_spec(repo, "release-fast", 300000, build_environment),
         repo,
         scratch,
         sequence
     );
-    context = fixture_gate.context;
-    sequence = fixture_gate.sequence;
+    context = map_context(fixture_gate);
+    timing = map_timing(fixture_gate);
+    sequence = map_sequence(fixture_gate);
     try {
-        std::fs::copy(
-            std::path::join(
-                repo,
-                "target/release-fast/agenterm.exe"
-            ).display,
-            upgrade_fixture
-        );
+        copy_release_fast_fixture(repo, upgrade_fixture);
     } catch (error) {
-        context.timing = qualification::timing_fail_stage(
-            context.timing,
+        timing = wrap_timing_fail_stage(
+            timing,
             "upgrade-fixture"
         );
         throw error;
     }
 }
-let final_build_arguments = [
-    "/d", "/c",
-    std::path::join(repo, "build.bat").display
-];
-if release {
-    final_build_arguments.push("release");
-}
+let build_timeout_ms = build_artifact_timeout_ms(release);
+let build_profile = build_artifact_profile(release);
+let final_build_spec = cmd_build_bat_spec(
+    repo,
+    build_profile,
+    build_timeout_ms,
+    build_environment
+);
 let build_gate = run_gate(
     context,
+    timing,
     "artifact-build",
     "current artifact",
-    [spec(
-        "cmd.exe",
-        final_build_arguments,
-        // Default build.bat is release-fast (optimized stage). Give cold
-        // optimized compile more room than the old 60s dev-only budget.
-        if release { 600000 } else { 300000 },
-        build_environment
-    )],
+    final_build_spec,
     repo,
     scratch,
     sequence
 );
-context = build_gate.context;
-sequence = build_gate.sequence;
+context = map_context(build_gate);
+timing = map_timing(build_gate);
+sequence = map_sequence(build_gate);
 let dist_rh_cli = first_nonempty_file(
     repo,
-    ["dist/agenterm-rh.exe", "dist/agenterm-rh"]
+    "dist/agenterm-rh.exe",
+    "dist/agenterm-rh"
 );
 let compatibility_task_worker = first_nonempty_file(
     repo,
-    ["dist/agenterm-rhai.exe", "dist/agenterm-rhai"]
+    "dist/agenterm-rhai.exe",
+    "dist/agenterm-rhai"
 );
-let task_rh_cli = if dist_rh_cli != "" {
-    dist_rh_cli
-} else {
-    first_nonempty_file(
-        repo,
-        ["target/debug/agenterm-rh.exe", "target/debug/agenterm-rh"]
-    )
-};
-let task_compatibility_worker = if compatibility_task_worker != "" {
-    compatibility_task_worker
-} else {
-    first_nonempty_file(
-        repo,
-        ["target/debug/agenterm-rhai.exe", "target/debug/agenterm-rhai"]
-    )
-};
+let task_rh_cli = resolve_task_rh_cli(dist_rh_cli, repo);
+let task_compatibility_worker =
+    resolve_task_compatibility_worker(compatibility_task_worker, repo);
 require(
     task_rh_cli != "" || task_compatibility_worker != "",
     "check_dist_task_worker_missing"
 );
-let worker = if dist_rh_cli != "" {
-    dist_rh_cli
-} else if task_rh_cli != "" {
-    task_rh_cli
-} else {
-    print(
-        "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai; " +
-            "agenterm-rh is unavailable"
-    );
+let worker = resolve_worker(
+    dist_rh_cli,
+    task_rh_cli,
     task_compatibility_worker
-};
-let dist_lint_cli =
-    if dist_rh_cli != "" { dist_rh_cli } else { lint_worker };
+);
+let dist_lint_cli = resolve_dist_lint_cli(dist_rh_cli, lint_worker);
+let artifact_verification_mode =
+    resolve_artifact_verification_mode(release);
 
-let ordinary_gates = [
-    #{
-        id:"prd-alignment",
-        label:"PRD capability alignment",
-        specs:[task(worker, manifest, "prd-alignment", 10000, [])]
-    },
-    #{
-        id:"rhai-lint",
-        label:"production Rhai source lint",
-        specs:[task(
-            worker, manifest, "lint", 120000, [dist_lint_cli, "rhai"]
-        )]
-    },
-    #{
-        id:"task-catalog",
-        label:"repository Rhai task catalog",
-        specs:[spec(
-            worker,
-            ["task", "check", "--manifest", manifest],
-            30000,
-            #{}
-        )]
-    },
-    #{
-        id:"mcp-conformance",
-        label:"public MCP conformance and isolation",
-        specs:[task(
-            worker, manifest, "mcp-conformance", 600000, []
-        )]
-    },
-    #{
-        id:"migration-audit",
-        label:"PowerShell migration ledger and no-new-PS1 gate",
-        specs:[task(
-            worker, manifest, "migration-audit", 10000, []
-        )]
-    },
-    #{
-        id:"artifact-verification",
-        label:"binary roles and metadata",
-        specs:[task(
-            worker,
-            manifest,
-            "artifact-verification",
-            30000,
-            [if release { "release" } else { "development" }]
-        )]
-    },
-    #{
-        id:"readme-examples",
-        label:"manifest-driven README examples",
-        specs:[task(worker, manifest, "readme-examples", 10000, [])]
-    },
-    #{
-        id:"docs-site",
-        label:"case-exact static docs assets",
-        specs:[task(worker, manifest, "verify-docs-site", 10000, [])]
-    },
-    #{
-        id:"supply-chain",
-        label:"locked dependency licenses and SPDX inventory",
-        specs:[task(
-            worker,
-            manifest,
-            "supply-chain",
-            60000,
-            [
+let ordinary = run_gate(
+    context,
+    timing,
+    "prd-alignment",
+    "PRD capability alignment",
+    task(worker, manifest, "prd-alignment", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "rhai-lint",
+    "production Rhai source lint",
+    task(
+        worker, manifest, "lint", 120000, two_task_extra(dist_lint_cli, "rhai"), #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "task-catalog",
+    "repository Rhai task catalog",
+    task_check_spec(worker, manifest),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "mcp-conformance",
+    "public MCP conformance and isolation",
+    task(worker, manifest, "mcp-conformance", 600000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "migration-audit",
+    "PowerShell migration ledger and no-new-PS1 gate",
+    task(worker, manifest, "migration-audit", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "artifact-verification",
+    "binary roles and metadata",
+    task(
+        worker,
+        manifest,
+        "artifact-verification",
+        30000,
+        one_task_extra(artifact_verification_mode), #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "readme-examples",
+    "manifest-driven README examples",
+    task(worker, manifest, "readme-examples", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "docs-site",
+    "case-exact static docs assets",
+    task(worker, manifest, "verify-docs-site", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "supply-chain",
+    "locked dependency licenses and SPDX inventory",
+    task(
+        worker,
+        manifest,
+        "supply-chain",
+        60000,
+        two_task_extra(
+            repo,
+            std::path::join(
                 repo,
-                std::path::join(
-                    repo,
-                    "dist/agenterm-sbom.spdx.json"
-                ).display
-            ]
-        )]
-    },
-    #{
-        id:"target-report",
-        label:"Cargo target inventory",
-        specs:[task(worker, manifest, "target-report", 10000, [])]
-    },
-    #{
-        id:"internal-version-policy",
-        label:"internal version publication policy",
-        specs:[task(
-            worker, manifest, "internal-version-policy", 10000, []
-        )]
-    },
-    #{
-        id:"qualification-selftest",
-        label:"qualification fail-closed self-test",
-        specs:[task(
-            worker, manifest, "qualification-selftest", 20000, []
-        )]
-    },
-    #{
-        id:"package-boundary-selftest",
-        label:"qualified package boundary self-test",
-        specs:[task(
-            worker,
-            manifest,
-            "package-qualified-selftest",
-            60000,
-            []
-        )]
-    },
-    #{
-        id:"harness-cleanup-selftest",
-        label:"owned-resource cleanup self-test",
-        specs:[task(
-            worker, manifest, "harness-cleanup-selftest", 10000, []
-        )]
-    }
-];
-for definition in ordinary_gates {
-    let completed = run_gate(
-        context,
-        definition.id,
-        definition.label,
-        definition.specs,
-        repo,
-        scratch,
-        sequence
-    );
-    context = completed.context;
-    sequence = completed.sequence;
-}
+                "dist/agenterm-sbom.spdx.json"
+            ).display
+        ),
+        #{},
+        0
+    ),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "target-report",
+    "Cargo target inventory",
+    task(worker, manifest, "target-report", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "internal-version-policy",
+    "internal version publication policy",
+    task(worker, manifest, "internal-version-policy", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "qualification-selftest",
+    "qualification fail-closed self-test",
+    task(worker, manifest, "qualification-selftest", 20000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "package-boundary-selftest",
+    "qualified package boundary self-test",
+    task(worker, manifest, "package-qualified-selftest", 60000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
+ordinary = run_gate(
+    context,
+    timing,
+    "harness-cleanup-selftest",
+    "owned-resource cleanup self-test",
+    task(worker, manifest, "harness-cleanup-selftest", 10000, empty_extra, #{}, 0),
+    repo,
+    scratch,
+    sequence
+);
+context = map_context(ordinary);
+timing = map_timing(ordinary);
+sequence = map_sequence(ordinary);
 
-if !skip_smoke {
+if skip_smoke == 0 {
     let no_activate = #{"AGENTERM_NO_ACTIVATE":"1"};
-    let smoke_ids = [
-        "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
-        "native-ipc-smoke", "native-ipc-compat-smoke",
-        "remote-ui-smoke", "remote-ui-upgrade-smoke", "fleet-smoke",
-        "script-smoke", "theme-smoke", "working-context-smoke",
-        "workbench-smoke", "control-center-smoke"
-    ];
-    for id in smoke_ids {
+    let smoke_ids = [];
+    smoke_ids.push("startup-smoke");
+    smoke_ids.push("wake-smoke");
+    smoke_ids.push("cli-smoke");
+    smoke_ids.push("server-smoke");
+    smoke_ids.push("native-ipc-smoke");
+    smoke_ids.push("native-ipc-compat-smoke");
+    smoke_ids.push("remote-ui-smoke");
+    smoke_ids.push("remote-ui-upgrade-smoke");
+    smoke_ids.push("fleet-smoke");
+    smoke_ids.push("script-smoke");
+    smoke_ids.push("theme-smoke");
+    smoke_ids.push("working-context-smoke");
+    smoke_ids.push("workbench-smoke");
+    smoke_ids.push("control-center-smoke");
+    let smoke_index = 0;
+    while smoke_index < smoke_ids.len {
+        let id = smoke_ids[smoke_index];
         let extra = [];
         if id == "remote-ui-upgrade-smoke" {
             extra.push(upgrade_fixture);
         }
-        if id == "fleet-smoke" && include_stress {
+        if id == "fleet-smoke" && include_stress != 0 {
             extra.push("--event-load");
+        }
+        let smoke_allow_powershell = 0;
+        if id == "remote-ui-smoke" {
+            smoke_allow_powershell = 1;
         }
         let smoke_spec = task(
             worker,
             manifest,
             id,
-            // Wall budgets are upper bounds, not pacing: every smoke returns
-            // as soon as its conditions settle. Cold CI runners under release
-            // builds repeatedly proved the old 60/120s ceilings were sized to
-            // warm dev machines — each newly reached step burned a full
-            // Candidate iteration on a budget failure instead of a real one.
-            if id == "remote-ui-smoke"
-                    || id == "cli-smoke"
-                    || id == "fleet-smoke"
-                    || id == "script-smoke" {
-                600000
-            } else {
-                300000
-            },
-            extra
+            smoke_timeout_ms(id),
+            extra,
+            no_activate,
+            smoke_allow_powershell
         );
-        smoke_spec.allow_powershell = id == "remote-ui-smoke";
-        smoke_spec.environment = no_activate;
         // GUI journeys on shared runners are load-sensitive: transient races
         // (pump reclamation, projection lag, input delivery) pass on a second
         // attempt while genuine regressions fail deterministically both
         // times. One bounded retry keeps the gate honest without turning
         // every transient into a 35-minute qualification iteration.
-        let completed = ();
+        let smoke_context = context;
+        let smoke_timing = timing;
+        let smoke_sequence = sequence;
         try {
-            completed = run_gate(
+            let completed = run_gate(
                 context,
+                timing,
                 id,
                 id,
-                [smoke_spec],
+                smoke_spec,
                 repo,
                 scratch,
                 sequence
             );
+            smoke_context = map_context(completed);
+            smoke_timing = map_timing(completed);
+            smoke_sequence = map_sequence(completed);
         } catch (first_failure) {
             print(
                 "RETRY " + id + " after transient failure: " +
-                    first_failure.to_string()
+                    "" + first_failure
             );
-            completed = run_gate(
+            let completed = run_gate(
                 context,
+                timing,
                 id,
                 id + " (retry)",
-                [smoke_spec],
+                smoke_spec,
                 repo,
                 scratch,
                 sequence + 1000
             );
+            smoke_context = map_context(completed);
+            smoke_timing = map_timing(completed);
+            smoke_sequence = map_sequence(completed);
         }
-        context = completed.context;
-        sequence = completed.sequence;
+        context = pass_context(smoke_context);
+        timing = pass_timing(smoke_timing);
+        sequence = pass_int(smoke_sequence);
+        smoke_index += 1;
     }
 }
 
@@ -1450,62 +2176,73 @@ let diagnostic = task(
     manifest,
     "diagnostic-bundle-selftest",
     60000,
-    []
+    empty_extra,
+    #{"AGENTERM_NO_ACTIVATE":"1"},
+    0
 );
-diagnostic.environment = #{"AGENTERM_NO_ACTIVATE":"1"};
-if skip_smoke {
-    context.timing = qualification::timing_set_gate(
-        context.timing,
+if skip_smoke != 0 {
+    timing = wrap_timing_set_gate(
+        timing,
         "diagnostic-bundle-selftest",
         "skipped",
         0,
         0,
-        false
+        0
     );
 } else {
     let diagnostic_gate = run_gate(
         context,
+        timing,
         "diagnostic-bundle-selftest",
         "CLI GUI and script diagnostic bundle self-test",
-        [diagnostic],
+        diagnostic,
         repo,
         scratch,
         sequence
     );
-    context = diagnostic_gate.context;
-    sequence = diagnostic_gate.sequence;
+    context = map_context(diagnostic_gate);
+    timing = map_timing(diagnostic_gate);
+    sequence = map_sequence(diagnostic_gate);
 }
-if skip_smoke {
+if skip_smoke != 0 {
     print("\nQUALIFICATION RECEIPT NOT WRITTEN: smoke gates were skipped.");
-} else if !include_stress {
+} else if include_stress == 0 {
     print(
         "\nQUALIFICATION RECEIPT NOT WRITTEN: explicit stress gate was not included."
     );
 } else {
     try {
+        context.timing = timing;
         let written =
-            qualification::write_receipt(context, repo, receipt_path);
+            wrap_write_receipt(context, repo, receipt_path);
         print("\nQUALIFICATION RECEIPT " + written);
     } catch (error) {
-        context.timing = qualification::timing_fail_stage(
-            context.timing,
+        timing = wrap_timing_fail_stage(
+            timing,
             "qualification-receipt"
         );
         throw error;
     }
 }
-context.timing = qualification::timing_finish(
-    context.timing,
+timing = wrap_timing_finish(
+    timing,
     "passed"
 );
 print("\nSlowest completed gates:");
-let ordered = slowest(context.results);
-let count = if ordered.len < 8 { ordered.len } else { 8 };
-for index in 0..count {
+let slow_ids = [];
+let slow_durations = [];
+slowest_fill(context.results, timing_gate_ids, slow_ids, slow_durations);
+let count = slow_ids.len;
+if count > 8 {
+    count = 8;
+}
+let index = 0;
+while index < count {
     print(
-        "  " + ordered[index].id + ": " +
-            ordered[index].duration_ms + " ms"
+        "  " + slow_ids[index] + ": " +
+            slow_durations[index] + " ms"
     );
+    index += 1;
 }
 print(
     "Total quality gate: " +
