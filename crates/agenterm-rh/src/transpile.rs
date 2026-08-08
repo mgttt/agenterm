@@ -1190,24 +1190,87 @@ fn collect_param_kind_upgrades(
     local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
 ) -> Vec<(usize, ValueKind)> {
     let mut upgrades = Vec::new();
+    let aliases = param_aliases_in_def(def);
     for stmt in def.body.iter() {
-        collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, &mut upgrades);
+        collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, &aliases, &mut upgrades);
     }
     upgrades
+}
+
+fn param_aliases_in_def(def: &ScriptFuncDef) -> BTreeMap<String, String> {
+    let param_names: BTreeSet<&str> = def.params.iter().map(|param| param.as_str()).collect();
+    let mut aliases = BTreeMap::new();
+    for stmt in def.body.iter() {
+        let Stmt::Var(boxed, ..) = stmt else {
+            continue;
+        };
+        let (ident, expr, _) = boxed.as_ref();
+        let Expr::Variable(source, ..) = expr else {
+            continue;
+        };
+        if param_names.contains(source.1.as_str()) {
+            aliases.insert(ident.name.to_string(), source.1.to_string());
+        } else if let Some(param) = aliases.get(source.1.as_str()) {
+            aliases.insert(ident.name.to_string(), param.clone());
+        }
+    }
+    aliases
+}
+
+fn resolve_param_index(
+    name: &str,
+    def: &ScriptFuncDef,
+    aliases: &BTreeMap<String, String>,
+) -> Option<usize> {
+    if let Some(index) = def
+        .params
+        .iter()
+        .position(|param| param.as_str() == name)
+    {
+        return Some(index);
+    }
+    aliases
+        .get(name)
+        .and_then(|param| def.params.iter().position(|candidate| candidate == param))
+}
+
+fn command_surface_param_upgrade(
+    lhs: &Expr,
+    rhs: &Expr,
+    def: &ScriptFuncDef,
+    aliases: &BTreeMap<String, String>,
+) -> Option<(usize, ValueKind)> {
+    let Expr::Variable(ident, ..) = lhs else {
+        return None;
+    };
+    let param_index = resolve_param_index(ident.1.as_str(), def, aliases)?;
+    if let Expr::MethodCall(call, ..) = rhs {
+        return match call.name.as_str() {
+            "stdin_text" | "stdin_bytes" | "arg" | "args" | "env" | "env_remove" | "timeout"
+            | "capture_limit" | "current_dir" | "stdout_file" | "stderr_file" | "output"
+            | "start" => Some((param_index, ValueKind::Command)),
+            _ => None,
+        };
+    }
+    match dot_property_name(rhs)? {
+        "stdout" => Some((param_index, ValueKind::Child)),
+        _ => None,
+    }
 }
 
 fn collect_param_kind_upgrades_in_stmt(
     stmt: &Stmt,
     def: &ScriptFuncDef,
     local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
+    aliases: &BTreeMap<String, String>,
     upgrades: &mut Vec<(usize, ValueKind)>,
 ) {
     match stmt {
         Stmt::Expr(expr) | Stmt::Return(Some(expr), ..) => {
-            collect_param_kind_upgrades_in_expr(expr.as_ref(), def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(expr.as_ref(), def, local_fn_sigs, aliases, upgrades);
         }
         Stmt::Var(boxed, ..) => {
-            collect_param_kind_upgrades_in_expr(&boxed.1, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&boxed.1, def, local_fn_sigs, aliases, upgrades);
         }
         Stmt::Assignment(boxed, ..) => {
             if let Expr::Index(index_box, ..) = &boxed.1.lhs {
@@ -1230,31 +1293,31 @@ fn collect_param_kind_upgrades_in_stmt(
                     }
                 }
             }
-            collect_param_kind_upgrades_in_expr(&boxed.1.lhs, def, local_fn_sigs, upgrades);
-            collect_param_kind_upgrades_in_expr(&boxed.1.rhs, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&boxed.1.lhs, def, local_fn_sigs, aliases, upgrades);
+            collect_param_kind_upgrades_in_expr(&boxed.1.rhs, def, local_fn_sigs, aliases, upgrades);
         }
         Stmt::If(boxed, ..) => {
             let flow = boxed.as_ref();
-            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, aliases, upgrades);
             for stmt in flow.body.iter() {
-                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, aliases, upgrades);
             }
             for stmt in flow.branch.iter() {
-                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, aliases, upgrades);
             }
         }
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
-            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, aliases, upgrades);
             for stmt in flow.body.iter() {
-                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, aliases, upgrades);
             }
         }
         Stmt::While(boxed, ..) => {
             let flow = boxed.as_ref();
-            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, upgrades);
+            collect_param_kind_upgrades_in_expr(&flow.expr, def, local_fn_sigs, aliases, upgrades);
             for stmt in flow.body.iter() {
-                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_stmt(stmt, def, local_fn_sigs, aliases, upgrades);
             }
         }
         Stmt::FnCall(call, ..) => {
@@ -1268,6 +1331,7 @@ fn collect_param_kind_upgrades_in_expr(
     expr: &Expr,
     def: &ScriptFuncDef,
     local_fn_sigs: &BTreeMap<String, Vec<ValueKind>>,
+    aliases: &BTreeMap<String, String>,
     upgrades: &mut Vec<(usize, ValueKind)>,
 ) {
     match expr {
@@ -1275,10 +1339,7 @@ fn collect_param_kind_upgrades_in_expr(
             if call.name == "args"
                 && call.args.len() == 1
                 && let Expr::Variable(ident, ..) = &call.args[0]
-                && let Some(param_index) = def
-                    .params
-                    .iter()
-                    .position(|param| param.as_str() == ident.1.as_str())
+                && let Some(param_index) = resolve_param_index(ident.1.as_str(), def, aliases)
             {
                 upgrades.push((param_index, ValueKind::StringList));
             }
@@ -1287,26 +1348,32 @@ fn collect_param_kind_upgrades_in_expr(
             }
             collect_param_kind_upgrades_in_call(call, def, local_fn_sigs, upgrades);
             for arg in &call.args {
-                collect_param_kind_upgrades_in_expr(arg, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_expr(arg, def, local_fn_sigs, aliases, upgrades);
             }
         }
         Expr::Dot(boxed, ..) | Expr::Index(boxed, ..) => {
-            collect_param_kind_upgrades_in_expr(&boxed.lhs, def, local_fn_sigs, upgrades);
-            collect_param_kind_upgrades_in_expr(&boxed.rhs, def, local_fn_sigs, upgrades);
+            if let Expr::Dot(boxed, ..) = expr
+                && let Some(upgrade) =
+                    command_surface_param_upgrade(&boxed.lhs, &boxed.rhs, def, aliases)
+            {
+                upgrades.push(upgrade);
+            }
+            collect_param_kind_upgrades_in_expr(&boxed.lhs, def, local_fn_sigs, aliases, upgrades);
+            collect_param_kind_upgrades_in_expr(&boxed.rhs, def, local_fn_sigs, aliases, upgrades);
         }
         Expr::Array(items, ..) => {
             for item in items {
-                collect_param_kind_upgrades_in_expr(item, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_expr(item, def, local_fn_sigs, aliases, upgrades);
             }
         }
         Expr::Map(map, ..) => {
             for (_, value) in &map.0 {
-                collect_param_kind_upgrades_in_expr(value, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_expr(value, def, local_fn_sigs, aliases, upgrades);
             }
         }
         Expr::And(args, ..) | Expr::Or(args, ..) => {
             for arg in args.iter() {
-                collect_param_kind_upgrades_in_expr(arg, def, local_fn_sigs, upgrades);
+                collect_param_kind_upgrades_in_expr(arg, def, local_fn_sigs, aliases, upgrades);
             }
         }
         _ => {}
@@ -1519,6 +1586,7 @@ fn is_child_member_name(name: &str) -> bool {
         "id"
             | "state"
             | "platform_facts"
+            | "stdout"
             | "stderr"
             | "kill"
             | "wait_with_output"
@@ -1536,6 +1604,7 @@ fn is_definite_child_member_name(name: &str) -> bool {
     matches!(
         name,
         "platform_facts"
+            | "stdout"
             | "stderr"
             | "kill"
             | "wait_with_output"
@@ -1560,7 +1629,19 @@ fn is_bytes_member_name(name: &str) -> bool {
 fn is_command_member_name(name: &str) -> bool {
     matches!(
         name,
-        "args" | "env" | "timeout" | "capture_limit" | "current_dir" | "output" | "start"
+        "arg"
+            | "args"
+            | "env"
+            | "env_remove"
+            | "stdin_text"
+            | "stdin_bytes"
+            | "timeout"
+            | "capture_limit"
+            | "current_dir"
+            | "stdout_file"
+            | "stderr_file"
+            | "output"
+            | "start"
     )
 }
 
@@ -3257,6 +3338,11 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         {
             ValueKind::Stream
         }
+        _ if child_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "stdout") =>
+        {
+            ValueKind::Stream
+        }
         _ if child_property_binding(expr, ctx).is_some_and(|(_, property)| property == "id") => {
             ValueKind::Int
         }
@@ -4683,7 +4769,7 @@ fn child_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str,
         return None;
     }
     let property = dot_property_name(&boxed.rhs)?;
-    matches!(property, "id" | "state" | "platform_facts" | "stderr")
+    matches!(property, "id" | "state" | "platform_facts" | "stdout" | "stderr")
         .then_some((ident.1.as_str(), property))
 }
 
@@ -4731,6 +4817,40 @@ fn emit_command_string_args(
         out.push(')');
     }
     out.push(']');
+    Ok(true)
+}
+
+fn emit_command_args_from(
+    out: &mut String,
+    binding: &str,
+    arg: &Expr,
+    ctx: &mut EmitCtx,
+    indent: &str,
+) -> Result<bool, RhError> {
+    let Some(arguments) = process_arguments_arg(arg, ctx) else {
+        return Ok(false);
+    };
+    out.push_str(indent);
+    out.push_str("rh_command_args(&mut ");
+    out.push_str(binding);
+    out.push_str(", ");
+    match arguments {
+        ProcessArguments::Literal(items) => {
+            if !emit_command_string_args(out, items, ctx)? {
+                return Ok(false);
+            }
+        }
+        ProcessArguments::StringList(arg_binding) => {
+            out.push('&');
+            out.push_str(arg_binding);
+        }
+        ProcessArguments::JsonArray(arg_binding) => {
+            out.push_str("&rh_json_string_argv(&");
+            out.push_str(arg_binding);
+            out.push(')');
+        }
+    }
+    out.push_str(");\n");
     Ok(true)
 }
 
@@ -4819,25 +4939,20 @@ fn emit_command_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             Ok(true)
         }
         "args" if call.args.len() == 1 => {
-            if let Expr::Variable(ident, ..) = &call.args[0]
-                && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::StringList)
-            {
-                out.push_str("{\n        rh_command_args(&mut ");
-                out.push_str(binding);
-                out.push_str(", &");
-                out.push_str(ident.1.as_str());
-                out.push_str(");\n        0\n    }");
+            let mut block = String::new();
+            if emit_command_args_from(&mut block, binding, &call.args[0], ctx, "        ")? {
+                out.push_str("{\n");
+                out.push_str(&block);
+                out.push_str("        0\n    }");
                 return Ok(true);
             }
-            let Expr::Array(arguments, ..) = &call.args[0] else {
-                return Ok(false);
-            };
-            out.push_str("{\n        rh_command_args(&mut ");
+            Ok(false)
+        }
+        "stdin_text" if call.args.len() == 1 => {
+            out.push_str("{\n        rh_command_stdin_text(&mut ");
             out.push_str(binding);
-            out.push_str(", ");
-            if !emit_command_string_args(out, arguments, ctx)? {
-                return Ok(false);
-            }
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
             out.push_str(");\n        0\n    }");
             Ok(true)
         }
@@ -5199,26 +5314,12 @@ fn emit_command_mut_stmt(
         return Ok(false);
     };
     match call.name.as_str() {
-        "args" if call.args.len() == 1 => {
-            if let Expr::Variable(ident, ..) = &call.args[0]
-                && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::StringList)
-            {
-                out.push_str("    rh_command_args(&mut ");
-                out.push_str(binding);
-                out.push_str(", &");
-                out.push_str(ident.1.as_str());
-                out.push_str(");\n");
-                return Ok(true);
-            }
-            let Expr::Array(arguments, ..) = &call.args[0] else {
-                return Ok(false);
-            };
-            out.push_str("    rh_command_args(&mut ");
+        "args" if call.args.len() == 1 => emit_command_args_from(out, binding, &call.args[0], ctx, "    "),
+        "stdin_text" if call.args.len() == 1 => {
+            out.push_str("    rh_command_stdin_text(&mut ");
             out.push_str(binding);
-            out.push_str(", ");
-            if !emit_command_string_args(out, arguments, ctx)? {
-                return Ok(false);
-            }
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
             out.push_str(");\n");
             Ok(true)
         }
@@ -5431,6 +5532,10 @@ fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
         out.push(')');
     } else if property == "stderr" {
         out.push_str("rh_child_stderr(&mut ");
+        out.push_str(binding);
+        out.push(')');
+    } else if property == "stdout" {
+        out.push_str("rh_child_stdout(&mut ");
         out.push_str(binding);
         out.push(')');
     } else if property == "id" {

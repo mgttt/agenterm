@@ -1,0 +1,11 @@
+fn configured_command(context, program, arguments) {
+    let command = std::process::command("" + program);
+    command.args(arguments);
+    command
+}
+
+fn entry() {
+    let context = #{ address: "ipc://probe" };
+    configured_command(context, "agenterm-cli", []);
+    0
+}
