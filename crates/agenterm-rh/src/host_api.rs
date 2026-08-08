@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 65;
+pub const RH_CODEGEN_REVISION: u32 = 66;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -852,6 +852,8 @@ pub fn emit_host_runtime(out: &mut String) {
              timeout_ms: INT,\n\
              capture_limit: usize,\n\
              current_dir: Option<String>,\n\
+             stdout_file: Option<String>,\n\
+             stderr_file: Option<String>,\n\
          }\n\n\
          #[derive(Clone)]\n\
          struct RhOutput {\n\
@@ -916,6 +918,8 @@ pub fn emit_host_runtime(out: &mut String) {
                  timeout_ms: 2_000,\n\
                  capture_limit: 64 * 1024,\n\
                  current_dir: None,\n\
+                 stdout_file: None,\n\
+                 stderr_file: None,\n\
              }\n\
          }\n\n\
          fn rh_command_new_owned(program: String) -> RhCommand {\n\
@@ -945,6 +949,12 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_current_dir(command: &mut RhCommand, path: &str) {\n\
              command.current_dir = Some(path.to_owned());\n\
          }\n\n\
+         fn rh_command_stdout_file(command: &mut RhCommand, path: &str) {\n\
+             command.stdout_file = Some(path.to_owned());\n\
+         }\n\n\
+         fn rh_command_stderr_file(command: &mut RhCommand, path: &str) {\n\
+             command.stderr_file = Some(path.to_owned());\n\
+         }\n\n\
          fn rh_command_build(command: &RhCommand) -> std::process::Command {\n\
              let mut process = std::process::Command::new(&command.program);\n\
              process.args(&command.args);\n\
@@ -958,8 +968,28 @@ pub fn emit_host_runtime(out: &mut String) {
                  process.current_dir(dir);\n\
              }\n\
              process.stdin(std::process::Stdio::null());\n\
-             process.stdout(std::process::Stdio::piped());\n\
-             process.stderr(std::process::Stdio::piped());\n\
+             if let Some(path) = &command.stdout_file {\n\
+                 match std::fs::File::create(path) {\n\
+                     Ok(file) => { process.stdout(std::process::Stdio::from(file)); }\n\
+                     Err(error) => {\n\
+                         let _ = rh_fail(&format!(\"process_stdout_file: {error}\"));\n\
+                         process.stdout(std::process::Stdio::null());\n\
+                     }\n\
+                 }\n\
+             } else {\n\
+                 process.stdout(std::process::Stdio::piped());\n\
+             }\n\
+             if let Some(path) = &command.stderr_file {\n\
+                 match std::fs::File::create(path) {\n\
+                     Ok(file) => { process.stderr(std::process::Stdio::from(file)); }\n\
+                     Err(error) => {\n\
+                         let _ = rh_fail(&format!(\"process_stderr_file: {error}\"));\n\
+                         process.stderr(std::process::Stdio::null());\n\
+                     }\n\
+                 }\n\
+             } else {\n\
+                 process.stderr(std::process::Stdio::piped());\n\
+             }\n\
              process\n\
          }\n\n\
          fn rh_read_pipe_limited(mut reader: impl std::io::Read, limit: usize) -> (String, bool) {\n\

@@ -4188,6 +4188,22 @@ fn emit_command_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             out.push_str(");\n        0\n    }");
             Ok(true)
         }
+        "stdout_file" if call.args.len() == 1 => {
+            out.push_str("{\n        rh_command_stdout_file(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        "stderr_file" if call.args.len() == 1 => {
+            out.push_str("{\n        rh_command_stderr_file(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }
@@ -12005,6 +12021,35 @@ fn entry() {
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn command_output_file_redirection_stays_native() {
+        let source = r#"
+fn entry() {
+    let command = std::process::command("tool");
+    command.stdout_file("target/out.log");
+    command.stderr_file("target/err.log");
+    let output = command.output();
+    output.exit_code
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output.rust.contains("rh_command_stdout_file(&mut command"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_command_stderr_file(&mut command"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+        let dir = tempfile::tempdir().expect("pack dir");
+        let pack = crate::build_pack_dir(source, dir.path()).expect("build pack");
+        assert!(pack.native_path.exists());
     }
 
     #[test]
