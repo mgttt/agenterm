@@ -60,6 +60,7 @@ pub mod manifest;
 pub mod module_resolver;
 pub mod module_sniff;
 pub mod pack;
+pub mod pack_module;
 pub mod qualify;
 
 pub use check::{check, check_with_project_validation};
@@ -77,6 +78,10 @@ pub use manifest::QjsPackManifest;
 pub use module_resolver::ProjectModuleResolver;
 pub use module_sniff::wants_module_mode;
 pub use pack::{QjsPack, build_pack_dir, is_pack_dir};
+pub use pack_module::{
+    QjsModulePack, QjsModulePackManifest, QjsModuleQualificationReceipt, build_module_pack_dir,
+    discover_import_graph, qualify_module_pack_dir,
+};
 pub use qualify::{QjsQualificationReceipt, qualify_pack_dir};
 
 pub const QJS_VERSION: &str = env!("CARGO_PKG_VERSION");
