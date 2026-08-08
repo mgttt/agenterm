@@ -1,0 +1,8 @@
+// Probe native rh::json::stringify compact serialization.
+fn entry() {
+    let text = rh::json::stringify(#{ ok: 1, kind: "probe" });
+    if text.contains("ok") && !text.contains("\n") {
+        return text.len;
+    }
+    0
+}

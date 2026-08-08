@@ -1,0 +1,5 @@
+// Probe native std::env::current_dir().display for cwd evidence.
+fn entry() {
+    let cwd = std::env::current_dir().display;
+    cwd.len
+}

@@ -1,0 +1,5 @@
+// Probe native std::time::Duration::from_millis via rh::task::sleep.
+fn entry() {
+    rh::task::sleep(std::time::Duration::from_millis(1));
+    1
+}

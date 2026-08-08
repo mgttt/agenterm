@@ -9,7 +9,7 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 59] = [
+const FIXTURE_NAMES: [&str; 65] = [
     "append-sync-probe.rh",
     "atomic-write-probe.rh",
     "break-continue.rh",
@@ -22,8 +22,11 @@ const FIXTURE_NAMES: [&str; 59] = [
     "command-stdin-text-probe.rh",
     "crypto-sha256-file-probe.rh",
     "direntry-metadata-probe.rh",
+    "duration-task-sleep-probe.rh",
     "entry.rh",
+    "env-current-dir-probe.rh",
     "env-has-get-probe.rh",
+    "env-parse-int-probe.rh",
     "fail-dynamic.rh",
     "fleet.rh",
     "for-dyn-range.rh",
@@ -43,11 +46,13 @@ const FIXTURE_NAMES: [&str; 59] = [
     "json-param-index-assign-probe.rh",
     "json-parse-schema.rh",
     "json-path-index-probe.rh",
+    "json-stringify-probe.rh",
     "json-stringify-pretty-probe.rh",
     "json-type-string.rh",
     "map-set-membership.rh",
     "output-fn-arg-probe.rh",
     "path-file-name-probe.rh",
+    "path-join-probe.rh",
     "path-metadata-probe.rh",
     "path-metadata-sugar.rh",
     "path-parent-probe.rh",
@@ -63,6 +68,7 @@ const FIXTURE_NAMES: [&str; 59] = [
     "string-fn-bundle.rh",
     "string-index-of-probe.rh",
     "string-list-index-probe.rh",
+    "string-list-set-probe.rh",
     "string-validate.rh",
     "system-time-rfc3339-probe.rh",
     "try-catch.rh",
