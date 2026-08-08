@@ -31,8 +31,8 @@ fn tail(value, maximum) {
     text.sub_string(text.len - maximum, maximum)
 }
 
-fn checked_output(program, arguments, cwd, timeout_ms, code) {
-    let command = std::process::command(program);
+fn git_output(arguments, cwd, timeout_ms, code) {
+    let command = std::process::command("git");
     command.args(arguments);
     command.current_dir(cwd);
     command.env("GCM_INTERACTIVE", "Never");
@@ -40,17 +40,10 @@ fn checked_output(program, arguments, cwd, timeout_ms, code) {
     command.timeout(std::time::Duration::from_millis(timeout_ms));
     command.capture_limit(262144);
     let output = command.output();
-    assert_ok(
-        output.success,
-        code + ":exit=" + output.exit_code
-    );
+    let exit_code = "" + output.exit_code;
+    let diagnostic = code + ":exit=" + exit_code;
+    assert_ok(output.success, diagnostic);
     trimmed(output.stdout_text())
-}
-
-fn git(repo, arguments, code) {
-    let argv = ["-C", repo];
-    argv.append(arguments);
-    checked_output("git", argv, repo, 120000, code)
 }
 
 fn package_version(repo) {
@@ -58,8 +51,7 @@ fn package_version(repo) {
         std::fs::read_to_string(std::path::join(repo, "Cargo.toml").display);
     let in_package = 0;
     for source_line in cargo.split("\n") {
-        let line = source_line;
-        line.trim();
+        let line = trimmed(source_line);
         if line.starts_with("[") {
             in_package = 0;
             if line == "[package]" {
@@ -75,13 +67,17 @@ fn package_version(repo) {
 }
 
 fn process_key(process) {
+    let executable_name = "" + process.executable_name;
+    let executable = executable_name.to_lower();
     "" + process.id + ":" +
         "" + process.parent_id + ":" +
-        process.executable_name.to_lower()
+        executable
 }
 
 fn powershell_token(process) {
-    process.executable_name.to_lower() + ":" + ("" + process.id)
+    let executable_name = "" + process.executable_name;
+    let executable = executable_name.to_lower();
+    executable + ":" + ("" + process.id)
 }
 
 fn terminal_compatibility_executable() {
@@ -93,16 +89,19 @@ fn alternate_powershell_executable() {
 }
 
 fn is_powershell(process) {
-    let name = process.executable_name.to_lower();
+    let executable_name = "" + process.executable_name;
+    let name = executable_name.to_lower();
     name == terminal_compatibility_executable()
         || name == alternate_powershell_executable()
 }
 
 fn observe_descendants(root_id, owned_ids, identities) {
     let snapshot = std::process::list();
-    let included = rhai::json::parse("{}");
-    included["" + root_id] = true;
-    for id in owned_ids.keys() {
+    let included = #{};
+    let owned_map = owned_ids;
+    let root_key = "" + root_id;
+    included[root_key] = true;
+    for id in owned_map.keys() {
         included[id] = true;
     }
     for depth in 0..64 {
@@ -121,6 +120,8 @@ fn observe_descendants(root_id, owned_ids, identities) {
     }
 
     let current = [];
+    let new_owned = [];
+    let new_identities = [];
     for process in snapshot {
         let id = "" + process.id;
         if !included.contains(id) {
@@ -133,22 +134,29 @@ fn observe_descendants(root_id, owned_ids, identities) {
                 "fresh_clone_process_id_reused:" + id
             );
         } else {
-            identities[id] = identity;
+            new_identities.push(#{ id: id, identity: identity });
         }
-        owned_ids[id] = 1;
+        if !owned_map.contains(id) {
+            new_owned.push(id);
+        }
         current.push(#{
             id: process.id,
             parent_id: process.parent_id,
             executable_name: process.executable_name
         });
     }
-    current
+    #{
+        current: current,
+        new_owned: new_owned,
+        new_identities: new_identities
+    }
 }
 
 fn unique_names(processes) {
     let names = [];
     for process in processes {
-        let name = process.executable_name.to_lower();
+        let executable_name = "" + process.executable_name;
+        let name = executable_name.to_lower();
         if !names.contains(name) {
             names.push(name);
         }
@@ -157,21 +165,25 @@ fn unique_names(processes) {
     names
 }
 
-fn ordered_processes(processes) {
+fn sort_processes_by_id(processes) {
     let ordered = [];
-    for key in processes.keys() {
-        let process = processes[key];
+    let item_index = 0;
+    while item_index < processes.len {
+        let process = processes[item_index];
         let inserted = 0;
-        for index in 0..ordered.len {
-            if process.id < ordered[index].id {
-                ordered.insert(index, process);
+        let order_index = 0;
+        while order_index < ordered.len {
+            if process.id < ordered[order_index].id {
+                ordered.insert(order_index, process);
                 inserted = 1;
                 break;
             }
+            order_index += 1;
         }
         if inserted == 0 {
             ordered.push(process);
         }
+        item_index += 1;
     }
     ordered
 }
@@ -244,6 +256,11 @@ fn remove_owned_clone(qualification_root, clone) {
     assert_ok(!std::fs::exists(target), "fresh_clone_cleanup_failed:" + target);
 }
 
+fn child_is_running(child) {
+    let state = "" + child.state;
+    state == "running"
+}
+
 fn start_child(command) {
     command.start()
 }
@@ -251,7 +268,9 @@ fn start_child(command) {
 fn terminate_observed_processes(identities) {
     for attempt in 0..4 {
         let terminated = 0;
-        for process in std::process::list() {
+        let processes = std::process::list();
+        for process_index in 0..processes.len {
+            let process = processes[process_index];
             let id = "" + process.id;
             if process.id != std::process::id()
                     && identities.contains(id)
@@ -273,7 +292,9 @@ fn terminate_observed_processes(identities) {
 
 fn live_observed_processes(identities) {
     let live = [];
-    for process in std::process::list() {
+    let processes = std::process::list();
+    for process_index in 0..processes.len {
+        let process = processes[process_index];
         let id = "" + process.id;
         if process.id != std::process::id()
                 && identities.contains(id)
@@ -288,22 +309,7 @@ fn live_observed_processes(identities) {
     live
 }
 
-fn entry() {
-// Contract: args.len == 2 && args[0] == "." && args[1] == "--self-test"
-let self_test = 0;
-if args.len == 1 {
-    if args[0] == "--self-test" {
-        self_test = 1;
-    }
-}
-if args.len == 2 {
-    if args[0] == "." {
-        if args[1] == "--self-test" {
-            self_test = 1;
-        }
-    }
-}
-if self_test {
+fn run_self_test() {
     let accepted = exact_terminal_payload(
         [terminal_compatibility_executable() + ":101"],
         [terminal_compatibility_executable() + ":101"]
@@ -375,6 +381,47 @@ if self_test {
         "fresh_clone_selftest_expected_rejection:fresh_clone_package_archive_name"
     );
     print("PASS: fresh-clone process policy fails closed");
+}
+
+fn append_final_scan(root_id, owned_ids, identities, unique, unique_list, evidence) {
+    let scan_result =
+        observe_descendants(root_id, owned_ids, identities);
+    for item in scan_result.new_identities {
+        let identity_id = "" + item.id;
+        identities[identity_id] = item.identity;
+    }
+    for id in scan_result.new_owned {
+        let owned_key = "" + id;
+        owned_ids[owned_key] = 1;
+    }
+    evidence.process_observation.scan_count += 1;
+    for process in scan_result.current {
+        let identity = process_key(process);
+        if !unique.contains(identity) {
+            unique[identity] = process;
+            unique_list.push(process);
+        }
+    }
+    0
+}
+
+fn entry() {
+// Contract: args.len == 2 && args[0] == "." && args[1] == "--self-test"
+let self_test = 0;
+if args.len == 1 {
+    if args[0] == "--self-test" {
+        self_test = 1;
+    }
+}
+if args.len == 2 {
+    if args[0] == "." {
+        if args[1] == "--self-test" {
+            self_test = 1;
+        }
+    }
+}
+if self_test != 0 {
+    run_self_test();
     return;
 }
 
@@ -387,30 +434,22 @@ let child_deadline_ms = 3300000;
 
 let source_input = std::env::current_dir().display;
 if args.len == 1 {
-    source_input = args[0];
+    source_input = "" + args[0];
 }
 let source = std::path::absolute(source_input).display;
 assert_ok(
-    git(source, ["branch", "--show-current"], "fresh_clone_source_branch")
+    git_output(["-C", source, "branch", "--show-current"], source, 120000, "fresh_clone_source_branch")
         == "main",
     "fresh_clone_source_not_main"
 );
 assert_ok(
-    git(
-        source,
-        ["status", "--porcelain", "--untracked-files=all"],
-        "fresh_clone_source_status"
-    ) == "",
+    git_output(["-C", source, "status", "--porcelain", "--untracked-files=all"], source, 120000, "fresh_clone_source_status") == "",
     "fresh_clone_source_dirty"
 );
-let head = git(source, ["rev-parse", "HEAD"], "fresh_clone_source_head");
+let head = git_output(["-C", source, "rev-parse", "HEAD"], source, 120000, "fresh_clone_source_head");
 let origin =
-    git(source, ["remote", "get-url", "origin"], "fresh_clone_origin");
-let push_origin = git(
-    source,
-    ["remote", "get-url", "--push", "origin"],
-    "fresh_clone_push_origin"
-);
+    git_output(["-C", source, "remote", "get-url", "origin"], source, 120000, "fresh_clone_origin");
+let push_origin = git_output(["-C", source, "remote", "get-url", "--push", "origin"], source, 120000, "fresh_clone_push_origin");
 let version = package_version(source);
 let tag = "v" + version;
 
@@ -506,13 +545,13 @@ let evidence = #{
 
 let failure = "";
 let root_id = 0;
-let owned_ids = rhai::json::parse("{}");
-let identities = rhai::json::parse("{}");
-let unique = rhai::json::parse("{}");
+let owned_ids = #{};
+let identities = #{};
+let unique = #{};
+let unique_list = [];
 try {
-    checked_output(
-        "git",
-        [
+    git_output([
+            "-C", source,
             "clone", "--no-hardlinks", "--no-checkout", "--",
             source, clone
         ],
@@ -520,44 +559,20 @@ try {
         300000,
         "fresh_clone_create"
     );
-    git(
-        clone,
-        ["checkout", "-B", "main", head],
-        "fresh_clone_checkout"
-    );
-    git(
-        clone,
-        ["remote", "set-url", "origin", origin],
-        "fresh_clone_restore_origin"
-    );
-    git(
-        clone,
-        ["remote", "set-url", "--push", "origin", push_origin],
-        "fresh_clone_restore_push_origin"
-    );
+    git_output(["-C", clone, "checkout", "-B", "main", head], clone, 120000, "fresh_clone_checkout");
+    git_output(["-C", clone, "remote", "set-url", "origin", origin], clone, 120000, "fresh_clone_restore_origin");
+    git_output(["-C", clone, "remote", "set-url", "--push", "origin", push_origin], clone, 120000, "fresh_clone_restore_push_origin");
     assert_ok(
-        git(clone, ["remote", "get-url", "origin"], "fresh_clone_origin_check")
+        git_output(["-C", clone, "remote", "get-url", "origin"], clone, 120000, "fresh_clone_origin_check")
             == origin
-            && git(
-                clone,
-                ["remote", "get-url", "--push", "origin"],
-                "fresh_clone_push_origin_check"
-            ) == push_origin,
+            && git_output(["-C", clone, "remote", "get-url", "--push", "origin"], clone, 120000, "fresh_clone_push_origin_check") == push_origin,
         "fresh_clone_origin_not_restored"
     );
     evidence.origin_restored = 1;
     assert_ok(
-        git(clone, ["rev-parse", "HEAD"], "fresh_clone_head") == head
-            && git(
-                clone,
-                ["branch", "--show-current"],
-                "fresh_clone_branch"
-            ) == "main"
-            && git(
-                clone,
-                ["status", "--porcelain", "--untracked-files=all"],
-                "fresh_clone_status"
-            ) == "",
+        git_output(["-C", clone, "rev-parse", "HEAD"], clone, 120000, "fresh_clone_head") == head
+            && git_output(["-C", clone, "branch", "--show-current"], clone, 120000, "fresh_clone_branch") == "main"
+            && git_output(["-C", clone, "status", "--porcelain", "--untracked-files=all"], clone, 120000, "fresh_clone_status") == "",
         "fresh_clone_not_exact_clean_main"
     );
 
@@ -577,23 +592,12 @@ try {
     evidence.delivery_sequence.push("fresh_clone_artifact_free");
 
     let local_tags_before =
-        git(clone, ["tag", "--list"], "fresh_clone_local_tags_before");
-    let local_candidate_before = git(
-            clone,
-            ["tag", "--list", tag],
-            "fresh_clone_local_candidate_before"
-        );
+        git_output(["-C", clone, "tag", "--list"], clone, 120000, "fresh_clone_local_tags_before");
+    let local_candidate_before = git_output(["-C", clone, "tag", "--list", tag], clone, 120000, "fresh_clone_local_candidate_before");
     if local_candidate_before == "" {
         evidence.mutation_proof.local_candidate_tag_absent_before = 1;
     }
-    let remote_before = git(
-        clone,
-        [
-            "ls-remote", "--refs", "origin",
-            "refs/heads/main", "refs/tags/" + tag
-        ],
-        "fresh_clone_remote_before"
-    );
+    let remote_before = git_output(["-C", clone, "ls-remote", "--refs", "origin", "refs/heads/main", "refs/tags/" + tag], clone, 120000, "fresh_clone_remote_before");
     if remote_before.contains("refs/tags/" + tag) == 0 {
         evidence.mutation_proof.candidate_tag_absent_before = 1;
     }
@@ -617,7 +621,7 @@ try {
     let target_observed = 0;
     let worker_observed = 0;
     let keep_waiting = 0;
-    if child.state == "running" {
+    if child_is_running(child) {
         let deadline_now = std::time::SystemTime::now().unix_millis;
         if deadline_now - started < child_deadline_ms {
             keep_waiting = 1;
@@ -625,14 +629,23 @@ try {
     }
     while keep_waiting != 0 {
         let now = std::time::SystemTime::now().unix_millis;
-        let current =
+        let scan =
             observe_descendants(root_id, owned_ids, identities);
-        evidence.process_observation.scan_count =
-            evidence.process_observation.scan_count + 1;
+        for item in scan.new_identities {
+            let identity_id = "" + item.id;
+            identities[identity_id] = item.identity;
+        }
+        for id in scan.new_owned {
+            let owned_key = "" + id;
+            owned_ids[owned_key] = 1;
+        }
+        let current = scan.current;
+        evidence.process_observation.scan_count += 1;
         for process in current {
             let identity = process_key(process);
             if !unique.contains(identity) {
                 unique[identity] = process;
+                unique_list.push(process);
             }
             if is_powershell(process) {
                 let token = powershell_token(process);
@@ -643,7 +656,8 @@ try {
         }
         if target_observed == 0
                 && std::fs::exists(clone_target) {
-            evidence.stage0.target_observed_at_ms = now - started;
+            let stage0_target_elapsed = now - started;
+            evidence.stage0.target_observed_at_ms = stage0_target_elapsed;
             target_observed = 1;
         }
         let bootstrap_worker =
@@ -653,7 +667,8 @@ try {
             ).display;
         if worker_observed == 0
                 && std::fs::exists(bootstrap_worker) {
-            evidence.stage0.worker_observed_at_ms = now - started;
+            let stage0_worker_elapsed = now - started;
+            evidence.stage0.worker_observed_at_ms = stage0_worker_elapsed;
             worker_observed = 1;
         }
         let names = unique_names(current);
@@ -676,14 +691,14 @@ try {
         }
         rhai::task::sleep(std::time::Duration::from_millis(500));
         keep_waiting = 0;
-        if child.state == "running" {
+        if child_is_running(child) {
             let deadline_now = std::time::SystemTime::now().unix_millis;
             if deadline_now - started < child_deadline_ms {
                 keep_waiting = 1;
             }
         }
     }
-    if child.state == "running" {
+    if child_is_running(child) {
         child.kill();
         throw "fresh_clone_release_deadline";
     }
@@ -701,7 +716,7 @@ try {
 
     assert_ok(
         evidence.process_observation.scan_count > 0
-            && unique.keys().len > 2
+            && unique_list.len > 2
             && target_observed != 0
             && worker_observed != 0
             && evidence.stage0.cargo_observed
@@ -724,12 +739,14 @@ try {
     );
     let receipt = rhai::json::parse_file(receipt_path);
     let release_report = rhai::json::parse_file(release_path);
-    evidence.qualification.gate_count = receipt.gates.len;
-    evidence.qualification.stress_included = receipt.stress_included;
-    evidence.qualification.receipt_source_commit =
-        receipt.provenance.git_head;
-    evidence.qualification.receipt_source_dirty =
-        receipt.provenance.source_dirty;
+    let gate_count = receipt.gates.len;
+    evidence.qualification.gate_count = gate_count;
+    let stress_included = receipt.stress_included;
+    evidence.qualification.stress_included = stress_included;
+    let receipt_commit = receipt.provenance.git_head;
+    evidence.qualification.receipt_source_commit = receipt_commit;
+    let receipt_dirty = receipt.provenance.source_dirty;
+    evidence.qualification.receipt_source_dirty = receipt_dirty;
     evidence.qualification.all_passed = 1;
     for gate in receipt.gates {
         if gate.status != "passed" {
@@ -750,11 +767,11 @@ try {
         receipt.process_observation.automation_processes.len == 0,
         "fresh_clone_inner_automation_powershell"
     );
-    evidence.process_observation.powershell_policy =
-        exact_terminal_payload(
-            powershell,
-            receipt.process_observation.terminal_compatibility_payloads
-        );
+    let powershell_policy = exact_terminal_payload(
+        powershell,
+        receipt.process_observation.terminal_compatibility_payloads
+    );
+    evidence.process_observation.powershell_policy = powershell_policy;
 
     assert_ok(
         release_report.mode == "rehearse"
@@ -766,11 +783,13 @@ try {
     assert_ok(std::fs::exists(release_archive),
         "fresh_clone_package_archive_missing");
     evidence.packaging.ready_to_publish = 1;
-    evidence.packaging.mode = release_report.mode;
-    evidence.packaging.archive_name =
+    let release_mode = release_report.mode;
+    evidence.packaging.mode = release_mode;
+    let archive_name =
         std::path::PathBuf::from(release_archive).file_name;
-    evidence.packaging.archive_sha256 =
-        rhai::crypto::sha256_file(release_archive);
+    evidence.packaging.archive_name = archive_name;
+    let archive_sha256 = rhai::crypto::sha256_file(release_archive);
+    evidence.packaging.archive_sha256 = archive_sha256;
     assert_ok(
         evidence.packaging.archive_sha256 ==
             release_report.archive_sha256,
@@ -779,23 +798,12 @@ try {
     evidence.delivery_sequence.push("package_rehearsal");
 
     let local_tags_after =
-        git(clone, ["tag", "--list"], "fresh_clone_local_tags_after");
-    let local_candidate_after = git(
-            clone,
-            ["tag", "--list", tag],
-            "fresh_clone_local_candidate_after"
-        );
+        git_output(["-C", clone, "tag", "--list"], clone, 120000, "fresh_clone_local_tags_after");
+    let local_candidate_after = git_output(["-C", clone, "tag", "--list", tag], clone, 120000, "fresh_clone_local_candidate_after");
     if local_candidate_after == "" {
         evidence.mutation_proof.local_candidate_tag_absent_after = 1;
     }
-    let remote_after = git(
-        clone,
-        [
-            "ls-remote", "--refs", "origin",
-            "refs/heads/main", "refs/tags/" + tag
-        ],
-        "fresh_clone_remote_after"
-    );
+    let remote_after = git_output(["-C", clone, "ls-remote", "--refs", "origin", "refs/heads/main", "refs/tags/" + tag], clone, 120000, "fresh_clone_remote_after");
     if local_tags_before == local_tags_after {
         evidence.mutation_proof.local_tags_unchanged = 1;
     }
@@ -814,11 +822,7 @@ try {
             && evidence.mutation_proof.candidate_tag_absent_after,
         "fresh_clone_mutation_detected"
     );
-    let final_status = git(
-            clone,
-            ["status", "--porcelain", "--untracked-files=all"],
-            "fresh_clone_final_status"
-        );
+    let final_status = git_output(["-C", clone, "status", "--porcelain", "--untracked-files=all"], clone, 120000, "fresh_clone_final_status");
     if final_status == "" {
         evidence.clone_clean_after_rehearsal = 1;
     }
@@ -832,10 +836,10 @@ try {
     evidence.failure = failure;
 }
 
-evidence.process_observation.remaining_before_cleanup =
-    live_observed_processes(identities);
+let remaining_before = live_observed_processes(identities);
+evidence.process_observation.remaining_before_cleanup = remaining_before;
 if failure == ""
-        && evidence.process_observation.remaining_before_cleanup.len > 0 {
+        && remaining_before.len > 0 {
     failure = "fresh_clone_owned_processes_remained";
     evidence.failure = failure;
     evidence.success = 0;
@@ -843,42 +847,26 @@ if failure == ""
 
 try {
     if root_id > 0 {
-        let final_processes =
-            observe_descendants(root_id, owned_ids, identities);
-        evidence.process_observation.scan_count =
-            evidence.process_observation.scan_count + 1;
-        for process in final_processes {
-            let identity = process_key(process);
-            if !unique.contains(identity) {
-                unique[identity] = process;
-            }
-        }
+        append_final_scan(
+            root_id,
+            owned_ids,
+            identities,
+            unique,
+            unique_list,
+            evidence
+        );
     }
     terminate_observed_processes(identities);
-    evidence.process_observation.remaining_after_cleanup =
-        live_observed_processes(identities);
+    let remaining_after = live_observed_processes(identities);
+    evidence.process_observation.remaining_after_cleanup = remaining_after;
     assert_ok(
-        evidence.process_observation.remaining_after_cleanup.len == 0,
+        remaining_after.len == 0,
         "fresh_clone_owned_process_cleanup_failed"
     );
     if std::fs::exists(std::path::join(clone, ".git").display) {
         try {
-            git(
-                clone,
-                [
-                    "remote", "set-url", "origin",
-                    "redacted://fresh-clone-removed"
-                ],
-                "fresh_clone_redact_origin"
-            );
-            git(
-                clone,
-                [
-                    "remote", "set-url", "--push", "origin",
-                    "redacted://fresh-clone-removed"
-                ],
-                "fresh_clone_redact_push_origin"
-            );
+            git_output(["-C", clone, "remote", "set-url", "origin", "redacted://fresh-clone-removed"], clone, 120000, "fresh_clone_redact_origin");
+            git_output(["-C", clone, "remote", "set-url", "--push", "origin", "redacted://fresh-clone-removed"], clone, 120000, "fresh_clone_redact_push_origin");
             evidence.origin_redacted_before_cleanup = 1;
         } catch (redaction_error) {
             // Removal below is still authoritative. A retained clone must
@@ -898,15 +886,17 @@ try {
         failure = "" + cleanup_error;
         evidence.failure = failure;
     } else {
-        evidence.failure =
+        let merged_failure =
             evidence.failure + "\n" + ("" + cleanup_error);
+        evidence.failure = merged_failure;
     }
     evidence.success = 0;
 }
 
-evidence.process_observation.unique_processes =
-    ordered_processes(unique);
-evidence.completed_at_utc = std::time::SystemTime::now().rfc3339;
+let unique_processes = sort_processes_by_id(unique_list);
+evidence.process_observation.unique_processes = unique_processes;
+let completed_at = std::time::SystemTime::now().rfc3339;
+evidence.completed_at_utc = completed_at;
 rhai::runtime::atomic_write(
     evidence_path,
     rhai::json::stringify_pretty(evidence) + "\n"

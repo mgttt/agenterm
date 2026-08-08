@@ -9,6 +9,10 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
+fn json_null() {
+    rhai::json::parse("null")
+}
+
 let declared_evidence = [
     "ux.unix-frontend-linux-no-activate",
     "ux.unix-frontend-linux-workbench",
@@ -20,7 +24,9 @@ let declared_evidence = [
     "ux.unix-frontend-macos-stale-paste"
 ];
 
-
+fn require(condition, message) {
+    test_harness::require(condition != 0, message);
+}
 
 fn environment_or_empty(name) {
     if std::env::has(name) { std::env::get(name) } else { "" }
@@ -48,10 +54,10 @@ fn resolve_tool(name) {
     command.args(["-c", "command -v -- " + name]);
     command.timeout(std::time::Duration::from_secs(2));
     let output = command.output();
-    if !output.success {
+    if output.success == 0 {
         return "";
     }
-    let path = output.stdout_text();
+    let path = "" + output.stdout_text();
     path.trim();
     path
 }
@@ -59,7 +65,7 @@ fn resolve_tool(name) {
 fn invoke_tool(context, program, arguments, input) {
     let command = std::process::command(program);
     command.args(arguments);
-    if input != () {
+    if input != "" {
         command.stdin_text(input);
     }
     command.timeout(std::time::Duration::from_secs(5));
@@ -69,11 +75,14 @@ fn invoke_tool(context, program, arguments, input) {
     ];
     recorded_arguments.append(arguments);
     test_harness::append_command_record(
-        context, recorded_arguments,
-        output, !output.success, []
+        context,
+        recorded_arguments,
+        output,
+        output.success == 0,
+        []
     );
-    test_harness::require(
-        output.success,
+    require(
+        output.success != 0,
         "unix_frontend_native_tool_failed:" +
             std::path::PathBuf::from(program).file_name + ":" +
             output.stderr_text()
@@ -84,23 +93,23 @@ fn invoke_tool(context, program, arguments, input) {
 fn json_cli(context, cli, arguments) {
     rhai::json::parse(
         test_harness::invoke_cli(
-            context, cli, arguments, false, []
+            context, cli, arguments, 0, []
         ).stdout
     )
 }
 
 fn text_cli(context, cli, arguments) {
     test_harness::invoke_cli(
-        context, cli, arguments, false, []
+        context, cli, arguments, 0, []
     ).stdout
 }
 
 fn wait_for_server(context, cli, gui) {
     for attempt in 0..240 {
         let probe = test_harness::run_cli(
-            context, cli, ["ui-snapshot"], false, []
+            context, cli, ["ui-snapshot"], 0, []
         );
-        if probe.success {
+        if probe.success != 0 {
             return rhai::json::parse(probe.stdout);
         }
         if gui.state == "exited" {
@@ -117,8 +126,8 @@ fn wait_for_server(context, cli, gui) {
 fn wait_for_window(gui) {
     for attempt in 0..240 {
         let facts = gui.platform_facts;
-        if facts.top_level_window_supported
-                && facts.top_level_window_present
+        if facts.top_level_window_supported != 0
+                && facts.top_level_window_present != 0
                 && facts.top_level_window_id != 0 {
             return facts;
         }
@@ -138,9 +147,9 @@ fn xdotool(context, arguments, expected_failure) {
     test_harness::append_command_record(
         context, arguments, output, expected_failure, []
     );
-    if !expected_failure {
-        test_harness::require(
-            output.success,
+    if expected_failure == 0 {
+        require(
+            output.success != 0,
             "unix_frontend_xdotool_failed:" + output.stderr_text()
         );
     }
@@ -150,22 +159,26 @@ fn xdotool(context, arguments, expected_failure) {
 fn wait_x11_window(context, title, child) {
     for attempt in 0..160 {
         let output = xdotool(
-            context, ["search", "--onlyvisible", "--name", title], true
+            context, ["search", "--onlyvisible", "--name", title], 1
         );
-        if output.success {
-            for raw in output.stdout_text().split("\n") {
+        if output.success != 0 {
+            let lines = ("" + output.stdout_text()).split("\n");
+            let line_index = 0;
+            while line_index < lines.len {
+                let raw = lines[line_index];
                 let id = raw;
                 id.trim();
                 if id != "" {
                     let name = xdotool(
-                        context, ["getwindowname", id], true
+                        context, ["getwindowname", id], 1
                     );
-                    let actual = name.stdout_text();
+                    let actual = "" + name.stdout_text();
                     actual.trim();
-                    if name.success && actual == title {
+                    if name.success != 0 && actual == title {
                         return id;
                     }
                 }
+                line_index += 1;
             }
         }
         if child.state == "exited" {
@@ -177,17 +190,17 @@ fn wait_x11_window(context, title, child) {
 }
 
 fn active_x11_window(context) {
-    let output = xdotool(context, ["getactivewindow"], false);
-    let id = output.stdout_text();
+    let output = xdotool(context, ["getactivewindow"], 0);
+    let id = "" + output.stdout_text();
     id.trim();
-    test_harness::require(id != "", "unix_frontend_x11_active_window_empty");
+    require(id != "", "unix_frontend_x11_active_window_empty");
     id
 }
 
 fn wait_x11_active(context, id, code) {
     for attempt in 0..160 {
         if active_x11_window(context) == id {
-            return;
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
@@ -212,11 +225,11 @@ fn frontmost_macos(context) {
             "-e",
             "tell application \"System Events\" to get name of first application process whose frontmost is true"
         ],
-        ()
+        ""
     );
-    let name = output.stdout_text();
+    let name = "" + output.stdout_text();
     name.trim();
-    test_harness::require(name != "", "unix_frontend_macos_frontmost_empty");
+    require(name != "", "unix_frontend_macos_frontmost_empty");
     name
 }
 
@@ -225,7 +238,7 @@ fn activate_finder_witness(context) {
         context,
         "/usr/bin/osascript",
         ["-e", "tell application \"Finder\" to activate"],
-        ()
+        ""
     );
     for attempt in 0..100 {
         if frontmost_macos(context) == "Finder" {
@@ -248,7 +261,7 @@ fn wait_macos_agenterm_active(context) {
 }
 
 fn wait_native_focus(context, cli, gui, platform, native_window_id) {
-    let last = ();
+    let last = json_null();
     for attempt in 0..160 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         last = snapshot;
@@ -257,16 +270,15 @@ fn wait_native_focus(context, cli, gui, platform, native_window_id) {
         } else {
             frontmost_macos(context).to_lower().contains("agenterm")
         };
-        if snapshot.focus.window_focused
-                && snapshot.focus.surface == "terminal"
-                && gui.platform_facts.top_level_window_is_foreground
+        if snapshot.focus.window_focused != 0
+                && ("" + snapshot.focus.surface) == "terminal"
+                && gui.platform_facts.top_level_window_is_foreground != 0
                 && os_focused {
             return snapshot;
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
-    throw "unix_frontend_native_focus_event_timeout:" +
-        rhai::json::stringify(last);
+    throw "unix_frontend_native_focus_event_timeout";
 }
 
 fn set_native_clipboard(context, platform, helper, text) {
@@ -300,11 +312,11 @@ fn wait_linux_clipboard_owner(context, helper, expected, owner) {
             context,
             ["xclip", "-selection", "clipboard", "-o"],
             output,
-            !output.success,
+            output.success == 0,
             []
         );
-        if output.success && output.stdout_text() == expected {
-            return;
+        if output.success != 0 && ("" + output.stdout_text()) == expected {
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
@@ -314,7 +326,7 @@ fn wait_linux_clipboard_owner(context, helper, expected, owner) {
 fn wait_file(path, gui, code) {
     for attempt in 0..240 {
         if std::fs::exists(path) {
-            return;
+            return 0;
         }
         if gui.state == "exited" {
             throw code + "_gui_exited";
@@ -325,42 +337,40 @@ fn wait_file(path, gui, code) {
 }
 
 fn wait_stale_failure(context, cli) {
-    let last = ();
+    let last = json_null();
     for attempt in 0..240 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         last = snapshot;
-        if snapshot.terminal_paste.state == "idle"
-                && snapshot.feedback.error != ()
-                && snapshot.feedback.error.code == "terminal_paste_failed"
-                && snapshot.feedback.error.category == "precondition"
-                && snapshot.feedback.error.retryable {
+        if ("" + snapshot.terminal_paste.state) == "idle"
+                && snapshot.feedback.error != json_null()
+                && ("" + snapshot.feedback.error.code) == "terminal_paste_failed"
+                && ("" + snapshot.feedback.error.category) == "precondition"
+                && snapshot.feedback.error.retryable != 0 {
             return snapshot;
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
-    throw "unix_frontend_stale_paste_failure_timeout:" +
-        rhai::json::stringify(last);
+    throw "unix_frontend_stale_paste_failure_timeout";
 }
 
 fn wait_terminal_paste_success(context, cli) {
-    let last = ();
+    let last = json_null();
     for attempt in 0..240 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         last = snapshot;
-        if snapshot.terminal_paste.state == "idle" {
-            if snapshot.feedback.error != () {
+        if ("" + snapshot.terminal_paste.state) == "idle" {
+            if snapshot.feedback.error != json_null() {
                 throw "unix_frontend_native_paste_failed:" +
                     rhai::json::stringify(snapshot.feedback.error);
             }
-            if snapshot.feedback.message != ()
-                    && snapshot.feedback.message.starts_with("Pasted ") {
+            if snapshot.feedback.message != json_null()
+                    && ("" + snapshot.feedback.message).starts_with("Pasted ") {
                 return snapshot;
             }
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
-    throw "unix_frontend_native_paste_timeout:" +
-        rhai::json::stringify(last);
+    throw "unix_frontend_native_paste_timeout";
 }
 
 fn wait_exit(child, code) {
@@ -378,30 +388,37 @@ fn wait_exit(child, code) {
 fn retain_failure_snapshot(context, cli) {
     std::fs::create_dir_all(context.failure_directory);
     let output = test_harness::run_cli(
-        context, cli, ["ui-snapshot"], true, []
+        context, cli, ["ui-snapshot"], 1, []
     );
+    let fail_stdout = "" + output.stdout;
+    let fail_stderr = "" + output.stderr;
     rhai::runtime::atomic_write(
         std::path::join(
             context.failure_directory, "ui-snapshot.txt"
         ).display,
-        output.stdout + output.stderr
+        fail_stdout + fail_stderr
     );
 }
 
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in declared_evidence {
-            print(id);
-        }
-        return;
+        print("ux.unix-frontend-linux-no-activate");
+        print("ux.unix-frontend-linux-workbench");
+        print("ux.unix-frontend-linux-native-clipboard");
+        print("ux.unix-frontend-linux-stale-paste");
+        print("ux.unix-frontend-macos-no-activate");
+        print("ux.unix-frontend-macos-workbench");
+        print("ux.unix-frontend-macos-native-clipboard");
+        print("ux.unix-frontend-macos-stale-paste");
+        return 0;
     }
 
-    test_harness::require(
+    require(
         args.len == 5 && args[3] == "--platform",
         "expected: REPO GUI_EXE CLI_EXE --platform linux|macos"
     );
     let platform = args[4];
-    test_harness::require(
+    require(
         platform == "linux" || platform == "macos",
         "unix_frontend_platform_invalid:" + platform
     );
@@ -413,7 +430,7 @@ fn entry() {
                 "unix_frontend_wayland_focus_witness_unsupported",
                 "the Linux native-focus journey currently requires an X11 compositor witness"
             );
-            return;
+            return 0;
         }
         if environment_or_empty("DISPLAY") == "" {
             unsupported(
@@ -421,7 +438,7 @@ fn entry() {
                 "unix_frontend_x11_display_unavailable",
                 "the Linux native workbench journey requires DISPLAY"
             );
-            return;
+            return 0;
         }
         if resolve_tool("xdotool") == "" || resolve_tool("xmessage") == "" {
             unsupported(
@@ -429,7 +446,7 @@ fn entry() {
                 "unix_frontend_x11_witness_unavailable",
                 "the Linux journey requires xdotool and xmessage"
             );
-            return;
+            return 0;
         }
     } else if resolve_tool("osascript") == "" {
         unsupported(
@@ -437,7 +454,7 @@ fn entry() {
             "unix_frontend_macos_witness_unavailable",
             "the macOS journey requires osascript"
         );
-        return;
+        return 0;
     }
 
     let clipboard_reader = if platform == "linux" {
@@ -460,14 +477,14 @@ fn entry() {
                 "the macOS journey requires pbpaste and pbcopy"
             }
         );
-        return;
+        return 0;
     }
 
     let repo = std::path::absolute(args[0]).display;
     let gui_exe = std::path::absolute(args[1]).display;
     let cli_exe = std::path::absolute(args[2]).display;
-    test_harness::require(std::fs::exists(gui_exe), "unix_frontend_gui_missing");
-    test_harness::require(std::fs::exists(cli_exe), "unix_frontend_cli_missing");
+    require(std::fs::exists(gui_exe) != 0, "unix_frontend_gui_missing");
+    require(std::fs::exists(cli_exe) != 0, "unix_frontend_cli_missing");
 
     let context = test_harness::new_context(
         repo, "unix-frontend-" + platform
@@ -500,7 +517,7 @@ fn entry() {
         "fi\n" +
         "exec \"" + clipboard_reader + "\" \"$@\"\n";
     rhai::runtime::atomic_write(wrapper_path, wrapper_source);
-    invoke_tool(context, "/bin/chmod", ["0700", wrapper_path], ());
+    invoke_tool(context, "/bin/chmod", ["0700", wrapper_path], "");
 
     let stale_marker = "AGENTERM_STALE_PASTE_" + context.run_id;
     let witness_title = "AgenTerm foreground witness " + context.run_id;
@@ -511,7 +528,7 @@ fn entry() {
         owned_children.push(witness);
         witness_id = wait_x11_window(context, witness_title, witness);
         xdotool(
-            context, ["windowactivate", "--sync", witness_id], false
+            context, ["windowactivate", "--sync", witness_id], 0
         );
         wait_x11_active(
             context, witness_id, "unix_frontend_witness_activation_timeout"
@@ -521,7 +538,7 @@ fn entry() {
         foreground_before = activate_finder_witness(context);
     }
 
-    let succeeded = false;
+    let succeeded = 0;
     let failure = "";
     try {
         print("STEP no-activate launch preserves an independent native foreground witness");
@@ -537,20 +554,20 @@ fn entry() {
         owned_children.push(gui);
         let native_window = wait_for_window(gui);
         let initial = wait_for_server(context, cli_exe, gui);
-        test_harness::require(
-            initial.projection == "embedded_gui"
-                && initial.focus.surface == "terminal"
-                && !initial.focus.window_focused,
+        require(
+            ("" + initial.projection) == "embedded_gui"
+                && ("" + initial.focus.surface) == "terminal"
+                && initial.focus.window_focused == 0,
             "unix_frontend_initial_snapshot_contract:" +
                 rhai::json::stringify(initial)
         );
         if platform == "linux" {
-            test_harness::require(
+            require(
                 active_x11_window(context) == foreground_before,
                 "unix_frontend_linux_no_activate_stole_focus"
             );
         } else {
-            test_harness::require(
+            require(
                 frontmost_macos(context) == foreground_before,
                 "unix_frontend_macos_no_activate_stole_focus"
             );
@@ -563,7 +580,7 @@ fn entry() {
         print("STEP semantic activation waits for native focus and compositor truth");
         json_cli(context, cli_exe, ["ui-action", "window-activate"]);
         let native_window_id = if platform == "linux" {
-            native_window.top_level_window_id.to_string()
+            "" + native_window.top_level_window_id
         } else {
             ""
         };
@@ -591,23 +608,23 @@ fn entry() {
         returned_path.trim();
         let after_capture = json_cli(context, cli_exe, ["ui-snapshot"]);
         let rendered = rhai::image::inspect_png(screenshot_path);
-        test_harness::require(
+        require(
             returned_path == screenshot_path
                 && before_capture.event_position.epoch
                     == after_capture.event_position.epoch
                 && before_capture.event_position.sequence
                     == after_capture.event_position.sequence
-                && after_capture.focus.window_focused
-                && after_capture.focus.surface == "terminal"
-                && after_capture.window.title != ""
+                && after_capture.focus.window_focused != 0
+                && ("" + after_capture.focus.surface) == "terminal"
+                && ("" + after_capture.window.title) != ""
                 && after_capture.layout.terminal.rows > 0
                 && after_capture.layout.terminal.cols > 0
                 && std::fs::metadata(screenshot_path).len > 1000
                 && rendered.width > 0
                 && rendered.height > 0
                 && rendered.samples > 0
-                && rendered.luminance > 1.0
-                && rendered.luminance < 254.9,
+                && rendered.luminance > 1
+                && rendered.luminance < 255,
             "unix_frontend_renderer_evidence:" +
                 rhai::json::stringify(#{
                     before: before_capture.event_position,
@@ -640,7 +657,7 @@ fn entry() {
         let paste_baseline = json_cli(context, cli_exe, ["ui-snapshot"]);
         json_cli(context, cli_exe, ["ui-action", "terminal-paste"]);
         let paste_complete = wait_terminal_paste_success(context, cli_exe);
-        test_harness::require(
+        require(
             paste_complete.active_window_id == active_tab,
             "unix_frontend_native_paste_target_changed"
         );
@@ -649,8 +666,8 @@ fn entry() {
             cli_exe,
             [
                 "wait-events",
-                "--epoch", paste_baseline.event_position.epoch,
-                "--after", paste_baseline.event_position.sequence.to_string(),
+                "--epoch", "" + paste_baseline.event_position.epoch,
+                "--after", "" + paste_baseline.event_position.sequence,
                 "--kind", "terminal.pasted",
                 "--tab", active_tab,
                 "--timeout-ms", "5000"
@@ -672,7 +689,7 @@ fn entry() {
             cli_exe,
             ["capture-pane", "-p", "-t", active_tab, "--max-bytes", "16384"]
         );
-        test_harness::require(
+        require(
             pasted.contains(paste_marker),
             "unix_frontend_native_clipboard_marker_missing"
         );
@@ -692,7 +709,7 @@ fn entry() {
             ]
         );
         peer.trim();
-        test_harness::require(peer.starts_with("@"), "unix_frontend_peer_id_invalid:" + peer);
+        require(peer.starts_with("@"), "unix_frontend_peer_id_invalid:" + peer);
         json_cli(context, cli_exe, ["ui-action", "select-tab", "-t", active_tab]);
         rhai::runtime::atomic_write(mode_path, "enabled\n");
         json_cli(context, cli_exe, ["ui-action", "terminal-paste"]);
@@ -702,25 +719,34 @@ fn entry() {
         json_cli(context, cli_exe, ["ui-action", "select-tab", "-t", peer]);
         rhai::runtime::atomic_write(release_path, "released\n");
         let stale = wait_stale_failure(context, cli_exe);
-        test_harness::require(
+        require(
             stale.active_window_id == peer
-                && stale.feedback.error.code == "terminal_paste_failed"
-                && stale.feedback.error.category == "precondition"
-                && stale.feedback.error.retryable,
+                && ("" + stale.feedback.error.code) == "terminal_paste_failed"
+                && ("" + stale.feedback.error.category) == "precondition"
+                && stale.feedback.error.retryable != 0,
             "unix_frontend_stale_failure_contract:" +
                 rhai::json::stringify(stale.feedback.error)
         );
-        for tab in [active_tab, peer] {
-            let capture = text_cli(
-                context,
-                cli_exe,
-                ["capture-pane", "-p", "-t", tab, "--max-bytes", "16384"]
-            );
-            test_harness::require(
-                !capture.contains(stale_marker),
-                "unix_frontend_stale_marker_delivered:" + tab
-            );
-        }
+        let tab_a = active_tab;
+        let capture_a = text_cli(
+            context,
+            cli_exe,
+            ["capture-pane", "-p", "-t", tab_a, "--max-bytes", "16384"]
+        );
+        require(
+            capture_a.contains(stale_marker) == 0,
+            "unix_frontend_stale_marker_delivered:" + tab_a
+        );
+        let tab_b = peer;
+        let capture_b = text_cli(
+            context,
+            cli_exe,
+            ["capture-pane", "-p", "-t", tab_b, "--max-bytes", "16384"]
+        );
+        require(
+            capture_b.contains(stale_marker) == 0,
+            "unix_frontend_stale_marker_delivered:" + tab_b
+        );
         test_harness::emit_evidence(
             context, declared_evidence,
             "ux.unix-frontend-" + platform + "-stale-paste"
@@ -730,14 +756,14 @@ fn entry() {
         json_cli(context, cli_exe, ["ui-action", "close-window"]);
         json_cli(context, cli_exe, ["ui-action", "stop-server-and-exit"]);
         let exit = wait_exit(gui, "unix_frontend_shutdown_timeout");
-        test_harness::require(
-            exit.success,
+        require(
+            exit.success != 0,
             "unix_frontend_shutdown_failed:" + exit.stderr_text()
         );
         print("PASS: " + platform + " native workbench and clipboard journey");
-        succeeded = true;
+        succeeded = 1;
     } catch (error) {
-        failure = error.to_string();
+        failure = "" + error;
         try {
             retain_failure_snapshot(context, cli_exe);
         } catch (diagnostic_error) {
@@ -745,7 +771,7 @@ fn entry() {
                 std::path::join(
                     context.failure_directory, "snapshot-error.txt"
                 ).display,
-                diagnostic_error.to_string()
+                "" + diagnostic_error
             );
         }
     }
@@ -756,9 +782,9 @@ fn entry() {
             context, owned_children, succeeded, failure
         );
     } catch (error) {
-        completion_failure = error.to_string();
+        completion_failure = "" + error;
     }
-    if succeeded && completion_failure == "" {
+    if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);
     }
     if failure != "" {
@@ -767,4 +793,5 @@ fn entry() {
     if completion_failure != "" {
         throw completion_failure;
     }
+    0
 }

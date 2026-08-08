@@ -6,29 +6,588 @@
 //   REPO CLI_EXE SCRIPT_EXE GUI_EXE [--internal-failure-bundle-probe]
 
 import "scripts/rh/lib/test_harness" as test_harness;
-import "scripts/rh/lib/script_smoke_helpers" as helper;
+// Inlined from scripts/rh/lib/script_smoke_helpers.rh for native AOT (do not edit lib copy).
 
-let declared_evidence = [
-    "script.rhai-runtime",
-    "script.rhai-fleet",
-    "script.api-tree",
-    "script.fleet-v2",
-    "script.fleet-tabs-set-note",
-    "script.direct-entry",
-    "script.north-star",
-    "script.rhai-robustness-budget",
-    "script.rhai-framed",
-    "script.exit-classes",
-    "script.typed-errors",
-    "script.modules-tasks",
-    "script.stream",
-    "script.http",
-    "script.fs-lifecycle",
-    "script.runtime-lifecycle",
-    "script.supervisor",
-    "script.repl-supervision",
-    "script.audit"
-];
+fn script_smoke_empty_env() {
+    #{}
+}
+
+// Public-process and binary-protocol helpers for the Script Runtime journey (INT-only).
+
+
+fn require(condition, message) {
+    if condition == 0 {
+        throw message;
+    } else {
+        0;
+    }
+}
+
+fn child_is_running(child) {
+    child.state == "running"
+}
+
+fn configured_program(
+    context,
+    program,
+    arguments,
+    audit_path,
+    environment
+) {
+    let command = test_harness::configured_command(
+        context,
+        program,
+        arguments
+    );
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    if audit_path == "" {
+        command.env_remove("AGENTERM_SCRIPT_AUDIT_PATH");
+        command.env_remove("AGENTERM_AUDIT_ENV_SECRET");
+    } else {
+        command.env("AGENTERM_SCRIPT_AUDIT_PATH", audit_path);
+        command.env("AGENTERM_AUDIT_ENV_SECRET", "AUDIT_ENV_SECRET");
+    }
+    let env_settings = environment;
+    for name in env_settings.keys() {
+        let value = env_settings[name];
+        if value == () {
+            command.env_remove(name);
+        } else {
+            command.env(name, "" + value);
+        }
+    }
+    command
+}
+
+fn safe_command_arguments(program, arguments) {
+    let safe = [program];
+    safe.append(arguments);
+    let script_index = -1;
+    let index = 0;
+    while index < safe.len {
+        if script_index < 0 && safe[index] == "script" {
+            script_index = index;
+        }
+        index += 1;
+    }
+    let operation_index =
+        if script_index >= 0 {
+            script_index + 1
+        } else if safe.len > 1
+                && (
+                    safe[1] == "eval"
+                        || safe[1] == "run"
+                        || safe[1] == "check"
+                ) {
+            1
+        } else {
+            -1
+        };
+    if operation_index >= 0
+            && operation_index + 1 < safe.len
+            && (
+                safe[operation_index] == "eval"
+                    || safe[operation_index] == "run"
+                    || safe[operation_index] == "check"
+            ) {
+        safe[operation_index + 1] = "<content>";
+        let index = operation_index + 2;
+        while index < safe.len {
+            if safe[index] == "--" {
+                let content_index = index + 1;
+                while content_index < safe.len {
+                    safe[content_index] = "<content>";
+                    content_index += 1;
+                }
+                index = safe.len;
+            }
+            index += 1;
+        }
+    }
+    safe
+}
+
+fn script_smoke_append_command_record(
+    context,
+    program,
+    arguments,
+    output,
+    expected_failure,
+    redactions
+) {
+    let safe_arguments = safe_command_arguments(program, arguments);
+    let expected_failure_flag = 0;
+    if expected_failure != 0 {
+        expected_failure_flag = 1;
+    }
+    let combined_output = test_harness::redact_text(
+        output.stdout_text() + output.stderr_text(),
+        redactions
+    );
+    let record = #{
+        recorded_at_utc: std::time::SystemTime::now().rfc3339,
+        arguments: safe_arguments,
+        expected_failure: expected_failure_flag != 0,
+        exit_code: output.exit_code,
+        output: test_harness::bounded_record_text(
+            combined_output,
+            512
+        )
+    };
+    rhai::runtime::append_sync(
+        context.command_journal_path,
+        rhai::json::stringify(record) + "\n"
+    );
+    rhai::runtime::atomic_write(
+        context.command_log_path,
+        rhai::json::stringify_pretty([record]) + "\n"
+    );
+    0
+}
+
+fn run_program(
+    context,
+    program,
+    arguments,
+    expected_exit,
+    audit_path,
+    environment,
+    redactions
+) {
+    let command = configured_program(
+        context,
+        program,
+        arguments,
+        audit_path,
+        environment
+    );
+    let output = command.output();
+    let expected_failure = 0;
+    if expected_exit != 0 {
+        expected_failure = 1;
+    }
+    script_smoke_append_command_record(
+        context,
+        program,
+        arguments,
+        output,
+        expected_failure,
+        redactions
+    );
+    require(
+        output.exit_code == expected_exit,
+        "script_smoke_process_exit:" + program + ":" +
+            output.exit_code + ":expected:" + expected_exit + ":" +
+            test_harness::redact_text(
+                output.stdout_text() + output.stderr_text(),
+                redactions
+            )
+    );
+    let stdout = output.stdout_text();
+    let stderr = output.stderr_text();
+    let bytes = output.stdout;
+    let complete = if output.complete {
+        1
+    } else {
+        0
+    };
+    let truncated = if output.truncated {
+        1
+    } else {
+        0
+    };
+    let success = if output.success {
+        1
+    } else {
+        0
+    };
+    #{
+        success: success,
+        exit_code: output.exit_code,
+        stdout: stdout,
+        stderr: stderr,
+        bytes: bytes,
+        complete: complete,
+        truncated: truncated
+    }
+}
+
+fn run_cli(
+    context,
+    cli,
+    arguments,
+    expected_exit,
+    audit_path,
+    environment,
+    redactions
+) {
+    let command_arguments = ["--address", context.address];
+    command_arguments.append(arguments);
+    run_program(
+        context,
+        cli,
+        command_arguments,
+        expected_exit,
+        audit_path,
+        environment,
+        redactions
+    )
+}
+
+fn cli_text(context, cli, arguments, audit_path) {
+    let result = run_cli(
+        context,
+        cli,
+        arguments,
+        0,
+        audit_path,
+        script_smoke_empty_env(),
+        []
+    );
+    let text = result.stdout;
+    text.trim();
+    text
+}
+
+fn cli_json(context, cli, arguments, audit_path) {
+    let result = run_cli(
+        context,
+        cli,
+        arguments,
+        0,
+        audit_path,
+        script_smoke_empty_env(),
+        []
+    );
+    rhai::json::parse(result.stdout)
+}
+
+fn direct_text(context, script, arguments, audit_path) {
+    let result = run_program(
+        context,
+        script,
+        arguments,
+        0,
+        audit_path,
+        script_smoke_empty_env(),
+        []
+    );
+    let text = result.stdout;
+    text.trim();
+    text
+}
+
+fn direct_json(context, script, arguments, audit_path) {
+    let result = run_program(
+        context,
+        script,
+        arguments,
+        0,
+        audit_path,
+        script_smoke_empty_env(),
+        []
+    );
+    rhai::json::parse(result.stdout)
+}
+
+fn failure_text(
+    context,
+    cli,
+    arguments,
+    expected_exit,
+    audit_path
+) {
+    let result = run_cli(
+        context,
+        cli,
+        arguments,
+        expected_exit,
+        audit_path,
+        script_smoke_empty_env(),
+        []
+    );
+    result.stdout + result.stderr
+}
+
+fn process_ids(executable_name) {
+    let ids = [];
+    for process in std::process::list() {
+        if process.executable_name.to_lower() == executable_name.to_lower() {
+            ids.push(process.id);
+        }
+    }
+    ids
+}
+
+fn process_exists(pid) {
+    for process in std::process::list() {
+        if process.id == pid {
+            return true;
+        }
+    }
+    false
+}
+
+fn wait_new_process(executable_name, existing, timeout_ms) {
+    let attempts = timeout_ms / 5;
+    for attempt in 0..attempts {
+        for pid in process_ids(executable_name) {
+            if existing.contains(pid) == 0 {
+                return pid;
+            }
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(5));
+    }
+    throw "script_smoke_new_process_timeout:" + executable_name;
+}
+
+fn wait_process_gone(pid, timeout_ms) {
+    let attempts = timeout_ms / 10;
+    for attempt in 0..attempts {
+        if process_exists(pid) == 0 {
+            return;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(10));
+    }
+    throw "script_smoke_process_remained:" + pid;
+}
+
+fn start_script_client(
+    context,
+    cli,
+    arguments,
+    audit_path
+) {
+    let command_arguments = ["--address", context.address];
+    command_arguments.append(arguments);
+    configured_program(
+        context,
+        cli,
+        command_arguments,
+        audit_path,
+        script_smoke_empty_env()
+    ).start()
+}
+
+fn start_http_fixture(
+    context,
+    script,
+    fixture_path,
+    repo,
+    ready_path,
+    log_path,
+    stop_path
+) {
+    configured_program(
+        context,
+        script,
+        [
+            "run",
+            fixture_path,
+            "--profile",
+            "local",
+            "--project-root",
+            repo,
+            "--timeout-ms",
+            "20000",
+            "--max-operations",
+            "10000000",
+            "--",
+            ready_path,
+            log_path,
+            stop_path,
+            "9",
+            "10000"
+        ],
+        "",
+        script_smoke_empty_env()
+    ).start()
+}
+
+fn wait_http_ready(child, ready_path, timeout_ms) {
+    let attempts = timeout_ms / 5;
+    for attempt in 0..attempts {
+        if std::fs::exists(ready_path) {
+            return rhai::json::parse_file(ready_path);
+        }
+        require(
+            ("" + child.state) != "exited",
+            "script_smoke_http_fixture_early_exit"
+        );
+        rhai::task::sleep(std::time::Duration::from_millis(5));
+    }
+    throw "script_smoke_http_fixture_ready_timeout";
+}
+
+fn u32_header(length) {
+    rhai::bytes::from_array([
+        (length / 16777216) % 256,
+        (length / 65536) % 256,
+        (length / 256) % 256,
+        length % 256
+    ])
+}
+
+fn payload_frame(payload) {
+    let stream = u32_header(payload.len);
+    stream.append(payload);
+    stream
+}
+
+fn json_frame(frame) {
+    let encoded = rhai::json::stringify(frame);
+    payload_frame(rhai::bytes::from_text(encoded))
+}
+
+fn framed_invocation(frame_id, invocation_id, source, version) {
+    #{
+        frame_version: version,
+        frame_id: frame_id,
+        kind: "invoke",
+        payload: #{
+            envelope_version: 2,
+            invocation_id: invocation_id,
+            api_version: 2,
+            operation: "eval",
+            profile: "pure",
+            source_label: "smoke",
+            source: source,
+            arguments: [],
+            budgets: #{
+                source_bytes: 262144,
+                operations: 1000000,
+                call_depth: 64,
+                expression_depth: 64,
+                collection_items: 10000,
+                string_bytes: 262144,
+                output_bytes: 65536,
+                wall_time_ms: 2000
+            }
+        }
+    }
+}
+
+fn sidebar_visible_code(snapshot) {
+    if snapshot.layout == () {
+        return -1;
+    }
+    if snapshot.layout.sidebar == () {
+        return -1;
+    }
+    if snapshot.layout.sidebar.visible {
+        1
+    } else {
+        0
+    }
+}
+
+fn wait_snapshot_sidebar(context, cli, audit_path, expected_code) {
+    for attempt in 0..600 {
+        let snapshot = cli_json(
+            context,
+            cli,
+            ["ui-snapshot"],
+            audit_path
+        );
+        let code = sidebar_visible_code(snapshot);
+        if expected_code == -2 {
+            if code >= 0 {
+                return code;
+            }
+        } else if code == expected_code {
+            return code;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "script_fleet_sidebar_wait_timeout";
+}
+
+fn active_tab_index(snapshot) {
+    for index in 0..snapshot.tabs.len {
+        if snapshot.tabs[index].active != 0 {
+            return index;
+        }
+    }
+    throw "script_fleet_active_tab_missing";
+}
+
+fn invoke_framed_worker(
+    context,
+    script,
+    input_bytes
+) {
+    let command = configured_program(
+        context,
+        script,
+        ["--framed-worker"],
+        "",
+        script_smoke_empty_env()
+    );
+    command.stdin_bytes(input_bytes);
+    command.capture_limit(262144);
+    let output = command.output();
+    let worker_label =
+        "[" + std::path::PathBuf::from(script).file_name + "]";
+    test_harness::append_command_record(
+        context,
+        [worker_label, "--framed-worker"],
+        output,
+        0,
+        []
+    );
+    require(
+        output.success,
+        "script_smoke_framed_worker_failed:" + ("" + output.stderr_text())
+    );
+    let bytes = output.stdout;
+    let frames = [];
+    let offset = 0;
+    while offset < bytes.len {
+        require(
+            bytes.len - offset >= 4,
+            "script_smoke_truncated_frame_length"
+        );
+        let length =
+            bytes.get(offset) * 16777216 +
+            bytes.get(offset + 1) * 65536 +
+            bytes.get(offset + 2) * 256 +
+            bytes.get(offset + 3);
+        offset += 4;
+        require(
+            length <= 2097152 && bytes.len - offset >= length,
+            "script_smoke_invalid_frame_payload:" + length
+        );
+        frames.push(
+            rhai::json::parse(bytes.slice(offset, length).to_text())
+        );
+        offset += length;
+    }
+    frames
+}
+fn declared_evidence_ids() {
+    return [
+        "script.rhai-runtime",
+        "script.rhai-fleet",
+        "script.api-tree",
+        "script.fleet-v2",
+        "script.fleet-tabs-set-note",
+        "script.direct-entry",
+        "script.north-star",
+        "script.rhai-robustness-budget",
+        "script.rhai-framed",
+        "script.exit-classes",
+        "script.typed-errors",
+        "script.modules-tasks",
+        "script.stream",
+        "script.http",
+        "script.fs-lifecycle",
+        "script.runtime-lifecycle",
+        "script.supervisor",
+        "script.repl-supervision",
+        "script.audit"
+    ];
+}
 
 fn matching(entries, field, value) {
     let result = [];
@@ -40,22 +599,13 @@ fn matching(entries, field, value) {
     result
 }
 
-fn emit(context, declared, id) {
-    test_harness::emit_evidence(context, declared, id);
-}
-
-fn json_literal(value) {
-    rhai::json::stringify(value)
-}
-
 fn trimmed(value) {
-    let text = value.to_string();
-    text.trim();
-    text
+    let text = "" + value;
+    return text.trim();
 }
 
 fn script_eval(context, cli, source, audit_path) {
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         ["script", "eval", source, "--profile", "local"],
@@ -64,7 +614,7 @@ fn script_eval(context, cli, source, audit_path) {
 }
 
 fn script_eval_json(context, cli, source, audit_path) {
-    helper::cli_json(
+    cli_json(
         context,
         cli,
         [
@@ -77,7 +627,7 @@ fn script_eval_json(context, cli, source, audit_path) {
 
 fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     print("STEP offline scripting API discovery");
-    let api = helper::cli_json(
+    let api = cli_json(
         context,
         cli,
         ["script", "api", "--json"],
@@ -138,12 +688,23 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             )[0].status == "planned",
         "script_api_required_entries_missing"
     );
-    let operation_ids = #{};
+    let operation_id_list = [];
     let operation_entries = 0;
     for entry in catalog.entries {
-        if entry.operation_id != () {
+        if type_of(entry.operation_id) != "()" {
             operation_entries += 1;
-            operation_ids[entry.operation_id] = 1;
+            let operation_id = "" + entry.operation_id;
+            let duplicate = 0;
+            for seen_id in operation_id_list {
+                if seen_id == operation_id {
+                    duplicate = 1;
+                }
+            }
+            test_harness::require(
+                duplicate == 0,
+                "script_api_operation_mapping_duplicate:" + operation_id
+            );
+            operation_id_list.push(operation_id);
             test_harness::require(
                 entry.surface_path == entry.operation.script_surface
                     && entry.operation.id == entry.operation_id,
@@ -159,12 +720,12 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         );
     }
     test_harness::require(
-        operation_entries == 24 && operation_ids.keys().len == 24,
+        operation_entries == 24 && operation_id_list.len == 24,
         "script_api_operation_mapping_not_bijective"
     );
 
     // A downstream consumer closing stdout early must remain a normal exit.
-    let pipe_command = helper::configured_program(
+    let pipe_command = configured_program(
         context,
         script,
         ["api", "--json"],
@@ -186,7 +747,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     );
 
     print("STEP filtered scripting API object tree");
-    let tree = helper::direct_text(
+    let tree = direct_text(
         context,
         script,
         ["api", "std::fs", "--status", "shipped", "--tree"],
@@ -201,7 +762,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             && !tree.contains("[planned]"),
         "script_api_filtered_tree_mismatch"
     );
-    let planned = helper::cli_json(
+    let planned = cli_json(
         context,
         cli,
         [
@@ -224,7 +785,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             "script_api_planned_view_leaked_other_status"
         );
     }
-    let invalid = helper::failure_text(
+    let invalid = failure_text(
         context,
         cli,
         ["script", "api", "--status", "experimental"],
@@ -252,14 +813,14 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     // Resolve from the repository supplied to the context rather than trusting
     // the current directory of a nested child.
     let repo = std::path::absolute(".").display;
-    let verified = helper::cli_text(
+    let verified = cli_text(
         context,
         cli,
         [
             "script", "run",
             std::path::join(
                 repo,
-                "scripts/rhai/verify-script-contract.rhai"
+                "scripts/rh/verify-script-contract.rh"
             ).display,
             "--profile", "local", "--",
             std::path::join(
@@ -284,34 +845,14 @@ fn assert_process_and_streams(
     runtime_dir
 ) {
     print("STEP local environment, process, duration, and child lifecycle");
-    let process_source = `
-let command = std::process::command("cmd.exe");
-command.args([
-    "/d", "/v:on", "/s", "/c",
-    "set /p LINE=&echo out:!LINE!:%AGENTERM_PROCESS_TEST%&echo cwd:%CD% 1>&2&exit /b 7"
-]);
-command.current_dir(args[0]);
-command.env("AGENTERM_PROCESS_TEST", "argv-safe");
-command.stdin_text("hello\n");
-command.timeout(std::time::Duration::from_secs(2));
-let output = command.output();
-#{
-    success: output.success,
-    exit_code: output.exit_code,
-    stdout: output.stdout_text(),
-    stderr: output.stderr_text(),
-    complete: output.complete,
-    truncated: output.truncated,
-    cwd: std::env::current_dir().display,
-    has_path: std::env::has("PATH")
-}`;
+    let process_source = "\nlet command = std::process::command(\"cmd.exe\");\ncommand.args([\n    \"/d\", \"/v:on\", \"/s\", \"/c\",\n    \"set /p LINE=&echo out:!LINE!:%AGENTERM_PROCESS_TEST%&echo cwd:%CD% 1>&2&exit /b 7\"\n]);\ncommand.current_dir(args[0]);\ncommand.env(\"AGENTERM_PROCESS_TEST\", \"argv-safe\");\ncommand.stdin_text(\"hello\\n\");\ncommand.timeout(std::time::Duration::from_secs(2));\nlet output = command.output();\n#{\n    success: output.success,\n    exit_code: output.exit_code,\n    stdout: output.stdout_text(),\n    stderr: output.stderr_text(),\n    complete: output.complete,\n    truncated: output.truncated,\n    cwd: std::env::current_dir().display,\n    has_path: std::env::has(\"PATH\")\n}";
     let process_file = std::path::join(
         runtime_dir,
         "process.rhai"
     ).display;
     std::fs::write(process_file, process_source);
     let process_result = rhai::json::parse(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             [
@@ -335,15 +876,12 @@ let output = command.output();
             && process_result.has_path,
         "script_process_context_mismatch"
     );
-    let timeout = helper::cli_text(
+    let timeout = cli_text(
         context,
         cli,
         [
             "script", "eval",
-            `let c=std::process::command("cmd.exe");
-             c.args(["/d","/s","/c","ping -n 6 127.0.0.1 >nul"]);
-             c.timeout(std::time::Duration::from_millis(10));
-             try { c.output(); "missing" } catch(e) { print(e); }`,
+            "let c=std::process::command(\"cmd.exe\");\n             c.args([\"/d\",\"/s\",\"/c\",\"ping -n 6 127.0.0.1 >nul\"]);\n             c.timeout(std::time::Duration::from_millis(10));\n             try { c.output(); \"missing\" } catch(e) { print(e); }",
             "--profile", "local", "--timeout-ms", "10000"
         ],
         audit_path
@@ -353,27 +891,24 @@ let output = command.output();
         script_eval(context, cli, "6 * 7", audit_path) == "42",
         "script_process_timeout_recovery_failed"
     );
-    let spawn_failure = helper::failure_text(
+    let spawn_failure = failure_text(
         context,
         cli,
         [
             "script", "eval",
-            `std::process::command("agenterm-definitely-missing.exe").output()`,
+            "std::process::command(\"agenterm-definitely-missing.exe\").output()",
             "--profile", "local"
         ],
         4,
         audit_path
     );
     test_harness::require(
-        spawn_failure.contains(`"code":"process_spawn"`)
-            && spawn_failure.contains(`"exit_class":"child"`),
+        spawn_failure.contains("\"code\":\"process_spawn\"")
+            && spawn_failure.contains("\"exit_class\":\"child\""),
         "script_process_spawn_failure_untyped"
     );
-    let nonzero_source = `
-let command = std::process::command("cmd.exe");
-command.args(["/d", "/s", "/c", "exit /b 7"]);
-command.output().require_success("test-child");`;
-    let nonzero = helper::failure_text(
+    let nonzero_source = "\nlet command = std::process::command(\"cmd.exe\");\ncommand.args([\"/d\", \"/s\", \"/c\", \"exit /b 7\"]);\ncommand.output().require_success(\"test-child\");";
+    let nonzero = failure_text(
         context,
         cli,
         [
@@ -384,21 +919,14 @@ command.output().require_success("test-child");`;
         audit_path
     );
     test_harness::require(
-        nonzero.contains(`"code":"child_nonzero"`)
+        nonzero.contains("\"code\":\"child_nonzero\"")
             && nonzero.contains("test-child"),
         "script_process_nonzero_failure_untyped"
     );
     let caught = script_eval_json(
         context,
         cli,
-        `
-let caught = ();
-try {
-    let command = std::process::command("cmd.exe");
-    command.args(["/d", "/s", "/c", "exit /b 7"]);
-    command.output().require_success("test-child");
-} catch (error) { caught = error; }
-caught`,
+        "\nlet caught = ();\ntry {\n    let command = std::process::command(\"cmd.exe\");\n    command.args([\"/d\", \"/s\", \"/c\", \"exit /b 7\"]);\n    command.output().require_success(\"test-child\");\n} catch (error) { caught = error; }\ncaught",
         audit_path
     );
     test_harness::require(
@@ -415,14 +943,7 @@ caught`,
         script_eval(
             context,
             cli,
-            `
-let command = std::process::command("cmd.exe");
-command.args(["/d","/s","/c","ping -n 6 127.0.0.1 >nul"]);
-let child = command.start();
-let pid = child.id;
-child.kill();
-let output = child.wait_with_output();
-#{pid: pid, state: child.state, complete: output.complete}`,
+            "\nlet command = std::process::command(\"cmd.exe\");\ncommand.args([\"/d\",\"/s\",\"/c\",\"ping -n 6 127.0.0.1 >nul\"]);\nlet child = command.start();\nlet pid = child.id;\nchild.kill();\nlet output = child.wait_with_output();\n#{pid: pid, state: child.state, complete: output.complete}",
             audit_path
         )
     );
@@ -432,7 +953,7 @@ let output = child.wait_with_output();
     );
 
     print("STEP bounded child streams, backpressure, and truthful truncation");
-    let expected = trimmed(helper::run_program(
+    let version_output = run_program(
         context,
         cli,
         ["--version"],
@@ -440,27 +961,14 @@ let output = child.wait_with_output();
         "",
         #{},
         []
-    ).stdout);
-    let cli_literal = json_literal(cli);
+    );
+    let expected = trimmed(version_output.stdout);
+    let cli_literal = "\"" + cli + "\"";
     let stream = rhai::json::parse(
         script_eval(
             context,
             cli,
-            `
-let command=std::process::command(${cli_literal});
-command.arg("--version");
-let child=command.start();
-let stream=child.stdout;
-let first=stream.read(2,std::time::Duration::from_secs(1)).to_text();
-let rest=stream.collect(64,std::time::Duration::from_secs(1)).to_text();
-let output=child.wait_with_output();
-let empty=stream.read(1);
-#{
- id:stream.id,kind:stream.kind,state:stream.state,
- buffered:stream.buffered_bytes,truncated:stream.truncated,
- complete:stream.complete,first:first,rest:rest,empty:empty.len,
- final:output.stdout_text(),output_complete:output.complete
-}`,
+            "\nlet command=std::process::command(" + cli_literal + ");\ncommand.arg(\"--version\");\nlet child=command.start();\nlet stream=child.stdout;\nlet first=stream.read(2,std::time::Duration::from_secs(1)).to_text();\nlet rest=stream.collect(64,std::time::Duration::from_secs(1)).to_text();\nlet output=child.wait_with_output();\nlet empty=stream.read(1);\n#{\n id:stream.id,kind:stream.kind,state:stream.state,\n buffered:stream.buffered_bytes,truncated:stream.truncated,\n complete:stream.complete,first:first,rest:rest,empty:empty.len,\n final:output.stdout_text(),output_complete:output.complete\n}",
             audit_path
         )
     );
@@ -482,17 +990,7 @@ let empty=stream.read(1);
         script_eval(
             context,
             cli,
-            `
-let command=std::process::command(${cli_literal});
-command.arg("--version"); command.capture_limit(4);
-let child=command.start(); let stream=child.stdout;
-let delivered=stream.collect(64).to_text();
-let output=child.wait_with_output();
-#{
- stdout:output.stdout_text(),truncated:output.truncated,
- complete:output.complete,delivered:delivered,
- stream_truncated:stream.truncated,stream_complete:stream.complete
-}`,
+            "\nlet command=std::process::command(" + cli_literal + ");\ncommand.arg(\"--version\"); command.capture_limit(4);\nlet child=command.start(); let stream=child.stdout;\nlet delivered=stream.collect(64).to_text();\nlet output=child.wait_with_output();\n#{\n stdout:output.stdout_text(),truncated:output.truncated,\n complete:output.complete,delivered:delivered,\n stream_truncated:stream.truncated,stream_complete:stream.complete\n}",
             audit_path
         )
     );
@@ -509,18 +1007,7 @@ let output=child.wait_with_output();
         script_eval(
             context,
             cli,
-            `
-let command=std::process::command("cmd.exe");
-command.args(["/d","/s","/c","ping -n 6 127.0.0.1 >nul"]);
-let child=command.start(); let stream=child.stdout; let timed_out=0;
-try { stream.read(1,std::time::Duration::from_millis(10)); }
-catch(error) { timed_out=error.contains("stream_read_timeout"); }
-let closed=stream.close(); child.kill(); let output=child.wait_with_output();
-#{
- timed_out:timed_out,closed:closed,state:stream.state,
- truncated:stream.truncated,complete:stream.complete,
- output_truncated:output.truncated,output_complete:output.complete
-}`,
+            "\nlet command=std::process::command(\"cmd.exe\");\ncommand.args([\"/d\",\"/s\",\"/c\",\"ping -n 6 127.0.0.1 >nul\"]);\nlet child=command.start(); let stream=child.stdout; let timed_out=0;\ntry { stream.read(1,std::time::Duration::from_millis(10)); }\ncatch(error) { timed_out=error.contains(\"stream_read_timeout\"); }\nlet closed=stream.close(); child.kill(); let output=child.wait_with_output();\n#{\n timed_out:timed_out,closed:closed,state:stream.state,\n truncated:stream.truncated,complete:stream.complete,\n output_truncated:output.truncated,output_complete:output.complete\n}",
             audit_path
         )
     );
@@ -549,16 +1036,7 @@ fn assert_tasks_and_http(
         script_eval(
             context,
             cli,
-            `
-let slow=rhai::task::after(std::time::Duration::from_millis(100));
-let fast=rhai::task::after(std::time::Duration::from_millis(1));
-let winner=rhai::task::race([slow,fast],std::time::Duration::from_secs(1));
-fast.wait(); let changed=slow.cancel();
-#{
- winner:winner,fast_state:fast.state,fast_done:fast.done,
- slow_state:slow.state,slow_cancelled:slow.cancelled,
- cancel_changed_state:changed
-}`,
+            "\nlet slow=rhai::task::after(std::time::Duration::from_millis(100));\nlet fast=rhai::task::after(std::time::Duration::from_millis(1));\nlet winner=rhai::task::race([slow,fast],std::time::Duration::from_secs(1));\nfast.wait(); let changed=slow.cancel();\n#{\n winner:winner,fast_state:fast.state,fast_done:fast.done,\n slow_state:slow.state,slow_cancelled:slow.cancelled,\n cancel_changed_state:changed\n}",
             audit_path
         )
     );
@@ -571,14 +1049,12 @@ fast.wait(); let changed=slow.cancel();
             && task_result.cancel_changed_state,
         "script_task_race_mismatch"
     );
-    let task_timeout = helper::cli_text(
+    let task_timeout = cli_text(
         context,
         cli,
         [
             "script", "eval",
-            `let task=rhai::task::after(std::time::Duration::from_secs(1));
-             try { task.wait(std::time::Duration::from_millis(1)); }
-             catch(error) { print(error); } task.cancel();`,
+            "let task=rhai::task::after(std::time::Duration::from_secs(1));\n             try { task.wait(std::time::Duration::from_millis(1)); }\n             catch(error) { print(error); } task.cancel();",
             "--profile", "local", "--timeout-ms", "10000"
         ],
         audit_path
@@ -602,7 +1078,7 @@ fast.wait(); let changed=slow.cancel();
         "http-requests.jsonl"
     ).display;
     let stop_path = std::path::join(runtime_dir, "http-stop").display;
-    let fixture = helper::start_http_fixture(
+    let fixture = start_http_fixture(
         context,
         script,
         fixture_path,
@@ -613,7 +1089,7 @@ fast.wait(); let changed=slow.cancel();
     );
     let http_error = "";
     try {
-        let ready = helper::wait_http_ready(fixture, ready_path, 3000);
+        let ready = wait_http_ready(fixture, ready_path, 3000);
         test_harness::require(
             ready.schema_version == 1
                 && ready.pid > 0
@@ -627,72 +1103,10 @@ fast.wait(); let changed=slow.cancel();
         ).display;
         std::fs::write(
             http_file,
-            `
-let base=args[0]; let tls_base=args[1];
-let options=#{proxy:0,timeout:std::time::Duration::from_secs(1)};
-let protocol_options=#{
- proxy:0,timeout:std::time::Duration::from_millis(500)
-};
-let status=rhai::http::request("GET",base+"/status",options);
-let values=status.header("x-test"); let body=status.body;
-let status_text=body.collect(16).to_text();
-let echo=rhai::http::request("POST",base+"/echo",#{
- proxy:0,timeout:std::time::Duration::from_secs(2),
- headers:#{"content-type":"application/octet-stream"},
- body:rhai::bytes::from_text("payload")
-});
-let echo_text=echo.body.collect(16).to_text();
-let large=rhai::http::request("GET",base+"/large",#{
- proxy:0,timeout:std::time::Duration::from_secs(2),max_body_bytes:4
-});
-let large_body=large.body; let large_text=large_body.collect(16).to_text();
-let async_task=rhai::http::start("GET",base+"/async",options);
-let async_kind=async_task.kind;
-let async_response=async_task.wait(std::time::Duration::from_secs(2));
-let async_text=async_response.body.collect(16).to_text();
-let cancel_task=rhai::http::start("GET",base+"/cancel",options);
-rhai::task::sleep(std::time::Duration::from_millis(50));
-let cancel_changed=cancel_task.cancel(); let cancel_error="";
-try { cancel_task.wait(std::time::Duration::from_secs(1)); }
-catch(error) { cancel_error=error; }
-rhai::task::sleep(std::time::Duration::from_millis(600));
-let timeout_error="";
-try { rhai::http::request("GET",base+"/slow",#{
- proxy:0,timeout:std::time::Duration::from_millis(50)
-}); } catch(error) { timeout_error=error; }
-let malformed_error="";
-try { rhai::http::request("GET",base+"/malformed",protocol_options); }
-catch(error) { malformed_error=error; }
-let disconnect_error="";
-try { rhai::http::request("GET",base+"/disconnect",protocol_options); }
-catch(error) { disconnect_error=error; }
-let tls_error="";
-try { rhai::http::request("GET",tls_base+"/tls",#{
- proxy:0,timeout:std::time::Duration::from_millis(250)
-}); } catch(error) { tls_error=error; }
-let proxy_error="";
-try {
- rhai::http::request(
-  "GET","http://HTTP_CREDENTIAL_SECRET.invalid/PRIVATE_PATH_SECRET",
-  #{proxy:"http://user:PROXY_CREDENTIAL_SECRET@127.0.0.1:1",
-    timeout:std::time::Duration::from_millis(50)}
- );
-} catch(error) { proxy_error=error; }
-#{
- status:status.status,version:status.version,
- first_header:values[0].to_text(),second_header:values[1].to_text(),
- status_text:status_text,status_kind:body.kind,status_complete:body.complete,
- echo_text:echo_text,large_text:large_text,
- large_truncated:large_body.truncated,large_complete:large_body.complete,
- async_kind:async_kind,async_text:async_text,async_state:async_task.state,
- cancel_changed:cancel_changed,cancel_error:cancel_error,
- cancel_state:cancel_task.state,timeout_error:timeout_error,
- malformed_error:malformed_error,disconnect_error:disconnect_error,
- tls_error:tls_error,proxy_error:proxy_error
-}`
+            "\nlet base=args[0]; let tls_base=args[1];\nlet options=#{proxy:0,timeout:std::time::Duration::from_secs(1)};\nlet protocol_options=#{\n proxy:0,timeout:std::time::Duration::from_millis(500)\n};\nlet status=rhai::http::request(\"GET\",base+\"/status\",options);\nlet values=status.header(\"x-test\"); let body=status.body;\nlet status_text=body.collect(16).to_text();\nlet echo=rhai::http::request(\"POST\",base+\"/echo\",#{\n proxy:0,timeout:std::time::Duration::from_secs(2),\n headers:#{\"content-type\":\"application/octet-stream\"},\n body:rhai::bytes::from_text(\"payload\")\n});\nlet echo_text=echo.body.collect(16).to_text();\nlet large=rhai::http::request(\"GET\",base+\"/large\",#{\n proxy:0,timeout:std::time::Duration::from_secs(2),max_body_bytes:4\n});\nlet large_body=large.body; let large_text=large_body.collect(16).to_text();\nlet async_task=rhai::http::start(\"GET\",base+\"/async\",options);\nlet async_kind=async_task.kind;\nlet async_response=async_task.wait(std::time::Duration::from_secs(2));\nlet async_text=async_response.body.collect(16).to_text();\nlet cancel_task=rhai::http::start(\"GET\",base+\"/cancel\",options);\nrhai::task::sleep(std::time::Duration::from_millis(50));\nlet cancel_changed=cancel_task.cancel(); let cancel_error=\"\";\ntry { cancel_task.wait(std::time::Duration::from_secs(1)); }\ncatch(error) { cancel_error=error; }\nrhai::task::sleep(std::time::Duration::from_millis(600));\nlet timeout_error=\"\";\ntry { rhai::http::request(\"GET\",base+\"/slow\",#{\n proxy:0,timeout:std::time::Duration::from_millis(50)\n}); } catch(error) { timeout_error=error; }\nlet malformed_error=\"\";\ntry { rhai::http::request(\"GET\",base+\"/malformed\",protocol_options); }\ncatch(error) { malformed_error=error; }\nlet disconnect_error=\"\";\ntry { rhai::http::request(\"GET\",base+\"/disconnect\",protocol_options); }\ncatch(error) { disconnect_error=error; }\nlet tls_error=\"\";\ntry { rhai::http::request(\"GET\",tls_base+\"/tls\",#{\n proxy:0,timeout:std::time::Duration::from_millis(250)\n}); } catch(error) { tls_error=error; }\nlet proxy_error=\"\";\ntry {\n rhai::http::request(\n  \"GET\",\"http://HTTP_CREDENTIAL_SECRET.invalid/PRIVATE_PATH_SECRET\",\n  #{proxy:\"http://user:PROXY_CREDENTIAL_SECRET@127.0.0.1:1\",\n    timeout:std::time::Duration::from_millis(50)}\n );\n} catch(error) { proxy_error=error; }\n#{\n status:status.status,version:status.version,\n first_header:values[0].to_text(),second_header:values[1].to_text(),\n status_text:status_text,status_kind:body.kind,status_complete:body.complete,\n echo_text:echo_text,large_text:large_text,\n large_truncated:large_body.truncated,large_complete:large_body.complete,\n async_kind:async_kind,async_text:async_text,async_state:async_task.state,\n cancel_changed:cancel_changed,cancel_error:cancel_error,\n cancel_state:cancel_task.state,timeout_error:timeout_error,\n malformed_error:malformed_error,disconnect_error:disconnect_error,\n tls_error:tls_error,proxy_error:proxy_error\n}"
         );
         let result = rhai::json::parse(
-            helper::cli_text(
+            cli_text(
                 context,
                 cli,
                 [
@@ -747,7 +1161,7 @@ try {
         );
         test_harness::require(
             fixture_output.success,
-            "script_http_fixture_exit:" + fixture_output.stderr_text()
+            "script_http_fixture_exit:" + ("" + fixture_output.stderr_text())
         );
         test_harness::append_command_record(
             context,
@@ -789,9 +1203,9 @@ try {
             "script_http_request_matrix_mismatch"
         );
     } catch (error) {
-        http_error = error.to_string();
+        http_error = "" + error;
     }
-    if fixture.state == "running" {
+    if child_is_running(fixture) {
         fixture.kill();
         fixture.wait_with_output(std::time::Duration::from_secs(2));
     }
@@ -810,7 +1224,7 @@ try {
         project,
         "agenterm.tasks.json"
     ).display;
-    let catalog = helper::cli_json(
+    let catalog = cli_json(
         context,
         cli,
         [
@@ -837,7 +1251,7 @@ try {
             && unknown[0].status == "degraded",
         "script_task_catalog_mismatch"
     );
-    let shown = helper::cli_json(
+    let shown = cli_json(
         context,
         cli,
         [
@@ -853,7 +1267,7 @@ try {
         "script_task_show_mismatch"
     );
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             [
@@ -864,7 +1278,7 @@ try {
         ) == "OK",
         "script_task_check_failed"
     );
-    let bad_version = helper::failure_text(
+    let bad_version = failure_text(
         context,
         cli,
         [
@@ -885,7 +1299,7 @@ try {
         project,
         "incompatible.tasks.json"
     ).display;
-    let incompatible_list = helper::cli_json(
+    let incompatible_list = cli_json(
         context,
         cli,
         [
@@ -902,7 +1316,7 @@ try {
         "script_task_incompatible_not_inspectable"
     );
     for operation in ["check", "run"] {
-        let rejected = helper::failure_text(
+        let rejected = failure_text(
             context,
             cli,
             [
@@ -919,28 +1333,29 @@ try {
             "script_task_incompatible_executed"
         );
     }
-    let named = rhai::json::parse(
-        helper::run_cli(
-            context,
-            cli,
-            [
-                "script", "task", "run", "daily-check",
-                "--manifest", manifest, "--json", "--", "cli-extra"
-            ],
-            0,
-            audit_path,
-            #{"AGENTERM_TASK_FIXTURE":"fixture-ok"},
-            []
-        ).stdout
+    let named_output = run_cli(
+        context,
+        cli,
+        [
+            "script", "task", "run", "daily-check",
+            "--manifest", manifest, "--json", "--", "cli-extra"
+        ],
+        0,
+        audit_path,
+        #{"AGENTERM_TASK_FIXTURE":"fixture-ok"},
+        []
     );
+    let named = rhai::json::parse(named_output.stdout);
     test_harness::require(
         named.ok
             && named.value.answer == 42
             && named.value.environment == "fixture-ok"
-            && named.value.args == ["manifest-default", "cli-extra"],
+            && named.value.args.len == 2
+            && named.value.args[0] == "manifest-default"
+            && named.value.args[1] == "cli-extra",
         "script_named_task_context_mismatch"
     );
-    let missing_environment = helper::run_cli(
+    let missing_environment = run_cli(
         context,
         cli,
         [
@@ -959,7 +1374,7 @@ try {
         ).contains("task_environment_missing"),
         "script_named_task_missing_environment_untyped"
     );
-    let module_ok = helper::cli_text(
+    let module_ok = cli_text(
         context,
         cli,
         [
@@ -970,28 +1385,66 @@ try {
         audit_path
     );
     test_harness::require(module_ok == "OK", "script_module_check_failed");
-    for fixture in [
-        ["missing-module.rhai", "script_module_missing"],
-        ["escape-module.rhai", "script_module_root_escape"],
-        ["cycle-module.rhai", "script_module_cycle"],
-        ["bad-module-api.rhai", "script_api_unknown"]
-    ] {
-        let failure = helper::failure_text(
-            context,
-            cli,
-            [
-                "script", "check",
-                std::path::join(project, fixture[0]).display,
-                "--profile", "local", "--project-root", project
-            ],
-            1,
-            audit_path
-        );
-        test_harness::require(
-            failure.contains(fixture[1]),
-            "script_module_failure_untyped:" + fixture[1]
-        );
-    }
+    let failure_missing = failure_text(
+        context,
+        cli,
+        [
+            "script", "check",
+            std::path::join(project, "missing-module.rhai").display,
+            "--profile", "local", "--project-root", project
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_missing.contains("script_module_missing"),
+        "script_module_failure_untyped:script_module_missing"
+    );
+    let failure_escape = failure_text(
+        context,
+        cli,
+        [
+            "script", "check",
+            std::path::join(project, "escape-module.rhai").display,
+            "--profile", "local", "--project-root", project
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_escape.contains("script_module_root_escape"),
+        "script_module_failure_untyped:script_module_root_escape"
+    );
+    let failure_cycle = failure_text(
+        context,
+        cli,
+        [
+            "script", "check",
+            std::path::join(project, "cycle-module.rhai").display,
+            "--profile", "local", "--project-root", project
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_cycle.contains("script_module_cycle"),
+        "script_module_failure_untyped:script_module_cycle"
+    );
+    let failure_bad_api = failure_text(
+        context,
+        cli,
+        [
+            "script", "check",
+            std::path::join(project, "bad-module-api.rhai").display,
+            "--profile", "local", "--project-root", project
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_bad_api.contains("script_api_unknown"),
+        "script_module_failure_untyped:script_api_unknown"
+    );
 }
 
 fn assert_runtime_and_framing(
@@ -1012,7 +1465,7 @@ fn assert_runtime_and_framing(
     std::fs::write(std::path::join(target_root, "root.bin").display, "x");
     std::fs::write(std::path::join(target_debug, "debug.bin").display, "abc");
     std::fs::write(std::path::join(target_deps, "dependency.bin").display, "12345");
-    let target_envelope = helper::cli_json(
+    let target_envelope = cli_json(
         context,
         cli,
         [
@@ -1048,7 +1501,7 @@ fn assert_runtime_and_framing(
 
     print("STEP pure eval, file run, arguments, and check");
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             ["script", "eval", "40 + 2"],
@@ -1061,10 +1514,10 @@ fn assert_runtime_and_framing(
     }
     std::fs::write(
         source_file,
-        `print("hello"); args[0] + args[1]`
+        "print(\"hello\"); args[0] + args[1]"
     );
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             [
@@ -1076,7 +1529,7 @@ fn assert_runtime_and_framing(
         "script_file_run_mismatch"
     );
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             ["script", "check", source_file],
@@ -1085,7 +1538,7 @@ fn assert_runtime_and_framing(
         "script_file_check_failed"
     );
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             [
@@ -1100,8 +1553,8 @@ fn assert_runtime_and_framing(
         runtime_dir,
         "local-data.json"
     ).display;
-    let data_literal = json_literal(data_file);
-    let data_text_literal = json_literal(`{"answer":42}`);
+    let data_literal = "\"" + data_file + "\"";
+    let data_text_literal = "\"{\\\"answer\\\":42}\"";
     test_harness::require(
         script_eval(
             context,
@@ -1125,20 +1578,20 @@ fn assert_runtime_and_framing(
     script_eval(
         context,
         cli,
-        `std::fs::create_dir_all(${json_literal(fs_nested)})`,
+        "std::fs::create_dir_all(" + "\"" + fs_nested + "\"" + ")",
         audit_path
     );
     script_eval(
         context,
         cli,
-        `std::fs::write(${json_literal(fs_source)}, "Unicode lifecycle: 目录")`,
+        "std::fs::write(" + "\"" + fs_source + "\"" + ", \"Unicode lifecycle: 目录\")",
         audit_path
     );
     test_harness::require(
         script_eval(
             context,
             cli,
-            `std::fs::copy(${json_literal(fs_source)}, ${json_literal(fs_copy)})`,
+            "std::fs::copy(" + "\"" + fs_source + "\"" + ", " + "\"" + fs_copy + "\"" + ")",
             audit_path
         ).parse_int() > 0,
         "script_fs_copy_count_invalid"
@@ -1146,14 +1599,14 @@ fn assert_runtime_and_framing(
     script_eval(
         context,
         cli,
-        `std::fs::rename(${json_literal(fs_copy)}, ${json_literal(fs_renamed)})`,
+        "std::fs::rename(" + "\"" + fs_copy + "\"" + ", " + "\"" + fs_renamed + "\"" + ")",
         audit_path
     );
     test_harness::require(
         script_eval(
             context,
             cli,
-            `std::fs::read_to_string(${json_literal(fs_renamed)})`,
+            "std::fs::read_to_string(" + "\"" + fs_renamed + "\"" + ")",
             audit_path
         ) == "Unicode lifecycle: 目录",
         "script_fs_unicode_corrupted"
@@ -1161,13 +1614,13 @@ fn assert_runtime_and_framing(
     script_eval(
         context,
         cli,
-        `std::fs::remove_file(${json_literal(fs_renamed)})`,
+        "std::fs::remove_file(" + "\"" + fs_renamed + "\"" + ")",
         audit_path
     );
     script_eval(
         context,
         cli,
-        `std::fs::remove_dir_all(${json_literal(fs_tree)})`,
+        "std::fs::remove_dir_all(" + "\"" + fs_tree + "\"" + ")",
         audit_path
     );
     test_harness::require(!std::fs::exists(fs_tree), "script_fs_tree_survived");
@@ -1185,17 +1638,17 @@ fn assert_runtime_and_framing(
         runtime_dir,
         "atomic-result-目录.json"
     ).display;
-    std::fs::write(atomic_path, `{"state":"old"}`);
+    std::fs::write(atomic_path, "{\"state\":\"old\"}");
     script_eval(
         context,
         cli,
         "rhai::runtime::atomic_write(" +
-            json_literal(atomic_path) + ", " +
-            json_literal(`{"state":"新"}`) + ")",
+            "\"" + atomic_path + "\"" + ", " +
+            "\"" + "{\"state\":\"新\"}" + ")",
         audit_path
     );
     test_harness::require(
-        std::fs::read_to_string(atomic_path) == `{"state":"新"}`,
+        std::fs::read_to_string(atomic_path) == "{\"state\":\"新\"}",
         "script_atomic_write_mismatch"
     );
     let staging_count = 0;
@@ -1210,7 +1663,7 @@ fn assert_runtime_and_framing(
         script_eval(
             context,
             cli,
-            `std::path::PathBuf::from(${data_literal}).extension`,
+            "std::path::PathBuf::from(" + data_literal + ").extension",
             audit_path
         ) == "json",
         "script_typed_path_mismatch"
@@ -1218,8 +1671,7 @@ fn assert_runtime_and_framing(
     let arbitrary_bytes = script_eval_json(
             context,
             cli,
-            `let b=rhai::bytes::from_array([0,65,255]);
-             #{len:b.len,first:b.get(0),last:b.get(2)}`,
+            "let b=rhai::bytes::from_array([0,65,255]);\n             #{len:b.len,first:b.get(0),last:b.get(2)}",
             audit_path
         );
     test_harness::require(
@@ -1230,49 +1682,85 @@ fn assert_runtime_and_framing(
         "script_arbitrary_bytes_mismatch"
     );
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             [
-                "script", "eval", `std::fs::exists(".")`,
+                "script", "eval", "std::fs::exists(\".\")",
                 "--profile", "pure"
             ],
             audit_path
         ) == "true",
         "script_legacy_pure_restricted"
     );
-    for fixture in [
-        ["let = ;", "script_parse"],
-        ["new_tab()", "script_api_unavailable"],
-        ["made_up_api()", "script_api_unknown"],
-        ["agent.workspace()", "script_api_migrated"]
-    ] {
-        std::fs::write(source_file, fixture[0]);
-        let failure = helper::failure_text(
-            context,
-            cli,
-            [
-                "script", "check", source_file,
-                "--profile", "observe"
-            ],
-            1,
-            audit_path
-        );
-        test_harness::require(
-            failure.contains(fixture[1]),
-            "script_static_failure_untyped:" + fixture[1]
-        );
-        if fixture[1] == "script_api_migrated" {
-            test_harness::require(
-                failure.contains("fleet.workspace.info()"),
-                "script_static_migration_target_missing"
-            );
-        }
-    }
+    std::fs::write(source_file, "let = ;");
+    let failure_parse = failure_text(
+        context,
+        cli,
+        [
+            "script", "check", source_file,
+            "--profile", "observe"
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_parse.contains("script_parse"),
+        "script_static_failure_untyped:script_parse"
+    );
+    std::fs::write(source_file, "new_tab()");
+    let failure_unavailable = failure_text(
+        context,
+        cli,
+        [
+            "script", "check", source_file,
+            "--profile", "observe"
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_unavailable.contains("script_api_unavailable"),
+        "script_static_failure_untyped:script_api_unavailable"
+    );
+    std::fs::write(source_file, "made_up_api()");
+    let failure_unknown = failure_text(
+        context,
+        cli,
+        [
+            "script", "check", source_file,
+            "--profile", "observe"
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_unknown.contains("script_api_unknown"),
+        "script_static_failure_untyped:script_api_unknown"
+    );
+    std::fs::write(source_file, "agent.workspace()");
+    let failure_migrated = failure_text(
+        context,
+        cli,
+        [
+            "script", "check", source_file,
+            "--profile", "observe"
+        ],
+        1,
+        audit_path
+    );
+    test_harness::require(
+        failure_migrated.contains("script_api_migrated"),
+        "script_static_failure_untyped:script_api_migrated"
+    );
+    test_harness::require(
+        failure_migrated.contains("fleet.workspace.info()"),
+        "script_static_migration_target_missing"
+    );
 
     print("STEP unrestricted legacy spellings and operation budget");
     test_harness::require(
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             [
@@ -1283,7 +1771,7 @@ fn assert_runtime_and_framing(
         ).parse_int() > 0,
         "script_legacy_pure_process_restricted"
     );
-    let operation_limit = helper::failure_text(
+    let operation_limit = failure_text(
         context,
         cli,
         [
@@ -1294,10 +1782,10 @@ fn assert_runtime_and_framing(
         audit_path
     );
     test_harness::require(
-        operation_limit.contains(`"code":"limit_operations"`),
+        operation_limit.contains("\"code\":\"limit_operations\""),
         "script_operation_limit_untyped"
     );
-    let wall_limit = helper::failure_text(
+    let wall_limit = failure_text(
         context,
         cli,
         [
@@ -1309,14 +1797,14 @@ fn assert_runtime_and_framing(
         audit_path
     );
     test_harness::require(
-        wall_limit.contains(`"code":"limit_wall_time"`)
-            && wall_limit.contains(`"exit_class":"limit"`),
+        wall_limit.contains("\"code\":\"limit_wall_time\"")
+            && wall_limit.contains("\"exit_class\":\"limit\""),
         "script_wall_limit_untyped"
     );
     let huge_source = "";
     huge_source.pad(262145, " ");
     std::fs::write(source_file, huge_source);
-    let source_limit = helper::failure_text(
+    let source_limit = failure_text(
         context,
         cli,
         ["script", "check", source_file],
@@ -1327,7 +1815,7 @@ fn assert_runtime_and_framing(
         source_limit.contains("262144 byte limit"),
         "script_source_limit_untyped"
     );
-    let malformed_command = helper::configured_program(
+    let malformed_command = configured_program(
         context,
         script,
         ["--worker"],
@@ -1339,13 +1827,13 @@ fn assert_runtime_and_framing(
     test_harness::require(
         malformed.exit_code == 1
             && malformed.stdout_text().contains(
-                `"code":"protocol_invalid_invocation"`
+                "\"code\":\"protocol_invalid_invocation\""
             ),
         "script_worker_malformed_untyped"
     );
     let oversized_text = "";
     oversized_text.pad(2097153, "x");
-    let oversized_command = helper::configured_program(
+    let oversized_command = configured_program(
         context,
         script,
         ["--worker"],
@@ -1357,7 +1845,7 @@ fn assert_runtime_and_framing(
     test_harness::require(
         oversized.exit_code == 1
             && oversized.stdout_text().contains(
-                `"code":"protocol_invocation_too_large"`
+                "\"code\":\"protocol_invocation_too_large\""
             ),
         "script_worker_oversized_untyped"
     );
@@ -1368,27 +1856,27 @@ fn assert_runtime_and_framing(
 
     print("STEP framed worker sequencing, isolation, rejection, and recovery");
     let framed = rhai::bytes::from_array([]);
-    framed.append(helper::payload_frame(rhai::bytes::from_text("{")));
+    framed.append(payload_frame(rhai::bytes::from_text("{")));
     let oversized_payload = "";
     oversized_payload.pad(2097153, "x");
     framed.append(
-        helper::payload_frame(
+        payload_frame(
             rhai::bytes::from_text(oversized_payload)
         )
     );
     framed.append(
-        helper::json_frame(
-            helper::framed_invocation(
+        json_frame(
+            framed_invocation(
                 "recovery",
                 "invoke-one",
-                `print("framed-output"); 40 + 2`,
+                "print(\"framed-output\"); 40 + 2",
                 1
             )
         )
     );
     framed.append(
-        helper::json_frame(
-            helper::framed_invocation(
+        json_frame(
+            framed_invocation(
                 "frame-two",
                 "invoke-one",
                 "1",
@@ -1397,8 +1885,8 @@ fn assert_runtime_and_framing(
         )
     );
     framed.append(
-        helper::json_frame(
-            helper::framed_invocation(
+        json_frame(
+            framed_invocation(
                 "bad-version",
                 "never-run",
                 "1",
@@ -1406,7 +1894,7 @@ fn assert_runtime_and_framing(
             )
         )
     );
-    let frames = helper::invoke_framed_worker(
+    let frames = invoke_framed_worker(
         context,
         script,
         framed
@@ -1433,7 +1921,7 @@ fn assert_runtime_and_framing(
             && recovered.payload.value == 42,
         "script_framed_recovery_mismatch"
     );
-    let cancel_invoke = helper::framed_invocation(
+    let cancel_invoke = framed_invocation(
         "cancel-invoke",
         "cancel-running",
         "loop {}",
@@ -1441,16 +1929,16 @@ fn assert_runtime_and_framing(
     );
     cancel_invoke.payload.budgets.wall_time_ms = 10000;
     cancel_invoke.payload.budgets.operations = 10000000;
-    let cancel_bytes = helper::json_frame(cancel_invoke);
+    let cancel_bytes = json_frame(cancel_invoke);
     cancel_bytes.append(
-        helper::json_frame(#{
+        json_frame(#{
             frame_version: 1,
             frame_id: "cancel-request",
             kind: "cancel",
             payload: #{invocation_id:"cancel-running"}
         })
     );
-    let cancel_frames = helper::invoke_framed_worker(
+    let cancel_frames = invoke_framed_worker(
         context,
         script,
         cancel_bytes
@@ -1473,9 +1961,9 @@ fn assert_supervisor(
 ) {
     print("STEP supervisor timeout, crash, parent exit, concurrency, and recovery");
     let blocking_source =
-        `std::net::TcpListener::bind("127.0.0.1:0").accept()`;
+        "std::net::TcpListener::bind(\"127.0.0.1:0\").accept()";
 
-    let hard_timeout = helper::start_script_client(
+    let hard_timeout = start_script_client(
         context,
         cli,
         [
@@ -1491,13 +1979,13 @@ fn assert_supervisor(
     test_harness::require(
         hard_output.exit_code == 3
             && hard_output.stderr_text().contains(
-                `"code":"host_hard_timeout"`
+                "\"code\":\"host_hard_timeout\""
             ),
         "script_supervisor_hard_timeout_untyped"
     );
 
-    let existing = helper::process_ids("agenterm-rh.exe");
-    let crash_client = helper::start_script_client(
+    let existing = process_ids("agenterm-rh.exe");
+    let crash_client = start_script_client(
         context,
         cli,
         [
@@ -1507,7 +1995,7 @@ fn assert_supervisor(
         ],
         audit_path
     );
-    let crash_worker = helper::wait_new_process(
+    let crash_worker = wait_new_process(
         "agenterm-rh.exe",
         existing,
         3000
@@ -1519,7 +2007,7 @@ fn assert_supervisor(
     test_harness::require(
         crash_output.exit_code == 1
             && crash_output.stderr_text().contains(
-                `"code":"host_worker_crash"`
+                "\"code\":\"host_worker_crash\""
             ),
         "script_supervisor_crash_untyped"
     );
@@ -1529,12 +2017,8 @@ fn assert_supervisor(
         "interrupted-child.pid"
     ).display;
     let interrupted_source =
-        `let command=std::process::command("cmd.exe");
-         command.args(["/d","/s","/c","ping -n 30 127.0.0.1 >nul"]);
-         let child=command.start();
-         std::fs::write(${json_literal(pid_path)}, child.id.to_string());
-         std::net::TcpListener::bind("127.0.0.1:0").accept();`;
-    let interrupted = helper::start_script_client(
+        "let command=std::process::command(\"cmd.exe\");\n         command.args([\"/d\",\"/s\",\"/c\",\"ping -n 30 127.0.0.1 >nul\"]);\n         let child=command.start();\n         std::fs::write(" + "\"" + pid_path + "\"" + ", child.id.to_string());\n         std::net::TcpListener::bind(\"127.0.0.1:0\").accept();";
+    let interrupted = start_script_client(
         context,
         cli,
         [
@@ -1553,7 +2037,7 @@ fn assert_supervisor(
             break;
         }
         test_harness::require(
-            interrupted.state == "running",
+            child_is_running(interrupted),
             "script_supervisor_parent_fixture_early_exit"
         );
         rhai::task::sleep(std::time::Duration::from_millis(5));
@@ -1561,7 +2045,7 @@ fn assert_supervisor(
     test_harness::require(nested_pid > 0, "script_supervisor_nested_pid_missing");
     interrupted.kill();
     interrupted.wait_with_output(std::time::Duration::from_secs(2));
-    helper::wait_process_gone(nested_pid, 3000);
+    wait_process_gone(nested_pid, 3000);
 
     // Fill the published eight-slot global pool until the first typed denial.
     // The number already occupied by release/check/task ancestors varies with
@@ -1569,7 +2053,7 @@ fn assert_supervisor(
     let holders = [];
     let denied_output = ();
     for index in 0..8 {
-        let holder = helper::start_script_client(
+        let holder = start_script_client(
             context,
             cli,
             [
@@ -1580,7 +2064,7 @@ fn assert_supervisor(
             audit_path
         );
         rhai::task::sleep(std::time::Duration::from_millis(100));
-        if holder.state == "running" {
+        if child_is_running(holder) {
             holders.push(holder);
         } else {
             denied_output = holder.wait_with_output(
@@ -1600,13 +2084,13 @@ fn assert_supervisor(
     test_harness::require(
         denied_output.exit_code == 2
             && denied_output.stderr_text().contains(
-                `"code":"host_concurrency_limit"`
+                "\"code\":\"host_concurrency_limit\""
             ),
         "script_supervisor_concurrency_untyped"
     );
     holders[0].kill();
     holders[0].wait_with_output(std::time::Duration::from_secs(2));
-    let replacement = helper::start_script_client(
+    let replacement = start_script_client(
         context,
         cli,
         [
@@ -1618,11 +2102,11 @@ fn assert_supervisor(
     );
     rhai::task::sleep(std::time::Duration::from_millis(150));
     test_harness::require(
-        replacement.state == "running",
+        child_is_running(replacement),
         "script_supervisor_slot_not_recovered"
     );
     for index in 1..holders.len {
-        if holders[index].state == "running" {
+        if child_is_running(holders[index]) {
             holders[index].kill();
         }
         holders[index].wait_with_output(
@@ -1638,8 +2122,10 @@ fn assert_supervisor(
 }
 
 fn wait_script_gui(context, cli, gui_child) {
+    let gui_facts = gui_child.platform_facts;
+    let gui_pid = gui_child.id;
     for attempt in 0..400 {
-        let probe_command = helper::configured_program(
+        let probe_command = configured_program(
             context,
             cli,
             [
@@ -1651,17 +2137,16 @@ fn wait_script_gui(context, cli, gui_child) {
             #{}
         );
         let probe = probe_command.output();
-        if probe.success
-                && gui_child.platform_facts.top_level_window_present {
+        if probe.success && gui_facts.top_level_window_present {
             let snapshot = rhai::json::parse(probe.stdout_text());
             test_harness::require(
-                snapshot.client_pid == gui_child.id,
+                snapshot.client_pid == gui_pid,
                 "script_fleet_gui_lease_owner"
             );
             return snapshot;
         }
         test_harness::require(
-            gui_child.state == "running",
+            ("" + gui_child.state) == "running",
             "script_fleet_gui_early_exit"
         );
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -1684,13 +2169,13 @@ fn wait_repl_pid_file(path, timeout_ms) {
 }
 
 fn send_repl_line(context, cli, tab_id, source, audit_path) {
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         ["send-keys", "-t", tab_id, "-l", source],
         audit_path
     );
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         ["send-keys", "-t", tab_id, "Enter"],
@@ -1699,7 +2184,7 @@ fn send_repl_line(context, cli, tab_id, source, audit_path) {
 }
 
 fn wait_repl_text(context, cli, tab_id, text, audit_path) {
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         [
@@ -1718,7 +2203,7 @@ fn assert_persistent_repl_supervision(
     runtime_dir
 ) {
     print("STEP hosted persistent REPL cancellation and replacement");
-    let tab_id = helper::cli_text(
+    let tab_id = cli_text(
         context,
         cli,
         [
@@ -1738,11 +2223,11 @@ fn assert_persistent_repl_supervision(
         context,
         cli,
         tab_id,
-        `let stable = 40; std::fs::write(${json_literal(initial_pid_path)}, std::process::id().to_string()); stable + 2`,
+        "let stable = 40; std::fs::write(" + "\"" + initial_pid_path + "\"" + ", std::process::id().to_string()); stable + 2",
         audit_path
     );
     let initial_pid = wait_repl_pid_file(initial_pid_path, 5000);
-    wait_repl_text(context, cli, tab_id, `"value":42`, audit_path);
+    wait_repl_text(context, cli, tab_id, "\"value\":42", audit_path);
 
     let cooperative_pid_path = std::path::join(
         runtime_dir,
@@ -1752,20 +2237,20 @@ fn assert_persistent_repl_supervision(
         context,
         cli,
         tab_id,
-        `std::fs::write(${json_literal(cooperative_pid_path)}, std::process::id().to_string()); loop {}`,
+        "std::fs::write(" + "\"" + cooperative_pid_path + "\"" + ", std::process::id().to_string()); loop {}",
         audit_path
     );
     test_harness::require(
         wait_repl_pid_file(cooperative_pid_path, 5000) == initial_pid,
         "script_repl_cooperative_fixture_changed_worker"
     );
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         ["send-keys", "-t", tab_id, "C-c"],
         audit_path
     );
-    wait_repl_text(context, cli, tab_id, `"code":"limit_cancelled"`, audit_path);
+    wait_repl_text(context, cli, tab_id, "\"code\":\"limit_cancelled\"", audit_path);
 
     let recovered_pid_path = std::path::join(
         runtime_dir,
@@ -1775,7 +2260,7 @@ fn assert_persistent_repl_supervision(
         context,
         cli,
         tab_id,
-        `std::fs::write(${json_literal(recovered_pid_path)}, std::process::id().to_string()); stable + 2`,
+        "std::fs::write(" + "\"" + recovered_pid_path + "\"" + ", std::process::id().to_string()); stable + 2",
         audit_path
     );
     let recovered_pid = wait_repl_pid_file(recovered_pid_path, 5000);
@@ -1796,7 +2281,7 @@ fn assert_persistent_repl_supervision(
         context,
         cli,
         tab_id,
-        `let command=std::process::command("cmd.exe"); command.args(["/d","/s","/c","ping -n 30 127.0.0.1 >nul"]); let child=command.start(); std::fs::write(${json_literal(hard_worker_path)}, std::process::id().to_string()); std::fs::write(${json_literal(nested_pid_path)}, child.id.to_string()); std::net::TcpListener::bind("127.0.0.1:0").accept();`,
+        "let command=std::process::command(\"cmd.exe\"); command.args([\"/d\",\"/s\",\"/c\",\"ping -n 30 127.0.0.1 >nul\"]); let child=command.start(); std::fs::write(" + "\"" + hard_worker_path + "\"" + ", std::process::id().to_string()); std::fs::write(" + "\"" + nested_pid_path + "\"" + ", child.id.to_string()); std::net::TcpListener::bind(\"127.0.0.1:0\").accept();",
         audit_path
     );
     let hard_worker_pid = wait_repl_pid_file(hard_worker_path, 5000);
@@ -1805,14 +2290,14 @@ fn assert_persistent_repl_supervision(
         hard_worker_pid == initial_pid,
         "script_repl_hard_fixture_changed_worker"
     );
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         ["send-keys", "-t", tab_id, "C-c"],
         audit_path
     );
-    helper::wait_process_gone(hard_worker_pid, 3000);
-    helper::wait_process_gone(nested_pid, 3000);
+    wait_process_gone(hard_worker_pid, 3000);
+    wait_process_gone(nested_pid, 3000);
 
     let fresh_pid_path = std::path::join(
         runtime_dir,
@@ -1822,7 +2307,7 @@ fn assert_persistent_repl_supervision(
         context,
         cli,
         tab_id,
-        `std::fs::write(${json_literal(fresh_pid_path)}, std::process::id().to_string()); 42`,
+        "std::fs::write(" + "\"" + fresh_pid_path + "\"" + ", std::process::id().to_string()); 42",
         audit_path
     );
     let fresh_pid = wait_repl_pid_file(fresh_pid_path, 5000);
@@ -1830,11 +2315,11 @@ fn assert_persistent_repl_supervision(
         fresh_pid != initial_pid,
         "script_repl_hard_cancel_reused_worker"
     );
-    wait_repl_text(context, cli, tab_id, `"reason":"hard_interrupt"`, audit_path);
-    wait_repl_text(context, cli, tab_id, `"side_effects_replayed":false`, audit_path);
+    wait_repl_text(context, cli, tab_id, "\"reason\":\"hard_interrupt\"", audit_path);
+    wait_repl_text(context, cli, tab_id, "\"side_effects_replayed\":false", audit_path);
 
     send_repl_line(context, cli, tab_id, ":quit", audit_path);
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         [
@@ -1843,7 +2328,7 @@ fn assert_persistent_repl_supervision(
         ],
         audit_path
     );
-    helper::cli_text(
+    cli_text(
         context,
         cli,
         ["kill-window", "-t", tab_id],
@@ -1860,30 +2345,49 @@ fn assert_fleet_and_north_star(
     audit_path,
     runtime_dir
 ) {
+    let journey_error = run_fleet_journey(
+        context,
+        repo,
+        cli,
+        script,
+        gui,
+        audit_path,
+        runtime_dir
+    );
+    test_harness::require(journey_error == "", journey_error);
+}
+
+fn run_fleet_journey(
+    context,
+    repo,
+    cli,
+    script,
+    gui,
+    audit_path,
+    runtime_dir
+) {
     print("STEP typed brokered observation");
     let server_started = 0;
-    let gui_child = ();
-    let http_child = ();
     let journey_error = "";
+    cli_text(
+        context,
+        cli,
+        [
+            "new-window", "-d", "-n",
+            "script-observe-" + context.run_id
+        ],
+        audit_path
+    );
+    server_started = 1;
+    let gui_command = configured_program(
+        context,
+        gui,
+        ["--no-activate", "--address", context.address],
+        "",
+        #{}
+    );
+    let gui_child = gui_command.start();
     try {
-        helper::cli_text(
-            context,
-            cli,
-            [
-                "new-window", "-d", "-n",
-                "script-observe-" + context.run_id
-            ],
-            audit_path
-        );
-        server_started = 1;
-        let gui_command = helper::configured_program(
-            context,
-            gui,
-            ["--no-activate", "--address", context.address],
-            "",
-            #{}
-        );
-        gui_child = gui_command.start();
         let snapshot = wait_script_gui(context, cli, gui_child);
         assert_persistent_repl_supervision(
             context,
@@ -1891,7 +2395,7 @@ fn assert_fleet_and_north_star(
             audit_path,
             runtime_dir
         );
-        let public_capture = helper::cli_json(
+        let public_capture = cli_json(
             context,
             cli,
             [
@@ -1905,7 +2409,7 @@ fn assert_fleet_and_north_star(
                 && public_capture.bytes <= 5,
             "script_fleet_public_capture_mismatch"
         );
-        let invalid_capture = helper::failure_text(
+        let invalid_capture = failure_text(
             context,
             cli,
             [
@@ -1919,7 +2423,7 @@ fn assert_fleet_and_north_star(
             invalid_capture.contains("must be from 1 to 1048576"),
             "script_fleet_invalid_capture_accepted"
         );
-        let observed = helper::cli_text(
+        let observed = cli_text(
             context,
             cli,
             [
@@ -1933,7 +2437,7 @@ fn assert_fleet_and_north_star(
             observed >= snapshot.event_position.sequence,
             "script_fleet_snapshot_position_regressed"
         );
-        let workspace = helper::cli_json(
+        let workspace = cli_json(
             context,
             cli,
             [
@@ -1942,7 +2446,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         );
-        let tabs = helper::cli_json(
+        let tabs = cli_json(
             context,
             cli,
             [
@@ -1951,7 +2455,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         );
-        let active = helper::cli_json(
+        let active = cli_json(
             context,
             cli,
             [
@@ -1960,7 +2464,7 @@ fn assert_fleet_and_north_star(
             ],
             audit_path
         );
-        let capture = helper::cli_json(
+        let capture = cli_json(
             context,
             cli,
             [
@@ -1982,8 +2486,8 @@ fn assert_fleet_and_north_star(
                 && capture.value.max_bytes == 32,
             "script_fleet_observation_mismatch"
         );
-        let epoch = json_literal(snapshot.event_position.epoch);
-        let batch = helper::cli_json(
+        let epoch = "\"" + snapshot.event_position.epoch + "\"";
+        let batch = cli_json(
             context,
             cli,
             [
@@ -1998,7 +2502,7 @@ fn assert_fleet_and_north_star(
             batch.ok && batch.value.position != (),
             "script_fleet_event_read_mismatch"
         );
-        let restart = helper::failure_text(
+        let restart = failure_text(
             context,
             cli,
             [
@@ -2010,12 +2514,12 @@ fn assert_fleet_and_north_star(
             audit_path
         );
         test_harness::require(
-            restart.contains(`"code":"server_restart"`)
-                && restart.contains(`"exit_class":"fleet"`),
+            restart.contains("\"code\":\"server_restart\"")
+                && restart.contains("\"exit_class\":\"fleet\""),
             "script_fleet_restart_untyped"
         );
         let wait_started = std::time::SystemTime::now().unix_millis;
-        let wait_failure = helper::failure_text(
+        let wait_failure = failure_text(
             context,
             cli,
             [
@@ -2036,7 +2540,7 @@ fn assert_fleet_and_north_star(
             "script_fleet_wait_deadline_mismatch"
         );
         test_harness::require(
-            helper::cli_text(
+            cli_text(
                 context,
                 cli,
                 [
@@ -2046,7 +2550,7 @@ fn assert_fleet_and_north_star(
                 ],
                 audit_path
             ) == "true"
-                && helper::cli_text(
+                && cli_text(
                     context,
                     cli,
                     [
@@ -2062,41 +2566,25 @@ fn assert_fleet_and_north_star(
         print("STEP Script API v2 Fleet mutation receipt, event, and post-state");
         // Sidebar layout drops out of the snapshot for a frame while the GUI
         // relays out, so every read of it below settles instead of racing.
-        let baseline_visible = ();
-        for attempt in 0..600 {
-            let baseline_snapshot = helper::cli_json(
-                context,
-                cli,
-                ["ui-snapshot"],
-                audit_path
-            );
-            if baseline_snapshot.layout != ()
-                    && baseline_snapshot.layout.sidebar != () {
-                baseline_visible = baseline_snapshot.layout.sidebar.visible;
-                break;
-            }
-            rhai::task::sleep(std::time::Duration::from_millis(50));
-        }
+        let baseline_visible = wait_snapshot_sidebar(
+            context,
+            cli,
+            audit_path,
+            -2
+        );
         test_harness::require(
-            baseline_visible != (),
+            baseline_visible >= 0,
             "script_fleet_sidebar_baseline_unavailable"
         );
         let mutation = script_eval_json(
             context,
             cli,
-            `
-let receipt=fleet.ui.tabs.toggle();
-#{
- request_id:receipt.request_id,operation_id:receipt.operation_id,
- outcome:receipt.outcome,event_count:receipt.events.len(),
- event_kind:if receipt.events.is_empty(){""}else{receipt.events[0].kind},
- verified:receipt.post_state.verified,reason:receipt.post_state.reason
-}`,
+            "\nlet receipt=fleet.ui.tabs.toggle();\n#{\n request_id:receipt.request_id,operation_id:receipt.operation_id,\n outcome:receipt.outcome,event_count:receipt.events.len(),\n event_kind:if receipt.events.is_empty(){\"\"}else{receipt.events[0].kind},\n verified:receipt.post_state.verified,reason:receipt.post_state.reason\n}",
             audit_path
         );
         let mutated_visible_flipped = 0;
         for attempt in 0..600 {
-            let mutated_snapshot = helper::cli_json(
+            let mutated_snapshot = cli_json(
                 context,
                 cli,
                 ["ui-snapshot"],
@@ -2104,7 +2592,7 @@ let receipt=fleet.ui.tabs.toggle();
             );
             if mutated_snapshot.layout != ()
                     && mutated_snapshot.layout.sidebar != ()
-                    && mutated_snapshot.layout.sidebar.visible
+                    && sidebar_visible_code(mutated_snapshot)
                         != baseline_visible {
                 mutated_visible_flipped = 1;
                 break;
@@ -2135,49 +2623,25 @@ let receipt=fleet.ui.tabs.toggle();
             ) == "true",
             "script_fleet_visibility_restore_failed"
         );
-        let restored = ();
-        let restored_visible_back = 0;
-        for attempt in 0..600 {
-            restored = helper::cli_json(
-                context,
-                cli,
-                ["ui-snapshot"],
-                audit_path
-            );
-            if restored.layout != ()
-                    && restored.layout.sidebar != ()
-                    && restored.layout.sidebar.visible == baseline_visible {
-                restored_visible_back = 1;
-                break;
-            }
-            rhai::task::sleep(std::time::Duration::from_millis(50));
-        }
-        test_harness::require(
-            restored_visible_back,
-            "script_fleet_visibility_not_restored"
+        wait_snapshot_sidebar(
+            context,
+            cli,
+            audit_path,
+            baseline_visible
         );
-        let active_tab = ();
-        for tab in restored.tabs {
-            if tab.active {
-                active_tab = tab;
-            }
-        }
+        let restored = cli_json(
+            context,
+            cli,
+            ["ui-snapshot"],
+            audit_path
+        );
+        let active_tab = restored.tabs[active_tab_index(restored)];
         test_harness::require(active_tab != (), "script_fleet_active_tab_missing");
         let note = "Script API v2 目录 " + std::process::id();
         let note_mutation = script_eval_json(
             context,
             cli,
-            `
-let receipt=fleet.tabs.set_note(
- ${json_literal(active_tab.id)},${json_literal(note)}
-);
-#{
- operation_id:receipt.operation_id,outcome:receipt.outcome,
- event_count:receipt.events.len(),
- event_kind:if receipt.events.is_empty(){""}else{receipt.events[0].kind},
- verified:receipt.post_state.verified,
- tab:receipt.post_state.value.id,note:receipt.post_state.value.note
-}`,
+            "\nlet receipt=fleet.tabs.set_note(\n " + "\"" + active_tab.id + "\"" + "," + "\"" + note + "\"" + "\n);\n#{\n operation_id:receipt.operation_id,outcome:receipt.outcome,\n event_count:receipt.events.len(),\n event_kind:if receipt.events.is_empty(){\"\"}else{receipt.events[0].kind},\n verified:receipt.post_state.verified,\n tab:receipt.post_state.value.id,note:receipt.post_state.value.note\n}",
             audit_path
         );
         test_harness::require(
@@ -2195,8 +2659,8 @@ let receipt=fleet.tabs.set_note(
                 context,
                 cli,
                 "fleet.tabs.set_note(" +
-                    json_literal(active_tab.id) + ", " +
-                    json_literal(active_tab.note) +
+                    "\"" + active_tab.id + "\"" + ", " +
+                    "\"" + active_tab.note + "\"" +
                     ").post_state.verified",
                 audit_path
             ) == "true",
@@ -2251,7 +2715,8 @@ let receipt=fleet.tabs.set_note(
             runtime_dir,
             "north-star-http-stop"
         ).display;
-        http_child = helper::start_http_fixture(
+        let north_http_error = "";
+        let http_child = start_http_fixture(
             context,
             script,
             std::path::join(
@@ -2263,23 +2728,19 @@ let receipt=fleet.tabs.set_note(
             log_path,
             stop_path
         );
-        let ready = helper::wait_http_ready(
+        try {
+        let ready = wait_http_ready(
             http_child,
             ready_path,
             3000
         );
-        let latest = helper::cli_json(
+        let latest = cli_json(
             context,
             cli,
             ["ui-snapshot"],
             audit_path
         );
-        let north_tab = ();
-        for tab in latest.tabs {
-            if tab.active {
-                north_tab = tab;
-            }
-        }
+        let north_tab = latest.tabs[active_tab_index(latest)];
         test_harness::require(north_tab != (), "script_north_star_tab_missing");
         std::fs::write(
             std::path::join(project, "config.json").display,
@@ -2294,7 +2755,7 @@ let receipt=fleet.tabs.set_note(
                 result_path: result_path
             })
         );
-        let direct_help = helper::direct_text(
+        let direct_help = direct_text(
             context,
             script,
             ["--help"],
@@ -2311,7 +2772,7 @@ let receipt=fleet.tabs.set_note(
             "script_direct_help_mismatch"
         );
         test_harness::require(
-            helper::direct_text(
+            direct_text(
                 context,
                 script,
                 [
@@ -2322,7 +2783,7 @@ let receipt=fleet.tabs.set_note(
             ) == "OK",
             "script_north_star_check_failed"
         );
-        let direct_catalog = helper::direct_json(
+        let direct_catalog = direct_json(
             context,
             script,
             [
@@ -2331,7 +2792,7 @@ let receipt=fleet.tabs.set_note(
             ],
             audit_path
         );
-        let direct_show = helper::direct_json(
+        let direct_show = direct_json(
             context,
             script,
             [
@@ -2355,7 +2816,7 @@ let receipt=fleet.tabs.set_note(
             "script_north_star_catalog_mismatch"
         );
         test_harness::require(
-            helper::direct_text(
+            direct_text(
                 context,
                 script,
                 [
@@ -2366,7 +2827,7 @@ let receipt=fleet.tabs.set_note(
             ) == "OK",
             "script_north_star_task_check_failed"
         );
-        let north_envelope = helper::direct_json(
+        let north_envelope = direct_json(
             context,
             script,
             [
@@ -2412,8 +2873,8 @@ let receipt=fleet.tabs.set_note(
             "script_north_star_persisted_result_mismatch"
         );
         test_harness::require(
-            !helper::process_exists(north.child_a.pid)
-                && !helper::process_exists(north.child_b.pid),
+            !process_exists(north.child_a.pid)
+                && !process_exists(north.child_b.pid),
             "script_north_star_child_survived"
         );
         test_harness::require(
@@ -2421,8 +2882,8 @@ let receipt=fleet.tabs.set_note(
                 context,
                 cli,
                 "fleet.tabs.set_note(" +
-                    json_literal(north_tab.id) + ", " +
-                    json_literal(north_tab.note) +
+                    "\"" + north_tab.id + "\"" + ", " +
+                    "\"" + north_tab.note + "\"" +
                     ").post_state.verified",
                 audit_path
             ) == "true",
@@ -2436,9 +2897,18 @@ let receipt=fleet.tabs.set_note(
             http_output.success,
             "script_north_star_http_exit"
         );
-        http_child = ();
+        } catch (error) {
+            north_http_error = "" + error;
+        }
+        if child_is_running(http_child) {
+            http_child.kill();
+            http_child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+        }
+        test_harness::require(north_http_error == "", north_http_error);
 
-        let close_state = helper::cli_json(
+        let close_state = cli_json(
             context,
             cli,
             ["ui-action", "close-window"],
@@ -2450,7 +2920,7 @@ let receipt=fleet.tabs.set_note(
             ),
             "script_fleet_close_contract_missing"
         );
-        helper::cli_text(
+        cli_text(
             context,
             cli,
             ["ui-action", "stop-server-and-exit"],
@@ -2459,20 +2929,19 @@ let receipt=fleet.tabs.set_note(
         gui_child.wait_with_output(
             std::time::Duration::from_secs(5)
         );
-        gui_child = ();
         server_started = 0;
     } catch (error) {
-        journey_error = error.to_string();
+        journey_error = "" + error;
     }
-    if http_child != () && http_child.state == "running" {
-        http_child.kill();
-        http_child.wait_with_output(
+    if ("" + gui_child.state) == "running" {
+        gui_child.kill();
+        gui_child.wait_with_output(
             std::time::Duration::from_secs(2)
         );
     }
     if server_started {
         try {
-            helper::run_cli(
+            run_cli(
                 context,
                 cli,
                 ["kill-server"],
@@ -2485,13 +2954,7 @@ let receipt=fleet.tabs.set_note(
             // The typed close path may already have removed the server.
         }
     }
-    if gui_child != () && gui_child.state == "running" {
-        gui_child.kill();
-        gui_child.wait_with_output(
-            std::time::Duration::from_secs(2)
-        );
-    }
-    test_harness::require(journey_error == "", journey_error);
+    return journey_error;
 }
 
 fn assert_audit(
@@ -2504,10 +2967,9 @@ fn assert_audit(
     print("STEP privacy-bounded reusable script audit");
     std::fs::write(
         source_file,
-        `print("AUDIT_STDOUT_SECRET");
-         args[0] + "AUDIT_SOURCE_SECRET"`
+        "print(\"AUDIT_STDOUT_SECRET\");\n         args[0] + \"AUDIT_SOURCE_SECRET\""
     );
-    let secret_result = helper::cli_text(
+    let secret_result = cli_text(
         context,
         cli,
         [
@@ -2539,14 +3001,14 @@ fn assert_audit(
         );
     }
     for field in [
-        `"source":`,
-        `"arguments":`,
-        `"argv":`,
-        `"stdout":`,
-        `"pane":`,
-        `"environment":`,
-        `"clipboard":`,
-        `"credentials":`
+        "\"source\":",
+        "\"arguments\":",
+        "\"argv\":",
+        "\"stdout\":",
+        "\"pane\":",
+        "\"environment\":",
+        "\"clipboard\":",
+        "\"credentials\":"
     ] {
         test_harness::require(
             !audit_text.contains(field),
@@ -2567,8 +3029,9 @@ fn assert_audit(
     let observe_record = 0;
     let pure_record = 0;
     for record in records {
-        if record.failure_code != () {
-            failure_codes[record.failure_code] = 1;
+        let failure_code = "" + record.failure_code;
+        if failure_code != "" {
+            failure_codes[failure_code] = true;
         }
         if record.cancelled == 1 && record.timed_out == 1 {
             timeout_record = 1;
@@ -2608,7 +3071,7 @@ fn assert_audit(
         "host_concurrency_limit"
     ] {
         test_harness::require(
-            failure_codes[required_code] == 1,
+            failure_codes.contains(required_code),
             "script_audit_failure_code_missing:" + required_code
         );
     }
@@ -2620,7 +3083,7 @@ fn assert_audit(
             && pure_record,
         "script_audit_result_metadata_mismatch"
     );
-    let audit_failure = helper::run_cli(
+    let audit_failure = run_cli(
         context,
         cli,
         ["script", "eval", "1"],
@@ -2633,7 +3096,7 @@ fn assert_audit(
         (
             audit_failure.stdout +
             audit_failure.stderr
-        ).contains(`"code":"host_audit_write"`),
+        ).contains("\"code\":\"host_audit_write\""),
         "script_audit_write_failure_not_fail_closed"
     );
 }
@@ -2653,7 +3116,7 @@ fn prefer_rh_worker(script) {
 
 fn entry() {
 if args.len == 1 && args[0] == "--list-evidence" {
-    for id in declared_evidence {
+    for id in declared_evidence_ids() {
         print(id);
     }
     return;
@@ -2683,7 +3146,6 @@ let runtime_dir = std::path::join(
 std::fs::create_dir_all(runtime_dir);
 let source_file = std::path::join(runtime_dir, "source.rhai").display;
 let audit_file = std::path::join(runtime_dir, "audit.jsonl").display;
-let owned_children = [];
 let succeeded = 0;
 let failure = "";
 
@@ -2695,15 +3157,15 @@ try {
         runtime_dir,
         audit_file
     );
-    emit(context, declared_evidence, "script.api-tree");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.api-tree");
     assert_process_and_streams(
         context,
         cli,
         audit_file,
         runtime_dir
     );
-    emit(context, declared_evidence, "script.typed-errors");
-    emit(context, declared_evidence, "script.stream");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.typed-errors");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.stream");
     assert_tasks_and_http(
         context,
         repo,
@@ -2712,8 +3174,8 @@ try {
         audit_file,
         runtime_dir
     );
-    emit(context, declared_evidence, "script.http");
-    emit(context, declared_evidence, "script.modules-tasks");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.http");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.modules-tasks");
     assert_runtime_and_framing(
         context,
         repo,
@@ -2724,22 +3186,22 @@ try {
         source_file,
         internal_failure_probe
     );
-    emit(context, declared_evidence, "script.fs-lifecycle");
-    emit(context, declared_evidence, "script.rhai-runtime");
-    emit(
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.fs-lifecycle");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.rhai-runtime");
+    test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "script.rhai-robustness-budget"
     );
-    emit(context, declared_evidence, "script.rhai-framed");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.rhai-framed");
     assert_supervisor(
         context,
         cli,
         audit_file,
         runtime_dir
     );
-    emit(context, declared_evidence, "script.runtime-lifecycle");
-    emit(context, declared_evidence, "script.supervisor");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.runtime-lifecycle");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.supervisor");
     assert_fleet_and_north_star(
         context,
         repo,
@@ -2749,13 +3211,13 @@ try {
         audit_file,
         runtime_dir
     );
-    emit(context, declared_evidence, "script.exit-classes");
-    emit(context, declared_evidence, "script.rhai-fleet");
-    emit(context, declared_evidence, "script.fleet-tabs-set-note");
-    emit(context, declared_evidence, "script.fleet-v2");
-    emit(context, declared_evidence, "script.direct-entry");
-    emit(context, declared_evidence, "script.north-star");
-    emit(context, declared_evidence, "script.repl-supervision");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.exit-classes");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.rhai-fleet");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.fleet-tabs-set-note");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.fleet-v2");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.direct-entry");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.north-star");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.repl-supervision");
     assert_audit(
         context,
         cli,
@@ -2763,7 +3225,7 @@ try {
         source_file,
         runtime_dir
     );
-    emit(context, declared_evidence, "script.audit");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "script.audit");
     test_harness::require(catalog.api_version == 2, "script_smoke_catalog_lost");
     succeeded = 1;
     print(
@@ -2771,7 +3233,7 @@ try {
     );
 } catch (error) {
     let safe_error = test_harness::redact_text(
-        error.to_string(),
+        "" + error,
         [
             "AUDIT_STDOUT_SECRET",
             "AUDIT_ARG_SECRET",
@@ -2784,12 +3246,12 @@ try {
     );
     let probe_marker =
         "INTERNAL_FAILURE_BUNDLE_PROBE:script:" + context.run_id;
-    failure = if internal_failure_probe
+    if internal_failure_probe
             && safe_error.contains(probe_marker) {
-        probe_marker + "\nintentional script failure-bundle probe"
+        failure = probe_marker + "\nintentional script failure-bundle probe";
     } else {
-        safe_error
-    };
+        failure = safe_error;
+    }
 }
 
 if !succeeded && std::fs::exists(audit_file) {
@@ -2818,12 +3280,12 @@ let completion_failure = "";
 try {
     test_harness::complete(
         context,
-        owned_children,
+        [],
         succeeded,
         failure
     );
 } catch (error) {
-    completion_failure = error.to_string();
+    completion_failure = "" + error;
 }
 if succeeded && completion_failure == "" {
     test_harness::remove_run(context);

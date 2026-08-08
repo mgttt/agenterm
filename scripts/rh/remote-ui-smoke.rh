@@ -9,42 +9,67 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = [
-    "ui.replaceable-client",
-    "ux.adaptive-tabs",
-    "ux.hierarchical-tabs",
-    "ux.detach-first-window-close",
-    "ux.live-close-confirmation",
-    "ux.locale-consistency",
-    "ux.keyboard-surface-navigation",
-    "ux.modal-wait",
-    "ux.mouse-scrollback",
-    "ux.semantic-ui-automation",
-    "ux.semantic-window-control",
-    "ux.settings-isolation",
-    "ux.system-menu-clipboard",
-    "ux.theme-render-parity",
-    "ux.terminal-selection-copy",
-    "ux.working-context-cwd",
-    "ux-parity.remote-ui.replaceable-client",
-    "ux-parity.remote-ui.selection",
-    "ux-parity.window-focus-contract"
-];
-
-if args.len == 1 && args[0] == "--list-evidence" {
-    for id in declared_evidence {
-        print(id);
-    }
-    return;
+fn declared_evidence_ids() {
+    [
+        "ui.replaceable-client",
+        "ux.adaptive-tabs",
+        "ux.hierarchical-tabs",
+        "ux.detach-first-window-close",
+        "ux.live-close-confirmation",
+        "ux.locale-consistency",
+        "ux.keyboard-surface-navigation",
+        "ux.modal-wait",
+        "ux.mouse-scrollback",
+        "ux.semantic-ui-automation",
+        "ux.semantic-window-control",
+        "ux.settings-isolation",
+        "ux.system-menu-clipboard",
+        "ux.theme-render-parity",
+        "ux.terminal-selection-copy",
+        "ux.working-context-cwd",
+        "ux-parity.remote-ui.replaceable-client",
+        "ux-parity.remote-ui.selection",
+        "ux-parity.window-focus-contract"
+    ]
 }
 
+fn json_null() {
+    rhai::json::parse("null")
+}
 
 fn require_window_control(control, name) {
-    test_harness::require(
-        control != (),
-        "remote_ui_control_missing:" + name
-    );
+    if control == json_null() {
+        throw "remote_ui_control_missing:" + name;
+    }
     control
+}
+
+fn output_stderr_text(output) {
+    output.stderr_text()
+}
+
+fn crypto_sha256_path(path_value) {
+    let path = std::path::absolute("" + path_value).display;
+    rhai::crypto::sha256_file(path)
+}
+
+fn configured_gui_command(
+    gui_exe,
+    address,
+    workspace_path,
+    settings_path,
+    instance_directory
+) {
+    let command = std::process::command("" + gui_exe);
+    command.args(["--ui-client", "--no-activate", "--address", address]);
+    command.env("AGENTERM_IPC_ADDRESS", "" + address);
+    command.env("AGENTERM_WORKSPACE_PATH", "" + workspace_path);
+    command.env("AGENTERM_SETTINGS_PATH", "" + settings_path);
+    command.env("AGENTERM_INSTANCE_DIR", "" + instance_directory);
+    command.env("AGENTERM_NO_ACTIVATE", "1");
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    command
 }
 
 fn wheel_message_lparam(gui) {
@@ -65,7 +90,7 @@ fn json_cli(context, cli, arguments) {
             context,
             cli,
             arguments,
-            false,
+            0,
             []
         ).stdout
     )
@@ -76,7 +101,7 @@ fn text_cli(context, cli, arguments) {
         context,
         cli,
         arguments,
-        false,
+        0,
         []
     ).stdout
 }
@@ -86,18 +111,16 @@ fn optional_cli(context, cli, arguments) {
         context,
         cli,
         arguments,
-        true,
+        1,
         []
     )
 }
 
-fn discard_cli(context, cli, arguments, output_name) {
-    let command_arguments = ["--address", context.address];
-    command_arguments.append(arguments);
+fn discard_cli(context, cli, action, target, output_name) {
     let command = test_harness::configured_command(
         context,
         cli,
-        command_arguments
+        ["--address", context.address, action, target]
     );
     command.stdout_file(
         std::path::join(
@@ -106,15 +129,16 @@ fn discard_cli(context, cli, arguments, output_name) {
         ).display
     );
     let output = command.output();
+    let stderr_text = output_stderr_text(output);
     test_harness::require(
-        output.success,
-        "remote_ui_discard_cli_failed:" + output.stderr_text()
+        output.success != 0,
+        "remote_ui_discard_cli_failed:" + stderr_text
     );
 }
 
 fn wait_for_exit(child, code) {
     for attempt in 0..1200 {
-        if child.state == "exited" {
+        if ("" + child.state) == "exited" {
             return child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
@@ -126,18 +150,19 @@ fn wait_for_exit(child, code) {
 
 fn wait_for_window(child, code) {
     for attempt in 0..1200 {
-        if child.platform_facts.top_level_window_present {
-            return;
+        if child.platform_facts.top_level_window_present != 0 {
+            return 0;
         }
-        if child.state == "exited" {
+        if ("" + child.state) == "exited" {
             let output = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + ":" + output.stderr_text();
+            throw code + ":" + output_stderr_text(output);
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
+    0
 }
 
 fn wait_for_lease(context, cli, child, attempts, code) {
@@ -146,21 +171,21 @@ fn wait_for_lease(context, cli, child, attempts, code) {
             context,
             cli,
             ["ui-lease", "status"],
-            false,
+            0,
             []
         );
-        if output.success {
+        if output.success != 0 {
             let lease = rhai::json::parse(output.stdout);
-            if lease.attached && lease.client_pid == child.id {
+            if lease.attached != 0 && lease.client_pid == child.id {
                 wait_for_window(child, code + "_window");
                 return lease;
             }
         }
-        if child.state == "exited" {
+        if ("" + child.state) == "exited" {
             let result = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + ":" + result.stderr_text();
+            throw code + ":" + output_stderr_text(result);
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
@@ -168,20 +193,22 @@ fn wait_for_lease(context, cli, child, attempts, code) {
 }
 
 fn start_gui(context, gui, cli) {
-    let command = test_harness::configured_command(
-        context,
+    let gui_command = configured_gui_command(
         gui,
-        ["--ui-client", "--no-activate", "--address", context.address]
+        context.address,
+        context.workspace_path,
+        context.settings_path,
+        context.instance_directory
     );
-    let child = command.start();
-    let lease = wait_for_lease(
+    let child = gui_command.start();
+    wait_for_lease(
         context,
         cli,
         child,
         1200,
         "remote_ui_lease_timeout"
     );
-    #{ child: child, lease: lease }
+    child
 }
 
 fn wait_projection(context, cli, projection) {
@@ -190,10 +217,10 @@ fn wait_projection(context, cli, projection) {
             context,
             cli,
             ["ui-snapshot"],
-            false,
+            0,
             []
         );
-        if output.success {
+        if output.success != 0 {
             let snapshot = rhai::json::parse(output.stdout);
             if snapshot.projection == projection {
                 return snapshot;
@@ -218,14 +245,13 @@ fn wait_observed(context, cli, sequence) {
 fn wait_workspace_toolbar(context, cli, code) {
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        if snapshot.layout.toolbar != () {
+        if snapshot.layout.toolbar != json_null() {
             return snapshot;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     let snapshot = json_cli(context, cli, ["ui-snapshot"]);
     throw code
-        + ":window=" + rhai::json::stringify(snapshot.window)
         + ":projection=" + snapshot.projection;
 }
 
@@ -243,11 +269,11 @@ fn wait_locale(context, cli, locale_id) {
 fn wait_effective_font_size(context, cli, size, overridden) {
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        if snapshot.settings != () && snapshot.settings.effective != () {
+        if snapshot.settings != json_null() && snapshot.settings.effective != json_null() {
             let terminal_override = snapshot.settings.current_terminal_override;
             if snapshot.settings.effective.terminal_font_size == size
-                && ((overridden && terminal_override != ())
-                    || (!overridden && terminal_override == ())) {
+                && ((overridden && terminal_override != json_null())
+                    || (!overridden && terminal_override == json_null())) {
                 return snapshot;
             }
         }
@@ -275,9 +301,9 @@ fn wait_terminal_selection(
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let interaction = snapshot.terminal_interaction;
-        if interaction != () {
+        if interaction != json_null() {
             let selection = interaction.selection;
-            if selection != ()
+            if selection != json_null()
                 && selection.phase == phase
                 && selection.capture_owned == capture_owned
                 && selection.copyable == copyable
@@ -295,8 +321,8 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
     let required_sequence = after_sequence;
     if required_sequence == 0 {
         let current = json_cli(context, cli, ["ui-snapshot"]);
-        if current.render_activity != () {
-            required_sequence = current.render_activity.sequence;
+        if current.render_activity != json_null() {
+            required_sequence = render_activity_sequence(current);
         }
     }
     test_harness::require(
@@ -306,7 +332,7 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let activity = snapshot.render_activity;
-        if activity != () && activity.sequence > required_sequence {
+        if activity != json_null() && activity.sequence > required_sequence {
             return activity;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -368,7 +394,7 @@ fn measure_theme_render(
         paints: after.parent_paints - before.parent_paints
     };
     print(
-        `THEME_RENDER_AB round=${round} theme=${label} duration_ms=${result.duration_ms} redraws=${result.redraws} paints=${result.paints}`
+        "THEME_RENDER_AB round=" + round + " theme=" + label + " duration_ms=" + result.duration_ms + " redraws=" + result.redraws + " paints=" + result.paints
     );
     result
 }
@@ -380,7 +406,7 @@ fn wait_viewport_mutation(context, cli, baseline, tab_id) {
         [
             "wait-events",
             "--epoch", baseline.epoch,
-            "--after", baseline.sequence.to_string(),
+            "--after", "" + baseline.sequence,
             "--kind", "terminal.viewport",
             "--tab", tab_id,
             "--timeout-ms", "30000"
@@ -394,28 +420,15 @@ fn find_tab(snapshot, id) {
             return tab;
         }
     }
-    ()
+    rhai::json::parse("null")
 }
 
 fn double_click_tab_text(context, cli, gui_child, id) {
     // Tab render geometry disappears from the snapshot for a frame while the
     // sidebar re-renders (for example right after dismissing an editor), so a
     // single-shot read races the redraw. Poll until the geometry settles.
-    let text_geometry = ();
-    for attempt in 0..600 {
-        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tab = find_tab(snapshot, id);
-        if tab != ()
-                && tab.render != ()
-                && tab.render.text != ()
-                && tab.render.text.width > 0
-                && tab.render.text.height > 0 {
-            text_geometry = tab.render.text;
-            break;
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
-    }
-    test_harness::require(text_geometry != (), "remote_ui_tab_text_geometry_missing");
+    let text_geometry = tab_text_geometry(context, cli, id);
+    test_harness::require(text_geometry != json_null(), "remote_ui_tab_text_geometry_missing");
     double_click_point(
         gui_child,
         text_geometry.left + text_geometry.width / 2,
@@ -424,7 +437,7 @@ fn double_click_tab_text(context, cli, gui_child, id) {
 }
 
 fn find_last_run(screen, marker) {
-    let found = ();
+    let found = json_null();
     for run in screen.runs {
         if run.text.contains(marker) {
             found = run;
@@ -436,10 +449,10 @@ fn find_last_run(screen, marker) {
 fn process_present(id) {
     for process in std::process::list() {
         if process.id == id {
-            return true;
+            return 1;
         }
     }
-    false
+    0
 }
 
 fn wait_process_gone(id, code) {
@@ -493,6 +506,32 @@ fn repeat_text(value, count) {
     result
 }
 
+fn render_activity_sequence(snapshot) {
+    snapshot.render_activity.sequence
+}
+
+fn tab_text_geometry(context, cli, id) {
+    for attempt in 0..600 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let tab = find_tab(snapshot, id);
+        if tab != json_null()
+                && tab.render != json_null()
+                && tab.render.text != json_null()
+                && tab.render.text.width > 0
+                && tab.render.text.height > 0 {
+            return tab.render.text;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "remote_ui_tab_text_geometry_missing";
+    // Unreachable: keep return kind Json.
+    find_tab(json_cli(context, cli, ["ui-snapshot"]), id).render.text
+}
+
+fn parse_json_text(text) {
+    rhai::json::parse(text)
+}
+
 fn screenshot(context, cli, path) {
     let returned = text_cli(
         context,
@@ -510,13 +549,13 @@ fn screenshot(context, cli, path) {
 }
 
 fn wait_screenshot_changed(context, cli, path, baseline_path, code) {
-    let baseline_hash = rhai::crypto::sha256_file(baseline_path);
+    let baseline_hash = crypto_sha256_path(baseline_path);
     // Selection state is published before the low-priority WM_PAINT that makes
     // its highlight visible. Keep the pixel receipt fail-closed while allowing
     // that independently scheduled paint to commit.
     for attempt in 0..1200 {
         screenshot(context, cli, path);
-        if rhai::crypto::sha256_file(path) != baseline_hash {
+        if crypto_sha256_path(path) != baseline_hash {
             return;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -551,6 +590,30 @@ fn assert_instance_directory_empty(context) {
     throw "remote_ui_instance_registration_leaked";
 }
 
+fn entry() {
+    if args.len == 1 && args[0] == "--list-evidence" {
+        print("ui.replaceable-client");
+        print("ux.adaptive-tabs");
+        print("ux.hierarchical-tabs");
+        print("ux.detach-first-window-close");
+        print("ux.live-close-confirmation");
+        print("ux.locale-consistency");
+        print("ux.keyboard-surface-navigation");
+        print("ux.modal-wait");
+        print("ux.mouse-scrollback");
+        print("ux.semantic-ui-automation");
+        print("ux.semantic-window-control");
+        print("ux.settings-isolation");
+        print("ux.system-menu-clipboard");
+        print("ux.theme-render-parity");
+        print("ux.terminal-selection-copy");
+        print("ux.working-context-cwd");
+        print("ux-parity.remote-ui.replaceable-client");
+        print("ux-parity.remote-ui.selection");
+        print("ux-parity.window-focus-contract");
+        return 0;
+    }
+
 test_harness::require(
     args.len == 3 || args.len == 4,
     "expected: REPO GUI_EXE CLI_EXE [SCREENSHOT_PATH]"
@@ -569,16 +632,14 @@ test_harness::require(std::fs::exists(cli), "remote_ui_cli_missing");
 let context = test_harness::new_context(repo, "remote-ui");
 let owned_children = [];
 let known_server_pids = [];
-let succeeded = false;
+let succeeded = 0;
 let failure = "";
-let clipboard_original = ();
 
 try {
     print("STEP start replaceable UI and let it start the independent server");
-    let started = start_gui(context, gui_exe, cli);
-    let gui = started.child;
+    let gui = start_gui(context, gui_exe, cli);
     owned_children.push(gui);
-    let lease = started.lease;
+    let lease = json_cli(context, cli, ["ui-lease", "status"]);
 
     print("STEP observe the lease-owned GUI projection through public CLI");
     let ui = wait_projection(context, cli, "replaceable_ui_client");
@@ -602,7 +663,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "ux-parity.remote-ui.replaceable-client"
     );
 
@@ -643,23 +704,21 @@ try {
         cli,
         ["wait-ui", "--window-state", "restored", "--timeout-ms", "30000"]
     );
-    let resized_width = if original_width > 720 {
-        original_width - 80
-    } else {
-        original_width + 80
-    };
-    let resized_height = if original_height > 540 {
-        original_height - 60
-    } else {
-        original_height + 60
-    };
+    let resized_width = original_width + 80;
+    if original_width > 720 {
+        resized_width = original_width - 80;
+    }
+    let resized_height = original_height + 60;
+    if original_height > 540 {
+        resized_height = original_height - 60;
+    }
     json_cli(
         context,
         cli,
         [
             "ui-action", "window-resize",
-            "--width", resized_width.to_string(),
-            "--height", resized_height.to_string()
+            "--width", "" + resized_width,
+            "--height", "" + resized_height
         ]
     );
     let resized_window = json_cli(
@@ -667,10 +726,10 @@ try {
         cli,
         [
             "wait-ui",
-            "--client-width", resized_width.to_string(),
-            "--client-height", resized_height.to_string(),
+            "--client-width", "" + resized_width,
+            "--client-height", "" + resized_height,
             "--terminal-grid-changed-from",
-                original_rows.to_string() + "x" + original_columns,
+                "" + original_rows + "x" + original_columns,
             "--timeout-ms", "30000"
         ]
     );
@@ -684,8 +743,8 @@ try {
         cli,
         [
             "ui-action", "window-resize",
-            "--width", original_width.to_string(),
-            "--height", original_height.to_string()
+            "--width", "" + original_width,
+            "--height", "" + original_height
         ]
     );
     json_cli(
@@ -693,8 +752,8 @@ try {
         cli,
         [
             "wait-ui",
-            "--client-width", original_width.to_string(),
-            "--client-height", original_height.to_string(),
+            "--client-width", "" + original_width,
+            "--client-height", "" + original_height,
             "--timeout-ms", "30000"
         ]
     );
@@ -735,7 +794,7 @@ try {
         "remote_ui_settings_modal_wait_invalid"
     );
     let cancelled = json_cli(context, cli, ["ui-action", "cancel"]);
-    test_harness::require(cancelled.modal == (), "remote_ui_cancel_relay_invalid");
+    test_harness::require(cancelled.modal == json_null(), "remote_ui_cancel_relay_invalid");
     json_cli(
         context,
         cli,
@@ -891,10 +950,9 @@ try {
     );
 
     print("STEP replace the GUI and recover the same live server state");
-    let replacement = start_gui(context, gui_exe, cli);
-    gui = replacement.child;
+    gui = start_gui(context, gui_exe, cli);
     owned_children.push(gui);
-    let replacement_lease = replacement.lease;
+    let replacement_lease = json_cli(context, cli, ["ui-lease", "status"]);
     let replacement_bootstrap = json_cli(
         context,
         cli,
@@ -1029,10 +1087,10 @@ try {
     http_proxy.set_text(proxy_secret);
     https_proxy.set_text(proxy_secret);
     let new_modal_text = "";
-    let new_modal = ();
+    let new_modal = json_null();
     for attempt in 0..400 {
         new_modal_text = text_cli(context, cli, ["ui-snapshot"]);
-        new_modal = rhai::json::parse(new_modal_text);
+        new_modal = parse_json_text(new_modal_text);
         if new_modal.modal.initial_command_configured
                 && new_modal.modal.http_proxy_configured
                 && new_modal.modal.https_proxy_configured {
@@ -1135,7 +1193,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "ux-parity.window-focus-contract"
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
@@ -1230,17 +1288,17 @@ try {
     test_harness::require(
         light_duration_ms <= dark_duration_ms * 11 / 4
             && dark_duration_ms <= light_duration_ms * 11 / 4,
-        `remote_ui_theme_render_duration_asymmetry:dark=${dark_duration_ms}:light=${light_duration_ms}`
+        "remote_ui_theme_render_duration_asymmetry:dark=" + dark_duration_ms + ":light=" + light_duration_ms
     );
     test_harness::require(
         light_redraws <= dark_redraws * 3 + 4
             && dark_redraws <= light_redraws * 3 + 4
             && light_paints <= dark_paints * 3 + 4
             && dark_paints <= light_paints * 3 + 4,
-        `remote_ui_theme_render_activity_asymmetry:dark_redraws=${dark_redraws}:light_redraws=${light_redraws}:dark_paints=${dark_paints}:light_paints=${light_paints}`
+        "remote_ui_theme_render_activity_asymmetry:dark_redraws=" + dark_redraws + ":light_redraws=" + light_redraws + ":dark_paints=" + dark_paints + ":light_paints=" + light_paints
     );
     print(
-        `THEME_RENDER_AB totals dark_ms=${dark_duration_ms} light_ms=${light_duration_ms} dark_redraws=${dark_redraws} light_redraws=${light_redraws} dark_paints=${dark_paints} light_paints=${light_paints}`
+        "THEME_RENDER_AB totals dark_ms=" + dark_duration_ms + " light_ms=" + light_duration_ms + " dark_redraws=" + dark_redraws + " light_redraws=" + light_redraws + " dark_paints=" + dark_paints + " light_paints=" + light_paints
     );
     let render_before_zoom = sample_render_activity(context, cli, gui, 0);
     font_increase_button.click();
@@ -1248,7 +1306,7 @@ try {
         gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_font_button_stole_terminal_focus"
     );
-    let overridden_font = wait_effective_font_size(context, cli, 15, true);
+    let overridden_font = wait_effective_font_size(context, cli, 15, 1);
     wait_terminal_resize_settled(context, cli);
     test_harness::require(
         overridden_font.settings.terminal_font_size == 14
@@ -1261,10 +1319,10 @@ try {
         font_increase_button.click();
     }
     font_decrease_button.click();
-    wait_effective_font_size(context, cli, 14, true);
+    wait_effective_font_size(context, cli, 14, 1);
     wait_terminal_resize_settled(context, cli);
     font_increase_button.click();
-    wait_effective_font_size(context, cli, 15, true);
+    wait_effective_font_size(context, cli, 15, 1);
     wait_terminal_resize_settled(context, cli);
     let render_after_zoom = sample_render_activity(
         context,
@@ -1277,14 +1335,14 @@ try {
                 == render_before_zoom.control_bounds_updates
             && render_after_zoom.control_visibility_updates
                 == render_before_zoom.control_visibility_updates,
-        `remote_ui_zoom_mutated_unchanged_native_controls:before_bounds=${render_before_zoom.control_bounds_updates}:after_bounds=${render_after_zoom.control_bounds_updates}:before_visibility=${render_before_zoom.control_visibility_updates}:after_visibility=${render_after_zoom.control_visibility_updates}`
+        "remote_ui_zoom_mutated_unchanged_native_controls:before_bounds=" + render_before_zoom.control_bounds_updates + ":after_bounds=" + render_after_zoom.control_bounds_updates + ":before_visibility=" + render_before_zoom.control_visibility_updates + ":after_visibility=" + render_after_zoom.control_visibility_updates
     );
     test_harness::require(
         render_after_zoom.control_bounds_skips
                 > render_before_zoom.control_bounds_skips
             && render_after_zoom.control_visibility_skips
                 > render_before_zoom.control_visibility_skips,
-        `remote_ui_zoom_did_not_coalesce_native_control_layout:before_bounds_skips=${render_before_zoom.control_bounds_skips}:after_bounds_skips=${render_after_zoom.control_bounds_skips}:before_visibility_skips=${render_before_zoom.control_visibility_skips}:after_visibility_skips=${render_after_zoom.control_visibility_skips}`
+        "remote_ui_zoom_did_not_coalesce_native_control_layout:before_bounds_skips=" + render_before_zoom.control_bounds_skips + ":after_bounds_skips=" + render_after_zoom.control_bounds_skips + ":before_visibility_skips=" + render_before_zoom.control_visibility_skips + ":after_visibility_skips=" + render_after_zoom.control_visibility_skips
     );
     let zoom_redraws =
         render_after_zoom.redraw_requests - render_before_zoom.redraw_requests;
@@ -1320,7 +1378,7 @@ try {
         "remote_ui_idle_mutated_native_controls"
     );
     print(
-        `RENDER_ACTIVITY zoom_redraws=${zoom_redraws} zoom_paints=${zoom_paints} idle_redraws=${idle_redraws} idle_paints=${idle_paints}`
+        "RENDER_ACTIVITY zoom_redraws=" + zoom_redraws + " zoom_paints=" + zoom_paints + " idle_redraws=" + idle_redraws + " idle_paints=" + idle_paints
     );
     let zoom_shift_tab_before = text_cli(
         context,
@@ -1367,10 +1425,10 @@ try {
     settings_current_scope.click();
     settings_reset_overrides.click();
     settings_apply.click();
-    let inherited_font = wait_effective_font_size(context, cli, 14, false);
+    let inherited_font = wait_effective_font_size(context, cli, 14, 0);
     wait_terminal_resize_settled(context, cli);
     test_harness::require(
-        inherited_font.settings.current_terminal_override == ()
+        inherited_font.settings.current_terminal_override == json_null()
             && inherited_font.settings.effective.terminal_font_size == 14,
         "remote_ui_terminal_font_inheritance_invalid"
     );
@@ -1407,7 +1465,7 @@ try {
     );
     cwd_composer.trim();
     test_harness::require(
-        cwd_tab != ()
+        cwd_tab != json_null()
             && cwd_tab.working_context.cwd == cwd_path
             && cwd_tab.working_context.cwd_request_pending
             && cwd_composer.contains(cwd_path),
@@ -1586,17 +1644,17 @@ try {
             "--submit-complete", "--timeout-ms", "30000"
         ]
     );
-    let osc_confirmed = false;
+    let osc_confirmed = 0;
     for attempt in 0..600 {
         let osc_tab = find_tab(
             json_cli(context, cli, ["ui-bootstrap"]),
             powershell_id
         );
-        if osc_tab != ()
+        if osc_tab != json_null()
                 && osc_tab.working_context.cwd_source == "osc7"
                 && osc_tab.working_context.cwd == "C:\\osc valid"
                 && !osc_tab.working_context.cwd_request_pending {
-            osc_confirmed = true;
+            osc_confirmed = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -1668,7 +1726,7 @@ try {
     let rows_before = before_resize.layout.terminal.rows;
     let columns_before = before_resize.layout.terminal.cols;
     test_harness::require(
-        before_resize.layout.sidebar.resize_grip != (),
+        before_resize.layout.sidebar.resize_grip != json_null(),
         "remote_ui_resize_grip_missing"
     );
     text_cli(
@@ -1682,7 +1740,7 @@ try {
         [
             "wait-ui",
             "--terminal-grid-changed-from",
-            rows_before + "x" + columns_before,
+            "" + rows_before + "x" + columns_before,
             "--timeout-ms", "30000"
         ]
     );
@@ -1718,7 +1776,7 @@ try {
         [
             "wait-events",
             "--epoch", root_ui.event_position.epoch,
-            "--after", root_ui.event_position.sequence.to_string(),
+            "--after", "" + root_ui.event_position.sequence,
             "--kind", "tab.created",
             "--timeout-ms", "30000"
         ]
@@ -1736,7 +1794,7 @@ try {
     );
     let child_tab = find_tab(child_bootstrap, child_id);
     test_harness::require(
-        child_tab != ()
+        child_tab != json_null()
             && child_tab.parent_id == tab_id
             && child_bootstrap.tabs.len == 2,
         "remote_ui_new_child_invalid"
@@ -1790,7 +1848,7 @@ try {
         ["ui-bootstrap"]
     );
     test_harness::require(
-        find_tab(cancelled_close, child_id) != ()
+        find_tab(cancelled_close, child_id) != json_null()
             && !tab_close_confirm.visible,
         "remote_ui_tab_close_cancel_invalid"
     );
@@ -1867,20 +1925,20 @@ try {
     // The snapshot projection can lag the server acknowledgment of the two
     // creations, so poll until the hierarchy shape settles instead of racing
     // it with one read.
-    let hierarchy = ();
-    let hierarchy_confirmed = false;
+    let hierarchy = json_null();
+    let hierarchy_confirmed = 0;
     for attempt in 0..600 {
         hierarchy = json_cli(context, cli, ["ui-snapshot"]);
         let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
         let hierarchy_grandchild =
             find_tab(hierarchy, hierarchy_grandchild_id);
-        if hierarchy_child != ()
-                && hierarchy_grandchild != ()
+        if hierarchy_child != json_null()
+                && hierarchy_grandchild != json_null()
                 && hierarchy_child.parent_id == tab_id
                 && hierarchy_grandchild.parent_id == hierarchy_child_id
                 && hierarchy_child.depth >= 1
                 && hierarchy_grandchild.depth >= 2 {
-            hierarchy_confirmed = true;
+            hierarchy_confirmed = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -1913,21 +1971,21 @@ try {
         [
             "wait-events",
             "--epoch", hierarchy.event_position.epoch,
-            "--after", hierarchy.event_position.sequence.to_string(),
+            "--after", "" + hierarchy.event_position.sequence,
             "--kind", "tab.closed",
             "--tab", hierarchy_child_id,
             "--timeout-ms", "30000"
         ]
     );
-    let promoted = ();
-    let promotion_confirmed = false;
+    let promoted = json_null();
+    let promotion_confirmed = 0;
     for attempt in 0..600 {
         promoted = json_cli(context, cli, ["ui-bootstrap"]);
         let promoted_grandchild =
             find_tab(promoted, hierarchy_grandchild_id);
-        if promoted_grandchild != ()
+        if promoted_grandchild != json_null()
                 && promoted_grandchild.parent_id == tab_id {
-            promotion_confirmed = true;
+            promotion_confirmed = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -2024,15 +2082,15 @@ try {
         sidebar_fixture_ids.push(fixture_id);
     }
     gui.window_resize(900, 320);
-    let sidebar_ui = ();
-    let sidebar_ready = false;
+    let sidebar_ui = json_null();
+    let sidebar_ready = 0;
     for attempt in 0..1200 {
         let candidate = json_cli(context, cli, ["ui-snapshot"]);
         if candidate.projection == "replaceable_ui_client"
-                && candidate.layout.sidebar.scrollbar != ()
+                && candidate.layout.sidebar.scrollbar != json_null()
                 && candidate.layout.sidebar.scrollbar.max_offset > 0 {
             sidebar_ui = candidate;
-            sidebar_ready = true;
+            sidebar_ready = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -2043,21 +2101,21 @@ try {
     );
     let sidebar_scrollbar = sidebar_ui.layout.sidebar.scrollbar;
     test_harness::require(
-        sidebar_scrollbar != ()
+        sidebar_scrollbar != json_null()
             && sidebar_scrollbar.max_offset > 0
             && sidebar_scrollbar.track.width == 12
             && sidebar_scrollbar.track.left
                 == sidebar_ui.layout.sidebar.bounds.left,
         "remote_ui_sidebar_scrollbar_invalid"
     );
-    let first_visible = ();
+    let first_visible = json_null();
     for tab in sidebar_ui.tabs {
-        if first_visible == () && tab.visible {
+        if first_visible == json_null() && tab.visible {
             first_visible = tab;
         }
     }
     test_harness::require(
-        first_visible != ()
+        first_visible != json_null()
             && first_visible.render.row.left
                 >= sidebar_scrollbar.track.right,
         "remote_ui_sidebar_row_overlaps_scrollbar"
@@ -2079,7 +2137,7 @@ try {
     );
     gui.window_pointer("up", sidebar_x, sidebar_bottom_y);
     gui.window_message(0x0113, 0, 0);
-    let sidebar_scrolled = ();
+    let sidebar_scrolled = json_null();
     for attempt in 0..400 {
         sidebar_scrolled = json_cli(context, cli, ["ui-snapshot"]);
         if sidebar_scrolled.layout.sidebar.scrollbar.offset > 0 {
@@ -2172,7 +2230,7 @@ try {
         "remote_ui_high_output_mutated_native_controls"
     );
     print(
-        `RENDER_ACTIVITY high_output_redraws=${output_redraws} high_output_paints=${output_paints}`
+        "RENDER_ACTIVITY high_output_redraws=" + output_redraws + " high_output_paints=" + output_paints
     );
     let scroll_tab = find_tab(scroll_bootstrap, tab_id);
     test_harness::require(
@@ -2362,11 +2420,11 @@ try {
         cli,
         alternate_bootstrap.position.sequence
     );
-    let alternate_active = false;
+    let alternate_active = 0;
     for attempt in 0..600 {
         let alternate_snapshot = json_cli(context, cli, ["ui-snapshot"]);
         if alternate_snapshot.focus.window_id == alternate_id {
-            alternate_active = true;
+            alternate_active = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -2397,10 +2455,12 @@ try {
     text_cli(context, cli, ["kill-window", "-t", alternate_id]);
 
     print("STEP select terminal text, Copy, and Paste through the UI");
+    let clipboard_restore_text = "";
+    let clipboard_restore_needed = 0;
     try {
-        clipboard_original = rhai::clipboard::get_text();
+        clipboard_restore_text = rhai::clipboard::get_text();
+        clipboard_restore_needed = 1;
     } catch (clipboard_error) {
-        clipboard_original = ();
     }
     let copy_marker = "REMOTE_COPY_" + context.run_id;
     text_cli(
@@ -2429,7 +2489,7 @@ try {
         copy_marker
     );
     test_harness::require(
-        marker_run != (),
+        marker_run != json_null(),
         "remote_ui_selection_marker_run_missing"
     );
     let marker_column =
@@ -2478,8 +2538,8 @@ try {
         context,
         cli,
         "prepared",
-        true,
-        false,
+        1,
+        0,
         "remote_ui_terminal_selection_prepared_timeout"
     );
     let selection_prepared_png = std::path::join(
@@ -2496,8 +2556,8 @@ try {
         context,
         cli,
         "dragging",
-        true,
-        false,
+        1,
+        0,
         "remote_ui_terminal_selection_dragging_timeout"
     );
     let selection_dragging_png = std::path::join(
@@ -2525,8 +2585,8 @@ try {
         context,
         cli,
         "completed",
-        false,
-        true,
+        0,
+        1,
         "remote_ui_terminal_selection_completed_timeout"
     );
     test_harness::require(
@@ -2569,7 +2629,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        declared_evidence_ids(),
         "ux-parity.remote-ui.selection"
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
@@ -2692,13 +2752,13 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    let bracketed_bootstrap = ();
-    let bracketed_mode_on = false;
+    let bracketed_bootstrap = json_null();
+    let bracketed_mode_on = 0;
     for attempt in 0..600 {
         bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
         let bracketed_tab = find_tab(bracketed_bootstrap, bracketed_id);
-        if bracketed_tab != () && bracketed_tab.screen.bracketed_paste {
-            bracketed_mode_on = true;
+        if bracketed_tab != json_null() && bracketed_tab.screen.bracketed_paste {
+            bracketed_mode_on = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -2739,12 +2799,12 @@ try {
     // never moves. Re-issue the paste only while nothing at all has been
     // delivered; once any byte reaches the pane a duplicate paste would
     // corrupt the framing comparison, so from then on just wait.
-    let bracketed_delivered = false;
+    let bracketed_delivered = 0;
     for paste_attempt in 0..6 {
         gui.window_message(0x0112, 0x1F10, 0);
         for poll in 0..40 {
             if std::fs::exists(bracketed_result) {
-                bracketed_delivered = true;
+                bracketed_delivered = 1;
                 break;
             }
             let bracketed_input_now = text_cli(
@@ -2754,7 +2814,7 @@ try {
             );
             bracketed_input_now.trim();
             if bracketed_input_now.parse_int() > bracketed_input_before {
-                bracketed_delivered = true;
+                bracketed_delivered = 1;
                 break;
             }
             rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -2792,10 +2852,10 @@ try {
     );
 
     let composer_send = require_window_control(gui.window_control(2102), "composer_send");
-    let offline_observed = false;
+    let offline_observed = 0;
     for attempt in 0..3000 {
         if !composer_send.visible {
-            offline_observed = true;
+            offline_observed = 1;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(10));
@@ -2848,7 +2908,8 @@ try {
     discard_cli(
         context,
         cli,
-        ["ui-action", "close-window"],
+        "ui-action",
+        "close-window",
         "relay-close.json"
     );
     test_harness::require(
@@ -2858,7 +2919,8 @@ try {
     discard_cli(
         context,
         cli,
-        ["ui-action", "keep-server-running"],
+        "ui-action",
+        "keep-server-running",
         "relay-detach.json"
     );
     wait_for_exit(gui, "remote_ui_replacement_exit_timeout");
@@ -2872,13 +2934,13 @@ try {
     );
 
     print("STEP stop the server through the third close choice");
-    let final_started = start_gui(context, gui_exe, cli);
-    let stop_gui = final_started.child;
+    let stop_gui = start_gui(context, gui_exe, cli);
     owned_children.push(stop_gui);
     discard_cli(
         context,
         cli,
-        ["ui-action", "close-window"],
+        "ui-action",
+        "close-window",
         "relay-stop-close.json"
     );
     test_harness::require(
@@ -2888,7 +2950,8 @@ try {
     discard_cli(
         context,
         cli,
-        ["ui-action", "stop-server-and-exit"],
+        "ui-action",
+        "stop-server-and-exit",
         "relay-stop.json"
     );
     wait_for_exit(stop_gui, "remote_ui_stop_gui_exit_timeout");
@@ -2899,37 +2962,53 @@ try {
     text_cli(context, cli, ["server-list", "--prune"]);
     assert_instance_directory_empty(context);
 
-    for id in declared_evidence {
-        test_harness::emit_evidence(context, declared_evidence, id);
-    }
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ui.replaceable-client");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.adaptive-tabs");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.hierarchical-tabs");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.detach-first-window-close");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.live-close-confirmation");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.locale-consistency");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.keyboard-surface-navigation");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.modal-wait");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.mouse-scrollback");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.semantic-ui-automation");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.semantic-window-control");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.settings-isolation");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.system-menu-clipboard");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.theme-render-parity");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.terminal-selection-copy");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux.working-context-cwd");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux-parity.remote-ui.replaceable-client");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux-parity.remote-ui.selection");
+    test_harness::emit_evidence(context, declared_evidence_ids(), "ux-parity.window-focus-contract");
     print(
         "PASS: replaceable GUI attaches, renders, detaches, preserves PTYs, " +
         "and reconnects in place across server restart"
     );
-    succeeded = true;
+    succeeded = 1;
 } catch (error) {
-    failure = error.to_string();
+    failure = "" + error;
 }
 
-if clipboard_original != () {
+if clipboard_restore_needed != 0 {
     try {
-        rhai::clipboard::set_text(clipboard_original);
+        rhai::clipboard::set_text(clipboard_restore_text);
     } catch (clipboard_restore_error) {
         if failure == "" {
             failure =
                 "remote_ui_clipboard_restore_failed:" +
-                clipboard_restore_error.to_string();
-            succeeded = false;
+                ("" + clipboard_restore_error);
+            succeeded = 0;
         }
     }
 }
 
-if !succeeded {
+if succeeded == 0 {
     // Stop the GUI clients first so none can restart the server while failure
     // cleanup is running.
     for source_child in owned_children {
         let child = source_child;
-        if child.state == "running" {
+        if ("" + child.state) == "running" {
             child.kill();
         }
         try {
@@ -2963,9 +3042,9 @@ try {
         failure
     );
 } catch (error) {
-    completion_failure = error.to_string();
+    completion_failure = "" + error;
 }
-if succeeded && completion_failure == "" {
+if succeeded != 0 && completion_failure == "" {
     test_harness::remove_run(context);
 }
 if failure != "" {
@@ -2973,4 +3052,6 @@ if failure != "" {
 }
 if completion_failure != "" {
     throw completion_failure;
+}
+0
 }
