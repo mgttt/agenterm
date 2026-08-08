@@ -826,9 +826,11 @@ pub(super) struct StatusBarView<'a> {
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) cwd_bounds: (u32, u32, u32, u32),
     pub(super) provider_bounds: Option<(u32, u32, u32, u32)>,
+    pub(super) ime_bounds: Option<(u32, u32, u32, u32)>,
     pub(super) tabs_recovery: Option<(u32, u32, u32, u32)>,
     pub(super) cwd_text: &'a str,
     pub(super) provider_text: &'a str,
+    pub(super) ime_text: &'a str,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1465,6 +1467,19 @@ fn render_status_bar(
             px + 4,
             py + (ph / 2).saturating_sub(4),
             &truncate_chars(status.provider_text, max_provider),
+            palette.muted_text,
+        );
+    }
+    if let Some((ix, iy, iw, ih)) = status.ime_bounds {
+        let max_ime = (iw.saturating_sub(8) / (GLYPH_WIDTH + 1)).max(1) as usize;
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            ix + 4,
+            iy + (ih / 2).saturating_sub(4),
+            &truncate_chars(status.ime_text, max_ime),
             palette.muted_text,
         );
     }

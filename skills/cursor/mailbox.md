@@ -15,7 +15,7 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `1fa3781e`（duty handoff） |
+| `origin/main` | tip `7e4c6200`（duty handoff） |
 | 待审合 | 无（`origin/cursor/*` ahead=0；`script-smoke-aot-pack-2fd5` 已消失） |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
@@ -64,12 +64,12 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-08T10:26Z
+### 舰队值班会话 · 2026-08-08T13:23Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-c1299cab-1fe0-43e1-946f-20f87ad02447`
-- URL: https://cursor.com/agents/bc-c1299cab-1fe0-43e1-946f-20f87ad02447
+- bcId: `bc-13db4760-df60-458e-9464-6befc73b1ea5`
+- URL: https://cursor.com/agents/bc-13db4760-df60-458e-9464-6befc73b1ea5
 - 分支: `main`
-- tip: `1fa3781e`
+- tip: `7e4c6200`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -85,6 +85,9 @@
 
 ## 交接日志
 
+- 2026-08-08T13:23Z · 舰队值班会话(`bc-13db4760-…`) · duty: noop findings=0 main=277e2e06；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
+- 2026-08-08T12:25Z · 舰队值班会话(`bc-84340ecd-…`) · duty: noop findings=0 main=51c4ba62；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
+- 2026-08-08T11:22Z · 舰队值班会话(`bc-3edaf99f-…`) · duty: noop findings=0 main=b670222f；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T10:26Z · 舰队值班会话(`bc-c1299cab-…`) · duty: noop findings=0 main=2715bfd3；待审合=无（`origin/cursor/*` ahead=0；`script-smoke-aot-pack-2fd5` 已消失）；nudge=0 未 apply；lock 已清
 - 2026-08-08T09:22Z · 舰队值班会话(`bc-6ad8a235-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 behind=65 main=39bda052；script nudge=0；tip~4.3h 已 chat 主控(`bc-43046381` run-f646c27f)；lock 已清
 - 2026-08-08T08:22Z · 舰队值班会话(`bc-2aedf6ed-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 behind=63 main=7141b970；nudge=0 未催主控（tip 05:05Z 仍新鲜 ~3h）；lock 已清

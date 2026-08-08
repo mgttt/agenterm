@@ -49,6 +49,7 @@ const WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH: i32 = 36;
 const WORKSPACE_COMPACT_FONT_BUTTON_WIDTH: i32 = 22;
 const STATUS_TABS_WIDTH: i32 = 72;
 const STATUS_CWD_WIDTH: i32 = 260;
+const STATUS_IME_WIDTH: i32 = 220;
 const STATUS_CURSOR_WIDTH: i32 = 148;
 const STATUS_MOUSE_WIDTH: i32 = 172;
 
@@ -132,6 +133,10 @@ pub(crate) struct StatusSegmentLayout {
     pub(crate) cwd: PixelRect,
     /// Flexible space reserved for future bounded status providers.
     pub(crate) provider: PixelRect,
+    /// Active input-method readout. Hosts supply the descriptive label while
+    /// this shared layout keeps status-bar ordering and collapse behavior
+    /// consistent.
+    pub(crate) ime: PixelRect,
     /// Terminal cursor readout (CURSOR(column,row)).
     pub(crate) cursor: PixelRect,
     /// Pointer readout (MOUSE(column,row)).
@@ -422,11 +427,14 @@ fn status_segment_layout(status: PixelRect, tabs_visible: bool) -> StatusSegment
     let mouse_left = right - mouse_width;
     let cursor_width = STATUS_CURSOR_WIDTH.min((mouse_left - cwd_right).max(0));
     let cursor_left = mouse_left - cursor_width;
+    let ime_width = STATUS_IME_WIDTH.min((cursor_left - cwd_right).max(0));
+    let ime_left = cursor_left - ime_width;
 
     StatusSegmentLayout {
         tabs_recovery,
         cwd: rect(left, status.top, cwd_right, status.bottom),
-        provider: rect(cwd_right, status.top, cursor_left, status.bottom),
+        provider: rect(cwd_right, status.top, ime_left, status.bottom),
+        ime: rect(ime_left, status.top, cursor_left, status.bottom),
         cursor: rect(cursor_left, status.top, mouse_left, status.bottom),
         mouse: rect(mouse_left, status.top, right, status.bottom),
         proxy: rect(right, status.top, right, status.bottom),
@@ -1199,7 +1207,8 @@ mod tests {
         assert_eq!(geometry.status_segments.tabs_recovery, None);
         assert_eq!(geometry.status_segments.cwd.width(), STATUS_CWD_WIDTH);
         assert_eq!(geometry.status_segments.proxy.width(), 0);
-        assert_eq!(geometry.status_segments.provider.width(), 170);
+        assert_eq!(geometry.status_segments.provider.width(), 0);
+        assert_eq!(geometry.status_segments.ime.width(), 170);
         assert_eq!(geometry.status_segments.cursor.width(), STATUS_CURSOR_WIDTH);
         assert_eq!(geometry.status_segments.mouse.width(), STATUS_MOUSE_WIDTH);
         assert_eq!(
@@ -1294,6 +1303,7 @@ mod tests {
 
         assert_eq!(segments.tabs_recovery.unwrap().width(), STATUS_TABS_WIDTH);
         assert_eq!(segments.provider.width(), 0);
+        assert_eq!(segments.ime.width(), 0);
         assert_eq!(segments.proxy.width(), 0);
         assert_eq!(segments.cwd.width(), 138);
         assert_eq!(segments.cwd.right, segments.provider.left);
@@ -1305,6 +1315,7 @@ mod tests {
         assert_eq!(tiny.status_segments.tabs_recovery.unwrap().width(), 40);
         assert_eq!(tiny.status_segments.cwd.width(), 0);
         assert_eq!(tiny.status_segments.provider.width(), 0);
+        assert_eq!(tiny.status_segments.ime.width(), 0);
         assert_eq!(tiny.status_segments.cursor.width(), 0);
         assert_eq!(tiny.status_segments.mouse.width(), 0);
         assert_eq!(tiny.status_segments.proxy.width(), 0);
@@ -1339,6 +1350,7 @@ mod tests {
                 geometry.status,
                 geometry.status_segments.cwd,
                 geometry.status_segments.provider,
+                geometry.status_segments.ime,
                 geometry.status_segments.cursor,
                 geometry.status_segments.mouse,
                 geometry.status_segments.proxy,

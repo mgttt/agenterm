@@ -7,6 +7,73 @@ repository orientation at `PRD.md`, then follow its links to the owning
 `plan/`. Current source layout SSOT is [`plan/ARCHITECTURE.md`](plan/ARCHITECTURE.md);
 do not invent a second living file map in prompts or version plans.
 
+## Document redaction (hard rule · never re-offend)
+
+**Incident (2026-08-08):** a handoff goal under `plan/` shipped host home absolute
+paths. That leaks identity. **Never** paste `pwd` / conversation CWD into the tree.
+
+Applies to **every** write: `plan/**`, `prd/**`, `docs/**`, `README*`, examples,
+tests/fixtures, commit messages, screenshots, prompts, and goal/handoff markdown
+for other agents. Same bar as credentials.
+
+### Path policy (all OS / ISA — one vocabulary)
+
+**Target form is only two kinds:**
+
+1. **Repo-relative** — files inside the clone: `plan/...`, `src/...`, `./check.sh`
+2. **`~/...`** — anything under the user home (product data, config, caches)
+
+Never paste `pwd` / expanded CWD. Prefer “from repository root” over `cd` + absolute.
+
+#### Home conversion table (mandatory — memorize this)
+
+Strip the host home root (and the account segment) and rewrite with `~/`.
+Use `/` after `~/` even on Windows. Real names and `<name>` placeholders both convert.
+
+| Host form (do not leave in tree) | Write as |
+|----------------------------------|----------|
+| `/Users/<name>/...` (Darwin) | `~/...` |
+| `/home/<name>/...` (Linux) | `~/...` |
+| `%USERPROFILE%\...` or `%UserProfile%\...` | `~/...` |
+| `$env:USERPROFILE\...` (PowerShell) | `~/...` |
+| `C:\Users\<name>\...` (and other drive letters) | `~/...` |
+| `$HOME/...` when used as a *documented path* | prefer `~/...` |
+
+Examples:
+
+| Before | After |
+|--------|--------|
+| `/Users/<name>/.local/share/agenterm` | `~/.local/share/agenterm` |
+| `/home/<name>/.config/agenterm` | `~/.config/agenterm` |
+| `%USERPROFILE%\AppData\Local\agenterm` | `~/AppData/Local/agenterm` |
+| `C:\Users\<name>\.local\share\agenterm` | `~/.local/share/agenterm` |
+| absolute path *into this clone* | repo-relative (`src/...`), not `~/...` |
+
+| Class | Action |
+|-------|--------|
+| Absolute path inside the clone | → repo-relative |
+| Absolute path under user home (any row above) | → `~/...` |
+| Product data already under home | → `~/...` only |
+
+**Also never write:** real email / phone / token / API key / SMTP pass → RFC 2606 /
+`<AUTH_CODE>` / `<API_KEY>` / `<TOKEN>`; real IP / MAC / personal hostname →
+`<IP>` / `<HOST>` / generic `station`.
+
+**Exception (code only):** unit tests that assert path *parsers* may use fixed
+synthetic absolute strings without a real account name. Docs, PRD, plan, goals,
+and handoff prompts **never** get that exception.
+
+**Mandatory pre-commit / post-write self-check:**
+
+```bash
+# From repository root; any hit = rewrite (repo-relative or ~/)
+./scripts/doc-redact-check.sh path/to/file
+```
+
+- Path hit → apply the conversion table above
+- Credential-like values → placeholders only
+- Handoff prompts for other agents: same scrub; “internal plan” is not exempt
+
 ## Planning and decomposition method
 
 Use tree thinking, divergent thinking, and dependency-aware parallel thinking
@@ -310,9 +377,9 @@ behavior.
 ## Change rules
 
 - All agents and subagents work in one shared checkout on `main` (the
-  repository root, wherever it is cloned — `D:\dev\agenterm` on the Windows
-  host, but macOS and Linux hosts are also in active use). Do not create Git
-  worktrees, task branches, or hidden
+  repository root wherever it is cloned — Windows, macOS, and Linux hosts are
+  all in active use; never hard-code a personal home path in docs). Do not
+  create Git worktrees, task branches, or hidden
   planning copies. Material planning progress must be written incrementally to
   the applicable `PRD.md`/`prd/PRD_*.md` product node so it is immediately
   visible in the repository; the primary agent reviews, commits, and pushes

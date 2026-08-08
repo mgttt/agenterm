@@ -169,7 +169,8 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 5. 证据：相关 `cargo test -p agenterm-platform` + `cargo test --lib ui_action_catalog` + 直接单测；**无证据不宣称三端手感已齐**。  
 
 7. 不要把 rust-analyzer / 通用 LSP 当成「结构 SSOT 已对齐」的证据；LSP 不消费本文。  
-8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。
+8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。  
+9. **文档脱敏**：仓内 → 仓库相对；用户家目录 → **`~/...`**。转换：`/Users/<name>/`、`/home/<name>/`、`%USERPROFILE%\`、`C:\Users\<name>\` **全部** → `~/`（详见 [`Agents.md`](../Agents.md) Home conversion table；自检 [`scripts/doc-redact-check.sh`](../scripts/doc-redact-check.sh)）。
 
 ---
 
