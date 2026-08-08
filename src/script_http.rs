@@ -501,7 +501,7 @@ mod tests {
         );
         let source = format!(
             r#"
-                let response = rhai::http::request("POST", "{url}", #{{
+                let response = rh::http::request("POST", "{url}", #{{
                     headers: #{{"content-type": "text/plain", "x-secret": "sentinel"}},
                     body: "payload",
                     proxy: false,
@@ -535,7 +535,7 @@ mod tests {
         );
         let source = format!(
             r#"
-                let response = rhai::http::request("GET", "{url}", #{{
+                let response = rh::http::request("GET", "{url}", #{{
                     proxy: false, max_body_bytes: 4
                 }});
                 let body = response.body;
@@ -550,7 +550,7 @@ mod tests {
         server.join().unwrap();
 
         let error = engine()
-            .eval::<Dynamic>(r#"rhai::http::request("GET", "file:///secret", #{proxy: false})"#)
+            .eval::<Dynamic>(r#"rh::http::request("GET", "file:///secret", #{proxy: false})"#)
             .unwrap_err()
             .to_string();
         assert!(error.contains("http_url_invalid"));
@@ -558,7 +558,7 @@ mod tests {
         let error = engine()
             .eval::<Dynamic>(
                 r#"
-                    rhai::http::request("GET", "http://127.0.0.1:1", #{
+                    rh::http::request("GET", "http://127.0.0.1:1", #{
                         proxy: false,
                         timeout: std::time::Duration::from_millis(0)
                     })
@@ -590,7 +590,7 @@ mod tests {
         let error = engine()
             .eval::<Dynamic>(&format!(
                 r#"
-                    rhai::http::request("GET", "https://{address}/tls", #{{
+                    rh::http::request("GET", "https://{address}/tls", #{{
                         proxy: false,
                         timeout: std::time::Duration::from_millis(500)
                     }})

@@ -399,7 +399,7 @@ mod tests {
         let mut engine = Engine::new();
         let mut rhai_module = Module::new();
         register(&mut engine, &mut rhai_module);
-        engine.register_static_module("rhai", Shared::new(rhai_module));
+        engine.register_static_module("rh", Shared::new(rhai_module));
         let mut std_module = Module::new();
         let mut time = Module::new();
         crate::script_process::register(&mut engine, &mut std_module, &mut time);
@@ -413,9 +413,9 @@ mod tests {
         let result = engine()
             .eval::<rhai::Map>(
                 r#"
-                    let slow = rhai::task::after(std::time::Duration::from_millis(30));
-                    let fast = rhai::task::after(std::time::Duration::from_millis(1));
-                    let winner = rhai::task::race([slow, fast],
+                    let slow = rh::task::after(std::time::Duration::from_millis(30));
+                    let fast = rh::task::after(std::time::Duration::from_millis(1));
+                    let winner = rh::task::race([slow, fast],
                         std::time::Duration::from_secs(1));
                     fast.wait();
                     let cancelled = slow.cancel();
@@ -435,7 +435,7 @@ mod tests {
         let error = engine()
             .eval::<Dynamic>(
                 r#"
-                    let task = rhai::task::after(std::time::Duration::from_secs(1));
+                    let task = rh::task::after(std::time::Duration::from_secs(1));
                     task.wait(std::time::Duration::from_millis(1));
                 "#,
             )
