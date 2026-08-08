@@ -21,6 +21,20 @@ pub const UI_WINDOW_CLOSE: &str = "ui.window.close";
 pub const UI_FONT_INCREASE: &str = "ui.font.increase";
 pub const UI_FONT_DECREASE: &str = "ui.font.decrease";
 pub const UI_LOCALE_TOGGLE: &str = "ui.locale.toggle";
+pub const UI_SETTINGS_OPEN: &str = "ui.settings.open";
+pub const UI_SETTINGS_APPLY: &str = "ui.settings.apply";
+pub const UI_SETTINGS_SCOPE_DEFAULTS: &str = "ui.settings.scope.defaults";
+pub const UI_SETTINGS_SCOPE_CURRENT: &str = "ui.settings.scope.current";
+pub const UI_SETTINGS_INHERIT_FONT: &str = "ui.settings.inherit.font";
+pub const UI_SETTINGS_INHERIT_SIZE: &str = "ui.settings.inherit.size";
+pub const UI_SETTINGS_INHERIT_THEME: &str = "ui.settings.inherit.theme";
+pub const UI_SETTINGS_RESET_OVERRIDES: &str = "ui.settings.reset-overrides";
+pub const UI_SETTINGS_THEME_DARK: &str = "ui.settings.theme.dark";
+pub const UI_SETTINGS_THEME_LIGHT: &str = "ui.settings.theme.light";
+pub const UI_SETTINGS_PRESET_CLASSIC_DAY: &str = "ui.settings.preset.classic-day";
+pub const UI_SETTINGS_PRESET_CLASSIC_NIGHT: &str = "ui.settings.preset.classic-night";
+pub const UI_SETTINGS_PRESET_FANCY_DAY: &str = "ui.settings.preset.fancy-day";
+pub const UI_SETTINGS_PRESET_FANCY_NIGHT: &str = "ui.settings.preset.fancy-night";
 pub const TERMINAL_COPY_SELECTION: &str = "terminal.copy-selection";
 pub const TERMINAL_PASTE: &str = "terminal.paste";
 pub const CONTROL_CENTER_OPEN: &str = "control-center.open";
@@ -398,6 +412,37 @@ const SESSION_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParamete
     maximum: None,
 }];
 
+/// Most promoted `ui-action` verbs differ only in identity: they take no
+/// arguments, answer with the post-action `ui-snapshot`, and their sole
+/// declarable failure is the shared argument check. Build them from one
+/// constructor so the catalog stays readable as the surface grows.
+///
+/// `events` is deliberately empty. Correlating a receipt with journal entries
+/// requires the dispatcher to stamp the operation id onto the event (the way
+/// `set_tabs_visible` does for `ui.tabs.*`); until a verb is wired that way,
+/// declaring an event would advertise a correlation that never arrives.
+const fn nullary_ui_action(
+    id: &'static str,
+    script_surface: &'static str,
+    action: &'static str,
+) -> OperationSpec {
+    OperationSpec {
+        id,
+        script_surface,
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some(action),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    }
+}
+
 pub const OPERATION_CATALOG: &[OperationSpec] = &[
     OperationSpec {
         id: CONTROL_CENTER_OPEN,
@@ -728,21 +773,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         available: true,
         since: "0.1.15",
     },
-    OperationSpec {
-        id: UI_TAB_NEW,
-        script_surface: "fleet.ui.tab.new",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("new-tab"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
+    nullary_ui_action(UI_TAB_NEW, "fleet.ui.tab.new", "new-tab"),
     OperationSpec {
         id: UI_TAB_NEW_CHILD,
         script_surface: "fleet.ui.tab.new_child",
@@ -794,36 +825,16 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     // Precondition: the tab title editor must be open (`ui.tab.edit`, or a
     // human double-click). `ui-snapshot` reports the editor state; calling
     // these without it fails rather than silently doing nothing.
-    OperationSpec {
-        id: UI_TAB_EDITOR_SAVE,
-        script_surface: "fleet.ui.tab.editor.save",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("tab-editor-save"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
-    OperationSpec {
-        id: UI_TAB_EDITOR_CANCEL,
-        script_surface: "fleet.ui.tab.editor.cancel",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("tab-editor-cancel"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
+    nullary_ui_action(
+        UI_TAB_EDITOR_SAVE,
+        "fleet.ui.tab.editor.save",
+        "tab-editor-save",
+    ),
+    nullary_ui_action(
+        UI_TAB_EDITOR_CANCEL,
+        "fleet.ui.tab.editor.cancel",
+        "tab-editor-cancel",
+    ),
     OperationSpec {
         id: UI_TREE_TOGGLE,
         script_surface: "fleet.ui.tree.toggle",
@@ -943,51 +954,21 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     // classification rules, including why `UNIX_ONLY_UI_ACTIONS` stays out and
     // why `events` is empty here (correlation needs the dispatcher to stamp the
     // operation id, the way `set_tabs_visible` does).
-    OperationSpec {
-        id: UI_WINDOW_MAXIMIZE,
-        script_surface: "fleet.ui.window.maximize",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("window-maximize"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
-    OperationSpec {
-        id: UI_WINDOW_MINIMIZE,
-        script_surface: "fleet.ui.window.minimize",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("window-minimize"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
-    OperationSpec {
-        id: UI_WINDOW_RESTORE,
-        script_surface: "fleet.ui.window.restore",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("window-restore"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
+    nullary_ui_action(
+        UI_WINDOW_MAXIMIZE,
+        "fleet.ui.window.maximize",
+        "window-maximize",
+    ),
+    nullary_ui_action(
+        UI_WINDOW_MINIMIZE,
+        "fleet.ui.window.minimize",
+        "window-minimize",
+    ),
+    nullary_ui_action(
+        UI_WINDOW_RESTORE,
+        "fleet.ui.window.restore",
+        "window-restore",
+    ),
     OperationSpec {
         id: UI_WINDOW_RESIZE,
         script_surface: "fleet.ui.window.resize",
@@ -1010,83 +991,96 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     // Not destructive: it *requests* a close, which raises the window-close
     // confirmation modal. `stop-server-and-exit` is the destructive branch.
-    OperationSpec {
-        id: UI_WINDOW_CLOSE,
-        script_surface: "fleet.ui.window.close",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("close-window"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
-    OperationSpec {
-        id: UI_FONT_INCREASE,
-        script_surface: "fleet.ui.font.increase",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("font-increase"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
-    OperationSpec {
-        id: UI_FONT_DECREASE,
-        script_surface: "fleet.ui.font.decrease",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("font-decrease"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
-    OperationSpec {
-        id: UI_LOCALE_TOGGLE,
-        script_surface: "fleet.ui.locale.toggle",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("toggle-locale"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
+    nullary_ui_action(UI_WINDOW_CLOSE, "fleet.ui.window.close", "close-window"),
+    nullary_ui_action(UI_FONT_INCREASE, "fleet.ui.font.increase", "font-increase"),
+    nullary_ui_action(UI_FONT_DECREASE, "fleet.ui.font.decrease", "font-decrease"),
+    nullary_ui_action(UI_LOCALE_TOGGLE, "fleet.ui.locale.toggle", "toggle-locale"),
     // Pairs with `terminal.paste`: the copy half of the clipboard round trip a
     // human gets from the terminal context menu.
-    OperationSpec {
-        id: TERMINAL_COPY_SELECTION,
-        script_surface: "fleet.terminal.copy_selection",
-        class: OperationClass::Control,
-        command: "ui-action",
-        action: Some("copy-selection"),
-        aliases: &[],
-        parameters: NO_PARAMETERS,
-        result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments"],
-        events: &[],
-        destructive: false,
-        available: true,
-        since: "0.1.16",
-    },
+    nullary_ui_action(
+        TERMINAL_COPY_SELECTION,
+        "fleet.terminal.copy_selection",
+        "copy-selection",
+    ),
+    // ---- Settings dialog -----------------------------------------------------
+    //
+    // Everything after `ui.settings.open` is modal-scoped: the shared settings
+    // dialog must be open, which `ui-snapshot` reports as `modal.kind`. They are
+    // registered rather than hidden because a control plane that can open a
+    // dialog but not drive or commit it is only half a control plane; calling
+    // one out of context fails loudly instead of silently doing nothing.
+    //
+    // `settings-theme-dark`/`-light` are literal duplicates of the classic-night
+    // and classic-day presets in the dispatcher. They stay as separate typed
+    // identities because they are separate public verbs with separate human
+    // affordances; folding them here would make the map disagree with the
+    // product until someone also merges the dispatcher arms.
+    nullary_ui_action(UI_SETTINGS_OPEN, "fleet.ui.settings.open", "open-settings"),
+    nullary_ui_action(
+        UI_SETTINGS_APPLY,
+        "fleet.ui.settings.apply",
+        "settings-apply",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_SCOPE_DEFAULTS,
+        "fleet.ui.settings.scope.defaults",
+        "settings-defaults",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_SCOPE_CURRENT,
+        "fleet.ui.settings.scope.current",
+        "settings-current",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_INHERIT_FONT,
+        "fleet.ui.settings.inherit.font",
+        "settings-font-toggle",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_INHERIT_SIZE,
+        "fleet.ui.settings.inherit.size",
+        "settings-size-toggle",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_INHERIT_THEME,
+        "fleet.ui.settings.inherit.theme",
+        "settings-theme-toggle",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_RESET_OVERRIDES,
+        "fleet.ui.settings.reset_overrides",
+        "settings-reset-overrides",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_THEME_DARK,
+        "fleet.ui.settings.theme.dark",
+        "settings-theme-dark",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_THEME_LIGHT,
+        "fleet.ui.settings.theme.light",
+        "settings-theme-light",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_PRESET_CLASSIC_DAY,
+        "fleet.ui.settings.preset.classic_day",
+        "settings-preset-classic-day",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_PRESET_CLASSIC_NIGHT,
+        "fleet.ui.settings.preset.classic_night",
+        "settings-preset-classic-night",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_PRESET_FANCY_DAY,
+        "fleet.ui.settings.preset.fancy_day",
+        "settings-preset-fancy-day",
+    ),
+    nullary_ui_action(
+        UI_SETTINGS_PRESET_FANCY_NIGHT,
+        "fleet.ui.settings.preset.fancy_night",
+        "settings-preset-fancy-night",
+    ),
     OperationSpec {
         id: TERMINAL_PASTE,
         script_surface: "fleet.terminal.paste",
@@ -1219,6 +1213,20 @@ pub(crate) fn operation_for_args(
                 "font-decrease" => UI_FONT_DECREASE,
                 "toggle-locale" => UI_LOCALE_TOGGLE,
                 "copy-selection" => TERMINAL_COPY_SELECTION,
+                "open-settings" => UI_SETTINGS_OPEN,
+                "settings-apply" => UI_SETTINGS_APPLY,
+                "settings-defaults" => UI_SETTINGS_SCOPE_DEFAULTS,
+                "settings-current" => UI_SETTINGS_SCOPE_CURRENT,
+                "settings-font-toggle" => UI_SETTINGS_INHERIT_FONT,
+                "settings-size-toggle" => UI_SETTINGS_INHERIT_SIZE,
+                "settings-theme-toggle" => UI_SETTINGS_INHERIT_THEME,
+                "settings-reset-overrides" => UI_SETTINGS_RESET_OVERRIDES,
+                "settings-theme-dark" => UI_SETTINGS_THEME_DARK,
+                "settings-theme-light" => UI_SETTINGS_THEME_LIGHT,
+                "settings-preset-classic-day" => UI_SETTINGS_PRESET_CLASSIC_DAY,
+                "settings-preset-classic-night" => UI_SETTINGS_PRESET_CLASSIC_NIGHT,
+                "settings-preset-fancy-day" => UI_SETTINGS_PRESET_FANCY_DAY,
+                "settings-preset-fancy-night" => UI_SETTINGS_PRESET_FANCY_NIGHT,
                 "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
                 "select-tab" => UI_TAB_SELECT,
@@ -1609,6 +1617,42 @@ mod tests {
                     .iter()
                     .any(|parameter| parameter.name == "tab")
             }));
+        }
+    }
+
+    /// The settings dialog is where "agent can do what a human can" is easiest
+    /// to break: a human sees fourteen affordances, so the map must list
+    /// fourteen. Modal scope is a runtime precondition (`ui-snapshot` reports
+    /// `modal.kind`), not a reason to hide the verb.
+    #[test]
+    fn every_settings_dialog_affordance_has_a_typed_identity() {
+        for (action, expected) in [
+            ("open-settings", UI_SETTINGS_OPEN),
+            ("settings-apply", UI_SETTINGS_APPLY),
+            ("settings-defaults", UI_SETTINGS_SCOPE_DEFAULTS),
+            ("settings-current", UI_SETTINGS_SCOPE_CURRENT),
+            ("settings-font-toggle", UI_SETTINGS_INHERIT_FONT),
+            ("settings-size-toggle", UI_SETTINGS_INHERIT_SIZE),
+            ("settings-theme-toggle", UI_SETTINGS_INHERIT_THEME),
+            ("settings-reset-overrides", UI_SETTINGS_RESET_OVERRIDES),
+            ("settings-theme-dark", UI_SETTINGS_THEME_DARK),
+            ("settings-theme-light", UI_SETTINGS_THEME_LIGHT),
+            (
+                "settings-preset-classic-day",
+                UI_SETTINGS_PRESET_CLASSIC_DAY,
+            ),
+            (
+                "settings-preset-classic-night",
+                UI_SETTINGS_PRESET_CLASSIC_NIGHT,
+            ),
+            ("settings-preset-fancy-day", UI_SETTINGS_PRESET_FANCY_DAY),
+            (
+                "settings-preset-fancy-night",
+                UI_SETTINGS_PRESET_FANCY_NIGHT,
+            ),
+        ] {
+            let operation = validate_operation_args(&args(&["ui-action", action])).unwrap();
+            assert_eq!(operation.map(|operation| operation.id), Some(expected));
         }
     }
 
