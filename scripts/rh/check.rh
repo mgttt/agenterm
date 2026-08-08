@@ -1078,66 +1078,6 @@ fn resolve_artifact_verification_mode(release) {
     "development"
 }
 
-fn exact(left, right) {
-    let left_count = 0 + left.len;
-    let right_count = 0 + right.len;
-    if left_count == 0 && right_count == 0 {
-        return 1;
-    }
-    if left_count == 0 || right_count == 0 {
-        return 0;
-    }
-    let first = ["" + left[0]];
-    let left_index = 1;
-    while left_index < left_count {
-        let value = "" + left[left_index];
-        let insert_at = 0 + first.len;
-        let index = 0;
-        let first_len = 0 + first.len;
-        while index < first_len {
-            if insert_at == first_len && value < first[index] {
-                insert_at = index;
-            }
-            index += 1;
-        }
-        if insert_at == first_len {
-            first.push(value);
-        } else {
-            first.insert(insert_at, value);
-        }
-        left_index += 1;
-    }
-    let second = ["" + right[0]];
-    let right_index = 1;
-    while right_index < right_count {
-        let value = "" + right[right_index];
-        let insert_at = 0 + second.len;
-        let index = 0;
-        let second_len = 0 + second.len;
-        while index < second_len {
-            if insert_at == second_len && value < second[index] {
-                insert_at = index;
-            }
-            index += 1;
-        }
-        if insert_at == second_len {
-            second.push(value);
-        } else {
-            second.insert(insert_at, value);
-        }
-        right_index += 1;
-    }
-    if first.len != second.len {
-        return 0;
-    }
-    for index in 0..first.len {
-        if first[index] != second[index] {
-            return 0;
-        }
-    }
-    1
-}
-
 fn assert_declarations(context, worker, repo, scratch, sequence, gate_manifest) {
     let _manifest = context.manifest;
     let sequence_value = 0 + sequence;
@@ -1178,7 +1118,7 @@ fn assert_declarations(context, worker, repo, scratch, sequence, gate_manifest) 
             }
         }
         require(
-            exact(gate.evidence, evidence),
+            qualification::exact_values(gate.evidence, evidence),
             "check_evidence_declaration_stale:" + gate.id
         );
     }
