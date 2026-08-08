@@ -4182,8 +4182,8 @@ mod tests {
     #[test]
     fn script_source_accepts_shebang_without_shifting_lines() {
         assert_eq!(
-            normalize_script_source("#!/usr/bin/env agenterm-rhai\nprint(1);".to_owned()),
-            "///usr/bin/env agenterm-rhai\nprint(1);"
+            normalize_script_source("#!/usr/bin/env agenterm-rh\nprint(1);".to_owned()),
+            "///usr/bin/env agenterm-rh\nprint(1);"
         );
         assert_eq!(normalize_script_source("print(1);".to_owned()), "print(1);");
     }

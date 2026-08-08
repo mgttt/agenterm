@@ -26,7 +26,7 @@ impl ConcurrencyPermit {
         }
         match agenterm_platform::locking::SlotPermit::try_acquire(
             &std::env::temp_dir(),
-            "agenterm-rhai-supervisor-v1",
+            "agenterm-rh-supervisor-v1",
             global_limit,
         ) {
             Ok(global) => Ok(Self { global, active }),

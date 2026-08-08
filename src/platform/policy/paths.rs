@@ -62,7 +62,7 @@ pub(crate) fn default_audit_path() -> PathBuf {
             .join(product_directory_name())
             .join("script-audit.jsonl")
     } else {
-        std::env::temp_dir().join("agenterm-rhai-audit.jsonl")
+        std::env::temp_dir().join("agenterm-rh-audit.jsonl")
     }
 }
 

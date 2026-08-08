@@ -780,7 +780,7 @@ mod tests {
         );
 
         let fixture = std::env::temp_dir().join(format!(
-            "agenterm-rhai-sha256-{}-{}",
+            "agenterm-rh-sha256-{}-{}",
             std::process::id(),
             ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -808,7 +808,7 @@ mod tests {
     #[test]
     fn local_filesystem_round_trip_and_error_are_bounded() {
         let directory =
-            std::env::temp_dir().join(format!("agenterm-rhai-stdlib-{}", std::process::id()));
+            std::env::temp_dir().join(format!("agenterm-rh-stdlib-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("round-trip.txt");
         let script_path = path.to_string_lossy().replace('\\', "\\\\");
@@ -831,7 +831,7 @@ mod tests {
     #[test]
     fn directory_metadata_absolute_paths_and_system_time_are_typed() {
         let directory =
-            std::env::temp_dir().join(format!("agenterm-rhai-directory-{}", std::process::id()));
+            std::env::temp_dir().join(format!("agenterm-rh-directory-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let file = directory.join("entry.txt");
         std::fs::write(&file, "hello").unwrap();
@@ -893,7 +893,7 @@ mod tests {
     #[test]
     fn filesystem_lifecycle_is_typed_and_unrestricted() {
         let root =
-            std::env::temp_dir().join(format!("agenterm-rhai-lifecycle-{}", std::process::id()));
+            std::env::temp_dir().join(format!("agenterm-rh-lifecycle-{}", std::process::id()));
         let nested = root.join("nested");
         let source = nested.join("source.txt");
         let copied = nested.join("copied.txt");
@@ -937,7 +937,7 @@ mod tests {
     #[test]
     fn invocation_temp_and_atomic_replace_have_explicit_lifecycle() {
         let root = std::env::temp_dir().join(format!(
-            "agenterm-rhai-runtime-{}-{}",
+            "agenterm-rh-runtime-{}-{}",
             std::process::id(),
             ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -992,7 +992,7 @@ mod tests {
     #[test]
     fn runtime_append_sync_preserves_existing_content_and_record_order() {
         let root = std::env::temp_dir().join(format!(
-            "agenterm-rhai-append-order-{}-{}",
+            "agenterm-rh-append-order-{}-{}",
             std::process::id(),
             ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -1023,7 +1023,7 @@ mod tests {
     #[test]
     fn runtime_append_sync_durably_creates_a_missing_file() {
         let root = std::env::temp_dir().join(format!(
-            "agenterm-rhai-append-create-{}-{}",
+            "agenterm-rh-append-create-{}-{}",
             std::process::id(),
             ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -1050,7 +1050,7 @@ mod tests {
     #[test]
     fn runtime_append_sync_bounds_records_and_reports_path_failures() {
         let root = std::env::temp_dir().join(format!(
-            "agenterm-rhai-append-errors-{}-{}",
+            "agenterm-rh-append-errors-{}-{}",
             std::process::id(),
             ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -1094,7 +1094,7 @@ mod tests {
             return;
         }
         let root = std::env::temp_dir().join(format!(
-            "agenterm-rhai-long-atomic-{}-{}",
+            "agenterm-rh-long-atomic-{}-{}",
             std::process::id(),
             ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
