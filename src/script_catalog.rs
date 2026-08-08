@@ -155,376 +155,9 @@ const HTTP_RESPONSE_ERRORS: &[&str] = &[
     "stream_closed",
 ];
 
-const RH_HOST_API_MODULES: &[&str] = &[
-    "json", "bytes", "crypto", "hash", "image", "clipboard", "task", "http", "runtime",
-];
-
-fn is_rhai_host_api_surface(surface_path: &str) -> bool {
-    surface_path.strip_prefix("rhai::").is_some_and(|rest| {
-        rest.split("::")
-            .next()
-            .is_some_and(|module| RH_HOST_API_MODULES.contains(&module))
-    })
-}
-
-fn mark_rhai_host_api_legacy(entries: &mut [ScriptApiEntry]) {
-    for entry in entries.iter_mut() {
-        if is_rhai_host_api_surface(entry.surface_path) {
-            entry.stability = ScriptApiStability::Legacy;
-        }
-    }
-}
-
-fn rh_host_api_surface_aliases() -> Vec<ScriptApiEntry> {
-    vec![
-        shipped_runtime_entry(
-            "rh.runtime.temp-dir",
-            "system/temp/invocation-directory",
-            "rh::runtime::temp_dir",
-            "rh::runtime::temp_dir()",
-            (&["invocation_owned_temp"], &["runtime_temp_unavailable"]),
-            Some("PathBuf"),
-        ),
-        shipped_runtime_entry(
-            "rh.runtime.atomic-write",
-            "system/filesystem/atomic-write-text",
-            "rh::runtime::atomic_write",
-            "rh::runtime::atomic_write(path, text)",
-            (
-                &["filesystem_write", "same_volume_atomic_replace"],
-                &[
-                    "runtime_atomic_write_invalid_target",
-                    "runtime_atomic_write_create",
-                    "runtime_atomic_write_data",
-                    "runtime_atomic_write_promote",
-                    "runtime_atomic_write_sync",
-                ],
-            ),
-            None,
-        ),
-        shipped_runtime_entry(
-            "rh.runtime.atomic-write-bytes",
-            "system/filesystem/atomic-write-bytes",
-            "rh::runtime::atomic_write_bytes",
-            "rh::runtime::atomic_write_bytes(path, bytes)",
-            (
-                &["filesystem_write", "same_volume_atomic_replace"],
-                &[
-                    "runtime_atomic_write_invalid_target",
-                    "runtime_atomic_write_create",
-                    "runtime_atomic_write_data",
-                    "runtime_atomic_write_promote",
-                    "runtime_atomic_write_sync",
-                ],
-            ),
-            None,
-        ),
-        shipped_runtime_entry(
-            "rh.runtime.append-sync",
-            "system/filesystem/durable-append-text",
-            "rh::runtime::append_sync",
-            "rh::runtime::append_sync(path, text)",
-            (
-                &[
-                    "filesystem_append",
-                    "record_sync",
-                    "parent_sync_on_create",
-                    "maximum_8_mib_record",
-                ],
-                &[
-                    "runtime_append_too_large",
-                    "runtime_append_invalid_target",
-                    "runtime_append_open",
-                    "runtime_append_write",
-                    "runtime_append_sync",
-                    "runtime_append_parent_sync",
-                ],
-            ),
-            None,
-        ),
-        shipped_runtime_entry(
-            "rh.runtime.append-sync-bytes",
-            "system/filesystem/durable-append-bytes",
-            "rh::runtime::append_sync_bytes",
-            "rh::runtime::append_sync_bytes(path, bytes)",
-            (
-                &[
-                    "filesystem_append",
-                    "record_sync",
-                    "parent_sync_on_create",
-                    "maximum_8_mib_record",
-                ],
-                &[
-                    "runtime_append_too_large",
-                    "runtime_append_invalid_target",
-                    "runtime_append_open",
-                    "runtime_append_write",
-                    "runtime_append_sync",
-                    "runtime_append_parent_sync",
-                ],
-            ),
-            None,
-        ),
-        shipped_local_entry(
-            "rh.json.parse",
-            "data/json/parse",
-            "rh::json::parse",
-            None,
-            RustMapping::None,
-            "rh::json::parse(text)",
-            (NO_STRINGS, &["json_parse", "json_dynamic"]),
-        ),
-        shipped_local_entry(
-            "rh.json.parse-file",
-            "data/json/parse-file",
-            "rh::json::parse_file",
-            Some("serde_json::from_reader"),
-            RustMapping::Adapted,
-            "rh::json::parse_file(path)",
-            (
-                &["typed_file_input", "eight_mebibyte_limit"],
-                &["json_parse_file", "json_parse_file_too_large"],
-            ),
-        ),
-        shipped_local_entry(
-            "rh.json.stringify",
-            "data/json/stringify",
-            "rh::json::stringify",
-            None,
-            RustMapping::None,
-            "rh::json::stringify(value)",
-            (NO_STRINGS, &["json_value", "json_stringify"]),
-        ),
-        shipped_local_entry(
-            "rh.json.stringify-pretty",
-            "data/json/stringify-pretty",
-            "rh::json::stringify_pretty",
-            None,
-            RustMapping::None,
-            "rh::json::stringify_pretty(value)",
-            (NO_STRINGS, &["json_value", "json_stringify"]),
-        ),
-        shipped_local_entry(
-            "rh.bytes.from-text",
-            "data/bytes/from-text",
-            "rh::bytes::from_text",
-            None,
-            RustMapping::None,
-            "rh::bytes::from_text(text)",
-            (NO_STRINGS, NO_STRINGS),
-        ),
-        shipped_local_entry_with_design(
-            shipped_local_entry(
-                "rh.bytes.from-array",
-                "data/bytes/from-array",
-                "rh::bytes::from_array",
-                None,
-                RustMapping::None,
-                "rh::bytes::from_array(values)",
-                (
-                    &["arbitrary_byte_construction", "unsigned_byte_values"],
-                    &[
-                        "bytes_value_type",
-                        "bytes_value_range",
-                        "bytes_length_limit",
-                    ],
-                ),
-            ),
-            "2026-07-30",
-        ),
-        shipped_local_entry(
-            "rh.crypto.sha256",
-            "data/crypto/sha256",
-            "rh::crypto::sha256",
-            Some("sha2::Sha256"),
-            RustMapping::Adapted,
-            "rh::crypto::sha256(bytes)",
-            (&["lowercase_hex", "sha256"], NO_STRINGS),
-        ),
-        shipped_local_entry(
-            "rh.crypto.sha256-file",
-            "data/crypto/sha256-file",
-            "rh::crypto::sha256_file",
-            Some("sha2::Sha256"),
-            RustMapping::Adapted,
-            "rh::crypto::sha256_file(path)",
-            (
-                &["streaming_64_kib_chunks", "lowercase_hex", "sha256"],
-                &["crypto_sha256_file"],
-            ),
-        ),
-        shipped_local_entry_with_design(
-            shipped_local_entry(
-                "rh.hash.fnv1a64",
-                "data/hash/fnv1a64",
-                "rh::hash::fnv1a64",
-                None,
-                RustMapping::None,
-                "rh::hash::fnv1a64(bytes)",
-                (&["lowercase_hex", "wrapping_u64", "fnv1a64"], NO_STRINGS),
-            ),
-            "2026-07-30",
-        ),
-        shipped_local_entry_with_design(
-            shipped_local_entry(
-                "rh.image.inspect-png",
-                "data/image/png/inspect",
-                "rh::image::inspect_png",
-                None,
-                RustMapping::None,
-                "rh::image::inspect_png(path) -> PngInfo",
-                (
-                    &[
-                        "typed_dimensions",
-                        "sampled_rgb",
-                        "sampled_luminance",
-                        "bounded_decode",
-                    ],
-                    &[
-                        "image_png_open",
-                        "image_png_header",
-                        "image_png_decode",
-                        "image_png_dimensions",
-                        "image_png_color",
-                        "image_png_size",
-                    ],
-                ),
-            ),
-            "2026-07-30",
-        ),
-        shipped_local_entry_with_design(
-            shipped_local_entry(
-                "rh.clipboard.get-text",
-                "system/clipboard/text/get",
-                "rh::clipboard::get_text",
-                None,
-                RustMapping::None,
-                "rh::clipboard::get_text() -> String",
-                (
-                    &[
-                        "operating_system_clipboard",
-                        "unicode_text",
-                        "unrestricted_local_access",
-                        "get_text",
-                    ],
-                    &[
-                        "clipboard_open",
-                        "clipboard_text_unavailable",
-                        "clipboard_read",
-                        "clipboard_text_invalid",
-                        "clipboard_unsupported",
-                    ],
-                ),
-            ),
-            "2026-07-30",
-        ),
-        shipped_local_entry_with_design(
-            shipped_local_entry(
-                "rh.clipboard.set-text",
-                "system/clipboard/text/set",
-                "rh::clipboard::set_text",
-                None,
-                RustMapping::None,
-                "rh::clipboard::set_text(text)",
-                (
-                    &[
-                        "operating_system_clipboard",
-                        "unicode_text",
-                        "unrestricted_local_access",
-                        "set_text",
-                    ],
-                    &[
-                        "clipboard_open",
-                        "clipboard_text_too_large",
-                        "clipboard_clear",
-                        "clipboard_allocate",
-                        "clipboard_write",
-                        "clipboard_unsupported",
-                    ],
-                ),
-            ),
-            "2026-07-30",
-        ),
-        shipped_local_entry(
-            "rh.task.after",
-            "runtime/task/timer/after",
-            "rh::task::after",
-            None,
-            RustMapping::None,
-            "rh::task::after(duration)",
-            (&["background_timer", "invocation_owned"], &["task_state_poisoned"]),
-        ),
-        shipped_local_entry(
-            "rh.task.sleep",
-            "runtime/task/timer/sleep",
-            "rh::task::sleep",
-            None,
-            RustMapping::None,
-            "rh::task::sleep(duration)",
-            (&["blocking_wait", "invocation_owned"], &["task_cancelled"]),
-        ),
-        shipped_local_entry(
-            "rh.task.wait-all",
-            "runtime/task/composition/wait-all",
-            "rh::task::wait_all",
-            None,
-            RustMapping::None,
-            "rh::task::wait_all(tasks[, timeout])",
-            (
-                &["deterministic_input_order", "maximum_64_tasks"],
-                &["task_wait_timeout", "task_cancelled"],
-            ),
-        ),
-        shipped_local_entry(
-            "rh.task.race",
-            "runtime/task/composition/race",
-            "rh::task::race",
-            None,
-            RustMapping::None,
-            "rh::task::race(tasks[, timeout])",
-            (
-                &["returns_winning_index", "maximum_64_tasks"],
-                &["task_race_empty", "task_wait_timeout"],
-            ),
-        ),
-        shipped_local_entry(
-            "rh.task.cancel-all",
-            "runtime/task/composition/cancel-all",
-            "rh::task::cancel_all",
-            None,
-            RustMapping::None,
-            "rh::task::cancel_all(tasks)",
-            (
-                &["idempotent_cancellation", "maximum_64_tasks"],
-                &["task_collection_type"],
-            ),
-        ),
-        http_entry(
-            "rh.http.request",
-            "network/http/client/request",
-            "rh::http::request",
-            "rh::http::request(method, url[, options]) -> HttpResponse",
-            "sync",
-            "supervisor_deadline_and_transport_timeout",
-            Some("HttpResponse"),
-            HTTP_REQUEST_ERRORS,
-        ),
-        http_entry(
-            "rh.http.start",
-            "network/http/client/start",
-            "rh::http::start",
-            "rh::http::start(method, url[, options]) -> Task",
-            "background_task",
-            "task_cancel_immediate_late_completion_ignored_transport_timeout_bounded",
-            Some("Task<HttpResponse>"),
-            HTTP_START_ERRORS,
-        ),
-    ]
-}
-
 pub fn entries() -> Vec<ScriptApiEntry> {
     let mut entries = vec![ScriptApiEntry {
-        stable_id: "rhai.print",
+        stable_id: "rh.print",
         catalog_path: "runtime/output/print",
         surface_path: "print",
         rust_path: None,
@@ -718,18 +351,18 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("FileLockAttempt"),
         ),
         shipped_runtime_entry(
-            "rhai.runtime.temp-dir",
+            "rh.runtime.temp-dir",
             "system/temp/invocation-directory",
-            "rhai::runtime::temp_dir",
-            "rhai::runtime::temp_dir()",
+            "rh::runtime::temp_dir",
+            "rh::runtime::temp_dir()",
             (&["invocation_owned_temp"], &["runtime_temp_unavailable"]),
             Some("PathBuf"),
         ),
         shipped_runtime_entry(
-            "rhai.runtime.atomic-write",
+            "rh.runtime.atomic-write",
             "system/filesystem/atomic-write-text",
-            "rhai::runtime::atomic_write",
-            "rhai::runtime::atomic_write(path, text)",
+            "rh::runtime::atomic_write",
+            "rh::runtime::atomic_write(path, text)",
             (
                 &["filesystem_write", "same_volume_atomic_replace"],
                 &[
@@ -743,10 +376,10 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             None,
         ),
         shipped_runtime_entry(
-            "rhai.runtime.atomic-write-bytes",
+            "rh.runtime.atomic-write-bytes",
             "system/filesystem/atomic-write-bytes",
-            "rhai::runtime::atomic_write_bytes",
-            "rhai::runtime::atomic_write_bytes(path, bytes)",
+            "rh::runtime::atomic_write_bytes",
+            "rh::runtime::atomic_write_bytes(path, bytes)",
             (
                 &["filesystem_write", "same_volume_atomic_replace"],
                 &[
@@ -760,10 +393,10 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             None,
         ),
         shipped_runtime_entry(
-            "rhai.runtime.append-sync",
+            "rh.runtime.append-sync",
             "system/filesystem/durable-append-text",
-            "rhai::runtime::append_sync",
-            "rhai::runtime::append_sync(path, text)",
+            "rh::runtime::append_sync",
+            "rh::runtime::append_sync(path, text)",
             (
                 &[
                     "filesystem_append",
@@ -783,10 +416,10 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             None,
         ),
         shipped_runtime_entry(
-            "rhai.runtime.append-sync-bytes",
+            "rh.runtime.append-sync-bytes",
             "system/filesystem/durable-append-bytes",
-            "rhai::runtime::append_sync_bytes",
-            "rhai::runtime::append_sync_bytes(path, bytes)",
+            "rh::runtime::append_sync_bytes",
+            "rh::runtime::append_sync_bytes(path, bytes)",
             (
                 &[
                     "filesystem_append",
@@ -1334,7 +967,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ),
         ),
         shipped_local_entry(
-            "rhai.stream.handle",
+            "rh.stream.handle",
             "runtime/stream/handle",
             "Stream.id/kind/state/buffered_bytes/truncated/complete/read/collect/close",
             None,
@@ -1374,61 +1007,61 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (&["maximum_60_seconds"], &["duration_seconds"]),
         ),
         shipped_local_entry(
-            "rhai.json.parse",
+            "rh.json.parse",
             "data/json/parse",
-            "rhai::json::parse",
+            "rh::json::parse",
             None,
             RustMapping::None,
-            "rhai::json::parse(text)",
+            "rh::json::parse(text)",
             (NO_STRINGS, &["json_parse", "json_dynamic"]),
         ),
         shipped_local_entry(
-            "rhai.json.parse-file",
+            "rh.json.parse-file",
             "data/json/parse-file",
-            "rhai::json::parse_file",
+            "rh::json::parse_file",
             Some("serde_json::from_reader"),
             RustMapping::Adapted,
-            "rhai::json::parse_file(path)",
+            "rh::json::parse_file(path)",
             (
                 &["typed_file_input", "eight_mebibyte_limit"],
                 &["json_parse_file", "json_parse_file_too_large"],
             ),
         ),
         shipped_local_entry(
-            "rhai.json.stringify",
+            "rh.json.stringify",
             "data/json/stringify",
-            "rhai::json::stringify",
+            "rh::json::stringify",
             None,
             RustMapping::None,
-            "rhai::json::stringify(value)",
+            "rh::json::stringify(value)",
             (NO_STRINGS, &["json_value", "json_stringify"]),
         ),
         shipped_local_entry(
-            "rhai.json.stringify-pretty",
+            "rh.json.stringify-pretty",
             "data/json/stringify-pretty",
-            "rhai::json::stringify_pretty",
+            "rh::json::stringify_pretty",
             None,
             RustMapping::None,
-            "rhai::json::stringify_pretty(value)",
+            "rh::json::stringify_pretty(value)",
             (NO_STRINGS, &["json_value", "json_stringify"]),
         ),
         shipped_local_entry(
-            "rhai.bytes.from-text",
+            "rh.bytes.from-text",
             "data/bytes/from-text",
-            "rhai::bytes::from_text",
+            "rh::bytes::from_text",
             None,
             RustMapping::None,
-            "rhai::bytes::from_text(text)",
+            "rh::bytes::from_text(text)",
             (NO_STRINGS, NO_STRINGS),
         ),
         shipped_local_entry_with_design(
             shipped_local_entry(
-                "rhai.bytes.from-array",
+                "rh.bytes.from-array",
                 "data/bytes/from-array",
-                "rhai::bytes::from_array",
+                "rh::bytes::from_array",
                 None,
                 RustMapping::None,
-                "rhai::bytes::from_array(values)",
+                "rh::bytes::from_array(values)",
                 (
                     &["arbitrary_byte_construction", "unsigned_byte_values"],
                     &[
@@ -1441,7 +1074,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "2026-07-30",
         ),
         shipped_local_entry(
-            "rhai.bytes.length",
+            "rh.bytes.length",
             "data/bytes/length",
             "Bytes.len",
             None,
@@ -1451,7 +1084,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         ),
         shipped_local_entry_with_design(
             shipped_local_entry(
-                "rhai.bytes.raw-operations",
+                "rh.bytes.raw-operations",
                 "data/bytes/raw-operations",
                 "Bytes.get/slice/append",
                 None,
@@ -1469,7 +1102,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "2026-07-30",
         ),
         shipped_local_entry(
-            "rhai.bytes.to-text",
+            "rh.bytes.to-text",
             "data/bytes/to-text",
             "Bytes.to_text",
             None,
@@ -1478,21 +1111,21 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (NO_STRINGS, &["bytes_invalid_utf8"]),
         ),
         shipped_local_entry(
-            "rhai.crypto.sha256",
+            "rh.crypto.sha256",
             "data/crypto/sha256",
-            "rhai::crypto::sha256",
+            "rh::crypto::sha256",
             Some("sha2::Sha256"),
             RustMapping::Adapted,
-            "rhai::crypto::sha256(bytes)",
+            "rh::crypto::sha256(bytes)",
             (&["lowercase_hex", "sha256"], NO_STRINGS),
         ),
         shipped_local_entry(
-            "rhai.crypto.sha256-file",
+            "rh.crypto.sha256-file",
             "data/crypto/sha256-file",
-            "rhai::crypto::sha256_file",
+            "rh::crypto::sha256_file",
             Some("sha2::Sha256"),
             RustMapping::Adapted,
-            "rhai::crypto::sha256_file(path)",
+            "rh::crypto::sha256_file(path)",
             (
                 &["streaming_64_kib_chunks", "lowercase_hex", "sha256"],
                 &["crypto_sha256_file"],
@@ -1500,24 +1133,24 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         ),
         shipped_local_entry_with_design(
             shipped_local_entry(
-                "rhai.hash.fnv1a64",
+                "rh.hash.fnv1a64",
                 "data/hash/fnv1a64",
-                "rhai::hash::fnv1a64",
+                "rh::hash::fnv1a64",
                 None,
                 RustMapping::None,
-                "rhai::hash::fnv1a64(bytes)",
+                "rh::hash::fnv1a64(bytes)",
                 (&["lowercase_hex", "wrapping_u64", "fnv1a64"], NO_STRINGS),
             ),
             "2026-07-30",
         ),
         shipped_local_entry_with_design(
             shipped_local_entry(
-                "rhai.image.inspect-png",
+                "rh.image.inspect-png",
                 "data/image/png/inspect",
-                "rhai::image::inspect_png",
+                "rh::image::inspect_png",
                 None,
                 RustMapping::None,
-                "rhai::image::inspect_png(path) -> PngInfo",
+                "rh::image::inspect_png(path) -> PngInfo",
                 (
                     &[
                         "typed_dimensions",
@@ -1539,12 +1172,12 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         ),
         shipped_local_entry_with_design(
             shipped_local_entry(
-                "rhai.clipboard.get-text",
+                "rh.clipboard.get-text",
                 "system/clipboard/text/get",
-                "rhai::clipboard::get_text",
+                "rh::clipboard::get_text",
                 None,
                 RustMapping::None,
-                "rhai::clipboard::get_text() -> String",
+                "rh::clipboard::get_text() -> String",
                 (
                     &[
                         "operating_system_clipboard",
@@ -1565,12 +1198,12 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         ),
         shipped_local_entry_with_design(
             shipped_local_entry(
-                "rhai.clipboard.set-text",
+                "rh.clipboard.set-text",
                 "system/clipboard/text/set",
-                "rhai::clipboard::set_text",
+                "rh::clipboard::set_text",
                 None,
                 RustMapping::None,
-                "rhai::clipboard::set_text(text)",
+                "rh::clipboard::set_text(text)",
                 (
                     &[
                         "operating_system_clipboard",
@@ -1591,52 +1224,52 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "2026-07-30",
         ),
         shipped_local_entry(
-            "rhai.task.after",
+            "rh.task.after",
             "runtime/task/timer/after",
-            "rhai::task::after",
+            "rh::task::after",
             None,
             RustMapping::None,
-            "rhai::task::after(duration)",
+            "rh::task::after(duration)",
             (&["background_timer", "invocation_owned"], &["task_state_poisoned"]),
         ),
         shipped_local_entry(
-            "rhai.task.sleep",
+            "rh.task.sleep",
             "runtime/task/timer/sleep",
-            "rhai::task::sleep",
+            "rh::task::sleep",
             None,
             RustMapping::None,
-            "rhai::task::sleep(duration)",
+            "rh::task::sleep(duration)",
             (&["blocking_wait", "invocation_owned"], &["task_cancelled"]),
         ),
         shipped_local_entry(
-            "rhai.task.wait-all",
+            "rh.task.wait-all",
             "runtime/task/composition/wait-all",
-            "rhai::task::wait_all",
+            "rh::task::wait_all",
             None,
             RustMapping::None,
-            "rhai::task::wait_all(tasks[, timeout])",
+            "rh::task::wait_all(tasks[, timeout])",
             (&["deterministic_input_order", "maximum_64_tasks"], &["task_wait_timeout", "task_cancelled"]),
         ),
         shipped_local_entry(
-            "rhai.task.race",
+            "rh.task.race",
             "runtime/task/composition/race",
-            "rhai::task::race",
+            "rh::task::race",
             None,
             RustMapping::None,
-            "rhai::task::race(tasks[, timeout])",
+            "rh::task::race(tasks[, timeout])",
             (&["returns_winning_index", "maximum_64_tasks"], &["task_race_empty", "task_wait_timeout"]),
         ),
         shipped_local_entry(
-            "rhai.task.cancel-all",
+            "rh.task.cancel-all",
             "runtime/task/composition/cancel-all",
-            "rhai::task::cancel_all",
+            "rh::task::cancel_all",
             None,
             RustMapping::None,
-            "rhai::task::cancel_all(tasks)",
+            "rh::task::cancel_all(tasks)",
             (&["idempotent_cancellation", "maximum_64_tasks"], &["task_collection_type"]),
         ),
         shipped_local_entry(
-            "rhai.task.handle",
+            "rh.task.handle",
             "runtime/task/handle",
             "Task.id/kind/state/done/cancelled/wait/cancel",
             None,
@@ -1645,27 +1278,27 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (&["typed_host_payload_only", "no_rhai_dynamic_cross_thread", "failed_terminal_state"], &["task_wait_timeout", "task_failed", "task_cancelled"]),
         ),
         http_entry(
-            "rhai.http.request",
+            "rh.http.request",
             "network/http/client/request",
-            "rhai::http::request",
-            "rhai::http::request(method, url[, options]) -> HttpResponse",
+            "rh::http::request",
+            "rh::http::request(method, url[, options]) -> HttpResponse",
             "sync",
             "supervisor_deadline_and_transport_timeout",
             Some("HttpResponse"),
             HTTP_REQUEST_ERRORS,
         ),
         http_entry(
-            "rhai.http.start",
+            "rh.http.start",
             "network/http/client/start",
-            "rhai::http::start",
-            "rhai::http::start(method, url[, options]) -> Task",
+            "rh::http::start",
+            "rh::http::start(method, url[, options]) -> Task",
             "background_task",
             "task_cancel_immediate_late_completion_ignored_transport_timeout_bounded",
             Some("Task<HttpResponse>"),
             HTTP_START_ERRORS,
         ),
         http_entry(
-            "rhai.http.response",
+            "rh.http.response",
             "network/http/client/response",
             "HttpResponse.status/version/headers/body/header",
             "response.status / response.version / response.headers / response.body / response.header(name)",
@@ -1726,8 +1359,6 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "Fleet control API is not shipped yet",
         ),
     ]);
-    mark_rhai_host_api_legacy(&mut entries);
-    entries.extend(rh_host_api_surface_aliases());
     for entry in &mut entries {
         entry.comparisons = comparisons_for(entry.stable_id);
     }
@@ -2182,7 +1813,7 @@ const fn unreviewed_comparisons() -> ScriptApiComparisons {
 }
 
 fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
-    if stable_id == "rhai.print" {
+    if stable_id == "rh.print" {
         return similar_comparisons(
             "console.log",
             "console.log",
@@ -2238,61 +1869,61 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "AgenTerm exposes blocking Rust-shaped TCP with typed deadlines and bounded per-call I/O",
         );
     }
-    if stable_id.starts_with("rhai.json.") || stable_id.starts_with("rh.json.") {
+    if stable_id.starts_with("rh.json.") {
         return similar_comparisons(
             "JSON",
             "JSON",
             "AgenTerm conversion is bounded and uses Rhai-compatible Dynamic values",
         );
     }
-    if stable_id.starts_with("rhai.bytes.") || stable_id.starts_with("rh.bytes.") {
+    if stable_id.starts_with("rh.bytes.") {
         return similar_comparisons(
             "Buffer / TextEncoder / TextDecoder",
             "Uint8Array / Buffer / Bun.readableStreamToBytes",
             "AgenTerm Bytes is an owned bounded value with strict UTF-8 conversion",
         );
     }
-    if stable_id.starts_with("rhai.crypto.") || stable_id.starts_with("rh.crypto.") {
+    if stable_id.starts_with("rh.crypto.") {
         return similar_comparisons(
             "node:crypto",
             "Bun.CryptoHasher",
             "AgenTerm exposes deterministic typed digests without implicit encoding or shell tools",
         );
     }
-    if stable_id.starts_with("rhai.hash.") || stable_id.starts_with("rh.hash.") {
+    if stable_id.starts_with("rh.hash.") {
         return similar_comparisons(
             "non-cryptographic userland hash",
             "non-cryptographic userland hash",
             "AgenTerm exposes an exact deterministic wire-compatible FNV-1a 64-bit digest",
         );
     }
-    if stable_id.starts_with("rhai.image.") || stable_id.starts_with("rh.image.") {
+    if stable_id.starts_with("rh.image.") {
         return similar_comparisons(
             "sharp / pngjs / Canvas image data",
             "sharp / Canvas image data",
             "AgenTerm exposes bounded typed PNG facts without a JavaScript image object graph",
         );
     }
-    if stable_id.starts_with("rhai.clipboard.") || stable_id.starts_with("rh.clipboard.") {
+    if stable_id.starts_with("rh.clipboard.") {
         return agenterm_specific_comparisons(
             "Node.js and Bun have no equivalent core operating-system clipboard API; AgenTerm exposes native Unicode text directly",
         );
     }
-    if stable_id.starts_with("rhai.stream.") || stable_id.starts_with("rh.stream.") {
+    if stable_id.starts_with("rh.stream.") {
         return similar_comparisons(
             "node:stream",
             "ReadableStream / Bun.readableStreamToBytes",
             "AgenTerm streams have invocation ownership, bounded queues, backpressure, and completeness facts",
         );
     }
-    if stable_id.starts_with("rhai.task.") || stable_id.starts_with("rh.task.") {
+    if stable_id.starts_with("rh.task.") {
         return similar_comparisons(
             "Promise / AbortController / node:timers",
             "Promise / AbortController / Bun.sleep",
             "AgenTerm exposes explicit Task identity and state rather than JavaScript promises or async syntax",
         );
     }
-    if stable_id.starts_with("rhai.http.") || stable_id.starts_with("rh.http.") {
+    if stable_id.starts_with("rh.http.") {
         return similar_comparisons(
             "fetch",
             "fetch",
@@ -2313,7 +1944,7 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "agenterm.tasks.json is a typed local task manifest, not a package or dependency manifest",
         );
     }
-    if stable_id.starts_with("rhai.runtime.") || stable_id.starts_with("rh.runtime.") {
+    if stable_id.starts_with("rh.runtime.") {
         return agenterm_specific_comparisons(
             "invocation-owned temporary resources and atomic publication are AgenTerm runtime contracts",
         );
@@ -2517,12 +2148,12 @@ mod tests {
         "std.process.child",
         "std.process.child-window-input",
         "std.process.output",
-        "rhai.stream.handle",
-        "rhai.bytes.length",
-        "rhai.bytes.raw-operations",
-        "rhai.bytes.to-text",
-        "rhai.task.handle",
-        "rhai.http.response",
+        "rh.stream.handle",
+        "rh.bytes.length",
+        "rh.bytes.raw-operations",
+        "rh.bytes.to-text",
+        "rh.task.handle",
+        "rh.http.response",
         "runtime.project.module-import",
         "runtime.project.named-task",
     ];
@@ -2582,7 +2213,6 @@ mod tests {
             std::collections::HashMap::new();
         collect_module_surface(&std_module, "std::", &mut surface);
         collect_module_surface(&host_api_module, "rh::", &mut surface);
-        collect_module_surface(&host_api_module, "rhai::", &mut surface);
         let mut names: std::collections::HashSet<String> = surface
             .keys()
             .filter_map(|path| path.rsplit("::").next().map(str::to_owned))

@@ -56,7 +56,7 @@ Ordered; 4.1 blocks 4.3; 4.5 follows 4.3; 4.6–4.7 follow 4.5.
 | # | Leaf | Exclusive owner(s) | Evidence |
 |---|------|--------------------|----------|
 | 4.1 | ✅ AOT typecheck debt + remaining HE emit for Native packs | `crates/agenterm-rh/src/transpile.rs` (+ smoke idiom) | script-smoke/remote-ui `mode_probe --pack` → `pack=ok`; `script_smoke_pack_builds` / `remote_ui_smoke_pack_builds` |
-| 4.2 | Drop Engine legacy `rhai` module + catalog/shipped aliases | `src/script_stdlib.rs`, `crates/agenterm-rh/src/host_api.rs`, `src/script_catalog.rs`, `crates/agenterm-rh/src/shipped_surfaces.rs` | zero `register_static_module(…"rhai"`; catalog `rh::` only |
+| 4.2 | Drop Engine legacy `rhai` module + catalog/shipped aliases (4.2c ✅ catalog/shipped `rh::` only) | `src/script_stdlib.rs`, `crates/agenterm-rh/src/host_api.rs`, `src/script_catalog.rs`, `crates/agenterm-rh/src/shipped_surfaces.rs` | zero `register_static_module(…"rhai"`; catalog `rh::` only |
 | 4.3 | Remove pack Rhai eval/run-script fallback | `src/script_rh_host.rs`, `crates/agenterm-rh/src/{host_api,transpile}.rs` | no prod `host_eval_snippet` / `host_run_script_source` |
 | 4.4 | Migrate Engine-root-dependent tests/fixtures | `src/script_{stdlib,task,catalog,http,worker}.rs`, `tests/rh_*.rs`, `crates/agenterm-rh/tests/**` | `cargo test -p agenterm --lib` + `agenterm-rh` green |
 | 4.5 | Retire `agenterm-rhai` PE + `ScriptBackend::Rhai` + REPL/worker interpreted path | `src/bin/agenterm-rhai.rs`, `Cargo.toml`, `src/script_{backend,worker,repl}.rs`, `src/client/mod.rs` | five product bins in matrix |
