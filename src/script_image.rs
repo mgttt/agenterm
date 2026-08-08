@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn png_inspection_reports_dimensions_and_sampled_color() {
         let path = std::env::temp_dir().join(format!(
-            "agenterm-rhai-image-{}-{}.png",
+            "agenterm-rh-image-{}-{}.png",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
