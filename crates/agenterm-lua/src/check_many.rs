@@ -1,300 +1,133 @@
-//! Bounded multi-file Lua syntax validation.
-//! Aligned with agenterm-rh check_many pattern: manifest → parse → validate → report.
+//! Bounded multi-file Lua syntax validation. Manifest/report shape,
+//! path-confinement, and the check-many driver loop now live in
+//! `agenterm_script_common::check_many` (shared with rh/qjs — see that
+//! module's doc for what's unified vs. kept per-engine). This file keeps
+//! only what's genuinely lua-specific: the manifest `kind` string, CLI
+//! flag parsing, and the `LuaEngine::check` adapter closure.
+//!
+//! Behavior note: the previous hand-written version of this file resolved
+//! manifest paths with a plain join-or-canonicalize and **no confinement
+//! check** against `project_root` — unlike rh/qjs, which both reject a
+//! resolved path that escapes the project root. Going through the shared
+//! driver closes that gap (see `agenterm_script_common::check_many`'s
+//! module doc); no existing lua test asserted on the old, weaker behavior.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use agenterm_script_common::check_many::{self, CheckFailure};
+
+pub use agenterm_script_common::check_many::{
+    CheckManyFailure, CheckManyManifest, CheckManyOptions, CheckManyReport, DEFAULT_SOURCE_BYTES,
+    DEFAULT_WALL_TIME_MS, FILES_MAX, MANIFEST_MAX_BYTES, ParsedCheckManyCli, PATH_MAX_BYTES,
+    TOTAL_SOURCE_MAX_BYTES,
+};
 
 use crate::LuaEngine;
 
-pub const MANIFEST_MAX_BYTES: usize = 64 * 1024;
-pub const FILES_MAX: usize = 256;
-pub const PATH_MAX_BYTES: usize = 4 * 1024;
-pub const TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
-pub const DEFAULT_WALL_TIME_MS: u64 = 10_000;
-pub const DEFAULT_SOURCE_BYTES: usize = 512 * 1024;
-
 const LUA_CHECK_MANIFEST_KIND: &str = "agenterm-lua-check-manifest";
 
-#[derive(Debug, Clone)]
-pub struct ParsedCheckManyCli {
-    pub manifest_path: PathBuf,
-    pub options: CheckManyOptions,
-    pub json: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CheckManyManifest {
-    pub schema_version: u32,
-    pub kind: String,
-    pub files: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CheckManyFailure {
-    pub path: String,
-    pub code: String,
-    pub message: String,
-    pub invocation_id: String,
-    pub exit_class: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CheckManyReport {
-    pub schema_version: u32,
-    pub kind: &'static str,
-    pub ok: bool,
-    pub checked_files: usize,
-    pub total_source_bytes: usize,
-    pub duration_ms: u64,
-    pub failures: Vec<CheckManyFailure>,
-}
-
-#[derive(Clone, Debug)]
-pub struct CheckManyOptions {
-    pub project_root: PathBuf,
-    pub wall_time_ms: u64,
-    pub source_bytes: usize,
-}
-
-impl Default for CheckManyOptions {
-    fn default() -> Self {
-        Self {
-            project_root: PathBuf::from("."),
-            wall_time_ms: DEFAULT_WALL_TIME_MS,
-            source_bytes: DEFAULT_SOURCE_BYTES,
-        }
-    }
-}
-
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, String> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|err| format!("check_many_manifest_read: {err}"))?;
-    if !metadata.is_file() || metadata.len() as usize > MANIFEST_MAX_BYTES {
-        return Err(format!(
-            "check_many_manifest_size: manifest must be a file of at most {MANIFEST_MAX_BYTES} bytes"
-        ));
-    }
-    let bytes = std::fs::read(path)
-        .map_err(|err| format!("check_many_manifest_read: {err}"))?;
-    let manifest: CheckManyManifest = serde_json::from_slice(&bytes)
-        .map_err(|err| format!("check_many_manifest_json: {err}"))?;
-    if manifest.schema_version != 1 {
-        return Err("check_many_manifest_schema: expected schema_version=1".into());
-    }
-    if manifest.kind != LUA_CHECK_MANIFEST_KIND {
-        return Err(format!(
-            "check_many_manifest_kind: expected {LUA_CHECK_MANIFEST_KIND}, got {}",
-            manifest.kind
-        ));
-    }
-    if manifest.files.is_empty() || manifest.files.len() > FILES_MAX {
-        return Err(format!(
-            "check_many_manifest_files: expected from 1 to {FILES_MAX} files"
-        ));
-    }
-    Ok(manifest)
+    check_many::read_manifest(path, &[LUA_CHECK_MANIFEST_KIND])
 }
 
-pub fn run_check_many(
-    manifest: CheckManyManifest,
-    options: CheckManyOptions,
-) -> CheckManyReport {
-    let started = Instant::now();
-    let deadline = started + Duration::from_millis(options.wall_time_ms);
-    let root = match std::fs::canonicalize(&options.project_root) {
-        Ok(root) if root.is_dir() => root,
-        Ok(_) => {
-            return report(
-                started,
-                0,
-                0,
-                vec![failure(
-                    options.project_root.display().to_string(),
-                    "check_many_project_root",
-                    "project root is not a directory".to_owned(),
-                    0,
-                    "configuration",
-                )],
-            );
-        }
-        Err(error) => {
-            return report(
-                started,
-                0,
-                0,
-                vec![failure(
-                    options.project_root.display().to_string(),
-                    "check_many_project_root",
-                    error.to_string(),
-                    0,
-                    "configuration",
-                )],
-            );
-        }
-    };
-
+pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) -> CheckManyReport {
     let engine = match LuaEngine::new() {
-        Ok(e) => e,
+        Ok(engine) => engine,
         Err(err) => {
-            return report(
-                started,
-                0,
-                0,
-                vec![failure(
-                    "".to_owned(),
-                    "lua_engine_init",
-                    err.to_string(),
-                    0,
-                    "host",
-                )],
-            );
+            // Mirror the previous behavior: an engine-init failure is
+            // reported as a single `host`-class failure covering the run,
+            // before any file is looked at.
+            return CheckManyReport {
+                schema_version: 1,
+                kind: LUA_CHECK_MANIFEST_KIND,
+                ok: false,
+                checked_files: 0,
+                total_source_bytes: 0,
+                duration_ms: 0,
+                failures: vec![CheckManyFailure {
+                    path: String::new(),
+                    code: "lua_engine_init".into(),
+                    message: err.to_string(),
+                    invocation_id: "check-many-0".into(),
+                    exit_class: "host",
+                }],
+            };
         }
     };
-
-    let mut seen = HashSet::new();
-    let mut failures = Vec::new();
-    let mut total_source = 0usize;
-    let mut checked = 0usize;
-    let mut sequence = 0u64;
-
-    for raw in &manifest.files {
-        if Instant::now() >= deadline {
-            failures.push(failure(
-                raw.clone(),
-                "limit_wall_time",
-                "check-many wall-time limit exceeded".to_owned(),
-                sequence,
-                "limit",
-            ));
-            // sequence incremented; break out of loop
-            break;
-        }
-
-        let path = normalize_path(raw, &root);
-        if !seen.insert(path.clone()) {
-            continue;
-        }
-
-        sequence += 1;
-
-        match check_file(path.as_ref(), &engine, &mut total_source, options.source_bytes)
-        {
-            Ok(()) => {
-                checked += 1;
-                continue;
-            }
-            Err(failure_msg) => {
-                failures.push(failure(
-                    path,
-                    failure_msg.code,
-                    failure_msg.message,
-                    sequence,
-                    failure_msg.exit_class,
-                ));
-                checked += 1;
-            }
-        };
-    }
-
-    report(started, checked, total_source, failures)
+    check_many::run_check_many(
+        manifest,
+        options,
+        LUA_CHECK_MANIFEST_KIND,
+        |source, _path, _root| {
+            engine
+                .check(source)
+                .map_err(|err| CheckFailure::new("lua_check", err.to_string(), "script"))
+        },
+    )
 }
 
-struct FileCheckFailure {
-    code: String,
-    message: String,
-    exit_class: &'static str,
-}
-
-fn check_file(
-    path: &Path,
-    engine: &LuaEngine,
-    total_source: &mut usize,
-    source_limit: usize,
-) -> Result<(), FileCheckFailure> {
-    let bytes = std::fs::read(path).map_err(|err| FileCheckFailure {
-        code: "limit_source_read".into(),
-        message: format!("failed to read {path}: {err}", path = path.display()),
-        exit_class: "limit",
-    })?;
-
-    *total_source += bytes.len();
-    if *total_source > TOTAL_SOURCE_MAX_BYTES {
-        return Err(FileCheckFailure {
-            code: "limit_source_bytes".into(),
-            message: "check-many total source exceeds byte budget".into(),
-            exit_class: "limit",
-        });
+/// Parse `check-many` argv — same flag surface as `agenterm-rh check-many`
+/// (rejects unknown flags, accepts-but-ignores a few rhai-compat ones).
+pub fn parse_check_many_cli<I>(mut args: I) -> Result<ParsedCheckManyCli, String>
+where
+    I: Iterator<Item = String>,
+{
+    let mut manifest_path = None::<std::path::PathBuf>;
+    let mut project_root = std::path::PathBuf::from(".");
+    let mut wall_time_ms = DEFAULT_WALL_TIME_MS;
+    let mut source_bytes = DEFAULT_SOURCE_BYTES;
+    let mut json = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--manifest" => {
+                manifest_path = Some(std::path::PathBuf::from(next_value(&mut args, "--manifest")?));
+            }
+            "--project-root" => {
+                project_root = std::path::PathBuf::from(next_value(&mut args, "--project-root")?);
+            }
+            "--timeout-ms" => {
+                wall_time_ms = next_value(&mut args, "--timeout-ms")?
+                    .parse()
+                    .map_err(|err| format!("timeout-ms: {err}"))?;
+            }
+            "--max-output-bytes" => {
+                let value = next_value(&mut args, "--max-output-bytes")?
+                    .parse::<usize>()
+                    .map_err(|err| format!("max-output-bytes: {err}"))?;
+                source_bytes = source_bytes.min(value);
+            }
+            "--profile" => {
+                let profile = next_value(&mut args, "--profile")?;
+                if !matches!(profile.as_str(), "local" | "pure" | "observe") {
+                    return Err(format!("unknown script profile: {profile}"));
+                }
+            }
+            "--max-operations" | "--max-collection-items" | "--max-string-bytes" => {
+                let _ = next_value(&mut args, arg.as_str())?;
+            }
+            "--json" => json = true,
+            other => return Err(format!("unknown check-many option `{other}`")),
+        }
     }
-
-    let source = String::from_utf8_lossy(&bytes);
-    if source.len() > source_limit {
-        return Err(FileCheckFailure {
-            code: "limit_source_bytes".into(),
-            message: format!(
-                "{}: source exceeds per-file byte budget",
-                path.display()
-            ),
-            exit_class: "limit",
-        });
-    }
-
-    engine.check(&source).map_err(|e| FileCheckFailure {
-        code: "lua_check".into(),
-        message: e.to_string(),
-        exit_class: "script",
+    let manifest_path =
+        manifest_path.ok_or_else(|| "check-many requires --manifest FILE".to_owned())?;
+    Ok(ParsedCheckManyCli {
+        manifest_path,
+        options: CheckManyOptions {
+            project_root,
+            wall_time_ms,
+            source_bytes,
+        },
+        json,
     })
 }
 
-fn normalize_path(raw: &str, root: &Path) -> String {
-    let path = Path::new(raw);
-    if path.is_absolute() {
-        // Resolve to canonical form relative to root if possible
-        if let Ok(canonical) = std::fs::canonicalize(path) {
-            return canonical.to_string_lossy().into_owned();
-        }
-        path.to_string_lossy().into_owned()
-    } else {
-        root.join(path).to_string_lossy().into_owned()
-    }
-}
-
-fn failure(
-    path: String,
-    code: impl Into<String>,
-    message: String,
-    sequence: u64,
-    exit_class: &'static str,
-) -> CheckManyFailure {
-    CheckManyFailure {
-        path,
-        code: code.into(),
-        message,
-        invocation_id: format!("lua-check-many-{sequence}"),
-        exit_class,
-    }
-}
-
-fn report(
-    started: Instant,
-    checked_files: usize,
-    total_source_bytes: usize,
-    failures: Vec<CheckManyFailure>,
-) -> CheckManyReport {
-    let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    let ok = failures.is_empty();
-    CheckManyReport {
-        schema_version: 1,
-        kind: LUA_CHECK_MANIFEST_KIND,
-        ok,
-        checked_files,
-        total_source_bytes,
-        duration_ms: elapsed,
-        failures,
-    }
+fn next_value<I>(args: &mut I, option: &str) -> Result<String, String>
+where
+    I: Iterator<Item = String>,
+{
+    args.next()
+        .ok_or_else(|| format!("missing value after {option}"))
 }
 
 #[cfg(test)]
@@ -302,7 +135,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn write_manifest(dir: &TempDir, files: &[&str]) -> PathBuf {
+    fn write_manifest(dir: &TempDir, files: &[&str]) -> std::path::PathBuf {
         let path = dir.path().join("manifest.json");
         let manifest = serde_json::json!({
             "schema_version": 1,
@@ -333,7 +166,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
         let err = read_manifest(&path).expect_err("wrong kind");
-        assert!(err.contains("kind"), "{err}");
+        assert!(err.contains("schema"), "{err}");
     }
 
     #[test]
@@ -375,16 +208,12 @@ mod tests {
     #[test]
     fn check_many_respects_file_limit() {
         let dir = TempDir::new().unwrap();
-        let mut files = Vec::new();
-        for i in 0..260 {
-            let name = format!("f{i}.lua");
-            std::fs::write(dir.path().join(&name), "return 0").unwrap();
-            files.push(name);
+        let files: Vec<String> = (0..(FILES_MAX + 1)).map(|i| format!("f{i}.lua")).collect();
+        for name in &files {
+            std::fs::write(dir.path().join(name), "return 0").unwrap();
         }
-        let manifest_path = write_manifest(&dir, &(0..260).map(|i| format!("f{i}.lua")).collect::<Vec<_>>()
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>());
+        let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+        let manifest_path = write_manifest(&dir, &refs);
         let err = read_manifest(&manifest_path).expect_err("too many files");
         assert!(err.contains("files"), "{err}");
     }
@@ -402,5 +231,51 @@ mod tests {
         let json = serde_json::to_string_pretty(&report).expect("serialize");
         assert!(json.contains("checked_files"));
         assert!(json.contains("failures"));
+    }
+
+    #[test]
+    fn check_many_rejects_a_relative_path_that_escapes_the_project_root() {
+        // Regression test for the confinement gap this migration closed.
+        let project = TempDir::new().unwrap();
+        let secret_dir = TempDir::new().unwrap();
+        std::fs::write(secret_dir.path().join("secret.lua"), "return 1").unwrap();
+        let secret_dir_name = secret_dir
+            .path()
+            .file_name()
+            .expect("tempdir has a name")
+            .to_string_lossy()
+            .into_owned();
+        let manifest = CheckManyManifest {
+            schema_version: 1,
+            kind: LUA_CHECK_MANIFEST_KIND.to_owned(),
+            files: vec![format!("../{secret_dir_name}/secret.lua")],
+        };
+        let options = CheckManyOptions {
+            project_root: project.path().to_path_buf(),
+            ..Default::default()
+        };
+        let report = run_check_many(manifest, options);
+        assert!(!report.ok, "{report:?}");
+        assert_eq!(report.failures[0].code, "check_many_path");
+    }
+
+    #[test]
+    fn parses_cli_flags() {
+        let dir = TempDir::new().unwrap();
+        let manifest_path = write_manifest(&dir, &["a.lua"]);
+        let parsed = parse_check_many_cli(
+            [
+                "--manifest",
+                &manifest_path.display().to_string(),
+                "--project-root",
+                &dir.path().display().to_string(),
+                "--json",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("parse");
+        assert!(parsed.json);
+        assert_eq!(parsed.options.project_root, dir.path());
     }
 }

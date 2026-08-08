@@ -1,13 +1,13 @@
 //! qjs pack manifest: JSON schema `agenterm.qjs-pack-manifest/v1`. Same
 //! shape and hashing convention as `agenterm_lua::manifest::LuaPackManifest`
-//! (`source_hash`/`bytecode_hash`/file pointers, hand-rolled hex to avoid a
-//! `hex` crate dependency for a two-field job) — see `compile.rs`'s module
-//! doc for what `bytecode_hash` here actually verifies (a real QuickJS
-//! module-bytecode fingerprint, not something loaded back at eval time).
+//! (`source_hash`/`bytecode_hash`/file pointers, hex/hash helpers shared via
+//! `agenterm_script_common::hex`) — see `compile.rs`'s module doc for what
+//! `bytecode_hash` here actually verifies (a real QuickJS module-bytecode
+//! fingerprint, not something loaded back at eval time).
 
 use std::path::Path;
 
-use sha2::Digest;
+use agenterm_script_common::hex::{required_json_string, sha256_hex};
 
 /// qjs pack manifest.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,12 +51,12 @@ impl QjsPackManifest {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|e| format!("manifest_json: {e}"))?;
         Ok(Self {
-            schema: required_string(&value, "schema")?,
-            version: required_string(&value, "version")?,
-            source_hash: required_string(&value, "source_hash")?,
-            bytecode_hash: required_string(&value, "bytecode_hash")?,
-            bytecode_file: required_string(&value, "bytecode_file")?,
-            entry_file: required_string(&value, "entry_file")?,
+            schema: required_json_string(&value, "schema")?,
+            version: required_json_string(&value, "version")?,
+            source_hash: required_json_string(&value, "source_hash")?,
+            bytecode_hash: required_json_string(&value, "bytecode_hash")?,
+            bytecode_file: required_json_string(&value, "bytecode_file")?,
+            entry_file: required_json_string(&value, "entry_file")?,
         })
     }
 
@@ -66,7 +66,7 @@ impl QjsPackManifest {
     pub fn verify_bytecode(&self, dir: &Path) -> Result<(), String> {
         let path = dir.join(&self.bytecode_file);
         let bytes = std::fs::read(&path).map_err(|e| format!("manifest_verify_bytecode_read: {e}"))?;
-        let actual = hex_encode_sha256(&sha2::Sha256::digest(&bytes));
+        let actual = sha256_hex(&bytes);
         if actual != self.bytecode_hash {
             return Err(format!(
                 "manifest_bytecode_hash_mismatch: expected {}, got {actual}",
@@ -82,7 +82,7 @@ impl QjsPackManifest {
     pub fn verify_source(&self, dir: &Path) -> Result<(), String> {
         let path = dir.join(&self.entry_file);
         let bytes = std::fs::read(&path).map_err(|e| format!("manifest_verify_source_read: {e}"))?;
-        let actual = hex_encode_sha256(&sha2::Sha256::digest(&bytes));
+        let actual = sha256_hex(&bytes);
         if actual != self.source_hash {
             return Err(format!(
                 "manifest_source_hash_mismatch: expected {}, got {actual}",
@@ -91,24 +91,6 @@ impl QjsPackManifest {
         }
         Ok(())
     }
-}
-
-fn required_string(value: &serde_json::Value, key: &str) -> Result<String, String> {
-    value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
-        .ok_or_else(|| format!("manifest_missing_field: {key}"))
-}
-
-fn hex_encode_sha256(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[usize::from(byte >> 4)] as char);
-        out.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    out
 }
 
 #[cfg(test)]

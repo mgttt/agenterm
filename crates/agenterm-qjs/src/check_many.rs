@@ -1,333 +1,53 @@
-//! Bounded multi-file qjs check, structurally aligned with
-//! `agenterm_rh::check_many` (`crates/agenterm-rh/src/check_many.rs`) —
-//! same manifest shape, same report shape, same failure-code taxonomy where
-//! the meaning is identical, same exit-code-by-`exit_class` mapping, same
-//! path-escape/duplicate/budget guards. Swapped: rh's subset+project-import
-//! check for our `check()` (QuickJS module declare, see `check.rs`); the
-//! `kind` fields are qjs-specific labels rather than reused rh/rhai ones —
-//! see PRD "Script engine family" for why (a `check-many` report claiming to
-//! be `agenterm-rhai-check-many` while actually running QuickJS would be an
-//! honest-labeling regression, not real capability alignment).
+//! Bounded multi-file qjs check. Manifest/report shape, path-confinement,
+//! and the check-many driver loop now live in
+//! `agenterm_script_common::check_many` (shared with rh/lua — see that
+//! module's doc for what's unified vs. kept per-engine, and its own doc for
+//! why: qjs's own driver loop is literally where the shared logic was
+//! lifted from). This file keeps only what's genuinely qjs-specific: the
+//! manifest `kind` string, the report `kind` label, CLI flag parsing, and
+//! the [`check_with_project_validation`](crate::check::check_with_project_validation)
+//! adapter closure (including its `QjsError` → [`CheckFailure`] mapping).
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use agenterm_script_common::check_many::{self, CheckFailure};
+
+pub use agenterm_script_common::check_many::{
+    CheckManyFailure, CheckManyManifest, CheckManyOptions, CheckManyReport, DEFAULT_SOURCE_BYTES,
+    DEFAULT_WALL_TIME_MS, FILES_MAX, MANIFEST_MAX_BYTES, ParsedCheckManyCli, PATH_MAX_BYTES,
+    TOTAL_SOURCE_MAX_BYTES,
+};
 
 use crate::{check::check_with_project_validation, error::QjsError};
 
-pub const MANIFEST_MAX_BYTES: usize = 64 * 1024;
-pub const FILES_MAX: usize = 256;
-pub const PATH_MAX_BYTES: usize = 4 * 1024;
-pub const TOTAL_SOURCE_MAX_BYTES: usize = 8 * 1024 * 1024;
-pub const DEFAULT_WALL_TIME_MS: u64 = 10_000;
-pub const DEFAULT_SOURCE_BYTES: usize = 512 * 1024;
-
 const QJS_CHECK_MANIFEST_KIND: &str = "agenterm-qjs-check-manifest";
 
-#[derive(Debug, Clone)]
-pub struct ParsedCheckManyCli {
-    pub manifest_path: PathBuf,
-    pub options: CheckManyOptions,
-    pub json: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CheckManyManifest {
-    pub schema_version: u32,
-    pub kind: String,
-    pub files: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CheckManyFailure {
-    pub path: String,
-    pub code: String,
-    pub message: String,
-    pub invocation_id: String,
-    pub exit_class: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CheckManyReport {
-    pub schema_version: u32,
-    pub kind: &'static str,
-    pub ok: bool,
-    pub checked_files: usize,
-    pub total_source_bytes: usize,
-    pub duration_ms: u64,
-    pub failures: Vec<CheckManyFailure>,
-}
-
-#[derive(Clone, Debug)]
-pub struct CheckManyOptions {
-    pub project_root: PathBuf,
-    pub wall_time_ms: u64,
-    pub source_bytes: usize,
-}
-
-impl Default for CheckManyOptions {
-    fn default() -> Self {
-        Self {
-            project_root: PathBuf::from("."),
-            wall_time_ms: DEFAULT_WALL_TIME_MS,
-            source_bytes: DEFAULT_SOURCE_BYTES,
-        }
-    }
-}
-
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, QjsError> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|err| QjsError::Check(format!("check_many_manifest_read: {err}")))?;
-    if !metadata.is_file() || metadata.len() as usize > MANIFEST_MAX_BYTES {
-        return Err(QjsError::Check(format!(
-            "check_many_manifest_size: manifest must be a file of at most {MANIFEST_MAX_BYTES} bytes"
-        )));
-    }
-    let bytes = std::fs::read(path)
-        .map_err(|err| QjsError::Check(format!("check_many_manifest_read: {err}")))?;
-    let manifest: CheckManyManifest = serde_json::from_slice(&bytes)
-        .map_err(|err| QjsError::Check(format!("check_many_manifest_json: {err}")))?;
-    if manifest.schema_version != 1 {
-        return Err(QjsError::Check("check_many_manifest_schema".into()));
-    }
-    if manifest.kind != QJS_CHECK_MANIFEST_KIND {
-        return Err(QjsError::Check("check_many_manifest_schema".into()));
-    }
-    if manifest.files.is_empty() || manifest.files.len() > FILES_MAX {
-        return Err(QjsError::Check(format!(
-            "check_many_manifest_files: expected from 1 to {FILES_MAX} files"
-        )));
-    }
-    Ok(manifest)
+    check_many::read_manifest(path, &[QJS_CHECK_MANIFEST_KIND]).map_err(QjsError::Check)
 }
 
 pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) -> CheckManyReport {
-    let started = Instant::now();
-    let deadline = started + Duration::from_millis(options.wall_time_ms);
-    let root = match std::fs::canonicalize(&options.project_root) {
-        Ok(root) if root.is_dir() => root,
-        Ok(_) => {
-            return report(
-                started,
-                0,
-                0,
-                vec![failure(
-                    options.project_root.display().to_string(),
-                    "check_many_project_root",
-                    "project root is not a directory".to_owned(),
-                    0,
-                    "configuration",
-                )],
-            );
-        }
-        Err(error) => {
-            return report(
-                started,
-                0,
-                0,
-                vec![failure(
-                    options.project_root.display().to_string(),
-                    "check_many_project_root",
-                    error.to_string(),
-                    0,
-                    "configuration",
-                )],
-            );
-        }
-    };
-    let mut failures = Vec::new();
-    let mut checked_files = 0;
-    let mut total_source_bytes = 0_usize;
-    let mut seen = HashSet::new();
-
-    for (ordinal, label) in manifest.files.into_iter().enumerate() {
-        if Instant::now() >= deadline {
-            failures.push(failure(
-                label,
-                "limit_wall_time",
-                "check-many reached its aggregate wall-time budget".to_owned(),
-                ordinal,
-                "limit",
-            ));
-            continue;
-        }
-        if label.is_empty() || label.len() > PATH_MAX_BYTES || Path::new(&label).is_absolute() {
-            failures.push(failure(
-                label,
-                "check_many_path",
-                "path label is empty or exceeds byte limit".to_owned(),
-                ordinal,
-                "configuration",
-            ));
-            continue;
-        }
-        let requested = root.join(&label);
-        let path = match std::fs::canonicalize(&requested) {
-            Ok(path) if path.is_file() && path.starts_with(&root) => path,
-            Ok(path) if !path.starts_with(&root) => {
-                failures.push(failure(
-                    label,
-                    "check_many_path",
-                    "manifest path escapes the project root".to_owned(),
-                    ordinal,
-                    "configuration",
-                ));
-                continue;
-            }
-            Ok(_) => {
-                failures.push(failure(
-                    label,
-                    "host_source_read",
-                    "script source is not a file".to_owned(),
-                    ordinal,
-                    "host",
-                ));
-                continue;
-            }
-            Err(error) => {
-                failures.push(failure(
-                    label,
-                    "host_source_resolve",
-                    error.to_string(),
-                    ordinal,
-                    "host",
-                ));
-                continue;
-            }
-        };
-        if !seen.insert(path.clone()) {
-            failures.push(failure(
-                label,
-                "check_many_duplicate",
-                "manifest resolves the same file more than once".to_owned(),
-                ordinal,
-                "configuration",
-            ));
-            continue;
-        }
-        let source = match read_source_file(&path, options.source_bytes) {
-            Ok(source) => source,
-            Err(SourceReadFailure::Limit(message)) => {
-                failures.push(failure(
-                    label,
-                    "limit_source_bytes",
-                    message,
-                    ordinal,
-                    "limit",
-                ));
-                continue;
-            }
-            Err(SourceReadFailure::Host(error)) => {
-                failures.push(failure(
-                    label,
-                    "host_source_read",
-                    error.to_string(),
-                    ordinal,
-                    "host",
-                ));
-                continue;
-            }
-        };
-        let next_total = total_source_bytes.saturating_add(source.len());
-        if next_total > TOTAL_SOURCE_MAX_BYTES {
-            failures.push(failure(
-                label,
-                "check_many_total_source_bytes",
-                format!("aggregate source exceeds {TOTAL_SOURCE_MAX_BYTES} bytes"),
-                ordinal,
-                "limit",
-            ));
-            continue;
-        }
-        total_source_bytes = next_total;
-        checked_files += 1;
-        // `path`/`root` are already canonicalized and confinement-checked
-        // above (this loop's own manifest-path validation) — reuse them
-        // rather than re-deriving, so a script using import/export gets
-        // its import graph checked against the same project root the
-        // manifest itself is scoped to. Non-module scripts (the common
-        // case today) behave identically to the old `check(&source,
-        // &label)` call — see `check_with_project_validation`'s doc.
-        if let Err(error) = check_with_project_validation(&source, &path, &root) {
-            failures.push(check_failure(label, &error, ordinal));
-        }
-    }
-
-    report(started, checked_files, total_source_bytes, failures)
+    check_many::run_check_many(
+        manifest,
+        options,
+        "agenterm-qjs-check-many",
+        |source, path, root| {
+            // `path`/`root` are already canonicalized and confinement-checked
+            // by the shared driver's own manifest-path validation — reuse
+            // them rather than re-deriving, so a script using import/export
+            // gets its import graph checked against the same project root
+            // the manifest itself is scoped to. Non-module scripts (the
+            // common case today) behave identically to a plain `check(&source,
+            // &label)` call — see `check_with_project_validation`'s doc.
+            check_with_project_validation(source, path, root).map_err(qjs_check_failure)
+        },
+    )
 }
 
-fn report(
-    started: Instant,
-    checked_files: usize,
-    total_source_bytes: usize,
-    failures: Vec<CheckManyFailure>,
-) -> CheckManyReport {
-    CheckManyReport {
-        schema_version: 1,
-        kind: "agenterm-qjs-check-many",
-        ok: failures.is_empty(),
-        checked_files,
-        total_source_bytes,
-        duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-        failures,
-    }
-}
-
-enum SourceReadFailure {
-    Limit(String),
-    Host(QjsError),
-}
-
-fn read_source_file(path: &Path, max_bytes: usize) -> Result<String, SourceReadFailure> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|err| SourceReadFailure::Host(QjsError::Check(err.to_string())))?;
-    if metadata.len() as usize > max_bytes {
-        return Err(SourceReadFailure::Limit(format!(
-            "source exceeds per-file limit of {max_bytes} bytes"
-        )));
-    }
-    std::fs::read_to_string(path)
-        .map_err(|err| SourceReadFailure::Host(QjsError::Check(err.to_string())))
-}
-
-fn failure(
-    path: String,
-    code: &str,
-    message: String,
-    ordinal: usize,
-    exit_class: &'static str,
-) -> CheckManyFailure {
-    CheckManyFailure {
-        path,
-        code: code.to_owned(),
-        message,
-        invocation_id: format!("check-many-{}-{ordinal}", std::process::id()),
-        exit_class,
-    }
-}
-
-fn check_failure(path: String, error: &QjsError, ordinal: usize) -> CheckManyFailure {
+fn qjs_check_failure(error: QjsError) -> CheckFailure {
     match error {
-        QjsError::Parse(message) => failure(path, "qjs_parse", message.clone(), ordinal, "script"),
-        QjsError::Check(message) => failure(path, "qjs_check", message.clone(), ordinal, "script"),
-    }
-}
-
-impl CheckManyReport {
-    pub fn exit_code(&self) -> u8 {
-        self.failures
-            .first()
-            .map_or(0, |failure| match failure.exit_class {
-                "configuration" => 2,
-                "limit" => 3,
-                "child" => 4,
-                "cancelled" => 5,
-                "fleet" => 6,
-                _ => 1,
-            })
+        QjsError::Parse(message) => CheckFailure::new("qjs_parse", message, "script"),
+        QjsError::Check(message) => CheckFailure::new("qjs_check", message, "script"),
     }
 }
 

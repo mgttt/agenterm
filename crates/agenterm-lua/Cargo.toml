@@ -7,6 +7,7 @@ description = "LuaJIT scripting backend for AgenTerm (mlua + LuaJIT + vendored)"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+agenterm-script-common = { path = "../agenterm-script-common" }
 mlua = { version = "0.12", features = ["luajit", "vendored", "serialize", "send"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

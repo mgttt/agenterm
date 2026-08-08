@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use sha2::Digest;
+use agenterm_script_common::hex::{required_json_string, sha256_hex};
 
 /// Lua pack manifest.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,11 +42,11 @@ impl LuaPackManifest {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|e| format!("manifest_json: {e}"))?;
         Ok(Self {
-            schema: required_string(&value, "schema")?,
-            version: required_string(&value, "version")?,
-            source_hash: required_string(&value, "source_hash")?,
-            bytecode_hash: required_string(&value, "bytecode_hash")?,
-            bytecode_file: required_string(&value, "bytecode_file")?,
+            schema: required_json_string(&value, "schema")?,
+            version: required_json_string(&value, "version")?,
+            source_hash: required_json_string(&value, "source_hash")?,
+            bytecode_hash: required_json_string(&value, "bytecode_hash")?,
+            bytecode_file: required_json_string(&value, "bytecode_file")?,
         })
     }
 
@@ -55,8 +55,7 @@ impl LuaPackManifest {
         let path = dir.join(&self.bytecode_file);
         let bytes =
             std::fs::read(&path).map_err(|e| format!("manifest_verify_read: {e}"))?;
-        let hash = sha2::Sha256::digest(&bytes);
-        let actual_hex = hex_encode_sha256(&hash);
+        let actual_hex = sha256_hex(&bytes);
         if actual_hex != self.bytecode_hash {
             return Err(format!(
                 "manifest_bytecode_hash_mismatch: expected {}, got {}",
@@ -65,24 +64,6 @@ impl LuaPackManifest {
         }
         Ok(())
     }
-}
-
-fn required_string(value: &serde_json::Value, key: &str) -> Result<String, String> {
-    value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
-        .ok_or_else(|| format!("manifest_missing_field: {key}"))
-}
-
-fn hex_encode_sha256(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[usize::from(byte >> 4)] as char);
-        out.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    out
 }
 
 #[cfg(test)]

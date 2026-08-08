@@ -2,68 +2,19 @@
 //! produce a report. Same shape/purpose as `agenterm_lua::corpus_scan`
 //! (batch syntax validation over a tree, no manifest needed — distinct from
 //! `check_many`'s explicit-file-list contract).
+//!
+//! Thin wrapper over the shared driver (`agenterm_script_common::corpus_scan`).
 
 use std::path::Path;
-use std::time::Instant;
 
-use serde::Serialize;
+pub use agenterm_script_common::corpus_scan::{CorpusScanReport, FailedFile};
 
 use crate::check;
 
-/// Result of scanning a directory of qjs scripts.
-#[derive(Debug, Serialize)]
-pub struct CorpusScanReport {
-    pub total_scripts: usize,
-    pub failures: usize,
-    pub duration_ms: u64,
-    pub failed_files: Vec<FailedFile>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FailedFile {
-    pub path: String,
-    pub message: String,
-}
-
 /// Scan a directory recursively for `.js`/`.mjs` files and check each one.
 pub fn scan_directory(dir: &Path) -> Result<CorpusScanReport, String> {
-    let started = Instant::now();
-    let mut total = 0usize;
-    let mut failures = 0usize;
-    let mut failed_files = Vec::new();
-
-    let entries = walkdir::WalkDir::new(dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry.file_type().is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "js" || ext == "mjs")
-        });
-
-    for entry in entries {
-        total += 1;
-        let path = entry.path();
-        let source =
-            std::fs::read_to_string(path).map_err(|e| format!("corpus_scan_read: {e}"))?;
-        let label = path.to_string_lossy().into_owned();
-        if let Err(error) = check(&source, &label) {
-            failures += 1;
-            failed_files.push(FailedFile {
-                path: label,
-                message: error.to_string(),
-            });
-        }
-    }
-
-    Ok(CorpusScanReport {
-        total_scripts: total,
-        failures,
-        duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-        failed_files,
+    agenterm_script_common::corpus_scan::scan_directory(dir, &["js", "mjs"], |source, label| {
+        check(source, label).map_err(|e| e.to_string())
     })
 }
 

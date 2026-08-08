@@ -1,60 +1,19 @@
 //! Directory scanning: recursively find .lua files, check each, produce report.
+//!
+//! Thin wrapper over the shared driver (`agenterm_script_common::corpus_scan`)
+//! — this module's own job is just "filter on `.lua`, drive `LuaEngine::check`".
 
 use std::path::Path;
-use std::time::Instant;
 
-use serde::Serialize;
+pub use agenterm_script_common::corpus_scan::{CorpusScanReport, FailedFile};
 
 use crate::LuaEngine;
 
-/// Result of scanning a directory of Lua scripts.
-#[derive(Debug, Serialize)]
-pub struct CorpusScanReport {
-    pub total_scripts: usize,
-    pub failures: usize,
-    pub duration_ms: u64,
-    pub failed_files: Vec<FailedFile>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FailedFile {
-    pub path: String,
-    pub message: String,
-}
-
 /// Scan a directory recursively for `.lua` files and check each one.
 pub fn scan_directory(dir: &Path) -> Result<CorpusScanReport, String> {
-    let started = Instant::now();
     let engine = LuaEngine::new().map_err(|e| e.to_string())?;
-    let mut total = 0usize;
-    let mut failures = 0usize;
-    let mut failed_files = Vec::new();
-
-    let entries = walkdir::WalkDir::new(dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext == "lua"));
-
-    for entry in entries {
-        total += 1;
-        let path = entry.path();
-        let source = std::fs::read_to_string(path)
-            .map_err(|e| format!("corpus_scan_read: {e}"))?;
-        if let Err(e) = engine.check(&source) {
-            failures += 1;
-            failed_files.push(FailedFile {
-                path: path.to_string_lossy().into_owned(),
-                message: e.to_string(),
-            });
-        }
-    }
-
-    Ok(CorpusScanReport {
-        total_scripts: total,
-        failures,
-        duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-        failed_files,
+    agenterm_script_common::corpus_scan::scan_directory(dir, &["lua"], |source, _label| {
+        engine.check(source).map_err(|e| e.to_string())
     })
 }
 

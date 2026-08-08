@@ -52,6 +52,7 @@ dependencies = [
 name = "agenterm-lua"
 version = "0.1.0"
 dependencies = [
+ "agenterm-script-common",
  "anyhow",
  "libc",
  "mlua",
@@ -83,6 +84,7 @@ dependencies = [
 name = "agenterm-qjs"
 version = "0.1.15"
 dependencies = [
+ "agenterm-script-common",
  "rquickjs",
  "serde",
  "serde_json",
@@ -95,12 +97,24 @@ dependencies = [
 name = "agenterm-rh"
 version = "0.1.15"
 dependencies = [
+ "agenterm-script-common",
  "libloading 0.9.0",
  "rhai",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+]
+
+[[package]]
+name = "agenterm-script-common"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "walkdir",
 ]
 
 [[package]]

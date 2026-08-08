@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-platform", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs"]
+members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs"]
 resolver = "2"
 
 [package]

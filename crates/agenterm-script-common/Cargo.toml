@@ -1,0 +1,21 @@
+[package]
+name = "agenterm-script-common"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "Engine-agnostic scaffolding shared by agenterm's script backends (rh/lua/qjs, future sql): check-many driver, corpus scan, manifest hashing helpers"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "agenterm_script_common"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3.25"
