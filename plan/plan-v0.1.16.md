@@ -171,13 +171,54 @@ C. Console host (agenterm-con.exe)
 ├─ [x] C10a fill_rect 根源 bug：背景色/下划线/选区/光标全部只画在第 0 列
 ├─ [x] C10b DECSCUSR 光标形状 + 闪烁（conhost 没有，vim 插入/普通模式区分靠它）
 ├─ [x] C10c 构建卫生：incremental 缓存 12GB→1.3GB，接入 bootstrap 单点
+├─ [x] C11 `--emit-snapshot`/`--script`/截图：agent 可编程接口（见下）
 └─ [ ] C10d 未做的超越面（有余力再挑）：回看搜索、OSC 8 超链接、脏行重绘
 ```
 
-**里程碑状态（2026-08-08）**：C1–C3、C5–C9、C10a–c 均已完成并有测试/截图验证；
-`agenterm-con` 现状：可编译可运行、30 项单测全绿、clippy 双 crate（`agenterm-con` +
-vendored `vt100`）零警告。C4（server attach）与 C10d 明确列为**非本版目标**，
-不阻塞"完成"的判定——它们是锦上添花，不是当前范围的缺口。
+**里程碑状态（2026-08-08，二次复核后）**：C1–C3、C5–C9、C10a–c、C11 均已完成，
+**且第二轮复核（人工要求"反思，别轻易以为完成了"）额外挖出并修了一个真 bug**
+（见 C11 的 child-exit）。`agenterm-con` 现状：可编译可运行、40 项单测 + 8 项
+黑盒集成测试全绿（+1 项诚实标记为已知未解决问题，见下）、clippy 双 crate
+（`agenterm-con` + vendored `vt100`）零警告。C4（server attach）与 C10d
+明确列为**非本版目标**。
+
+**仍未解决 / 仍未验证的缺口（如实列出，不装作齐了）**：
+1. **方向键在真实 shell 里不生效**（`key_command_moves_the_cursor_through_the_real_forward_key_path`，
+   `#[ignore]`）——编码器单测证明字节是对的（`\x1b[D`），`forward_key`
+   代码逐行读过没有吞掉分支，**但真实光标就是不动**，用真实键盘输入
+   （`keybd_event`，非脚本）复现过，不是本轮新引入。头号疑点：这台
+   Windows Server 2022 的 ConPTY 没把 VT 方向键序列正确译回经典控制台
+   按键事件给 cooked-mode 行编辑器——但没有工具确证，只是最可能的解释。
+2. **IME 端到端从未自动化验证过**——一直标注"待人工验证"，这轮也没有变，
+   因为没有可编程的方式驱动真实输入法。
+3. **鼠标事件没有进 `--script`**——控制接口目前只有 text/key/paste/wait/screenshot，
+   没有 click/move/wheel。既然产品北极星明确要"100% 操控"，这是个已知的、
+   故意暂缓的缺口，不是疏漏，下一步该补。
+4. **`--script`/`--emit-snapshot` 只测过 `cmd.exe`**——没有针对真实 TUI
+   （vim/htop 之类会认 DECCKM/鼠标上报的程序）跑过黑盒测试，因为找不到
+   一个能在这台机器上确定性安装、体积小、行为可预期的 TUI 依赖。C5 的
+   DECCKM/鼠标上报因此仍然只有编码器层 + 单进程内 `ConTerminal` 层的覆盖，
+   没有"真程序在真会话里对方向键/鼠标做出正确反应"这层集成证据。
+
+**这轮复核踩过的两个真实教训（写给未来的自己）**：
+- **未提交的改动在这个共享检出里不安全**——花了大约 45 分钟写完 agent
+  接口的接线代码，还没提交就去跑测试，回来发现整个文件被重置回 HEAD，
+  同一批工作里唯一幸存的是一个新建的、未跟踪的文件（因为没有可以"重置回去"
+  的历史）。只能凭对话记录把丢的部分重打一遍。**结论：跟踪文件的改动，
+  编译测试一过就立刻提交，不要攒着**（已写进
+  `feedback_shared_checkout_loop` 记忆）。同一节课后来又发生一次
+  （`test(con): finish black-box suite` 提交本身也先丢了一次），复现了
+  同一条结论——不是偶然。
+- **黑盒测试第一次真的跑起来，立刻抓到一个纯代码审查绝对看不出的真 bug**：
+  `-e cmd.exe /c <command>` 命令执行完之后，整个 `agenterm-con` 进程
+  **永远不退出**——`child_alive` 在子进程退出 33 秒后仍然是 `true`。
+  根因：Windows ConPTY 的输出管道不会因为直接子进程退出就 EOF（master
+  侧一直攥着伪控制台句柄），而检测逻辑只看 PTY 读端 EOF。这几乎可以肯定
+  意味着**默认场景（用户在自己的 shell 里输入 `exit`）同样退不出**——
+  `/c` 只是让它更容易稳定复现。已修（用 `rmux-pty` 的 `try_wait`/`wait`
+  走真正的 Windows 进程退出信号）。这正是本轮目标里"别轻易以为自己完成了"
+  想防的那类 bug：光看代码、光跑单测都不会发现，只有真正把二进制当黑盒
+  跑起来才会现形。
 
 - [x] **C7 光标与选区**（`8d5fc840`）
   - **可读块光标**：原来在字形层之后用前景色**实心矩形**覆盖光标格，导致
@@ -239,6 +280,37 @@ vendored `vt100`）零警告。C4（server attach）与 C10d 明确列为**非�
     接进 `bootstrap.sh`/`.cmd`——这是所有 build/check/lint 入口共用的单一收敛点，
     成功失败两条路径都跑，退出码恒 0（清理绝不改变构建结果）。
   - **验收**：实测 12GB→1.3GB，249→67 目录，事后增量构建仍正常快。
+
+- [x] **C11 agent 可编程接口**（`78243a7f` `9f694540` `5ea4ccad` `d4350531`）
+  - **动机**：产品北极星（人工原话）——"通过 agenterm 工具能 100% 操控自身和
+    所有能控制的资源，并获取反馈（截图、视频、流式结构化数据），未来才能跟
+    大模型自主反馈式自进化"。`agenterm-con` 在这轮之前对程序化访问是**完全黑箱**——
+    本会话所有验证都是我手动截图、肉眼看，一次性脚本，不可重放。
+  - **`--emit-snapshot PATH`**：每帧渲染后原子写入（临时文件+rename）一份 JSON——
+    屏幕文字（`rows_text`）、光标（位置/形状/闪烁/`visible_now`）、回看偏移、
+    选区、IME 候选串、标题、子进程是否存活。**刻意只到文字层**，不逐格转出
+    颜色/属性——那层已经被 `paint_cells` 自己的像素级单测覆盖，重复只会更慢更脆。
+  - **`--script PATH`**：JSON 命令数组（`text`/`paste`/`key`(+ctrl/alt/shift)/
+    `wait_ms`/`screenshot`），走的是**真实输入路径**——`key` 过 `forward_key`
+    （含宿主快捷键、实时 DECCKM 感知编码器），`paste` 过 `paste_text`
+    （`paste_clipboard` 现在只是它的薄包装），不是另起一套模拟。`wait_ms`
+    复用 resize 防抖/光标闪烁已有的 `about_to_wait` `WaitUntil` 机制而非阻塞
+    sleep——为此把三路独立定时器（resize/blink/script）的唤醒时间**合并取最小值**，
+    否则 blink 独占 early-return 会把 `wait_ms: 50` 拖到 blink 的 ~530ms 周期。
+  - **截图命令**：像素只在 `render()` 内瞬时存在，`Screenshot` 命令先记
+    `pending_screenshot` 路径，`about_to_wait` 强制触发一次重绘，`render()`
+    捕获后原子写 PNG（复用仓库已有的 `png::Encoder` 写法）。**替掉了本会话
+    从头到尾一直在用的 PowerShell `PrintWindow` 土办法**。
+  - **黑盒测试套件真正跑起来后，第一轮就抓到一个纯代码审查/单测绝不会现形的
+    真 bug**：`-e cmd.exe /c <command>` 执行完命令后进程永不退出——Windows
+    ConPTY 的输出管道不会因为直接子进程退出就 EOF，而退出检测只看 PTY 读端
+    EOF。几乎可以肯定默认场景（用户在 shell 里敲 `exit`）同样退不出。用
+    `rmux-pty` 已经暴露的 `try_clone_for_wait`/`wait`（走 Windows 真正的
+    进程退出信号）加一个镜像现有 reader 线程写法的 waiter 线程修复。
+  - **诚实的未解决项**：见上方"仍未解决的缺口" 1–4 条（方向键真会话不生效、
+    IME 端到端零自动化、`--script` 缺鼠标命令、DECCKM/鼠标上报缺真 TUI 集成证据）。
+  - **验收**：40 单测 + 8 项黑盒集成测试全绿（1 项诚实 `#[ignore]` 并写明原因），
+    clippy 双 crate 零警告；截图命令实测产出可解码 PNG。
 
 - [ ] **C1 最小 ConPTY 窗**
   - **用户问题**：agenterm 开发/锁住时没有可靠终端
