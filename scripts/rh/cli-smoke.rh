@@ -7,21 +7,6 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-fn declared_evidence_ids() {
-    [
-        "cli.backspace-del-one",
-        "cli.named-buffer-paste",
-        "cli.remain-on-exit",
-        "cli.stable-create-id",
-        "cli.observable-events",
-        "cli.typed-tabs-operations",
-        "cli.control-receipts",
-        "cli.ui-bridge-contracts",
-        "cli.ui-bootstrap",
-        "cli.ui-follow"
-    ]
-}
-
 fn catch_text(error) {
     "" + error
 }
@@ -31,7 +16,15 @@ fn null_json() {
 }
 
 fn json_is_present(value) {
-    value != null_json()
+    let marker = value.kind;
+    if type_of(marker) == "()" {
+        return 0;
+    }
+    if value == null_json() {
+        0
+    } else {
+        1
+    }
 }
 
 fn invoke(context, cli, arguments, expected_failure) {
@@ -45,34 +38,45 @@ fn invoke(context, cli, arguments, expected_failure) {
 }
 
 fn text(context, cli, arguments) {
-    let output = invoke(context, cli, arguments, false);
-    let result = output.stdout + output.stderr;
+    let output = invoke(context, cli, arguments, 0);
+    let result = "" + output.stdout + output.stderr;
     result.trim();
     result
 }
 
 fn failure_text(context, cli, arguments) {
-    let output = invoke(context, cli, arguments, true);
-    output.stdout + output.stderr
+    let output = invoke(context, cli, arguments, 1);
+    "" + output.stdout + output.stderr
+}
+
+fn failure_json(context, cli, arguments) {
+    let output = invoke(context, cli, arguments, 1);
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    rhai::json::parse(result)
 }
 
 fn json(context, cli, arguments) {
-    rhai::json::parse(text(context, cli, arguments))
+    let output = invoke(context, cli, arguments, 0);
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    rhai::json::parse(result)
 }
 
 fn wait_sidebar_snapshot(context, cli, configured_width) {
     for attempt in 0..200 {
         let snapshot = json(context, cli, ["ui-snapshot"]);
         let sidebar = snapshot.layout.sidebar;
-        if json_is_present(sidebar)
+        if json_is_present(sidebar) != 0
             && sidebar.configured_width == configured_width
-            && sidebar.visible
+            && sidebar.visible != 0
         {
             return snapshot;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "cli_smoke_sidebar_width_timeout";
+    json(context, cli, ["ui-snapshot"])
 }
 
 fn direct(context, program, arguments, expected_failure) {
@@ -90,12 +94,15 @@ fn direct(context, program, arguments, expected_failure) {
         expected_failure,
         []
     );
-    if expected_failure {
-        test_harness::require(!output.success, "cli_smoke_direct_unexpected_success");
+    if expected_failure != 0 {
+        test_harness::require(
+            output.success == 0,
+            "cli_smoke_direct_unexpected_success"
+        );
     } else {
         let stderr_text = output.stderr_text();
         test_harness::require(
-            output.success,
+            output.success != 0,
             "cli_smoke_direct_failure:" + stderr_text
         );
     }
@@ -105,76 +112,86 @@ fn direct(context, program, arguments, expected_failure) {
 }
 
 fn tab_by_name(tab_entries, name) {
-    for index in 0..tab_entries.len() {
-        let window_entry = tab_entries[index];
-        if window_entry.name == name
-                || (window_entry.contains("title")
-                    && window_entry.title == name) {
-            return window_entry;
+    let wanted = "" + name;
+    for tab in tab_entries {
+        if ("" + tab.name) == wanted {
+            return tab;
+        }
+        if json_is_present(tab.title) != 0 {
+            if ("" + tab.title) == wanted {
+                return tab;
+            }
         }
     }
     rhai::json::parse("null")
 }
 
 fn tab_by_id(tab_entries, id) {
-    for index in 0..tab_entries.len() {
-        let window_entry = tab_entries[index];
-        let entry_id = "" + window_entry.id;
-        if entry_id == id {
-            return window_entry;
+    let wanted = "" + id;
+    for tab in tab_entries {
+        if ("" + tab.id) == wanted {
+            return tab;
         }
     }
     rhai::json::parse("null")
 }
 
 fn event_by_kind(events, kind) {
-    // Index on the Json param directly (aliases lose string-path emit).
     let kind_text = "" + kind;
-    let result = rhai::json::parse("null");
-    for index in 0..events.len {
-        let event = events[index];
-        let event_kind = "" + event.kind;
-        if event_kind == kind_text {
-            result = event;
-        }
-    }
-    result
-}
-
-fn event_for_tab(events, kind, tab_id) {
-    let kind_text = "" + kind;
-    let tab_text = "" + tab_id;
-    let result = rhai::json::parse("null");
-    for index in 0..events.len {
-        let event = events[index];
-        let event_kind = "" + event.kind;
-        let event_tab = "" + event.tab_id;
-        if event_kind == kind_text && event_tab == tab_text {
-            result = event;
-        }
-    }
-    result
-}
-
-fn operation_by_id(catalog_operations, id) {
-    for index in 0..catalog_operations.len() {
-        let catalog_entry = catalog_operations[index];
-        let entry_id = "" + catalog_entry.id;
-        if entry_id == id {
-            return catalog_entry;
+    for event in events {
+        if ("" + event.kind) == kind_text {
+            return event;
         }
     }
     rhai::json::parse("null")
 }
 
+fn event_for_tab(events, kind, tab_id) {
+    let kind_text = "" + kind;
+    let tab_text = "" + tab_id;
+    for event in events {
+        if ("" + event.kind) == kind_text
+                && ("" + event.tab_id) == tab_text {
+            return event;
+        }
+    }
+    rhai::json::parse("null")
+}
+
+fn operation_by_id(catalog_operations, id) {
+    let wanted = "" + id;
+    for operation in catalog_operations {
+        if ("" + operation.id) == wanted {
+            return operation;
+        }
+    }
+    rhai::json::parse("null")
+}
+
+fn first_window(windows) {
+    for window in windows {
+        return window;
+    }
+    rhai::json::parse("null")
+}
+
+fn first_parameter(parameters) {
+    for parameter in parameters {
+        return parameter;
+    }
+    rhai::json::parse("null")
+}
+
 fn stable_tab_id(value) {
-    value.starts_with("@") && value.len > 1
+    let text = "" + value;
+    text.starts_with("@") != 0 && text.len > 1
 }
 
 fn parse_integer(value) {
-    let text = "" + value;
-    text.trim();
-    text.parse_int()
+    let digits = "" + value;
+    digits.trim();
+    let parsed = digits.parse_int();
+    parsed
 }
 
 fn require_file(path, minimum_bytes) {
@@ -185,11 +202,66 @@ fn require_file(path, minimum_bytes) {
     );
 }
 
+fn wait_for_gui_lease(context, cli, gui) {
+    for attempt in 0..400 {
+        let probe = test_harness::run_cli(
+            context,
+            cli,
+            [
+                "wait-ui", "--window-state", "restored",
+                "--timeout-ms", "100"
+            ],
+            0,
+            []
+        );
+        if probe.success != 0 {
+            let lease_probe = test_harness::run_cli(
+                context,
+                cli,
+                ["ui-lease", "status"],
+                0,
+                []
+            );
+            if lease_probe.success != 0 {
+                let lease_text = "" + lease_probe.stdout;
+                let lease = rhai::json::parse(lease_text);
+                let client_pid = 0 + lease.client_pid;
+                if lease.attached != 0 && client_pid == gui.id {
+                    let probe_text = "" + probe.stdout;
+                    let snapshot = rhai::json::parse(probe_text);
+                    test_harness::require(
+                        snapshot.client_pid == gui.id,
+                        "cli_smoke_gui_lease_owner"
+                    );
+                    return 0;
+                }
+            }
+        }
+        if gui.state == "exited" {
+            let output = gui.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            let stderr_text = output.stderr_text();
+            throw "cli_smoke_gui_early_exit:" + stderr_text;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "cli_smoke_gui_ready_timeout";
+    0
+}
+
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in declared_evidence_ids() {
-            print(id);
-        }
+        print("cli.backspace-del-one");
+        print("cli.named-buffer-paste");
+        print("cli.remain-on-exit");
+        print("cli.stable-create-id");
+        print("cli.observable-events");
+        print("cli.typed-tabs-operations");
+        print("cli.control-receipts");
+        print("cli.ui-bridge-contracts");
+        print("cli.ui-bootstrap");
+        print("cli.ui-follow");
         return 0;
     }
 
@@ -212,8 +284,20 @@ let pane_png = std::path::join(
     name + "-pane.png"
 ).display;
     let owned_children = [];
-    let succeeded = 0;
-    let failure = "";
+let succeeded = 0;
+let failure = "";
+let declared_evidence = [
+    "cli.backspace-del-one",
+    "cli.named-buffer-paste",
+    "cli.remain-on-exit",
+    "cli.stable-create-id",
+    "cli.observable-events",
+    "cli.typed-tabs-operations",
+    "cli.control-receipts",
+    "cli.ui-bridge-contracts",
+    "cli.ui-bootstrap",
+    "cli.ui-follow"
+];
 
 try {
     print("STEP create tab and prove request receipt replay");
@@ -235,15 +319,13 @@ try {
                 replayed_receipt.after_position.sequence,
         "cli_smoke_receipt_replay"
     );
-    let conflict_receipt = rhai::json::parse(
-        failure_text(
-            context,
-            cli,
-            [
-                "--request-id", request_id, "--receipt-json",
-                "set-tab-note", "-t", name, "different-payload"
-            ]
-        )
+    let conflict_receipt = failure_json(
+        context,
+        cli,
+        [
+            "--request-id", request_id, "--receipt-json",
+            "set-tab-note", "-t", name, "different-payload"
+        ]
     );
     test_harness::require(
         conflict_receipt.outcome == "no_op"
@@ -290,34 +372,88 @@ try {
         killed.outcome == "committed"
             && killed.after_position.sequence ==
                 killed_replay.after_position.sequence
-            && !json_is_present(killed_tab),
+            && json_is_present(killed_tab) == 0,
         "cli_smoke_kill_replay"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.control-receipts"
     );
 
     print("STEP discover commands and typed operation contracts");
     let commands = text(context, cli, ["list-commands"]);
-    for expected in [
-        "new-window (neww)", "list-windows (lsw)",
-        "send-keys (send)", "set-buffer (setb)", "paste-buffer (pasteb)",
-        "scroll-pane", "read-events",
-        "wait-events", "new-agent", "list-instances",
-        "wait-pane (expect-pane)", "set-composer", "ui-bootstrap",
-        "ui-deltas", "ui-hello", "ui-snapshot"
-    ] {
-        test_harness::require(
-            commands.contains(expected),
-            "cli_smoke_command_missing:" + expected
-        );
-    }
-    let save_buffer_fail = failure_text(context, cli, ["save-buffer"]);
     test_harness::require(
-        save_buffer_fail.contains("unsupported")
-            || save_buffer_fail.contains("not implemented"),
+        commands.contains("new-window (neww)"),
+        "cli_smoke_command_missing:new-window (neww)"
+    );
+    test_harness::require(
+        commands.contains("list-windows (lsw)"),
+        "cli_smoke_command_missing:list-windows (lsw)"
+    );
+    test_harness::require(
+        commands.contains("send-keys (send)"),
+        "cli_smoke_command_missing:send-keys (send)"
+    );
+    test_harness::require(
+        commands.contains("set-buffer (setb)"),
+        "cli_smoke_command_missing:set-buffer (setb)"
+    );
+    test_harness::require(
+        commands.contains("paste-buffer (pasteb)"),
+        "cli_smoke_command_missing:paste-buffer (pasteb)"
+    );
+    test_harness::require(
+        commands.contains("scroll-pane"),
+        "cli_smoke_command_missing:scroll-pane"
+    );
+    test_harness::require(
+        commands.contains("read-events"),
+        "cli_smoke_command_missing:read-events"
+    );
+    test_harness::require(
+        commands.contains("wait-events"),
+        "cli_smoke_command_missing:wait-events"
+    );
+    test_harness::require(
+        commands.contains("new-agent"),
+        "cli_smoke_command_missing:new-agent"
+    );
+    test_harness::require(
+        commands.contains("list-instances"),
+        "cli_smoke_command_missing:list-instances"
+    );
+    test_harness::require(
+        commands.contains("wait-pane (expect-pane)"),
+        "cli_smoke_command_missing:wait-pane (expect-pane)"
+    );
+    test_harness::require(
+        commands.contains("set-composer"),
+        "cli_smoke_command_missing:set-composer"
+    );
+    test_harness::require(
+        commands.contains("ui-bootstrap"),
+        "cli_smoke_command_missing:ui-bootstrap"
+    );
+    test_harness::require(
+        commands.contains("ui-deltas"),
+        "cli_smoke_command_missing:ui-deltas"
+    );
+    test_harness::require(
+        commands.contains("ui-hello"),
+        "cli_smoke_command_missing:ui-hello"
+    );
+    test_harness::require(
+        commands.contains("ui-snapshot"),
+        "cli_smoke_command_missing:ui-snapshot"
+    );
+    let save_buffer_fail = failure_text(context, cli, ["save-buffer"]);
+    let save_buffer_unsupported = save_buffer_fail.contains("unsupported");
+    let save_buffer_not_implemented =
+        save_buffer_fail.contains("not implemented");
+    test_harness::require(
+        save_buffer_unsupported != 0
+            || save_buffer_not_implemented != 0,
         "cli_smoke_save_buffer_explicit_unsupported"
     );
     let offline_unknown = direct(
@@ -327,7 +463,7 @@ try {
             "--address", "127.0.0.1:1",
             "ui-action", "tabs-teleport"
         ],
-        true
+        1
     );
     let offline_width = direct(
         context,
@@ -336,17 +472,18 @@ try {
             "--address", "127.0.0.1:1",
             "ui-action", "tabs-set-width"
         ],
-        true
+        1
     );
     test_harness::require(
         offline_unknown.contains("operation_unknown[tabs-teleport]")
-            && !offline_unknown.contains("connect"),
+            != 0
+            && offline_unknown.contains("connect") == 0,
         "cli_smoke_offline_operation_validation"
     );
     test_harness::require(
         offline_width.contains(
             "operation_invalid_arguments[ui.tabs.set-width]"
-        ) && !offline_width.contains("connect"),
+        ) != 0 && offline_width.contains("connect") == 0,
         "cli_smoke_offline_width_validation"
     );
 
@@ -355,14 +492,14 @@ try {
     test_harness::require(
         protocol.ui_bridge.schema_version == 7
             && protocol.ui_bridge.ownership_mode == "split_server_client"
-            && protocol.ui_bridge.replaceable_ui
-            && protocol.ui_bridge.interactive_lease
+            && protocol.ui_bridge.replaceable_ui != 0
+            && protocol.ui_bridge.interactive_lease != 0
             && protocol.ui_bridge.target_server_executable ==
                 "agenterm.exe"
-            && protocol.ui_bridge.bootstrap_snapshot
-            && protocol.ui_bridge.ordered_deltas
-            && protocol.ui_bridge.reconnect
-            && protocol.ui_bridge.rollback_proven
+            && protocol.ui_bridge.bootstrap_snapshot != 0
+            && protocol.ui_bridge.ordered_deltas != 0
+            && protocol.ui_bridge.reconnect != 0
+            && protocol.ui_bridge.rollback_proven != 0
             && protocol.ui_bridge.contract_schemas.hello == 1
             && protocol.ui_bridge.contract_schemas.bootstrap == 2
             && protocol.ui_bridge.contract_schemas.screen == 2
@@ -379,13 +516,13 @@ try {
             && protocol.ui_bridge.hard_limits.delta_events == 64
             && protocol.ui_bridge.hard_limits.input_bytes == 262144
             && operation_catalog.schema_version == 1
-            && operation_catalog.classification_only
-            && !operation_catalog.authorization_policy,
+            && operation_catalog.classification_only != 0
+            && operation_catalog.authorization_policy == 0,
         "cli_smoke_protocol_contract"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.ui-bridge-contracts"
     );
 
@@ -403,8 +540,8 @@ try {
             && bootstrap.server_epoch == ui_snapshot.event_position.epoch
             && bootstrap.position.sequence ==
                 ui_snapshot.event_position.sequence
-            && bootstrap.complete
-            && !bootstrap.truncated
+            && bootstrap.complete != 0
+            && bootstrap.truncated == 0
             && bootstrap.active_tab_id == inspect.active_window_id
             && bootstrap.tabs.len == inspect.windows.len,
         "cli_smoke_bootstrap_identity"
@@ -413,11 +550,17 @@ try {
         let tab_id = "" + tab.id;
         let composer_text = tab.composer.text;
         let window = tab_by_id(inspect.windows, tab_id);
+        let window_name = "" + window.name;
+        let window_note = "" + window.note;
+        let window_parent_id = "" + window.parent_id;
+        let tab_parent_id = "" + tab.parent_id;
+        let tab_title = "" + tab.title;
+        let tab_note = "" + tab.note;
         test_harness::require(
-            json_is_present(window)
-                && tab.parent_id == window.parent_id
-                && tab.title == window.name
-                && tab.note == window.note
+            json_is_present(window) != 0
+                && tab_parent_id == window_parent_id
+                && tab_title == window_name
+                && tab_note == window_note
                 && tab.process_id == window.pid
                 && tab.dead == window.dead
                 && tab.exit_code == window.exit_code
@@ -425,34 +568,34 @@ try {
                 && tab.screen.rows == window.rows
                 && tab.screen.columns == window.cols
                 && tab.screen.scrollback_offset == window.scrollback_offset
-                && tab.screen.complete
-                && !tab.screen.truncated
+                && tab.screen.complete != 0
+                && tab.screen.truncated == 0
                 && tab.screen.runs.len > 0,
             "cli_smoke_bootstrap_tab:" + tab_id
         );
-        if tab.composer.sensitive {
+        if tab.composer.sensitive != 0 {
             test_harness::require(
                 composer_text == null_json(),
                 "cli_smoke_sensitive_composer_disclosed"
             );
         } else {
             let composer_text_string = "" + composer_text;
-            let composer_byte_length =
-                rhai::bytes::from_text(composer_text_string).len;
+            let composer_byte_length = composer_text_string.len;
             test_harness::require(
                 tab.composer.byte_length == composer_byte_length,
                 "cli_smoke_composer_byte_identity"
             );
         }
+        let working_context = "" + tab.working_context;
         test_harness::require(
-            !tab.working_context.contains("http_proxy")
-                && !tab.working_context.contains("https_proxy"),
+            working_context.contains("http_proxy") == 0
+                && working_context.contains("https_proxy") == 0,
             "cli_smoke_proxy_value_disclosed"
         );
     }
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.ui-bootstrap"
     );
 
@@ -476,7 +619,7 @@ try {
     let hello = json(context, cli, hello_args);
     test_harness::require(
         hello.schema_version == 1
-            && hello.accepted
+            && hello.accepted != 0
             && hello.compatibility == "compatible"
             && hello.client_id == hello_client_id
             && hello.protocol_version == 1
@@ -488,7 +631,7 @@ try {
             && hello.server_build.version != ""
             && hello.bootstrap_schema_version == 2
             && hello.delta_schema_version == 2
-            && hello.capabilities.contains("ordered_delta_poll"),
+            && hello.capabilities.contains("ordered_delta_poll") != 0,
         "cli_smoke_hello_contract"
     );
     let future_client_id = "future-renderer-" + context.run_id;
@@ -498,13 +641,13 @@ try {
     ];
     let too_new = json(context, cli, too_new_args);
     test_harness::require(
-        !too_new.accepted
+        too_new.accepted == 0
             && too_new.compatibility == "client_too_new",
         "cli_smoke_future_renderer_contract"
     );
     let follow_tab = tab_by_name(bootstrap.tabs, name);
     test_harness::require(
-        json_is_present(follow_tab),
+        json_is_present(follow_tab) != 0,
         "cli_smoke_follow_tab_missing"
     );
     let follow_tab_id = "" + follow_tab.id;
@@ -521,13 +664,13 @@ try {
         "--limit", "64"
     ];
     let deltas = json(context, cli, deltas_args);
-    let previous = hello.position.sequence;
+    let previous_sequence = 0 + hello.position.sequence;
     for event in deltas.events {
         test_harness::require(
-            event.sequence > previous,
+            event.sequence > previous_sequence,
             "cli_smoke_delta_order"
         );
-        previous = event.sequence;
+        previous_sequence = 0 + event.sequence;
     }
     let follow_event =
         event_for_tab(deltas.events, "tab.note", follow_tab_id);
@@ -539,14 +682,14 @@ try {
             && deltas.server_epoch == hello.position.server_epoch
             && deltas.after_sequence == hello.position.sequence
             && deltas.through_sequence == deltas.current_sequence
-            && deltas.complete
-            && !deltas.truncated
-            && json_is_present(follow_event)
-            && json_is_present(follow_update)
+            && deltas.complete != 0
+            && deltas.truncated == 0
+            && json_is_present(follow_event) != 0
+            && json_is_present(follow_update) != 0
             && follow_update.note == follow_note
             && follow_update.screen.generation == deltas.current_sequence
             && post_bootstrap.position.sequence == deltas.current_sequence
-            && json_is_present(post_tab)
+            && json_is_present(post_tab) != 0
             && post_tab.note == follow_update.note
             && post_tab.screen.generation ==
                 follow_update.screen.generation,
@@ -569,75 +712,168 @@ try {
             "--after", future_after_sequence
         ]
     );
+    let restart_has_server_restart =
+        restart_error.contains("\"code\":\"server_restart\"");
+    let restart_has_current =
+        restart_error.contains("\"current\"");
+    let future_has_future_sequence =
+        future_error.contains("\"code\":\"future_sequence\"");
+    let future_has_current =
+        future_error.contains("\"current\"");
     test_harness::require(
-        restart_error.contains("\"code\":\"server_restart\"")
-            && restart_error.contains("\"current\"")
-            && future_error.contains("\"code\":\"future_sequence\"")
-            && future_error.contains("\"current\""),
+        restart_has_server_restart != 0
+            && restart_has_current != 0
+            && future_has_future_sequence != 0
+            && future_has_current != 0,
         "cli_smoke_delta_recovery"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.ui-follow"
     );
 
-    let expected_operations = #{
-        "protocol.info": "observe",
-        "ui.hello": "observe",
-        "ui.bootstrap": "observe",
-        "ui.deltas": "observe",
-        "ui.tabs.show": "control",
-        "ui.tabs.hide": "control",
-        "ui.tabs.toggle": "control",
-        "ui.tabs.set-width": "control",
-        "tabs.set-note": "control",
-        "server.kill": "destructive"
-    };
     let seen_operations = #{};
     for operation in operation_catalog.operations {
         let operation_id = "" + operation.id;
         test_harness::require(
-            !seen_operations.contains(operation_id),
+            seen_operations.contains(operation_id) == 0,
             "cli_smoke_duplicate_operation:" + operation_id
         );
         seen_operations[operation_id] = true;
-        for field in [
-            "id", "class", "command", "aliases", "parameters",
-            "result_type", "errors", "events", "destructive",
-            "available", "since"
-        ] {
-            test_harness::require(
-                operation.contains(field),
-                "cli_smoke_operation_field:" + operation_id + ":" + field
-            );
-        }
         test_harness::require(
-            operation.available
+            operation.contains("id"),
+            "cli_smoke_operation_field:" + operation_id + ":id"
+        );
+        test_harness::require(
+            operation.contains("class"),
+            "cli_smoke_operation_field:" + operation_id + ":class"
+        );
+        test_harness::require(
+            operation.contains("command"),
+            "cli_smoke_operation_field:" + operation_id + ":command"
+        );
+        test_harness::require(
+            operation.contains("aliases"),
+            "cli_smoke_operation_field:" + operation_id + ":aliases"
+        );
+        test_harness::require(
+            operation.contains("parameters"),
+            "cli_smoke_operation_field:" + operation_id + ":parameters"
+        );
+        test_harness::require(
+            operation.contains("result_type"),
+            "cli_smoke_operation_field:" + operation_id + ":result_type"
+        );
+        test_harness::require(
+            operation.contains("errors"),
+            "cli_smoke_operation_field:" + operation_id + ":errors"
+        );
+        test_harness::require(
+            operation.contains("events"),
+            "cli_smoke_operation_field:" + operation_id + ":events"
+        );
+        test_harness::require(
+            operation.contains("destructive"),
+            "cli_smoke_operation_field:" + operation_id + ":destructive"
+        );
+        test_harness::require(
+            operation.contains("available"),
+            "cli_smoke_operation_field:" + operation_id + ":available"
+        );
+        test_harness::require(
+            operation.contains("since"),
+            "cli_smoke_operation_field:" + operation_id + ":since"
+        );
+        let operation_destructive = operation.destructive;
+        let operation_class = "" + operation.class;
+        test_harness::require(
+            operation.available != 0
                 && operation.result_type != ""
                 && operation.since != ""
                 && (
-                    (operation.class == "destructive") ==
-                        operation.destructive
+                    (operation_class == "destructive") ==
+                        operation_destructive
                 ),
             "cli_smoke_operation_metadata:" + operation_id
         );
     }
-    for id in expected_operations.keys() {
-        let operation =
-            operation_by_id(operation_catalog.operations, id);
-        let expected_class = "" + expected_operations[id];
-        test_harness::require(
-            json_is_present(operation)
-                && operation.class == expected_class,
-            "cli_smoke_operation_class:" + id
-        );
-    }
+    let protocol_info_operation =
+        operation_by_id(operation_catalog.operations, "protocol.info");
+    test_harness::require(
+        json_is_present(protocol_info_operation) != 0
+            && protocol_info_operation.class == "observe",
+        "cli_smoke_operation_class:protocol.info"
+    );
+    let ui_hello_operation =
+        operation_by_id(operation_catalog.operations, "ui.hello");
+    test_harness::require(
+        json_is_present(ui_hello_operation) != 0
+            && ui_hello_operation.class == "observe",
+        "cli_smoke_operation_class:ui.hello"
+    );
+    let ui_bootstrap_operation =
+        operation_by_id(operation_catalog.operations, "ui.bootstrap");
+    test_harness::require(
+        json_is_present(ui_bootstrap_operation) != 0
+            && ui_bootstrap_operation.class == "observe",
+        "cli_smoke_operation_class:ui.bootstrap"
+    );
+    let ui_deltas_operation =
+        operation_by_id(operation_catalog.operations, "ui.deltas");
+    test_harness::require(
+        json_is_present(ui_deltas_operation) != 0
+            && ui_deltas_operation.class == "observe",
+        "cli_smoke_operation_class:ui.deltas"
+    );
+    let ui_tabs_show_operation =
+        operation_by_id(operation_catalog.operations, "ui.tabs.show");
+    test_harness::require(
+        json_is_present(ui_tabs_show_operation) != 0
+            && ui_tabs_show_operation.class == "control",
+        "cli_smoke_operation_class:ui.tabs.show"
+    );
+    let ui_tabs_hide_operation =
+        operation_by_id(operation_catalog.operations, "ui.tabs.hide");
+    test_harness::require(
+        json_is_present(ui_tabs_hide_operation) != 0
+            && ui_tabs_hide_operation.class == "control",
+        "cli_smoke_operation_class:ui.tabs.hide"
+    );
+    let ui_tabs_toggle_operation =
+        operation_by_id(operation_catalog.operations, "ui.tabs.toggle");
+    test_harness::require(
+        json_is_present(ui_tabs_toggle_operation) != 0
+            && ui_tabs_toggle_operation.class == "control",
+        "cli_smoke_operation_class:ui.tabs.toggle"
+    );
+    let ui_tabs_set_width_operation =
+        operation_by_id(operation_catalog.operations, "ui.tabs.set-width");
+    test_harness::require(
+        json_is_present(ui_tabs_set_width_operation) != 0
+            && ui_tabs_set_width_operation.class == "control",
+        "cli_smoke_operation_class:ui.tabs.set-width"
+    );
+    let tabs_set_note_operation =
+        operation_by_id(operation_catalog.operations, "tabs.set-note");
+    test_harness::require(
+        json_is_present(tabs_set_note_operation) != 0
+            && tabs_set_note_operation.class == "control",
+        "cli_smoke_operation_class:tabs.set-note"
+    );
+    let server_kill_operation =
+        operation_by_id(operation_catalog.operations, "server.kill");
+    test_harness::require(
+        json_is_present(server_kill_operation) != 0
+            && server_kill_operation.class == "destructive",
+        "cli_smoke_operation_class:server.kill"
+    );
     let width_operation =
         operation_by_id(operation_catalog.operations, "ui.tabs.set-width");
-    let width_parameter = width_operation.parameters[0];
+    let width_parameter = first_parameter(width_operation.parameters);
+    let width_parameter_name = "" + width_parameter.name;
     test_harness::require(
-        width_parameter.name == "width"
+        width_parameter_name == "width"
             && width_parameter.value_type == "integer"
             && width_parameter.required
             && width_parameter.minimum == 180
@@ -646,11 +882,10 @@ try {
             && width_operation.events.contains("layout.tabs.width"),
         "cli_smoke_width_discovery"
     );
+    let toggle_operation =
+        operation_by_id(operation_catalog.operations, "ui.tabs.toggle");
     test_harness::require(
-        operation_by_id(
-            operation_catalog.operations,
-            "ui.tabs.toggle"
-        ).aliases.contains("toggle-tabs"),
+        toggle_operation.aliases.contains("toggle-tabs"),
         "cli_smoke_toggle_alias"
     );
     let note_operation =
@@ -670,7 +905,7 @@ try {
     test_harness::require(
         headless_error.contains(
             "no interactive GUI client is attached to this server"
-        ),
+        ) != 0,
         "cli_smoke_headless_ui_error"
     );
     let gui_command = test_harness::configured_command(
@@ -680,40 +915,7 @@ try {
     );
     let gui = gui_command.start();
     owned_children.push(gui);
-    let gui_ready = 0;
-    for attempt in 0..400 {
-        let probe = test_harness::run_cli(
-            context,
-            cli,
-            [
-                "wait-ui", "--window-state", "restored",
-                "--timeout-ms", "100"
-            ],
-            false,
-            []
-        );
-        let gui_facts = gui.platform_facts;
-        if probe.success
-                && gui_facts.top_level_window_supported
-                && gui_facts.top_level_window_present {
-            let snapshot = rhai::json::parse(probe.stdout);
-            test_harness::require(
-                snapshot.client_pid == gui.id,
-                "cli_smoke_gui_lease_owner"
-            );
-            gui_ready = 1;
-            break;
-        }
-        if gui.state == "exited" {
-            let output = gui.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
-            let stderr_text = output.stderr_text();
-            throw "cli_smoke_gui_early_exit:" + stderr_text;
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
-    }
-    test_harness::require(gui_ready != 0, "cli_smoke_gui_ready_timeout");
+    wait_for_gui_lease(context, cli, gui);
 
     print("STEP typed Tabs actions preserve layout and event attribution");
     let tabs_baseline = json(context, cli, ["ui-snapshot"]);
@@ -725,7 +927,7 @@ try {
         ["ui-action", "tabs-hide"]
     );
     test_harness::require(
-        !hidden.layout.sidebar.visible
+        hidden.layout.sidebar.visible == 0
             && hidden.layout.sidebar.effective_width == 0
             && hidden.layout.sidebar.configured_width == configured_width,
         "cli_smoke_tabs_hide"
@@ -748,19 +950,27 @@ try {
             && hide_operation_id == "ui.tabs.hide",
         "cli_smoke_tabs_hide_event"
     );
+    let tabs_show = json(context, cli, ["ui-action", "tabs-show"]);
     test_harness::require(
-        json(context, cli, ["ui-action", "tabs-show"])
-            .layout.sidebar.visible,
+        tabs_show.layout.sidebar.visible != 0,
         "cli_smoke_tabs_show"
     );
-    test_harness::require(
-        !json(context, cli, ["ui-action", "tabs-toggle"])
-            .layout.sidebar.visible,
-        "cli_smoke_tabs_toggle"
+    let tabs_toggle = json(
+        context,
+        cli,
+        ["ui-action", "tabs-toggle"]
     );
     test_harness::require(
-        json(context, cli, ["ui-action", "toggle-tabs"])
-            .layout.sidebar.visible,
+        tabs_toggle.layout.sidebar.visible == 0,
+        "cli_smoke_tabs_toggle"
+    );
+    let tabs_legacy_toggle = json(
+        context,
+        cli,
+        ["ui-action", "toggle-tabs"]
+    );
+    test_harness::require(
+        tabs_legacy_toggle.layout.sidebar.visible != 0,
         "cli_smoke_tabs_legacy_toggle"
     );
     let width_baseline = json(context, cli, ["ui-snapshot"]);
@@ -801,26 +1011,29 @@ try {
     );
     for width in [179, 481] {
         let invalid_width_text = "" + width;
+        let invalid_width_error = failure_text(
+            context,
+            cli,
+            [
+                "ui-action", "tabs-set-width",
+                "--width", invalid_width_text
+            ]
+        );
         test_harness::require(
-            failure_text(
-                context,
-                cli,
-                [
-                    "ui-action", "tabs-set-width",
-                    "--width", invalid_width_text
-                ]
-            ).contains(
+            invalid_width_error.contains(
                 "operation_invalid_arguments[ui.tabs.set-width]"
-            ),
+            ) != 0,
             "cli_smoke_invalid_width:" + invalid_width_text
         );
     }
+    let unknown_tabs_error = failure_text(
+        context,
+        cli,
+        ["ui-action", "tabs-teleport"]
+    );
     test_harness::require(
-        failure_text(
-            context,
-            cli,
-            ["ui-action", "tabs-teleport"]
-        ).contains("operation_unknown[tabs-teleport]"),
+        unknown_tabs_error.contains("operation_unknown[tabs-teleport]")
+            != 0,
         "cli_smoke_unknown_tabs_action"
     );
     let after_invalid = wait_sidebar_snapshot(context, cli, 480);
@@ -835,7 +1048,7 @@ try {
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.typed-tabs-operations"
     );
 
@@ -880,23 +1093,24 @@ try {
         "cli_smoke_waited_event"
     );
     let timeout_after_sequence = "" + event_batch.position.sequence;
+    let timeout_error = failure_text(
+        context,
+        cli,
+        [
+            "wait-events",
+            "--epoch", event_batch.position.epoch,
+            "--after", timeout_after_sequence,
+            "--kind", "never.test-event",
+            "--timeout-ms", "20"
+        ]
+    );
     test_harness::require(
-        failure_text(
-            context,
-            cli,
-            [
-                "wait-events",
-                "--epoch", event_batch.position.epoch,
-                "--after", timeout_after_sequence,
-                "--kind", "never.test-event",
-                "--timeout-ms", "20"
-            ]
-        ).contains("event_wait_timeout"),
+        timeout_error.contains("event_wait_timeout") != 0,
         "cli_smoke_event_timeout"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.observable-events"
     );
 
@@ -908,9 +1122,10 @@ try {
         ["set-composer", "-t", name, composer_command]
     );
     let before_submit = json(context, cli, ["inspect", "-t", name]);
+    let composer_roundtrip =
+        text(context, cli, ["show-composer", "-t", name]);
     test_harness::require(
-        text(context, cli, ["show-composer", "-t", name]) ==
-            "echo " + token,
+        composer_roundtrip == "echo " + token,
         "cli_smoke_composer_roundtrip"
     );
     let submit_baseline = json(context, cli, ["ui-snapshot"]);
@@ -927,12 +1142,14 @@ try {
                 "composer.submission-finished",
         "cli_smoke_submit_accepted"
     );
+    let pending_input_error = failure_text(
+        context,
+        cli,
+        ["send-keys", "-t", name, "SHOULD_NOT_MERGE"]
+    );
     test_harness::require(
-        failure_text(
-            context,
-            cli,
-            ["send-keys", "-t", name, "SHOULD_NOT_MERGE"]
-        ).contains("composer submission is pending"),
+        pending_input_error.contains("composer submission is pending")
+            != 0,
         "cli_smoke_pending_input"
     );
     text(
@@ -960,36 +1177,40 @@ try {
             "--after", submit_after_sequence
         ]
     );
-    let submit_completion = rhai::json::parse("null");
     let submit_count = 0;
+    let submit_enter_written = 0;
     let committed_operation_id = "" + committed.operation_id;
     let submit_events_list = submit_events.events;
-    for index in 0..submit_events_list.len {
-        let event = submit_events.events[index];
+    for event in submit_events_list {
         let event_kind = "" + event.kind;
         let event_request = "" + event.request_id;
         let event_operation = "" + event.operation_id;
         if event_kind == "composer.submission-finished"
                 && event_request == submit_request
                 && event_operation == committed_operation_id {
-            submit_completion = event;
+            submit_enter_written = 0 + event.payload.enter_written;
             submit_count += 1;
         }
     }
     test_harness::require(
-        submit_count == 1 && submit_completion.payload.enter_written,
+        submit_count == 1 && submit_enter_written != 0,
         "cli_smoke_submit_event"
     );
     let after_submit = json(context, cli, ["inspect", "-t", name]);
+    let before_window = first_window(before_submit.windows);
+    let after_window = first_window(after_submit.windows);
+    let before_input_writes = before_window.input_writes;
+    let after_input_writes = after_window.input_writes;
+    let after_submit_pending = after_window.submit_pending;
     test_harness::require(
-        after_submit.windows[0].input_writes ==
-            before_submit.windows[0].input_writes + 2
-            && !after_submit.windows[0].submit_pending,
+        after_input_writes == before_input_writes + 2
+            && after_submit_pending == 0,
         "cli_smoke_submit_pty_writes"
     );
+    let capture_output =
+        text(context, cli, ["capture-pane", "-p", "-t", name]);
     test_harness::require(
-        text(context, cli, ["capture-pane", "-p", "-t", name])
-            .contains(token),
+        capture_output.contains(token) != 0,
         "cli_smoke_capture_token"
     );
 
@@ -1018,17 +1239,20 @@ try {
     );
     let backspace_capture =
         text(context, cli, ["capture-pane", "-p", "-t", name]);
-    let exact_backspace = false;
-    for line in backspace_capture.split("\n") {
-        line.trim();
-        if line == backspace_prefix + "Y" {
-            exact_backspace = true;
+    let exact_backspace = 0;
+    let backspace_lines = backspace_capture.split("\n");
+    for line_index in 0..backspace_lines.len {
+        let line = backspace_lines[line_index];
+        let trimmed = line;
+        trimmed.trim();
+        if trimmed == backspace_prefix + "Y" {
+            exact_backspace = 1;
         }
     }
-    test_harness::require(exact_backspace, "cli_smoke_backspace_contract");
+    test_harness::require(exact_backspace != 0, "cli_smoke_backspace_contract");
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.backspace-del-one"
     );
 
@@ -1039,13 +1263,15 @@ try {
         cli,
         ["set-buffer", "-b", "probe", "--", buffer_probe]
     );
+    let show_probe_buffer =
+        text(context, cli, ["show-buffer", "-b", "probe"]);
     test_harness::require(
-        text(context, cli, ["show-buffer", "-b", "probe"])
-            .contains(buffer_probe),
+        show_probe_buffer.contains(buffer_probe) != 0,
         "cli_smoke_show_buffer_roundtrip"
     );
+    let list_buffers = text(context, cli, ["list-buffers"]);
     test_harness::require(
-        text(context, cli, ["list-buffers"]).contains("probe:"),
+        list_buffers.contains("probe:") != 0,
         "cli_smoke_list_buffers_named"
     );
     text(
@@ -1068,9 +1294,10 @@ try {
             "--timeout-ms", "30000"
         ]
     );
+    let paste_capture =
+        text(context, cli, ["capture-pane", "-p", "-t", name]);
     test_harness::require(
-        text(context, cli, ["capture-pane", "-p", "-t", name])
-            .contains(buffer_probe),
+        paste_capture.contains(buffer_probe) != 0,
         "cli_smoke_paste_buffer_capture"
     );
     text(context, cli, ["delete-buffer", "-b", "probe"]);
@@ -1097,7 +1324,7 @@ try {
     text(context, cli, ["delete-buffer", "-b", "empty"]);
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.named-buffer-paste"
     );
 
@@ -1124,13 +1351,11 @@ try {
     let top_offset = parse_integer(
         text(context, cli, ["scroll-pane", "-t", name, "top"])
     );
+    let scroll_top_capture =
+        text(context, cli, ["capture-pane", "-p", "-t", name]);
     test_harness::require(
         top_offset > 0
-            && !text(
-                context,
-                cli,
-                ["capture-pane", "-p", "-t", name]
-            ).contains(scroll_prefix + "_80"),
+            && scroll_top_capture.contains(scroll_prefix + "_80") == 0,
         "cli_smoke_scroll_top"
     );
     let lower_offset = parse_integer(
@@ -1144,13 +1369,11 @@ try {
     let bottom_offset = parse_integer(
         text(context, cli, ["scroll-pane", "-t", name, "bottom"])
     );
+    let scroll_bottom_capture =
+        text(context, cli, ["capture-pane", "-p", "-t", name]);
     test_harness::require(
         bottom_offset == 0
-            && text(
-                context,
-                cli,
-                ["capture-pane", "-p", "-t", name]
-            ).contains(scroll_prefix + "_80"),
+            && scroll_bottom_capture.contains(scroll_prefix + "_80") != 0,
         "cli_smoke_scroll_bottom"
     );
     text(context, cli, ["screenshot", "-o", window_png]);
@@ -1218,19 +1441,17 @@ try {
             stable_child_name + "-renamed"
         ]
     );
+    let stable_parent =
+        text(context, cli, ["show-tab-parent", "-t", stable_child]);
     test_harness::require(
-        text(
-            context,
-            cli,
-            ["show-tab-parent", "-t", stable_child]
-        ) == stable_root,
+        stable_parent == stable_root,
         "cli_smoke_stable_parent"
     );
     text(context, cli, ["kill-window", "-t", stable_child]);
     text(context, cli, ["kill-window", "-t", stable_root]);
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.stable-create-id"
     );
 
@@ -1253,10 +1474,10 @@ try {
     );
     let finalized_first_inspect =
         json(context, cli, ["inspect", "-t", name]);
-    let finalized_first = finalized_first_inspect.windows[0];
+    let finalized_first = first_window(finalized_first_inspect.windows);
     let finalized_second_inspect =
         json(context, cli, ["inspect", "-t", name]);
-    let finalized_second = finalized_second_inspect.windows[0];
+    let finalized_second = first_window(finalized_second_inspect.windows);
     test_harness::require(
         finalized_first.reader_closed
             && finalized_first.parser_drained
@@ -1265,35 +1486,34 @@ try {
                 finalized_second.output_bytes,
         "cli_smoke_finalized_boundary"
     );
-    let dead_write = rhai::json::parse(
-        failure_text(
-            context,
-            cli,
-            [
-                "--receipt-json", "send-keys",
-                "-t", name, "-l", "late-input"
-            ]
-        )
+    let dead_write = failure_json(
+        context,
+        cli,
+        [
+            "--receipt-json", "send-keys",
+            "-t", name, "-l", "late-input"
+        ]
     );
     test_harness::require(
         dead_write.outcome == "no_op"
             && dead_write.error.code == "terminal_not_writable",
         "cli_smoke_dead_write"
     );
+    let remain_on_exit_message = text(
+        context,
+        cli,
+        [
+            "display-message", "-p", "-t", name,
+            "#{window_id}:#{window_name}:#{pane_dead}"
+        ]
+    );
     test_harness::require(
-        text(
-            context,
-            cli,
-            [
-                "display-message", "-p", "-t", name,
-                "#{window_id}:#{window_name}:#{pane_dead}"
-            ]
-        ).ends_with(":" + name + ":1"),
+        remain_on_exit_message.ends_with(":" + name + ":1") != 0,
         "cli_smoke_remain_on_exit"
     );
     test_harness::emit_evidence(
         context,
-        declared_evidence_ids(),
+        declared_evidence,
         "cli.remain-on-exit"
     );
 
@@ -1354,7 +1574,7 @@ try {
 
 let completion_failure = "";
 try {
-    test_harness::complete(
+    let _completed = test_harness::complete(
         context,
         owned_children,
         succeeded,

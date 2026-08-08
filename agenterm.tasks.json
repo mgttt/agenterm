@@ -2062,7 +2062,7 @@
     {
       "id": "cli-smoke",
       "description": "Prove public typed control, UI bridge, PTY, screenshots, remain-on-exit, and explicit close",
-      "entry": "scripts/rhai/cli-smoke.rhai",
+      "entry": "scripts/rh/cli-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
