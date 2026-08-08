@@ -8,7 +8,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] Linux/macOS human workspace MVP: one window, live POSIX PTY tabs,
   keyboard input, visible VT grid, tab sidebar with New/Tabs/Settings
   toolbar, event journal, shared workspace IPC, composer, settings modal,
-  wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD editor,
+  wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD editor
+  and platform-reported IME label (`IME: off` for a plain layout, native input
+  source name/mode when attached),
   window-close confirm, and tabs resize grip on Unix; Win-only proxy editor
   remains a follow-up. The Linux/macOS matching-host gate is now registered
   against public no-activate/activation, renderer-owned snapshot+PNG, native

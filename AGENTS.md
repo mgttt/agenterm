@@ -7,6 +7,52 @@ repository orientation at `PRD.md`, then follow its links to the owning
 `plan/`. Current source layout SSOT is [`plan/ARCHITECTURE.md`](plan/ARCHITECTURE.md);
 do not invent a second living file map in prompts or version plans.
 
+## Document redaction (hard rule · never re-offend)
+
+**Incident (2026-08-08):** a handoff goal under `plan/` shipped host home absolute
+paths. That leaks identity. **Never** paste `pwd` / conversation CWD into the tree.
+
+Applies to **every** write: `plan/**`, `prd/**`, `docs/**`, `README*`, examples,
+tests/fixtures, commit messages, screenshots, prompts, and goal/handoff markdown
+for other agents. Same bar as credentials.
+
+### Path policy (all OS / ISA — one vocabulary)
+
+| Need | Canonical form in docs |
+|------|------------------------|
+| File inside this clone | **repo-relative** only: `plan/...`, `src/...`, `./check.sh` |
+| User home / product data | **`~/...` only** — e.g. `~/.local/share/agenterm/`, `~/env.jsonl` |
+| Shell env when `~` is wrong medium | `$HOME`, `$SHELL` (still no expanded host path) |
+| Current checkout root in commands | “from repository root” + relative command; **never** `cd` + host absolute |
+
+**Forbidden in prose, tables, examples, and “bad example” columns alike:**
+
+- Expanded home absolutes (macOS/Linux/Windows host forms)
+- Token placeholders that re-teach OS-specific roots (do **not** write
+  host-layout templates such as “Users/…”, “home/…”, or “Users\\…” in docs;
+  describe the class as “host absolute home path” and show only the **good** form)
+
+| Also never write | Write instead |
+|------------------|---------------|
+| real email / phone / token / API key / SMTP pass | RFC 2606 / `<AUTH_CODE>` / `<API_KEY>` / `<TOKEN>` |
+| real IP / MAC / personal hostname | `<IP>` / `<HOST>` / generic `station` |
+
+Windows readers map `~/...` to the user profile mentally; do not dual-write
+`%USERPROFILE%` unless a Windows-only script truly requires that expansion.
+
+**Mandatory pre-commit / post-write self-check** on every new or edited text file:
+
+```bash
+# From repository root; any hit = rewrite before commit
+# Blocks expanded home roots on common hosts (do not put those roots in docs)
+rg -nE '(^|[^~])(/Users/|/home/|[A-Za-z]:\\\\Users\\\\)|@gmail\.com|@qq\.com|@163\.com' \
+  --glob '!target/**' --glob '!**/node_modules/**' path/to/file
+```
+
+- Path hit → repo-relative or `~/...`
+- Credential-like values → placeholders only
+- Handoff prompts for other agents: **same scrub**; “internal plan” is not exempt
+
 ## Planning and decomposition method
 
 Use tree thinking, divergent thinking, and dependency-aware parallel thinking
@@ -310,9 +356,9 @@ behavior.
 ## Change rules
 
 - All agents and subagents work in one shared checkout on `main` (the
-  repository root, wherever it is cloned — `D:\dev\agenterm` on the Windows
-  host, but macOS and Linux hosts are also in active use). Do not create Git
-  worktrees, task branches, or hidden
+  repository root wherever it is cloned — Windows, macOS, and Linux hosts are
+  all in active use; never hard-code a personal home path in docs). Do not
+  create Git worktrees, task branches, or hidden
   planning copies. Material planning progress must be written incrementally to
   the applicable `PRD.md`/`prd/PRD_*.md` product node so it is immediately
   visible in the repository; the primary agent reviews, commits, and pushes

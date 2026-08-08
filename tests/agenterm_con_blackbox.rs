@@ -53,6 +53,38 @@ fn gui_test_guard() -> std::sync::MutexGuard<'static, ()> {
     GUI_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn shell_program() -> String {
+    if cfg!(windows) {
+        return "cmd.exe".to_owned();
+    }
+    std::env::var("SHELL")
+        .ok()
+        .filter(|shell| Path::new(shell).is_file())
+        .unwrap_or_else(|| "/bin/sh".to_owned())
+}
+
+fn command_shell_args(command: &str) -> Vec<String> {
+    vec![
+        "-e".to_owned(),
+        shell_program(),
+        if cfg!(windows) { "/c" } else { "-c" }.to_owned(),
+        command.to_owned(),
+    ]
+}
+
+fn interactive_shell_args(script: &Path) -> Vec<String> {
+    let mut args = vec![
+        "--script".to_owned(),
+        script.to_string_lossy().into_owned(),
+        "-e".to_owned(),
+        shell_program(),
+    ];
+    if cfg!(windows) {
+        args.push("/k".to_owned());
+    }
+    args
+}
+
 /// Locates a real `less.exe` (bundled with Git for Windows) if one is
 /// installed, for tests that need a genuine raw-mode/curses-style TUI
 /// rather than a cooked-mode shell — closing the gap plan-v0.1.16.md §C
@@ -66,16 +98,30 @@ fn gui_test_guard() -> std::sync::MutexGuard<'static, ()> {
 /// rather than failing outright on a machine that genuinely lacks it —
 /// this is a real environment dependency, not a bug to hard-fail on.
 fn find_less_exe() -> Option<PathBuf> {
-    let mut candidates = vec![
-        PathBuf::from(r"C:\Program Files\Git\usr\bin\less.exe"),
-        PathBuf::from(r"C:\Program Files (x86)\Git\usr\bin\less.exe"),
-    ];
-    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
-        if let Ok(base) = std::env::var(var) {
-            candidates.push(PathBuf::from(base).join(r"Git\usr\bin\less.exe"));
+    #[cfg(not(windows))]
+    {
+        for candidate in ["/usr/bin/less", "/bin/less", "/usr/local/bin/less"] {
+            let path = PathBuf::from(candidate);
+            if path.is_file() {
+                return Some(path);
+            }
         }
+        return None;
     }
-    candidates.into_iter().find(|path| path.is_file())
+
+    #[cfg(windows)]
+    {
+        let mut candidates = vec![
+            PathBuf::from(r"C:\Program Files\Git\usr\bin\less.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\usr\bin\less.exe"),
+        ];
+        for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+            if let Ok(base) = std::env::var(var) {
+                candidates.push(PathBuf::from(base).join(r"Git\usr\bin\less.exe"));
+            }
+        }
+        candidates.into_iter().find(|path| path.is_file())
+    }
 }
 
 /// Writes a fixture file of `count` numbered, greppable lines — enough to
@@ -126,7 +172,7 @@ impl ConSession {
     /// Spawns `agenterm-con --no-activate <extra_args before -e>`. `extra_args`
     /// must come before any `-e`, matching this binary's own contract that
     /// `-e` consumes the remainder of the command line verbatim.
-    fn spawn(dir: &Path, extra_args: &[&str]) -> Self {
+    fn spawn<S: AsRef<std::ffi::OsStr>>(dir: &Path, extra_args: &[S]) -> Self {
         let snapshot_path = dir.join("snapshot.json");
         let child = Command::new(binary())
             .arg("--no-activate")
@@ -253,10 +299,8 @@ fn dash_e_passthrough_reaches_the_real_child_process() {
     // command finishes, letting the natural child-exit path close the
     // session instead of requiring a kill.
     let dir = scratch_dir("dash-e");
-    let mut session = ConSession::spawn(
-        &dir,
-        &["-e", "cmd.exe", "/c", "echo DASH_E_PASSTHROUGH_MARKER"],
-    );
+    let args = command_shell_args("echo DASH_E_PASSTHROUGH_MARKER");
+    let mut session = ConSession::spawn(&dir, &args);
     session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("DASH_E_PASSTHROUGH_MARKER")
     });
@@ -317,10 +361,8 @@ fn scripted_text_and_paste_both_reach_the_pty() {
             {"wait_ms": 300}
         ]"#,
     );
-    let session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
-    );
+    let args = interactive_shell_args(&script);
+    let session = ConSession::spawn(&dir, &args);
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
         let text = ConSession::screen_text(snapshot);
         text.contains("TYPED_MARKER") && text.contains("PASTED_MARKER")
@@ -351,8 +393,13 @@ fn cjk_output_from_a_real_child_process_appears_as_actual_characters() {
     // the hard way. Literal text on the command line is delivered as UTF-16
     // (CommandLineToArgvW) and `echo` re-emits it through the *output*
     // encoding, which `chcp 65001` does control correctly.
-    let command = "chcp 65001>nul && echo CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}";
-    let mut session = ConSession::spawn(&dir, &["-e", "cmd.exe", "/c", command]);
+    let command = if cfg!(windows) {
+        "chcp 65001>nul && echo CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}"
+    } else {
+        "printf 'CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}\\n'"
+    };
+    let args = command_shell_args(command);
+    let mut session = ConSession::spawn(&dir, &args);
     session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}")
     });
@@ -371,10 +418,13 @@ fn snapshot_reports_a_live_child_until_it_exits() {
     // child_alive:false landed in the same snapshot. The trailing `ping`
     // keeps the child alive for ~1s after the marker prints, giving the
     // poll below a real window to observe true before it flips.
-    let mut session = ConSession::spawn(
-        &dir,
-        &["-e", "cmd.exe", "/c", "echo READY_MARKER && ping -n 2 127.0.0.1 >nul"],
-    );
+    let command = if cfg!(windows) {
+        "echo READY_MARKER && ping -n 2 127.0.0.1 >nul"
+    } else {
+        "echo READY_MARKER; sleep 1"
+    };
+    let args = command_shell_args(command);
+    let mut session = ConSession::spawn(&dir, &args);
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("READY_MARKER")
     });
@@ -422,10 +472,8 @@ fn typed_input_echoes_back_well_under_one_blink_cycle() {
         ]"#,
     );
     let started = Instant::now();
-    let mut session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
-    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
     session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("LATENCY_MARKER")
     });
@@ -491,10 +539,8 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
             {"wait_ms": 300}
         ]"#,
     );
-    let session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
-    );
+    let args = interactive_shell_args(&script);
+    let session = ConSession::spawn(&dir, &args);
     let first = session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("echo ABCDE")
     });
@@ -532,10 +578,8 @@ fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
             {"wait_ms": 200}
         ]"#,
     );
-    let mut session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
-    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
         snapshot["selection"].is_array()
     });
@@ -557,21 +601,24 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
     // what proves `notches`' sign is actually wired through, not just that
     // *a* wheel command moves the offset off zero once.
     let dir = scratch_dir("wheel-scroll");
+    let scroll_command = if cfg!(windows) {
+        "for /l %i in (1,1,120) do @echo SCROLL_LINE_%i"
+    } else {
+        "i=1; while [ $i -le 120 ]; do echo SCROLL_LINE_$i; i=$((i+1)); done"
+    };
     let script = write_script(
         &dir,
-        r#"[
-            {"text": "for /l %i in (1,1,120) do @echo SCROLL_LINE_%i\r"},
-            {"wait_ms": 6000},
-            {"wheel": {"row": 0, "col": 0, "notches": 5}},
-            {"wait_ms": 200},
-            {"wheel": {"row": 0, "col": 0, "notches": -2}},
-            {"wait_ms": 200}
-        ]"#,
+        &format!(r#"[
+            {{"text": {} }},
+            {{"wait_ms": 6000}},
+            {{"wheel": {{"row": 0, "col": 0, "notches": 5}}}},
+            {{"wait_ms": 200}},
+            {{"wheel": {{"row": 0, "col": 0, "notches": -2}}}},
+            {{"wait_ms": 200}}
+        ]"#, serde_json::to_string(&format!("{scroll_command}\r")).unwrap()),
     );
-    let mut session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
-    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
     // wait_ms in the script paces the wheel commands, not this poll — but the
     // wheel commands only move the offset meaningfully once the loop has
     // actually pushed 200 lines into scrollback, so this confirms that
@@ -746,10 +793,8 @@ fn scripted_screenshot_produces_a_valid_nonempty_png() {
             serde_json::to_string(png_path.to_str().unwrap()).unwrap()
         ),
     );
-    let mut session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
-    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
     session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("SHOT_MARKER")
     });

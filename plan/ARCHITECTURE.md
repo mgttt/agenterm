@@ -169,7 +169,8 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 5. 证据：相关 `cargo test -p agenterm-platform` + `cargo test --lib ui_action_catalog` + 直接单测；**无证据不宣称三端手感已齐**。  
 
 7. 不要把 rust-analyzer / 通用 LSP 当成「结构 SSOT 已对齐」的证据；LSP 不消费本文。  
-8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。
+8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。  
+9. **文档脱敏**：`plan/**` / goal / 派工 / 示例命令 **禁止** 宿主绝对 home 路径与真实凭据。仓内用**仓库相对路径**；用户家目录与产品数据目录**统一 `~/...`**（跨 OS/ISA 一种写法，不要写各平台 home 根模板）。铁律与自检：根目录 [`Agents.md`](../Agents.md) **Document redaction**。
 
 ---
 

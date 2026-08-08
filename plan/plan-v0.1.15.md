@@ -1578,7 +1578,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 `current` / `ssh` / `rdp` / `vnc` 等协议，做成 computer-use 的控制工具；
 **`current` 最急**；参考 moltbaby 的 `my-computer-use` / `computer-use`。
 
-**已核实的可复用资产**（`/Users/wjc/repos/moltbaby/skills/computer-use/`）：
+**已核实的可复用资产**（并列 monorepo 的 `skills/computer-use/`，路径勿写宿主绝对 home）：
 
 | 资产 | 内容 | 对本仓的价值 |
 |------|------|-------------|

@@ -2998,6 +2998,12 @@ impl UnixApp {
                         "bounds": pixel_rect_json(layout.status_segments.cwd),
                         "action": "open-cwd-editor",
                     },
+                    "ime": {
+                        "bounds": pixel_rect_json(layout.status_segments.ime),
+                        "label": agenterm_platform::ime::status()
+                            .map(|status| status.label())
+                            .unwrap_or_else(|| "IME: off".to_owned()),
+                    },
                     "proxy": archived_proxy_status_json(layout.status_segments.proxy),
                     "provider": "placeholder",
                 },
@@ -4927,6 +4933,9 @@ impl UnixApp {
                 send.height().max(0) as u32,
             ),
         };
+        let ime_label = agenterm_platform::ime::status()
+            .map(|status| status.label())
+            .unwrap_or_else(|| "IME: off".to_owned());
         let status_view = StatusBarView {
             bounds: u32_rect(layout.status),
             cwd_bounds: u32_rect(layout.status_segments.cwd),
@@ -4935,9 +4944,15 @@ impl UnixApp {
             } else {
                 None
             },
+            ime_bounds: if layout.status_segments.ime.width() > 0 {
+                Some(u32_rect(layout.status_segments.ime))
+            } else {
+                None
+            },
             tabs_recovery: layout.status_segments.tabs_recovery.map(u32_rect),
             cwd_text: &cwd_label,
             provider_text: &self.status_message,
+            ime_text: &ime_label,
         };
         let terminal_selection = self
             .terminal_selection
