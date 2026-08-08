@@ -2597,7 +2597,7 @@ fn run_fleet_journey(
             cli,
             [
                 "script", "eval",
-                "fleet.events.wait(" + epoch + ", " +
+                "fleet.events.wait(" + snapshot.event_position.epoch + ", " +
                     snapshot.event_position.sequence +
                     ", `never.matches`, 50)",
                 "--profile", "observe", "--timeout-ms", "200"
