@@ -54,9 +54,11 @@ pub mod compile;
 pub mod corpus_scan;
 pub mod error;
 pub mod eval;
+pub mod eval_module;
 pub mod host;
 pub mod manifest;
 pub mod module_resolver;
+pub mod module_sniff;
 pub mod pack;
 pub mod qualify;
 
@@ -69,9 +71,11 @@ pub use compile::{compile_qjs, hash_source};
 pub use corpus_scan::{CorpusScanReport, FailedFile as CorpusScanFailedFile, scan_directory};
 pub use error::QjsError;
 pub use eval::{EvalOutcome, eval_entry, eval_entry_with_host};
+pub use eval_module::eval_module_entry_with_host;
 pub use host::QjsHostFunctions;
 pub use manifest::QjsPackManifest;
 pub use module_resolver::ProjectModuleResolver;
+pub use module_sniff::wants_module_mode;
 pub use pack::{QjsPack, build_pack_dir, is_pack_dir};
 pub use qualify::{QjsQualificationReceipt, qualify_pack_dir};
 
