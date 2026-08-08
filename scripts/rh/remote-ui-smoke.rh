@@ -37,6 +37,17 @@ fn json_null() {
     rhai::json::parse("null")
 }
 
+fn trimmed(value) {
+    let text = "" + value;
+    text.trim()
+}
+
+fn parse_int_text(value) {
+    let digits = "" + value;
+    digits.trim();
+    digits.parse_int()
+}
+
 fn require_window_control(control, name) {
     if control == json_null() {
         throw "remote_ui_control_missing:" + name;
@@ -85,25 +96,25 @@ fn double_click_point(gui_child, x, y) {
 }
 
 fn json_cli(context, cli, arguments) {
-    rhai::json::parse(
-        test_harness::invoke_cli(
-            context,
-            cli,
-            arguments,
-            0,
-            []
-        ).stdout
-    )
-}
-
-fn text_cli(context, cli, arguments) {
-    test_harness::invoke_cli(
+    let response = test_harness::invoke_cli(
         context,
         cli,
         arguments,
         0,
         []
-    ).stdout
+    );
+    rhai::json::parse(trimmed(response.stdout))
+}
+
+fn text_cli(context, cli, arguments) {
+    let response = test_harness::invoke_cli(
+        context,
+        cli,
+        arguments,
+        0,
+        []
+    );
+    trimmed(response.stdout)
 }
 
 fn optional_cli(context, cli, arguments) {
@@ -469,7 +480,7 @@ fn wait_file_text(path, expected, code) {
     for attempt in 0..1200 {
         if std::fs::exists(path) {
             let observed = std::fs::read_to_string(path);
-            observed.trim();
+            observed = trimmed(observed);
             if observed == expected {
                 return observed;
             }
@@ -484,13 +495,12 @@ fn wait_file_text(path, expected, code) {
 
 fn wait_pane_input_bytes(context, cli, tab_id, minimum, code) {
     for attempt in 0..1200 {
-        let observed = text_cli(
+        let observed_bytes = parse_int_text(text_cli(
             context,
             cli,
             ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
-        );
-        observed.trim();
-        if observed.parse_int() >= minimum {
+        ));
+        if observed_bytes >= minimum {
             return;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -514,18 +524,23 @@ fn tab_text_geometry(context, cli, id) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let tab = find_tab(snapshot, id);
+        let render = tab.render;
+        let text = render.text;
         if tab != json_null()
-                && tab.render != json_null()
-                && tab.render.text != json_null()
-                && tab.render.text.width > 0
-                && tab.render.text.height > 0 {
-            return tab.render.text;
+                && render != json_null()
+                && text != json_null()
+                && text.width > 0
+                && text.height > 0 {
+            return text;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "remote_ui_tab_text_geometry_missing";
     // Unreachable: keep return kind Json.
-    find_tab(json_cli(context, cli, ["ui-snapshot"]), id).render.text
+    let unreachable_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let unreachable_tab = find_tab(unreachable_snapshot, id);
+    let unreachable_render = unreachable_tab.render;
+    unreachable_render.text
 }
 
 fn parse_json_text(text) {
@@ -538,7 +553,7 @@ fn screenshot(context, cli, path) {
         cli,
         ["screenshot", "-o", path]
     );
-    returned.trim();
+    returned = trimmed(returned);
     test_harness::require(
         std::path::absolute(returned).display.to_lower()
             == std::path::absolute(path).display.to_lower(),
@@ -569,7 +584,7 @@ fn pane_screenshot(context, cli, path) {
         cli,
         ["screenshot-pane", "-o", path]
     );
-    returned.trim();
+    returned = trimmed(returned);
     test_harness::require(
         std::path::absolute(returned).display.to_lower()
             == std::path::absolute(path).display.to_lower(),
@@ -921,7 +936,7 @@ try {
         cli,
         ["show-composer", "-t", tab_id]
     );
-    saved_draft.trim();
+    saved_draft = trimmed(saved_draft);
     test_harness::require(
         saved_draft == draft_marker,
         "remote_ui_close_lost_composer_draft"
@@ -1090,11 +1105,12 @@ try {
     let http_proxy = require_window_control(replacement_gui.window_control(2125), "http_proxy");
     let https_proxy = require_window_control(replacement_gui.window_control(2126), "https_proxy");
     let create_button = require_window_control(replacement_gui.window_control(2127), "create_button");
-    let before_new_count = json_cli(
+    let before_new_bootstrap = json_cli(
         context,
         cli,
         ["ui-bootstrap"]
-    ).tabs.len;
+    );
+    let before_new_count = before_new_bootstrap.tabs.len;
     new_button.click();
     text_cli(
         context,
@@ -1104,8 +1120,9 @@ try {
             "--timeout-ms", "30000"
         ]
     );
+    let new_modal_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
     test_harness::require(
-        json_cli(context, cli, ["ui-bootstrap"]).tabs.len
+        new_modal_bootstrap.tabs.len
             == before_new_count
             && initial_command.visible,
         "remote_ui_new_modal_invalid"
@@ -1211,8 +1228,8 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    shift_tab_input_before_text.trim();
-    let shift_tab_input_before = shift_tab_input_before_text.parse_int();
+    shift_tab_input_before_text = trimmed(shift_tab_input_before_text);
+    let shift_tab_input_before = parse_int_text(shift_tab_input_before_text);
     test_harness::require(
         replacement_gui.window_message(shortcut_message, 0x09, 2) == 1,
         "remote_ui_shift_tab_not_consumed"
@@ -1222,8 +1239,8 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    shift_tab_input_after_text.trim();
-    let shift_tab_input_after = shift_tab_input_after_text.parse_int();
+    shift_tab_input_after_text = trimmed(shift_tab_input_after_text);
+    let shift_tab_input_after = parse_int_text(shift_tab_input_after_text);
     test_harness::require(
         shift_tab_input_after == shift_tab_input_before + 3,
         "remote_ui_shift_tab_pty_bytes_invalid"
@@ -1425,8 +1442,8 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    zoom_shift_tab_before_text.trim();
-    let zoom_shift_tab_before = zoom_shift_tab_before_text.parse_int();
+    zoom_shift_tab_before_text = trimmed(zoom_shift_tab_before_text);
+    let zoom_shift_tab_before = parse_int_text(zoom_shift_tab_before_text);
     test_harness::require(
         replacement_gui.window_message(shortcut_message, 0x09, 2) == 1,
         "remote_ui_zoom_shift_tab_not_consumed"
@@ -1436,8 +1453,8 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    zoom_shift_tab_after_text.trim();
-    let zoom_shift_tab_after = zoom_shift_tab_after_text.parse_int();
+    zoom_shift_tab_after_text = trimmed(zoom_shift_tab_after_text);
+    let zoom_shift_tab_after = parse_int_text(zoom_shift_tab_after_text);
     test_harness::require(
         zoom_shift_tab_after == zoom_shift_tab_before + 3,
         "remote_ui_zoom_shift_tab_pty_bytes_invalid"
@@ -1503,7 +1520,7 @@ try {
         cli,
         ["show-composer", "-t", tab_id]
     );
-    cwd_composer.trim();
+    cwd_composer = trimmed(cwd_composer);
     test_harness::require(
         cwd_tab != json_null()
             && cwd_tab.working_context.cwd == cwd_path
@@ -1519,7 +1536,7 @@ try {
         cli,
         ["show-composer", "-t", tab_id]
     );
-    cwd_after_cancel.trim();
+    cwd_after_cancel = trimmed(cwd_after_cancel);
     test_harness::require(
         cwd_after_cancel == cwd_composer,
         "remote_ui_cwd_cancel_changed_draft"
@@ -1562,7 +1579,7 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    pane_input_before.trim();
+    pane_input_before = trimmed(pane_input_before);
     let protected_draft =
         "echo AGENTERM_CWD_DRAFT_" + context.run_id;
     text_cli(
@@ -1583,7 +1600,7 @@ try {
         cli,
         ["show-composer", "-t", tab_id]
     );
-    protected_after.trim();
+    protected_after = trimmed(protected_after);
     test_harness::require(
         !protected_prepare.success && protected_after == protected_draft,
         "remote_ui_cwd_prepare_overwrote_draft"
@@ -1601,7 +1618,7 @@ try {
         cli,
         ["show-composer", "-t", tab_id]
     );
-    prepared_cmd.trim();
+    prepared_cmd = trimmed(prepared_cmd);
     test_harness::require(
         prepared_cmd.starts_with(protected_draft)
             && prepared_cmd.contains("cd /d \"C:\\Program Files\""),
@@ -1612,7 +1629,7 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    pane_input_after.trim();
+    pane_input_after = trimmed(pane_input_after);
     let requested_snapshot = json_cli(context, cli, ["ui-snapshot"]);
     let requested_tab = find_tab(requested_snapshot, tab_id);
     test_harness::require(
@@ -1634,7 +1651,7 @@ try {
             "--", "powershell.exe", "-NoLogo", "-NoProfile"
         ]
     );
-    powershell_id.trim();
+    powershell_id = trimmed(powershell_id);
     text_cli(
         context,
         cli,
@@ -1657,7 +1674,7 @@ try {
         cli,
         ["show-composer", "-t", powershell_id]
     );
-    prepared_powershell.trim();
+    prepared_powershell = trimmed(prepared_powershell);
     test_harness::require(
         prepared_powershell ==
             "Set-Location -LiteralPath 'C:\\O''Brien'",
@@ -1743,7 +1760,7 @@ try {
             "--", unknown_shell, "cmd"
         ]
     );
-    unknown_id.trim();
+    unknown_id = trimmed(unknown_id);
     let unknown_send = optional_cli(
         context,
         cli,
@@ -1931,7 +1948,7 @@ try {
             "-F", "#{window_id}"
         ]
     );
-    hierarchy_child_id.trim();
+    hierarchy_child_id = trimmed(hierarchy_child_id);
     let hierarchy_child_bootstrap = json_cli(
         context,
         cli,
@@ -1952,7 +1969,7 @@ try {
             "-F", "#{window_id}"
         ]
     );
-    hierarchy_grandchild_id.trim();
+    hierarchy_grandchild_id = trimmed(hierarchy_grandchild_id);
     let hierarchy_grandchild_bootstrap = json_cli(
         context,
         cli,
@@ -2122,7 +2139,7 @@ try {
                 "--", "cmd.exe", "/c", "exit"
             ]
         );
-        fixture_id.trim();
+        fixture_id = trimmed(fixture_id);
         sidebar_fixture_ids.push(fixture_id);
     }
     replacement_gui.window_resize(900, 320);
@@ -2457,7 +2474,7 @@ try {
             alternate_fixture, alternate_result
         ]
     );
-    alternate_id.trim();
+    alternate_id = trimmed(alternate_id);
     text_cli(context, cli, ["select-window", "-t", alternate_id]);
     text_cli(
         context,
@@ -2652,22 +2669,22 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    copy_input_before_text.trim();
-    let copy_input_before = copy_input_before_text.parse_int();
+    copy_input_before_text = trimmed(copy_input_before_text);
+    let copy_input_before = parse_int_text(copy_input_before_text);
     rhai::clipboard::set_text("REMOTE_COPY_SENTINEL");
     test_harness::require(
         replacement_gui.window_message(0x8002, 0x43, 1) == 1,
         "remote_ui_terminal_ctrl_c_not_consumed"
     );
     let copied = rhai::clipboard::get_text();
-    copied.trim();
+    copied = trimmed(copied);
     let copy_input_after_text = text_cli(
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    copy_input_after_text.trim();
-    let copy_input_after = copy_input_after_text.parse_int();
+    copy_input_after_text = trimmed(copy_input_after_text);
+    let copy_input_after = parse_int_text(copy_input_after_text);
     test_harness::require(
         copied == copy_marker
             && copy_input_after == copy_input_before,
@@ -2676,7 +2693,7 @@ try {
     rhai::clipboard::set_text("REMOTE_MENU_COPY_SENTINEL");
     replacement_gui.window_message(0x0112, 0x1F00, 0);
     let menu_copied = rhai::clipboard::get_text();
-    menu_copied.trim();
+    menu_copied = trimmed(menu_copied);
     test_harness::require(
         menu_copied == copy_marker,
         "remote_ui_terminal_system_menu_copy_invalid:" + menu_copied
@@ -2695,8 +2712,8 @@ try {
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
     );
-    paste_input_before_text.trim();
-    let paste_input_before = paste_input_before_text.parse_int();
+    paste_input_before_text = trimmed(paste_input_before_text);
+    let paste_input_before = parse_int_text(paste_input_before_text);
     replacement_gui.window_message(0x0112, 0x1F10, 0);
     wait_pane_input_bytes(
         context,
@@ -2795,7 +2812,7 @@ try {
             bracketed_fixture, bracketed_result, bracketed_payload
         ]
     );
-    bracketed_id.trim();
+    bracketed_id = trimmed(bracketed_id);
     text_cli(context, cli, ["select-window", "-t", bracketed_id]);
     text_cli(
         context,
@@ -2846,8 +2863,8 @@ try {
         cli,
         ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
     );
-    bracketed_input_before_text.trim();
-    let bracketed_input_before = bracketed_input_before_text.parse_int();
+    bracketed_input_before_text = trimmed(bracketed_input_before_text);
+    let bracketed_input_before = parse_int_text(bracketed_input_before_text);
     // Paste delivery has been observed to be lost outright on loaded CI
     // runners: the result file never appears and the pane input counter
     // never moves. Re-issue the paste only while nothing at all has been
@@ -2866,8 +2883,9 @@ try {
                 cli,
                 ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
             );
-            bracketed_input_now.trim();
-            if bracketed_input_now.parse_int() > bracketed_input_before {
+            bracketed_input_now = trimmed(bracketed_input_now);
+            let bracketed_input_now_bytes = parse_int_text(bracketed_input_now);
+            if bracketed_input_now_bytes > bracketed_input_before {
                 bracketed_delivered = 1;
                 break;
             }

@@ -18,7 +18,7 @@ fn run_repl_with(executable: &str, input: &str, arguments: &[&str]) -> std::proc
         .stderr(Stdio::piped());
     let mut child = command
         .spawn()
-        .expect("spawn agenterm-rhai compatibility shim repl");
+        .unwrap_or_else(|error| panic!("spawn {executable} repl: {error}"));
     child
         .stdin
         .take()

@@ -1027,7 +1027,7 @@
         </div>
         <pre class="stack-block" aria-label="Architecture stack" data-i18n-aria-label="stackLabel"><span class="hl">agenterm server</span>  tree · PTY · journal · persistence · no HWND
     ↑ typed IPC · snapshots · waits · receipts
-<span class="hl">clients</span>        agenterm (GUI) · agenterm-cc (Control Center) · agenterm-cli · agenterm-mux · agenterm-rhai · agenterm-mcp
+<span class="hl">clients</span>        agenterm (GUI) · agenterm-cc (Control Center) · agenterm-cli · agenterm-rh · agenterm-rhai (compat)
 <span class="hl">promise</span>        unsupported ops fail explicitly — no false success</pre>
       </div>
     </section>
@@ -1075,8 +1075,8 @@
             <span data-i18n="visionBody">Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.</span>
           </a>
           <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-rhai-runtime.md">
-            <strong data-i18n="scriptTitle">Script runtime draft →</strong>
-            <span data-i18n="scriptBody">The versioned Rhai runtime design, including shipped foundations and clearly marked planned work.</span>
+            <strong data-i18n="scriptTitle">Script runtime specification →</strong>
+            <span data-i18n="scriptBody">Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm-rh`.</span>
           </a>
           <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md">
             <strong data-i18n="macPreviewTitle">macOS preview safety →</strong>
@@ -1129,7 +1129,7 @@
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "Copy", installCopied: "Copied",
           installNoteMacos: "No <code>sudo</code>. Verifies SHA-256, links commands into <code>~/.local/bin</code>, and creates <code>~/Applications/AgenTerm.app</code>. macOS currently ships as a labeled unsigned developer preview — read the <a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md\">safety notes</a> before opting in.",
-          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, <code>agenterm-mux</code>, <code>agenterm-rhai</code>, and <code>agenterm-mcp</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
+          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, <code>agenterm-rh</code>, and the <code>agenterm-rhai</code> compatibility shim into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
           installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All seven client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
           downloadWindowsCta: "Download for Windows",
           specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specOpen: "<strong>Open</strong> MIT / Apache-2.0", specLoopback: "Loopback IPC only", specSbom: "SBOM + provenance", specServer: "Headless server authority",
@@ -1183,7 +1183,7 @@
           readmeTitle: "README →", readmeBody: "Current highlights, install commands, CLI examples, and release workflow.",
           productTitle: "Product tree →", productBody: "Canonical requirements, current status, invariants, and links to owning modules.",
           visionTitle: "Product vision →", visionBody: "Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.",
-          scriptTitle: "Script runtime specification →", scriptBody: "The versioned Rhai runtime contract, including shipped foundations and clearly marked planned work.",
+          scriptTitle: "Script runtime specification →", scriptBody: "Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm-rh`.",
           macPreviewTitle: "macOS preview safety →", macPreviewBody: "Verification and per-app Gatekeeper instructions for the unsigned developer preview.",
           macLocalTitle: "Local macOS build →", macLocalBody: "Build source, install a real application bundle, and keep the correct Dock item.",
           footerTagline: "AgenTerm · Windows, macOS & Linux · MIT OR Apache-2.0",
@@ -1211,7 +1211,7 @@
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "複製", installCopied: "已複製",
           installNoteMacos: "無需 <code>sudo</code>。驗證 SHA-256、將命令連結至 <code>~/.local/bin</code>，並建立 <code>~/Applications/AgenTerm.app</code>。macOS 目前以標示清楚的未簽署開發者預覽版發布——請先閱讀<a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.zh-Hant.md\">安全說明</a>再選擇安裝。",
-          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code>、<code>agenterm-mux</code>、<code>agenterm-rhai</code>、<code>agenterm-mcp</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
+          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code>、<code>agenterm-rh</code> 與 <code>agenterm-rhai</code> 相容薄殼連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
           installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部七個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
           downloadWindowsCta: "下載 Windows 版",
           specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specOpen: "<strong>開源</strong> MIT / Apache-2.0", specLoopback: "僅 loopback IPC", specSbom: "SBOM + provenance", specServer: "無頭 server 權威",
@@ -1265,7 +1265,7 @@
           readmeTitle: "README →", readmeBody: "目前重點、安裝命令、CLI 範例與發行流程。",
           productTitle: "產品樹 →", productBody: "正式需求、目前狀態、不變條件，以及各負責模組的連結。",
           visionTitle: "產品願景 →", visionBody: "思維樹、靈感採集與長期方向——與版本執行計劃分開。",
-          scriptTitle: "Script Runtime 規格 →", scriptBody: "具版本的 Rhai Runtime 契約，包含已交付的基礎與明確標示的規劃工作。",
+          scriptTitle: "Script Runtime 規格 →", scriptBody: "歷史 Rhai 契約（來源已歸檔）；現行自動化以 `agenterm-rh` 執行原生 `.rh`。",
           macPreviewTitle: "macOS 預覽版安全指南 →", macPreviewBody: "未簽署開發者預覽版的檔案驗證與個別 App Gatekeeper 操作說明。",
           macLocalTitle: "本機 macOS 建置 →", macLocalBody: "從原始碼建置、安裝真正的 App bundle，並保留正確的 Dock 項目。",
           footerTagline: "AgenTerm · Windows、macOS 與 Linux · MIT OR Apache-2.0",

@@ -155,6 +155,7 @@ if [[ -n "$LOCAL_BUILD_DIR" ]]; then
   [[ "$OS" == "macos" ]] || fail "--local-build currently supports macOS only"
   [[ -d "$LOCAL_BUILD_DIR" ]] || fail "local build directory does not exist: $LOCAL_BUILD_DIR"
   LOCAL_BUILD_DIR="$(cd "$LOCAL_BUILD_DIR" && pwd -P)"
+  # Local macOS build fixtures may omit agenterm-rh until the dev loop stages it.
   REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-rhai)
   for executable in "${REQUIRED_EXECUTABLES[@]}"; do
     SOURCE_PATH="$LOCAL_BUILD_DIR/$executable"
@@ -349,6 +350,7 @@ fi
 REQUIRED_EXECUTABLES=(
   agenterm
   agenterm-cli
+  agenterm-rh
   agenterm-rhai
 )
 for executable in "${REQUIRED_EXECUTABLES[@]}"; do
@@ -577,7 +579,7 @@ if [[ -n "$SOURCE_COMMIT" ]]; then
   say "Supply-chain: commit=$SOURCE_COMMIT signed=${PROVENANCE_SIGNED:-?} notarized=${PROVENANCE_NOTARIZED:-?}"
 fi
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  say "Add $BIN_DIR to PATH to use agenterm-cli (includes mux/mcp subcommands) and agenterm-rh"
+  say "Add $BIN_DIR to PATH to use agenterm-rh (.rh tasks), agenterm-cli (mux/mcp subcommands), and the agenterm-rhai compatibility shim"
 fi
 
 if command -v pgrep >/dev/null 2>&1 && pgrep -f '/agenterm( |$)' >/dev/null 2>&1; then

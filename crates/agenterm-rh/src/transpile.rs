@@ -2705,14 +2705,14 @@ fn emit_stmt(
                 } else {
                     let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
                     out.push_str("    let _for = rh_host_eval_int(");
-                    out.push_str(&format!("{:?}, ", snippet));
+                    emit_host_eval_snippet_arg(out, &snippet);
                     ctx.emit_scope_json_expr(out);
                     out.push_str(";\n");
                 }
             } else {
                 let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
                 out.push_str("    let _for = rh_host_eval_int(");
-                out.push_str(&format!("{:?}, ", snippet));
+                emit_host_eval_snippet_arg(out, &snippet);
                 ctx.emit_scope_json_expr(out);
                 out.push_str(";\n");
             }
@@ -2728,7 +2728,7 @@ fn emit_stmt(
             } else {
                 let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
                 out.push_str("    let _while = rh_host_eval_int(");
-                out.push_str(&format!("{:?}, ", snippet));
+                emit_host_eval_snippet_arg(out, &snippet);
                 ctx.emit_scope_json_expr(out);
                 out.push_str(";\n");
             }
@@ -2767,7 +2767,7 @@ fn emit_stmt(
         Stmt::TryCatch(..) => {
             let snippet = crate::expr_print::stmt_to_rhai(stmt)?;
             out.push_str("    let _try = rh_host_eval_int(");
-            out.push_str(&format!("{:?}, ", snippet));
+            emit_host_eval_snippet_arg(out, &snippet);
             ctx.emit_scope_json_expr(out);
             out.push_str(";\n");
             if implicit_return {
@@ -2957,7 +2957,7 @@ fn emit_throw_stmt(
             expr_to_rhai(&call.args[0]).unwrap_or_else(|_| "0".into())
         );
         out.push_str("    let _throw = rh_host_eval_int(");
-        out.push_str(&format!("{:?}, ", snippet));
+        emit_host_eval_snippet_arg(out, &snippet);
         ctx.emit_scope_json_expr(out);
         out.push_str(";\n");
         if implicit_return {
@@ -3066,7 +3066,7 @@ fn emit_throw_expr(
             expr_to_rhai(&call.args[0]).unwrap_or_else(|_| "0".into())
         );
         out.push_str("return Err(rh_host_eval_int(");
-        out.push_str(&format!("{:?}, ", snippet));
+        emit_host_eval_snippet_arg(out, &snippet);
         ctx.emit_scope_json_expr(out);
         out.push_str(");");
     }
@@ -3323,10 +3323,31 @@ fn int_for_plan(iterable: &Expr) -> Option<IntForPlan> {
     }
 }
 
+/// Escape `snippet` for embedding as the first `&str` argument to `rh_host_eval_int`.
+fn rust_host_eval_snippet_literal(snippet: &str) -> String {
+    let mut out = String::with_capacity(snippet.len() + 8);
+    out.push('"');
+    for ch in snippet.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn emit_host_eval_snippet_arg(out: &mut String, snippet: &str) {
+    out.push_str(&rust_host_eval_snippet_literal(snippet));
+    out.push_str(", ");
+}
+
 fn emit_host_expr(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<(), RhError> {
     let snippet = expr_to_rhai(expr)?;
     out.push_str("rh_host_eval_int(");
-    out.push_str(&format!("{:?}, ", snippet));
+    emit_host_eval_snippet_arg(out, &snippet);
     ctx.emit_scope_json_expr(out);
     out.push(')');
     Ok(())
@@ -9694,7 +9715,7 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
         let mut snippet = String::from("throw ");
         snippet.push_str(&expr_to_rhai(&call.args[0])?);
         out.push_str("rh_host_eval_int(");
-        out.push_str(&format!("{:?}, ", snippet));
+        emit_host_eval_snippet_arg(out, &snippet);
         ctx.emit_scope_json_expr(out);
         return Ok(());
     }
@@ -10144,8 +10165,8 @@ fn binary(
 #[cfg(test)]
 mod tests {
     use super::{
-        CdylibExecutionMode, CdylibTranspileOutput, RhError, transpile, transpile_cdylib,
-        transpile_cdylib_with_mode, transpile_cdylib_with_project,
+        CdylibExecutionMode, CdylibTranspileOutput, RhError, rust_host_eval_snippet_literal,
+        transpile, transpile_cdylib, transpile_cdylib_with_mode, transpile_cdylib_with_project,
     };
 
     const NATIVE_ASSIGN_BLOCKERS: &[&str] = &[
@@ -14058,5 +14079,69 @@ fn entry() {
         ] {
             let _ = assert_transpile_past_assign_lhs_blockers(&root, rel);
         }
+    }
+
+    #[test]
+    fn host_eval_snippet_literal_escapes_backslash_quote_and_newline() {
+        assert_eq!(
+            rust_host_eval_snippet_literal(r#"say "hi"\line"#),
+            r#""say \"hi\"\\line""#
+        );
+        assert_eq!(
+            rust_host_eval_snippet_literal("line1\nline2"),
+            r#""line1\nline2""#
+        );
+    }
+
+    #[test]
+    fn host_eval_snippet_literal_compiles_as_rust_string_content() {
+        let snippet = r#"for piece in line.split('"') { piece.len() }"#;
+        let literal = rust_host_eval_snippet_literal(snippet);
+        assert!(
+            literal.contains(r#"split('\"')"#),
+            "expected escaped double quote in literal: {literal}"
+        );
+        let src = format!("const SNIPPET: &str = {literal};");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("snippet.rs");
+        std::fs::write(&path, &src).expect("write snippet");
+        let out = dir.path().join("lib.rlib");
+        let status = std::process::Command::new("rustc")
+            .args([
+                "--edition",
+                "2021",
+                "--crate-type",
+                "lib",
+                "-o",
+                out.to_str().expect("path"),
+            ])
+            .arg(&path)
+            .status()
+            .expect("spawn rustc");
+        assert!(
+            status.success(),
+            "escaped host-eval snippet literal must compile as Rust string content"
+        );
+    }
+
+    #[test]
+    fn host_eval_for_loop_emits_escaped_snippet_literal() {
+        let source = r#"
+fn entry() {
+    let line = `"version"`;
+    for piece in line.split('"') {
+        if piece.len > 0 {
+            return 1;
+        }
+    }
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert!(
+            output.rust.contains("let _for = rh_host_eval_int(\"for piece in line.split('\\\"')"),
+            "expected escaped quote in host-eval for snippet:\n{}",
+            output.rust
+        );
     }
 }

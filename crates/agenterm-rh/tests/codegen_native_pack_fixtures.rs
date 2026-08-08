@@ -78,8 +78,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_seventy_five() {
-    assert_eq!(RH_CODEGEN_REVISION, 75);
+fn codegen_revision_is_seventy_six() {
+    assert_eq!(RH_CODEGEN_REVISION, 76);
 }
 
 #[test]

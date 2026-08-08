@@ -61,8 +61,13 @@ Stability values:
 - `research`: no compatibility promise.
 
 ```text
-agenterm-rhai
-│  AgenTerm's general-purpose Rhai automation runtime.
+agenterm-rh
+│  Live native `.rh` task/worker/check-many front door (2026-08 onward).
+│  [shipped; stable; designed 2026-08-07]
+│
+agenterm-rhai (compatibility shim)
+│  Rhai-era CLI retained for `.rhai`, `repl`, and Windows `agenterm-cli script …`
+│  forwarding — not the live `scripts/rh/` tree owner.
 │  [shipped v0.1.9 product slice; stable; designed 2026-07-28]
 │
 ├─ Rhai language
@@ -594,8 +599,9 @@ The initial comparison set was reviewed on 2026-07-29 against
 Those versions identify research inputs only. Updating a comparison never
 renames or changes a stable AgenTerm Rhai interface.
 
-`agenterm-rhai api --tree` renders a compact Rust/Node.js/Bun index from the
-same entries returned by `agenterm-rhai api --json`. Long-form prose may add
+`agenterm-rh api --tree` renders a compact Rust/Node.js/Bun index from the
+same entries returned by `agenterm-rh api --json`. The compatibility
+`agenterm-rhai` shim exposes the same catalog surface. Long-form prose may add
 examples and rationale, but exact callable identity, status, signatures,
 availability, limits, and comparisons come from the machine catalog.
 
