@@ -75,7 +75,7 @@ focus / caret / anchor / selection，手势可机器验证。
 | **键盘** | `send-keys`（PTY 层）✅ + `ui-input key`（GUI 层，Unix only） | Windows 无 GUI 层键入；`key` 未注册进 `operations.rs` |
 | **鼠标** | `ui-input pointer/wheel`（GUI 层，Unix only）✅ | Windows 无；**PTY 层鼠标 `send-mouse` 声明但零实现**（F3） |
 | **截图** | `screenshot` / `screenshot-pane` 三平台可用 ✅ | headless 无路径（依赖活客户端） |
-| **结构化树** | `ui-snapshot` + `list-tab-tree` + `capture-pane` ✅ 厚 | headless 无几何（F2）；模态/系统菜单无 bounds（F6）；Win 缺 composer caret（F7） |
+| **结构化树** | `ui-snapshot` + `list-tab-tree` + `capture-pane` ✅ 厚；headless 已供 synthetic 几何（F2 已闭合，§1.2） | headless 供了几何但**不能派发** `ui-input`（F2b）；模态/系统菜单无 bounds（F6）；Win 缺 composer caret（F7） |
 | **声音** | **完全不存在** | 见 F8——注意这是**双侧**缺口，不是对齐缺口 |
 
 ---
@@ -85,7 +85,7 @@ focus / caret / anchor / selection，手势可机器验证。
 | # | 面 | 证据 | 严重度 | 状态 |
 |---|-----|------|--------|------|
 | **F1** | `ui-input` **Windows 完全未实现** | `src/platform/adapters/windows/remote_frontend.rs:8124-8144` 自带 `REVIEW(macos → windows owner)` 注释，明说「on Windows the command currently does nothing」；`src/server_app.rs:1398-1411` 的客户端中继白名单含 `ui-action\|focus\|get-settings\|set-setting\|screenshot\|screenshot-pane\|screenshot-tab`，**不含 `ui-input`**，故落到 `:1465` 的 `server_command_unsupported` | **P0** | 开 |
-| **F2** | headless 快照**无任何几何** | `src/server_app.rs:1937-1977`（`projection: "headless_server"`）：`layout` 只有硬编码 `composer:{visible:false,…}`（`:1951-1957`），`focus.surface` 硬编码 `null`（`:1959`），tabs 只有 id/title/pid/state/rows/cols，**无 bounds / selection / render** | **P0** | 开（含决策项 D-1） |
+| **F2** | headless 快照**无任何几何** | `src/server_app.rs:1937-1977`（`projection: "headless_server"`）：`layout` 只有硬编码 `composer:{visible:false,…}`（`:1951-1957`），`focus.surface` 硬编码 `null`（`:1959`），tabs 只有 id/title/pid/state/rows/cols，**无 bounds / selection / render** | **P0** | **已闭合**（P-headless，见 §1.2）；余 **F2b「headless 可派发 `ui-input`」** 另开，见 §2 |
 | **F3** | `send-mouse` 是**活着的谎**：四处声明、零处 dispatch，却仍在 `extensions` 广告 | 声明 `src/commands.rs:61,734`、`src/control_authority.rs:251`、`src/client/mod.rs:5039,5146`；全仓无 dispatch 分支；Unix 落 `unix/frontend/mod.rs:4682-4695` 的 `unix_gui_unsupported`。且其坐标系是**终端 cell**（`-x col -y row`），本就够不到工具栏 | **P1** | 开 |
 | **F4** | `ui-input` **不在 `--help`** | `src/client/mod.rs:5019-5049` 列了 `ui-snapshot`/`ui-action`/`ui-hello`/`ui-bootstrap`/`ui-deltas`/`send-mouse`，**唯独没有 `ui-input`** | **P1** | 开 |
 | **F5** | typed 目录漂移 | `src/operations.rs` 只注册 **10** 个 `ui-action`（`:482-647` + `open-control-center`）；`src/frontend/ui_action_catalog.rs:29-88` 的 `SHARED_UI_ACTIONS` 有 **58** 个、`UNIX_ONLY_UI_ACTIONS`（`:109-121`）**11** 个；CLI help 广告约 40 个。另：`ui-input key` **未注册**（`operations.rs:749-756` 对非 pointer/wheel 返回 `Ok(None)`），`POINTER_PARAMETERS`（`:181-196`）只声明 `x`/`y`，`button`/`action`/`count`/`mods`/`delta-y`/`units`/`key` 全未声明 | **P1** | **shared 面已闭合**（见 §1.1）；`UNIX_ONLY` 11 个仍开 |
@@ -208,6 +208,79 @@ arity 检查限制为**只对 `NO_PARAMETERS` 的动词**生效，否则任何�
 
 ---
 
+## 1.2 F2 落地记录（P-headless，2026-08-08）
+
+`projection: "headless_server"` 现在跑**同一份** `src/ui_geometry.rs`，从一个
+**名义 viewport** 算出 bounds，并在快照根与 `layout` 两处标
+`geometry_source: "synthetic"`；另两个投影（`embedded_gui` /
+`replaceable_ui_client`）同步标 `"rendered"`，消费者无法把算出来的当成画出来的。
+
+### 供了哪些几何
+
+键名与 `embedded_gui` 完全一致（agent 的解析代码不按投影分叉）：
+
+| 面 | 内容 |
+|----|------|
+| `layout.toolbar` | 逐按钮 bounds（tabs / new / control_center / settings / locale / font_decrease / font_increase），走共享的 `ui_snapshot::workspace_toolbar_snapshot_json`——Unix 那份已改为**委托**同一函数，两端不可能再漂 |
+| `layout.sidebar` | bounds、`tree`、`resize_grip`、configured/effective width、`row_capacity` |
+| `layout.server_strip` / `sidebar_clock` | strip bounds；**chips 留 `null`**（枚举活实例是 fleet 查询不是布局数学，归 `list-instances`） |
+| `layout.terminal` | bounds、viewport_width、rows/cols、scrollbar track/thumb/offset |
+| `layout.composer` | bounds + `input.bounds` + `send.bounds` |
+| `layout.status_bar` | bounds、`tabs_recovery`、`cwd`（含 action）、archived proxy 槽 |
+| `tabs[].bounds` / `.render` / `.actions` | 逐行 row/selection/node/expander/status/disclosure_hit/text/name/note；**仅活动行**给 `new_child`/`close`（与两个 GUI host 同规则）。另补 `depth`/`has_children`/`visible` |
+
+**仍然是 `null` 的**：`focus.surface`、`modal`。headless 真的没有键盘焦点、没有
+模态栈——合成它们是编故事，不是布局数学。这条界线是本叶的诚实性下限。
+
+### 名义 viewport 怎么定
+
+固定 **1280x800**，可用 `AGENTERM_HEADLESS_VIEWPORT=<w>x<h>` 覆盖。
+
+- **不从 tab 的 rows/cols 反推**：那需要 cell 度量，cell 度量需要字体与 DPI，
+  headless 两样都没有。捏一个出来只会让 bounds **看起来像量出来的**而实际并不更真，
+  还会让几何随任意一次 `resize-pane` 抖动——CI 要的恰恰是可复现。
+- 越界请求**拒绝而非 clamp**：给一个 40x40 的"窗口"静默返回 clamp 后的布局，会让
+  一个根本放不下 chrome 的请求长得跟被采纳了一样。
+- chrome 高度跟随**本平台已发布的 GUI host**（Win composer 104 / Unix 64，两端今天
+  就不一致），并且**一并发布**在 `layout.viewport` 里，调用方不必猜。
+
+### `ui-input` 可派发性结论：**不做，另立叶 F2b**
+
+`ui-input` 的硬约束是「合成真实 `PixelWindowEvent` 喂进人类同一条
+`handle_pixel_event`，**不得有第二套 hit-test**」（见下方「不要回退」小节）。
+headless 既无窗口也无事件循环，`handle_pixel_event` 本身是 per-frontend 的。要让它
+可派发只有两条路：
+
+1. 在 `server_app.rs` 里另写一套命中测试 —— **正是被禁止的那件事**；
+2. 把整个前端事件状态机（焦点、拖拽、选区、模态栈）上提到平台无关核心 —— 比"供几何"
+   大一个量级，且应当与 P-win-input 一起规划。
+
+而且 headless 没有 composer buffer、没有选区、没有模态——点击本该改变的状态一个都
+不存在，勉强路由过去也只是**空转的表演**。
+
+改为把拒绝**说实话**：`ui-input` 在 headless 下不再落 `server_command_unsupported`
+（"does not implement"、不可重试），而是 `ui_client_unavailable` + `retryable=true`，
+文案点名缺的是 GUI client。原来的措辞会让 agent 去找一个**已经存在**的功能，并把
+「接一个 GUI 再试」这个正确动作标成不可重试——那是 F3 同一类的谎。
+
+### 新增的 CI 覆盖
+
+`tests/headless_ui_geometry.rs`（起真 server 进程、**不依赖活窗口**，3 个测试）：
+
+| 测试 | 守什么 |
+|------|--------|
+| `headless_snapshot_publishes_labelled_synthetic_chrome_geometry` | **perceive**：自称 synthetic、viewport 报出处；**每个工具栏按钮的中心点只落在自己身上**（退化或重叠的 bounds 无法瞄准，发布它比不发布更糟）；composer input 在 composer 内、滚动条贴住终端右缘 |
+| `selecting_a_tab_moves_the_published_row_actions_to_the_new_active_row` | **perceive→act→perceive 闭环**：读活动行 Close 位置 → `select-window` 换活动 tab → 再读，`actions` 跟着搬到新活动行、旧行回落 `null`、行与行不重叠、Close 仍在自己行内 |
+| `ui_input_refuses_headless_dispatch_by_naming_the_missing_client` | 边界：朝发布出来的 Close 中心发 `ui-input pointer`，必须点名缺 GUI client，且**不得**说 "does not implement" |
+
+另有 `src/ui_snapshot.rs` 3 个单测（viewport 解析拒绝而非 clamp、chrome 非退化且
+在 viewport 内、行不重叠且仅活动行有 actions）。
+
+> **它不证明什么**：不证明任何像素被画出来过。它验证的是命中/路由/派发逻辑，
+> 真窗 smoke 不可省——二者分工等同于「布局数学单测 vs 像素回归」。
+
+---
+
 ### 已经做对、**不要回退**的部分
 
 - `ui-input` 走**同一条** `handle_pixel_event`，无第二套 hit-test
@@ -229,15 +302,22 @@ arity 检查限制为**只对 `NO_PARAMETERS` 的动词**生效，否则任何�
 |----|-----|------|------|------------|------|
 | 1 | **P-honest** | F3（**实现** `send-mouse`，见 D-3）+ F4（`ui-input` 进 `--help`） | **小** | `src/control_dispatch.rs`（共享，两平台一次到位）、`src/client/mod.rs` | 无 |
 | 2 | ~~**P-catalog**~~ | F5：`operations.rs` 登记 `ui-input key`/`send-mouse` + 补全参数声明 + **shared `ui-action` 全量登记** | 小–中 | `src/operations.rs`、`crates/agenterm-rh/src/shipped_surfaces.rs` | 1 — **shared 面已完成，见 §1.1**；余 `UNIX_ONLY` 11 个待平台可用性轴 |
-| 3 | **P-headless** | F2：headless 供 synthetic 几何（D-1 已定），解锁 `ui-input` 的 CI 覆盖 | **中** | `server_app.rs` + `ui_geometry` 复用 | 1 |
-| 4 | **P-win-input** | F1：Windows `ui-input` 移植 + `server_app.rs` 中继白名单 | **大** | Win-UX（`remote_frontend*`） | 3（先有 CI 才敢改） |
+| 3 | ~~**P-headless**~~ | F2：headless 供 synthetic 几何（D-1 已定），解锁 `ui-input` 的 CI 覆盖 | **中** | `server_app.rs` + `ui_geometry` 复用 | 1 — **已完成，见 §1.2** |
+| 4 | **P-win-input** | F1：Windows `ui-input` 移植 + `server_app.rs` 中继白名单 | **大** | Win-UX（`remote_frontend*`） | 3（已就绪） |
 | 5 | **P-modal** | F6 + F7：模态/菜单 bounds、Win composer caret | 中 | 两端 | 4 |
 | 6 | **P-bell** | F8：BEL 事件化（D-2 已定，只做事件，不做音频） | 小 | vt100 callbacks + event journal | 无 |
+| 7 | **P-headless-act** | **F2b（新）**：headless 真的能派发 `ui-input`。前提是把前端事件状态机（焦点/拖拽/选区/模态栈）上提到平台无关核心，**不得**在 `server_app.rs` 另写命中测试 | **大** | 与 P-win-input 同一片重构 | 4（应与之合并规划） |
 | — | **P-stream** | F9 + F10：视频/帧流、推流 | 大 | 待定 | **决策 D-4** |
 
 **排序变更说明**：P-headless 提到 P-win-input **之前**——因为 Windows 移植是
-本表最贵的一叶，而现在 `ui-input` **零行为测试**；先有 CI 闭环再动大改，
+本表最贵的一叶，而当时 `ui-input` **零行为测试**；先有 CI 闭环再动大改，
 否则移植完也无法证明它对。
+
+> **2026-08-08 更新**：P-headless 已完成，`tests/headless_ui_geometry.rs` 提供了
+> 第一条不依赖活窗口的 perceive→act 闭环覆盖。P-win-input 的前置条件因此解除。
+> 新出的 **P-headless-act（F2b）** 排在 P-win-input 之后而非之前：两者要动的是
+> **同一块**——把 per-frontend 的事件状态机提取成平台无关核心。先做 Windows 移植
+> 会暴露这块的真实形状，再做提取才不会提取错。
 
 **关键提醒（来自 `goal-cli-input-parity.md` T2）**：动 `src/operations.rs` 加公开
 命令时，`tests/rhai_migration.rs` 的
@@ -256,7 +336,7 @@ arity 检查限制为**只对 `NO_PARAMETERS` 的动词**生效，否则任何�
 
 | ID | 题 | **决定** | 理由 |
 |----|-----|---------|------|
-| **D-1** | headless 是否供几何？ | **供，但标注为 synthetic** | 布局数学在共享的 `src/ui_geometry.rs`（precision-audit #10/#11/#12 已把两端统一到它），**是纯函数**：给定 viewport + cell 度量 + tab 数即可算 bounds，不需要活窗口。做法：headless 接受一个名义 viewport，跑**同一份** `ui_geometry`，快照里标 `geometry_source:"synthetic"`。收益：perceive→act 闭环终于能进 CI（现状 `ui-input` **零行为测试**）。诚实性：它验证的是**命中/路由/派发逻辑**，不是渲染像素——真窗 smoke 仍不可省，二者分工与「布局数学单测 vs 像素回归」同构 |
+| **D-1** ✅ 已落地（§1.2） | headless 是否供几何？ | **供，但标注为 synthetic** | 布局数学在共享的 `src/ui_geometry.rs`（precision-audit #10/#11/#12 已把两端统一到它），**是纯函数**：给定 viewport + cell 度量 + tab 数即可算 bounds，不需要活窗口。做法：headless 接受一个名义 viewport，跑**同一份** `ui_geometry`，快照里标 `geometry_source:"synthetic"`。收益：perceive→act 闭环终于能进 CI（现状 `ui-input` **零行为测试**）。诚实性：它验证的是**命中/路由/派发逻辑**，不是渲染像素——真窗 smoke 仍不可省，二者分工与「布局数学单测 vs 像素回归」同构 |
 | **D-2** | BEL 落地形态？ | **只做事件化；视觉后补；声音不做** | 事件化进 Observable Fleet 序列后 agent 可 `wait`，且它是视觉/声音两种呈现的**共同前置**（都消费同一事件），杠杆最高。真音频要引依赖并吃 4 MiB GUI 体积预算（`PRD_02_17`），换来的是一个多数终端默认关掉的功能——不值。 |
 | **D-3** | `send-mouse` 删除还是实现？ | **实现** | 三条理由：① 缺口真实——人类能在 `htop`/`lazygit`/`k9s` 里点，agent 不能；② **成本已被 C5 打掉**——编码 `mouse_report_bytes`/`mouse_code_with_modifiers` 已在 `agenterm_platform`，协商态 `mouse_protocol_mode/encoding` 已在 `control_dispatch.rs:190-205` 被读，写入只是 `.send(&bytes)`；③ **它在 `control_dispatch.rs` 这个共享派发里，一次实现两个平台都有**——不像 `ui-input` 是 per-frontend 的。所以在 Windows `ui-input` 移植（P-win-input，成本大）落地之前，**这是给 Windows agent 补上鼠标能力的最便宜路径**。删掉则永久放弃 PTY 层这条轴 |
 
