@@ -2369,6 +2369,11 @@ fn emit_return_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<
             return Ok(());
         }
         ValueKind::Json => {
+            // Child/WindowControl property reads (e.g. `child.platform_facts`) are
+            // host calls, not JSON literals; route through emit_expr.
+            if matches!(expr, Expr::Dot(..)) && emit_child_property(out, expr, ctx)? {
+                return Ok(());
+            }
             emit_json_value_expr(out, expr, ctx)?;
             return Ok(());
         }
