@@ -28,7 +28,7 @@ perceive→act 闭环收紧到 LLM 能自己开、自己看结果、自己改进
 
 | 面 | 状态 |
 |----|------|
-| **自身**（GUI/终端/工作区） | 见下 §0.1—§2：Unix 接近闭环，**Windows 缺像素输入**，模态/菜单无 bounds |
+| **自身**（GUI/终端/工作区） | 见下 §0.1—§2：Unix 接近闭环；**Windows 像素输入已补齐**（§1.4，2026-08-08）；余：模态/菜单无 bounds（F6，现为最大瓶颈）、原生 `EDIT` 内部不可达 |
 | **可控资源**（硬件、进程） | **未立项** —— computer-use（L-CU，`plan-v0.1.15.md` §5.6.1），决策项 P4 未拍板 |
 
 **② 反馈**
@@ -61,8 +61,14 @@ focus / caret / anchor / selection，手势可机器验证。
 
 **但**：
 
-> **「agent 能做人类能做的事」目前在 Linux/macOS 成立（那边人类 GUI 仍 `[~]`），
-> 在 Windows 不成立（而那是 shipped 的人类平面）。**
+> ~~**「agent 能做人类能做的事」目前在 Linux/macOS 成立（那边人类 GUI 仍 `[~]`），
+> 在 Windows 不成立（而那是 shipped 的人类平面）。**~~
+>
+> **2026-08-08 更新（P-win-input 完成，§1.4）**：这条倒挂已经填平——Windows 的
+> `ui-input pointer/wheel/key` 现在真的派发，且走的是人类鼠标同一条
+> `dispatch_window_event`。剩余不对等**不再是「平台没做」，而是「Win32 的原生
+> `EDIT` 内部没有可合成的事件」**，并且每一处都返回点名到具体控件的 typed 失败，
+> 不再静默。
 
 外加一类**不是功能缺失、而是能力发现面在说谎**的问题（F3/F4）：agent 照
 `--help` 学产品会被引到死命令，同时看不见活命令。对一个要被 agent 自主
@@ -72,8 +78,8 @@ focus / caret / anchor / selection，手势可机器验证。
 
 | 轴 | agent 侧现状 | 缺口 |
 |----|-------------|------|
-| **键盘** | `send-keys`（PTY 层）✅ + `ui-input key`（GUI 层，Unix only） | Windows 无 GUI 层键入；`key` 未注册进 `operations.rs` |
-| **鼠标** | `ui-input pointer/wheel`（GUI 层，Unix only）✅ | Windows 无；**PTY 层鼠标 `send-mouse` 声明但零实现**（F3） |
+| **键盘** | `send-keys`（PTY 层）✅ + `ui-input key`（GUI 层，**三平台**，§1.4） | Windows 上原生 `EDIT` 内的字符输入不可合成（typed 拒绝，指向 `set-composer`）；`key` 未注册进 `operations.rs` |
+| **鼠标** | `ui-input pointer/wheel`（GUI 层，**三平台**，§1.4）✅ | Windows 上原生 `EDIT` 内部（caret 定位/文本拖选）不可达；**PTY 层鼠标 `send-mouse` 声明但零实现**（F3） |
 | **截图** | `screenshot` / `screenshot-pane` 三平台可用 ✅ | headless 无路径（依赖活客户端） |
 | **结构化树** | `ui-snapshot` + `list-tab-tree` + `capture-pane` ✅ 厚；headless 已供 synthetic 几何（F2 已闭合，§1.2） | headless 供了几何但**不能派发** `ui-input`（F2b）；模态/系统菜单无 bounds（F6）；Win 缺 composer caret（F7） |
 | **声音** | **完全不存在** | 见 F8——注意这是**双侧**缺口，不是对齐缺口 |
@@ -84,7 +90,7 @@ focus / caret / anchor / selection，手势可机器验证。
 
 | # | 面 | 证据 | 严重度 | 状态 |
 |---|-----|------|--------|------|
-| **F1** | `ui-input` **Windows 完全未实现** | `src/platform/adapters/windows/remote_frontend.rs:8124-8144` 自带 `REVIEW(macos → windows owner)` 注释，明说「on Windows the command currently does nothing」；`src/server_app.rs:1398-1411` 的客户端中继白名单含 `ui-action\|focus\|get-settings\|set-setting\|screenshot\|screenshot-pane\|screenshot-tab`，**不含 `ui-input`**，故落到 `:1465` 的 `server_command_unsupported` | **P0** | 开 |
+| **F1** | `ui-input` **Windows 完全未实现** | ~~`remote_frontend.rs:8124-8144` 的 `REVIEW(macos → windows owner)`；`server_app.rs` 中继白名单不含 `ui-input`~~ | **P0** | **已闭合**（P-win-input，见 §1.4） |
 | **F2** | headless 快照**无任何几何** | `src/server_app.rs:1937-1977`（`projection: "headless_server"`）：`layout` 只有硬编码 `composer:{visible:false,…}`（`:1951-1957`），`focus.surface` 硬编码 `null`（`:1959`），tabs 只有 id/title/pid/state/rows/cols，**无 bounds / selection / render** | **P0** | **已闭合**（P-headless，见 §1.2）；余 **F2b「headless 可派发 `ui-input`」** 另开，见 §2 |
 | **F3** | `send-mouse` 是**活着的谎**：四处声明、零处 dispatch，却仍在 `extensions` 广告 | 声明 `src/commands.rs:61,734`、`src/control_authority.rs:251`、`src/client/mod.rs:5039,5146`；全仓无 dispatch 分支；Unix 落 `unix/frontend/mod.rs:4682-4695` 的 `unix_gui_unsupported`。且其坐标系是**终端 cell**（`-x col -y row`），本就够不到工具栏 | **P1** | 开 |
 | **F4** | `ui-input` **不在 `--help`** | `src/client/mod.rs:5019-5049` 列了 `ui-snapshot`/`ui-action`/`ui-hello`/`ui-bootstrap`/`ui-deltas`/`send-mouse`，**唯独没有 `ui-input`** | **P1** | 开 |
@@ -281,6 +287,132 @@ headless 既无窗口也无事件循环，`handle_pixel_event` 本身是 per-fro
 
 ---
 
+## 1.4 F1 落地记录（P-win-input，2026-08-08）
+
+`ui-input pointer/wheel/key` 现在在 Windows 前端**真的派发**，并且**没有第二套
+hit-test**。中继白名单已加 `ui-input`（`src/server_app.rs` 的
+`relays_to_ui_client`）。
+
+### 关键结构变更：抽出唯一的事件入口
+
+`ControlWindowApplication::event` 那段巨大的 `match` 被提成自由函数
+`dispatch_window_event(state: &mut RemoteWindowState, event) -> (consumed, redraw)`
+（`remote_frontend.rs`）。人类消息泵和 `apply_pointer_request` 现在**调用同一个
+函数**——不是「长得一样的两份」，是同一份。任何绕开它的命中测试都是 bug。
+
+### 真正的难点：Windows 的像素归谁
+
+原注释指出的问题比 composer 更广：**工具栏按钮、Send、所有对话框控件在
+Windows 上都是原生子控件**。Win32 把落在子控件上的点击直接路由进那个子控件，
+父窗口的事件处理器**根本收不到**。所以「合成 PointerButton 喂给窗口」这条路
+在这些区域天然无效——静默无效，正是 F1 的病。
+
+解法不是猜矩形，而是**问 OS**：新增 `ControlWindow::control_at(point)`
+（`crates/agenterm-platform`），底层是 `ChildWindowFromPointEx`——**Win32 自己
+路由真实点击时用的那个函数**，连 skip invisible/disabled 都一致。它不是「第二
+份命中测试」，它就是第一份。然后分三种情况：
+
+| 点落在 | 做什么 | 理由 |
+|--------|--------|------|
+| **自绘区域**（sidebar 树、终端、server strip、状态栏、滚动条、绘制的右键菜单） | 合成 `PointerMoved` + `PointerButton`，喂 `dispatch_window_event` | 与 Unix 完全同构 |
+| **原生按钮**（工具栏 7 个、对话框按钮、Send） | 合成 `ControlWindowEvent::Command(id)` | 人类点原生 BUTTON，Win32 发的就是 `WM_COMMAND` → 这个事件。**替换的是「谁产生事件」，不是「事件怎么处理」**；处理它的仍是 `dispatch_window_event` 里那一条 `Command` 臂 |
+| **原生 EDIT**（composer 输入、tab 编辑器 title/note、Settings 字体/字号、New terminal 三个字段、new-server 名字） | **typed 失败** | 点进 EDIT 的语义是「把 caret 放到某个文本偏移」，控件契约里**没有**这个事件，文本缓冲区归 OS。这是本叶诚实边界的核心 |
+
+**捕获例外**：窗口持有 pointer capture 时，Win32 把所有鼠标消息给父窗口，
+不管光标在哪个子控件上。所以 `control_at` 检查只在**未捕获**时生效——从自绘
+区域按下的拖拽可以横穿 composer 带，和人类一模一样（实测通过）。
+
+### 失败语义（typed，全部可理解、可行动）
+
+| code | category | retryable | 何时 |
+|------|----------|-----------|------|
+| `ui_input_outside_window` | validation | false | 坐标在 client area 之外；消息里带上实测的 `WxH` |
+| `ui_input_native_control_unreachable` | unsupported | false | 点落在原生控件上且无法投递：EDIT（附**替代命令**：`set-composer` / `set-setting terminal.font-size` …），或对原生按钮发 `--action release/move` |
+| `ui_input_focus_native_control` | precondition | **true** | `key` 没被任何快捷键消费，而焦点在原生控件上；文案给出 `focus terminal` 这个正确动作，所以标可重试 |
+| `operation_invalid_arguments` | validation | false | 解析失败，与 Unix 一致 |
+
+为此 `process_client_command` 让 `ui-input` **绕开** `ui_client_command_failed`
+这个漏斗——把「哪块面板吞了手势」压扁成一个通用 code，等于把刚补上的诚实性
+再扔掉一次。
+
+### 键盘：照抄真实的 Win32 消息泵
+
+消息循环先把每个 `WM_KEYDOWN` 交给应用（`KeyPreview`），**只有没人消费时**才
+让 `TranslateMessage` 生成字符。`apply_key_request` 复制这个顺序：先发
+`KeyPreview`，被消费就结束（实测：composer/tab-editor 打开时 `--key Escape`
+正常关闭对话框）；没被消费且焦点在窗口上才发 `TextInput`；没被消费而焦点在
+原生控件上——那一跳是 OS 往控件缓冲区里塞字符，本进程做不到，于是报
+`ui_input_focus_native_control`。
+
+### 多击：**不**合成人类做不到的手势
+
+Win32 只有 `WM_LBUTTONDOWN`(clicks=1) / `WM_LBUTTONDBLCLK`(clicks=2)，**没有
+三击消息**。所以合成序列是 `1,2,1,2…`（`win32_click_index`）。
+
+> **诚实标注**：`handle_terminal_double_click` 里有一条 `clicks >= 3` 的行选分支，
+> 但 Windows 前端**任何真实输入都到不了它**——那是既存的死分支（不是本叶引入）。
+> 因此 `ui-input pointer --count 3` 在 Windows 上不会行选。这是**平台既有差异**，
+> 不是 `ui-input` 的洞；合成 `clicks: 3` 去点亮它，等于给 agent 一个人类做不到的
+> 手势，正是本设计要防的漂移。要修就去修 Windows 的三击提升本身。
+
+### 滚轮
+
+`ControlWheelDelta::Pixels` 原本从 `match` 里漏下去（静默丢弃）；现在走同一个
+`wheel_delta_units` 累加器，`--units pixels` 与 Unix 行为一致（实测：5 notch
+→ offset +15；-240 px → -6）。滚轮**不**做原生控件拦截：子控件不消费滚轮时
+`DefWindowProc` 会转给父窗口，所以它本来就到得了工作区处理器。
+
+### 覆盖到什么程度（实测，真窗）
+
+在 Windows Server 2022 上起真 server + 真 GUI，逐条驱动：
+
+| 区域 | 结果 |
+|------|------|
+| 工具栏原生按钮（Tabs / Settings） | ✅ 像素点击收起/展开 sidebar；打开 Settings 模态 |
+| sidebar 行内 `actions.new_child` | ✅ 建出子 tab 并打开内联编辑器（与人类点击同效） |
+| 终端双击选词 | ✅ `selection` = row 11, col 12..99 |
+| 终端拖拽选区（press→move→release） | ✅ start(16,6) → end(72,13) |
+| 拖拽横穿 composer 带 | ✅（capture 例外生效） |
+| 滚轮 lines / pixels | ✅ offset 15 / 9 |
+| `key` 文本进终端 | ✅ `echo hi` 落进 PTY |
+| `key Escape` 关内联编辑器 | ✅ |
+| composer EDIT（press/move） | ⛔ 按设计 typed 拒绝，文案指向 `set-composer` |
+| tab 编辑器 EDIT 上打字 | ⛔ 按设计 typed 拒绝，文案指向 `focus terminal` / `tab-editor-save` |
+| 原生按钮 `--action release/move` | ⛔ typed 拒绝（原生按钮只报「完成的一次点击」） |
+| 窗口外坐标 | ⛔ typed 拒绝，报出 `1164x721` |
+
+### 测试覆盖 vs 只能人工验
+
+**机器守住的**（`cargo test --lib`，4 个新测试）：
+
+| 测试 | 守什么 |
+|------|--------|
+| `server_app::tests::ui_input_reaches_the_gui_client_only_when_one_is_attached` | 中继判定：有客户端才转发；无客户端保留 headless 那句更好的拒绝；服务器自有命令不得被转手 |
+| `remote_frontend::tests::multi_click_replays_the_sequence_windows_itself_reports` | 序列是 `1,2,1,2` 且**永不出现 3** |
+| `remote_frontend::tests::coordinates_outside_the_client_area_are_refused_by_name` | 越界拒绝 + 四条边界 + 消息里带实测尺寸 |
+| `remote_frontend::tests::refusals_carry_a_category_the_client_can_read` | 每个 category 都能被 `error_category_from_wire` 解出（否则退化成 `Internal`，等于告诉 agent「我们坏了」而不是「这块不可像素寻址」） |
+
+`tests/headless_ui_geometry.rs` 3 个仍绿（含
+`ui_input_refuses_headless_dispatch_by_naming_the_missing_client`）。
+
+**只能人工验的**：上表「实测，真窗」那一整块。原因是这条路径的入口需要一个活
+的 `ControlWindow`（真 HWND + 真消息泵），`control_at` 更是直接问 OS；没有活窗口
+就没有子控件可问。要机器化，只能等 F2b（把前端事件状态机上提到平台无关核心）。
+
+### 仍然不行 / 已知边界
+
+- **原生 EDIT 内部**：定位 caret、选中一段文本、鼠标拖选文本——做不到，原因如上。
+  文本层有 `set-composer` / `set-setting`；**没有**文本层命令的是 New terminal 的
+  三个字段和 new-server 名字，拒绝文案会如实说「this field has no text-level
+  command yet」。
+- **模态框内的按钮可以点，但 agent 瞄不准**：Windows 的 `snapshot_modal()` 只给
+  kind + actions，不给 bounds（**F6**）。所以「Settings 的 Cancel 按钮」这类目标
+  目前得靠 `ui-action settings-cancel`。F1 通了，F6 就成了下一个真瓶颈。
+- **三击行选**：见上，Windows 平台既有差异。
+- **headless 仍不能派发**：F2b 不变。
+
+---
+
 ### 已经做对、**不要回退**的部分
 
 - `ui-input` 走**同一条** `handle_pixel_event`，无第二套 hit-test
@@ -454,8 +586,8 @@ CLI **不联服务器**：目录是二进制的属性，不是运行中 server �
 | 1 | **P-honest** | F3（**实现** `send-mouse`，见 D-3）+ F4（`ui-input` 进 `--help`） | **小** | `src/control_dispatch.rs`（共享，两平台一次到位）、`src/client/mod.rs` | 无 |
 | 2 | ~~**P-catalog**~~ | F5：`operations.rs` 登记 `ui-input key`/`send-mouse` + 补全参数声明 + **shared `ui-action` 全量登记** | 小–中 | `src/operations.rs`、`crates/agenterm-rh/src/shipped_surfaces.rs` | 1 — **shared 面已完成，见 §1.1**；余 `UNIX_ONLY` 11 个待平台可用性轴 |
 | 3 | ~~**P-headless**~~ | F2：headless 供 synthetic 几何（D-1 已定），解锁 `ui-input` 的 CI 覆盖 | **中** | `server_app.rs` + `ui_geometry` 复用 | 1 — **已完成，见 §1.2** |
-| 4 | **P-win-input** | F1：Windows `ui-input` 移植 + `server_app.rs` 中继白名单 | **大** | Win-UX（`remote_frontend*`） | 3（已就绪） |
-| 5 | **P-modal** | F6 + F7：模态/菜单 bounds、Win composer caret | 中 | 两端 | 4 |
+| 4 | ~~**P-win-input**~~ | F1：Windows `ui-input` 移植 + `server_app.rs` 中继白名单 | **大** | Win-UX（`remote_frontend*`） | 3 — **已完成，见 §1.4** |
+| 5 | **P-modal** | F6 + F7：模态/菜单 bounds、Win composer caret | 中 | 两端 | 4 — **就绪，且已升格为下一个真瓶颈**：Windows 现在能用像素点原生按钮了，但模态里的按钮**没有 bounds 可瞄**（§1.4 末） |
 | 6 | **P-bell** | F8：BEL 事件化（D-2 已定，只做事件，不做音频） | 小 | vt100 callbacks + event journal | 无 |
 | 7 | **P-headless-act** | **F2b（新）**：headless 真的能派发 `ui-input`。前提是把前端事件状态机（焦点/拖拽/选区/模态栈）上提到平台无关核心，**不得**在 `server_app.rs` 另写命中测试 | **大** | 与 P-win-input 同一片重构 | 4（应与之合并规划） |
 | — | **P-stream** | F9 + F10：视频/帧流、推流 | 大 | 待定 | **决策 D-4** |
@@ -469,6 +601,13 @@ CLI **不联服务器**：目录是二进制的属性，不是运行中 server �
 > 新出的 **P-headless-act（F2b）** 排在 P-win-input 之后而非之前：两者要动的是
 > **同一块**——把 per-frontend 的事件状态机提取成平台无关核心。先做 Windows 移植
 > 会暴露这块的真实形状，再做提取才不会提取错。
+
+> **2026-08-08 再更新（P-win-input 完成后）**：那块的形状现在看得见了。Windows
+> 侧已经把「事件 → 行为」收敛成**一个**函数 `dispatch_window_event(state, event)`
+> （Unix 侧对应 `handle_pixel_event`）。F2b 要做的提取，本质就是让这两个函数收敛
+> 到一个平台无关的状态机上；`ControlWindowEvent` 与 `PixelWindowEvent` 的差异
+> （`clicks` 由 OS 计算 vs 由应用提升、原生子控件 vs 全自绘）**是真实的平台差异，
+> 不是可以抹平的偶然**——提取时必须保留它们，否则又会造出一个人类到不了的状态面。
 
 **关键提醒（来自 `goal-cli-input-parity.md` T2）**：动 `src/operations.rs` 加公开
 命令时，`tests/rhai_migration.rs` 的
