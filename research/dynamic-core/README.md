@@ -1,7 +1,46 @@
-# dynamic-core — 1 layer vs 2 layer, measured
+# dynamic-core — research track index
 
-A clean-room, decisive experiment for `plan/design-dynamic-core-experiment.md`.
-It builds one dynamic core two ways — **1 layer** (mechanism + platform adaptation
+A clean-room research track on **"maximum information and control from minimum
+resources"**: how small can a self-extending native core be, and where does the
+growth come from. Every question here is settled by a **decisive experiment**
+(criteria fixed *before* building, a decision tree, a kill criterion, a time
+box) rather than by argument. The method itself is packaged as
+[`.claude/skills/decisive-experiment/SKILL.md`](../../.claude/skills/decisive-experiment/SKILL.md) —
+read it before writing a new Q spec.
+
+> ⚠️ **Not AgenTerm product scope.** No version plan owns this, no `PRD.md`
+> capability state changes. Specs live in `plan/design-*-experiment.md`, code
+> lives here.
+
+## The question board
+
+Status vocabulary: **decided** / **running** / **specced, not started** /
+**candidate (not specced)**. A candidate carries **no conclusion**, however
+obvious it looks.
+
+| Q | Question | Status | Conclusion so far | Spec | Code |
+|---|----------|--------|-------------------|------|------|
+| **Q0** | **How many layers?** 1 layer (mechanism + platform adaptation fused) vs 2 layers (frozen minimal kernel + replaceable payload) | **decided** | **2-layer**, but only on the experiment's own priority order — see below. The decisive-by-design metric ③ **tied**; the deferred ④ is what separated them | [`design-dynamic-core-experiment.md`](../../plan/design-dynamic-core-experiment.md) | `core/` `adapters/` `payloads/` `pack/` `build/` → [`RESULTS.md`](./RESULTS.md) |
+| **Q1** | **Can a neutral IR defer *all* ABI/layout decisions to lowering?** Same ISA, two incompatible ABIs (SysV64 vs Win64) | **running** | — (① is a boolean gate: if `pure_compute` can't be neutral, the proposition dies) | [`design-neutral-ir-experiment.md`](../../plan/design-neutral-ir-experiment.md) | `ir/` |
+| **Q2** | **How big is a minimal usable IR→native lowerer (X bytes), and does it belong inside or outside the kernel?** | **running** | — (Q0's 2.7 KB TCB measured a kernel that *cannot run neutral IR*; X is the missing piece) | [`design-lowering-cost-experiment.md`](../../plan/design-lowering-cost-experiment.md) | `lowering/` |
+| **Q3** | **Composition of the second layer** — can adapter packages be *reused* (not merely coexist) without a central registry anointing an official one? Failure mode is fragmentation, the mirror image of the JVM monopoly. Q0's ⑥ proved coexistence only | **running** | — | [`design-adapter-reuse-experiment.md`](../../plan/design-adapter-reuse-experiment.md) | `reuse/` |
+| **Q4** | **Verifiability** — "hand it a blob and it executes" is an unverifiable execution surface (Thompson's trusting-trust, amplified when an agent produces its own code). Target shape: one neutral IR lowered by independent paths must be **behaviourally equivalent**, as a *structural invariant*, not an after-the-fact check (diverse double-compilation) | **candidate** | — | — | — |
+| **Q5** | **The ISA axis** — Q0/Q1/Q2 deliberately pin x86_64. What does a second ISA cost: is IR neutrality preserved, and does "N kernels, one per ISA" stay bounded? | **candidate** | — | — | — |
+| **Q6** | **Primitive completeness** — is the four-primitive floor stable, or does it creep? Q0 needed no fifth primitive kind, but the second capability forced *completing* ④ `call` (arg ceiling 7→11) at a cost paid by **both** variants' kernels. Open: is that a one-time step or a slope? | **candidate** | Evidence exists but no experiment: see `RESULTS.md` §④ (b2) | — | — |
+
+**Provenance for every Q:** built from public technical knowledge only; no
+prior/related implementation is read or referenced (clean-room, per
+[`prd/PRD_02_14_research_provenance.md`](../../prd/PRD_02_14_research_provenance.md)).
+
+**Directory ownership:** Q1/Q2/Q3 run in parallel and each owns exactly one
+subdirectory (`ir/`, `lowering/`, `reuse/`). Do not edit another Q's directory.
+Q0's code sits at the top level of this directory.
+
+---
+
+# Q0 — 1 layer vs 2 layer, measured
+
+Builds one dynamic core two ways — **1 layer** (mechanism + platform adaptation
 fused into one artifact) and **2 layer** (a frozen minimal kernel + a replaceable,
 runtime-loaded payload) — across **two operating systems** (Linux and Windows,
 x86_64), and measures six numbers. The whole point is the numbers in
@@ -17,6 +56,12 @@ intercept, so on the experiment's own priority it tips the balance to **2-layer*
 by ⑤ TCB and ⑥ coexistence); 1-layer's only remaining edge is raw ② size. Caveat found:
 the capability forced a one-time completion of the ④ `call` primitive (7→11 args) that
 grew both variants' kernels. See `RESULTS.md` §④ and the §4 decision trace.
+
+> **Two honest readings survive.** By §4's literal decision tree (which never listed ④
+> as a node) it is marginally 1-layer on the ② byte tiebreak; by §3's stated priority
+> (slopes outrank intercepts) it is 2-layer. The tree/priority mismatch is a **bug in the
+> spec**, recorded rather than papered over — and it is why the skill above insists on
+> reconciling the decision tree against the stated priority order.
 
 ## The kernel — four primitives, nothing else
 
@@ -47,6 +92,10 @@ pack/variant_a_onelayer/   static-link everything into one binary; fused.rs = th
 pack/variant_b_twolayer/   frozen kernel/loader + flat PIC payload blobs
 build/                     build_linux.sh, build_windows.ps1, flat.ld
 out/                       build outputs (git-ignored)
+
+ir/                        Q1 (separate spec/owner)
+lowering/                  Q2 (separate spec/owner)
+reuse/                     Q3 (separate spec/owner)
 ```
 
 ## Build & reproduce
@@ -63,10 +112,8 @@ pwsh research/dynamic-core/build/build_windows.ps1
 Each script prints the artifact sizes and writes them to `out/`. Correctness-verification
 commands (Windows) and the independent reference hash are in `RESULTS.md`.
 
-## What this experiment does NOT do
+## What Q0 does NOT do
 
 The first run stopped at ③ per the §4.4 time-box; a **follow-up run added criterion ④**
 (one capability: spawn a subprocess) and nothing else — still **no macOS, no second ISA,
-no optimization.** Provenance: built from public technical knowledge only; no
-prior/related implementation was read or referenced (clean-room, per
-`prd/PRD_02_14_research_provenance.md`).
+no optimization.** Everything else it deliberately left open became Q1–Q6 above.
