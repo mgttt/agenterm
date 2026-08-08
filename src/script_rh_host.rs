@@ -622,6 +622,22 @@ extern "C" fn host_fleet_call(
     write_response(response, out_buf, out_cap)
 }
 
+fn json_pid(input: &serde_json::Value) -> Result<u32, i32> {
+    input
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|pid| u32::try_from(pid).ok())
+        .ok_or(-5)
+}
+
+fn json_i32_field(input: &serde_json::Value, field: &str) -> Result<i32, i32> {
+    input
+        .get(field)
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or(-5)
+}
+
 extern "C" fn host_json_call(
     operation: *const u8,
     operation_len: u32,
@@ -690,6 +706,135 @@ extern "C" fn host_json_call(
                     .map(|()| serde_json::json!({ "ok": true }))
                     .map_err(|_| -5),
                 _ => Err(-5),
+            }
+        }
+        "process.window_control" => match (json_pid(&input), json_i32_field(&input, "id")) {
+            (Ok(pid), Ok(id)) => crate::platform::services::script_window::control_exists(pid, id)
+                .map(|()| serde_json::json!({ "ok": true }))
+                .map_err(|_| -5),
+            _ => Err(-5),
+        },
+        "process.window_control_visible" => {
+            match (json_pid(&input), json_i32_field(&input, "id")) {
+                (Ok(pid), Ok(id)) => {
+                    crate::platform::services::script_window::control_visible(pid, id)
+                        .map(|visible| serde_json::json!({ "visible": visible }))
+                        .map_err(|_| -5)
+                }
+                _ => Err(-5),
+            }
+        }
+        "process.window_control_text" => match (json_pid(&input), json_i32_field(&input, "id")) {
+            (Ok(pid), Ok(id)) => crate::platform::services::script_window::control_text(pid, id)
+                .map(|text| serde_json::json!({ "text": text }))
+                .map_err(|_| -5),
+            _ => Err(-5),
+        },
+        "process.window_control_set_text" => {
+            match (
+                json_pid(&input),
+                json_i32_field(&input, "id"),
+                input.get("text").and_then(serde_json::Value::as_str),
+            ) {
+                (Ok(pid), Ok(id), Some(text)) => {
+                    crate::platform::services::script_window::control_set_text(pid, id, text)
+                        .map(|()| serde_json::json!({ "ok": true }))
+                        .map_err(|_| -5)
+                }
+                _ => Err(-5),
+            }
+        }
+        "process.window_control_click" => match (json_pid(&input), json_i32_field(&input, "id")) {
+            (Ok(pid), Ok(id)) => crate::platform::services::script_window::control_click(pid, id)
+                .map(|()| serde_json::json!({ "ok": true }))
+                .map_err(|_| -5),
+            _ => Err(-5),
+        },
+        "process.window_message" => {
+            use crate::platform::contract::script_window::ScriptWindowMessage;
+
+            let pid = json_pid(&input);
+            let message = input
+                .get("message")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok());
+            let wparam = input
+                .get("wparam")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
+            let lparam = input
+                .get("lparam")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|value| isize::try_from(value).ok());
+            match (pid, message, wparam, lparam) {
+                (Ok(pid), Some(message), Some(wparam), Some(lparam)) => {
+                    crate::platform::services::script_window::message(
+                        pid,
+                        ScriptWindowMessage {
+                            message,
+                            wparam,
+                            lparam,
+                        },
+                    )
+                    .map(|value| serde_json::json!({ "value": value }))
+                    .map_err(|_| -5)
+                }
+                _ => Err(-5),
+            }
+        }
+        "process.window_pointer" => {
+            use crate::platform::contract::script_window::ScriptWindowPointerAction;
+
+            let pid = json_pid(&input);
+            let action = input
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|action| match action {
+                    "click" => Some(ScriptWindowPointerAction::Click),
+                    "down" => Some(ScriptWindowPointerAction::Down),
+                    "move" => Some(ScriptWindowPointerAction::Move),
+                    "move-held" => Some(ScriptWindowPointerAction::MoveHeld),
+                    "up" => Some(ScriptWindowPointerAction::Up),
+                    "capture-changed" => Some(ScriptWindowPointerAction::CaptureChanged),
+                    _ => None,
+                });
+            let x = json_i32_field(&input, "x");
+            let y = json_i32_field(&input, "y");
+            match (pid, action, x, y) {
+                (Ok(pid), Some(action), Ok(x), Ok(y)) => {
+                    crate::platform::services::script_window::pointer(pid, action, x, y)
+                        .map(|()| serde_json::json!({ "ok": true }))
+                        .map_err(|_| -5)
+                }
+                _ => Err(-5),
+            }
+        }
+        "process.window_resize" => match (
+            json_pid(&input),
+            json_i32_field(&input, "width"),
+            json_i32_field(&input, "height"),
+        ) {
+            (Ok(pid), Ok(width), Ok(height)) if width > 0 && height > 0 => {
+                crate::platform::services::script_window::resize(pid, width, height)
+                    .map(|()| serde_json::json!({ "ok": true }))
+                    .map_err(|_| -5)
+            }
+            _ => Err(-5),
+        },
+        "process.window_rect" | "process.window_client_rect" => {
+            let client = operation == "process.window_client_rect";
+            match json_pid(&input) {
+                Ok(pid) => crate::platform::services::script_window::rect(pid, client)
+                    .map(|rect| {
+                        serde_json::json!({
+                            "left": rect.left,
+                            "top": rect.top,
+                            "right": rect.right,
+                            "bottom": rect.bottom,
+                        })
+                    })
+                    .map_err(|_| -5),
+                Err(code) => Err(code),
             }
         }
         _ => Err(-4),

@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 77;
+pub const RH_CODEGEN_REVISION: u32 = 78;
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
@@ -1181,6 +1181,160 @@ pub fn emit_host_runtime(out: &mut String) {
                 0\n\
             } else {\n\
                 rh_fail(\"process_window_key\")\n\
+            }\n\
+        }\n\n\
+        #[derive(Clone, Copy)]\n\
+        struct RhWindowRect {\n\
+            left: INT,\n\
+            top: INT,\n\
+            right: INT,\n\
+            bottom: INT,\n\
+        }\n\n\
+        #[derive(Clone)]\n\
+        struct RhWindowControl {\n\
+            child: RhChild,\n\
+            id: INT,\n\
+        }\n\n\
+        fn rh_child_pid(child: &RhChild) -> INT {\n\
+            child.inner.borrow().pid\n\
+        }\n\n\
+        fn rh_window_rect_from_json(value: &serde_json::Value) -> RhWindowRect {\n\
+            RhWindowRect {\n\
+                left: value.get(\"left\").and_then(serde_json::Value::as_i64).unwrap_or(0),\n\
+                top: value.get(\"top\").and_then(serde_json::Value::as_i64).unwrap_or(0),\n\
+                right: value.get(\"right\").and_then(serde_json::Value::as_i64).unwrap_or(0),\n\
+                bottom: value.get(\"bottom\").and_then(serde_json::Value::as_i64).unwrap_or(0),\n\
+            }\n\
+        }\n\n\
+        fn rh_child_window_control(child: &mut RhChild, id: INT) -> RhWindowControl {\n\
+            let pid = rh_child_pid(child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_control\",\n\
+                &serde_json::json!({ \"pid\": pid, \"id\": id }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) != Some(true) {\n\
+                let _ = rh_fail(\"process_window_control\");\n\
+            }\n\
+            RhWindowControl {\n\
+                child: child.clone(),\n\
+                id,\n\
+            }\n\
+        }\n\n\
+        fn rh_window_control_visible(control: &mut RhWindowControl) -> INT {\n\
+            let pid = rh_child_pid(&control.child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_control_visible\",\n\
+                &serde_json::json!({ \"pid\": pid, \"id\": control.id }),\n\
+            );\n\
+            if let Some(visible) = result.get(\"visible\").and_then(serde_json::Value::as_bool) {\n\
+                i64::from(visible)\n\
+            } else {\n\
+                rh_fail(\"process_window_control_visible\")\n\
+            }\n\
+        }\n\n\
+        fn rh_window_control_text(control: &mut RhWindowControl) -> String {\n\
+            let pid = rh_child_pid(&control.child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_control_text\",\n\
+                &serde_json::json!({ \"pid\": pid, \"id\": control.id }),\n\
+            );\n\
+            match result.get(\"text\").and_then(serde_json::Value::as_str) {\n\
+                Some(text) => text.to_owned(),\n\
+                None => {\n\
+                    let _ = rh_fail(\"process_window_control_text\");\n\
+                    String::new()\n\
+                }\n\
+            }\n\
+        }\n\n\
+        fn rh_window_control_set_text(control: &mut RhWindowControl, text: &str) -> INT {\n\
+            let pid = rh_child_pid(&control.child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_control_set_text\",\n\
+                &serde_json::json!({ \"pid\": pid, \"id\": control.id, \"text\": text }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                0\n\
+            } else {\n\
+                rh_fail(\"process_window_control_set_text\")\n\
+            }\n\
+        }\n\n\
+        fn rh_window_control_click(control: &mut RhWindowControl) -> INT {\n\
+            let pid = rh_child_pid(&control.child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_control_click\",\n\
+                &serde_json::json!({ \"pid\": pid, \"id\": control.id }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                0\n\
+            } else {\n\
+                rh_fail(\"process_window_control_click\")\n\
+            }\n\
+        }\n\n\
+        fn rh_child_window_message(\n\
+            child: &mut RhChild,\n\
+            message: INT,\n\
+            wparam: INT,\n\
+            lparam: INT,\n\
+        ) -> INT {\n\
+            let pid = rh_child_pid(child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_message\",\n\
+                &serde_json::json!({\n\
+                    \"pid\": pid,\n\
+                    \"message\": message,\n\
+                    \"wparam\": wparam,\n\
+                    \"lparam\": lparam,\n\
+                }),\n\
+            );\n\
+            result\n\
+                .get(\"value\")\n\
+                .and_then(serde_json::Value::as_i64)\n\
+                .unwrap_or_else(|| rh_fail(\"process_window_message\"))\n\
+        }\n\n\
+        fn rh_child_window_pointer(child: &mut RhChild, action: &str, x: INT, y: INT) -> INT {\n\
+            let pid = rh_child_pid(child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_pointer\",\n\
+                &serde_json::json!({ \"pid\": pid, \"action\": action, \"x\": x, \"y\": y }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                0\n\
+            } else {\n\
+                rh_fail(\"process_window_pointer\")\n\
+            }\n\
+        }\n\n\
+        fn rh_child_window_resize(child: &mut RhChild, width: INT, height: INT) -> INT {\n\
+            let pid = rh_child_pid(child);\n\
+            let result = rh_host_json_call(\n\
+                \"process.window_resize\",\n\
+                &serde_json::json!({ \"pid\": pid, \"width\": width, \"height\": height }),\n\
+            );\n\
+            if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                0\n\
+            } else {\n\
+                rh_fail(\"process_window_resize\")\n\
+            }\n\
+        }\n\n\
+        fn rh_child_window_rect(child: &mut RhChild, client: bool) -> RhWindowRect {\n\
+            let pid = rh_child_pid(child);\n\
+            let result = rh_host_json_call(\n\
+                if client { \"process.window_client_rect\" } else { \"process.window_rect\" },\n\
+                &serde_json::json!({ \"pid\": pid }),\n\
+            );\n\
+            if result.get(\"left\").is_some() {\n\
+                rh_window_rect_from_json(&result)\n\
+            } else {\n\
+                let _ = rh_fail(if client {\n\
+                    \"process_window_client_rect\"\n\
+                } else {\n\
+                    \"process_window_rect\"\n\
+                });\n\
+                RhWindowRect {\n\
+                    left: 0,\n\
+                    top: 0,\n\
+                    right: 0,\n\
+                    bottom: 0,\n\
+                }\n\
             }\n\
         }\n\n\
          fn rh_child_kill(child: &mut RhChild) -> INT {\n\

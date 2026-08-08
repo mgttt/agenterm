@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 8] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 9] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -58,6 +58,21 @@ const FIXTURES: [(&str, &[&str], &[&str]); 8] = [
         ],
         &["rh_json_string_path_index(&snapshot, &[\"tabs\"]"],
     ),
+    (
+        "rh_gui_window_control_visible_click.rh",
+        &[
+            "rh_child_window_control(&mut gui, 2104)",
+            "rh_window_control_visible(&mut tabs_button)",
+            "rh_window_control_click(&mut tabs_button)",
+            "rh_child_window_message(&mut gui, ",
+            "rh_child_window_pointer(&mut gui, ",
+            "rh_child_window_rect(&mut gui, true)",
+        ],
+        &[
+            "rh_host_eval_int(\"tabs_button.visible",
+            "rh_host_eval_int(\"settings_button.click",
+        ],
+    ),
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -110,8 +125,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_seventy_seven() {
-    assert_eq!(RH_CODEGEN_REVISION, 77);
+fn codegen_revision_is_seventy_eight() {
+    assert_eq!(RH_CODEGEN_REVISION, 78);
 }
 
 #[test]
@@ -190,4 +205,23 @@ fn tab_active_map_key_vs_dot_emits_native_key_and_field_reads() {
 #[test]
 fn snapshot_tabs_map_key_active_emits_array_get_and_path_key_not_string_index() {
     assert_native_or_host_eval(FIXTURES[7].0, FIXTURES[7].1, FIXTURES[7].2);
+}
+
+#[test]
+fn gui_window_control_visible_click_emits_native_gui_host_calls() {
+    assert_native_or_host_eval(FIXTURES[8].0, FIXTURES[8].1, FIXTURES[8].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[8].0))
+        .expect("transpile gui window-control fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
 }

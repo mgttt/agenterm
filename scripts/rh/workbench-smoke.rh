@@ -18,26 +18,32 @@ fn json_null() {
     rhai::json::parse("null")
 }
 
-fn json_cli(context, cli, arguments) {
-    rhai::json::parse(
-        test_harness::invoke_cli(
-            context,
-            cli,
-            arguments,
-            0,
-            []
-        ).stdout
-    )
+fn trimmed(value) {
+    let text = "" + value;
+    text.trim()
 }
 
-fn text_cli(context, cli, arguments) {
-    test_harness::invoke_cli(
+fn json_cli(context, cli, arguments) {
+    let response = test_harness::invoke_cli(
         context,
         cli,
         arguments,
         0,
         []
-    ).stdout
+    );
+    let payload = "" + response.stdout;
+    rhai::json::parse(payload)
+}
+
+fn text_cli(context, cli, arguments) {
+    let response = test_harness::invoke_cli(
+        context,
+        cli,
+        arguments,
+        0,
+        []
+    );
+    trimmed("" + response.stdout)
 }
 
 fn tab_index(snapshot, target) {
@@ -174,7 +180,8 @@ fn wait_for_server(context, cli, gui_child) {
 
 fn wait_for_window(gui_child) {
     for attempt in 0..200 {
-        if gui_child.platform_facts.top_level_window_present != 0 {
+        let facts = gui_child.platform_facts;
+        if facts.top_level_window_present != 0 {
             return;
         }
         if gui_child.state == "exited" {
@@ -186,7 +193,10 @@ fn wait_for_window(gui_child) {
 }
 
 fn wait_for_editor(context, cli, target, open) {
-    let editor_state = if open != 0 { "open" } else { "closed" };
+    let editor_state = "closed";
+    if open != 0 {
+        editor_state = "open";
+    }
     json_cli(
         context,
         cli,
@@ -248,6 +258,16 @@ fn double_click_message(gui_child, bounds) {
 
 fn double_click_point(gui_child, x, y) {
     gui_child.window_message(0x0203, 0, y * 65536 + x);
+}
+
+fn resize_gui(gui_child, width, height) {
+    gui_child.window_resize(width, height);
+}
+
+fn drag_scrollbar_thumb(gui_child, thumb_x, thumb_y, target_y) {
+    gui_child.window_pointer("down", thumb_x, thumb_y);
+    gui_child.window_pointer("move-held", thumb_x, target_y);
+    gui_child.window_pointer("up", thumb_x, target_y);
 }
 
 fn set_tab_editor_text(gui_child, name, note) {
@@ -361,9 +381,9 @@ fn retain_failure_snapshot(context, cli) {
 
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in workbench_declared_evidence {
-            print(id);
-        }
+        print("ux.workbench-inline-edit");
+        print("ux.workbench-compact-tree");
+        print("ux.workbench-proxy-archived");
         return 0;
     }
 
@@ -385,11 +405,10 @@ fn entry() {
             gui,
             ["--no-activate", "--address", context.address]
         );
-        for name in [
-            "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"
-        ] {
-            command.env_remove(name);
-        }
+        command.env_remove("HTTP_PROXY");
+        command.env_remove("HTTPS_PROXY");
+        command.env_remove("http_proxy");
+        command.env_remove("https_proxy");
         let gui_child = command.start();
         owned_children.push(gui_child);
         wait_for_server(context, cli, gui_child);
@@ -408,7 +427,6 @@ fn entry() {
             ["new-window", "-d", "-n", root_name,
              "-F", "#{window_id}"]
         );
-        root.trim();
         text_cli(context, cli, ["select-window", "-t", root]);
         json_cli(
             context,
@@ -430,7 +448,6 @@ fn entry() {
             ["new-window", "-d", "-n", peer_name,
              "-F", "#{window_id}"]
         );
-        peer.trim();
         text_cli(context, cli, ["select-window", "-t", root]);
         let snapshot = json_cli(
             context,
@@ -481,19 +498,32 @@ fn entry() {
                 root_tab = tab;
             }
         }
-        for zone in [
-            root_tab.render.disclosure_hit,
-            root_tab.render.status,
-            root_tab.actions.new_child.bounds,
-            root_tab.actions.close.bounds
-        ] {
-            double_click_message(gui_child, zone);
-            assert_editor_closed(
-                json_cli(context, cli, ["ui-snapshot"]),
-                root,
-                "non-text-zone"
-            );
-        }
+        let root_render = root_tab.render;
+        let root_actions = root_tab.actions;
+        double_click_message(gui_child, root_render.disclosure_hit);
+        assert_editor_closed(
+            json_cli(context, cli, ["ui-snapshot"]),
+            root,
+            "non-text-zone"
+        );
+        double_click_message(gui_child, root_render.status);
+        assert_editor_closed(
+            json_cli(context, cli, ["ui-snapshot"]),
+            root,
+            "non-text-zone"
+        );
+        double_click_message(gui_child, root_actions.new_child.bounds);
+        assert_editor_closed(
+            json_cli(context, cli, ["ui-snapshot"]),
+            root,
+            "non-text-zone"
+        );
+        double_click_message(gui_child, root_actions.close.bounds);
+        assert_editor_closed(
+            json_cli(context, cli, ["ui-snapshot"]),
+            root,
+            "non-text-zone"
+        );
         double_click_point(
             gui_child,
             root_tab.render.row.left + 1,
@@ -569,13 +599,15 @@ fn entry() {
         print("STEP mouse Cancel discards both independent drafts");
         double_click_tab_text(gui_child, snapshot, root);
         let snapshot = wait_for_editor(context, cli, root, 1);
-        set_tab_editor_text(gui_child, "discarded name", "discarded note");
+        let discarded_name = "discarded name";
+        let discarded_note = "discarded note";
+        set_tab_editor_text(gui_child, discarded_name, discarded_note);
         wait_for_editor_draft(
             context,
             cli,
             root,
-            "discarded name".len,
-            "discarded note".len
+            discarded_name.len,
+            discarded_note.len
         );
         let root_tab = json_null();
         for tab in snapshot.tabs {
@@ -623,13 +655,15 @@ fn entry() {
         print("STEP tab switch and Tabs hide cancel unsaved inline drafts");
         json_cli(context, cli, ["ui-action", "edit-tab", "-t", root]);
         wait_for_editor(context, cli, root, 1);
-        set_tab_editor_text(gui_child, "switch draft", "switch note");
+        let switch_draft = "switch draft";
+        let switch_note = "switch note";
+        set_tab_editor_text(gui_child, switch_draft, switch_note);
         wait_for_editor_draft(
             context,
             cli,
             root,
-            "switch draft".len,
-            "switch note".len
+            switch_draft.len,
+            switch_note.len
         );
         json_cli(context, cli, ["ui-action", "select-tab", "-t", peer]);
         assert_editor_closed(
@@ -651,13 +685,15 @@ fn entry() {
         json_cli(context, cli, ["ui-action", "select-tab", "-t", root]);
         json_cli(context, cli, ["ui-action", "edit-tab", "-t", root]);
         wait_for_editor(context, cli, root, 1);
-        set_tab_editor_text(gui_child, "hide draft", "hide note");
+        let hide_draft = "hide draft";
+        let hide_note = "hide note";
+        set_tab_editor_text(gui_child, hide_draft, hide_note);
         wait_for_editor_draft(
             context,
             cli,
             root,
-            "hide draft".len,
-            "hide note".len
+            hide_draft.len,
+            hide_note.len
         );
         json_cli(context, cli, ["ui-action", "tabs-hide"]);
         assert_editor_closed(
@@ -711,7 +747,7 @@ fn entry() {
             }
         }
         click_bounds(gui_child, pre_resize_text);
-        gui_child.window_resize(1000, 680);
+        resize_gui(gui_child, 1000, 680);
         double_click_message(gui_child, pre_resize_text);
         assert_editor_closed(
             json_cli(context, cli, ["ui-snapshot"]),
@@ -794,7 +830,7 @@ fn entry() {
                 ]
             );
         }
-        gui_child.window_resize(900, 320);
+        resize_gui(gui_child, 900, 320);
         let scroll_snapshot = json_null();
         for attempt in 0..40 {
             let candidate = json_cli(context, cli, ["ui-snapshot"]);
@@ -828,9 +864,7 @@ fn entry() {
         let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
         let thumb_y = scrollbar.thumb.top + scrollbar.thumb.height / 2;
         let bottom_y = scrollbar.track.top + scrollbar.track.height - 2;
-        gui_child.window_pointer("down", thumb_x, thumb_y);
-        gui_child.window_pointer("move-held", thumb_x, bottom_y);
-        gui_child.window_pointer("up", thumb_x, bottom_y);
+        drag_scrollbar_thumb(gui_child, thumb_x, thumb_y, bottom_y);
         let scrolled = json_null();
         for attempt in 0..40 {
             let candidate = json_cli(context, cli, ["ui-snapshot"]);
@@ -855,13 +889,12 @@ fn entry() {
             editor_closed.tab_editor == json_null(),
             "workbench_scroll_retained_double_click_candidate"
         );
-        gui_child.window_resize(1000, 680);
+        resize_gui(gui_child, 1000, 680);
         let scrollbar = scrolled.layout.sidebar.scrollbar;
         let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
         let thumb_y = scrollbar.thumb.top + scrollbar.thumb.height / 2;
-        gui_child.window_pointer("down", thumb_x, thumb_y);
-        gui_child.window_pointer("move-held", thumb_x, scrollbar.track.top + 2);
-        gui_child.window_pointer("up", thumb_x, scrollbar.track.top + 2);
+        let top_y = scrollbar.track.top + 2;
+        drag_scrollbar_thumb(gui_child, thumb_x, thumb_y, top_y);
         json_cli(context, cli, ["ui-action", "select-tab", "-t", target]);
         json_cli(
             context,
@@ -910,7 +943,10 @@ fn entry() {
                 tab_actions.close.bounds,
                 "close:" + width
             );
-            let density = if width < 300 { "compact" } else { "full" };
+            let density = "full";
+            if width < 300 {
+                density = "compact";
+            }
             test_harness::require(
                 tab_actions.density == density
                     && tab_actions.edit == json_null()

@@ -33,7 +33,11 @@ fn tail(value, maximum) {
 
 fn git_output(arguments, cwd, timeout_ms, code) {
     let command = std::process::command("git");
-    command.args(arguments);
+    let arg_index = 0;
+    while arg_index < arguments.len {
+        command.arg(arguments[arg_index]);
+        arg_index += 1;
+    }
     command.current_dir(cwd);
     command.env("GCM_INTERACTIVE", "Never");
     command.env("GIT_TERMINAL_PROMPT", "0");
@@ -107,9 +111,11 @@ fn observe_descendants(root_id, owned_ids, identities) {
     for depth in 0..64 {
         let changed = 0;
         for process in snapshot {
-            let id = "" + process.id;
-            let parent = "" + process.parent_id;
-            if !included.contains(id) && included.contains(parent) {
+            let process_id = process.id;
+            let process_parent = process.parent_id;
+            let id = "" + process_id;
+            let parent = "" + process_parent;
+            if map_has_key(included, id) == 0 && map_has_key(included, parent) != 0 {
                 included[id] = true;
                 changed = 1;
             }
@@ -123,12 +129,13 @@ fn observe_descendants(root_id, owned_ids, identities) {
     let new_owned = [];
     let new_identities = [];
     for process in snapshot {
-        let id = "" + process.id;
-        if !included.contains(id) {
+        let process_id = process.id;
+        let id = "" + process_id;
+        if map_has_key(included, id) == 0 {
             continue;
         }
         let identity = process_key(process);
-        if identities.contains(id) {
+        if map_has_key(identities, id) != 0 {
             assert_ok(
                 identities[id] == identity,
                 "fresh_clone_process_id_reused:" + id
@@ -136,11 +143,11 @@ fn observe_descendants(root_id, owned_ids, identities) {
         } else {
             new_identities.push(#{ id: id, identity: identity });
         }
-        if !owned_map.contains(id) {
+        if map_has_key(owned_map, id) == 0 {
             new_owned.push(id);
         }
         current.push(#{
-            id: process.id,
+            id: process_id,
             parent_id: process.parent_id,
             executable_name: process.executable_name
         });
@@ -152,17 +159,77 @@ fn observe_descendants(root_id, owned_ids, identities) {
     }
 }
 
+fn int_text(value) {
+    let number = 0 + value;
+    "" + number
+}
+
+fn joined(values) {
+    let text = "";
+    let index = 0;
+    while index < values.len {
+        if text != "" {
+            text = text + ",";
+        }
+        text = text + ("" + values[index]);
+        index = index + 1;
+    }
+    text
+}
+
+fn map_has_key(map, key) {
+    for existing in map.keys() {
+        if existing == key {
+            return 1;
+        }
+    }
+    0
+}
+
+fn list_has_value(list, value) {
+    let index = 0;
+    while index < list.len {
+        if list[index] == value {
+            return 1;
+        }
+        index = index + 1;
+    }
+    0
+}
+
+fn sort_string_list(values) {
+    let ordered = [];
+    let item_index = 0;
+    while item_index < values.len {
+        let value = values[item_index];
+        let inserted = 0;
+        let order_index = 0;
+        while order_index < ordered.len {
+            if value < ordered[order_index] {
+                ordered.insert(order_index, value);
+                inserted = 1;
+                break;
+            }
+            order_index += 1;
+        }
+        if inserted == 0 {
+            ordered.push(value);
+        }
+        item_index += 1;
+    }
+    ordered
+}
+
 fn unique_names(processes) {
     let names = [];
     for process in processes {
         let executable_name = "" + process.executable_name;
         let name = executable_name.to_lower();
-        if !names.contains(name) {
+        if list_has_value(names, name) == 0 {
             names.push(name);
         }
     }
-    names.sort();
-    names
+    sort_string_list(names)
 }
 
 fn sort_processes_by_id(processes) {
@@ -189,44 +256,26 @@ fn sort_processes_by_id(processes) {
 }
 
 fn exact_terminal_payload(observed, typed) {
-    observed.sort();
-    typed.sort();
-    let first_count = "" + observed.len;
-    let second_count = "" + typed.len;
-    let first_text = "";
-    let first_index = 0;
-    while first_index < observed.len {
-        if first_text != "" {
-            first_text = first_text + ",";
-        }
-        first_text = first_text + ("" + observed[first_index]);
-        first_index = first_index + 1;
-    }
-    let second_text = "";
-    let second_index = 0;
-    while second_index < typed.len {
-        if second_text != "" {
-            second_text = second_text + ",";
-        }
-        second_text = second_text + ("" + typed[second_index]);
-        second_index = second_index + 1;
-    }
+    let first = sort_string_list(observed);
+    let second = sort_string_list(typed);
+    let first_len = 0 + first.len;
+    let second_len = 0 + second.len;
     assert_ok(
-        observed.len == typed.len && observed.len <= 1,
+        first_len == second_len && first_len <= 1,
         "fresh_clone_terminal_payload_not_unique:" +
-            first_count + ":" + second_count
+            int_text(first_len) + ":" + int_text(second_len)
     );
-    if observed.len == 1 {
+    if first_len == 1 {
         assert_ok(
-            observed[0] == typed[0],
+            first[0] == second[0],
             "fresh_clone_untyped_powershell:" +
-                first_text + ":" + second_text
+                joined(first) + ":" + joined(second)
         );
     }
     #{
         policy: "exact_remote_ui_terminal_compatibility_payload",
-        observed: observed,
-        typed: typed
+        observed: first,
+        typed: second
     }
 }
 
@@ -271,15 +320,17 @@ fn terminate_observed_processes(identities) {
         let processes = std::process::list();
         for process_index in 0..processes.len {
             let process = processes[process_index];
-            let id = "" + process.id;
-            if process.id != std::process::id()
-                    && identities.contains(id)
+            let process_id = process.id;
+            let id = "" + process_id;
+            if process_id != std::process::id()
+                    && map_has_key(identities, id) != 0
                     && identities[id] == process_key(process) {
                 try {
-                    std::process::kill(process.id);
+                    std::process::kill(process_id);
                     terminated = 1;
                 } catch (error) {
                     // A process may exit between the snapshot and kill.
+                    0;
                 }
             }
         }
@@ -288,6 +339,7 @@ fn terminate_observed_processes(identities) {
         }
         rhai::task::sleep(std::time::Duration::from_millis(100));
     }
+    0
 }
 
 fn live_observed_processes(identities) {
@@ -295,18 +347,41 @@ fn live_observed_processes(identities) {
     let processes = std::process::list();
     for process_index in 0..processes.len {
         let process = processes[process_index];
-        let id = "" + process.id;
-        if process.id != std::process::id()
-                && identities.contains(id)
+        let process_id = process.id;
+        let id = "" + process_id;
+        if process_id != std::process::id()
+                && map_has_key(identities, id) != 0
                 && identities[id] == process_key(process) {
             live.push(#{
-                id: process.id,
+                id: process_id,
                 parent_id: process.parent_id,
                 executable_name: process.executable_name
             });
         }
     }
     live
+}
+
+fn error_contains(error, needle) {
+    let text = "" + error;
+    if needle.len == 0 || needle.len > text.len {
+        return 0;
+    }
+    let index = 0;
+    let last = text.len - needle.len;
+    while index <= last {
+        if text.sub_string(index, needle.len) == needle {
+            return 1;
+        }
+        index += 1;
+    }
+    0
+}
+
+fn bump_scan_count(evidence) {
+    let prior = evidence.process_observation.scan_count;
+    evidence.process_observation.scan_count = prior + 1;
+    0
 }
 
 fn run_self_test() {
@@ -323,12 +398,14 @@ fn run_self_test() {
             [terminal_compatibility_executable() + ":101"],
             [terminal_compatibility_executable() + ":202"]
         );
+        0;
     } catch (error) {
         assert_ok(
-            ("" + error).contains("fresh_clone_untyped_powershell"),
+            error_contains(error, "fresh_clone_untyped_powershell"),
             "fresh_clone_selftest_wrong_rejection:" + error
         );
         rejected_wrong = 1;
+        0;
     }
     assert_ok(
         rejected_wrong,
@@ -343,12 +420,14 @@ fn run_self_test() {
             ],
             [terminal_compatibility_executable() + ":101"]
         );
+        0;
     } catch (error) {
         assert_ok(
-            ("" + error).contains("fresh_clone_terminal_payload_not_unique"),
+            error_contains(error, "fresh_clone_terminal_payload_not_unique"),
             "fresh_clone_selftest_wrong_rejection:" + error
         );
         rejected_not_unique = 1;
+        0;
     }
     assert_ok(
         rejected_not_unique,
@@ -369,18 +448,21 @@ fn run_self_test() {
             archive: "../candidate.zip",
             package_directory: self_test_directory
         });
+        0;
     } catch (error) {
         assert_ok(
-            ("" + error).contains("fresh_clone_package_archive_name"),
+            error_contains(error, "fresh_clone_package_archive_name"),
             "fresh_clone_selftest_wrong_rejection:" + error
         );
         rejected_archive = 1;
+        0;
     }
     assert_ok(
         rejected_archive,
         "fresh_clone_selftest_expected_rejection:fresh_clone_package_archive_name"
     );
     print("PASS: fresh-clone process policy fails closed");
+    0
 }
 
 fn append_final_scan(root_id, owned_ids, identities, unique, unique_list, evidence) {
@@ -394,10 +476,10 @@ fn append_final_scan(root_id, owned_ids, identities, unique, unique_list, eviden
         let owned_key = "" + id;
         owned_ids[owned_key] = 1;
     }
-    evidence.process_observation.scan_count += 1;
+    bump_scan_count(evidence);
     for process in scan_result.current {
         let identity = process_key(process);
-        if !unique.contains(identity) {
+        if map_has_key(unique, identity) == 0 {
             unique[identity] = process;
             unique_list.push(process);
         }
@@ -603,7 +685,10 @@ try {
     }
 
     let release = std::process::command("cmd.exe");
-    release.args(["/d", "/c", "release.cmd", "--rehearse"]);
+    release.arg("/d");
+    release.arg("/c");
+    release.arg("release.cmd");
+    release.arg("--rehearse");
     release.current_dir(clone);
     release.env("AGENTERM_NO_ACTIVATE", "1");
     release.env("AGENTERM_FRESH_CLONE_REHEARSAL_ACTIVE", "1");
@@ -640,16 +725,16 @@ try {
             owned_ids[owned_key] = 1;
         }
         let current = scan.current;
-        evidence.process_observation.scan_count += 1;
+        bump_scan_count(evidence);
         for process in current {
             let identity = process_key(process);
-            if !unique.contains(identity) {
+            if map_has_key(unique, identity) == 0 {
                 unique[identity] = process;
                 unique_list.push(process);
             }
             if is_powershell(process) {
                 let token = powershell_token(process);
-                if !powershell.contains(token) {
+                if list_has_value(powershell, token) == 0 {
                     powershell.push(token);
                 }
             }
@@ -672,13 +757,13 @@ try {
             worker_observed = 1;
         }
         let names = unique_names(current);
-        if names.contains("cargo.exe") {
+        if list_has_value(names, "cargo.exe") != 0 {
             evidence.stage0.cargo_observed = 1;
         }
-        if names.contains("rustc.exe") {
+        if list_has_value(names, "rustc.exe") != 0 {
             evidence.stage0.rustc_observed = 1;
         }
-        if names.contains("agenterm-rh.exe") {
+        if list_has_value(names, "agenterm-rh.exe") != 0 {
             evidence.stage0.script_worker_observed = 1;
         }
         if now >= next_timeline {
@@ -700,7 +785,7 @@ try {
     }
     if child_is_running(child) {
         child.kill();
-        throw "fresh_clone_release_deadline";
+        assert_ok(0, "fresh_clone_release_deadline");
     }
     let result =
         child.wait_with_output(std::time::Duration::from_secs(10));

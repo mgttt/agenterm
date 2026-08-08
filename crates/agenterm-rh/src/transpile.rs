@@ -33,6 +33,8 @@ enum ValueKind {
     Output,
     Child,
     ChildList,
+    WindowControl,
+    WindowRect,
     Stream,
     Bytes,
 }
@@ -180,6 +182,8 @@ impl EmitCtx {
                 | ValueKind::Output
                 | ValueKind::Child
                 | ValueKind::ChildList
+                | ValueKind::WindowControl
+                | ValueKind::WindowRect
                 | ValueKind::Stream
                 | ValueKind::Bytes => {
                     out.push_str(&format!(
@@ -213,6 +217,8 @@ impl EmitCtx {
                     | ValueKind::Output
                     | ValueKind::Child
                     | ValueKind::ChildList
+                    | ValueKind::WindowControl
+                    | ValueKind::WindowRect
                     | ValueKind::Stream
                     | ValueKind::Bytes
             ) {
@@ -609,6 +615,8 @@ fn rust_return_type(kind: ValueKind) -> &'static str {
         ValueKind::Output => "RhOutput",
         ValueKind::Child => "RhChild",
         ValueKind::ChildList => "Vec<RhChild>",
+        ValueKind::WindowControl => "RhWindowControl",
+        ValueKind::WindowRect => "RhWindowRect",
         ValueKind::StringList => "Vec<String>",
         ValueKind::Stream => "RhStream",
         ValueKind::Bytes => "RhBytes",
@@ -654,6 +662,7 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
                 ValueKind::Child
                     | ValueKind::Command
                     | ValueKind::Stream
+                    | ValueKind::WindowControl
                     | ValueKind::Json
                     | ValueKind::StringList
                     | ValueKind::ChildList
@@ -872,6 +881,8 @@ fn is_param_kind_upgrade(kind: ValueKind) -> bool {
             | ValueKind::Output
             | ValueKind::Child
             | ValueKind::ChildList
+            | ValueKind::WindowControl
+            | ValueKind::WindowRect
             | ValueKind::StringList
             | ValueKind::Stream
             | ValueKind::Bytes
@@ -1106,9 +1117,11 @@ fn call_site_arg_kind_for_param_upgrade(arg: &Expr, ctx: &EmitCtx) -> Option<Val
                 | ValueKind::Path
                 | ValueKind::Command
                 | ValueKind::Output
-                | ValueKind::Child
-                | ValueKind::ChildList
-                | ValueKind::StringList
+            | ValueKind::Child
+            | ValueKind::ChildList
+            | ValueKind::WindowControl
+            | ValueKind::WindowRect
+            | ValueKind::StringList
                 | ValueKind::Stream
                 | ValueKind::Bytes),
             ) => kind,
@@ -1503,14 +1516,36 @@ fn is_output_member_name(name: &str) -> bool {
 fn is_child_member_name(name: &str) -> bool {
     matches!(
         name,
-        "id" | "state" | "platform_facts" | "stderr" | "kill" | "wait_with_output" | "window_key"
+        "id"
+            | "state"
+            | "platform_facts"
+            | "stderr"
+            | "kill"
+            | "wait_with_output"
+            | "window_key"
+            | "window_control"
+            | "window_message"
+            | "window_pointer"
+            | "window_resize"
+            | "window_rect"
+            | "window_client_rect"
     )
 }
 
 fn is_definite_child_member_name(name: &str) -> bool {
     matches!(
         name,
-        "platform_facts" | "stderr" | "kill" | "wait_with_output" | "window_key"
+        "platform_facts"
+            | "stderr"
+            | "kill"
+            | "wait_with_output"
+            | "window_key"
+            | "window_control"
+            | "window_message"
+            | "window_pointer"
+            | "window_resize"
+            | "window_rect"
+            | "window_client_rect"
     )
 }
 
@@ -1541,6 +1576,8 @@ fn rust_param_type(kind: ValueKind) -> &'static str {
         ValueKind::Output => "RhOutput",
         ValueKind::Child => "RhChild",
         ValueKind::ChildList => "Vec<RhChild>",
+        ValueKind::WindowControl => "RhWindowControl",
+        ValueKind::WindowRect => "RhWindowRect",
         ValueKind::Stream => "RhStream",
         ValueKind::Bytes => "RhBytes",
         ValueKind::StringList => "Vec<String>",
@@ -2795,6 +2832,7 @@ fn emit_stmt(
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_command_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_child_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_window_control_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_string_list_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_child_list_push_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_json_array_push_stmt(out, expr, ctx)? => {}
@@ -3013,6 +3051,12 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
             "RhOutput { success: 0, exit_code: -1, stdout: String::new(), stderr: String::new() }",
         ),
         ValueKind::Child => Some("RhChild::exited(0, 64 * 1024)"),
+        ValueKind::WindowControl => Some(
+            "RhWindowControl { child: RhChild::exited(0, 64 * 1024), id: 0 }",
+        ),
+        ValueKind::WindowRect => {
+            Some("RhWindowRect { left: 0, top: 0, right: 0, bottom: 0 }")
+        }
         ValueKind::Bytes => Some("RhBytes { bytes: Vec::new() }"),
         ValueKind::Command => None,
         ValueKind::Char
@@ -3205,6 +3249,28 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             ValueKind::Int
         }
         _ if child_state_binding(expr, ctx).is_some() => ValueKind::String,
+        _ if child_window_control_call(expr, ctx).is_some() => ValueKind::WindowControl,
+        _ if child_window_client_rect_call(expr, ctx).is_some()
+            || child_window_rect_call(expr, ctx).is_some() =>
+        {
+            ValueKind::WindowRect
+        }
+        _ if window_control_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "visible") =>
+        {
+            ValueKind::Bool
+        }
+        _ if window_control_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "text") =>
+        {
+            ValueKind::String
+        }
+        _ if window_rect_property_binding(expr, ctx).is_some() => ValueKind::Int,
+        _ if child_method_call(expr, ctx)
+            .is_some_and(|(_, call)| call.name == "window_message" && call.args.len() == 3) =>
+        {
+            ValueKind::Int
+        }
         _ if std_time_system_time_now_rfc3339(expr) => ValueKind::String,
         _ if std_env_get_arg(expr).is_some() => ValueKind::String,
         _ if parse_string_method_call(expr, ctx)
@@ -4443,6 +4509,58 @@ fn bytes_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     command_binding_method(expr, ctx, ValueKind::Bytes)
 }
 
+fn window_control_method_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::WindowControl)
+}
+
+fn child_window_control_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = child_method_call(expr, ctx)?;
+    (call.name == "window_control" && call.args.len() == 1 && is_pure_int_expr(&call.args[0]))
+        .then_some(binding)
+}
+
+fn child_window_client_rect_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = child_method_call(expr, ctx)?;
+    (call.name == "window_client_rect" && call.args.is_empty()).then_some(binding)
+}
+
+fn child_window_rect_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let (binding, call) = child_method_call(expr, ctx)?;
+    (call.name == "window_rect" && call.args.is_empty()).then_some(binding)
+}
+
+fn window_control_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::WindowControl) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    matches!(property, "visible" | "text").then_some((ident.1.as_str(), property))
+}
+
+fn window_rect_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::WindowRect) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    matches!(property, "left" | "top" | "right" | "bottom")
+        .then_some((ident.1.as_str(), property))
+}
+
 fn command_output_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
     let (binding, call) = command_method_call(expr, ctx)?;
     (call.name == "output" && call.args.is_empty()).then_some(binding)
@@ -4812,6 +4930,87 @@ fn emit_child_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result
             out.push(')');
             Ok(true)
         }
+        "window_control" if call.args.len() == 1 && is_pure_int_expr(&call.args[0]) => {
+            out.push_str("rh_child_window_control(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_expr(out, &call.args[0], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        "window_message" if call.args.len() == 3 => {
+            out.push_str("rh_child_window_message(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_intish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[1], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[2], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        "window_pointer" if call.args.len() == 3 => {
+            out.push_str("rh_child_window_pointer(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[1], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[2], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        "window_resize" if call.args.len() == 2 => {
+            out.push_str("rh_child_window_resize(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_intish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[1], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
+        "window_client_rect" if call.args.is_empty() => {
+            out.push_str("rh_child_window_rect(&mut ");
+            out.push_str(binding);
+            out.push_str(", true)");
+            Ok(true)
+        }
+        "window_rect" if call.args.is_empty() => {
+            out.push_str("rh_child_window_rect(&mut ");
+            out.push_str(binding);
+            out.push_str(", false)");
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_window_control_method(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = window_control_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "click" if call.args.is_empty() => {
+            out.push_str("rh_window_control_click(&mut ");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        "set_text" if call.args.len() == 1 => {
+            out.push_str("rh_window_control_set_text(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push(')');
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }
@@ -4967,8 +5166,95 @@ fn emit_child_mut_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             out.push_str(");\n");
             Ok(true)
         }
+        "window_message" if call.args.len() == 3 => {
+            out.push_str("    let _ = rh_child_window_message(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_intish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[1], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[2], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "window_pointer" if call.args.len() == 3 => {
+            out.push_str("    let _ = rh_child_window_pointer(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[1], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[2], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "window_resize" if call.args.len() == 2 => {
+            out.push_str("    let _ = rh_child_window_resize(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_intish(out, &call.args[0], ctx)?;
+            out.push_str(", ");
+            emit_intish(out, &call.args[1], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
         _ => Ok(false),
     }
+}
+
+fn emit_window_control_mut_stmt(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, call)) = window_control_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "click" if call.args.is_empty() => {
+            out.push_str("    rh_window_control_click(&mut ");
+            out.push_str(binding);
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "set_text" if call.args.len() == 1 => {
+            out.push_str("    rh_window_control_set_text(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n");
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_window_control_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, property)) = window_control_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    if property == "visible" {
+        out.push_str("rh_window_control_visible(&mut ");
+        out.push_str(binding);
+        out.push(')');
+    } else {
+        out.push_str("rh_window_control_text(&mut ");
+        out.push_str(binding);
+        out.push(')');
+    }
+    Ok(true)
+}
+
+fn emit_window_rect_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, property)) = window_rect_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str(binding);
+    out.push('.');
+    out.push_str(property);
+    Ok(true)
 }
 
 fn emit_output_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
@@ -7556,6 +7842,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if emit_child_method(out, expr, ctx)? {
             return Ok(());
         }
+        if emit_window_control_method(out, expr, ctx)? {
+            return Ok(());
+        }
         if emit_stream_method(out, expr, ctx)? {
             return Ok(());
         }
@@ -7566,6 +7855,12 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_child_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_window_control_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_window_rect_property(out, expr, ctx)? {
             return Ok(());
         }
         if emit_bytes_property(out, expr, ctx)? {
@@ -13112,6 +13407,40 @@ fn entry() {
             output
                 .rust
                 .contains("let mut facts = rh_child_platform_facts(&mut child);"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn gui_window_control_visible_click_stays_native() {
+        let source = include_str!("../tests/fixtures/rh_gui_window_control_visible_click.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_window_control_visible(&mut tabs_button)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_window_control_click(&mut tabs_button)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_child_window_message(&mut gui, "),
             "{}",
             output.rust
         );

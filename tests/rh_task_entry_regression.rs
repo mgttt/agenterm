@@ -550,13 +550,85 @@ fn script_smoke_host_eval_he_ceiling() {
         output.execution_mode
     );
     let he = output.rust.matches("rh_host_eval_int(").count();
-    // Pre-cut tip was ~108–116 HE; keep a hard ceiling so rewrites cannot silently regress.
+    // Pre-cut tip was ~108–116 HE; rev78 + idiom rewrite lands ~42.
     assert!(
-        he <= 90,
-        "script-smoke HostEval ceiling exceeded: he={he} (expected <= 90 after idiom rewrite)"
+        he <= 50,
+        "script-smoke HostEval ceiling exceeded: he={he} (expected <= 50 after rev78/idiom rewrite)"
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
+}
+
+#[test]
+fn workbench_smoke_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/workbench-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+}
+
+#[test]
+fn remote_ui_smoke_host_eval_he_ceiling() {
+    let (source, output) = transpile_project_entry("scripts/rh/remote-ui-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert!(
+        matches!(
+            output.execution_mode,
+            agenterm_rh::CdylibExecutionMode::HostEval
+                | agenterm_rh::CdylibExecutionMode::Native
+        ),
+        "remote-ui-smoke: {:?}",
+        output.execution_mode
+    );
+    let he = output.rust.matches("rh_host_eval_int(").count();
+    // Pre-rev78 tip was ~229 HE; GUI window-control native emit lands ~119.
+    assert!(
+        he <= 140,
+        "remote-ui-smoke HostEval ceiling exceeded: he={he} (expected <= 140 after rev78 GUI emit)"
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+}
+
+#[test]
+fn fresh_clone_rehearsal_pack_builds() {
+    // HostEval pack still needs a rich embedding host to return entry 0; lock AOT
+    // compile success (the previous tip failure mode) rather than bare qualify.
+    let root = repo();
+    let entry = "scripts/rh/fresh-clone-rehearsal.rh";
+    let source = std::fs::read_to_string(root.join(entry)).unwrap_or_else(|error| {
+        panic!("read {entry}: {error}");
+    });
+    let bundled = agenterm_rh::bundle_project_source(&root, &source)
+        .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
+    let output = agenterm_rh::transpile_cdylib_with_mode(&bundled).unwrap_or_else(|error| {
+        panic!("transpile bundled {entry}: {error}");
+    });
+    assert!(
+        matches!(
+            output.execution_mode,
+            agenterm_rh::CdylibExecutionMode::HostEval
+                | agenterm_rh::CdylibExecutionMode::Native
+        ),
+        "{entry}: {:?}",
+        output.execution_mode
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-fresh-clone-pack-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let built = agenterm_rh::build_pack_dir(&bundled, &dir)
+        .unwrap_or_else(|error| panic!("build_pack_dir {entry}: {error}"));
+    assert!(
+        built.native_path.is_file(),
+        "{entry}: missing {}",
+        built.native_path.display()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

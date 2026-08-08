@@ -1,0 +1,15 @@
+fn entry() {
+    let command = std::process::command("agenterm");
+    let gui = command.start();
+    let tabs_button = gui.window_control(2104);
+    let settings_button = gui.window_control(2112);
+    if tabs_button.visible && settings_button.visible {
+        tabs_button.click();
+        settings_button.click();
+        return 1;
+    }
+    let rect = gui.window_client_rect();
+    gui.window_message(0x0112, 0x1F20, 0);
+    gui.window_pointer("click", 36, rect.bottom - 13);
+    0
+}
