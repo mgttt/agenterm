@@ -437,58 +437,87 @@ fn execute(command_spec, repo, scratch, sequence) {
     let command = std::process::command(prog);
     command.args(argv);
     command.current_dir(repo_path);
-    // Explicit keys: empty `#{}` stays no-op; identity envs set known AGENTERM_*.
-    let env_version = "" + env_map.AGENTERM_BUILD_IDENTITY_VERSION;
-    if env_version != "" {
-        command.env("AGENTERM_BUILD_IDENTITY_VERSION", env_version);
-        command.env(
-            "AGENTERM_BUILD_GIT_COMMIT",
-            "" + env_map.AGENTERM_BUILD_GIT_COMMIT
-        );
-        command.env(
-            "AGENTERM_BUILD_GIT_DIRTY",
-            "" + env_map.AGENTERM_BUILD_GIT_DIRTY
-        );
-        command.env(
-            "AGENTERM_BUILD_CARGO_LOCK_SHA256",
-            "" + env_map.AGENTERM_BUILD_CARGO_LOCK_SHA256
-        );
-        command.env(
-            "AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256",
-            "" + env_map.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256
-        );
-        command.env(
-            "AGENTERM_BUILD_PROFILE",
-            "" + env_map.AGENTERM_BUILD_PROFILE
-        );
+    // Explicit keys: empty `#{}` stays no-op; identity/envs set known AGENTERM_*.
+    let env_text = rh::json::stringify(env_map);
+    let has_identity_env =
+        env_text.contains("\"AGENTERM_BUILD_IDENTITY_VERSION\":") != 0;
+    if has_identity_env != 0 {
+        let env_version = "" + env_map.AGENTERM_BUILD_IDENTITY_VERSION;
+        if env_version != "" {
+            command.env("AGENTERM_BUILD_IDENTITY_VERSION", env_version);
+            if env_text.contains("\"AGENTERM_BUILD_GIT_COMMIT\":") != 0 {
+                command.env(
+                    "AGENTERM_BUILD_GIT_COMMIT",
+                    "" + env_map.AGENTERM_BUILD_GIT_COMMIT
+                );
+            }
+            if env_text.contains("\"AGENTERM_BUILD_GIT_DIRTY\":") != 0 {
+                command.env(
+                    "AGENTERM_BUILD_GIT_DIRTY",
+                    "" + env_map.AGENTERM_BUILD_GIT_DIRTY
+                );
+            }
+            if env_text.contains("\"AGENTERM_BUILD_CARGO_LOCK_SHA256\":") != 0 {
+                command.env(
+                    "AGENTERM_BUILD_CARGO_LOCK_SHA256",
+                    "" + env_map.AGENTERM_BUILD_CARGO_LOCK_SHA256
+                );
+            }
+            if env_text.contains("\"AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256\":") != 0 {
+                command.env(
+                    "AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256",
+                    "" + env_map.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256
+                );
+            }
+            if env_text.contains("\"AGENTERM_BUILD_PROFILE\":") != 0 {
+                command.env(
+                    "AGENTERM_BUILD_PROFILE",
+                    "" + env_map.AGENTERM_BUILD_PROFILE
+                );
+            }
+        }
     }
-    let cargo_target_dir = "" + env_map.CARGO_TARGET_DIR;
-    if cargo_target_dir != "" {
-        command.env("CARGO_TARGET_DIR", cargo_target_dir);
+    if env_text.contains("\"CARGO_TARGET_DIR\":") != 0 {
+        let cargo_target_dir = "" + env_map.CARGO_TARGET_DIR;
+        if cargo_target_dir != "" {
+            command.env("CARGO_TARGET_DIR", cargo_target_dir);
+        }
     }
-    let rustc_wrapper = "" + env_map.RUSTC_WRAPPER;
-    if rustc_wrapper != "" {
-        command.env("RUSTC_WRAPPER", rustc_wrapper);
-        command.env(
-            "AGENTERM_INTERNAL_RUSTC_WRAPPER",
-            "" + env_map.AGENTERM_INTERNAL_RUSTC_WRAPPER
-        );
-        command.env(
-            "AGENTERM_INCREMENTAL_INVOCATION_ID",
-            "" + env_map.AGENTERM_INCREMENTAL_INVOCATION_ID
-        );
-        command.env(
-            "AGENTERM_INCREMENTAL_TARGET",
-            "" + env_map.AGENTERM_INCREMENTAL_TARGET
-        );
-        command.env(
-            "AGENTERM_INCREMENTAL_ROOT",
-            "" + env_map.AGENTERM_INCREMENTAL_ROOT
-        );
-        command.env(
-            "AGENTERM_INCREMENTAL_STATE",
-            "" + env_map.AGENTERM_INCREMENTAL_STATE
-        );
+    if env_text.contains("\"RUSTC_WRAPPER\":") != 0 {
+        let rustc_wrapper = "" + env_map.RUSTC_WRAPPER;
+        if rustc_wrapper != "" {
+            command.env("RUSTC_WRAPPER", rustc_wrapper);
+            if env_text.contains("\"AGENTERM_INTERNAL_RUSTC_WRAPPER\":") != 0 {
+                command.env(
+                    "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+                    "" + env_map.AGENTERM_INTERNAL_RUSTC_WRAPPER
+                );
+            }
+            if env_text.contains("\"AGENTERM_INCREMENTAL_INVOCATION_ID\":") != 0 {
+                command.env(
+                    "AGENTERM_INCREMENTAL_INVOCATION_ID",
+                    "" + env_map.AGENTERM_INCREMENTAL_INVOCATION_ID
+                );
+            }
+            if env_text.contains("\"AGENTERM_INCREMENTAL_TARGET\":") != 0 {
+                command.env(
+                    "AGENTERM_INCREMENTAL_TARGET",
+                    "" + env_map.AGENTERM_INCREMENTAL_TARGET
+                );
+            }
+            if env_text.contains("\"AGENTERM_INCREMENTAL_ROOT\":") != 0 {
+                command.env(
+                    "AGENTERM_INCREMENTAL_ROOT",
+                    "" + env_map.AGENTERM_INCREMENTAL_ROOT
+                );
+            }
+            if env_text.contains("\"AGENTERM_INCREMENTAL_STATE\":") != 0 {
+                command.env(
+                    "AGENTERM_INCREMENTAL_STATE",
+                    "" + env_map.AGENTERM_INCREMENTAL_STATE
+                );
+            }
+        }
     }
     let deadline_ms = timeout_ms + 10000;
     command.timeout(

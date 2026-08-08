@@ -87,6 +87,18 @@ fn local_build_installs_a_dock_safe_app_bundle() {
     );
     assert!(bin.join("agenterm-cli").exists(), "CLI link is missing");
     assert!(install.join("current").exists(), "current link is missing");
+    let installed: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(install.join("current/installed.json"))
+            .expect("read installed.json"),
+    )
+    .expect("parse installed.json");
+    assert_eq!(installed["channel"], "local-build");
+    assert_eq!(installed["distribution"], "local");
+    assert_eq!(installed["variant"], format!("macos-{}-local", std::env::consts::ARCH));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("distribution local"),
+        "install output does not report the distribution"
+    );
     let architecture = match std::env::consts::ARCH {
         "aarch64" => "aarch64",
         "x86_64" => "x86_64",

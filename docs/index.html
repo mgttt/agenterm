@@ -1128,7 +1128,7 @@
           installTabsLabel: "Install method",
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "Copy", installCopied: "Copied",
-          installNoteMacos: "No <code>sudo</code>. Verifies SHA-256, links commands into <code>~/.local/bin</code>, and creates <code>~/Applications/AgenTerm.app</code>. macOS currently ships as a labeled unsigned developer preview — read the <a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md\">safety notes</a> before opting in.",
+          installNoteMacos: "No <code>sudo</code>. Verifies SHA-256 and provenance, links commands into <code>~/.local/bin</code>, and creates <code>~/Applications/AgenTerm.app</code>. The installer falls back to the labeled unsigned developer preview only when the signed macOS asset returns HTTP 404 or 410; every other download error fails closed. A signed release requires provenance with <code>channel=release</code>, <code>signed=true</code>, and <code>notarized=true</code>, plus local Apple Developer ID signature verification for every executable, so signed-release trust is inferred from both provenance and local verification. <code>AGENTERM_ALLOW_UNSIGNED_PREVIEW</code> remains a compatibility acknowledgment: it does not force the preview, skip verification, or hide the trust warning. Read the <a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md\">safety notes</a> before installing.",
           installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, and <code>agenterm-rh</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
           installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All four client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
           downloadWindowsCta: "Download for Windows",
@@ -1210,7 +1210,7 @@
           installTabsLabel: "安裝方式",
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "複製", installCopied: "已複製",
-          installNoteMacos: "無需 <code>sudo</code>。驗證 SHA-256、將命令連結至 <code>~/.local/bin</code>，並建立 <code>~/Applications/AgenTerm.app</code>。macOS 目前以標示清楚的未簽署開發者預覽版發布——請先閱讀<a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.zh-Hant.md\">安全說明</a>再選擇安裝。",
+          installNoteMacos: "無需 <code>sudo</code>。驗證 SHA-256 與 provenance、將命令連結至 <code>~/.local/bin</code>，並建立 <code>~/Applications/AgenTerm.app</code>。只有已簽署的 macOS 資產返回 HTTP 404 或 410 時，安裝程式才會回退至標示清楚的未簽署開發者預覽版；其他下載錯誤一律 fail-closed。已簽署發行版要求 provenance 為 <code>channel=release</code>、<code>signed=true</code>、<code>notarized=true</code>，並在本機逐一驗證每個執行檔的 Apple Developer ID 簽章，因此已簽署發行版的信任結論是由 provenance 與本機校驗共同推斷。<code>AGENTERM_ALLOW_UNSIGNED_PREVIEW</code> 仍只是相容性確認，不會強制選擇預覽版、略過校驗或隱藏信任警告。安裝前請先閱讀<a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.zh-Hant.md\">安全說明</a>。",
           installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code> 與 <code>agenterm-rh</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
           installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部四個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
           downloadWindowsCta: "下載 Windows 版",
@@ -1302,7 +1302,7 @@
 
       function installCommand(platform) {
         if (platform === "macos") {
-          return `curl -fsSL ${INSTALL_SCRIPT} \\\n  | AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 bash`;
+          return `curl -fsSL ${INSTALL_SCRIPT} | bash`;
         }
         if (platform === "linux") {
           return `curl -fsSL ${INSTALL_SCRIPT} | bash`;

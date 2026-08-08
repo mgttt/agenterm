@@ -10,6 +10,21 @@ English: [macOS unsigned preview](macos-unsigned-preview.md).
 只有在你瞭解「略過 macOS 對未驗證軟體的保護會帶來額外風險」時，才應
 使用此預覽版。
 
+只有已簽署的 macOS 資產返回 HTTP `404` 或 `410` 時，`install.sh` 才會
+自動回退至另行命名的 `-unsigned-preview` 封存檔。其他下載錯誤，包括
+傳輸、認證、rate limit 或伺服器錯誤，一律 fail-closed。下載預覽版前，
+安裝程式一定會將信任警告輸出至 stderr，且沒有可隱藏警告的選項。
+
+對於已簽署發行版，安裝程式要求 provenance 明確記錄
+`channel=release`、`signed=true` 與 `notarized=true`。它也會在本機對每個
+必要執行檔執行嚴格的 Apple 程式碼簽章校驗，並要求各簽章識別為 Apple
+Developer ID Application 權威。因此，已簽署發行版的信任結論是由
+provenance 聲明與本機執行檔校驗共同推斷，而不是只依賴其中一項訊號。
+
+`AGENTERM_ALLOW_UNSIGNED_PREVIEW=1` 僅保留為舊安裝命令的相容性確認；它
+不會強制選擇未簽署內容、略過簽章驗證、隱藏警告或改變安裝記錄。
+它也不會略過 provenance 或本機 Apple 簽章校驗。
+
 ## 請先驗證下載內容
 
 請從同一個 GitHub Release 下載符合你電腦架構的三個檔案：
@@ -30,6 +45,10 @@ shasum -a 256 -c agenterm-*-macos-*-unsigned-preview.zip.sha256
 架構、封存檔 SHA-256、`Cargo.lock` 雜湊、artifact manifest 雜湊，以及
 GitHub Actions 建置記錄 URL。同一個 Release 也會提供
 `agenterm-…-sbom.spdx.json`，也就是依鎖定版本來源產生的相依套件清單。
+
+安裝程式會自動執行相同的 SHA-256 與 provenance 核對，並要求此預覽版的
+provenance 明確記錄 `channel=macos-unsigned-preview`、`signed=false` 與
+`notarized=false`。
 
 ## 開啟預覽版
 
