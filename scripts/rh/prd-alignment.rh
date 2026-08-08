@@ -269,7 +269,7 @@ fn entry() {
         );
         evidence_gates.push(gate);
     }
-    let rhai_dir = std::path::join(repo, "scripts/rhai").display;
+    let rh_dir = std::path::join(repo, "scripts/rh").display;
     for gate in evidence_gates {
         let suite_name = "" + gate.id;
         let effective_suite = suite_name;
@@ -279,13 +279,13 @@ fn entry() {
                 effective_suite = suite_override;
             }
         }
-        let rhai_name = effective_suite + ".rhai";
-        let rhai_path = std::path::join(rhai_dir, rhai_name).display;
+        let rh_name = effective_suite + ".rh";
+        let rh_path = std::path::join(rh_dir, rh_name).display;
         require(
-            std::fs::exists(rhai_path),
+            std::fs::exists(rh_path),
             "prd_alignment_evidence_suite_missing:" + gate.id
         );
-        let suite_source = std::fs::read_to_string(rhai_path);
+        let suite_source = std::fs::read_to_string(rh_path);
         for evidence_id in gate.evidence {
             let evidence_key = "" + evidence_id;
             require(evidence_key != "", "prd_alignment_evidence_id:" + evidence_key);

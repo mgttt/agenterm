@@ -18,7 +18,7 @@
     {
       "id": "must-not-run",
       "description": "Compatibility inspection must reject this task before execution",
-      "entry": "compile-only.rhai",
+      "entry": "compile-only.rh",
       "profile": "local"
     }
   ]

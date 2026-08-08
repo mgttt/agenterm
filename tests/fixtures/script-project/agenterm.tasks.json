@@ -28,7 +28,7 @@
     {
       "id": "daily-check",
       "description": "Public named-task and module fixture",
-      "entry": "main.rhai",
+      "entry": "main.rh",
       "profile": "local",
       "cwd": ".",
       "args": ["manifest-default"],
@@ -43,14 +43,14 @@
     {
       "id": "unknown-field",
       "description": "Intentionally malformed discovery fixture",
-      "entry": "main.rhai",
+      "entry": "main.rh",
       "profile": "local",
       "unexpected": true
     },
     {
       "id": "no-execute",
       "description": "Discovery must not execute this source",
-      "entry": "compile-only.rhai",
+      "entry": "compile-only.rh",
       "profile": "local"
     }
   ]

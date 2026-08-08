@@ -385,7 +385,7 @@ for executable in "${REQUIRED_EXECUTABLES[@]}"; do
 done
 
 # G2: remove broken BIN symlinks that still point under this install root
-# (e.g. renamed agenterm-script → agenterm-rhai left a dangling link).
+# (e.g. renamed agenterm-script → agenterm-rh left a dangling link).
 if [[ -d "$BIN_DIR" ]]; then
   for link in "$BIN_DIR"/*; do
     [[ -L "$link" ]] || continue
@@ -577,7 +577,7 @@ if [[ -n "$SOURCE_COMMIT" ]]; then
   say "Supply-chain: commit=$SOURCE_COMMIT signed=${PROVENANCE_SIGNED:-?} notarized=${PROVENANCE_NOTARIZED:-?}"
 fi
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  say "Add $BIN_DIR to PATH to use agenterm-cli (includes mux/mcp subcommands) and agenterm-rhai"
+  say "Add $BIN_DIR to PATH to use agenterm-cli (includes mux/mcp subcommands) and agenterm-rh"
 fi
 
 if command -v pgrep >/dev/null 2>&1 && pgrep -f '/agenterm( |$)' >/dev/null 2>&1; then

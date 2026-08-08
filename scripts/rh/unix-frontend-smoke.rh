@@ -468,14 +468,15 @@ fn entry() {
         resolve_tool("pbcopy")
     };
     if clipboard_reader == "" || clipboard_writer == "" {
+        let clipboard_message = if platform == "linux" {
+            "the Linux journey requires the real xclip helper"
+        } else {
+            "the macOS journey requires pbpaste and pbcopy"
+        };
         unsupported(
             platform,
             "unix_frontend_native_clipboard_unavailable",
-            if platform == "linux" {
-                "the Linux journey requires the real xclip helper"
-            } else {
-                "the macOS journey requires pbpaste and pbcopy"
-            }
+            clipboard_message
         );
         return 0;
     }

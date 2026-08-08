@@ -8,11 +8,19 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
+fn json_null() {
+    rhai::json::parse("null")
+}
+
 let declared_evidence = [
     "ux.workbench-inline-edit",
     "ux.workbench-compact-tree",
     "ux.workbench-proxy-archived"
 ];
+
+fn declared_evidence_ids() {
+    declared_evidence
+}
 
 fn json_cli(context, cli, arguments) {
     rhai::json::parse(
@@ -46,7 +54,7 @@ fn find_tab(snapshot, target) {
 }
 
 fn find_tab_optional(snapshot, target) {
-    let result = ();
+    let result = json_null();
     for tab in snapshot.tabs {
         if tab.id == target {
             result = tab;
@@ -58,12 +66,13 @@ fn find_tab_optional(snapshot, target) {
 fn wait_tab_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tab = find_tab_optional(snapshot, target);
-        if type_of(tab) != "()"
-                && type_of(tab.render) != "()"
-                && type_of(tab.render.text) != "()"
-                && tab.render.text.width > 0 {
-            return tab;
+        for tab in snapshot.tabs {
+            if tab.id == target {
+                let render_text = tab.render.text;
+                if render_text.width > 0 {
+                    return tab;
+                }
+            }
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
@@ -73,16 +82,18 @@ fn wait_tab_render(context, cli, target) {
 fn wait_tab_label_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let tab = find_tab_optional(snapshot, target);
-        if type_of(tab) != "()"
-                && type_of(tab.render) != "()"
-                && type_of(tab.render.name) != "()"
-                && type_of(tab.render.note) != "()"
-                && type_of(tab.render.node) != "()"
-                && type_of(tab.actions) != "()"
-                && type_of(tab.actions.close) != "()"
-                && type_of(tab.actions.new_child) != "()" {
-            return tab;
+        for tab in snapshot.tabs {
+            if tab.id == target {
+                let tab_render = tab.render;
+                let tab_actions = tab.actions;
+                if tab_render.name.width > 0
+                        && tab_render.note.width > 0
+                        && tab_render.node.width > 0
+                        && tab_actions.close.bounds.width > 0
+                        && tab_actions.new_child.bounds.width > 0 {
+                    return tab;
+                }
+            }
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
@@ -149,14 +160,15 @@ fn wait_for_editor(context, cli, target, open) {
 }
 
 fn wait_for_editor_draft(context, cli, target, name_len, note_len) {
-    let last = ();
+    let last = json_null();
     for attempt in 0..200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         last = snapshot;
-        if type_of(snapshot.tab_editor) != "()"
-                && snapshot.tab_editor.target == target
-                && snapshot.tab_editor.name_length == name_len
-                && snapshot.tab_editor.note_length == note_len {
+        let tab_editor = snapshot.tab_editor;
+        if tab_editor != json_null()
+                && tab_editor.target == target
+                && tab_editor.name_length == name_len
+                && tab_editor.note_length == note_len {
             return snapshot;
         }
         rhai::task::sleep(std::time::Duration::from_millis(10));
@@ -211,14 +223,17 @@ fn set_tab_editor_text(gui_child, name, note) {
 
 fn assert_editor_closed(snapshot, target, label) {
     let tab = find_tab(snapshot, target);
-    let actions_closed = type_of(tab.actions) == "()"
-        || (tab.actions.mode == "normal"
-            && type_of(tab.actions.edit) == "()"
-            && type_of(tab.actions.save) == "()"
-            && type_of(tab.actions.cancel) == "()");
-    let render_closed = type_of(tab.render) == "()" || tab.render.mode == "normal";
+    let tab_actions = tab.actions;
+    let tab_render = tab.render;
+    let snapshot_tab_editor = snapshot.tab_editor;
+    let actions_closed = tab_actions == json_null()
+        || (tab_actions.mode == "normal"
+            && tab_actions.edit == json_null()
+            && tab_actions.save == json_null()
+            && tab_actions.cancel == json_null());
+    let render_closed = tab_render == json_null() || tab_render.mode == "normal";
     test_harness::require(
-        type_of(snapshot.tab_editor) == "()"
+        snapshot_tab_editor == json_null()
             && render_closed != 0
             && actions_closed != 0,
         "workbench_editor_should_be_closed:" + label +
@@ -228,17 +243,20 @@ fn assert_editor_closed(snapshot, target, label) {
 
 fn assert_editor_open(snapshot, target, label) {
     let tab = find_tab(snapshot, target);
+    let tab_render = tab.render;
+    let tab_actions = tab.actions;
+    let snapshot_tab_editor = snapshot.tab_editor;
     test_harness::require(
-        type_of(snapshot.tab_editor) != "()"
-            && snapshot.tab_editor.target == target
-            && tab.render.mode == "editing"
-            && type_of(tab.render.editors) != "()"
-            && tab.actions.mode == "editing"
-            && type_of(tab.actions.edit) == "()"
-            && tab.actions.save.id == "tab-editor-save"
-            && tab.actions.cancel.id == "tab-editor-cancel"
-            && tab.actions.save.bounds.width > 0
-            && tab.actions.cancel.bounds.width > 0,
+        snapshot_tab_editor != json_null()
+            && snapshot_tab_editor.target == target
+            && tab_render.mode == "editing"
+            && tab_render.editors != json_null()
+            && tab_actions.mode == "editing"
+            && tab_actions.edit == json_null()
+            && tab_actions.save.id == "tab-editor-save"
+            && tab_actions.cancel.id == "tab-editor-cancel"
+            && tab_actions.save.bounds.width > 0
+            && tab_actions.cancel.bounds.width > 0,
         "workbench_editor_should_be_open:" + label +
             ":" + rhai::json::stringify(tab)
     );
@@ -452,10 +470,12 @@ fn entry() {
             cli,
             ["show-composer", "-t", root]
         );
+        let root_tab = find_tab(snapshot, root);
+        let root_tab_actions = root_tab.actions;
         test_harness::require(
             root_tab.name == saved_name
                 && root_tab.note == saved_note
-                && type_of(root_tab.actions.edit) == "()"
+                && root_tab_actions.edit == json_null()
                 && composer_after == composer_before,
             "workbench_save_contract:" +
                 rhai::json::stringify(root_tab)
@@ -589,29 +609,32 @@ fn entry() {
         );
 
         print("STEP archived Proxy status surface releases its layout and actions");
-        let proxy = ();
+        let proxy = json_null();
         for attempt in 0..600 {
             let proxy_snapshot = json_cli(context, cli, ["ui-snapshot"]);
-            if type_of(proxy_snapshot.layout) != "()"
-                    && type_of(proxy_snapshot.layout.status_bar) != "()"
-                    && type_of(proxy_snapshot.layout.status_bar.proxy) != "()" {
-                proxy = proxy_snapshot.layout.status_bar.proxy;
+            let layout = proxy_snapshot.layout;
+            let status_bar = layout.status_bar;
+            let proxy_surface = status_bar.proxy;
+            if layout != json_null()
+                    && status_bar != json_null()
+                    && proxy_surface != json_null() {
+                proxy = proxy_surface;
                 break;
             }
             rhai::task::sleep(std::time::Duration::from_millis(50));
         }
-        test_harness::require(type_of(proxy) != "()", "workbench_proxy_surface_unavailable");
+        test_harness::require(proxy != json_null(), "workbench_proxy_surface_unavailable");
         test_harness::require(
             proxy.archived != 0
                 && proxy.available == 0
                 && proxy.bounds.width == 0
-                && type_of(proxy.action) == "()"
-                && type_of(proxy.eye_action) == "()",
+                && proxy.action == json_null()
+                && proxy.eye_action == json_null(),
             "workbench_proxy_surface_not_archived"
         );
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            declared_evidence_ids(),
             "ux.workbench-proxy-archived"
         );
 
@@ -652,31 +675,34 @@ fn entry() {
             );
         }
         gui_child.window_resize(900, 320);
-        let scroll_snapshot = ();
+        let scroll_snapshot = json_null();
         for attempt in 0..40 {
             let candidate = json_cli(context, cli, ["ui-snapshot"]);
+            let sidebar = candidate.layout.sidebar;
+            let scrollbar = sidebar.scrollbar;
             if candidate.projection == "replaceable_ui_client"
-                    && type_of(candidate.layout.sidebar) != "()"
-                    && type_of(candidate.layout.sidebar.scrollbar) != "()"
-                    && candidate.layout.sidebar.scrollbar.max_offset > 0 {
+                    && sidebar != json_null()
+                    && scrollbar != json_null()
+                    && scrollbar.max_offset > 0 {
                 scroll_snapshot = candidate;
                 break;
             }
             rhai::task::sleep(std::time::Duration::from_millis(25));
         }
         test_harness::require(
-            type_of(scroll_snapshot) != "()",
+            scroll_snapshot != json_null(),
             "workbench_sidebar_scrollbar_timeout"
         );
-        let first_visible = ();
+        let first_visible = json_null();
         for tab in scroll_snapshot.tabs {
-            if type_of(first_visible) == "()"
+            let render_text = tab.render.text;
+            if first_visible == json_null()
                     && tab.visible != 0
-                    && tab.render.text.width > 0 {
+                    && render_text.width > 0 {
                 first_visible = tab;
             }
         }
-        test_harness::require(type_of(first_visible) != "()", "workbench_visible_scroll_tab_missing");
+        test_harness::require(first_visible != json_null(), "workbench_visible_scroll_tab_missing");
         click_bounds(gui_child, first_visible.render.text);
         let scrollbar = scroll_snapshot.layout.sidebar.scrollbar;
         let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
@@ -685,27 +711,28 @@ fn entry() {
         gui_child.window_pointer("down", thumb_x, thumb_y);
         gui_child.window_pointer("move-held", thumb_x, bottom_y);
         gui_child.window_pointer("up", thumb_x, bottom_y);
-        let scrolled = ();
+        let scrolled = json_null();
         for attempt in 0..40 {
             let candidate = json_cli(context, cli, ["ui-snapshot"]);
+            let sidebar = candidate.layout.sidebar;
+            let scrollbar = sidebar.scrollbar;
             if candidate.projection == "replaceable_ui_client"
-                    && type_of(candidate.layout.sidebar) != "()"
-                    && type_of(candidate.layout.sidebar.scrollbar) != "()"
-                    && candidate.layout.sidebar.scrollbar.offset > 0 {
+                    && sidebar != json_null()
+                    && scrollbar != json_null()
+                    && scrollbar.offset > 0 {
                 scrolled = candidate;
                 break;
             }
             rhai::task::sleep(std::time::Duration::from_millis(25));
         }
         test_harness::require(
-            type_of(scrolled) != "()",
+            scrolled != json_null(),
             "workbench_sidebar_scroll_did_not_move"
         );
         double_click_message(gui_child, first_visible.render.text);
+        let editor_closed = wait_for_editor(context, cli, first_visible.id, 0);
         test_harness::require(
-            type_of(
-                wait_for_editor(context, cli, first_visible.id, 0).tab_editor
-            ) == "()",
+            editor_closed.tab_editor == json_null(),
             "workbench_scroll_retained_double_click_candidate"
         );
         gui_child.window_resize(1000, 680);
@@ -724,7 +751,7 @@ fn entry() {
         );
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            declared_evidence_ids(),
             "ux.workbench-inline-edit"
         );
 
@@ -735,34 +762,36 @@ fn entry() {
                 ["ui-action", "tabs-set-width", "--width", "" + width]
             );
             let tab = wait_tab_label_render(context, cli, target);
+            let tab_actions = tab.actions;
+            let tab_render = tab.render;
             assert_inside(
                 tab.bounds,
-                tab.render.name,
+                tab_render.name,
                 "name:" + width
             );
             assert_inside(
                 tab.bounds,
-                tab.render.note,
+                tab_render.note,
                 "note:" + width
             );
             assert_inside(
                 tab.bounds,
-                tab.actions.close.bounds,
+                tab_actions.close.bounds,
                 "close:" + width
             );
             let density = if width < 300 { "compact" } else { "full" };
             test_harness::require(
-                tab.actions.density == density
-                    && type_of(tab.actions.edit) == "()"
-                    && tab.render.node.x >= tab.bounds.left
-                    && tab.render.name.left < tab.actions.new_child.bounds.left,
+                tab_actions.density == density
+                    && tab_actions.edit == json_null()
+                    && tab_render.node.x >= tab.bounds.left
+                    && tab_render.name.left < tab_actions.new_child.bounds.left,
                 "workbench_tree_geometry:" + width +
                     ":" + rhai::json::stringify(tab)
             );
         }
         test_harness::emit_evidence(
             context,
-            declared_evidence,
+            declared_evidence_ids(),
             "ux.workbench-compact-tree"
         );
         print("PASS: inline Tabs editing and compact tree geometry");

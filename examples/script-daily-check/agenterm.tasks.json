@@ -56,7 +56,7 @@
     {
       "id": "daily-check",
       "description": "Exercise local process, HTTP, Fleet, JSON, atomic output, and cleanup APIs",
-      "entry": "daily-check.rhai",
+      "entry": "daily-check.rh",
       "profile": "local",
       "cwd": ".",
       "args": []

@@ -72,7 +72,7 @@ fn checked_module_file(root: &Path, import: &str) -> Result<PathBuf, String> {
     {
         return Err(format!("script_module_root_escape: {import}"));
     }
-    // Prefer native `.rh` modules; fall back to archived `.rhai` while callers migrate.
+    // Prefer native `.rh` modules; resolve `.rh` then legacy `.rhai` only for archive fixtures.
     let mut rh_candidate = root.join(import);
     rh_candidate.set_extension("rh");
     let mut rhai_candidate = root.join(import);
@@ -212,11 +212,11 @@ mod tests {
     fn validates_nested_imports_in_dependency_order() {
         let root = fixture();
         fs::write(
-            root.join("modules/middle.rhai"),
+            root.join("modules/middle.rh"),
             "import \"modules/leaf\" as leaf;\nexport const middle = leaf::value;",
         )
         .unwrap();
-        fs::write(root.join("modules/leaf.rhai"), "export const value = 42;").unwrap();
+        fs::write(root.join("modules/leaf.rh"), "export const value = 42;").unwrap();
 
         let sources =
             validate_project_imports(&root, "import \"modules/middle\" as middle;").unwrap();
@@ -241,6 +241,15 @@ mod tests {
     }
 
     #[test]
+    fn resolves_legacy_rhai_modules_when_rh_is_absent() {
+        let root = fixture();
+        fs::write(root.join("modules/leaf.rhai"), "fn value() { 1 }").unwrap();
+        let sources = validate_project_imports(&root, "import \"modules/leaf\" as leaf;").unwrap();
+        assert_eq!(sources, ["fn value() { 1 }"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn rejects_missing_import() {
         let root = fixture();
         let error = validate_project_imports(&root, "import \"missing\" as missing;").unwrap_err();
@@ -251,8 +260,8 @@ mod tests {
     #[test]
     fn rejects_import_cycle() {
         let root = fixture();
-        fs::write(root.join("modules/a.rhai"), "import \"modules/b\" as b;").unwrap();
-        fs::write(root.join("modules/b.rhai"), "import \"modules/a\" as a;").unwrap();
+        fs::write(root.join("modules/a.rh"), "import \"modules/b\" as b;").unwrap();
+        fs::write(root.join("modules/b.rh"), "import \"modules/a\" as a;").unwrap();
 
         let error = validate_project_imports(&root, "import \"modules/a\" as a;").unwrap_err();
         assert_eq!(error, "script_module_cycle: modules/a");

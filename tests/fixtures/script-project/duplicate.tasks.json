@@ -14,12 +14,12 @@
   "tasks": [
     {
       "id": "duplicate",
-      "entry": "main.rhai",
+      "entry": "main.rh",
       "profile": "local"
     },
     {
       "id": "duplicate",
-      "entry": "main.rhai",
+      "entry": "main.rh",
       "profile": "local"
     }
   ]

@@ -33,7 +33,7 @@
       "name": "agenterm-rhai.exe",
       "role": "scripting-cli",
       "pe_subsystem": 3,
-      "documentation_role": "public Rhai scripting CLI and worker",
+      "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
       "offline_probe": [
         "--version"
       ],
@@ -88,7 +88,7 @@
           "name": "agenterm-rhai.exe",
           "role": "scripting-cli",
           "pe_subsystem": 3,
-          "documentation_role": "public Rhai scripting CLI and worker",
+          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
           "offline_probe": [
             "--version"
           ],
@@ -141,7 +141,7 @@
           "name": "agenterm-rhai.exe",
           "role": "scripting-cli",
           "pe_subsystem": 3,
-          "documentation_role": "public Rhai scripting CLI and worker",
+          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
           "offline_probe": [
             "--version"
           ]
@@ -188,7 +188,7 @@
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
-          "documentation_role": "public Rhai scripting CLI and worker",
+          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
           "offline_probe": [
             "--help"
           ]
@@ -234,7 +234,7 @@
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
-          "documentation_role": "public Rhai scripting CLI and worker",
+          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
           "offline_probe": [
             "--help"
           ]
@@ -280,7 +280,7 @@
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
-          "documentation_role": "public Rhai scripting CLI and worker",
+          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
           "offline_probe": [
             "--help"
           ]
@@ -326,7 +326,7 @@
         {
           "name": "agenterm-rhai",
           "role": "scripting-cli",
-          "documentation_role": "public Rhai scripting CLI and worker",
+          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
           "offline_probe": [
             "--help"
           ]

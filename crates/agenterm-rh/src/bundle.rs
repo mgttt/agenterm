@@ -518,7 +518,7 @@ fn entry() { helper::add(40, 2) }
         assert!(bundled.contains("helper__add(40, 2)"), "{bundled}");
         assert!(!bundled.contains("import "), "{bundled}");
         assert!(!bundled.contains("helper::"), "{bundled}");
-        let _ = fs::metadata(root.join("fixtures/rh/modules/import_helper.rhai"));
+        let _ = fs::metadata(root.join("fixtures/rh/modules/import_helper.rh"));
     }
 
     #[test]

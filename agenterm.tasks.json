@@ -62,7 +62,7 @@
       "id": "agenterm"
     },
     "provenance": {
-      "producer": "agenterm-rhai",
+      "producer": "agenterm-rh",
       "revision": "v0.1.15-rc-unpublished"
     }
   },
@@ -1642,7 +1642,7 @@
       "args": [
         ".",
         "dist/agenterm-cli.exe",
-        "dist/agenterm-rhai.exe",
+        "dist/agenterm-rh.exe",
         "dist/agenterm.exe"
       ],
       "dependencies": [
@@ -2090,7 +2090,7 @@
       "args": [
         ".",
         "dist/agenterm-cli.exe",
-        "dist/agenterm-rhai.exe",
+        "dist/agenterm-rh.exe",
         "dist/agenterm.exe"
       ],
       "dependencies": [],

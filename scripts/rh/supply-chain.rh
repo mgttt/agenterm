@@ -186,7 +186,8 @@ fn entry() {
         }
         let picked_key = "" + best_index;
         picked[picked_key] = true;
-        sorted_dependencies.push(dependencies[best_index]);
+        let next_dep = dependencies[best_index];
+        sorted_dependencies.push(next_dep);
     }
 
     for pkg in sorted_dependencies {
@@ -406,9 +407,10 @@ fn entry() {
         output,
         rhai::json::stringify_pretty(document) + "\n"
     );
+    let dep_count = "" + sorted_dependencies.len;
     print(
         "PASS: wrote deterministic SPDX inventory for " +
-            sorted_dependencies.len +
+            dep_count +
             " resolved packages to " + output
     );
     0

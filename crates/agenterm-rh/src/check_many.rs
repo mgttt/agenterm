@@ -542,7 +542,7 @@ mod tests {
         let fixture_dir = repo.join("fixtures/rh/check-many-tmp");
         std::fs::create_dir_all(&fixture_dir).expect("create temp dir");
         std::fs::write(
-            fixture_dir.join("unknown-api.rhai"),
+            fixture_dir.join("unknown-api.rh"),
             "fn entry() { std::fs::not_shipped(`x`) }\n",
         )
         .expect("write temp script");
@@ -550,7 +550,7 @@ mod tests {
             super::CheckManyManifest {
                 schema_version: 1,
                 kind: super::RH_CHECK_MANIFEST_KIND.to_owned(),
-                files: vec!["unknown-api.rhai".to_owned()],
+                files: vec!["unknown-api.rh".to_owned()],
             },
             CheckManyOptions {
                 project_root: fixture_dir.clone(),

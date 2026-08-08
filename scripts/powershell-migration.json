@@ -15,8 +15,8 @@
       "group": "deleted",
       "responsibility": "quality gate orchestration",
       "replacement_task": "check",
-      "replacement": "check.cmd plus scripts/rhai/check.rhai and scripts/rh/artifact-verification.rh",
-      "evidence": "check.cmd --quick and --skip-smoke pass through the public Script task; the Rhai orchestrator owns ordered gates, build identity, artifact verification, declaration discovery, smoke dispatch, timing, diagnostics, and qualification receipt production without invoking PowerShell",
+      "replacement": "check.cmd plus scripts/rh/check.rh and scripts/rh/artifact-verification.rh",
+      "evidence": "check.cmd --quick and --skip-smoke pass through the public Script task; the rh task orchestrator owns ordered gates, build identity, artifact verification, declaration discovery, smoke dispatch, timing, diagnostics, and qualification receipt production without invoking PowerShell",
       "status": "deleted",
       "callers": [
         "check.cmd",
@@ -51,7 +51,7 @@
         {
           "id": "migration-parity:ps1-root-check",
           "owner": "check",
-          "proof": "check.cmd --quick and --skip-smoke pass through the public Script task; the Rhai orchestrator owns ordered gates, build identity, artifact verification, declaration discovery, smoke dispatch, timing, diagnostics, and qualification receipt production without invoking PowerShell"
+          "proof": "check.cmd --quick and --skip-smoke pass through the public Script task; the rh task orchestrator owns ordered gates, build identity, artifact verification, declaration discovery, smoke dispatch, timing, diagnostics, and qualification receipt production without invoking PowerShell"
         }
       ]
     },
@@ -62,7 +62,7 @@
       "responsibility": "repository static lint",
       "replacement_task": "lint",
       "replacement": "scripts/rh/lint.rh plus the thin lint.cmd Script Runtime bootstrap",
-      "evidence": "public lint task and wrapper pass static JSON/strict-UTF8/NUL/conflict-marker checks, production Rhai checks, malformed-input self-test, and Rust rustfmt/Clippy mode without invoking PowerShell",
+      "evidence": "public lint task and wrapper pass static JSON/strict-UTF8/NUL/conflict-marker checks, production rh checks, malformed-input self-test, and Rust rustfmt/Clippy mode without invoking PowerShell",
       "status": "deleted",
       "callers": [
         "lint.cmd",
@@ -71,7 +71,7 @@
       "inputs": [
         "repository checkout",
         "Rust sources",
-        "production Rhai sources",
+        "production rh sources",
         "JSON catalogs"
       ],
       "outputs": [
@@ -92,7 +92,7 @@
         {
           "id": "migration-parity:ps1-root-lint",
           "owner": "lint",
-          "proof": "public lint task and wrapper pass static JSON/strict-UTF8/NUL/conflict-marker checks, production Rhai checks, malformed-input self-test, and Rust rustfmt/Clippy mode without invoking PowerShell"
+          "proof": "public lint task and wrapper pass static JSON/strict-UTF8/NUL/conflict-marker checks, production rh checks, malformed-input self-test, and Rust rustfmt/Clippy mode without invoking PowerShell"
         }
       ]
     },
@@ -102,7 +102,7 @@
       "group": "deleted",
       "responsibility": "approved release coordination",
       "replacement_task": "release",
-      "replacement": "release.cmd plus scripts/rhai/release.rhai and scripts/rh/lib/package_qualified.rh",
+      "replacement": "release.cmd plus scripts/rh/release.rh and scripts/rh/lib/package_qualified.rh",
       "evidence": "the named release task requires clean main, rejects the internal version and existing tag, runs the complete stress-inclusive check, creates a byte-qualified package and durable rehearsal report, performs no mutation in rehearse mode, and only publish mode creates an annotated tag plus atomic main/tag push with local-tag rollback on failure",
       "status": "deleted",
       "callers": [
@@ -264,7 +264,7 @@
       "responsibility": "qualified package boundary self-test",
       "replacement_task": "package-qualified-selftest",
       "replacement": "scripts/rh/package-qualified-selftest.rh plus scripts/rh/lib/package_qualified.rh",
-      "evidence": "old and named Rhai self-tests both pass; Rust public integration proves exact ZIP members and rejects Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with owned fixture cleanup",
+      "evidence": "old and named rh self-tests both pass; Rust public integration proves exact ZIP members and rejects Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with owned fixture cleanup",
       "status": "deleted",
       "callers": [
         "check task"
@@ -290,7 +290,7 @@
         {
           "id": "migration-parity:ps1-script-package-selftest",
           "owner": "package-qualified-selftest",
-          "proof": "old and named Rhai self-tests both pass; Rust public integration proves exact ZIP members and rejects Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with owned fixture cleanup"
+          "proof": "old and named rh self-tests both pass; Rust public integration proves exact ZIP members and rejects Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with owned fixture cleanup"
         }
       ]
     },
@@ -381,7 +381,7 @@
       "responsibility": "preflight fail-closed self-test",
       "replacement_task": "check",
       "replacement": "tests/rhai_migration.rs",
-      "evidence": "public agenterm-rhai task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports",
+      "evidence": "public agenterm-rh task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports",
       "status": "deleted",
       "callers": [
         "check task"
@@ -407,7 +407,7 @@
         {
           "id": "migration-parity:ps1-script-preflight-selftest",
           "owner": "check",
-          "proof": "public agenterm-rhai task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports"
+          "proof": "public agenterm-rh task fixture covers clean, CRLF, dirty, wrong-branch, invalid-lock and invalid-manifest outcomes with durable reports"
         }
       ]
     },
@@ -495,7 +495,7 @@
       "group": "deleted",
       "responsibility": "obsolete v0.1.8 public candidate policy self-test",
       "replacement_task": "qualify-release",
-      "replacement": "qualification-selftest and package-qualified-selftest named Rhai tasks",
+      "replacement": "qualification-selftest and package-qualified-selftest named rh tasks",
       "evidence": "caller audit proves the legacy policy has no operational consumer; current qualification and package fail-closed self-tests own the retained readiness invariants",
       "status": "deleted",
       "callers": [
@@ -531,7 +531,7 @@
       "group": "deleted",
       "responsibility": "obsolete v0.1.8 public candidate policy",
       "replacement_task": "qualify-release",
-      "replacement": "Rhai qualification receipt, package-qualified task, and release orchestration",
+      "replacement": "rh qualification receipt, package-qualified task, and release orchestration",
       "evidence": "caller audit proves the hard-coded v0.1.8 decision function is unreachable; current receipt, byte-qualified package, preflight, and explicit release approval boundaries supersede it",
       "status": "deleted",
       "callers": [
@@ -567,8 +567,8 @@
       "group": "deleted",
       "responsibility": "qualification fail-closed self-test",
       "replacement_task": "qualification-selftest",
-      "replacement": "scripts/rhai/qualification-selftest.rhai plus scripts/rhai/lib/qualification.rhai and scripts/rhai/lib/test_harness.rhai",
-      "evidence": "named Rhai task rejects missing manifests, failed or skipped gates, missing stress, mismatched artifact provenance, and invalid CLI diagnostics while cleaning exact owned scratch",
+      "replacement": "scripts/rh/qualification-selftest.rh plus scripts/rh/lib/qualification.rh and scripts/rh/lib/test_harness.rh",
+      "evidence": "named rh task rejects missing manifests, failed or skipped gates, missing stress, mismatched artifact provenance, and invalid CLI diagnostics while cleaning exact owned scratch",
       "status": "deleted",
       "callers": [
         "check task"
@@ -594,7 +594,7 @@
         {
           "id": "migration-parity:ps1-script-qualification-selftest",
           "owner": "qualification-selftest",
-          "proof": "named Rhai task rejects missing manifests, failed or skipped gates, missing stress, mismatched artifact provenance, and invalid CLI diagnostics while cleaning exact owned scratch"
+          "proof": "named rh task rejects missing manifests, failed or skipped gates, missing stress, mismatched artifact provenance, and invalid CLI diagnostics while cleaning exact owned scratch"
         }
       ]
     },
@@ -604,7 +604,7 @@
       "group": "deleted",
       "responsibility": "qualification receipt production",
       "replacement_task": "check",
-      "replacement": "scripts/rhai/check.rhai plus scripts/rhai/lib/qualification.rhai",
+      "replacement": "scripts/rh/check.rh plus scripts/rh/lib/qualification.rh",
       "evidence": "the public check task validates exact required gates and executable evidence declarations, rejects failed/skipped or missing stress results, binds artifact metadata to source state, and writes the byte-qualified receipt only after the full stress-inclusive lane passes",
       "status": "deleted",
       "callers": [
@@ -798,7 +798,7 @@
       "group": "deleted",
       "responsibility": "unintegrated PowerShell journey manifest prototype",
       "replacement_task": "test-smoke",
-      "replacement": "planned shared Rhai smoke harness and qualification receipt",
+      "replacement": "planned shared rh smoke harness and qualification receipt",
       "evidence": "caller audit proves no smoke, check, CI, qualification, or release path imports the prototype; the PRD already marks machine-readable step manifests incomplete",
       "status": "deleted",
       "callers": [
@@ -834,8 +834,8 @@
       "group": "deleted",
       "responsibility": "black-box process and resource harness",
       "replacement_task": "test-smoke",
-      "replacement": "scripts/rhai/lib/test_harness.rhai",
-      "evidence": "all public smoke journeys, diagnostic and qualification self-tests use the shared Rhai harness; its dedicated self-test proves exact registered-child cleanup, unowned-child survival, bounded retained evidence, and original-failure preservation",
+      "replacement": "scripts/rh/lib/test_harness.rh",
+      "evidence": "all public smoke journeys, diagnostic and qualification self-tests use the shared rh harness; its dedicated self-test proves exact registered-child cleanup, unowned-child survival, bounded retained evidence, and original-failure preservation",
       "status": "deleted",
       "callers": [
         "all public smoke tasks",
@@ -867,7 +867,7 @@
         {
           "id": "migration-parity:ps1-test-harness",
           "owner": "test-smoke",
-          "proof": "all public smoke journeys, diagnostic and qualification self-tests use the shared Rhai harness; its dedicated self-test proves exact registered-child cleanup, unowned-child survival, bounded retained evidence, and original-failure preservation"
+          "proof": "all public smoke journeys, diagnostic and qualification self-tests use the shared rh harness; its dedicated self-test proves exact registered-child cleanup, unowned-child survival, bounded retained evidence, and original-failure preservation"
         }
       ]
     },
@@ -877,7 +877,7 @@
       "group": "deleted",
       "responsibility": "CLI black-box regression",
       "replacement_task": "cli-smoke",
-      "replacement": "scripts/rhai/cli-smoke.rhai plus scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/cli-smoke.rh plus scripts/rh/lib/test_harness.rh",
       "evidence": "named task preserves all nine public evidence IDs across receipt replay/conflict, operation and UI-bridge discovery, bootstrap/delta causality, typed Tabs actions, event read/wait, Composer/PTY/Backspace/scroll/screenshots, stable IDs, remain-on-exit, explicit close, and bounded diagnostics",
       "status": "deleted",
       "callers": [
@@ -918,8 +918,8 @@
       "group": "deleted",
       "responsibility": "diagnostic bundle self-test",
       "replacement_task": "diagnostic-bundle-selftest",
-      "replacement": "scripts/rhai/diagnostic-bundle-selftest.rhai plus scripts/rhai/lib/test_harness.rhai",
-      "evidence": "named Rhai task creates an intentional CLI bundle and concurrently probes the real theme and Script journeys; it verifies exact identity markers, privacy metadata, bounded local diagnostics and command logs, successful GUI/worker evidence, zero owned orphans, private-input redaction, and exact owned cleanup",
+      "replacement": "scripts/rh/diagnostic-bundle-selftest.rh plus scripts/rh/lib/test_harness.rh",
+      "evidence": "named rh task creates an intentional CLI bundle and concurrently probes the real theme and Script journeys; it verifies exact identity markers, privacy metadata, bounded local diagnostics and command logs, successful GUI/worker evidence, zero owned orphans, private-input redaction, and exact owned cleanup",
       "status": "deleted",
       "callers": [
         "check task"
@@ -948,7 +948,7 @@
         {
           "id": "migration-parity:ps1-test-diagnostic-bundle",
           "owner": "diagnostic-bundle-selftest",
-          "proof": "named Rhai task creates an intentional CLI bundle and concurrently probes the real theme and Script journeys; it verifies exact identity markers, privacy metadata, bounded local diagnostics and command logs, successful GUI/worker evidence, zero owned orphans, private-input redaction, and exact owned cleanup"
+          "proof": "named rh task creates an intentional CLI bundle and concurrently probes the real theme and Script journeys; it verifies exact identity markers, privacy metadata, bounded local diagnostics and command logs, successful GUI/worker evidence, zero owned orphans, private-input redaction, and exact owned cleanup"
         }
       ]
     },
@@ -958,7 +958,7 @@
       "group": "deleted",
       "responsibility": "Fleet black-box regression",
       "replacement_task": "fleet-smoke",
-      "replacement": "scripts/rhai/fleet-smoke.rhai plus scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/fleet-smoke.rh plus scripts/rh/lib/test_harness.rh",
       "evidence": "live old/new ordinary and 16x258 concurrent-load parity preserves six evidence IDs, offline help, dead registration pruning, explicit/implicit/ambiguous instance selection, scoped environment and Codex launcher, typed event catalog/causality/wait timeout/cancellation/restart/gap, Mux compatibility and destructive safety, exact multi-address cleanup, and cuts full stress time from about 116 to 63 seconds",
       "status": "deleted",
       "callers": [
@@ -997,7 +997,7 @@
       "group": "deleted",
       "responsibility": "owned-resource cleanup self-test",
       "replacement_task": "harness-cleanup-selftest",
-      "replacement": "scripts/rhai/harness-cleanup-selftest.rhai and scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/harness-cleanup-selftest.rh and scripts/rh/lib/test_harness.rh",
       "evidence": "public task and Windows black-box integration prove only registered Child handles are forced, an unregistered sibling remains live until explicit cleanup, persisted proof is orphan-free, and the original failure marker survives",
       "status": "deleted",
       "callers": [
@@ -1035,7 +1035,7 @@
       "group": "deleted",
       "responsibility": "self-test for the unintegrated journey manifest prototype",
       "replacement_task": "test-smoke",
-      "replacement": "planned shared Rhai smoke harness and qualification receipt",
+      "replacement": "planned shared rh smoke harness and qualification receipt",
       "evidence": "legacy self-test passed immediately before removal, but caller audit proves neither it nor the implementation was part of any product or qualification path",
       "status": "deleted",
       "callers": [
@@ -1148,8 +1148,8 @@
       "group": "deleted",
       "responsibility": "remote UI black-box regression",
       "replacement_task": "remote-ui-smoke",
-      "replacement": "scripts/rhai/remote-ui-smoke.rhai plus unrestricted native child-window, operating-system clipboard, and process-termination APIs with the shared Rhai harness",
-      "evidence": "live PowerShell last-known-good and named Rhai task both pass the complete physical journey; Rhai preserves replaceable lease/client roles, detach and same-server PTY continuity, toolbar/modal/Settings/CWD/tree/scroll/selection/clipboard behavior, real server force-termination, hidden offline input, local disconnected close, same GUI PID/window identity reconnect to a new PID/epoch/lease, screenshot evidence, stale-registration pruning, and zero owned orphans",
+      "replacement": "scripts/rh/remote-ui-smoke.rh plus unrestricted native child-window, operating-system clipboard, and process-termination APIs with the shared rh harness",
+      "evidence": "live PowerShell last-known-good and named rh task both pass the complete physical journey; rh preserves replaceable lease/client roles, detach and same-server PTY continuity, toolbar/modal/Settings/CWD/tree/scroll/selection/clipboard behavior, real server force-termination, hidden offline input, local disconnected close, same GUI PID/window identity reconnect to a new PID/epoch/lease, screenshot evidence, stale-registration pruning, and zero owned orphans",
       "status": "deleted",
       "callers": [
         "check task"
@@ -1180,7 +1180,7 @@
         {
           "id": "migration-parity:ps1-test-remote-ui",
           "owner": "remote-ui-smoke",
-          "proof": "live PowerShell last-known-good and named Rhai task both pass the complete physical journey; Rhai preserves replaceable lease/client roles, detach and same-server PTY continuity, toolbar/modal/Settings/CWD/tree/scroll/selection/clipboard behavior, real server force-termination, hidden offline input, local disconnected close, same GUI PID/window identity reconnect to a new PID/epoch/lease, screenshot evidence, stale-registration pruning, and zero owned orphans"
+          "proof": "live PowerShell last-known-good and named rh task both pass the complete physical journey; rh preserves replaceable lease/client roles, detach and same-server PTY continuity, toolbar/modal/Settings/CWD/tree/scroll/selection/clipboard behavior, real server force-termination, hidden offline input, local disconnected close, same GUI PID/window identity reconnect to a new PID/epoch/lease, screenshot evidence, stale-registration pruning, and zero owned orphans"
         }
       ]
     },
@@ -1190,7 +1190,7 @@
       "group": "deleted",
       "responsibility": "UI/server upgrade regression",
       "replacement_task": "remote-ui-upgrade-smoke",
-      "replacement": "scripts/rhai/remote-ui-upgrade-smoke.rhai plus typed owned-child opaque window identity and the shared Rhai harness",
+      "replacement": "scripts/rh/remote-ui-upgrade-smoke.rh plus typed owned-child opaque window identity and the shared rh harness",
       "evidence": "named public task preserves distinct real GUI byte hashes and build identities, competing-lease rejection, stable server/epoch/PTY/draft/CWD/proxy facts, live streamed output, incompatible-protocol rejection, rollback scrollback continuity, public close/detach actions, and orphan-free owned-child cleanup",
       "status": "deleted",
       "callers": [
@@ -1230,7 +1230,7 @@
       "group": "deleted",
       "responsibility": "loopback HTTP fixture",
       "replacement_task": "test-smoke",
-      "replacement": "scripts/rhai/script-http-fixture.rhai plus unrestricted std::net::TcpListener and raw Bytes operations",
+      "replacement": "scripts/rh/script-http-fixture.rh plus unrestricted std::net::TcpListener and raw Bytes operations",
       "evidence": "full public Script smoke preserves status, echo, large, async, slow, cancel, malformed, disconnect and TLS paths; privacy-bounded audit, typed host failures, cleanup, and delayed-first-byte accepted-socket regression pass on Windows",
       "status": "deleted",
       "callers": [
@@ -1267,8 +1267,8 @@
       "group": "deleted",
       "responsibility": "Script Runtime black-box regression",
       "replacement_task": "script-smoke",
-      "replacement": "scripts/rhai/script-smoke.rhai plus scripts/rhai/lib/script_smoke_helpers.rhai and unrestricted binary stdin/Bytes APIs",
-      "evidence": "named Rhai task preserves all eighteen public Script evidence IDs across API discovery, process/stream/task/HTTP/filesystem lifecycles, module and named-task compatibility, raw worker framing, supervisor timeout/crash/parent-exit/concurrency, typed Fleet observation/mutation, north-star composition, audit privacy, and retained failure diagnostics",
+      "replacement": "scripts/rh/script-smoke.rh plus scripts/rh/lib/script_smoke_helpers.rh and unrestricted binary stdin/Bytes APIs",
+      "evidence": "named rh task preserves all eighteen public Script evidence IDs across API discovery, process/stream/task/HTTP/filesystem lifecycles, module and named-task compatibility, raw worker framing, supervisor timeout/crash/parent-exit/concurrency, typed Fleet observation/mutation, north-star composition, audit privacy, and retained failure diagnostics",
       "status": "deleted",
       "callers": [
         "check task",
@@ -1297,7 +1297,7 @@
         {
           "id": "migration-parity:ps1-test-script",
           "owner": "script-smoke",
-          "proof": "named Rhai task preserves all eighteen public Script evidence IDs across API discovery, process/stream/task/HTTP/filesystem lifecycles, module and named-task compatibility, raw worker framing, supervisor timeout/crash/parent-exit/concurrency, typed Fleet observation/mutation, north-star composition, audit privacy, and retained failure diagnostics"
+          "proof": "named rh task preserves all eighteen public Script evidence IDs across API discovery, process/stream/task/HTTP/filesystem lifecycles, module and named-task compatibility, raw worker framing, supervisor timeout/crash/parent-exit/concurrency, typed Fleet observation/mutation, north-star composition, audit privacy, and retained failure diagnostics"
         }
       ]
     },
@@ -1307,7 +1307,7 @@
       "group": "deleted",
       "responsibility": "server lifecycle black-box regression",
       "replacement_task": "server-smoke",
-      "replacement": "scripts/rhai/server-smoke.rhai plus scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/server-smoke.rh plus scripts/rh/lib/test_harness.rh",
       "evidence": "named task and Windows public integration preserve native no-window facts, exact PID/ownership, UI lease lifecycle and gated interaction, real PTY, receipt replay/conflict/async completion, causal events, workspace persistence, graceful shutdown, and owned-child cleanup",
       "status": "deleted",
       "callers": [
@@ -1346,7 +1346,7 @@
       "group": "deleted",
       "responsibility": "startup latency and first-window regression",
       "replacement_task": "startup-smoke",
-      "replacement": "scripts/rhai/startup-smoke.rhai plus unrestricted std::process::list and scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/startup-smoke.rh plus unrestricted std::process::list and scripts/rh/lib/test_harness.rh",
       "evidence": "named task preserves the one-second native-window budget, public asynchronous terminal readiness, exact title/guidance, second-launch handoff, invalid GUI-argument nonblocking behavior, no nested Script worker, graceful shutdown, and orphan-free cleanup",
       "status": "deleted",
       "callers": [
@@ -1388,7 +1388,7 @@
       "group": "deleted",
       "responsibility": "unintegrated professional terminal-selection prototype",
       "replacement_task": "test-smoke",
-      "replacement": "future public Rhai professional-selection journey after the planned product slice ships",
+      "replacement": "future public rh professional-selection journey after the planned product slice ships",
       "evidence": "caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before its first interaction assertion because terminal.cols is zero; Windows WM_LBUTTONDBLCLK currently does not implement its claimed word/third-click behavior; PRD keeps professional selection planned",
       "status": "deleted",
       "callers": [
@@ -1424,7 +1424,7 @@
       "group": "deleted",
       "responsibility": "theme regression",
       "replacement_task": "theme-smoke",
-      "replacement": "scripts/rhai/theme-smoke.rhai plus Child native-window input, rhai::image::inspect_png, and the shared Rhai harness",
+      "replacement": "scripts/rh/theme-smoke.rh plus Child native-window input, rhai::image::inspect_png, and the shared rh harness",
       "evidence": "live old/new parity preserves dark/light preview, Cancel and physical Escape rollback, settings persistence, PTY PID/output continuity, native PNG luminance separation, restart state, bounded failure diagnostics, and orphan-free cleanup",
       "status": "deleted",
       "callers": [
@@ -1466,8 +1466,8 @@
       "group": "deleted",
       "responsibility": "UX geometry and interaction regression",
       "replacement_task": "remote-ui-smoke plus startup-smoke plus working-context-smoke",
-      "replacement": "scripts/rhai/remote-ui-smoke.rhai, scripts/rhai/startup-smoke.rhai, and scripts/rhai/working-context-smoke.rhai plus typed foreground-window observation",
-      "evidence": "the three named Rhai journeys own all sixteen former UX evidence IDs: remote-ui proves semantic window control, locale, modal waits, hierarchy cycle rejection and child promotion, adaptive Tabs, keyboard focus, Settings isolation, safe CWD/OSC7 behavior, scrolling, selection, clipboard, close/detach, and physical UI automation; startup directly observes no-activate behavior; working-context proves tab metadata and safe CWD state across restart",
+      "replacement": "scripts/rh/remote-ui-smoke.rh, scripts/rh/startup-smoke.rh, and scripts/rh/working-context-smoke.rh plus typed foreground-window observation",
+      "evidence": "the three named rh journeys own all sixteen former UX evidence IDs: remote-ui proves semantic window control, locale, modal waits, hierarchy cycle rejection and child promotion, adaptive Tabs, keyboard focus, Settings isolation, safe CWD/OSC7 behavior, scrolling, selection, clipboard, close/detach, and physical UI automation; startup directly observes no-activate behavior; working-context proves tab metadata and safe CWD state across restart",
       "status": "deleted",
       "callers": [
         "remote-ui-smoke task",
@@ -1497,7 +1497,7 @@
         {
           "id": "migration-parity:ps1-test-ux",
           "owner": "remote-ui-smoke plus startup-smoke plus working-context-smoke",
-          "proof": "the three named Rhai journeys own all sixteen former UX evidence IDs: remote-ui proves semantic window control, locale, modal waits, hierarchy cycle rejection and child promotion, adaptive Tabs, keyboard focus, Settings isolation, safe CWD/OSC7 behavior, scrolling, selection, clipboard, close/detach, and physical UI automation; startup directly observes no-activate behavior; working-context proves tab metadata and safe CWD state across restart"
+          "proof": "the three named rh journeys own all sixteen former UX evidence IDs: remote-ui proves semantic window control, locale, modal waits, hierarchy cycle rejection and child promotion, adaptive Tabs, keyboard focus, Settings isolation, safe CWD/OSC7 behavior, scrolling, selection, clipboard, close/detach, and physical UI automation; startup directly observes no-activate behavior; working-context proves tab metadata and safe CWD state across restart"
         }
       ]
     },
@@ -1507,7 +1507,7 @@
       "group": "deleted",
       "responsibility": "wake transport regression",
       "replacement_task": "wake-smoke",
-      "replacement": "scripts/rhai/wake-smoke.rhai plus std::net::TcpStream and scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/wake-smoke.rh plus std::net::TcpStream and scripts/rh/lib/test_harness.rh",
       "evidence": "named task and Windows public integration preserve one isolated headless server, 32 concurrent IPC clients, simultaneous PTY output, typed raw expired-mutation receipt, unchanged post-state, and orphan-free owned-child cleanup",
       "status": "deleted",
       "callers": [
@@ -1547,7 +1547,7 @@
       "group": "deleted",
       "responsibility": "workbench layout regression",
       "replacement_task": "workbench-smoke",
-      "replacement": "scripts/rhai/workbench-smoke.rhai plus Child.window_pointer click dispatch and scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/workbench-smoke.rh plus Child.window_pointer click dispatch and scripts/rh/lib/test_harness.rh",
       "evidence": "live old/new parity preserves physical Edit/Save/Cancel, independent name/note drafts, Composer isolation, archived Proxy geometry/actions, four-level CJK hierarchy, 180/250/480 px density and bounded-row geometry, and orphan-free cleanup",
       "status": "deleted",
       "callers": [
@@ -1587,7 +1587,7 @@
       "group": "deleted",
       "responsibility": "working directory and proxy regression",
       "replacement_task": "working-context-smoke",
-      "replacement": "scripts/rhai/working-context-smoke.rhai plus scripts/rhai/lib/test_harness.rhai",
+      "replacement": "scripts/rh/working-context-smoke.rh plus scripts/rh/lib/test_harness.rh",
       "evidence": "named task and Windows public integration prove isolated GUI/server launch, safe proxy metadata, archived non-mutation, secret-free snapshot/pane/workspace/events/stderr, proxy non-persistence across restart, and owned-child cleanup",
       "status": "deleted",
       "callers": [

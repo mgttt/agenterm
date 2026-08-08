@@ -2687,9 +2687,9 @@ fn run_fleet_journey(
         std::fs::copy(
             std::path::join(
                 source_project,
-                "daily-check.rhai"
+                "daily-check.rh"
             ).display,
-            std::path::join(project, "daily-check.rhai").display
+            std::path::join(project, "daily-check.rh").display
         );
         let manifest = std::path::join(
             project,
@@ -2697,7 +2697,7 @@ fn run_fleet_journey(
         ).display;
         let entry = std::path::join(
             project,
-            "daily-check.rhai"
+            "daily-check.rh"
         ).display;
         let result_path = std::path::join(
             runtime_dir,
@@ -2812,7 +2812,7 @@ fn run_fleet_journey(
                 && direct_catalog.tasks[0].contract.evidence ==
                     ["task.daily-check"]
                 && direct_show.compatible
-                && direct_show.tasks[0].entry == "daily-check.rhai",
+                && direct_show.tasks[0].entry == "daily-check.rh",
             "script_north_star_catalog_mismatch"
         );
         test_harness::require(

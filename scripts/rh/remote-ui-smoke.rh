@@ -988,9 +988,15 @@ try {
     let locale_button = require_window_control(gui.window_control(2129), "locale_button");
     let font_decrease_button = require_window_control(gui.window_control(2130), "font_decrease_button");
     let font_increase_button = require_window_control(gui.window_control(2131), "font_increase_button");
+    let tabs_button_text = "" + tabs_button.text;
+    let locale_button_text = "" + locale_button.text;
+    let control_center_button_text = "" + control_center_button.text;
+    let font_decrease_button_text = "" + font_decrease_button.text;
+    let font_increase_button_text = "" + font_increase_button.text;
+    let settings_button_text = "" + settings_button.text;
     let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
     test_harness::require(
-        tabs_button.text == "<Tabs"
+        tabs_button_text == "<Tabs"
             && toolbar.layout.toolbar.tabs.left
                 < toolbar.layout.toolbar["new"].left
             && toolbar.layout.toolbar["new"].right
@@ -1008,18 +1014,20 @@ try {
         "remote_ui_toolbar_geometry_invalid"
     );
     test_harness::require(
-        locale_button.text == "En|Zh"
-            && control_center_button.text == "Control Center"
-            && font_decrease_button.text == "z"
-            && font_increase_button.text == "Z",
+        locale_button_text == "En|Zh"
+            && control_center_button_text == "Control Center"
+            && font_decrease_button_text == "z"
+            && font_increase_button_text == "Z",
         "remote_ui_toolbar_new_controls_invalid"
     );
     locale_button.click();
+    locale_button_text = "" + locale_button.text;
+    settings_button_text = "" + settings_button.text;
     let traditional = wait_locale(context, cli, "zh-Hant");
     test_harness::require(
         traditional.locale.id == "zh-Hant"
-            && locale_button.text == "Zh|En"
-            && settings_button.text == "設定",
+            && locale_button_text == "Zh|En"
+            && settings_button_text == "設定",
         "remote_ui_locale_toggle_invalid"
     );
     locale_button.click();
@@ -1028,10 +1036,11 @@ try {
         "remote_ui_locale_restore_invalid"
     );
     tabs_button.click();
+    tabs_button_text = "" + tabs_button.text;
     test_harness::require(
         tabs_button.visible
             && settings_button.visible
-            && tabs_button.text == ">Tabs",
+            && tabs_button_text == ">Tabs",
         "remote_ui_toolbar_hide_invalid"
     );
     tabs_button.click();

@@ -409,8 +409,7 @@ fn entry() {
                 let allowed = 0;
                 if path == "scripts/rh/powershell-migration-audit.rh"
                         || path ==
-                            "scripts/archive/rhai/powershell-migration-audit.rhai"
-                        || path == "scripts/rhai/powershell-migration-audit.rhai" {
+                            "scripts/archive/rhai/powershell-migration-audit.rhai" {
                     if !lower_line.contains("std::process::command(")
                             && !trimmed_line.starts_with("powershell ")
                             && !trimmed_line.starts_with("pwsh ") {

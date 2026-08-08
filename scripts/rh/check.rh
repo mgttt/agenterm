@@ -1044,7 +1044,7 @@ fn resolve_worker(
         return task_text;
     }
     print(
-        "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai; " +
+        "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai shim; " +
             "agenterm-rh is unavailable"
     );
     fallback_text
@@ -1826,7 +1826,7 @@ ordinary = run_gate(
     context,
     timing,
     "rhai-lint",
-    "production Rhai source lint",
+    "production rh source lint",
     task(
         worker, manifest, "lint", 120000, two_task_extra(dist_lint_cli, "rhai"), #{}, 0),
     repo,

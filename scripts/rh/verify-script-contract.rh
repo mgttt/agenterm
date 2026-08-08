@@ -1,8 +1,8 @@
-// First repository dogfood for agenterm-rhai.
+// First repository dogfood for agenterm-rh.
 //
 // This standalone verifier consumes explicit specification and catalog
 // fixtures. It is intentionally outside the ready named-task catalog until a
-// Rhai-owned catalog export supplies its second input.
+// rh-owned catalog export supplies its second input.
 //
 // Args:
 //   RUNTIME_SPEC SCRIPT_CATALOG

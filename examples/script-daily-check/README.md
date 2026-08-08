@@ -10,7 +10,7 @@ Copy `config.example.json` to `config.json`, use an isolated AgenTerm server
 and stable tab ID, then run:
 
 ```powershell
-agenterm-rhai.exe check daily-check.rhai --profile local --project-root .
+agenterm-rhai.exe check daily-check.rh --profile local --project-root .
 agenterm-rhai.exe task list --json
 agenterm-rhai.exe task show daily-check --json
 agenterm-rhai.exe task run daily-check --timeout-ms 10000 --json -- smoke
