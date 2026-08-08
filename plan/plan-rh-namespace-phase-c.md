@@ -59,9 +59,9 @@ Ordered; 4.1 blocks 4.3; 4.5 follows 4.3; 4.6–4.7 follow 4.5.
 | 4.2 | ✅ Drop Engine legacy `rhai` module + catalog/shipped aliases + legacy root (4.2a+4.2b+4.2c) | `src/script_stdlib.rs`, `crates/agenterm-rh/src/host_api.rs`, `src/script_catalog.rs`, `crates/agenterm-rh/src/shipped_surfaces.rs` | zero `register_static_module(…"rhai"`; catalog `rh::` only |
 | 4.3 | Remove pack Rhai eval/run-script fallback | `src/script_rh_host.rs`, `crates/agenterm-rh/src/{host_api,transpile}.rs` | no prod `host_eval_snippet` / `host_run_script_source` |
 | 4.4 | Migrate Engine-root-dependent tests/fixtures | `src/script_{stdlib,task,catalog,http,worker}.rs`, `tests/rh_*.rs`, `crates/agenterm-rh/tests/**` | `cargo test -p agenterm --lib` + `agenterm-rh` green |
-| 4.5 | Retire `agenterm-rhai` PE + `ScriptBackend::Rhai` + REPL/worker interpreted path | `src/bin/agenterm-rhai.rs`, `Cargo.toml`, `src/script_{backend,worker,repl}.rs`, `src/client/mod.rs` | five product bins in matrix |
-| 4.6 | Packaging / install / bootstrap / smokes | `scripts/artifacts.json`, `install.sh`, `scripts/rh/{check,artifact-verification,*smoke}.rh` | stage-build + artifact-verification |
-| 4.7 | Retire PE integration tests + caller-inventory baseline | `tests/rhai_migration.rs`, `tests/script_repl.rs`, `tests/linux_script_cli.rs`, `tests/rh_cli_forward.rs`, `fixtures/rh/caller-inventory-baseline.json`, … | `caller-inventory` / `rh_corpus` green |
+| 4.5 | ✅ Retire `agenterm-rhai` PE + `ScriptBackend::Rhai` + REPL/worker interpreted path | `src/bin/agenterm-rhai.rs`, `Cargo.toml`, `src/script_{backend,worker,repl}.rs`, `src/client/mod.rs` | five product bins in matrix |
+| 4.6 | ✅ Packaging / install / bootstrap / smokes | `scripts/artifacts.json`, `install.sh`, `scripts/rh/{check,artifact-verification,*smoke}.rh` | stage-build + artifact-verification |
+| 4.7 | ✅ Retire PE integration tests + caller-inventory baseline | `tests/rhai_migration.rs`, `tests/script_repl.rs`, `tests/linux_script_cli.rs`, `tests/rh_cli_forward.rs`, `fixtures/rh/caller-inventory-baseline.json`, … | `caller-inventory` / `rh_corpus` green |
 | 4.8 | Residual operational trace scrub | `scripts/rh/script-smoke.rh`, `skills/**`, `README.md`, `AGENTS.md`, PRD nodes | intentional historical docs only |
 
 Do not edit `scripts/archive/rhai/**` except as historical reference.
@@ -73,4 +73,6 @@ Do not edit `scripts/archive/rhai/**` except as historical reference.
 - Wave 3: ✅ live `scripts/rh` `rhai::`=0.
 - Wave 4.1: ✅ rev83; script-smoke/remote-ui Native AOT `pack=ok` + regression locks.
 - Wave 4.2a/b/c: ✅ Engine registers only `rh`; catalog/shipped `rh::` only; `RHAI_LEGACY_HOST_API_ROOT` removed.
-- Wave 4 (rest): zero live `rhai::` / `agenterm-rhai` operator paths outside archive + intentional historical docs.
+- Wave 4.5: ✅ `agenterm-rhai` PE deleted; `ScriptBackend::Rhai` removed; REPL retired.
+- Wave 4.6/4.7: ✅ packaging cleaned; integration tests retired.
+- Wave 4.8: residual trace scrub (docs/skills/PRD).
