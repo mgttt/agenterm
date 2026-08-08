@@ -20,7 +20,8 @@ fn json_null() {
 
 fn trimmed(value) {
     let text = "" + value;
-    text.trim()
+    text.trim();
+    text
 }
 
 fn json_cli(context, cli, arguments) {
@@ -55,6 +56,7 @@ fn tab_index(snapshot, target) {
         index += 1;
     }
     throw "workbench_tab_missing:" + target;
+    0
 }
 
 fn require_matching_editor_actions(left, left_id, right, right_id, label) {
@@ -62,12 +64,14 @@ fn require_matching_editor_actions(left, left_id, right, right_id, label) {
     let right_actions = json_null();
     for tab in left.tabs {
         if tab.id == left_id {
-            left_actions = tab.actions;
+            let actions = tab.actions;
+            left_actions = actions;
         }
     }
     for tab in right.tabs {
         if tab.id == right_id {
-            right_actions = tab.actions;
+            let actions = tab.actions;
+            right_actions = actions;
         }
     }
     test_harness::require(
@@ -77,50 +81,64 @@ fn require_matching_editor_actions(left, left_id, right, right_id, label) {
             && left_actions.cancel.id == right_actions.cancel.id,
         label
     );
+    0
 }
 
 fn click_tab_text(gui_child, snapshot, target) {
     for tab in snapshot.tabs {
         if tab.id == target {
-            click_bounds(gui_child, tab.render.text);
-            return;
+            let render = tab.render;
+            let text_bounds = render["text"];
+            click_bounds(gui_child, text_bounds);
+            return 0;
         }
     }
     throw "workbench_tab_missing:" + target;
+    0
 }
 
 fn double_click_tab_text(gui_child, snapshot, target) {
     for tab in snapshot.tabs {
         if tab.id == target {
-            double_click_text(gui_child, tab.render.text);
-            return;
+            let render = tab.render;
+            let text_bounds = render["text"];
+            double_click_text(gui_child, text_bounds);
+            return 0;
         }
     }
     throw "workbench_tab_missing:" + target;
+    0
 }
 
 fn double_click_tab_message(gui_child, snapshot, target) {
     for tab in snapshot.tabs {
         if tab.id == target {
-            double_click_message(gui_child, tab.render.text);
-            return;
+            let render = tab.render;
+            let text_bounds = render["text"];
+            double_click_message(gui_child, text_bounds);
+            return 0;
         }
     }
     throw "workbench_tab_missing:" + target;
+    0
 }
 
 fn wait_tab_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         for tab in snapshot.tabs {
-            if tab.id == target
-                    && tab.render.text.width > 0 {
-                return 0;
+            if tab.id == target {
+                let render = tab.render;
+                let text_bounds = render["text"];
+                if text_bounds.width > 0 {
+                    return 0;
+                }
             }
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "workbench_tab_render_timeout:" + target;
+    0
 }
 
 fn wait_tab_label_render(context, cli, target) {
@@ -142,6 +160,7 @@ fn wait_tab_label_render(context, cli, target) {
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "workbench_tab_label_render_timeout:" + target;
+    0
 }
 
 fn active_tab_index(snapshot) {
@@ -153,6 +172,7 @@ fn active_tab_index(snapshot) {
         index += 1;
     }
     throw "workbench_active_tab_missing";
+    0
 }
 
 fn wait_for_server(context, cli, gui_child) {
@@ -165,7 +185,7 @@ fn wait_for_server(context, cli, gui_child) {
             []
         );
         if probe.success != 0 {
-            return;
+            return 0;
         }
         if gui_child.state == "exited" {
             let output = gui_child.wait_with_output(
@@ -176,13 +196,14 @@ fn wait_for_server(context, cli, gui_child) {
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "workbench_server_timeout";
+    0
 }
 
 fn wait_for_window(gui_child) {
     for attempt in 0..200 {
         let facts = gui_child.platform_facts;
         if facts.top_level_window_present != 0 {
-            return;
+            return 0;
         }
         if gui_child.state == "exited" {
             throw "workbench_window_early_exit";
@@ -190,6 +211,7 @@ fn wait_for_window(gui_child) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "workbench_window_timeout";
+    0
 }
 
 fn wait_for_editor(context, cli, target, open) {
@@ -213,7 +235,6 @@ fn wait_for_editor_draft(context, cli, target, name_len, note_len) {
     let last = json_null();
     for attempt in 0..200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        last = snapshot;
         let tab_editor = snapshot.tab_editor;
         if tab_editor != json_null()
                 && tab_editor.target == target
@@ -221,6 +242,7 @@ fn wait_for_editor_draft(context, cli, target, name_len, note_len) {
                 && tab_editor.note_length == note_len {
             return snapshot;
         }
+        last = snapshot;
         rhai::task::sleep(std::time::Duration::from_millis(10));
     }
     throw "workbench_editor_draft_timeout:" + target +
@@ -228,8 +250,12 @@ fn wait_for_editor_draft(context, cli, target, name_len, note_len) {
 }
 
 fn click_bounds(gui_child, bounds) {
-    let x_offset = bounds.width / 2;
-    let y_offset = bounds.height / 2;
+    let left = bounds.left;
+    let top = bounds.top;
+    let width = bounds.width;
+    let height = bounds.height;
+    let x_offset = width / 2;
+    let y_offset = height / 2;
     if x_offset < 1 {
         x_offset = 1;
     }
@@ -238,36 +264,47 @@ fn click_bounds(gui_child, bounds) {
     }
     gui_child.window_pointer(
         "click",
-        bounds.left + x_offset,
-        bounds.top + y_offset
+        left + x_offset,
+        top + y_offset
     );
+    0
 }
 
 fn double_click_text(gui_child, bounds) {
-    let x = bounds.left + bounds.width / 2;
-    let y = bounds.top + bounds.height / 2;
+    let left = bounds.left;
+    let top = bounds.top;
+    let width = bounds.width;
+    let height = bounds.height;
+    let x = left + width / 2;
+    let y = top + height / 2;
     gui_child.window_pointer("click", x, y);
     gui_child.window_message(0x0203, 0, y * 65536 + x);
+    0
 }
 
 fn double_click_message(gui_child, bounds) {
-    let x = bounds.left + bounds.width / 2;
-    let y = bounds.top + bounds.height / 2;
+    let left = bounds.left;
+    let top = bounds.top;
+    let width = bounds.width;
+    let height = bounds.height;
+    let x = left + width / 2;
+    let y = top + height / 2;
     gui_child.window_message(0x0203, 0, y * 65536 + x);
+    0
 }
 
 fn double_click_point(gui_child, x, y) {
-    gui_child.window_message(0x0203, 0, y * 65536 + x);
+    let px = x;
+    let py = y;
+    gui_child.window_message(0x0203, 0, py * 65536 + px);
+    0
 }
 
 fn resize_gui(gui_child, width, height) {
-    gui_child.window_resize(width, height);
-}
-
-fn drag_scrollbar_thumb(gui_child, thumb_x, thumb_y, target_y) {
-    gui_child.window_pointer("down", thumb_x, thumb_y);
-    gui_child.window_pointer("move-held", thumb_x, target_y);
-    gui_child.window_pointer("up", thumb_x, target_y);
+    let w = width;
+    let h = height;
+    gui_child.window_resize(w, h);
+    0
 }
 
 fn set_tab_editor_text(gui_child, name, note) {
@@ -279,6 +316,7 @@ fn set_tab_editor_text(gui_child, name, note) {
     );
     title_editor.set_text(name);
     note_editor.set_text(note);
+    0
 }
 
 fn assert_editor_closed(snapshot, target, label) {
@@ -455,12 +493,15 @@ fn entry() {
             ["wait-ui", "--active", root, "--window-state", "restored",
              "--timeout-ms", "30000"]
         );
+        // Separate loops: native emit lowers `else if` to two `if`s and moves `tab`.
         let root_tab = json_null();
-        let peer_tab = json_null();
         for tab in snapshot.tabs {
             if tab.id == root {
                 root_tab = tab;
             }
+        }
+        let peer_tab = json_null();
+        for tab in snapshot.tabs {
             if tab.id == peer {
                 peer_tab = tab;
             }
@@ -524,10 +565,14 @@ fn entry() {
             root,
             "non-text-zone"
         );
+        let row = root_render.row;
+        let row_left = row.left;
+        let row_top = row.top;
+        let row_height = row.height;
         double_click_point(
             gui_child,
-            root_tab.render.row.left + 1,
-            root_tab.render.row.top + root_tab.render.row.height / 2
+            row_left + 1,
+            row_top + row_height / 2
         );
         assert_editor_closed(
             json_cli(context, cli, ["ui-snapshot"]),
@@ -740,10 +785,12 @@ fn entry() {
             root,
             "candidate-tabs-hide"
         );
+        let pre_resize_snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let pre_resize_text = json_null();
-        for tab in snapshot.tabs {
+        for tab in pre_resize_snapshot.tabs {
             if tab.id == root {
-                pre_resize_text = tab.render.text;
+                let render = tab.render;
+                pre_resize_text = render["text"];
             }
         }
         click_bounds(gui_child, pre_resize_text);
@@ -790,7 +837,7 @@ fn entry() {
         );
 
         print("STEP compact and full geometry stay bounded for a deep CJK row");
-        let target = root;
+        let target = "" + root;
         for depth in 1..5 {
             let snapshot = json_cli(
                 context,
@@ -815,7 +862,7 @@ fn entry() {
             );
             click_bounds(gui_child, child.actions.save.bounds);
             wait_for_editor(context, cli, child.id, 0);
-            target = child.id;
+            target = "" + child.id;
         }
 
         print("STEP sidebar scrolling clears a pending text double-click candidate");
@@ -851,7 +898,8 @@ fn entry() {
         );
         let first_visible = json_null();
         for tab in scroll_snapshot.tabs {
-            let render_text = tab.render.text;
+            let render = tab.render;
+            let render_text = render["text"];
             if first_visible == json_null()
                     && tab.visible != 0
                     && render_text.width > 0 {
@@ -859,12 +907,24 @@ fn entry() {
             }
         }
         test_harness::require(first_visible != json_null(), "workbench_visible_scroll_tab_missing");
-        click_bounds(gui_child, first_visible.render.text);
+        let first_render = first_visible.render;
+        let first_text = first_render["text"];
+        click_bounds(gui_child, first_text);
         let scrollbar = scroll_snapshot.layout.sidebar.scrollbar;
-        let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
-        let thumb_y = scrollbar.thumb.top + scrollbar.thumb.height / 2;
-        let bottom_y = scrollbar.track.top + scrollbar.track.height - 2;
-        drag_scrollbar_thumb(gui_child, thumb_x, thumb_y, bottom_y);
+        let thumb = scrollbar.thumb;
+        let track = scrollbar.track;
+        let thumb_left = thumb.left;
+        let thumb_width = thumb.width;
+        let thumb_top = thumb.top;
+        let thumb_height = thumb.height;
+        let track_top = track.top;
+        let track_height = track.height;
+        let thumb_x = thumb_left + thumb_width / 2;
+        let thumb_y = thumb_top + thumb_height / 2;
+        let bottom_y = track_top + track_height - 2;
+        gui_child.window_pointer("down", thumb_x, thumb_y);
+        gui_child.window_pointer("move-held", thumb_x, bottom_y);
+        gui_child.window_pointer("up", thumb_x, bottom_y);
         let scrolled = json_null();
         for attempt in 0..40 {
             let candidate = json_cli(context, cli, ["ui-snapshot"]);
@@ -883,7 +943,7 @@ fn entry() {
             scrolled != json_null(),
             "workbench_sidebar_scroll_did_not_move"
         );
-        double_click_message(gui_child, first_visible.render.text);
+        double_click_message(gui_child, first_text);
         let editor_closed = wait_for_editor(context, cli, first_visible.id, 0);
         test_harness::require(
             editor_closed.tab_editor == json_null(),
@@ -891,10 +951,19 @@ fn entry() {
         );
         resize_gui(gui_child, 1000, 680);
         let scrollbar = scrolled.layout.sidebar.scrollbar;
-        let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
-        let thumb_y = scrollbar.thumb.top + scrollbar.thumb.height / 2;
-        let top_y = scrollbar.track.top + 2;
-        drag_scrollbar_thumb(gui_child, thumb_x, thumb_y, top_y);
+        let thumb = scrollbar.thumb;
+        let track = scrollbar.track;
+        let thumb_left = thumb.left;
+        let thumb_width = thumb.width;
+        let thumb_top = thumb.top;
+        let thumb_height = thumb.height;
+        let track_top = track.top;
+        let top_y = track_top + 2;
+        let thumb_x = thumb_left + thumb_width / 2;
+        let thumb_y = thumb_top + thumb_height / 2;
+        gui_child.window_pointer("down", thumb_x, thumb_y);
+        gui_child.window_pointer("move-held", thumb_x, top_y);
+        gui_child.window_pointer("up", thumb_x, top_y);
         json_cli(context, cli, ["ui-action", "select-tab", "-t", target]);
         json_cli(
             context,
@@ -980,8 +1049,10 @@ fn entry() {
             succeeded,
             failure
         );
+        0
     } catch (error) {
         completion_failure = "" + error;
+        0
     }
     if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);

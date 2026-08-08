@@ -603,12 +603,10 @@ fn remote_ui_smoke_host_eval_he_ceiling() {
     assert!(!output.rust.contains("compat delegating"));
 }
 
-#[test]
-fn fresh_clone_rehearsal_pack_builds() {
-    // HostEval pack still needs a rich embedding host to return entry 0; lock AOT
-    // compile success (the previous tip failure mode) rather than bare qualify.
+fn assert_bundled_aot_pack_builds(entry: &str) {
+    // Lock AOT compile success (not bare qualify entry_value): HostEval packs still
+    // need a rich embedding host to return 0, but Native smokes must compile clean.
     let root = repo();
-    let entry = "scripts/rh/fresh-clone-rehearsal.rh";
     let source = std::fs::read_to_string(root.join(entry)).unwrap_or_else(|error| {
         panic!("read {entry}: {error}");
     });
@@ -627,8 +625,10 @@ fn fresh_clone_rehearsal_pack_builds() {
         output.execution_mode
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
     let dir = std::env::temp_dir().join(format!(
-        "agenterm-rh-fresh-clone-pack-{}",
+        "agenterm-rh-aot-pack-{}-{}",
+        entry.replace('/', "_").replace('.', "_"),
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
@@ -640,6 +640,21 @@ fn fresh_clone_rehearsal_pack_builds() {
         built.native_path.display()
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fresh_clone_rehearsal_pack_builds() {
+    assert_bundled_aot_pack_builds("scripts/rh/fresh-clone-rehearsal.rh");
+}
+
+#[test]
+fn workbench_smoke_pack_builds() {
+    assert_bundled_aot_pack_builds("scripts/rh/workbench-smoke.rh");
+}
+
+#[test]
+fn unix_frontend_smoke_pack_builds() {
+    assert_bundled_aot_pack_builds("scripts/rh/unix-frontend-smoke.rh");
 }
 
 #[test]
