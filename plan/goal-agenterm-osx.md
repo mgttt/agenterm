@@ -35,8 +35,11 @@
 
 - `agenterm-con` 在本机 macOS **可顺利打开**
 - `cargo test --bin agenterm-con` → **43 pass**
-- `cargo test --test agenterm_con_blackbox` → 约 **3 pass / 9 fail / 2 ignore**  
-  - 失败主因：测试硬编码 **`cmd.exe`**（Win-centric），**不是** con 打不开
+- `cargo test --test agenterm_con_blackbox`（merge 后亲测，约 **10 pass / 3 fail / 2 ignore**）  
+  - shell 跨平台已修（`$SHELL` / `/bin/sh`）；**残留红**：  
+    1. `nonexistent_program_via_dash_e…`：Unix 上 `-e` 不存在程序仍 **exit 0**（窗口正常关，spawn 失败未映到进程码）  
+    2. `typed_input_echoes…`：时延阈值（真机 ~3s 超 400ms 预算，偏 flake/启动成本）  
+    3. `repeated_ctrl_wheel_zoom…`：需再归因（崩溃 vs 时序）
 - 亲测：`./target/debug/agenterm-con --no-activate --cols 80 --rows 24 --emit-snapshot … --script …`  
   - `child_alive=true`，屏上可见 `DEF_OK` / `CON_OK`，title `agenterm-con — SF Mono`
   - 默认 shell 可能是 bash+py38 提示，PTY 仍正常
