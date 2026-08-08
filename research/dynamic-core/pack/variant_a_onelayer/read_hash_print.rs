@@ -7,7 +7,11 @@
 mod abi;
 #[path = "../../core/kernel.rs"]
 mod kernel;
+#[cfg(dc_os = "linux")]
 #[path = "../../adapters/linux/readfile.rs"]
+mod adapter;
+#[cfg(dc_os = "windows")]
+#[path = "../../adapters/windows/readfile.rs"]
 mod adapter;
 #[path = "../../payloads/read_hash_print/logic.rs"]
 mod payload;

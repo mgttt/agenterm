@@ -6,13 +6,11 @@
 
 use crate::abi::Kernel;
 
-static mut BUF: [u8; 65536] = [0u8; 65536];
-
 fn fnv1a64(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 1469598103934665603;
+    let mut h: u64 = 14695981039346656037; // FNV-1a/64 offset basis (0xcbf29ce484222325)
     for &b in bytes {
         h ^= b as u64;
-        h = h.wrapping_mul(1099511628211);
+        h = h.wrapping_mul(1099511628211); // FNV prime (0x100000001b3)
     }
     h
 }
@@ -30,8 +28,11 @@ fn hex16(mut v: u64, out: &mut [u8; 17]) {
 
 pub fn run(k: &Kernel) -> ! {
     let path = b"input.txt\0";
-    let buf_ptr = core::ptr::addr_of_mut!(BUF) as *mut u8;
-    let n = crate::adapter::read_file(k, path.as_ptr(), buf_ptr, 65536);
+    // Request a RW read buffer from primitive ① (a payload in a flat, RX-mapped
+    // blob cannot rely on static .bss/.data — that region is not writable).
+    const CAP: usize = 65536;
+    let buf_ptr = (k.mem_alloc)(CAP);
+    let n = crate::adapter::read_file(k, path.as_ptr(), buf_ptr, CAP);
     let slice = if n > 0 {
         unsafe { core::slice::from_raw_parts(buf_ptr, n as usize) }
     } else {

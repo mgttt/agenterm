@@ -60,9 +60,14 @@ pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
     0
 }
 
+// ===========================================================================
+// LINUX x86_64 implementation of the four primitives.
+// ===========================================================================
+
 // ---------------------------------------------------------------------------
 // ③ reachability — raw syscall (Linux path)
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
 pub extern "sysv64" fn raw_syscall(
     n: usize,
     a: usize,
@@ -92,13 +97,17 @@ pub extern "sysv64" fn raw_syscall(
 }
 
 // Linux syscall numbers used by the kernel's own primitives.
+#[cfg(target_os = "linux")]
 const SYS_MMAP: usize = 9;
+#[cfg(target_os = "linux")]
 const SYS_MPROTECT: usize = 10;
+#[cfg(target_os = "linux")]
 const SYS_EXIT: usize = 60;
 
 // ---------------------------------------------------------------------------
 // ① memory — reserve+commit (RW) and protect (RW <-> RX)
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
 pub extern "sysv64" fn mem_alloc(size: usize) -> *mut u8 {
     // mmap(NULL, size, PROT_READ|WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
     const PROT_RW: usize = 0x3;
@@ -107,6 +116,7 @@ pub extern "sysv64" fn mem_alloc(size: usize) -> *mut u8 {
     p as *mut u8
 }
 
+#[cfg(target_os = "linux")]
 pub extern "sysv64" fn mem_protect(ptr: *mut u8, size: usize, exec: bool) {
     const PROT_RX: usize = 0x5; // READ|EXEC
     const PROT_RW: usize = 0x3;
@@ -118,6 +128,7 @@ pub extern "sysv64" fn mem_protect(ptr: *mut u8, size: usize, exec: bool) {
 // ③ symbol resolution (dlsym / GetProcAddress). Unused on the Linux path
 // (file access goes through raw_syscall) — present as a primitive placeholder.
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
 pub extern "sysv64" fn sym(_module: *const u8, _name: *const u8) -> *mut u8 {
     core::ptr::null_mut()
 }
@@ -128,6 +139,7 @@ pub extern "sysv64" fn sym(_module: *const u8, _name: *const u8) -> *mut u8 {
 // (int or pointer). Floats, structs-by-value and >7 args are out of scope
 // (not needed by the file adapters). On Linux the native convention is sysv64.
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
 pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> usize {
     unsafe {
         let a = core::slice::from_raw_parts(args, nargs);
@@ -152,8 +164,103 @@ pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> 
 // ---------------------------------------------------------------------------
 // process exit (bootstrap)
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
 pub extern "sysv64" fn exit(code: usize) -> ! {
     raw_syscall(SYS_EXIT, code, 0, 0, 0, 0, 0);
+    loop {}
+}
+
+// ===========================================================================
+// WINDOWS x86_64 implementation — added in Phase 2 (the "+1 OS" step).
+// This is the ENTIRE in-kernel cost of adding Windows. Note what is NOT here:
+// no file abstraction, no portable I/O — only raw reachability (sym) and the
+// platform's own memory + call mechanisms. Reachability, not semantics.
+// ===========================================================================
+
+// ③ On Windows there is no stable user-mode `syscall` numbering; the raw-syscall
+// path is not used. Everything goes through symbol resolution + call.
+#[cfg(windows)]
+pub extern "sysv64" fn raw_syscall(
+    _n: usize,
+    _a: usize,
+    _b: usize,
+    _c: usize,
+    _d: usize,
+    _e: usize,
+    _f: usize,
+) -> isize {
+    -1
+}
+
+// ③ symbol resolution — bootstrap via the two loader entrypoints (the OS's own
+// symbol resolver), then reach anything else dynamically. This import table is
+// the minimal bootstrap; it is linkage, not encapsulation.
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn LoadLibraryA(name: *const u8) -> *mut u8;
+    fn GetProcAddress(module: *mut u8, name: *const u8) -> *mut u8;
+}
+
+#[cfg(windows)]
+pub extern "sysv64" fn sym(module: *const u8, name: *const u8) -> *mut u8 {
+    unsafe {
+        let h = LoadLibraryA(module);
+        GetProcAddress(h, name)
+    }
+}
+
+// ④ call — data-driven native call, Windows (win64) convention.
+#[cfg(windows)]
+pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> usize {
+    unsafe {
+        let a = core::slice::from_raw_parts(args, nargs);
+        macro_rules! t {
+            ($($p:ty),*) => { core::mem::transmute::<_, extern "win64" fn($($p),*) -> usize>(addr) };
+        }
+        match nargs {
+            0 => (t!())(),
+            1 => (t!(usize))(a[0]),
+            2 => (t!(usize, usize))(a[0], a[1]),
+            3 => (t!(usize, usize, usize))(a[0], a[1], a[2]),
+            4 => (t!(usize, usize, usize, usize))(a[0], a[1], a[2], a[3]),
+            5 => (t!(usize, usize, usize, usize, usize))(a[0], a[1], a[2], a[3], a[4]),
+            6 => (t!(usize, usize, usize, usize, usize, usize))(a[0], a[1], a[2], a[3], a[4], a[5]),
+            _ => (t!(usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6],
+            ),
+        }
+    }
+}
+
+// ① memory — VirtualAlloc (reserve+commit RW) / VirtualProtect (RW <-> RX),
+// reached through sym + call. No new primitive kind is introduced.
+#[cfg(windows)]
+pub extern "sysv64" fn mem_alloc(size: usize) -> *mut u8 {
+    const MEM_COMMIT_RESERVE: usize = 0x3000;
+    const PAGE_READWRITE: usize = 0x04;
+    let f = sym(b"kernel32.dll\0".as_ptr(), b"VirtualAlloc\0".as_ptr());
+    let args = [0usize, size, MEM_COMMIT_RESERVE, PAGE_READWRITE];
+    call(f, 4, args.as_ptr()) as *mut u8
+}
+
+#[cfg(windows)]
+pub extern "sysv64" fn mem_protect(ptr: *mut u8, size: usize, exec: bool) {
+    const PAGE_EXECUTE_READ: usize = 0x20;
+    const PAGE_READWRITE: usize = 0x04;
+    let prot = if exec { PAGE_EXECUTE_READ } else { PAGE_READWRITE };
+    let mut old: u32 = 0;
+    let f = sym(b"kernel32.dll\0".as_ptr(), b"VirtualProtect\0".as_ptr());
+    let args = [ptr as usize, size, prot, core::ptr::addr_of_mut!(old) as usize];
+    call(f, 4, args.as_ptr());
+}
+
+// process exit (bootstrap)
+#[cfg(windows)]
+pub extern "sysv64" fn exit(code: usize) -> ! {
+    let f = sym(b"kernel32.dll\0".as_ptr(), b"ExitProcess\0".as_ptr());
+    let args = [code];
+    call(f, 1, args.as_ptr());
     loop {}
 }
 
@@ -196,9 +303,16 @@ extern "sysv64" {
     fn agent_main(k: *const Kernel) -> !;
 }
 
-#[cfg(dc_variant = "a")]
+#[cfg(all(dc_variant = "a", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
+    let k = native_table();
+    unsafe { agent_main(&k as *const Kernel) }
+}
+
+#[cfg(all(dc_variant = "a", windows))]
+#[no_mangle]
+pub extern "C" fn mainCRTStartup() -> ! {
     let k = native_table();
     unsafe { agent_main(&k as *const Kernel) }
 }
@@ -206,9 +320,16 @@ pub extern "C" fn _start() -> ! {
 #[cfg(dc_variant = "b")]
 static DC_BLOB: &[u8] = include_bytes!(env!("DC_BLOB"));
 
-#[cfg(dc_variant = "b")]
+#[cfg(all(dc_variant = "b", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
+    let k = native_table();
+    load_and_run(DC_BLOB, &k)
+}
+
+#[cfg(all(dc_variant = "b", windows))]
+#[no_mangle]
+pub extern "C" fn mainCRTStartup() -> ! {
     let k = native_table();
     load_and_run(DC_BLOB, &k)
 }

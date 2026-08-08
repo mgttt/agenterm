@@ -17,7 +17,7 @@ HOST="$(rustc -vV | sed -n 's/host: //p')"
 LLD="$SYSROOT/lib/rustlib/$HOST/bin/rust-lld.exe"
 [ -x "$LLD" ] || LLD="$SYSROOT/lib/rustlib/$HOST/bin/rust-lld"
 
-RFLAGS="--edition 2021 -O -C panic=abort -C debuginfo=0 -C force-unwind-tables=no -A unexpected_cfgs --target $TARGET"
+RFLAGS="--edition 2021 -O -C panic=abort -C debuginfo=0 -C force-unwind-tables=no -A unexpected_cfgs --cfg dc_os=\"linux\" --target $TARGET"
 
 echo "== rustc: $(rustc --version)"
 echo "== target: $TARGET"
