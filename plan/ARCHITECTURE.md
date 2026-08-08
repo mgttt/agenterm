@@ -170,7 +170,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 
 7. 不要把 rust-analyzer / 通用 LSP 当成「结构 SSOT 已对齐」的证据；LSP 不消费本文。  
 8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。  
-9. **文档脱敏**：`plan/**` / goal / 派工 / 示例命令 **禁止** 宿主绝对 home 路径与真实凭据。仓内用**仓库相对路径**；用户家目录一律压成 **`~/...`**（Darwin/Linux/Windows 同一规则，禁止保留各平台 home 根或 `<name>` 模板）。铁律：[`Agents.md`](../Agents.md) Document redaction；自检：[`scripts/doc-redact-check.sh`](../scripts/doc-redact-check.sh)。
+9. **文档脱敏**：仓内 → 仓库相对；用户家目录 → **`~/...`**。转换：`/Users/<name>/`、`/home/<name>/`、`%USERPROFILE%\`、`C:\Users\<name>\` **全部** → `~/`（详见 [`Agents.md`](../Agents.md) Home conversion table；自检 [`scripts/doc-redact-check.sh`](../scripts/doc-redact-check.sh)）。
 
 ---
 

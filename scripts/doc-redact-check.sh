@@ -8,11 +8,9 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 
-# Match expanded home roots without teaching them in Agents.md prose:
-# - Darwin user homes
-# - Linux user homes
-# - Windows user-profile style paths
-pattern='(^|[^~])(/Users/|/home/|[A-Za-z]:\\Users\\)|@gmail\.com|@qq\.com|@163\.com'
+# Match host home forms that must become ~/... (see Agents.md conversion table):
+# Darwin /Users/, Linux /home/, Windows C:\Users\ and %USERPROFILE% / $env:USERPROFILE
+pattern='(^|[^~])(/Users/|/home/|[A-Za-z]:\\Users\\)|%USERPROFILE%|%UserProfile%|\$env:USERPROFILE|@gmail\.com|@qq\.com|@163\.com'
 
 if command -v rg >/dev/null 2>&1; then
   if rg -nE "$pattern" --glob '!target/**' --glob '!**/node_modules/**' "$@"; then

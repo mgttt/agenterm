@@ -18,52 +18,61 @@ for other agents. Same bar as credentials.
 
 ### Path policy (all OS / ISA — one vocabulary)
 
-| Need | Canonical form in docs |
-|------|------------------------|
-| File inside this clone | **repo-relative** only: `plan/...`, `src/...`, `./check.sh` |
-| User home / product data | **`~/...` only** — e.g. `~/.local/share/agenterm/`, `~/env.jsonl` |
-| Shell env when `~` is wrong medium | `$HOME`, `$SHELL` (still no expanded host path) |
-| Current checkout root in commands | “from repository root” + relative command; **never** `cd` + host absolute |
+**Target form is only two kinds:**
 
-**Home map (mandatory):** any path under a user home directory becomes
-**`~/` + the part after the home root**. This covers Darwin, Linux, and Windows
-alike. Do **not** keep platform home roots in the tree — not real usernames,
-not `<name>` placeholders, not “example” homes in plan/goal/docs.
+1. **Repo-relative** — files inside the clone: `plan/...`, `src/...`, `./check.sh`
+2. **`~/...`** — anything under the user home (product data, config, caches)
+
+Never paste `pwd` / expanded CWD. Prefer “from repository root” over `cd` + absolute.
+
+#### Home conversion table (mandatory — memorize this)
+
+Strip the host home root (and the account segment) and rewrite with `~/`.
+Use `/` after `~/` even on Windows. Real names and `<name>` placeholders both convert.
+
+| Host form (do not leave in tree) | Write as |
+|----------------------------------|----------|
+| `/Users/<name>/...` (Darwin) | `~/...` |
+| `/home/<name>/...` (Linux) | `~/...` |
+| `%USERPROFILE%\...` or `%UserProfile%\...` | `~/...` |
+| `$env:USERPROFILE\...` (PowerShell) | `~/...` |
+| `C:\Users\<name>\...` (and other drive letters) | `~/...` |
+| `$HOME/...` when used as a *documented path* | prefer `~/...` |
+
+Examples:
+
+| Before | After |
+|--------|--------|
+| `/Users/<name>/.local/share/agenterm` | `~/.local/share/agenterm` |
+| `/home/<name>/.config/agenterm` | `~/.config/agenterm` |
+| `%USERPROFILE%\AppData\Local\agenterm` | `~/AppData/Local/agenterm` |
+| `C:\Users\<name>\.local\share\agenterm` | `~/.local/share/agenterm` |
+| absolute path *into this clone* | repo-relative (`src/...`), not `~/...` |
 
 | Class | Action |
 |-------|--------|
-| In-repo path written as absolute | → repo-relative |
-| Under user home (any host layout) | → `~/...` |
-| Product data already under home | → `~/...` form only |
+| Absolute path inside the clone | → repo-relative |
+| Absolute path under user home (any row above) | → `~/...` |
+| Product data already under home | → `~/...` only |
 
-**Forbidden in prose, tables, examples, and “bad example” columns alike:**
-
-- Expanded host home absolutes (every OS)
-- Re-teaching OS-specific home roots in docs (describe the class as
-  “host absolute home path”; show only the good form `~/...`)
-
-| Also never write | Write instead |
-|------------------|---------------|
-| real email / phone / token / API key / SMTP pass | RFC 2606 / `<AUTH_CODE>` / `<API_KEY>` / `<TOKEN>` |
-| real IP / MAC / personal hostname | `<IP>` / `<HOST>` / generic `station` |
-
-Windows readers map `~/...` to the user profile mentally; do not dual-write
-`%USERPROFILE%` unless a Windows-only script truly requires that expansion.
+**Also never write:** real email / phone / token / API key / SMTP pass → RFC 2606 /
+`<AUTH_CODE>` / `<API_KEY>` / `<TOKEN>`; real IP / MAC / personal hostname →
+`<IP>` / `<HOST>` / generic `station`.
 
 **Exception (code only):** unit tests that assert path *parsers* may use fixed
-synthetic absolute strings; they must not embed a real account name. Docs and
-agent goals never get that exception.
+synthetic absolute strings without a real account name. Docs, PRD, plan, goals,
+and handoff prompts **never** get that exception.
 
-**Mandatory pre-commit / post-write self-check** on every new or edited text file:
+**Mandatory pre-commit / post-write self-check:**
 
 ```bash
-# From repository root; any hit = rewrite before commit (→ repo-relative or ~/)
+# From repository root; any hit = rewrite (repo-relative or ~/)
 ./scripts/doc-redact-check.sh path/to/file
 ```
 
-- Path hit → repo-relative or `~/...` (home-absolute always collapses to `~/`)
+- Path hit → apply the conversion table above
 - Credential-like values → placeholders only
-- Handoff prompts for other agents: **same scrub**; “internal plan” is not exempt
+- Handoff prompts for other agents: same scrub; “internal plan” is not exempt
 
 ## Planning and decomposition method
 
