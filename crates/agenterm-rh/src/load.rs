@@ -112,6 +112,7 @@ impl RhNativeModule {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn register_host_v7(
         &self,
         fleet_call: RhHostFleetCall,
@@ -134,6 +135,7 @@ impl RhNativeModule {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn register_host_v8(
         &self,
         fleet_call: RhHostFleetCall,
@@ -157,6 +159,7 @@ impl RhNativeModule {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn register_host_v9(
         &self,
         fleet_call: RhHostFleetCall,

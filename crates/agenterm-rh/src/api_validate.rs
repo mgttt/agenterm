@@ -16,9 +16,7 @@ fn script_error(code: &'static str, message: impl Into<String>) -> ApiValidateEr
 }
 
 fn is_shipped_surface(path: &str) -> bool {
-    SHIPPED_SURFACE_PATHS
-        .iter()
-        .any(|&candidate| candidate == path)
+    SHIPPED_SURFACE_PATHS.contains(&path)
         || path == "std::fs::try_remove_file"
         || path == "std::fs::try_copy"
         || path == "std::fs::try_create_dir_all"

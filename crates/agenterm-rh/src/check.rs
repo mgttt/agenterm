@@ -34,8 +34,7 @@ pub fn check_with_project_validation(
 ) -> Result<(), RhError> {
     check(source)?;
     if let Some(root) = project_root {
-        let module_sources =
-            validate_project_imports(root, source).map_err(|error| RhError::Compile(error))?;
+        let module_sources = validate_project_imports(root, source).map_err(RhError::Compile)?;
         for module_source in module_sources {
             validate_available_apis(&module_source).map_err(api_validate_error_to_rh)?;
         }

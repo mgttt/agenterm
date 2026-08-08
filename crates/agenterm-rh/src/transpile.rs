@@ -1473,27 +1473,26 @@ fn stmt_uses_string_list_param(stmt: &Stmt, param: &str) -> bool {
 }
 
 fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
-    if let Expr::Dot(boxed, ..) = expr {
-        if let Expr::MethodCall(call, ..) = &boxed.rhs {
-            if call.name == "args" && call.args.len() == 1 && is_param_var(&call.args[0], param) {
-                return true;
-            }
-            if call.name == "push" && is_param_var(&boxed.lhs, param) {
-                return true;
-            }
+    if let Expr::Dot(boxed, ..) = expr
+        && let Expr::MethodCall(call, ..) = &boxed.rhs
+    {
+        if call.name == "args" && call.args.len() == 1 && is_param_var(&call.args[0], param) {
+            return true;
         }
-    }
-    if let Expr::FnCall(call, ..) = expr {
-        if let Some(argv_index) = process_command_argv_arg_index(call)
-            && is_param_var(&call.args[argv_index], param)
-        {
+        if call.name == "push" && is_param_var(&boxed.lhs, param) {
             return true;
         }
     }
-    if let Expr::Index(boxed, ..) = expr {
-        if is_param_var(&boxed.lhs, param) {
-            return true;
-        }
+    if let Expr::FnCall(call, ..) = expr
+        && let Some(argv_index) = process_command_argv_arg_index(call)
+        && is_param_var(&call.args[argv_index], param)
+    {
+        return true;
+    }
+    if let Expr::Index(boxed, ..) = expr
+        && is_param_var(&boxed.lhs, param)
+    {
+        return true;
     }
     match expr {
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
@@ -1533,10 +1532,9 @@ fn param_used_as_child_list(def: &ScriptFuncDef, param: &str) -> bool {
 fn expr_uses_child_list_param(expr: &Expr, param: &str) -> bool {
     if let Expr::Dot(boxed, ..) = expr
         && is_param_var(&boxed.lhs, param)
+        && let Expr::Property(property, ..) = &boxed.rhs
     {
-        if let Expr::Property(property, ..) = &boxed.rhs {
-            return property.2.as_str() == "len";
-        }
+        return property.2.as_str() == "len";
     }
     match expr {
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
@@ -4047,18 +4045,17 @@ fn emit_command_string_args(
 }
 
 fn emit_duration_ms(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
-    if let Expr::FnCall(call, ..) = expr {
-        if call.namespace.to_string() == "std::time::Duration" {
-            if call.name == "from_secs" && call.args.len() == 1 && is_pure_int_expr(&call.args[0]) {
-                emit_expr(out, &call.args[0], ctx)?;
-                out.push_str(" * 1000");
-                return Ok(true);
-            }
-            if call.name == "from_millis" && call.args.len() == 1 && is_pure_int_expr(&call.args[0])
-            {
-                emit_expr(out, &call.args[0], ctx)?;
-                return Ok(true);
-            }
+    if let Expr::FnCall(call, ..) = expr
+        && call.namespace.to_string() == "std::time::Duration"
+    {
+        if call.name == "from_secs" && call.args.len() == 1 && is_pure_int_expr(&call.args[0]) {
+            emit_expr(out, &call.args[0], ctx)?;
+            out.push_str(" * 1000");
+            return Ok(true);
+        }
+        if call.name == "from_millis" && call.args.len() == 1 && is_pure_int_expr(&call.args[0]) {
+            emit_expr(out, &call.args[0], ctx)?;
+            return Ok(true);
         }
     }
     if is_pure_int_expr(expr) {
@@ -4523,11 +4520,10 @@ fn emit_split_separator(
     emit_stringish(out, separator, ctx)
 }
 
+type StringSplitParts<'a> = (Option<&'a Expr>, Option<(&'a str, Vec<&'a str>)>, &'a Expr);
+
 /// `text.split(sep)` / `doc.field.split(sep)` — mirrors `json_contains_path` nesting.
-fn string_split_parts<'a>(
-    expr: &'a Expr,
-    ctx: &EmitCtx,
-) -> Option<(Option<&'a Expr>, Option<(&'a str, Vec<&'a str>)>, &'a Expr)> {
+fn string_split_parts<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<StringSplitParts<'a>> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
@@ -4582,10 +4578,7 @@ fn append_json_split<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> Option<&'a 
 }
 
 /// `text.split(sep).len` / `doc.field.split(sep).len`.
-fn string_split_len_parts<'a>(
-    expr: &'a Expr,
-    ctx: &EmitCtx,
-) -> Option<(Option<&'a Expr>, Option<(&'a str, Vec<&'a str>)>, &'a Expr)> {
+fn string_split_len_parts<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<StringSplitParts<'a>> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
@@ -4594,12 +4587,11 @@ fn string_split_len_parts<'a>(
         return string_split_parts(&boxed.lhs, ctx);
     }
     // Shape B: Dot(json_root, Dot(Property…, Dot(MethodCall(split), len)))
-    if let Some((binding, mut path)) = json_value_path(&boxed.lhs, ctx) {
-        if let Some(sep) = append_json_split_len(&boxed.rhs, &mut path)
-            && split_separator_ok(sep, ctx)
-        {
-            return Some((None, Some((binding, path)), sep));
-        }
+    if let Some((binding, mut path)) = json_value_path(&boxed.lhs, ctx)
+        && let Some(sep) = append_json_split_len(&boxed.rhs, &mut path)
+        && split_separator_ok(sep, ctx)
+    {
+        return Some((None, Some((binding, path)), sep));
     }
     // Shape C: Dot(string_receiver, Dot(MethodCall(split), len))
     if let Expr::Dot(inner, ..) = &boxed.rhs
@@ -4693,7 +4685,7 @@ fn string_list_index_misparse_len<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(
     is_len_property(&inner.rhs).then_some((ident.1.as_str(), *index))
 }
 
-fn string_list_index_rhs<'a>(rhs: &'a Expr) -> Option<&'a Expr> {
+fn string_list_index_rhs(rhs: &Expr) -> Option<&Expr> {
     if let Expr::Dot(inner, ..) = rhs
         && matches!(&inner.lhs, Expr::IntegerConstant(..))
         && is_len_property(&inner.rhs)
@@ -4832,7 +4824,7 @@ fn emit_string_list_index_misparse_len(
     binding: &str,
     index: i64,
 ) -> Result<(), RhError> {
-    out.push_str("(");
+    out.push('(');
     out.push_str("rh_string_list_get(&");
     out.push_str(binding);
     out.push_str(", ");
@@ -4917,7 +4909,7 @@ enum JsonAssignTarget<'a> {
     },
 }
 
-fn json_assign_value_path<'a>(expr: &'a Expr) -> Option<(&'a str, Vec<&'a str>)> {
+fn json_assign_value_path(expr: &Expr) -> Option<(&str, Vec<&str>)> {
     match expr {
         Expr::Variable(ident, ..) => Some((ident.1.as_str(), Vec::new())),
         Expr::Dot(boxed, ..) => {
@@ -4976,10 +4968,10 @@ fn json_assign_target<'a>(lhs: &'a Expr, ctx: &EmitCtx) -> Option<JsonAssignTarg
             key: &index_box.rhs,
         });
     }
-    if let Some((binding, path)) = json_assign_value_path(lhs) {
-        if !path.is_empty() {
-            return Some(JsonAssignTarget::Path { binding, path });
-        }
+    if let Some((binding, path)) = json_assign_value_path(lhs)
+        && !path.is_empty()
+    {
+        return Some(JsonAssignTarget::Path { binding, path });
     }
     None
 }
@@ -5073,9 +5065,7 @@ fn json_path_int_plus_assign<'a>(
     ctx: &EmitCtx,
 ) -> Option<(JsonAssignTarget<'a>, &'a Expr)> {
     let (op, bin) = assign;
-    let Some((_, _, _, syntax, _, _)) = op.get_op_assignment_info() else {
-        return None;
-    };
+    let (_, _, _, syntax, _, _) = op.get_op_assignment_info()?;
     if syntax != "+=" {
         return None;
     }
@@ -5189,11 +5179,11 @@ fn std_time_system_time_now_unix_millis(expr: &Expr) -> bool {
         && call.args.is_empty()
 }
 
-fn symlink_metadata_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+fn symlink_metadata_property(expr: &Expr) -> Option<(&Expr, &str)> {
     fs_metadata_property(expr, "symlink_metadata")
 }
 
-fn metadata_call_property<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+fn metadata_call_property(expr: &Expr) -> Option<(&Expr, &str)> {
     fs_metadata_property(expr, "metadata")
 }
 
@@ -5225,7 +5215,7 @@ fn dir_entry_variable<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
         .then_some(ident.1.as_str())
 }
 
-fn dir_entry_field_name<'a>(rhs: &'a Expr) -> Option<&'a str> {
+fn dir_entry_field_name(rhs: &Expr) -> Option<&str> {
     match rhs {
         Expr::Property(property, ..) => Some(property.2.as_str()),
         Expr::Dot(boxed, ..) => match &boxed.lhs {
@@ -5320,7 +5310,7 @@ fn system_time_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'
     matches!(name, "unix_millis" | "rfc3339").then_some((ident.1.as_str(), name))
 }
 
-fn dot_property_name<'a>(rhs: &'a Expr) -> Option<&'a str> {
+fn dot_property_name(rhs: &Expr) -> Option<&str> {
     match rhs {
         Expr::Property(property, ..) => Some(property.2.as_str()),
         Expr::MethodCall(call, ..) if call.args.is_empty() => Some(call.name.as_str()),
@@ -5424,7 +5414,7 @@ fn dir_entry_metadata_modified_rfc3339<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Opt
     (dot_property_name(&outer.rhs)? == "rfc3339").then_some(binding)
 }
 
-fn fs_metadata_modified_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+fn fs_metadata_modified_arg(expr: &Expr) -> Option<(&Expr, &str)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
@@ -5440,7 +5430,7 @@ fn fs_metadata_modified_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
     None
 }
 
-fn fs_metadata_len_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+fn fs_metadata_len_arg(expr: &Expr) -> Option<(&Expr, &str)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
     };
@@ -5456,7 +5446,7 @@ fn fs_metadata_len_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
     None
 }
 
-fn fs_metadata_modified_unix_millis<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+fn fs_metadata_modified_unix_millis(expr: &Expr) -> Option<(&Expr, &str)> {
     let Expr::Dot(outer, ..) = expr else {
         return None;
     };
@@ -5465,10 +5455,9 @@ fn fs_metadata_modified_unix_millis<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a
     };
     let (path, call_name) = if let Some(path) = std_fs_metadata_arg(&inner.lhs) {
         (path, "metadata")
-    } else if let Some(path) = std_fs_symlink_metadata_arg(&inner.lhs) {
-        (path, "symlink_metadata")
     } else {
-        return None;
+        let path = std_fs_symlink_metadata_arg(&inner.lhs)?;
+        (path, "symlink_metadata")
     };
     if dot_property_name(&inner.rhs)? != "modified"
         || dot_property_name(&outer.rhs)? != "unix_millis"
@@ -5478,7 +5467,7 @@ fn fs_metadata_modified_unix_millis<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a
     Some((path, call_name))
 }
 
-fn fs_metadata_modified_rfc3339<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+fn fs_metadata_modified_rfc3339(expr: &Expr) -> Option<(&Expr, &str)> {
     let Expr::Dot(outer, ..) = expr else {
         return None;
     };
@@ -5487,10 +5476,9 @@ fn fs_metadata_modified_rfc3339<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str
     };
     let (path, call_name) = if let Some(path) = std_fs_metadata_arg(&inner.lhs) {
         (path, "metadata")
-    } else if let Some(path) = std_fs_symlink_metadata_arg(&inner.lhs) {
-        (path, "symlink_metadata")
     } else {
-        return None;
+        let path = std_fs_symlink_metadata_arg(&inner.lhs)?;
+        (path, "symlink_metadata")
     };
     if dot_property_name(&inner.rhs)? != "modified" || dot_property_name(&outer.rhs)? != "rfc3339" {
         return None;
@@ -6331,7 +6319,7 @@ fn emit_intish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), R
         return Ok(());
     }
     if let Some(binding) = set_keys_len_path(expr, ctx) {
-        out.push_str("(");
+        out.push('(');
         out.push_str(binding);
         out.push_str(".len() as INT)");
         return Ok(());
@@ -6471,7 +6459,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if let Some(binding) = set_keys_len_path(expr, ctx) {
-            out.push_str("(");
+            out.push('(');
             out.push_str(binding);
             out.push_str(".len() as INT)");
             return Ok(());
@@ -7613,10 +7601,10 @@ fn emit_process_status(
         return Ok(false);
     }
     let mut options_expr = String::new();
-    if let Some(options) = options {
-        if !emit_process_options(&mut options_expr, options, ctx)? {
-            return Ok(false);
-        }
+    if let Some(options) = options
+        && !emit_process_options(&mut options_expr, options, ctx)?
+    {
+        return Ok(false);
     }
     out.push_str("rh_process_status(");
     out.push_str(&program_expr);
@@ -7654,10 +7642,10 @@ fn emit_process_stdout_file(
         return Ok(false);
     }
     let mut options_expr = String::new();
-    if let Some(options) = options {
-        if !emit_process_options(&mut options_expr, options, ctx)? {
-            return Ok(false);
-        }
+    if let Some(options) = options
+        && !emit_process_options(&mut options_expr, options, ctx)?
+    {
+        return Ok(false);
     }
     out.push_str("rh_process_stdout_file(");
     out.push_str(&program_expr);
@@ -7849,7 +7837,7 @@ fn emit_native_string(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
         _ if let Some(binding) = path_binding_file_name(expr, ctx) => {
             out.push_str("&rh_path_file_name(&");
             out.push_str(binding);
-            out.push_str(")");
+            out.push(')');
         }
         _ if env_current_dir_display(expr) => {
             out.push_str("&rh_env_current_dir()");
@@ -8076,9 +8064,7 @@ fn string_plus_int_assign<'a>(
     ctx: &EmitCtx,
 ) -> Option<(&'a str, &'a Expr)> {
     let (op, bin) = assign;
-    let Some((_, _, _, syntax, _, _)) = op.get_op_assignment_info() else {
-        return None;
-    };
+    let (_, _, _, syntax, _, _) = op.get_op_assignment_info()?;
     if syntax != "+=" {
         return None;
     }

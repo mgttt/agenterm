@@ -360,11 +360,11 @@ pub fn ast_contains_eval(ast: &AST) -> bool {
         let Some(ASTNode::Expr(expr)) = path.last() else {
             return true;
         };
-        if let Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) = expr {
-            if call.name == "eval" {
-                *found.borrow_mut() = true;
-                return false;
-            }
+        if let Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) = expr
+            && call.name == "eval"
+        {
+            *found.borrow_mut() = true;
+            return false;
         }
         true
     });
@@ -383,9 +383,6 @@ fn reject_call(call: &FnCallExpr) -> Option<RhError> {
     }
     None
 }
-
-
-
 
 fn is_int_method_assign_rhs(expr: &Expr) -> bool {
     match expr {
@@ -648,15 +645,18 @@ mod tests {
 
     #[test]
     fn owned_scripts_have_pure_int_while_conditions() {
-        use std::path::PathBuf;
         use rhai::{ASTNode, Engine, OptimizationLevel, Stmt};
+        use std::path::PathBuf;
 
         use crate::expr_print::is_pure_int_expr;
 
         fn while_cond_errors(source: &str) -> Vec<String> {
             let mut engine = Engine::new();
             engine.set_optimization_level(OptimizationLevel::None);
-            engine.set_max_expr_depths(crate::check::RH_MAX_EXPR_DEPTH, crate::check::RH_MAX_EXPR_DEPTH);
+            engine.set_max_expr_depths(
+                crate::check::RH_MAX_EXPR_DEPTH,
+                crate::check::RH_MAX_EXPR_DEPTH,
+            );
             let ast = engine.compile(source).expect("compile");
             let mut errors = Vec::new();
             ast.walk(&mut |path| {
