@@ -1,0 +1,7 @@
+// Probe native std::fs::exists for shipped filesystem presence checks.
+fn entry() {
+    if std::fs::exists("Cargo.toml") {
+        return 1;
+    }
+    0
+}

@@ -1,0 +1,6 @@
+fn entry() {
+    if std::fs::exists("Cargo.toml") {
+        return 1;
+    }
+    0
+}

@@ -1,0 +1,5 @@
+fn entry() {
+    let payload = rh::bytes::from_text("probe");
+    let text = payload.to_text();
+    text.len
+}

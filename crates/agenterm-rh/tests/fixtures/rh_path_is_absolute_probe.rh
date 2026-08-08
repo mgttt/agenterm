@@ -1,0 +1,12 @@
+fn entry() {
+    let score = 0;
+    let abs = std::path::PathBuf::from("/tmp");
+    let rel = std::path::PathBuf::from("Cargo.toml");
+    if abs.is_absolute {
+        score += 1;
+    }
+    if !rel.is_absolute {
+        score += 10;
+    }
+    score
+}

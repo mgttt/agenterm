@@ -1,0 +1,4 @@
+fn entry() {
+    let millis = std::time::SystemTime::now().unix_millis;
+    millis
+}

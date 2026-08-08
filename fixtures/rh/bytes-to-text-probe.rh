@@ -1,0 +1,6 @@
+// Probe native Bytes.to_text roundtrip over rh::bytes::from_text input.
+fn entry() {
+    let payload = rh::bytes::from_text("probe");
+    let text = payload.to_text();
+    text.len
+}

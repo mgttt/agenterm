@@ -1,4 +1,0 @@
-fn entry() {
-    let doc = rhai::json::parse("{\"value\":7}");
-    doc.value
-}

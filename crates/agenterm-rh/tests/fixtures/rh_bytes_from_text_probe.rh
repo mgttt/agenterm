@@ -1,0 +1,4 @@
+fn entry() {
+    let payload = rh::bytes::from_text("agenterm-rh-probe");
+    payload.len
+}

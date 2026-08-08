@@ -1,0 +1,5 @@
+// Probe native std::time::SystemTime::now().unix_millis for evidence timestamps.
+fn entry() {
+    let millis = std::time::SystemTime::now().unix_millis;
+    millis
+}

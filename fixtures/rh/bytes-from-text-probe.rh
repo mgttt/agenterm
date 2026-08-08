@@ -1,0 +1,5 @@
+// Probe native rh::bytes::from_text for stringish payload construction.
+fn entry() {
+    let payload = rh::bytes::from_text("agenterm-rh-probe");
+    payload.len
+}

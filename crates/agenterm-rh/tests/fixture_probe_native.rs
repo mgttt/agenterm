@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, check, transpile_cdylib_with_mode};
 
-const NEW_PUBLIC_PROBES: [(&str, &[&str]); 14] = [
+const NEW_PUBLIC_PROBES: [(&str, &[&str]); 20] = [
     (
         "bytes-append-probe.rh",
         &["rh_bytes_append(", "rh_bytes_from_text("],
@@ -55,6 +55,30 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 14] = [
     (
         "string-list-set-probe.rh",
         &["rh_string_list_set(&mut parts,"],
+    ),
+    (
+        "bytes-from-text-probe.rh",
+        &["rh_bytes_from_text(&String::from(\"agenterm-rh-probe\"))"],
+    ),
+    (
+        "bytes-to-text-probe.rh",
+        &["rh_bytes_from_text(", "rh_bytes_to_text(&payload)"],
+    ),
+    (
+        "system-time-unix-millis-probe.rh",
+        &["rh_system_time_now_unix_millis()"],
+    ),
+    (
+        "path-is-absolute-probe.rh",
+        &["rh_path_is_absolute("],
+    ),
+    (
+        "string-split-probe.rh",
+        &["rh_string_split("],
+    ),
+    (
+        "std-fs-exists-probe.rh",
+        &["rh_std_fs_exists("],
     ),
 ];
 

@@ -1,0 +1,5 @@
+// Probe native String.split for delimiter-separated token discovery.
+fn entry() {
+    let parts = "a.b.c".split(".");
+    parts.len
+}
