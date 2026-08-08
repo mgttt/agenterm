@@ -1,0 +1,5 @@
+fn entry() {
+    let command = std::process::command("agenterm-cli");
+    command.args([]);
+    0
+}

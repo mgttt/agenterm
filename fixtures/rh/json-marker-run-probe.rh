@@ -1,0 +1,8 @@
+// Probe native json property reads on marker_run objects.
+fn entry() {
+    let marker_run = rh::json::parse("{\"text\":\"copy\",\"row\":4,\"column\":7}");
+    let marker_text = marker_run.text;
+    let marker_row = marker_run.row;
+    let marker_column = marker_run.column;
+    marker_text.len + marker_row + marker_column
+}

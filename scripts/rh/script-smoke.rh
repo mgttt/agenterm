@@ -108,19 +108,10 @@ fn pipe_stream_prefix(stream) {
 
 fn script_smoke_child_stop(child) {
     child.kill();
-    child.wait_with_output(std::time::Duration::from_secs(2));
+    return child.wait_with_output(std::time::Duration::from_secs(2));
 }
 
-fn script_smoke_child_stdout(child) {
-    let worker = child;
-    worker.stdout
-}
 
-fn script_smoke_set_stdin_text(command, text) {
-    let worker = command;
-    let payload = "" + text;
-    worker.stdin_text(payload);
-}
 
 fn process_output_exit_code(output) {
     output.exit_code
@@ -197,31 +188,19 @@ fn safe_command_arguments(program, arguments) {
                     || safe[operation_index] == "run"
                     || safe[operation_index] == "check"
             ) {
-        let redacted = [];
-        let index = 0;
-        while index < safe.len {
-            if index == operation_index + 1 {
-                redacted.push("<content>");
-            } else if index > operation_index + 1 {
-                let after_dash = 0;
-                let scan = operation_index + 2;
-                while scan < index {
-                    if safe[scan] == "--" {
-                        after_dash = 1;
-                    }
-                    scan += 1;
+        safe[operation_index + 1] = "<content>";
+        let scan_index = operation_index + 2;
+        while scan_index < safe.len {
+            if safe[scan_index] == "--" {
+                let content_index = scan_index + 1;
+                while content_index < safe.len {
+                    safe[content_index] = "<content>";
+                    content_index += 1;
                 }
-                if after_dash != 0 {
-                    redacted.push("<content>");
-                } else {
-                    redacted.push(safe[index]);
-                }
-            } else {
-                redacted.push(safe[index]);
+                break;
             }
-            index += 1;
+            scan_index += 1;
         }
-        return redacted;
     }
     safe
 }
@@ -304,7 +283,6 @@ fn run_program(
     );
     let stdout = output.stdout_text();
     let stderr = output.stderr_text();
-    let bytes = output.stdout;
     let success = 0;
     if output.success {
         success = 1;
@@ -313,8 +291,7 @@ fn run_program(
         success: success,
         exit_code: output.exit_code,
         stdout: stdout,
-        stderr: stderr,
-        bytes: bytes
+        stderr: stderr
     }
 }
 
@@ -422,7 +399,7 @@ fn process_ids(executable_name) {
     while index < processes.len {
         let process = processes[index];
         if process.executable_name.to_lower() == executable_name.to_lower() {
-            ids.push(process.id);
+            ids.push("" + process.id);
         }
         index += 1;
     }
@@ -435,19 +412,19 @@ fn process_exists(pid) {
     while index < processes.len {
         let process = processes[index];
         if process.id == pid {
-            return true;
+            return 1;
         }
         index += 1;
     }
-    false
+    0
 }
 
 fn wait_new_process(executable_name, existing, timeout_ms) {
     let attempts = timeout_ms / 5;
     for attempt in 0..attempts {
         for pid in process_ids(executable_name) {
-            if existing.contains(pid) == 0 {
-                return pid;
+            if existing.contains("" + pid) == 0 {
+                return 0 + pid;
             }
         }
         rh::task::sleep(std::time::Duration::from_millis(5));
@@ -459,7 +436,7 @@ fn wait_process_gone(pid, timeout_ms) {
     let attempts = timeout_ms / 10;
     for attempt in 0..attempts {
         if process_exists(pid) == 0 {
-            return;
+            return "";
         }
         rh::task::sleep(std::time::Duration::from_millis(10));
     }
@@ -733,27 +710,26 @@ fn active_tab_note_from_snapshot(snapshot) {
 }
 
 fn declared_evidence_ids() {
-    return [
-        "script.rh-runtime",
-        "script.rh-fleet",
-        "script.api-tree",
-        "script.fleet-v2",
-        "script.fleet-tabs-set-note",
-        "script.direct-entry",
-        "script.north-star",
-        "script.rh-robustness-budget",
-        "script.rh-framed",
-        "script.exit-classes",
-        "script.typed-errors",
-        "script.modules-tasks",
-        "script.stream",
-        "script.http",
-        "script.fs-lifecycle",
-        "script.runtime-lifecycle",
-        "script.supervisor",
-        "script.repl-supervision",
-        "script.audit"
-    ];
+    let ids = ["script.rh-runtime"];
+    ids.push("script.rh-fleet");
+    ids.push("script.api-tree");
+    ids.push("script.fleet-v2");
+    ids.push("script.fleet-tabs-set-note");
+    ids.push("script.direct-entry");
+    ids.push("script.north-star");
+    ids.push("script.rh-robustness-budget");
+    ids.push("script.rh-framed");
+    ids.push("script.exit-classes");
+    ids.push("script.typed-errors");
+    ids.push("script.modules-tasks");
+    ids.push("script.stream");
+    ids.push("script.http");
+    ids.push("script.fs-lifecycle");
+    ids.push("script.runtime-lifecycle");
+    ids.push("script.supervisor");
+    ids.push("script.repl-supervision");
+    ids.push("script.audit");
+    ids
 }
 
 fn matching(entries, field, value) {
@@ -912,8 +888,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         script_smoke_empty_env()
     );
     let pipe_child = pipe_command.start();
-    let pipe_worker = pipe_child;
-    let pipe_stream = script_smoke_child_stdout(pipe_worker);
+    let pipe_stream = pipe_child.stdout;
     let prefix = pipe_stream_prefix(pipe_stream);
     let pipe_output = pipe_child.wait_with_output(
         std::time::Duration::from_secs(5)
@@ -1343,7 +1318,7 @@ fn assert_tasks_and_http(
         );
         let requests = [];
         for line in std::fs::read_to_string(log_path).split("\n") {
-            if trimmed(line) != "" {
+            if ("" + trimmed("" + line)) != "" {
                 requests.push(rh::json::parse(line));
             }
         }
@@ -1974,7 +1949,7 @@ fn assert_runtime_and_framing(
         script_smoke_empty_env()
     );
     let malformed_open = "{";
-    script_smoke_set_stdin_text(malformed_command, malformed_open);
+    malformed_command.stdin_text("" + malformed_open);
     let malformed = malformed_command.output();
     let malformed_stdout = malformed.stdout_text();
     let malformed_has_code = malformed_stdout.contains(
@@ -1992,7 +1967,7 @@ fn assert_runtime_and_framing(
         "",
         script_smoke_empty_env()
     );
-    script_smoke_set_stdin_text(oversized_command, oversized_text);
+    oversized_command.stdin_text("" + oversized_text);
     let oversized = oversized_command.output();
     let oversized_stdout = oversized.stdout_text();
     let oversized_has_code = oversized_stdout.contains(
@@ -2135,16 +2110,23 @@ fn assert_supervisor(
     let denied_exit_code = 0;
     let denied_stderr = "";
     for index in 0..8 {
-        let holder = start_script_client(
-            context,
-            cli,
+        let holder_arguments = ["--address", context.address];
+        append_arguments(
+            holder_arguments,
             [
                 "script", "eval", blocking_source,
                 "--timeout-ms", "10000",
                 "--max-operations", "10000000"
-            ],
-            audit_path
+            ]
         );
+        let holder_command = configured_program(
+            context,
+            cli,
+            holder_arguments,
+            audit_path,
+            script_smoke_empty_env()
+        );
+        let holder = holder_command.start();
         rh::task::sleep(std::time::Duration::from_millis(100));
         if child_is_running(holder) {
             holders.push(holder);
@@ -2282,7 +2264,7 @@ fn assert_persistent_repl_supervision(
     runtime_dir
 ) {
     print("STEP hosted persistent REPL cancellation and replacement");
-    let tab_id = cli_text(
+    let tab_id = "" + cli_text(
         context,
         cli,
         [
@@ -2485,7 +2467,7 @@ fn run_fleet_journey(
         );
         test_harness::require(
             public_capture.max_bytes == 5
-                && public_capture.bytes <= 5,
+                && 0 + public_capture.bytes <= 5,
             "script_fleet_public_capture_mismatch"
         );
         let invalid_capture = failure_text(
@@ -2879,7 +2861,6 @@ fn run_fleet_journey(
         let direct_task0 = direct_catalog.tasks[0];
         let direct_task_contract = direct_task0.contract;
         let direct_show_task0 = direct_show.tasks[0];
-        let expected_daily_check_evidence = ["task.daily-check"];
         test_harness::require(
             direct_catalog.project_id ==
                 "agenterm-rhai-daily-check"
@@ -2888,8 +2869,8 @@ fn run_fleet_journey(
                 && direct_catalog.tasks.len == 1
                 && direct_task0.status == "ready"
                 && direct_task_contract.inputs.len == 3
-                && direct_task_contract.evidence ==
-                    expected_daily_check_evidence
+                && direct_task_contract.evidence.len == 1
+                && direct_task_contract.evidence[0] == "task.daily-check"
                 && direct_show.compatible
                 && direct_show_task0.entry == "daily-check.rh",
             "script_north_star_catalog_mismatch"
@@ -3029,6 +3010,7 @@ fn run_fleet_journey(
                 script_smoke_empty_env(),
                 []
             );
+            0
         } catch (cleanup_error) {
             // The typed close path may already have removed the server.
         }
@@ -3095,7 +3077,7 @@ fn assert_audit(
     );
     let records = [];
     for line in audit_text.split("\n") {
-        if trimmed(line) != "" {
+        if ("" + trimmed("" + line)) != "" {
             records.push(rh::json::parse(line));
         }
     }
@@ -3219,7 +3201,7 @@ if args.len == 1 && args[0] == "--list-evidence" {
     for id in declared_evidence_ids() {
         print(id);
     }
-    return;
+    return 0;
 }
 
 test_harness::require(
@@ -3377,15 +3359,28 @@ test_harness::scrub_retained_text(
     ]
 );
 let completion_failure = "";
+let owned_children = [];
+let noop_command = configured_program(
+    context,
+    cli,
+    ["--version"],
+    "",
+    script_smoke_empty_env()
+);
+let noop_child = noop_command.start();
+noop_child.kill();
+owned_children.push(noop_child);
 try {
     test_harness::complete(
         context,
-        [],
+        owned_children,
         succeeded,
         failure
     );
+    0
 } catch (error) {
     completion_failure = "" + error;
+    0
 }
 if succeeded && completion_failure == "" {
     test_harness::remove_run(context);
@@ -3395,5 +3390,7 @@ if succeeded == 0 {
 }
 if completion_failure != "" {
     throw completion_failure;
+} else {
+    0
 }
 }

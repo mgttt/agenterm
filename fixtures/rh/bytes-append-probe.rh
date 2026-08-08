@@ -1,0 +1,6 @@
+// Probe native rh::bytes::append for framed payload growth.
+fn entry() {
+    let framed = rh::bytes::from_array([]);
+    framed.append(rh::bytes::from_text("{"));
+    framed.len
+}

@@ -1,0 +1,4 @@
+fn entry() {
+    std::process::kill(4242);
+    0
+}

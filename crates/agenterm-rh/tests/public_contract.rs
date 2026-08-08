@@ -9,12 +9,17 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 51] = [
+const FIXTURE_NAMES: [&str; 59] = [
     "append-sync-probe.rh",
     "atomic-write-probe.rh",
     "break-continue.rh",
+    "bytes-append-probe.rh",
     "bytes-from-array-probe.rh",
     "child-lifecycle-probe.rh",
+    "child-stdout-probe.rh",
+    "command-arg-probe.rh",
+    "command-args-json-probe.rh",
+    "command-stdin-text-probe.rh",
     "crypto-sha256-file-probe.rh",
     "direntry-metadata-probe.rh",
     "entry.rh",
@@ -34,6 +39,7 @@ const FIXTURE_NAMES: [&str; 51] = [
     "json-array-push-probe.rh",
     "json-array-walk.rh",
     "json-keys-probe.rh",
+    "json-marker-run-probe.rh",
     "json-param-index-assign-probe.rh",
     "json-parse-schema.rh",
     "json-path-index-probe.rh",
@@ -46,11 +52,13 @@ const FIXTURE_NAMES: [&str; 51] = [
     "path-metadata-sugar.rh",
     "path-parent-probe.rh",
     "process-id-probe.rh",
+    "process-kill-probe.rh",
     "process-output-probe.rh",
     "process-stdout-file.rh",
     "remove-dir-all-probe.rh",
     "set-map-loop-assign-probe.rh",
     "set-map-value-assign-probe.rh",
+    "std-fs-write-probe.rh",
     "stdlib.rh",
     "string-fn-bundle.rh",
     "string-index-of-probe.rh",
@@ -110,8 +118,8 @@ fn assert_compile_code(error: RhError, expected_code: &str) {
 }
 
 #[test]
-fn public_codegen_revision_is_eighty_two() {
-    assert_eq!(RH_CODEGEN_REVISION, 82);
+fn public_codegen_revision_is_eighty_three() {
+    assert_eq!(RH_CODEGEN_REVISION, 83);
 }
 
 #[test]

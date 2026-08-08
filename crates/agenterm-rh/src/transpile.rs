@@ -74,8 +74,9 @@ struct EmitCtx {
     try_depth: u32,
     /// Locals initialized as `[]` that later `push` Child bindings (owned_children).
     empty_child_lists: BTreeSet<String>,
-    /// Empty `#{}` locals that later receive non-bool index assignments (map semantics).
+    empty_string_lists: BTreeSet<String>,
     set_map_bindings: BTreeSet<String>,
+    binding_aliases: BTreeMap<String, String>,
 }
 
 impl EmitCtx {
@@ -89,7 +90,9 @@ impl EmitCtx {
             current_return_kind: ValueKind::Int,
             try_depth: 0,
             empty_child_lists: BTreeSet::new(),
+            empty_string_lists: BTreeSet::new(),
             set_map_bindings: BTreeSet::new(),
+            binding_aliases: BTreeMap::new(),
         }
     }
 
@@ -241,6 +244,10 @@ impl EmitCtx {
     fn with_empty_child_lists(mut self, empty_child_lists: BTreeSet<String>) -> Self {
         self.empty_child_lists = empty_child_lists;
         self
+    }
+
+    fn resolve_binding<'a>(&'a self, name: &'a str) -> &'a str {
+        self.binding_aliases.get(name).map(|alias| alias.as_str()).unwrap_or(name)
     }
 }
 
@@ -643,7 +650,8 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
         .copied()
         .unwrap_or(ValueKind::Int);
     fn_ctx.current_return_kind = return_kind;
-    fn_ctx.empty_child_lists = discover_empty_child_list_bindings(&def.body);
+    fn_ctx.empty_child_lists = discover_empty_child_list_bindings(&def.body, ctx);
+    fn_ctx.empty_string_lists = discover_empty_string_list_bindings(&def.body, ctx);
     fn_ctx.set_map_bindings = discover_set_map_bindings(&def.body);
     out.push_str("pub fn ");
     out.push_str(def.name.as_str());
@@ -657,6 +665,9 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
             // params are also mutated in place (path assign, push, remove).
             // Int/Bool params that the body reassigns (e.g. `sequence += 1`)
             // also need `mut`.
+            // Command stays by-value `mut RhCommand` (host helpers take `&mut`
+            // at the call site via `rh_command_*(...)`). Typing params as
+            // `&mut RhCommand` double-borrows (`&mut command` on an `&mut`).
             if matches!(
                 *kind,
                 ValueKind::Child
@@ -749,9 +760,11 @@ fn infer_return_kind(def: &ScriptFuncDef, ctx: &EmitCtx) -> ValueKind {
     if matches!(
         last,
         Stmt::Return(_, flags, ..) if flags.contains(ASTFlags::BREAK)
-    ) && let Some(kind) = infer_non_throw_return_kind(&def.body, &mut fn_ctx.clone())
-    {
-        return kind;
+    ) {
+        if let Some(kind) = infer_non_throw_return_kind(&def.body, &mut fn_ctx.clone()) {
+            return kind;
+        }
+        return ValueKind::Int;
     }
     let expr = match last {
         Stmt::Return(Some(expr), ..) => expr.as_ref(),
@@ -769,6 +782,7 @@ fn infer_return_kind(def: &ScriptFuncDef, ctx: &EmitCtx) -> ValueKind {
 fn infer_non_throw_return_kind(block: &StmtBlock, ctx: &mut EmitCtx) -> Option<ValueKind> {
     for stmt in block.iter() {
         match stmt {
+            Stmt::Return(None, ..) => return Some(ValueKind::Int),
             Stmt::Return(Some(expr), flags, ..) if !flags.contains(ASTFlags::BREAK) => {
                 return Some(infer_binding_kind(expr, ctx));
             }
@@ -955,7 +969,7 @@ fn propagate_callee_param_kinds_from_call_sites(
             let mut ctx = base_ctx
                 .clone()
                 .with_local_fn_sigs(local_fn_sigs.clone())
-                .with_empty_child_lists(discover_empty_child_list_bindings(&def.body));
+                .with_empty_child_lists(discover_empty_child_list_bindings(&def.body, base_ctx));
             if let Some(sig) = local_fn_sigs.get(def.name.as_str()) {
                 for (param, kind) in def.params.iter().zip(sig.iter().copied()) {
                     ctx = ctx.with_binding(param.as_str(), kind);
@@ -2291,6 +2305,98 @@ fn stmt_assigns_param(stmt: &Stmt, param: &str) -> bool {
     }
 }
 
+
+fn json_string_field_path<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<(&'a str, Vec<&'a str>)> {
+    let (binding, path) = json_value_path(expr, ctx)?;
+    if path.is_empty() {
+        return None;
+    }
+    matches!(
+        path.last().copied(),
+        Some(
+            "stdout" | "stderr" | "state" | "text" | "executable_name" | "file_name" | "path"
+                | "status" | "entry" | "evidence" | "stable_id" | "module" | "default_profile"
+                | "execution_model" | "job_object" | "ambient_authority" | "run_id" | "address"
+                | "run_directory" | "failure_directory" | "project_id"
+        )
+    )
+    .then_some((binding, path))
+}
+
+fn string_list_compare_pair<'a>(lhs: &'a Expr, rhs: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
+    let Expr::Variable(ident, ..) = lhs else { return None; };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::StringList) {
+        return None;
+    }
+    Some((ident.1.as_str(), rhs))
+}
+
+fn stmt_always_returns(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(..) => true,
+        Stmt::BreakLoop(_, flags, ..) if flags.contains(ASTFlags::BREAK) => true,
+        Stmt::FnCall(call, ..) if call.name == "throw" => true,
+        _ => false,
+    }
+}
+
+fn emit_return_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhError> {
+    match ctx.current_return_kind {
+        ValueKind::StringList => {
+            if let Expr::Array(items, ..) = expr
+                && !items.is_empty()
+                && items.iter().all(|item| is_stringish_array_item(item, ctx))
+            {
+                out.push_str("vec![");
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 { out.push_str(", "); }
+                    if !emit_owned_string_element(out, item, ctx)? {
+                        return Err(RhError::Transpile("string list return items must be stringish".into()));
+                    }
+                }
+                out.push(']');
+                return Ok(());
+            }
+            if let Expr::Variable(ident, ..) = expr
+                && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::StringList)
+            {
+                out.push_str(ident.1.as_str());
+                return Ok(());
+            }
+        }
+        ValueKind::String | ValueKind::Path => {
+            emit_stringish(out, expr, ctx)?;
+            return Ok(());
+        }
+        ValueKind::Json => {
+            emit_json_value_expr(out, expr, ctx)?;
+            return Ok(());
+        }
+        ValueKind::Int | ValueKind::Bool => {
+            if let Expr::Variable(ident, ..) = expr
+                && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+            {
+                out.push_str("rh_json_as_i64(&");
+                out.push_str(ident.1.as_str());
+                out.push(')');
+                return Ok(());
+            }
+            emit_intish(out, expr, ctx)?;
+            return Ok(());
+        }
+        ValueKind::Output => {
+            if let Some(binding) = child_wait_with_output_call(expr, ctx) {
+                out.push_str("rh_child_wait_with_output(&mut ");
+                out.push_str(ctx.resolve_binding(binding));
+                out.push_str(", 0)");
+                return Ok(());
+            }
+        }
+        _ => {}
+    }
+    emit_expr(out, expr, ctx)
+}
+
 fn emit_block(
     out: &mut String,
     block: &StmtBlock,
@@ -2301,6 +2407,14 @@ fn emit_block(
     for (index, stmt) in stmts.iter().enumerate() {
         let is_last = index + 1 == stmts.len();
         emit_stmt(out, stmt, ctx, implicit_return && is_last)?;
+    }
+    if implicit_return
+        && ctx.cdylib
+        && ctx.current_return_kind == ValueKind::Int
+        && !stmts.is_empty()
+        && !stmt_always_returns(stmts.last().expect("non-empty"))
+    {
+        out.push_str("    return 0;\n");
     }
     Ok(())
 }
@@ -2323,6 +2437,12 @@ fn emit_stmt(
                 && ctx.empty_child_lists.contains(ident.name.as_str())
             {
                 kind = ValueKind::ChildList;
+            }
+            if kind == ValueKind::Json
+                && matches!(expr, Expr::Array(items, ..) if items.is_empty())
+                && ctx.empty_string_lists.contains(ident.name.as_str())
+            {
+                kind = ValueKind::StringList;
             }
             out.push_str("    let mut ");
             out.push_str(ident.name.as_str());
@@ -2581,7 +2701,7 @@ fn emit_stmt(
         }
         Stmt::Return(Some(expr), ..) => {
             out.push_str("    return ");
-            emit_expr(out, expr, ctx)?;
+            emit_return_expr(out, expr, ctx)?;
             out.push_str(";\n");
         }
         Stmt::Return(None, ..) => {
@@ -2934,7 +3054,7 @@ fn emit_stmt(
         }
         Stmt::Expr(expr) if implicit_return => {
             out.push_str("    return ");
-            emit_expr(out, expr, ctx)?;
+            emit_return_expr(out, expr, ctx)?;
             out.push_str(";\n");
         }
         Stmt::Expr(expr) => {
@@ -2954,9 +3074,17 @@ fn emit_stmt(
             emit_require_stmt(out, &call.args[0], &call.args[1], ctx)?;
         }
         Stmt::FnCall(call, ..) if implicit_return => {
-            out.push_str("    return ");
-            emit_call(out, call, ctx)?;
-            out.push_str(";\n");
+            if ctx.current_return_kind == ValueKind::Int
+                && call.namespace.is_empty() && call.name == "print" && call.args.len() == 1
+            {
+                out.push_str("    ");
+                emit_call(out, call, ctx)?;
+                out.push_str(";\n    return 0;\n");
+            } else {
+                out.push_str("    return ");
+                emit_call(out, call, ctx)?;
+                out.push_str(";\n");
+            }
         }
         Stmt::FnCall(call, ..) => {
             out.push_str("    ");
@@ -3023,9 +3151,17 @@ fn emit_try_stmt(
 ) -> Result<(), RhError> {
     match stmt {
         Stmt::Expr(expr) if implicit_ok => {
-            out.push_str("        return Ok(");
-            emit_expr(out, expr, ctx)?;
-            out.push_str(");\n");
+            if let Expr::FnCall(call, ..) = expr.as_ref()
+                && call.namespace.is_empty() && call.name == "print" && call.args.len() == 1
+            {
+                out.push_str("        ");
+                emit_call(out, call, ctx)?;
+                out.push_str(";\n        Ok(0)\n");
+            } else {
+                out.push_str("        return Ok(");
+                emit_intish(out, expr, ctx)?;
+                out.push_str(");\n");
+            }
         }
         Stmt::Return(Some(expr), flags, ..) if flags.contains(ASTFlags::BREAK) => {
             // Rhai parses `throw msg` as a BREAK-flagged return. Keep Err arm INT.
@@ -3259,6 +3395,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             ValueKind::Int
         }
         _ if json_parse_arg(expr).is_some() => ValueKind::Json,
+        _ if json_string_field_path(expr, ctx).is_some() => ValueKind::String,
         _ if json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty()) => {
             ValueKind::Json
         }
@@ -3391,6 +3528,23 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             resolve_local_fn_name(call.name.as_str(), ctx)
                 .and_then(|name| ctx.local_fn_return_kinds.get(name.as_str()).copied())
                 .unwrap_or(ValueKind::Int)
+        }
+        _ if parse_string_method_call(expr, ctx).is_some_and(|(_, call)| {
+            matches!(call.name.as_str(), "trim" | "to_lower" | "to_string") && call.args.is_empty()
+        }) => ValueKind::String,
+        _ if json_string_field_path(expr, ctx).is_some() => ValueKind::String,
+        _ if output_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "stdout" || property == "stderr") =>
+        {
+            ValueKind::Bytes
+        }
+        _ if parse_string_method_call(expr, ctx).is_some_and(|(_, call)| {
+            matches!(call.name.as_str(), "trim" | "to_lower" | "to_string") && call.args.is_empty()
+        }) => ValueKind::String,
+        _ if output_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| property == "stdout" || property == "stderr") =>
+        {
+            ValueKind::Bytes
         }
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
@@ -4326,35 +4480,116 @@ fn emit_child_list_push_stmt(
     let Some((binding, item)) = child_list_push_call(expr, ctx) else {
         return Ok(false);
     };
-    let Expr::Variable(child_ident, ..) = item else {
-        return Err(RhError::Transpile(format!(
+    match item {
+        Expr::Variable(child_ident, ..)
+            if ctx.scope.get(child_ident.1.as_str()).copied() == Some(ValueKind::Child) =>
+        {
+            out.push_str("    ");
+            out.push_str(binding);
+            out.push_str(".push(rh_child_share(&mut ");
+            out.push_str(ctx.resolve_binding(child_ident.1.as_str()));
+            out.push_str("));\n");
+            Ok(true)
+        }
+        _ if expr_produces_child(item, ctx) => {
+            out.push_str("    ");
+            out.push_str(binding);
+            out.push_str(".push(rh_child_share(&mut {");
+            emit_expr(out, item, ctx)?;
+            out.push_str("}));\n");
+            Ok(true)
+        }
+        _ => Err(RhError::Transpile(format!(
             "child list push argument must be a Child binding (expr={item:?})"
-        )));
-    };
-    if ctx.scope.get(child_ident.1.as_str()).copied() != Some(ValueKind::Child) {
-        return Err(RhError::Transpile(format!(
-            "child list push argument must be a Child binding (name={}, kind={:?})",
-            child_ident.1,
-            ctx.scope.get(child_ident.1.as_str()).copied()
-        )));
+        ))),
     }
-    out.push_str("    ");
-    out.push_str(binding);
-    out.push_str(".push(rh_child_share(&mut ");
-    out.push_str(child_ident.1.as_str());
-    out.push_str("));\n");
-    Ok(true)
 }
 
 /// Locals bound as `let name = []` that later `name.push(child)` where `child` is a
 /// Child binding from `command.start()` (smoke `owned_children` pattern).
-fn discover_empty_child_list_bindings(block: &StmtBlock) -> BTreeSet<String> {
+fn discover_empty_child_list_bindings(block: &StmtBlock, ctx: &EmitCtx) -> BTreeSet<String> {
     let mut empty_arrays = BTreeSet::new();
     let mut child_names = BTreeSet::new();
-    collect_empty_array_and_child_bindings(block, &mut empty_arrays, &mut child_names);
+    collect_empty_array_and_child_bindings(block, &mut empty_arrays, &mut child_names, ctx);
     let mut result = BTreeSet::new();
-    collect_child_list_pushes(block, &empty_arrays, &child_names, &mut result);
+    collect_child_list_pushes(block, &empty_arrays, &child_names, ctx, &mut result);
     result
+}
+
+fn discover_empty_string_list_bindings(block: &StmtBlock, ctx: &EmitCtx) -> BTreeSet<String> {
+    let mut empty_arrays = BTreeSet::new();
+    collect_empty_array_bindings(block, &mut empty_arrays);
+    let mut result = BTreeSet::new();
+    collect_string_list_pushes(block, &empty_arrays, ctx, &mut result);
+    result
+}
+
+fn collect_empty_array_bindings(block: &StmtBlock, empty_arrays: &mut BTreeSet<String>) {
+    for stmt in block.iter() {
+        match stmt {
+            Stmt::Var(boxed, ..) => {
+                let (ident, expr, _) = boxed.as_ref();
+                if matches!(expr, Expr::Array(items, ..) if items.is_empty()) {
+                    empty_arrays.insert(ident.name.to_string());
+                }
+            }
+            Stmt::If(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_empty_array_bindings(&flow.body, empty_arrays);
+                collect_empty_array_bindings(&flow.branch, empty_arrays);
+            }
+            Stmt::For(boxed, ..) => {
+                collect_empty_array_bindings(&boxed.as_ref().2.body, empty_arrays);
+            }
+            Stmt::While(boxed, ..) => {
+                collect_empty_array_bindings(&boxed.as_ref().body, empty_arrays);
+            }
+            Stmt::Block(inner) => collect_empty_array_bindings(inner, empty_arrays),
+            Stmt::TryCatch(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_empty_array_bindings(&flow.body, empty_arrays);
+                collect_empty_array_bindings(&flow.branch, empty_arrays);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_string_list_pushes(
+    block: &StmtBlock,
+    empty_arrays: &BTreeSet<String>,
+    ctx: &EmitCtx,
+    result: &mut BTreeSet<String>,
+) {
+    for stmt in block.iter() {
+        match stmt {
+            Stmt::Expr(expr) => {
+                if let Some((list, _)) = string_list_push_call(expr, ctx)
+                    && empty_arrays.contains(list)
+                {
+                    result.insert(list.to_string());
+                }
+            }
+            Stmt::If(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_string_list_pushes(&flow.body, empty_arrays, ctx, result);
+                collect_string_list_pushes(&flow.branch, empty_arrays, ctx, result);
+            }
+            Stmt::For(boxed, ..) => {
+                collect_string_list_pushes(&boxed.as_ref().2.body, empty_arrays, ctx, result);
+            }
+            Stmt::While(boxed, ..) => {
+                collect_string_list_pushes(&boxed.as_ref().body, empty_arrays, ctx, result);
+            }
+            Stmt::Block(inner) => collect_string_list_pushes(inner, empty_arrays, ctx, result),
+            Stmt::TryCatch(boxed, ..) => {
+                let flow = boxed.as_ref();
+                collect_string_list_pushes(&flow.body, empty_arrays, ctx, result);
+                collect_string_list_pushes(&flow.branch, empty_arrays, ctx, result);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn is_empty_set_literal(expr: &Expr) -> bool {
@@ -4466,10 +4701,15 @@ fn expr_is_command_start(expr: &Expr) -> bool {
     )
 }
 
+fn expr_produces_child(expr: &Expr, ctx: &EmitCtx) -> bool {
+    matches!(infer_binding_kind(expr, ctx), ValueKind::Child)
+}
+
 fn collect_empty_array_and_child_bindings(
     block: &StmtBlock,
     empty_arrays: &mut BTreeSet<String>,
     child_names: &mut BTreeSet<String>,
+    ctx: &EmitCtx,
 ) {
     for stmt in block.iter() {
         match stmt {
@@ -4478,30 +4718,30 @@ fn collect_empty_array_and_child_bindings(
                 if matches!(expr, Expr::Array(items, ..) if items.is_empty()) {
                     empty_arrays.insert(ident.name.to_string());
                 }
-                if expr_is_command_start(expr) {
+                if expr_is_command_start(expr) || expr_produces_child(expr, ctx) {
                     child_names.insert(ident.name.to_string());
                 }
             }
             Stmt::If(boxed, ..) => {
                 let flow = boxed.as_ref();
-                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
-                collect_empty_array_and_child_bindings(&flow.branch, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names, ctx);
+                collect_empty_array_and_child_bindings(&flow.branch, empty_arrays, child_names, ctx);
             }
             Stmt::For(boxed, ..) => {
                 let (_, _, flow) = boxed.as_ref();
-                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names, ctx);
             }
             Stmt::While(boxed, ..) => {
                 let flow = boxed.as_ref();
-                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names, ctx);
             }
             Stmt::Block(inner) => {
-                collect_empty_array_and_child_bindings(inner, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(inner, empty_arrays, child_names, ctx);
             }
             Stmt::TryCatch(boxed, ..) => {
                 let flow = boxed.as_ref();
-                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names);
-                collect_empty_array_and_child_bindings(&flow.branch, empty_arrays, child_names);
+                collect_empty_array_and_child_bindings(&flow.body, empty_arrays, child_names, ctx);
+                collect_empty_array_and_child_bindings(&flow.branch, empty_arrays, child_names, ctx);
             }
             _ => {}
         }
@@ -4512,6 +4752,7 @@ fn collect_child_list_pushes(
     block: &StmtBlock,
     empty_arrays: &BTreeSet<String>,
     child_names: &BTreeSet<String>,
+    ctx: &EmitCtx,
     result: &mut BTreeSet<String>,
 ) {
     for stmt in block.iter() {
@@ -4523,32 +4764,35 @@ fn collect_child_list_pushes(
                     && let Expr::MethodCall(call, ..) = &boxed.rhs
                     && call.name == "push"
                     && call.args.len() == 1
-                    && let Expr::Variable(child_ident, ..) = &call.args[0]
-                    && child_names.contains(child_ident.1.as_str())
+                    && call.args.len() == 1
                 {
-                    result.insert(ident.1.to_string());
+                    let ok = match &call.args[0] {
+                        Expr::Variable(child_ident, ..) => child_names.contains(child_ident.1.as_str()),
+                        other => expr_produces_child(other, ctx),
+                    };
+                    if ok { result.insert(ident.1.to_string()); }
                 }
             }
             Stmt::If(boxed, ..) => {
                 let flow = boxed.as_ref();
-                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
-                collect_child_list_pushes(&flow.branch, empty_arrays, child_names, result);
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, ctx, result);
+                collect_child_list_pushes(&flow.branch, empty_arrays, child_names, ctx, result);
             }
             Stmt::For(boxed, ..) => {
                 let (_, _, flow) = boxed.as_ref();
-                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, ctx, result);
             }
             Stmt::While(boxed, ..) => {
                 let flow = boxed.as_ref();
-                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, ctx, result);
             }
             Stmt::Block(inner) => {
-                collect_child_list_pushes(inner, empty_arrays, child_names, result);
+                collect_child_list_pushes(inner, empty_arrays, child_names, ctx, result);
             }
             Stmt::TryCatch(boxed, ..) => {
                 let flow = boxed.as_ref();
-                collect_child_list_pushes(&flow.body, empty_arrays, child_names, result);
-                collect_child_list_pushes(&flow.branch, empty_arrays, child_names, result);
+                collect_child_list_pushes(&flow.body, empty_arrays, child_names, ctx, result);
+                collect_child_list_pushes(&flow.branch, empty_arrays, child_names, ctx, result);
             }
             _ => {}
         }
@@ -5391,8 +5635,13 @@ fn emit_child_mut_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             Ok(true)
         }
         "wait_with_output" if call.args.len() == 1 => {
-            out.push_str("    let _ = rh_child_wait_with_output(&mut ");
-            out.push_str(binding);
+            out.push_str("    ");
+            if ctx.current_return_kind == ValueKind::Output {
+                out.push_str("return rh_child_wait_with_output(&mut ");
+            } else {
+                out.push_str("let _ = rh_child_wait_with_output(&mut ");
+            }
+            out.push_str(ctx.resolve_binding(binding));
             out.push_str(", ");
             if !emit_duration_ms(out, &call.args[0], ctx)? {
                 return Ok(false);
@@ -5522,6 +5771,7 @@ fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
     let Some((binding, property)) = child_property_binding(expr, ctx) else {
         return Ok(false);
     };
+    let binding = ctx.resolve_binding(binding);
     if property == "state" {
         out.push_str("rh_child_state(&mut ");
         out.push_str(binding);
@@ -8353,7 +8603,7 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             }
         }
         Expr::Unit(..) => out.push_str(ctx.unit_expr()),
-        Expr::Variable(ident, ..) => out.push_str(ident.1.as_str()),
+        Expr::Variable(ident, ..) => out.push_str(ctx.resolve_binding(ident.1.as_str())),
         Expr::Dot(..) if is_args_len_expr(expr) => out.push_str("rh_args_len()"),
         Expr::Dot(..)
             if var_len_name(expr)
@@ -8710,11 +8960,11 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             let (binding, property) = output_property_binding(expr, ctx).expect("checked output");
             match property {
                 "stdout" | "stderr" => {
-                    out.push_str("serde_json::Value::String(");
+                    out.push_str("serde_json::Value::Number(serde_json::Number::from(");
                     out.push_str(binding);
                     out.push('.');
                     out.push_str(property);
-                    out.push_str(".clone())");
+                    out.push_str(".len() as i64))");
                 }
                 "success" => {
                     out.push_str("serde_json::Value::Bool(");
@@ -8824,6 +9074,9 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str("rh_json_parse(&");
             emit_stringish(out, &call.args[0], ctx)?;
             out.push(')');
+        }
+        Expr::FnCall(call, ..) if json_parse_file_arg(expr).is_some() => {
+            emit_json_parse_file(out, &call.args[0], ctx)?;
         }
         Expr::FnCall(call, ..)
             if call.op_token.is_none()
@@ -9408,10 +9661,11 @@ fn string_for_binding<'a>(expr: &'a Expr, ctx: &'a EmitCtx) -> Option<&'a str> {
         .then_some(ident.1.as_str())
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum StringReceiver<'a> {
     Binding(&'a str),
     JsonBinding(&'a str),
+    JsonPath { binding: &'a str, path: Vec<&'a str> },
     Literal(&'a str),
     DirEntryField { binding: &'a str, field: &'a str },
 }
@@ -9432,7 +9686,16 @@ fn parse_string_method_call<'a>(
         Expr::Variable(ident, ..)
             if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json) =>
         {
-            StringReceiver::JsonBinding(ident.1.as_str())
+            if let Expr::Dot(inner, ..) = &boxed.rhs {
+                let mut path = Vec::new();
+                if append_json_properties(&inner.lhs, &mut path) {
+                    StringReceiver::JsonPath { binding: ident.1.as_str(), path }
+                } else {
+                    StringReceiver::JsonBinding(ident.1.as_str())
+                }
+            } else {
+                StringReceiver::JsonBinding(ident.1.as_str())
+            }
         }
         Expr::Variable(ident, ..)
             if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::DirEntry) =>
@@ -9471,6 +9734,13 @@ fn emit_string_receiver(out: &mut String, receiver: StringReceiver<'_>) {
         StringReceiver::JsonBinding(name) => {
             out.push_str("rh_json_as_str(&");
             out.push_str(name);
+            out.push(')');
+        }
+        StringReceiver::JsonPath { binding, path } => {
+            out.push_str("rh_json_string_path(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
             out.push(')');
         }
         StringReceiver::Literal(value) => {
@@ -9808,6 +10078,14 @@ fn emit_string_method_expr(
             out.push_str(").to_ascii_lowercase()");
             Ok(true)
         }
+        (StringReceiver::JsonPath { binding, path }, "to_lower") if call.args.is_empty() => {
+            out.push_str("rh_json_string_path(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push_str(").to_ascii_lowercase()");
+            Ok(true)
+        }
         (StringReceiver::Binding(binding), "trim") if call.args.is_empty() => {
             out.push_str(binding);
             out.push_str(".trim().to_string()");
@@ -9816,6 +10094,14 @@ fn emit_string_method_expr(
         (StringReceiver::JsonBinding(binding), "trim") if call.args.is_empty() => {
             out.push_str("rh_json_as_str(&");
             out.push_str(binding);
+            out.push_str(").trim().to_string()");
+            Ok(true)
+        }
+        (StringReceiver::JsonPath { binding, path }, "trim") if call.args.is_empty() => {
+            out.push_str("rh_json_string_path(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
             out.push_str(").trim().to_string()");
             Ok(true)
         }
@@ -10384,6 +10670,17 @@ fn emit_call(out: &mut String, call: &rhai::FnCallExpr, ctx: &mut EmitCtx) -> Re
                         emit_expr(out, arg, ctx)?;
                     }
                 }
+                Some(ValueKind::Command) => {
+                    if let Expr::Variable(ident, ..) = arg
+                        && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Command)
+                    {
+                        // By-value `RhCommand` params; clone so callers keep the binding.
+                        out.push_str(ident.1.as_str());
+                        out.push_str(".clone()");
+                    } else {
+                        emit_expr(out, arg, ctx)?;
+                    }
+                }
                 _ => emit_expr(out, arg, ctx)?,
             }
         }
@@ -10788,6 +11085,26 @@ fn comparison_binary(
     ctx: &mut EmitCtx,
 ) -> Result<(), RhError> {
     if ctx.cdylib {
+        if let Some((list, rhs)) = string_list_compare_pair(lhs, rhs, ctx) {
+            out.push('(');
+            if op == "==" {
+                out.push_str(list);
+                out.push_str(" == vec![");
+                emit_stringish(out, rhs, ctx)?;
+                out.push_str("]");
+            } else if op == "!=" {
+                out.push('!');
+                out.push('(');
+                out.push_str(list);
+                out.push_str(" == vec![");
+                emit_stringish(out, rhs, ctx)?;
+                out.push_str("])");
+            } else {
+                return Err(RhError::Transpile(format!("unsupported string-list comparison `{op}`")));
+            }
+            out.push_str(") as INT");
+            return Ok(());
+        }
         if let Some((json_expr, _)) = json_unit_compare_pair(lhs, rhs, ctx) {
             // `((value.is_null())) as INT` / `(!(value.is_null())) as INT`
             // so `!` applies to the bool before the INT cast.

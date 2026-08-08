@@ -1,0 +1,6 @@
+// Probe native command.arg for single-flag append.
+fn entry() {
+    let command = std::process::command("tool");
+    command.arg("--probe");
+    0
+}

@@ -1,8 +1,9 @@
 # Phase C prep: retire live `rhai::` namespace
 
-Tip baseline: `9045f53d` (rev82 Native he=1 for script/remote-ui/working-context;
-fresh-clone Native he=1 + `pack=ok`; workbench/unix/working-context `pack=ok`;
-script-smoke/remote-ui still AOT typecheck debt). SSOT for sequencing; do not invent a second living file map.
+Tip baseline: Wave 4.1 landed at codegen **rev83** — script-smoke / remote-ui
+Native + AOT `pack=ok` (locked); fresh-clone / workbench / unix / working-context
+remain Native with pack locks. SSOT for sequencing; do not invent a second living
+file map.
 
 ## Outcome
 
@@ -42,9 +43,9 @@ docs / policy guards — see [`rhai-trace-scrub-notes.md`](rhai-trace-scrub-note
 ## Sequenced leaves
 
 1. **Wave 1 — dual alias window:** ✅ shipped at codegen **rev80**.
-2. **Wave 2 — native emit gaps:** ✅ through codegen **rev82** — script-smoke / remote-ui / working-context **Native he=1**; working-context AOT pack builds; script-smoke/remote-ui still have **AOT typecheck debt** (`pack=fail`).
+2. **Wave 2 — native emit gaps:** ✅ through codegen **rev82** — Native selection for core smokes; pack debt closed in Wave 4.1.
 3. **Wave 3 — script mass-rename:** ✅ live `scripts/rh/**` has **0** `rhai::` call sites.
-4. **Wave 4 — Phase C archive:** drop `rhai` Engine module, eval/run-script Rhai paths, then `agenterm-rhai` PE; scrub residual branding.
+4. **Wave 4 — Phase C archive:** 4.1 ✅ rev83 AOT pack for script-smoke/remote-ui; next drop `rhai` Engine module, eval/run-script Rhai paths, then `agenterm-rhai` PE; scrub residual branding.
 
 **Non-goal:** inventing permission/sandbox policy under Script Runtime.
 
@@ -54,7 +55,7 @@ Ordered; 4.1 blocks 4.3; 4.5 follows 4.3; 4.6–4.7 follow 4.5.
 
 | # | Leaf | Exclusive owner(s) | Evidence |
 |---|------|--------------------|----------|
-| 4.1 | AOT typecheck debt + remaining HE emit for Native packs | `crates/agenterm-rh/src/transpile.rs` (+ `host_api.rs` if helpers) | script-smoke/remote-ui `mode_probe --pack` → `pack=ok`; lock `*_pack_builds` |
+| 4.1 | ✅ AOT typecheck debt + remaining HE emit for Native packs | `crates/agenterm-rh/src/transpile.rs` (+ smoke idiom) | script-smoke/remote-ui `mode_probe --pack` → `pack=ok`; `script_smoke_pack_builds` / `remote_ui_smoke_pack_builds` |
 | 4.2 | Drop Engine legacy `rhai` module + catalog/shipped aliases | `src/script_stdlib.rs`, `crates/agenterm-rh/src/host_api.rs`, `src/script_catalog.rs`, `crates/agenterm-rh/src/shipped_surfaces.rs` | zero `register_static_module(…"rhai"`; catalog `rh::` only |
 | 4.3 | Remove pack Rhai eval/run-script fallback | `src/script_rh_host.rs`, `crates/agenterm-rh/src/{host_api,transpile}.rs` | no prod `host_eval_snippet` / `host_run_script_source` |
 | 4.4 | Migrate Engine-root-dependent tests/fixtures | `src/script_{stdlib,task,catalog,http,worker}.rs`, `tests/rh_*.rs`, `crates/agenterm-rh/tests/**` | `cargo test -p agenterm --lib` + `agenterm-rh` green |
@@ -68,6 +69,7 @@ Do not edit `scripts/archive/rhai/**` except as historical reference.
 ## Evidence per wave
 
 - Wave 1: ✅ rev80 dual-alias; catalog + `agenterm-rh` tests green.
-- Wave 2: ✅ rev82; script-smoke/remote-ui/working-context Native he=1; working-context AOT pack builds; script-smoke/remote-ui AOT cargo still fails.
+- Wave 2: ✅ rev82; script-smoke/remote-ui/working-context Native.
 - Wave 3: ✅ live `scripts/rh` `rhai::`=0.
-- Wave 4: zero live `rhai::` / `agenterm-rhai` operator paths outside archive + intentional historical docs.
+- Wave 4.1: ✅ rev83; script-smoke/remote-ui Native AOT `pack=ok` + regression locks.
+- Wave 4 (rest): zero live `rhai::` / `agenterm-rhai` operator paths outside archive + intentional historical docs.

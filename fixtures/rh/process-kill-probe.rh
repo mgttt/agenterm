@@ -1,0 +1,5 @@
+// Probe native std::process::kill for stale PID cleanup.
+fn entry() {
+    std::process::kill(4242);
+    0
+}
