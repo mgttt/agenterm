@@ -296,6 +296,157 @@ headless 既无窗口也无事件循环，`handle_pixel_event` 本身是 per-fro
 
 ---
 
+## 1.3 P-agent-tools 落地记录（2026-08-08）
+
+> **架构原则（本节的全部要点）：超控智能体的工具表是 `OPERATION_CATALOG` 的
+> 投影，是它唯一的能力来源。任何手写的第二张表都是漂移源，不是备份。**
+
+`src/agent_tools.rs` 把 `OPERATION_CATALOG` 投影成 LLM 工具定义；
+`agenterm-cli agent-tools` 是它的出口。它与
+`src/script_catalog.rs:185`（脚本 API 从同一目录派生）**并列**，不另立真理：
+两者读同一个 const，`operations.rs` 加一条，两边同时变宽，无需同步。
+
+这一节存在的理由就是 F3/F4：`scripts/lua/lib/fleet.lua` 与
+`scripts/qjs/lib/fleet.js` 是手工逐行互译的两份，`--help` 广告过一个**从未
+实现**的 `send-mouse` 而藏起了唯一能用的 `ui-input`。**超控智能体不得再拿到
+一张这样的表。**
+
+### 投影长什么样
+
+77 个 available 操作 → 77 个工具（Observe 13 / Control 60 / Destructive 4）。
+每个工具携带：
+
+| 字段 | 来源 | 为什么 LLM 需要它 |
+|------|------|------------------|
+| `name` | `id` 的机械 slug | 见下"工具名怎么定" |
+| `title` | `id` 原样 | typed 身份就是标题 |
+| `description` | **生成**，非撰写 | 见下"描述为什么是生成的" |
+| `class` | `OperationClass` | 「先看后动」的规划依据 |
+| `mutating` | `class != Observe` | 只读 / 变更的二分 |
+| `approval` | `destructive` | **批准门**，见下 |
+| `annotations` | class + destructive | MCP `readOnlyHint`/`destructiveHint`，camelCase 直接可转发 |
+| `input_schema` | `parameters` | JSON Schema，见下"参数映射" |
+| `invocation` | `id`/`script_surface`/`command`/`action`/`aliases` | 真的怎么调 |
+| `errors` | `errors` | 已声明的 typed 失败词表 |
+| `events` | `events` | 可等待的关联事件 |
+| `available` / `unavailable_reason` | `available` | 诚实性，见下 |
+
+### 参数 → JSON Schema
+
+`value_type` 的 7 个取值全部有显式映射：`number`/`integer` 直通，
+`uint32` 补 `0..=4294967295`，`uint64` 只补下界（`u64::MAX` 超出 JSON 数字能
+无损往返的范围，声明上界等于撒谎），`string`/`session_name` 是字符串，
+`stable_tab_id` 额外带 `pattern: "^@[0-9]+$"`——否则 agent 会把 tab 标题传进去。
+
+**一个真实的坑**：`OperationParameterSpec::{minimum, maximum}` 在数值类型上是
+**取值边界**，在字符串类型上是**字节长度边界**（`note` 是 `0..=4096` 字节，
+`client_id` 是 `1..=128`）。把两者一律映射成 JSON Schema 的 `minimum`，等于
+告诉模型「备注必须是个数字」。所以字符串走 `minLength`/`maxLength`，由
+`parameter_bounds_and_requiredness_reach_the_schema` 断言 `note` **没有**
+`maximum` 字段。
+
+`required` 数组从 `parameter.required` 派生；`additionalProperties: false`
+让 schema 校验器替 agent 挡住拼错的参数名。
+
+### 批准门怎么表达
+
+```
+"approval": { "required": true, "gate": "explicit_human_approval",
+              "reason": "destructive_operation" }
+```
+
+`gate` 是枚举而不是 bool，因为 `plan/design-cc-hyper-control-agent.md` §1.2 要求
+的是**显式批准门**，而 CC 未来还会有别的门（配额、租约）；一个 bool 只够表达
+"要不要问"，不够表达"问谁"。当前 4 个门：`ui.tab.close`、
+`ui.window-close.stop-server-and-exit`、`server.kill`、`workspace.shutdown`。
+
+守卫 `destructive_operations_carry_an_explicit_approval_gate` 断言的是**集合
+相等**——被门控的工具集恰好等于目录里 `destructive` 的集合，不多不少。少一个是
+静默越权，多一个是把 `ui.tabs.show` 也拿去烦人类。
+
+同时保留 `classification_only: true` / `authorization_policy: false`
+（与 `protocol-info` 对原始目录的口径一致）：投影标注**哪些**调用需要门，
+**谁来开门**仍归操作员，投影不是策略引擎。
+
+### 诚实：不可用能力不得进表
+
+默认投影**排除** `available: false`；`--include-unavailable` 才带出来，并且带
+`available: false` + `unavailable_reason: "operation_unavailable"`，描述文本里
+也写死 `UNAVAILABLE: ... do not call it.`（模型读的是散文，不只是字段）。
+
+目录当前**没有** unavailable 条目，所以这条守卫如果只跑真目录会**永远空转**。
+`unavailable_operations_never_reach_the_default_table` 因此对一条**合成**
+`OperationSpec` 断言，`project_catalog` 也就设计成接受任意 slice。
+
+### 工具名怎么定：slug，不是 `id`，也不是 CLI 形式
+
+Anthropic 与 OpenAI 的工具名都受 `^[a-zA-Z0-9_-]{1,64}$` 约束，
+**带点的 `ui.tab.close` 直接非法**。所以 `name` 是机械 slug
+`agenterm_ui_tab_close`（前缀让它在混合工具表里自我标识），而 typed 身份原样
+留在 `invocation.operation_id`——投影因此是**可逆**的。
+`tool_names_are_unique_and_wire_legal` 守住唯一性与合法性；
+规则本身写成生产函数 `tool_name_is_wire_legal`，不是测试里的一段字面量。
+
+**不用 CLI 形式**，也**不生成 argv 模板**：目录声明的是参数**名**，不是它们的
+CLI 拼法（`tab` 是 `-t`，`instance` 是位置参数，`select-server-tab` 的实例名
+不带旗标）。生成一条命令行等于把目录里没有的事实编出来——**正是 F3 那类
+错误**。给的是 `operation_id` 和 `script_surface`，两者都逐字接受目录声明的
+参数名。
+
+同理，`title` 不再拼 `command + action`：`control-center.open` 的
+`command` 是 `control-center`，而它的 action `open-control-center` 属于
+`ui-action`，拼起来会读成一条**不存在**的命令行。
+
+### 描述为什么是生成的
+
+`OperationSpec` 没有散文字段。加一个就意味着每条操作要人写一句话——那是一张
+**穿着派生表外衣的手写表**，第 78 条操作加进来时它就开始漂移。所以
+`description_for` 从 class / 身份 / `result_type` / `errors` / `events` 机械
+拼装。代价是文风呆板，收益是新增操作**零散文成本**。
+
+### 为什么是运行时函数 + CLI，不是构建期 codegen
+
+目录是 Rust `const`，投影就是纯函数，运行时算它是零成本，且**不可能**与目录
+不同步。codegen 会产出一个签入仓库的产物，那个产物可以被忘记重新生成——把
+"永不手写"降级成"记得跑脚本"。
+
+CLI **不联服务器**：目录是二进制的属性，不是运行中 server 的属性。agent 必须
+能在还没有任何东西可对话之前，先知道自己**可以**做什么。
+
+### 为什么没有接进 `mcp_stdio` 的 `tools/list`
+
+`src/mcp_stdio.rs:637` 现在手写着唯一一个工具 `agenterm_wait`，
+服务器自我描述为 `Read-only AgenTerm Fleet bridge`。把 60 个 Control 工具挂上
+去，而 `tools/call` 侧**没有**对应的派发与批准门执行，就是又造一次 F3——
+**表里有、按下去没反应**。`agent_tool_catalog_mcp_json()` 已经按 MCP 的
+`inputSchema`/`annotations` 键名产出，等执行侧就位时直接接上即可，届时不需要
+重新手抄一遍键名。
+
+### 机器守卫
+
+| 测试 | 守什么 |
+|------|--------|
+| **`every_available_operation_is_projected`** | **本节的核心**：目录里每个 available 操作都在工具表里，且工具数**恰好等于** available 数。手写表会在下一条目录条目上失败 |
+| `no_tool_exists_without_a_catalog_entry` | 反向：每个工具都有目录条目撑着，且 `errors`/`events`/`result_type`/`class`/`since` 原样透传 |
+| `unavailable_operations_never_reach_the_default_table` | 不可用能力不得被选中（对合成 spec 断言，不空转） |
+| `destructive_operations_carry_an_explicit_approval_gate` | 门控集合 == 目录 destructive 集合 |
+| `observation_and_mutation_stay_distinguishable` | Observe/Control/Destructive 三分穿过投影 |
+| `every_declared_value_type_has_a_schema_mapping` | 目录新增 `value_type` 时**必须**来改映射，而不是让投影猜一个 `string` 混过去 |
+| `parameter_bounds_and_requiredness_reach_the_schema` | 边界/必填/字符串长度 vs 数值边界的区分 |
+| `tool_names_are_unique_and_wire_legal` | slug 唯一且符合 `^[a-zA-Z0-9_-]{1,64}$` |
+| `document_and_mcp_shapes_are_derived_from_the_same_tools` | 两种输出形状同源 |
+| `declared_failures_are_visible_to_the_model` | typed 失败词表进入模型读得到的散文 |
+
+### 顺带修的 / 需要知道的
+
+- `agent-tools` 是**新增 CLI 命令**，所以按 §2 的提醒补了
+  `prd/PRD_02_15_command_line.md` 的条目——`scripts/rh/prd-alignment.rh:459`
+  要求每个 `list-commands` 公共名在 PRD 或其 linked 详情文档里被提到，
+  fail-closed。`OPERATION_CATALOG` 增删不触发这条，新增命令会。
+- 同时补进了 `agenterm-cli --help`（F4 的教训：能力不进 help 等于不存在）。
+
+---
+
 ## 2. 排序建议（成本 / 依赖 / 泳道）
 
 | 序 | 叶 | 内容 | 成本 | 泳道 / 热域 | 依赖 |
