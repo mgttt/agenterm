@@ -1,7 +1,8 @@
 # Phase C prep: retire live `rhai::` namespace
 
-Tip baseline: `e6c83c70` era (rev82 Native he=1 for script/remote-ui/working-context;
-workbench/unix `pack=ok`). SSOT for sequencing; do not invent a second living file map.
+Tip baseline: `9045f53d` (rev82 Native he=1 for script/remote-ui/working-context;
+fresh-clone Native he=1 + `pack=ok`; workbench/unix/working-context `pack=ok`;
+script-smoke/remote-ui still AOT typecheck debt). SSOT for sequencing; do not invent a second living file map.
 
 ## Outcome
 
