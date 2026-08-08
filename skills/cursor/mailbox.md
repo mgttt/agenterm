@@ -4,7 +4,7 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**舰队值班会话**刷新：2026-08-08T02:22Z（duty noop；findings=0）
+最后由**主控**刷新：2026-08-08（换防：`bc-a4df769a` → `bc-43046381`；命名：主控1 → 主控）
 
 ## 共享事实
 
@@ -15,7 +15,7 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `ca861531`（duty handoff） |
+| `origin/main` | tip `ebdd7b45`（duty handoff） |
 | 待审合 | （无）`origin/cursor/*` ahead=0 |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
@@ -64,12 +64,12 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-08T02:22Z
+### 舰队值班会话 · 2026-08-08T01:24Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-1dd408d3-5c19-4a3a-8182-b7daf0a60310`
-- URL: https://cursor.com/agents/bc-1dd408d3-5c19-4a3a-8182-b7daf0a60310
+- bcId: `bc-823bbeb5-6c4b-412b-84bc-ea2f594a3354`
+- URL: https://cursor.com/agents/bc-823bbeb5-6c4b-412b-84bc-ea2f594a3354
 - 分支: `main`
-- tip: `ca861531`
+- tip: `ebdd7b45`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -85,7 +85,6 @@
 
 ## 交接日志
 
-- 2026-08-08T02:22Z · 舰队值班会话(`bc-1dd408d3-…`) · duty: noop findings=0 main=3242b09a；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T01:24Z · 舰队值班会话(`bc-823bbeb5-…`) · duty: noop findings=0 main=c075d6b0；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T00:25Z · 舰队值班会话(`bc-815ae5a0-…`) · duty: noop findings=0 main=38fba119；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-07T23:22Z · 舰队值班会话(`bc-9c581f29-…`) · duty: noop findings=0 main=5d8f57e1；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清

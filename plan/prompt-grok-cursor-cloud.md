@@ -1,17 +1,23 @@
 # Grok ↔ Cursor Cloud 协同 loop 提示词
 
-状态：可执行（给 `/loop` 用）  
+状态：可执行（给 `/loop` 用）；2026-08-08 更新  
 用法：在本机 Grok 会话执行
 
 ```text
-/loop 5m 执行 plan/prompt-grok-cursor-cloud.md
+/loop 10m 执行 plan/prompt-grok-cursor-cloud.md
 ```
 
-本文件即**每一火的完整 prompt**（后台 subagent 无对话上下文，须自包含）。  
+10→本文件即**每一火的完整 prompt**（后台 subagent 无对话上下文，须自包含）。  
 工具：`bun skills/cursor/cloud.ts`（`CURSOR_API` 或 `~/env.jsonl`；**禁止打印密钥**）。  
 仓库：当前 checkout（Windows 主机常见 `D:\dev\agenterm`）。
 
----
+**2026-08-08 教训**（见本文末尾 `## 已知陷阱`）：
+- 用 bc-ID 直查，不靠 name 解析（同名/换名曾导致选了已归档旧 agent）
+- chat 409 (`agent_busy`) = agent 已自启新 run，不是故障
+- 连续 CANCELLED ≥5 轮只报告不自动删任务
+- 换防后须同步更新 `session-registry.md` + `mailbox.md`
+
+20→---
 
 ## Prompt（复制进 scheduler / 作为 loop 正文）
 
@@ -59,4 +65,14 @@ agent name/bcId | free|busy | main tip | pulled? | new tip? | chat? | 结论(pas
 取消：对该 loop 的 `task_id` 执行 `scheduler_delete`（或会话内等价取消）。  
 任务默认最长约 7 天自动过期（若经 scheduler 创建）。
 
-相关：`skills/cursor/cloud.ts`、`skills/cursor/README.md`、`skills/cursor/fleet-awareness.md`。
+## 已知陷阱（2026-08-08 实战沉淀）
+
+| 陷阱 | 现象 | 正确做法 |
+|------|------|----------|
+| **同名歧义** | `resolveAgentId("主控")` 在存在 `主控1`(archived)+`主控`(active) 时可能选错 | **用 bc-ID 直查**：`cloud.ts get bc-43046381-...` 跳过名字解析 |
+| **换防后过时 ID** | 旧定时器仍 watch 已归档的旧 bc-ID，报 `agent_archived` | 换防后立即 `scheduler_create --task_id <old>` 更新 prompt 中的 bc-ID |
+| **chat 409** | agent 已自启新 run，API 拒绝第二条 chat | 不是故障；视为「已自续」，正常跳过 |
+| **CANCELLED 螺旋** | agent 连续多轮被 CANCELLED（可能是排队超时或卡死） | ≥5 轮报告人工；**不自动删任务**（曾误杀健康 agent） |
+| **latestRun 未刷新** | get 返回的 latestRun 仍是旧 run（CREATING 已完成但 API 未更新） | 等下一轮；不要基于 stale latestRun 误判 free/busy |
+
+相关：`skills/cursor/cloud.ts`、`skills/cursor/README.md`、`skills/cursor/fleet-awareness.md`、`skills/cursor/session-registry.md`。
