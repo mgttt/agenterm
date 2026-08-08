@@ -82,11 +82,6 @@ fn script_smoke_copy(from, to) {
     std::fs::copy(from, to);
 }
 
-fn script_smoke_bytes_append(stream, payload) {
-    stream.append(payload);
-    stream
-}
-
 fn script_smoke_require_contains(text, needle, message) {
     let matched = text.contains(needle);
     test_harness::require(matched != 0, message);
@@ -116,16 +111,15 @@ fn script_smoke_child_stop(child) {
     child.wait_with_output(std::time::Duration::from_secs(2));
 }
 
-fn framed_recovery_ok(frame) {
-    frame.payload.ok
+fn script_smoke_child_stdout(child) {
+    let worker = child;
+    worker.stdout
 }
 
-fn framed_recovery_stdout(frame) {
-    frame.payload.stdout
-}
-
-fn framed_recovery_value(frame) {
-    frame.payload.value
+fn script_smoke_set_stdin_text(command, text) {
+    let worker = command;
+    let payload = "" + text;
+    worker.stdin_text(payload);
 }
 
 fn process_output_exit_code(output) {
@@ -539,54 +533,150 @@ fn wait_http_ready(child, ready_path, timeout_ms) {
     throw "script_smoke_http_fixture_ready_timeout";
 }
 
-fn u32_header(length) {
-    rh::bytes::from_array([
-        (length / 16777216) % 256,
-        (length / 65536) % 256,
-        (length / 256) % 256,
-        length % 256
-    ])
-}
-
-fn payload_frame(payload) {
-    let stream = u32_header(payload.len);
-    script_smoke_bytes_append(stream, payload);
-    stream
-}
-
-fn json_frame(frame) {
-    let encoded = rh::json::stringify(frame);
-    let encoded_text = "" + encoded;
-    let encoded_bytes = rh::bytes::from_text(encoded_text);
-    payload_frame(encoded_bytes)
-}
-
-fn framed_invocation(frame_id, invocation_id, source, version) {
-    #{
-        frame_version: version,
-        frame_id: frame_id,
-        kind: "invoke",
-        payload: #{
-            envelope_version: 2,
-            invocation_id: invocation_id,
-            api_version: 2,
-            operation: "eval",
-            profile: "pure",
-            source_label: "smoke",
-            source: source,
-            arguments: [],
-            budgets: #{
-                source_bytes: 262144,
-                operations: 1000000,
-                call_depth: 64,
-                expression_depth: 64,
-                collection_items: 10000,
-                string_bytes: 262144,
-                output_bytes: 65536,
-                wall_time_ms: 2000
-            }
-        }
-    }
+fn script_framed_worker_smoke_eval_source(script) {
+    "\nlet script_path=\"" + script + "\";\n\
+fn pad(text, target_len, ch) {\n\
+    let padded = \"\" + text;\n\
+    while padded.len < target_len { padded += ch; }\n\
+    padded\n\
+}\n\
+fn u32_header(length) {\n\
+    rh::bytes::from_array([\n\
+        (length / 16777216) % 256,\n\
+        (length / 65536) % 256,\n\
+        (length / 256) % 256,\n\
+        length % 256\n\
+    ])\n\
+}\n\
+fn payload_frame(payload) {\n\
+    let stream = u32_header(payload.len);\n\
+    stream.append(payload);\n\
+    stream\n\
+}\n\
+fn json_frame(frame) {\n\
+    payload_frame(rh::bytes::from_text(\"\" + rh::json::stringify(frame)))\n\
+}\n\
+fn framed_invocation(frame_id, invocation_id, source, version) {\n\
+    #{\n\
+        frame_version: version,\n\
+        frame_id: frame_id,\n\
+        kind: \"invoke\",\n\
+        payload: #{\n\
+            envelope_version: 2,\n\
+            invocation_id: invocation_id,\n\
+            api_version: 2,\n\
+            operation: \"eval\",\n\
+            profile: \"pure\",\n\
+            source_label: \"smoke\",\n\
+            source: source,\n\
+            arguments: [],\n\
+            budgets: #{\n\
+                source_bytes: 262144,\n\
+                operations: 1000000,\n\
+                call_depth: 64,\n\
+                expression_depth: 64,\n\
+                collection_items: 10000,\n\
+                string_bytes: 262144,\n\
+                output_bytes: 65536,\n\
+                wall_time_ms: 2000\n\
+            }\n\
+        }\n\
+    }\n\
+}\n\
+fn invoke_framed(input_bytes) {\n\
+    let command = std::process::command(script_path);\n\
+    command.args([\"--framed-worker\"]);\n\
+    command.stdin_bytes(input_bytes);\n\
+    command.capture_limit(262144);\n\
+    let output = command.output();\n\
+    if !output.success { throw output.stderr_text(); }\n\
+    let bytes = output.stdout;\n\
+    let frames = [];\n\
+    let offset = 0;\n\
+    while offset < bytes.len {\n\
+        let length = bytes.get(offset) * 16777216\n\
+            + bytes.get(offset + 1) * 65536\n\
+            + bytes.get(offset + 2) * 256\n\
+            + bytes.get(offset + 3);\n\
+        offset += 4;\n\
+        frames.push(\n\
+            rh::json::parse(bytes.slice(offset, length).to_text())\n\
+        );\n\
+        offset += length;\n\
+    }\n\
+    frames\n\
+}\n\
+let framed = rh::bytes::from_array([]);\n\
+framed.append(payload_frame(rh::bytes::from_text(\"{\")));\n\
+framed.append(payload_frame(rh::bytes::from_text(pad(\"\", 2097153, \"x\"))));\n\
+framed.append(json_frame(framed_invocation(\n\
+    \"recovery\", \"invoke-one\", \"print(\\\"framed-output\\\"); 40 + 2\", 1\n)));\n\
+framed.append(json_frame(framed_invocation(\"frame-two\", \"invoke-one\", \"1\", 1)));\n\
+framed.append(json_frame(framed_invocation(\n\
+    \"bad-version\", \"never-run\", \"1\", 2\n)));\n\
+let frames = invoke_framed(framed);\n\
+let codes = [];\n\
+let recovered_found = 0;\n\
+let recovered_ok = 0;\n\
+let recovered_stdout = \"\";\n\
+let recovered_value = 0;\n\
+for frame in frames {\n\
+    if frame.frame_id == \"recovery\" {\n\
+        recovered_found = 1;\n\
+        recovered_ok = frame.payload.ok;\n\
+        recovered_stdout = frame.payload.stdout;\n\
+        recovered_value = frame.payload.value;\n\
+    }\n\
+    if type_of(frame.payload.failure) != \"()\" {\n\
+        codes.push(frame.payload.failure.code);\n\
+    }\n\
+}\n\
+let cancel_bytes = json_frame(#{\n\
+    frame_version: 1,\n\
+    frame_id: \"cancel-invoke\",\n\
+    kind: \"invoke\",\n\
+    payload: #{\n\
+        envelope_version: 2,\n\
+        invocation_id: \"cancel-running\",\n\
+        api_version: 2,\n\
+        operation: \"eval\",\n\
+        profile: \"pure\",\n\
+        source_label: \"smoke\",\n\
+        source: \"loop {}\",\n\
+        arguments: [],\n\
+        budgets: #{\n\
+            source_bytes: 262144,\n\
+            operations: 10000000,\n\
+            call_depth: 64,\n\
+            expression_depth: 64,\n\
+            collection_items: 10000,\n\
+            string_bytes: 262144,\n\
+            output_bytes: 65536,\n\
+            wall_time_ms: 10000\n\
+        }\n\
+    }\n\
+});\n\
+cancel_bytes.append(json_frame(#{\n\
+    frame_version: 1,\n\
+    frame_id: \"cancel-request\",\n\
+    kind: \"cancel\",\n\
+    payload: #{invocation_id: \"cancel-running\"}\n\
+}));\n\
+let cancel_frames = invoke_framed(cancel_bytes);\n\
+let cancel_frame0 = cancel_frames[0];\n\
+let cancel_failure = cancel_frame0.payload.failure;\n\
+#{\n\
+    frames_len: frames.len,\n\
+    codes: codes,\n\
+    recovered_found: recovered_found,\n\
+    recovered_ok: recovered_ok,\n\
+    recovered_stdout: recovered_stdout,\n\
+    recovered_value: recovered_value,\n\
+    cancel_frames_len: cancel_frames.len,\n\
+    cancel_frame_id: cancel_frame0.frame_id,\n\
+    cancel_failure_code: cancel_failure.code,\n\
+    cancel_failure_exit_class: cancel_failure.exit_class\n\
+}"
 }
 
 fn sidebar_visible_code(snapshot) {
@@ -642,59 +732,6 @@ fn active_tab_note_from_snapshot(snapshot) {
     throw "script_fleet_active_tab_missing";
 }
 
-fn invoke_framed_worker(
-    context,
-    script,
-    input_bytes
-) {
-    let command = configured_program(
-        context,
-        script,
-        ["--framed-worker"],
-        "",
-        script_smoke_empty_env()
-    );
-    command.stdin_bytes(input_bytes);
-    command.capture_limit(262144);
-    let output = command.output();
-    let worker_label =
-        "[" + std::path::PathBuf::from(script).file_name + "]";
-    test_harness::append_command_record(
-        context,
-        [worker_label, "--framed-worker"],
-        output,
-        0,
-        []
-    );
-    require(
-        output.success,
-        "script_smoke_framed_worker_failed:" + ("" + output.stderr_text())
-    );
-    let bytes = output.stdout;
-    let frames = [];
-    let offset = 0;
-    while offset < bytes.len {
-        require(
-            bytes.len - offset >= 4,
-            "script_smoke_truncated_frame_length"
-        );
-        let length =
-            bytes.get(offset) * 16777216 +
-            bytes.get(offset + 1) * 65536 +
-            bytes.get(offset + 2) * 256 +
-            bytes.get(offset + 3);
-        offset += 4;
-        require(
-            length <= 2097152 && bytes.len - offset >= length,
-            "script_smoke_invalid_frame_payload:" + length
-        );
-        frames.push(
-            rh::json::parse(bytes.slice(offset, length).to_text())
-        );
-        offset += length;
-    }
-    frames
-}
 fn declared_evidence_ids() {
     return [
         "script.rh-runtime",
@@ -875,7 +912,8 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         script_smoke_empty_env()
     );
     let pipe_child = pipe_command.start();
-    let pipe_stream = pipe_child.stdout;
+    let pipe_worker = pipe_child;
+    let pipe_stream = script_smoke_child_stdout(pipe_worker);
     let prefix = pipe_stream_prefix(pipe_stream);
     let pipe_output = pipe_child.wait_with_output(
         std::time::Duration::from_secs(5)
@@ -1101,7 +1139,8 @@ fn assert_process_and_streams(
         []
     );
     let expected = trimmed("" + version_output.stdout);
-    let expected_suffix = expected.sub_string(2);
+    let expected_text = "" + expected;
+    let expected_suffix = expected_text.sub_string(2);
     let stream = script_eval_parse(
         context,
         cli,
@@ -1935,7 +1974,7 @@ fn assert_runtime_and_framing(
         script_smoke_empty_env()
     );
     let malformed_open = "{";
-    malformed_command.stdin_text(malformed_open);
+    script_smoke_set_stdin_text(malformed_command, malformed_open);
     let malformed = malformed_command.output();
     let malformed_stdout = malformed.stdout_text();
     let malformed_has_code = malformed_stdout.contains(
@@ -1953,7 +1992,7 @@ fn assert_runtime_and_framing(
         "",
         script_smoke_empty_env()
     );
-    oversized_command.stdin_text(oversized_text);
+    script_smoke_set_stdin_text(oversized_command, oversized_text);
     let oversized = oversized_command.output();
     let oversized_stdout = oversized.stdout_text();
     let oversized_has_code = oversized_stdout.contains(
@@ -1969,124 +2008,30 @@ fn assert_runtime_and_framing(
     );
 
     print("STEP framed worker sequencing, isolation, rejection, and recovery");
-    let framed = rh::bytes::from_array([]);
-    framed.append(payload_frame(rh::bytes::from_text("{")));
-    let oversized_payload = script_smoke_pad("", 2097153, "x");
-    framed.append(
-        payload_frame(
-            rh::bytes::from_text(oversized_payload)
-        )
-    );
-    framed.append(
-        json_frame(
-            framed_invocation(
-                "recovery",
-                "invoke-one",
-                "print(\"framed-output\"); 40 + 2",
-                1
-            )
-        )
-    );
-    framed.append(
-        json_frame(
-            framed_invocation(
-                "frame-two",
-                "invoke-one",
-                "1",
-                1
-            )
-        )
-    );
-    framed.append(
-        json_frame(
-            framed_invocation(
-                "bad-version",
-                "never-run",
-                "1",
-                2
-            )
-        )
-    );
-    let frames = invoke_framed_worker(
+    let framed_result = script_eval_parse(
         context,
-        script,
-        framed
+        cli,
+        script_framed_worker_smoke_eval_source(script),
+        audit_path
     );
-    let codes = [];
-    let recovered_found = 0;
-    let recovered_ok = 0;
-    let recovered_stdout = "";
-    let recovered_value = 0;
-    for frame in frames {
-        if frame.frame_id == "recovery" {
-            recovered_found = 1;
-            recovered_ok = framed_recovery_ok(frame);
-            recovered_stdout = framed_recovery_stdout(frame);
-            recovered_value = framed_recovery_value(frame);
-        }
-        if type_of(frame.payload.failure) != "()" {
-            codes.push(frame.payload.failure.code);
-        }
-    }
     test_harness::require(
-        frames.len == 5
-            && codes.contains("protocol_malformed_frame")
-            && codes.contains("protocol_frame_too_large")
-            && codes.contains("protocol_duplicate_invocation")
-            && codes.contains("protocol_unsupported_frame_version")
-            && recovered_found != 0
-            && recovered_ok != 0
-            && recovered_stdout == "framed-output\n"
-            && recovered_value == 42,
+        framed_result.frames_len == 5
+            && framed_result.codes.contains("protocol_malformed_frame")
+            && framed_result.codes.contains("protocol_frame_too_large")
+            && framed_result.codes.contains("protocol_duplicate_invocation")
+            && framed_result.codes.contains("protocol_unsupported_frame_version")
+            && framed_result.recovered_found != 0
+            && framed_result.recovered_ok != 0
+            && framed_result.recovered_stdout == "framed-output\n"
+            && framed_result.recovered_value == 42,
         "script_framed_recovery_mismatch"
     );
-    let cancel_invoke = #{
-        frame_version: 1,
-        frame_id: "cancel-invoke",
-        kind: "invoke",
-        payload: #{
-            envelope_version: 2,
-            invocation_id: "cancel-running",
-            api_version: 2,
-            operation: "eval",
-            profile: "pure",
-            source_label: "smoke",
-            source: "loop {}",
-            arguments: [],
-            budgets: #{
-                source_bytes: 262144,
-                operations: 10000000,
-                call_depth: 64,
-                expression_depth: 64,
-                collection_items: 10000,
-                string_bytes: 262144,
-                output_bytes: 65536,
-                wall_time_ms: 10000
-            }
-        }
-    };
-    let cancel_bytes = json_frame(cancel_invoke);
-    cancel_bytes.append(
-        json_frame(#{
-            frame_version: 1,
-            frame_id: "cancel-request",
-            kind: "cancel",
-            payload: #{invocation_id:"cancel-running"}
-        })
-    );
-    let cancel_frames = invoke_framed_worker(
-        context,
-        script,
-        cancel_bytes
-    );
-    let cancel_frame0 = cancel_frames[0];
-    let cancel_failure = cancel_frame0.payload.failure;
     test_harness::require(
-        cancel_frames.len == 1
-            && cancel_frame0.frame_id == "cancel-invoke"
-            && cancel_failure.code ==
+        framed_result.cancel_frames_len == 1
+            && framed_result.cancel_frame_id == "cancel-invoke"
+            && framed_result.cancel_failure_code ==
                 "limit_cancelled"
-            && cancel_failure.exit_class == "cancelled",
+            && framed_result.cancel_failure_exit_class == "cancelled",
         "script_framed_cancel_mismatch"
     );
 }
@@ -2137,7 +2082,8 @@ fn assert_supervisor(
         existing,
         3000
     );
-    std::process::kill(crash_worker);
+    let crash_pid = crash_worker;
+    std::process::kill(crash_pid);
     let crash_output = crash_client.wait_with_output(
         std::time::Duration::from_secs(5)
     );

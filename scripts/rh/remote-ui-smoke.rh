@@ -59,7 +59,7 @@ fn output_stderr_text(output) {
 }
 
 fn remote_ui_write(path, content) {
-    std::fs::write(path, content);
+    rh::runtime::atomic_write(path, content);
 }
 
 fn remote_ui_kill(pid) {
@@ -110,7 +110,8 @@ fn json_cli(context, cli, arguments) {
         0,
         []
     );
-    rh::json::parse(trimmed(response.stdout))
+    let stdout_text = trimmed(response.stdout);
+    parse_json_text(stdout_text)
 }
 
 fn text_cli(context, cli, arguments) {
@@ -469,20 +470,17 @@ fn double_click_tab_text(context, cli, gui_child, id) {
     );
 }
 
-fn find_last_run(screen, marker) {
-    let found = json_null();
-    for run in screen.runs {
-        if run.text.contains(marker) {
-            found = run;
-        }
-    }
-    found
-}
-
 fn marker_text_offset(text, needle) {
     let haystack = "" + text;
     let fragment = "" + needle;
-    haystack.index_of(fragment)
+    let index = 0;
+    while index + fragment.len <= haystack.len {
+        if haystack.sub_string(index, fragment.len) == fragment {
+            return index;
+        }
+        index += 1;
+    }
+    throw "remote_ui_marker_offset_missing";
 }
 
 fn process_present(id) {
@@ -2634,18 +2632,21 @@ try {
         ["ui-bootstrap"]
     );
     let selection_tab = find_tab(selection_bootstrap, tab_id);
-    let marker_run = find_last_run(
-        selection_tab.screen,
-        copy_marker
-    );
+    let marker_run = json_null();
+    for run in selection_tab.screen.runs {
+        if run.text.contains(copy_marker) {
+            marker_run = run;
+        }
+    }
     test_harness::require(
         marker_run != json_null(),
         "remote_ui_selection_marker_run_missing"
     );
-    let marker_text = marker_run.text;
-    let marker_row_value = 0 + marker_run.row;
+    let marker_text = "" + marker_run.text;
+    let marker_row_value = 0 + (0 + marker_run.row);
     let marker_column =
-        0 + marker_run.column + marker_text_offset(marker_text, copy_marker);
+        0 + (0 + marker_run.column)
+            + marker_text_offset(marker_text, copy_marker);
     let selection_rect = replacement_gui.window_client_rect();
     let terminal_left = 360;
     let terminal_width = selection_rect.right - terminal_left - 12;

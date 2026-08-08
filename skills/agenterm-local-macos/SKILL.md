@@ -34,8 +34,7 @@ sees the old behaviour, and the code looks correct when you re-read it.
 Install, then prove the binary actually carries the change:
 
 ```bash
-cargo build --release --bin agenterm --bin agenterm-cli \
-            --bin agenterm-mux --bin agenterm-rhai --bin agenterm-mcp
+cargo build --release --bin agenterm --bin agenterm-cli --bin agenterm-rhai
 ./install.sh --local-build target/release
 readlink ~/.local/share/agenterm/current          # must be the new release dir
 stat -f "%Sm" ~/Applications/AgenTerm.app/Contents/MacOS/AgenTerm
@@ -45,8 +44,10 @@ strings ~/.local/share/agenterm/current/agenterm | grep -c "<a new string litera
 The `strings` check is the one that cannot be fooled by a stale symlink: pick a
 message the fix introduced and confirm it is present in the installed bytes.
 
-`--local-build` requires **all five** executables; building only `agenterm`
-fails the installer's validation.
+`--local-build` requires **all three** installer-validated executables
+(`agenterm`, `agenterm-cli`, `agenterm-rhai` compatibility shim); building
+only `agenterm` fails the installer's validation. Live `.rh` task automation
+uses `agenterm-rh` (build separately or via `./build.sh`).
 
 An already-running server keeps its loaded version. After installing, close the
 window with **stop server and exit** (not *keep server running*), or run
