@@ -307,13 +307,33 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
-    // std.fs.create_dir(path) → true | nil, err  (alias for create_dir_all)
+    // std.fs.create_dir(path) → true | nil, err
     fs.set(
         "create_dir",
         lua.create_function(|_lua, path: String| {
             std::fs::create_dir_all(&path)
                 .map(|()| true)
                 .map_err(|e| mlua::Error::runtime(format!("fs_create_dir: {e}")))
+        })?,
+    )?;
+
+    // std.fs.create_dir_all(path) → true | nil, err (rh naming alias)
+    fs.set(
+        "create_dir_all",
+        lua.create_function(|_lua, path: String| {
+            std::fs::create_dir_all(&path)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_create_dir_all: {e}")))
+        })?,
+    )?;
+
+    // std.fs.remove_dir(path) → true | nil, err (empty dirs only)
+    fs.set(
+        "remove_dir",
+        lua.create_function(|_lua, path: String| {
+            std::fs::remove_dir(&path)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_remove_dir: {e}")))
         })?,
     )?;
 
@@ -609,6 +629,17 @@ fn build_env(lua: &Lua) -> Result<Table, mlua::Error> {
             std::env::current_dir()
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|e| mlua::Error::runtime(format!("env_current_dir: {e}")))
+        })?,
+    )?;
+
+    // std.env.names() → table (array of string)
+    env.set(
+        "names",
+        lua.create_function(|lua, ()| {
+            let names: Vec<String> = std::env::vars_os()
+                .map(|(k, _)| k.to_string_lossy().into_owned())
+                .collect();
+            lua.to_value(&names)
         })?,
     )?;
 
@@ -1458,6 +1489,64 @@ mod tests {
             &host(),
         ).expect("split index");
         assert_eq!(r.value, 1);
+    }
+
+    // ── env.names / create_dir_all / remove_dir ────────────────────
+
+    #[test]
+    fn env_names_contains_path() {
+        let e = engine();
+        let r = e.eval(
+            "local names = std.env.names(); for _, n in ipairs(names) do if n == 'PATH' then return 1 end end; return 0",
+            &host(),
+        ).expect("env.names");
+        assert_eq!(r.value, 1, "PATH should be in env.names");
+    }
+
+    #[test]
+    fn env_names_not_empty() {
+        let e = engine();
+        let r = e.eval("return #std.env.names()", &host()).expect("env.names");
+        assert!(r.value > 0, "env.names must not be empty");
+    }
+
+    #[test]
+    fn create_dir_all_recursive() {
+        let dir = TempDir::new().unwrap();
+        let deep = dir.path().join("a").join("b").join("c");
+        let e = engine();
+        e.eval(
+            &format!("std.fs.create_dir_all([[{}]])", deep.display()),
+            &host(),
+        ).expect("create_dir_all");
+        assert!(deep.is_dir());
+    }
+
+    #[test]
+    fn remove_dir_empty() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("empty_dir");
+        std::fs::create_dir(&sub).unwrap();
+        let e = engine();
+        e.eval(
+            &format!("std.fs.remove_dir([[{}]])", sub.display()),
+            &host(),
+        ).expect("remove_dir");
+        assert!(!sub.exists());
+    }
+
+    #[test]
+    fn remove_dir_nonempty_fails() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("nonempty");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("f.txt"), "x").unwrap();
+        let e = engine();
+        let r = e.eval(
+            &format!("local ok, err = pcall(function() std.fs.remove_dir([[{}]]) end); return ok and 0 or 1", sub.display()),
+            &host(),
+        ).expect("remove_dir nonempty");
+        assert_eq!(r.value, 1, "remove_dir should fail on non-empty dir");
     }
 
     // ── fnv1a64 ─────────────────────────────────────────────────────

@@ -1,9 +1,12 @@
--- check.lua — Production task example: lint directory of Lua scripts.
--- Demonstrates std.fs.read_dir, std.fs.exists, string_split, print.
--- Returns 0 on success, non-zero on failure.
+-- check.lua — Production task: lint directory of Lua scripts with real syntax checking.
+-- Uses std.fs.read_dir, std.fs.read, pcall(load) for syntax validation.
+-- Returns 0 on success, 1 on failure.
 -- Usage: check.lua <dir-path>
 
 local function check_dir(path)
+    -- std.env.names for diagnostic info
+    local _ = std.env.names()
+
     if not std.fs.exists(path) then
         print("check: directory not found: " .. path)
         return 1
@@ -16,19 +19,24 @@ local function check_dir(path)
     for _, entry in ipairs(entries) do
         if entry.is_file then
             local name = entry.name
-            -- Only check .lua files
             local parts = string_split(name, ".")
             local ext = parts[#parts] or ""
             if ext == "lua" then
                 total = total + 1
                 local ok, err = pcall(function()
-                    local src = std.fs.read(entry.path)
-                    -- Basic sanity: must start with valid Lua
-                    return src and #src > 0
+                    local src = std.fs.read_to_string(entry.path)
+                    -- Real syntax check via Lua's load()
+                    local fn, load_err = load(src)
+                    if fn == nil then
+                        error(load_err)
+                    end
+                    return true
                 end)
-                if not (ok and err) then
+                if not ok or err ~= true then
                     failed = failed + 1
-                    print("FAIL: " .. entry.path)
+                    local msg = "syntax error"
+                    if type(err) == "string" then msg = err end
+                    print("FAIL: " .. entry.path .. " — " .. msg)
                 else
                     print("OK: " .. entry.path)
                 end
@@ -48,6 +56,5 @@ local n = __host.args_len()
 if n == 1 then
     return check_dir(__host.arg(0))
 else
-    -- Default: check scripts/lua directory
     return check_dir("scripts/lua")
 end

@@ -74,15 +74,12 @@ impl LuaEngine {
     /// Create a new LuaJIT engine.
     pub fn new() -> Result<Self, LuaError> {
         let lua = Lua::new();
-        // Sandbox: remove dangerous globals.
+        // Sandbox: remove dangerous globals. Keep `load` for syntax checking.
         lua.globals()
             .set("loadfile", mlua::Value::Nil)
             .map_err(|e| LuaError::Engine(e.to_string()))?;
         lua.globals()
             .set("dofile", mlua::Value::Nil)
-            .map_err(|e| LuaError::Engine(e.to_string()))?;
-        lua.globals()
-            .set("load", mlua::Value::Nil)
             .map_err(|e| LuaError::Engine(e.to_string()))?;
         // Inject std library.
         stdlib::inject(&lua).map_err(|e| LuaError::Engine(e.to_string()))?;
