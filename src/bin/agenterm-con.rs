@@ -403,10 +403,12 @@ A standalone console host (conhost equivalent). No tabs, no server, no Fleet.
   --script PATH  Read a JSON array of input commands from PATH and play them
                  back through the real keyboard/paste/mouse code paths —
                  text, paste, key (with ctrl/alt/shift), wait_ms, click
-                 (row/col/button, with ctrl/alt/shift), mouse_move
-                 (row/col), wheel (row/col/notches). Lets a test or another
-                 agent drive a session without OS-level input injection.
-                 See src/bin/agenterm-con/agent_interface.rs.
+                 (row/col/button, with ctrl/alt/shift), mouse_down/mouse_up
+                 (same shape as click, for press-drag-release gestures),
+                 mouse_move (row/col), wheel (row/col/notches, or ctrl:true
+                 for font-size zoom). Lets a test or another agent drive a
+                 session without OS-level input injection. See
+                 src/bin/agenterm-con/agent_interface.rs.
 
 Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 ~/.config (Unix) with keys: font_size, cols, rows (all optional).
@@ -1177,6 +1179,30 @@ impl ConTerminal {
                 ScriptCommand::Click { row, col, button, ctrl, alt, shift } => {
                     self.execute_script_click(window, row, col, button, ctrl, alt, shift);
                 }
+                ScriptCommand::MouseDown { row, col, button, ctrl, alt, shift } => {
+                    self.execute_script_pointer_button(
+                        window,
+                        row,
+                        col,
+                        button,
+                        ctrl,
+                        alt,
+                        shift,
+                        PointerButtonState::Pressed,
+                    );
+                }
+                ScriptCommand::MouseUp { row, col, button, ctrl, alt, shift } => {
+                    self.execute_script_pointer_button(
+                        window,
+                        row,
+                        col,
+                        button,
+                        ctrl,
+                        alt,
+                        shift,
+                        PointerButtonState::Released,
+                    );
+                }
                 ScriptCommand::MouseMove { row, col } => {
                     self.execute_script_mouse_move(window, row, col);
                 }
@@ -1237,6 +1263,43 @@ impl ConTerminal {
         alt: bool,
         shift: bool,
     ) {
+        self.execute_script_pointer_button(
+            window,
+            row,
+            col,
+            button,
+            ctrl,
+            alt,
+            shift,
+            PointerButtonState::Pressed,
+        );
+        self.execute_script_pointer_button(
+            window,
+            row,
+            col,
+            button,
+            ctrl,
+            alt,
+            shift,
+            PointerButtonState::Released,
+        );
+    }
+
+    /// One half of a press-drag-release gesture — see
+    /// [`ScriptCommand::MouseDown`]/[`ScriptCommand::MouseUp`], and shared
+    /// by [`Self::execute_script_click`] for the atomic press+release case.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_script_pointer_button(
+        &mut self,
+        window: &PixelWindow,
+        row: u16,
+        col: u16,
+        button: ScriptMouseButton,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+        state: PointerButtonState,
+    ) {
         let modifiers = ModifierState { control: ctrl, alt, shift, meta: false };
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
         let platform_button = match button {
@@ -1244,20 +1307,7 @@ impl ConTerminal {
             ScriptMouseButton::Middle => PointerButton::Middle,
             ScriptMouseButton::Right => PointerButton::Right,
         };
-        self.handle_pointer_button(
-            window,
-            platform_button,
-            PointerButtonState::Pressed,
-            Some(position),
-            &modifiers,
-        );
-        self.handle_pointer_button(
-            window,
-            platform_button,
-            PointerButtonState::Released,
-            Some(position),
-            &modifiers,
-        );
+        self.handle_pointer_button(window, platform_button, state, Some(position), &modifiers);
     }
 
     /// Moves the pointer to a cell coordinate for a `--script` `mouse_move`

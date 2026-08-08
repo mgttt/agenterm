@@ -547,6 +547,47 @@ fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
 }
 
 #[test]
+fn scripted_press_drag_release_extends_a_local_selection() {
+    let _guard = gui_test_guard();
+    // Closes a gap this session's own plan doc flagged: `click` is atomic
+    // press+release and cannot express a drag, so drag-selection —
+    // `mouse_move` events extending a selection while a button is held via
+    // `handle_pointer_moved`'s `self.selecting` branch — had never been
+    // driven by anything but a real physical mouse. `mouse_down`/`mouse_up`
+    // close that: press, move (still held), release, and confirm the
+    // selection followed the drag rather than staying pinned to the press
+    // point the way a single `click` always does.
+    let dir = scratch_dir("drag-selection");
+    let script = write_script(
+        &dir,
+        r#"[
+            {"text": "echo DRAG_MARKER\r"},
+            {"wait_ms": 300},
+            {"mouse_down": {"row": 3, "col": 2}},
+            {"mouse_move": {"row": 3, "col": 9}},
+            {"mouse_up": {"row": 3, "col": 9}},
+            {"wait_ms": 200}
+        ]"#,
+    );
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["selection"].is_array() && snapshot["selection"][1]["col"] != snapshot["selection"][0]["col"]
+    });
+    // The anchor (press point) must stay put and the moving endpoint must
+    // have followed the drag to the release point — a `click` alone could
+    // only ever produce a single-cell selection, so this is real evidence
+    // the drag path, not just press/release individually, is wired.
+    assert_eq!(snapshot["selection"][0]["row"], 3, "{snapshot}");
+    assert_eq!(snapshot["selection"][0]["col"], 2, "anchor must stay at the press point: {snapshot}");
+    assert_eq!(snapshot["selection"][1]["row"], 3, "{snapshot}");
+    assert_eq!(snapshot["selection"][1]["col"], 9, "moving endpoint must follow the drag: {snapshot}");
+    let _ = session.child.kill();
+}
+
+#[test]
 fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
     let _guard = gui_test_guard();
     // Same gap as above, the scroll half: proves a scripted `wheel` reaches

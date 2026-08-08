@@ -235,6 +235,32 @@ pub enum ScriptCommand {
         alt: bool,
         shift: bool,
     },
+    /// Presses (without releasing) a mouse button at a cell coordinate —
+    /// the first half of a real press-drag-release gesture. `Click` is
+    /// atomic press+release and therefore cannot express a drag at all;
+    /// splitting it was a real, documented coverage gap (drag-selection —
+    /// `mouse_move` events extending a selection while a button is held —
+    /// had never been driven by anything but a real physical mouse). A
+    /// `MouseDown` left unmatched by a later `MouseUp` leaves the session
+    /// in a real held-button state, same as a human who never lets go.
+    MouseDown {
+        row: u16,
+        col: u16,
+        button: ScriptMouseButton,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    },
+    /// Releases a mouse button at a cell coordinate — the second half of a
+    /// `MouseDown`/`MouseUp` pair. See `MouseDown`.
+    MouseUp {
+        row: u16,
+        col: u16,
+        button: ScriptMouseButton,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    },
     /// Moves the pointer to a cell coordinate without a button transition —
     /// drives `handle_pointer_moved`, so a dragging selection extends, an
     /// application-owned drag reports motion, and `ANY_MOTION` (1003)
@@ -303,6 +329,8 @@ struct RawCommand {
     wait_ms: Option<u64>,
     screenshot: Option<PathBuf>,
     click: Option<RawClick>,
+    mouse_down: Option<RawClick>,
+    mouse_up: Option<RawClick>,
     mouse_move: Option<RawPoint>,
     wheel: Option<RawWheel>,
 }
@@ -316,6 +344,8 @@ impl RawCommand {
             self.wait_ms.is_some(),
             self.screenshot.is_some(),
             self.click.is_some(),
+            self.mouse_down.is_some(),
+            self.mouse_up.is_some(),
             self.mouse_move.is_some(),
             self.wheel.is_some(),
         ]
@@ -324,7 +354,7 @@ impl RawCommand {
         .count();
         if present != 1 {
             return Err(format!(
-                "script command {index}: exactly one of text/paste/key/wait_ms/screenshot/click/mouse_move/wheel is required, found {present}"
+                "script command {index}: exactly one of text/paste/key/wait_ms/screenshot/click/mouse_down/mouse_up/mouse_move/wheel is required, found {present}"
             ));
         }
         if let Some(text) = self.text {
@@ -354,6 +384,26 @@ impl RawCommand {
                 row: click.row,
                 col: click.col,
                 button: click.button,
+                ctrl: self.ctrl,
+                alt: self.alt,
+                shift: self.shift,
+            });
+        }
+        if let Some(down) = self.mouse_down {
+            return Ok(ScriptCommand::MouseDown {
+                row: down.row,
+                col: down.col,
+                button: down.button,
+                ctrl: self.ctrl,
+                alt: self.alt,
+                shift: self.shift,
+            });
+        }
+        if let Some(up) = self.mouse_up {
+            return Ok(ScriptCommand::MouseUp {
+                row: up.row,
+                col: up.col,
+                button: up.button,
                 ctrl: self.ctrl,
                 alt: self.alt,
                 shift: self.shift,
@@ -555,6 +605,42 @@ mod tests {
                 ScriptCommand::Wheel { row: 5, col: 20, notches: 3.0, ctrl: false },
                 ScriptCommand::Wheel { row: 5, col: 20, notches: -1.5, ctrl: false },
                 ScriptCommand::Wheel { row: 5, col: 20, notches: 1.0, ctrl: true },
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_mouse_down_and_up_for_drag_gestures() {
+        // Split press/release exist specifically so a script can express a
+        // real press-drag-release gesture (`Click` is atomic press+release
+        // and cannot span a `mouse_move` in between) — see
+        // `ScriptCommand::MouseDown`'s doc comment.
+        let script = br#"[
+            {"mouse_down": {"row": 2, "col": 4}},
+            {"mouse_move": {"row": 2, "col": 9}},
+            {"mouse_up": {"row": 2, "col": 9}, "shift": true}
+        ]"#;
+        let commands = parse_script(script).expect("valid script");
+        assert_eq!(
+            commands,
+            vec![
+                ScriptCommand::MouseDown {
+                    row: 2,
+                    col: 4,
+                    button: ScriptMouseButton::Left,
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                },
+                ScriptCommand::MouseMove { row: 2, col: 9 },
+                ScriptCommand::MouseUp {
+                    row: 2,
+                    col: 9,
+                    button: ScriptMouseButton::Left,
+                    ctrl: false,
+                    alt: false,
+                    shift: true,
+                },
             ]
         );
     }
