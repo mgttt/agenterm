@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 use std::{
     cell::RefCell,
     env,
-    io::{BufRead, IsTerminal, Read, Write},
-    sync::mpsc,
+    io::{BufRead, Read, Write},
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -11,10 +10,9 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use crate::script_protocol::{
-    ReplSessionQuery, ReplSessionWireConfig, ReplWireCellResult, ReplWireFailure,
-    ReplWireInputState, ReplWireQueryResult, SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION,
-    ScriptBrokerError, ScriptBrokerRequest, ScriptBrokerResponse, ScriptBudgets, ScriptExitClass,
-    ScriptInvocation, ScriptOperation, ScriptProfile,
+    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
+    ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
+    ScriptProfile,
 };
 use crate::{
     build_identity::BuildIdentity,
@@ -59,11 +57,6 @@ use crate::script_audit::{
 use crate::script_project::{
     ResolvedScriptTask, ScriptTaskCatalog, ScriptTaskStatus, discover_task_manifest,
     load_task_catalog, resolve_task,
-};
-use crate::script_repl::{ReplCellFailure, ReplCellResult, canonical_project_root};
-use crate::worker_supervisor::persistent::{
-    FreshSessionReason, FreshSessionReceipt, PersistentReplClient, PersistentReplControl,
-    PersistentReplError, PersistentWorkerError,
 };
 use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
 
@@ -309,18 +302,15 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
 fn script_help_text() -> &'static str {
     "AgenTerm Script Runtime\n\
          Usage:\n\
-           agenterm-rhai api [MODULE] [--status STATE] [--tree|--json]\n\
-           agenterm-rhai check [OPTIONS] FILE.rhai|-\n\
-           agenterm-rhai check-many --manifest FILE [OPTIONS]\n\
-           agenterm-rhai eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
-           agenterm-rhai repl [OPTIONS] [--] [ARGS...]\n\
-           agenterm-rhai run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
-           agenterm-rhai task list [--manifest PATH] [--json]\n\
-           agenterm-rhai task show TASK [--manifest PATH] [--json]\n\
-           agenterm-rhai task check [TASK] [--manifest PATH] [--json]\n\
-           agenterm-rhai task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
-         REPL commands: :help :quit :reset :history :vars :functions :limits \
-         :api [MODULE] :load FILE :json on|off\n\
+           agenterm-rh api [MODULE] [--status STATE] [--tree|--json]\n\
+           agenterm-rh check [OPTIONS] FILE.rh|-\n\
+           agenterm-rh check-many --manifest FILE [OPTIONS]\n\
+           agenterm-rh eval [OPTIONS] EXPRESSION|-- FILE.rh [--] [ARGS...]\n\
+           agenterm-rh run [OPTIONS] FILE.rh|- [--] [ARGS...]\n\
+           agenterm-rh task list [--manifest PATH] [--json]\n\
+           agenterm-rh task show TASK [--manifest PATH] [--json]\n\
+           agenterm-rh task check [TASK] [--manifest PATH] [--json]\n\
+           agenterm-rh task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
          Options: --timeout-ms N --max-operations N --max-collection-items N \
          --max-string-bytes N --max-output-bytes N --project-root DIR \
          --manifest FILE --json"
@@ -341,1120 +331,12 @@ fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
     }
 }
 
-enum ReplInputEvent {
-    Line(String),
-    Eof,
-    Failed(String),
-}
-
-enum ReplInterruptEvent {
-    Idle,
-    Active,
-    Failed(String),
-}
-
-/// Commands the REPL main loop sends to the interactive input thread.
-enum ReplEditorCommand {
-    /// Discard the in-progress line (after ^C cancels a cell).
-    Clear,
-    /// Render the prompt; `None` suppresses rendering (JSON output mode).
-    SetPrompt(Option<String>),
-}
-
-/// Render `prompt + text` on one terminal line with the cursor restored to
-/// `cursor`. Uses ANSI sequences; the platform line editor enables VT
-/// processing on the output handle where required.
-fn render_edit_line(
-    out: &mut impl Write,
-    prompt: &str,
-    text: &str,
-    cursor: usize,
-) -> std::io::Result<()> {
-    write!(out, "\r\x1b[2K{prompt}{text}")?;
-    let suffix = &text[cursor.min(text.len())..];
-    let suffix_columns: usize = suffix
-        .chars()
-        .filter_map(unicode_width::UnicodeWidthChar::width)
-        .sum();
-    if suffix_columns > 0 {
-        write!(out, "\x1b[{suffix_columns}D")?;
-    }
-    out.flush()
-}
-
-/// Interactive per-key input thread: line editing with local history plus the
-/// shared Ctrl-C observer. Falls back to plain line reads when the platform
-/// line editor is unavailable (e.g. mintty without a Win32 console).
-fn run_repl_line_editor(
-    input_tx: mpsc::Sender<ReplInputEvent>,
-    command_rx: mpsc::Receiver<ReplEditorCommand>,
-) {
-    let mut editor = match crate::platform::enter_console_line_editor() {
-        Ok(editor) => editor,
-        Err(_) => {
-            run_repl_plain_reader(input_tx, command_rx);
-            return;
-        }
-    };
-    let mut buffer = crate::platform::LineBuffer::new();
-    let mut history = crate::platform::LineHistory::new();
-    let mut prompt: Option<String> = None;
-    let mut dirty = false;
-    loop {
-        loop {
-            match command_rx.try_recv() {
-                Ok(ReplEditorCommand::Clear) => {
-                    buffer.clear();
-                    history.reset();
-                    dirty = true;
-                }
-                Ok(ReplEditorCommand::SetPrompt(next)) => {
-                    prompt = next;
-                    dirty = true;
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => return,
-            }
-        }
-        match editor.read_key() {
-            Ok(Some(key)) => {
-                let mut submitted = None;
-                match key {
-                    crate::platform::ConsoleKey::Char(ch) => buffer.insert_char(ch),
-                    crate::platform::ConsoleKey::Enter => submitted = Some(buffer.take()),
-                    crate::platform::ConsoleKey::Backspace => {
-                        buffer.backspace();
-                    }
-                    crate::platform::ConsoleKey::Delete => {
-                        buffer.delete();
-                    }
-                    crate::platform::ConsoleKey::Left => buffer.move_left(),
-                    crate::platform::ConsoleKey::Right => buffer.move_right(),
-                    crate::platform::ConsoleKey::Home => buffer.move_home(),
-                    crate::platform::ConsoleKey::End => buffer.move_end(),
-                    crate::platform::ConsoleKey::Up => {
-                        if let Some(text) = history.previous(&buffer) {
-                            buffer.set_text(text);
-                        }
-                    }
-                    crate::platform::ConsoleKey::Down => {
-                        if let Some(text) = history.next(&buffer) {
-                            buffer.set_text(text);
-                        }
-                    }
-                    crate::platform::ConsoleKey::Eof => {
-                        if buffer.is_empty() {
-                            let _ = std::io::stderr().write_all(b"\n");
-                            let _ = input_tx.send(ReplInputEvent::Eof);
-                            return;
-                        }
-                        buffer.delete();
-                    }
-                    _ => {}
-                }
-                if let Some(line) = submitted {
-                    history.push(&line);
-                    // The main loop accumulates multi-line cells with
-                    // `buffer.push_str(&line)`; carry the line terminator so
-                    // an incomplete Rhai cell keeps its line boundaries.
-                    let mut line_with_eol = line;
-                    line_with_eol.push('\n');
-                    if input_tx.send(ReplInputEvent::Line(line_with_eol)).is_err() {
-                        return;
-                    }
-                    // Commit the submitted line to the terminal scrollback so
-                    // multi-line cells stay visible (standard REPL behavior);
-                    // continuation prompts then start on a fresh line.
-                    let _ = std::io::stderr().write_all(b"\n");
-                }
-                dirty = true;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                let _ = input_tx.send(ReplInputEvent::Failed(format!("host_line_editor: {error}")));
-                return;
-            }
-        }
-        if dirty && let Some(prompt) = &prompt {
-            if let Err(error) = render_edit_line(
-                &mut std::io::stderr(),
-                prompt,
-                buffer.text(),
-                buffer.cursor(),
-            ) {
-                let _ = input_tx.send(ReplInputEvent::Failed(format!(
-                    "host_line_editor_render: {error}"
-                )));
-                return;
-            }
-            dirty = false;
-        }
-    }
-}
-
-/// Plain line-read input thread, used for non-tty, JSON, or fallback input.
-/// Renders the prompt from the same command channel so both input paths share
-/// one main-loop contract.
-fn run_repl_plain_reader(
-    input_tx: mpsc::Sender<ReplInputEvent>,
-    command_rx: mpsc::Receiver<ReplEditorCommand>,
-) {
-    let stdin = std::io::stdin();
-    let mut input = stdin.lock();
-    loop {
-        loop {
-            match command_rx.try_recv() {
-                Ok(ReplEditorCommand::Clear) => {}
-                Ok(ReplEditorCommand::SetPrompt(Some(prompt))) => {
-                    eprint!("{prompt}");
-                    let _ = std::io::stderr().flush();
-                }
-                Ok(ReplEditorCommand::SetPrompt(None)) => {}
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => return,
-            }
-        }
-        let mut line = String::new();
-        match input.read_line(&mut line) {
-            Ok(0) => {
-                let _ = input_tx.send(ReplInputEvent::Eof);
-                return;
-            }
-            Ok(_) => {
-                if input_tx.send(ReplInputEvent::Line(line)).is_err() {
-                    return;
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(error) => {
-                let _ = input_tx.send(ReplInputEvent::Failed(error.to_string()));
-                return;
-            }
-        }
-    }
-}
-
-struct ReplInterruptWatcher {
-    events: mpsc::Receiver<ReplInterruptEvent>,
-    shutdown: mpsc::Sender<()>,
-    thread: Option<thread::JoinHandle<()>>,
-}
-
-impl ReplInterruptWatcher {
-    fn install(control: PersistentReplControl) -> Result<Self, String> {
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let (event_tx, events) = mpsc::channel();
-        let (shutdown, shutdown_rx) = mpsc::channel();
-        let thread = thread::spawn(move || {
-            let observer = match crate::platform::install_console_interrupt_observer() {
-                Ok(observer) => {
-                    let _ = ready_tx.send(Ok(()));
-                    observer
-                }
-                Err(error) => {
-                    let _ = ready_tx.send(Err(error.to_string()));
-                    return;
-                }
-            };
-            loop {
-                match shutdown_rx.recv_timeout(Duration::from_millis(10)) {
-                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                }
-                match observer.take_pending() {
-                    Ok(false) => {}
-                    Ok(true) => {
-                        let event = match control.cancel() {
-                            Ok(true) => ReplInterruptEvent::Active,
-                            Ok(false) => ReplInterruptEvent::Idle,
-                            Err(error) => ReplInterruptEvent::Failed(format!("{error:?}")),
-                        };
-                        if event_tx.send(event).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = event_tx.send(ReplInterruptEvent::Failed(error.to_string()));
-                        break;
-                    }
-                }
-            }
-        });
-        match ready_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(())) => Ok(Self {
-                events,
-                shutdown,
-                thread: Some(thread),
-            }),
-            Ok(Err(error)) => {
-                let _ = thread.join();
-                Err(error)
-            }
-            Err(error) => {
-                let _ = shutdown.send(());
-                let _ = thread.join();
-                Err(format!("interrupt observer startup timed out: {error}"))
-            }
-        }
-    }
-
-    fn stop(mut self) {
-        let _ = self.shutdown.send(());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-impl Drop for ReplInterruptWatcher {
-    fn drop(&mut self) {
-        let _ = self.shutdown.send(());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-fn run_script_repl(arguments: &[String]) -> i32 {
-    let mut json = has_option(arguments, "--json");
-    let budgets = match parse_repl_budgets(arguments) {
-        Ok(budgets) => budgets,
-        Err(error) => return render_repl_startup_error(&error, json, 2),
-    };
-    if let Err(error) = validate_repl_options(arguments) {
-        return render_repl_startup_error(&error, json, 2);
-    }
-    let project_root = match canonical_project_root(option_value(arguments, "--project-root")) {
-        Ok(root) => root,
-        Err(error) => return render_repl_startup_error(&error, json, 2),
-    };
-    let delimiter = arguments.iter().position(|argument| argument == "--");
-    let script_arguments = delimiter
-        .and_then(|position| arguments.get(position + 1..))
-        .unwrap_or_default()
-        .to_vec();
-    let session_id = format!(
-        "repl-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
+fn run_script_repl(_arguments: &[String]) -> i32 {
+    eprintln!(
+        "script repl was removed with the Rhai interpreter; \
+         use agenterm-rh for check, eval, and run on .rh sources"
     );
-    let invocation_temp = match OwnedScriptTemp::create(&session_id) {
-        Ok(owned) => owned,
-        Err(error) => {
-            return render_repl_startup_error(
-                &format!("host_temp_create: REPL temporary root is unavailable: {error}"),
-                json,
-                1,
-            );
-        }
-    };
-    let executable = match repl_worker_executable() {
-        Ok(executable) => executable,
-        Err(error) => {
-            return render_repl_startup_error(&error, json, 1);
-        }
-    };
-    let config = ReplSessionWireConfig {
-        budgets: budgets.clone(),
-        arguments: script_arguments,
-        project_root: project_root.map(|path| path.display().to_string()),
-        invocation_temp_root: Some(invocation_temp.display()),
-    };
-    let mut session = match PersistentReplClient::spawn(&executable, None, session_id, config) {
-        Ok(session) => session,
-        Err(error) => return render_repl_startup_error(&format!("{error:?}"), json, 1),
-    };
-    let watcher = match ReplInterruptWatcher::install(session.control()) {
-        Ok(watcher) => watcher,
-        Err(error) => {
-            let _ = session.close();
-            return render_repl_startup_error(&format!("host_console_interrupt: {error}"), json, 1);
-        }
-    };
-    let tty = std::io::stdin().is_terminal();
-    let (input_tx, input_rx) = mpsc::channel();
-    let (command_tx, command_rx) = mpsc::channel();
-    let editor_active = tty && !json;
-    let join_editor = editor_active;
-    let input_thread = thread::spawn(move || {
-        if editor_active {
-            run_repl_line_editor(input_tx, command_rx);
-        } else {
-            run_repl_plain_reader(input_tx, command_rx);
-        }
-    });
-    let fail_fast = has_option(arguments, "--fail-fast");
-    if tty && !json {
-        eprintln!(
-            "AgenTerm Rhai REPL {} — :help for commands, Ctrl-D or :quit to exit",
-            env!("CARGO_PKG_VERSION")
-        );
-    }
-    let mut buffer = String::new();
-    let mut had_failure = false;
-    let mut exit_code = None;
-    let mut cell_sequence = 0_u64;
-
-    'repl: loop {
-        if tty {
-            let prompt = if json {
-                None
-            } else if buffer.is_empty() {
-                Some("rhai> ".to_owned())
-            } else {
-                Some("....> ".to_owned())
-            };
-            let _ = command_tx.send(ReplEditorCommand::SetPrompt(prompt));
-        }
-        let event = loop {
-            match watcher.events.try_recv() {
-                Ok(event) => break Err(event),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    break Err(ReplInterruptEvent::Failed(
-                        "interrupt observer stopped unexpectedly".to_owned(),
-                    ));
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-            match input_rx.recv_timeout(Duration::from_millis(10)) {
-                Ok(event) => break Ok(event),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => break Ok(ReplInputEvent::Eof),
-            }
-        };
-        let line = match event {
-            Err(ReplInterruptEvent::Idle | ReplInterruptEvent::Active) if tty => {
-                buffer.clear();
-                let _ = command_tx.send(ReplEditorCommand::Clear);
-                if !json {
-                    eprintln!("^C");
-                }
-                continue;
-            }
-            Err(ReplInterruptEvent::Idle | ReplInterruptEvent::Active) => {
-                render_repl_cancelled(json);
-                exit_code = Some(5);
-                break;
-            }
-            Err(ReplInterruptEvent::Failed(error)) => {
-                render_repl_host_failure("host_console_interrupt", &error, json);
-                exit_code = Some(1);
-                break;
-            }
-            Ok(ReplInputEvent::Failed(error)) => {
-                render_repl_host_failure("repl_stdin", &error, json);
-                exit_code = Some(1);
-                break;
-            }
-            Ok(ReplInputEvent::Eof) => {
-                if !buffer.trim().is_empty() {
-                    let ok =
-                        finish_repl_eof(&mut session, &buffer, &budgets, &mut cell_sequence, json);
-                    had_failure |= !ok;
-                }
-                break;
-            }
-            Ok(ReplInputEvent::Line(line)) => line,
-        };
-        let line_without_eol = line.trim_end_matches(['\r', '\n']);
-        if buffer.is_empty() && line_without_eol.trim_start().starts_with(':') {
-            match run_repl_meta(
-                line_without_eol.trim(),
-                &mut session,
-                &budgets,
-                &mut cell_sequence,
-                &mut json,
-                tty,
-            ) {
-                ReplMetaOutcome::Continue => {}
-                ReplMetaOutcome::Quit => break,
-                ReplMetaOutcome::Failure => {
-                    had_failure = true;
-                    if fail_fast {
-                        break;
-                    }
-                }
-            }
-        } else if !buffer.is_empty() || !line_without_eol.trim().is_empty() {
-            buffer.push_str(&line);
-            match session.inspect(buffer.clone()) {
-                Ok(reply) => {
-                    render_fresh_session(reply.fresh_session.as_ref(), json);
-                    match watcher.events.try_recv() {
-                        Ok(ReplInterruptEvent::Idle | ReplInterruptEvent::Active) if tty => {
-                            buffer.clear();
-                            if !json {
-                                eprintln!("^C");
-                            }
-                            continue 'repl;
-                        }
-                        Ok(ReplInterruptEvent::Idle | ReplInterruptEvent::Active) => {
-                            render_repl_cancelled(json);
-                            exit_code = Some(5);
-                            break 'repl;
-                        }
-                        Ok(ReplInterruptEvent::Failed(error)) => {
-                            render_repl_host_failure("host_console_interrupt", &error, json);
-                            exit_code = Some(1);
-                            break 'repl;
-                        }
-                        Err(mpsc::TryRecvError::Empty) => {}
-                        Err(mpsc::TryRecvError::Disconnected) => {
-                            render_repl_host_failure(
-                                "host_console_interrupt",
-                                "interrupt observer stopped unexpectedly",
-                                json,
-                            );
-                            exit_code = Some(1);
-                            break 'repl;
-                        }
-                    }
-                    match reply.value {
-                        ReplWireInputState::Incomplete => continue,
-                        ReplWireInputState::Complete | ReplWireInputState::Invalid(_) => {
-                            let ok = evaluate_repl_source(
-                                &mut session,
-                                &buffer,
-                                &budgets,
-                                &mut cell_sequence,
-                                json,
-                            );
-                            had_failure |= !ok;
-                            buffer.clear();
-                            if !ok && fail_fast {
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(error) => {
-                    render_repl_error(&error, json);
-                    buffer.clear();
-                    had_failure = true;
-                    if fail_fast {
-                        break;
-                    }
-                }
-            }
-        }
-
-        let mut interrupted = false;
-        loop {
-            match watcher.events.try_recv() {
-                Ok(ReplInterruptEvent::Active | ReplInterruptEvent::Idle) => interrupted = true,
-                Ok(ReplInterruptEvent::Failed(error)) => {
-                    render_repl_host_failure("host_console_interrupt", &error, json);
-                    exit_code = Some(1);
-                    break 'repl;
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => break,
-            }
-        }
-        if interrupted && !tty {
-            exit_code = Some(5);
-            break;
-        }
-        if interrupted {
-            buffer.clear();
-            let _ = command_tx.send(ReplEditorCommand::Clear);
-            if !json {
-                eprintln!("^C");
-            }
-        }
-    }
-
-    drop(command_tx);
-    if join_editor {
-        let _ = input_thread.join();
-    }
-    watcher.stop();
-    if let Err(error) = session.close() {
-        render_repl_error(&error, json);
-        had_failure = true;
-    }
-    exit_code.unwrap_or_else(|| i32::from(had_failure))
-}
-
-enum ReplMetaOutcome {
-    Continue,
-    Quit,
-    Failure,
-}
-
-fn run_repl_meta(
-    command: &str,
-    session: &mut PersistentReplClient,
-    budgets: &ScriptBudgets,
-    cell_sequence: &mut u64,
-    json: &mut bool,
-    interactive: bool,
-) -> ReplMetaOutcome {
-    let (name, argument) = command
-        .split_once(char::is_whitespace)
-        .map_or((command, ""), |(name, argument)| (name, argument.trim()));
-    match name {
-        ":quit" | ":exit" => ReplMetaOutcome::Quit,
-        ":help" => {
-            let help = ":help                 show this command list\n\
-                 :quit | :exit          leave the session\n\
-                 :reset                clear user variables and functions\n\
-                 :history              list in-memory successful cells\n\
-                 :vars                 list variable names and types\n\
-                 :functions            list session-defined functions\n\
-                 :limits               show per-cell and session robustness limits\n\
-                 :api [MODULE]         inspect the runtime API catalog\n\
-                 :load FILE            evaluate a Rhai file as one cell\n\
-                 :json on|off          toggle NDJSON cell results";
-            render_repl_meta("help", serde_json::Value::String(help.to_owned()), *json);
-            ReplMetaOutcome::Continue
-        }
-        ":reset" => match session.reset() {
-            Ok(reply) => {
-                render_fresh_session(reply.fresh_session.as_ref(), *json);
-                if *json {
-                    render_repl_meta("reset", serde_json::json!({"reset": true}), true);
-                } else if interactive {
-                    eprintln!("session reset");
-                }
-                ReplMetaOutcome::Continue
-            }
-            Err(error) => {
-                render_repl_error(&error, *json);
-                ReplMetaOutcome::Failure
-            }
-        },
-        ":history" => match query_repl(session, ReplSessionQuery::History, *json) {
-            Some(ReplWireQueryResult::History(history)) => {
-                if *json {
-                    render_repl_meta("history", serde_json::json!(history), true);
-                } else {
-                    for (index, source) in history.iter().enumerate() {
-                        println!("{}  {}", index + 1, source.trim_end().replace('\n', "\\n"));
-                    }
-                }
-                ReplMetaOutcome::Continue
-            }
-            Some(_) => unreachable!("query response validator preserves query shape"),
-            None => ReplMetaOutcome::Failure,
-        },
-        ":vars" => match query_repl(session, ReplSessionQuery::Variables, *json) {
-            Some(ReplWireQueryResult::Variables(variables)) => {
-                if *json {
-                    let variables = variables
-                        .iter()
-                        .map(|variable| (&variable.name, &variable.type_name))
-                        .collect::<Vec<_>>();
-                    render_repl_meta("vars", serde_json::json!(variables), true);
-                } else {
-                    for variable in variables {
-                        println!("{}: {}", variable.name, variable.type_name);
-                    }
-                }
-                ReplMetaOutcome::Continue
-            }
-            Some(_) => unreachable!("query response validator preserves query shape"),
-            None => ReplMetaOutcome::Failure,
-        },
-        ":functions" => match query_repl(session, ReplSessionQuery::Functions, *json) {
-            Some(ReplWireQueryResult::Functions(functions)) => {
-                if *json {
-                    render_repl_meta("functions", serde_json::json!(functions), true);
-                } else {
-                    for function in functions {
-                        println!("{function}");
-                    }
-                }
-                ReplMetaOutcome::Continue
-            }
-            Some(_) => unreachable!("query response validator preserves query shape"),
-            None => ReplMetaOutcome::Failure,
-        },
-        ":limits" => match query_repl(session, ReplSessionQuery::Limits, *json) {
-            Some(ReplWireQueryResult::Limits(limits)) => {
-                render_repl_limits(&limits, *json);
-                ReplMetaOutcome::Continue
-            }
-            Some(_) => unreachable!("query response validator preserves query shape"),
-            None => ReplMetaOutcome::Failure,
-        },
-        ":api" => {
-            let mut view_arguments = vec!["script".to_owned(), "api".to_owned()];
-            if !argument.is_empty() {
-                view_arguments.push(argument.to_owned());
-            }
-            match parse_script_api_view(&view_arguments).and_then(|view| {
-                let mut catalog = crate::script_catalog::catalog();
-                filter_script_api_catalog(&mut catalog, &view)
-                    .map_err(|error| error.to_string())?;
-                render_script_api_tree(&catalog).map_err(|error| error.to_string())
-            }) {
-                Ok(tree) => {
-                    if *json {
-                        render_repl_meta("api", serde_json::Value::String(tree), true);
-                    } else {
-                        println!("{tree}");
-                    }
-                }
-                Err(error) => {
-                    render_repl_host_failure("repl_api", &error, *json);
-                    return ReplMetaOutcome::Failure;
-                }
-            }
-            ReplMetaOutcome::Continue
-        }
-        ":load" => {
-            if argument.is_empty() {
-                render_repl_host_failure("repl_load", ":load requires a Rhai file path", *json);
-                return ReplMetaOutcome::Failure;
-            }
-            let source = match std::fs::read_to_string(argument) {
-                Ok(source) => source,
-                Err(error) => {
-                    render_repl_host_failure("repl_load", &format!("{argument}: {error}"), *json);
-                    return ReplMetaOutcome::Failure;
-                }
-            };
-            if !evaluate_repl_source(session, &source, budgets, cell_sequence, *json) {
-                ReplMetaOutcome::Failure
-            } else {
-                ReplMetaOutcome::Continue
-            }
-        }
-        ":json" => match argument {
-            "on" => {
-                *json = true;
-                ReplMetaOutcome::Continue
-            }
-            "off" => {
-                *json = false;
-                ReplMetaOutcome::Continue
-            }
-            _ => {
-                render_repl_host_failure("repl_json", "expected :json on or :json off", *json);
-                ReplMetaOutcome::Failure
-            }
-        },
-        _ => {
-            render_repl_host_failure("repl_meta_unknown", &format!("{name}; use :help"), *json);
-            ReplMetaOutcome::Failure
-        }
-    }
-}
-
-fn repl_worker_executable() -> Result<PathBuf, String> {
-    script_worker_executable().map(|worker| worker.path)
-}
-
-fn query_repl(
-    session: &mut PersistentReplClient,
-    query: ReplSessionQuery,
-    json: bool,
-) -> Option<ReplWireQueryResult> {
-    match session.query(query) {
-        Ok(reply) => {
-            render_fresh_session(reply.fresh_session.as_ref(), json);
-            Some(reply.value)
-        }
-        Err(error) => {
-            render_repl_error(&error, json);
-            None
-        }
-    }
-}
-
-fn render_repl_limits(budgets: &ScriptBudgets, json: bool) {
-    if json {
-        render_repl_meta(
-            "limits",
-            serde_json::json!({
-                "source_bytes": budgets.source_bytes,
-                "operations": budgets.operations,
-                "call_depth": budgets.call_depth,
-                "expression_depth": budgets.expression_depth,
-                "collection_items": budgets.collection_items,
-                "string_bytes": budgets.string_bytes,
-                "output_bytes": budgets.output_bytes,
-                "wall_time_ms": budgets.wall_time_ms,
-            }),
-            true,
-        );
-    } else {
-        println!(
-            "source_bytes={} operations={} call_depth={} expression_depth={} \
-             collection_items={} string_bytes={} output_bytes={} wall_time_ms={}",
-            budgets.source_bytes,
-            budgets.operations,
-            budgets.call_depth,
-            budgets.expression_depth,
-            budgets.collection_items,
-            budgets.string_bytes,
-            budgets.output_bytes,
-            budgets.wall_time_ms
-        );
-    }
-}
-
-fn evaluate_repl_source(
-    session: &mut PersistentReplClient,
-    source: &str,
-    budgets: &ScriptBudgets,
-    cell_sequence: &mut u64,
-    json: bool,
-) -> bool {
-    *cell_sequence = match cell_sequence.checked_add(1) {
-        Some(sequence) => sequence,
-        None => {
-            render_repl_host_failure("protocol_repl_cell_overflow", "cell ID overflow", json);
-            return false;
-        }
-    };
-    let result = session.evaluate(
-        format!("cell-{cell_sequence}"),
-        source.to_owned(),
-        Duration::from_millis(budgets.wall_time_ms),
-        |request, remaining| {
-            handle_script_broker(request, ScriptProfile::Local, budgets, remaining)
-        },
-    );
-    match result {
-        Ok(reply) => {
-            render_fresh_session(reply.fresh_session.as_ref(), json);
-            let result = repl_wire_result(reply.value);
-            let ok = result.ok;
-            if render_repl_result(&result, json).is_err() {
-                return false;
-            }
-            ok
-        }
-        Err(error) => {
-            render_repl_error(&error, json);
-            false
-        }
-    }
-}
-
-fn finish_repl_eof(
-    session: &mut PersistentReplClient,
-    source: &str,
-    budgets: &ScriptBudgets,
-    cell_sequence: &mut u64,
-    json: bool,
-) -> bool {
-    match session.inspect(source.to_owned()) {
-        Ok(reply) => {
-            render_fresh_session(reply.fresh_session.as_ref(), json);
-            match reply.value {
-                ReplWireInputState::Complete => {
-                    evaluate_repl_source(session, source, budgets, cell_sequence, json)
-                }
-                ReplWireInputState::Incomplete => {
-                    let result = repl_failure_result(
-                        "script_incomplete",
-                        "script",
-                        "end of input reached while the REPL cell was incomplete",
-                    );
-                    let _ = render_repl_result(&result, json);
-                    false
-                }
-                ReplWireInputState::Invalid(failure) => {
-                    let result = repl_wire_failure_result(failure);
-                    let _ = render_repl_result(&result, json);
-                    false
-                }
-            }
-        }
-        Err(error) => {
-            render_repl_error(&error, json);
-            false
-        }
-    }
-}
-
-fn render_repl_meta(command: &str, value: serde_json::Value, json: bool) {
-    if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "kind": "meta",
-                "command": command,
-                "ok": true,
-                "value": value,
-            })
-        );
-    } else if let Some(text) = value.as_str() {
-        println!("{text}");
-    }
-}
-
-fn render_repl_result(result: &ReplCellResult, json: bool) -> std::io::Result<()> {
-    if json {
-        serde_json::to_writer(std::io::stdout().lock(), result)?;
-        println!();
-        return Ok(());
-    }
-    if !result.stdout.is_empty() {
-        print!("{}", result.stdout);
-        if !result.stdout.ends_with('\n') {
-            println!();
-        }
-    }
-    if result.ok {
-        if let Some(value) = result.value.as_ref() {
-            if let Some(serialized) = value.value.as_ref() {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(serialized).unwrap_or_else(|_| "null".to_owned())
-                );
-            } else {
-                println!("<{}>", value.type_name);
-            }
-        }
-    } else if let Some(failure) = result.failure.as_ref() {
-        eprintln!("{}: {}", failure.code, failure.message);
-    }
-    std::io::stdout().flush()
-}
-
-fn repl_wire_result(result: ReplWireCellResult) -> ReplCellResult {
-    ReplCellResult {
-        sequence: result.cell_sequence,
-        ok: result.ok,
-        stdout: result.stdout,
-        value: result.value.map(|value| crate::script_repl::ReplValue {
-            type_name: value.type_name,
-            serializable: value.serializable,
-            value: value.value,
-        }),
-        failure: result.failure.map(repl_wire_failure),
-        state_committed: result.state_committed,
-        duration_ms: result.duration_ms,
-    }
-}
-
-fn repl_wire_failure(failure: ReplWireFailure) -> ReplCellFailure {
-    ReplCellFailure {
-        code: failure.code,
-        category: failure.category,
-        message: failure.message,
-    }
-}
-
-fn repl_wire_failure_result(failure: ReplWireFailure) -> ReplCellResult {
-    let failure = repl_wire_failure(failure);
-    repl_failure_result(&failure.code, &failure.category, &failure.message)
-}
-
-fn repl_failure_result(code: &str, category: &str, message: &str) -> ReplCellResult {
-    ReplCellResult {
-        sequence: 0,
-        ok: false,
-        stdout: String::new(),
-        value: None,
-        failure: Some(ReplCellFailure {
-            code: code.to_owned(),
-            category: category.to_owned(),
-            message: message.to_owned(),
-        }),
-        state_committed: false,
-        duration_ms: 0,
-    }
-}
-
-fn render_fresh_session(receipt: Option<&FreshSessionReceipt>, json: bool) {
-    let Some(receipt) = receipt else {
-        return;
-    };
-    let reason = match receipt.reason {
-        FreshSessionReason::GenerationLimit => "generation_limit",
-        FreshSessionReason::WorkerCrash => "worker_crash",
-        FreshSessionReason::HardInterrupt => "hard_interrupt",
-        FreshSessionReason::ProtocolFailure => "protocol_failure",
-    };
-    if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "kind": "fresh_session",
-                "reason": reason,
-                "old_worker_pid": receipt.old_worker_pid,
-                "new_worker_pid": receipt.new_worker_pid,
-                "old_generation": receipt.old_generation,
-                "new_generation": receipt.new_generation,
-                "language_state_fresh": receipt.language_state_fresh,
-                "history_fresh": receipt.history_fresh,
-                "side_effects_replayed": receipt.side_effects_replayed,
-            })
-        );
-    } else {
-        eprintln!(
-            "fresh REPL session ({reason}): worker {} generation {} -> worker {} generation {}; \
-             language state and history were reset; side effects were not replayed",
-            receipt.old_worker_pid,
-            receipt.old_generation,
-            receipt.new_worker_pid,
-            receipt.new_generation
-        );
-    }
-}
-
-fn render_repl_error(error: &PersistentReplError, json: bool) {
-    let (code, category, message) = repl_error_fields(error);
-    let result = repl_failure_result(code, category, &message);
-    let _ = render_repl_result(&result, json);
-}
-
-fn repl_error_fields(error: &PersistentReplError) -> (&'static str, &'static str, String) {
-    match error {
-        PersistentReplError::Interrupted {
-            worker_pid,
-            generation,
-            ..
-        } => (
-            "limit_cancelled",
-            "cancelled",
-            format!("REPL worker {worker_pid} generation {generation} was interrupted"),
-        ),
-        PersistentReplError::Protocol(message) => ("protocol_repl", "protocol", message.clone()),
-        PersistentReplError::Host(message) => ("host_repl", "host", message.clone()),
-        PersistentReplError::Worker(error) => match error {
-            PersistentWorkerError::Supervisor(error) => supervisor_error_fields(error),
-            PersistentWorkerError::Busy { worker_pid } => (
-                "worker_busy",
-                "host",
-                format!("REPL worker {worker_pid} is already active"),
-            ),
-            PersistentWorkerError::InvocationLimit { worker_pid, limit } => (
-                "worker_invocation_limit",
-                "limit",
-                format!("REPL worker {worker_pid} reached invocation limit {limit}"),
-            ),
-            PersistentWorkerError::WorkerEof {
-                worker_pid,
-                exit_code,
-            } => (
-                "worker_eof",
-                "child",
-                format!("REPL worker {worker_pid} closed output with status {exit_code:?}"),
-            ),
-            PersistentWorkerError::WorkerCrash {
-                worker_pid,
-                exit_code,
-            } => (
-                "worker_crash",
-                "child",
-                format!("REPL worker {worker_pid} crashed with status {exit_code:?}"),
-            ),
-            PersistentWorkerError::Unavailable { worker_pid } => (
-                "worker_unavailable",
-                "child",
-                format!("REPL worker {worker_pid} is unavailable"),
-            ),
-        },
-    }
-}
-
-fn supervisor_error_fields(error: &SupervisorError) -> (&'static str, &'static str, String) {
-    match error {
-        SupervisorError::ConcurrencyLimit => (
-            "worker_concurrency_limit",
-            "limit",
-            "script worker concurrency limit reached".to_owned(),
-        ),
-        SupervisorError::Spawn(message) => ("worker_spawn", "child", message.clone()),
-        SupervisorError::Transport(message) => ("worker_transport", "protocol", message.clone()),
-        SupervisorError::Protocol(message) => ("worker_protocol", "protocol", message.clone()),
-        SupervisorError::HardTimeout { worker_pid } => (
-            "worker_hard_timeout",
-            "limit",
-            format!("REPL worker {worker_pid} exceeded its hard response timeout"),
-        ),
-        SupervisorError::WorkerCrash {
-            worker_pid,
-            exit_code,
-        } => (
-            "worker_crash",
-            "child",
-            format!("REPL worker {worker_pid} crashed with status {exit_code:?}"),
-        ),
-    }
-}
-
-fn render_repl_cancelled(json: bool) {
-    let result = repl_failure_result("limit_cancelled", "cancelled", "REPL input was interrupted");
-    let _ = render_repl_result(&result, json);
-}
-
-fn render_repl_host_failure(code: &str, message: &str, json: bool) {
-    let result = repl_failure_result(code, "host", message);
-    let _ = render_repl_result(&result, json);
-}
-
-fn render_repl_startup_error(message: &str, json: bool, code: i32) -> i32 {
-    render_repl_host_failure("repl_startup", message, json);
-    code
-}
-
-fn validate_repl_options(arguments: &[String]) -> Result<(), String> {
-    let mut index = 2;
-    while index < arguments.len() {
-        let argument = &arguments[index];
-        if argument == "--" {
-            return Ok(());
-        }
-        match argument.as_str() {
-            "--json" | "--fail-fast" => index += 1,
-            "--timeout-ms"
-            | "--max-operations"
-            | "--max-output-bytes"
-            | "--max-collection-items"
-            | "--max-string-bytes"
-            | "--project-root" => {
-                if arguments.get(index + 1).is_none() {
-                    return Err(format!("script repl {argument} requires a value"));
-                }
-                index += 2;
-            }
-            other => return Err(format!("unknown script repl option: {other}")),
-        }
-    }
-    Ok(())
-}
-
-fn parse_repl_budgets(arguments: &[String]) -> Result<ScriptBudgets, String> {
-    let mut budgets = ScriptBudgets::default();
-    let hard = ScriptBudgets::hard_limits();
-    if let Some(value) = option_value(arguments, "--timeout-ms") {
-        budgets.wall_time_ms = parse_repl_limit(value, 1, hard.wall_time_ms, "--timeout-ms")?;
-    }
-    if let Some(value) = option_value(arguments, "--max-operations") {
-        budgets.operations = parse_repl_limit(value, 1, hard.operations, "--max-operations")?;
-    }
-    if let Some(value) = option_value(arguments, "--max-output-bytes") {
-        budgets.output_bytes = parse_repl_limit(value, 1, hard.output_bytes, "--max-output-bytes")?;
-    }
-    if let Some(value) = option_value(arguments, "--max-collection-items") {
-        budgets.collection_items =
-            parse_repl_limit(value, 1, hard.collection_items, "--max-collection-items")?;
-    }
-    if let Some(value) = option_value(arguments, "--max-string-bytes") {
-        budgets.string_bytes = parse_repl_limit(value, 1, hard.string_bytes, "--max-string-bytes")?;
-    }
-    Ok(budgets)
-}
-
-fn parse_repl_limit<T>(value: &str, minimum: T, maximum: T, option: &str) -> Result<T, String>
-where
-    T: std::str::FromStr + Ord + Copy + std::fmt::Display,
-{
-    value
-        .parse::<T>()
-        .ok()
-        .filter(|value| *value >= minimum && *value <= maximum)
-        .ok_or_else(|| format!("script repl {option} must be from {minimum} to {maximum}"))
+    2
 }
 
 pub fn run_mux_entry() -> i32 {
@@ -2440,39 +1322,32 @@ fn command_may_start_server(command: &str) -> bool {
 }
 
 fn run_script_command_hosted(arguments: &[String]) -> i32 {
+    if arguments.get(1).is_some_and(|value| value == "repl") {
+        return run_script_repl(arguments);
+    }
     if !crate::platform::services::script_host::hosted_worker_available() {
         eprintln!(
             "agenterm-cli script hosting is not yet available on this platform; \
-             invoke agenterm-rhai directly"
+             invoke agenterm-rh directly"
         );
         return 2;
     }
-    if !arguments
-        .get(1)
-        .is_some_and(|value| value == "repl" || value == "check-many")
-    {
-        if arguments.get(1).is_some_and(|value| value == "task") {
-            return run_script_task_command(arguments);
-        }
-        return run_script_command_with_context(arguments, None);
+    if arguments.get(1).is_some_and(|value| value == "check-many") {
+        return run_script_check_many_hosted(arguments);
     }
-    let worker = match script_compatibility_executable() {
+    if arguments.get(1).is_some_and(|value| value == "task") {
+        return run_script_task_command(arguments);
+    }
+    run_script_command_with_context(arguments, None)
+}
+
+fn run_script_check_many_hosted(arguments: &[String]) -> i32 {
+    let worker = match script_worker_executable() {
         Ok(worker) => worker,
         Err(error) => {
             eprintln!("{error}");
             return 2;
         }
-    };
-    let _interrupt_guard = if arguments.get(1).is_some_and(|value| value == "repl") {
-        match crate::platform::install_console_interrupt_ignore_guard() {
-            Ok(guard) => Some(guard),
-            Err(error) => {
-                eprintln!("host_console_interrupt: {error}");
-                return 1;
-            }
-        }
-    } else {
-        None
     };
     let mut command = std::process::Command::new(&worker.path);
     command.args(arguments.iter().skip(1)).env(
@@ -2518,27 +1393,15 @@ fn script_worker_executable() -> Result<ResolvedScriptWorker, String> {
         format!(
             "host_worker_missing: could not locate current executable: {error}; attempted \
              adjacent executables: {}",
-            script_worker_attempted_names(false)
+            script_worker_attempted_names()
         )
     })?;
-    resolve_script_worker_executable(&current, false, Path::is_file)
+    resolve_script_worker_executable(&current, Path::is_file)
 }
 
-fn script_compatibility_executable() -> Result<ResolvedScriptWorker, String> {
-    let current = std::env::current_exe().map_err(|error| {
-        format!(
-            "host_worker_missing: could not locate current executable: {error}; attempted \
-             adjacent executables: {}",
-            script_worker_attempted_names(true)
-        )
-    })?;
-    resolve_script_worker_executable(&current, true, Path::is_file)
-}
-
-fn script_worker_attempted_names(compatibility_only: bool) -> String {
+fn script_worker_attempted_names() -> String {
     crate::platform::paths::script_worker_executable_names()
         .into_iter()
-        .filter(|candidate| !compatibility_only || candidate.is_compatibility_fallback())
         .map(|candidate| candidate.name)
         .collect::<Vec<_>>()
         .join(", ")
@@ -2546,13 +1409,9 @@ fn script_worker_attempted_names(compatibility_only: bool) -> String {
 
 fn resolve_script_worker_executable(
     current: &Path,
-    compatibility_only: bool,
     is_file: impl Fn(&Path) -> bool,
 ) -> Result<ResolvedScriptWorker, String> {
-    let candidates = crate::platform::paths::script_worker_executable_names()
-        .into_iter()
-        .filter(|candidate| !compatibility_only || candidate.is_compatibility_fallback())
-        .collect::<Vec<_>>();
+    let candidates = crate::platform::paths::script_worker_executable_names();
     let attempted = candidates
         .iter()
         .map(|candidate| candidate.name.as_str())
@@ -5296,44 +4155,27 @@ mod tests {
     }
 
     #[test]
-    fn script_worker_resolution_prefers_rh_then_uses_adjacent_compatibility_fallback() {
+    fn script_worker_resolution_prefers_adjacent_rh_executable() {
         let candidates = crate::platform::paths::script_worker_executable_names();
         let primary = candidates
             .first()
             .expect("primary worker candidate")
             .name
             .clone();
-        let fallback = candidates
-            .iter()
-            .find(|candidate| candidate.name.starts_with("agenterm-rhai"))
-            .expect("compatibility worker candidate")
-            .name
-            .clone();
-        let current = Path::new("/bundle/agenterm-rhai.exe");
+        let current = Path::new("/bundle/agenterm-cli.exe");
 
         let selected_primary =
-            resolve_script_worker_executable(current, false, |path| path.ends_with(&primary))
+            resolve_script_worker_executable(current, |path| path.ends_with(&primary))
                 .expect("primary worker");
         assert_eq!(selected_primary.name, primary);
-
-        let selected_fallback =
-            resolve_script_worker_executable(current, false, |path| path.ends_with(&fallback))
-                .expect("compatibility worker");
-        assert_eq!(selected_fallback.name, fallback);
-
-        let selected_hosted_compatibility =
-            resolve_script_worker_executable(current, true, |_| true)
-                .expect("hosted compatibility executable");
-        assert_eq!(selected_hosted_compatibility.name, fallback);
     }
 
     #[test]
     fn missing_script_worker_diagnostic_lists_every_attempted_name() {
-        let error =
-            resolve_script_worker_executable(Path::new("/bundle/agenterm-cli.exe"), false, |_| {
-                false
-            })
-            .expect_err("missing worker");
+        let error = resolve_script_worker_executable(Path::new("/bundle/agenterm-cli.exe"), |_| {
+            false
+        })
+        .expect_err("missing worker");
 
         for candidate in crate::platform::paths::script_worker_executable_names() {
             assert!(error.contains(&candidate.name), "{error}");
