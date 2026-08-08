@@ -68,66 +68,11 @@ pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) ->
 
 /// Parse `check-many` argv — same flag surface as `agenterm-rh check-many`
 /// (rejects unknown flags, accepts-but-ignores a few rhai-compat ones).
-pub fn parse_check_many_cli<I>(mut args: I) -> Result<ParsedCheckManyCli, String>
+pub fn parse_check_many_cli<I>(args: I) -> Result<ParsedCheckManyCli, String>
 where
     I: Iterator<Item = String>,
 {
-    let mut manifest_path = None::<std::path::PathBuf>;
-    let mut project_root = std::path::PathBuf::from(".");
-    let mut wall_time_ms = DEFAULT_WALL_TIME_MS;
-    let mut source_bytes = DEFAULT_SOURCE_BYTES;
-    let mut json = false;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--manifest" => {
-                manifest_path = Some(std::path::PathBuf::from(next_value(&mut args, "--manifest")?));
-            }
-            "--project-root" => {
-                project_root = std::path::PathBuf::from(next_value(&mut args, "--project-root")?);
-            }
-            "--timeout-ms" => {
-                wall_time_ms = next_value(&mut args, "--timeout-ms")?
-                    .parse()
-                    .map_err(|err| format!("timeout-ms: {err}"))?;
-            }
-            "--max-output-bytes" => {
-                let value = next_value(&mut args, "--max-output-bytes")?
-                    .parse::<usize>()
-                    .map_err(|err| format!("max-output-bytes: {err}"))?;
-                source_bytes = source_bytes.min(value);
-            }
-            "--profile" => {
-                let profile = next_value(&mut args, "--profile")?;
-                if !matches!(profile.as_str(), "local" | "pure" | "observe") {
-                    return Err(format!("unknown script profile: {profile}"));
-                }
-            }
-            "--max-operations" | "--max-collection-items" | "--max-string-bytes" => {
-                let _ = next_value(&mut args, arg.as_str())?;
-            }
-            "--json" => json = true,
-            other => return Err(format!("unknown check-many option `{other}`")),
-        }
-    }
-    let manifest_path =
-        manifest_path.ok_or_else(|| "check-many requires --manifest FILE".to_owned())?;
-    Ok(ParsedCheckManyCli {
-        manifest_path,
-        options: CheckManyOptions {
-            project_root,
-            wall_time_ms,
-            source_bytes,
-        },
-        json,
-    })
-}
-
-fn next_value<I>(args: &mut I, option: &str) -> Result<String, String>
-where
-    I: Iterator<Item = String>,
-{
-    args.next()
-        .ok_or_else(|| format!("missing value after {option}"))
+    agenterm_script_common::cli::parse_check_many_cli(args)
 }
 
 #[cfg(test)]

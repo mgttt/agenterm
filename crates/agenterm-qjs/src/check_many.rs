@@ -8,7 +8,7 @@
 //! the [`check_with_project_validation`](crate::check::check_with_project_validation)
 //! adapter closure (including its `QjsError` → [`CheckFailure`] mapping).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agenterm_script_common::check_many::{self, CheckFailure};
 
@@ -55,72 +55,11 @@ fn qjs_check_failure(error: QjsError) -> CheckFailure {
 /// (`crates/agenterm-rh/src/check_many.rs::parse_check_many_cli`), including
 /// its accepted-but-ignored compat flags, so the same wrapper scripts can
 /// call either engine's `check-many` with identical argv.
-pub fn parse_check_many_cli<I>(mut args: I) -> Result<ParsedCheckManyCli, QjsError>
+pub fn parse_check_many_cli<I>(args: I) -> Result<ParsedCheckManyCli, QjsError>
 where
     I: Iterator<Item = String>,
 {
-    let mut manifest_path = None::<PathBuf>;
-    let mut project_root = PathBuf::from(".");
-    let mut wall_time_ms = DEFAULT_WALL_TIME_MS;
-    let mut source_bytes = DEFAULT_SOURCE_BYTES;
-    let mut json = false;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--manifest" => {
-                manifest_path = Some(PathBuf::from(next_value(&mut args, "--manifest")?));
-            }
-            "--project-root" => {
-                project_root = PathBuf::from(next_value(&mut args, "--project-root")?);
-            }
-            "--timeout-ms" => {
-                wall_time_ms = next_value(&mut args, "--timeout-ms")?
-                    .parse()
-                    .map_err(|err| QjsError::Check(format!("timeout-ms: {err}")))?;
-            }
-            "--max-output-bytes" => {
-                let value = next_value(&mut args, "--max-output-bytes")?
-                    .parse::<usize>()
-                    .map_err(|err| QjsError::Check(format!("max-output-bytes: {err}")))?;
-                source_bytes = source_bytes.min(value);
-            }
-            "--profile" => {
-                let profile = next_value(&mut args, "--profile")?;
-                if !matches!(profile.as_str(), "local" | "pure" | "observe") {
-                    return Err(QjsError::Check(format!(
-                        "unknown script profile: {profile}"
-                    )));
-                }
-            }
-            "--max-operations" | "--max-collection-items" | "--max-string-bytes" => {
-                let _ = next_value(&mut args, arg.as_str())?;
-            }
-            "--json" => json = true,
-            other => {
-                return Err(QjsError::Check(format!(
-                    "unknown check-many option `{other}`"
-                )));
-            }
-        }
-    }
-    let manifest_path = manifest_path
-        .ok_or_else(|| QjsError::Check("check-many requires --manifest FILE".into()))?;
-    Ok(ParsedCheckManyCli {
-        manifest_path,
-        options: CheckManyOptions {
-            project_root,
-            wall_time_ms,
-            source_bytes,
-        },
-        json,
-    })
-}
-
-fn next_value<I>(args: &mut I, option: &str) -> Result<String, QjsError>
-where
-    I: Iterator<Item = String>,
-{
-    args.next()
-        .ok_or_else(|| QjsError::Check(format!("missing value after {option}")))
+    agenterm_script_common::cli::parse_check_many_cli(args).map_err(QjsError::Check)
 }
 
 #[cfg(test)]

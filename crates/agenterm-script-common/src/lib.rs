@@ -25,5 +25,6 @@
 //! source a fourth time.
 
 pub mod check_many;
+pub mod cli;
 pub mod corpus_scan;
 pub mod hex;
