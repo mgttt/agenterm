@@ -9,27 +9,50 @@
 //! "Capability alignment" scope:
 //! - QJS-M1 (shipped): same CLI verb shape, same typed JSON/exit-code
 //!   envelope as `agenterm-rh` for `check`/`eval`/`check-many`.
-//! - QJS-M2 (in progress): `__host.fleet_call`/`args_len`/`arg` bound the
+//! - QJS-M2 (shipped): `__host.fleet_call`/`args_len`/`arg` bound the
 //!   same way `agenterm_lua::LuaHostFunctions` binds them, so
 //!   `scripts/qjs/lib/fleet.js` can port `scripts/lua/lib/fleet.lua`
-//!   near-line-for-line rather than re-deriving the L2 facade shape.
+//!   near-line-for-line rather than re-deriving the L2 facade shape;
 //!   `agenterm::script_backend` wiring (the `try_execute_*_invocation`
-//!   family) and `task`/`run`/`pack`/`qualify` verbs are not yet done.
+//!   family) covers `check`/`eval`/`run` for the real worker/task dispatch
+//!   path (`src/script_worker.rs`'s `execute_inner`).
+//! - QJS-M3 (this module set): `pack`/`qualify` — see `compile.rs`/
+//!   `pack.rs`/`qualify.rs`. `pack` captures a *real* QuickJS bytecode
+//!   fingerprint (`Module::declare().write()`, rquickjs's only public
+//!   bytecode surface) but execution still re-parses from stored source —
+//!   see `pack.rs`'s module doc for exactly why that's not yet a full
+//!   bytecode load+exec path, and what would be needed to close that gap.
+//!   CLI `pack`/`qualify`/`run`/`hash` verbs live in `main.rs`.
 //! - Explicitly NOT in scope, ever: AOT/native codegen (rh-specific).
+//! - Still open (not this pass, tracked): project-level import-graph
+//!   validation in `check` (rh has one, see `check.rs`'s "known gap" note);
+//!   a `task` CLI verb — `agenterm-lua`'s is an informative stub pointing at
+//!   the root `agenterm` binary's `task` command, and `agenterm-qjs`'s
+//!   mirrors that, since real task dispatch already goes through
+//!   `agenterm::script_backend` (root binary), not through this crate's own
+//!   binary.
 
 pub mod check;
 pub mod check_many;
+pub mod compile;
 pub mod error;
 pub mod eval;
 pub mod host;
+pub mod manifest;
+pub mod pack;
+pub mod qualify;
 
 pub use check::check;
 pub use check_many::{
     CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
     read_manifest, run_check_many,
 };
+pub use compile::{compile_qjs, hash_source};
 pub use error::QjsError;
 pub use eval::{EvalOutcome, eval_entry, eval_entry_with_host};
 pub use host::QjsHostFunctions;
+pub use manifest::QjsPackManifest;
+pub use pack::{QjsPack, build_pack_dir, is_pack_dir};
+pub use qualify::{QjsQualificationReceipt, qualify_pack_dir};
 
 pub const QJS_VERSION: &str = env!("CARGO_PKG_VERSION");
