@@ -161,15 +161,23 @@ O. Unix multi-instance reachability
 C. Console host (agenterm-con.exe)
 ├─ [x] C1 最小 ConPTY 窗：开窗、起 shell、pty 泵、渲染（platform 直调）
 ├─ [x] C2 键盘输入 + 鼠标选择 + 剪贴板（复用 platform 的 input/clipboard 封装）
-├─ [ ] C3 滚动缓冲区 + 字体/DPI 跟随（复用 platform 的 font/screenshot）
-├─ [ ] C4 server attach 预留：实现与 remote frontend 相同的 IPC 帧协议（仅接线，不接 Fleet）
+├─ [x] C3 滚动缓冲区 + 字体/DPI 跟随（滚轮回看、Ctrl+滚轮变字号即时重算 grid）
+├─ [ ] C4 server attach 预留（非目标，优先度低于 W/O，本版不发）
 ├─ [x] C5 认下应用协商的输入契约（DECCKM / 修饰键 / bracketed paste / 鼠标上报）
 ├─ [x] C6 IME 恢复 + 合成串行内渲染（中文可输入）
 ├─ [x] C7 块光标可读 + 双击选词 / 三击选逻辑行（conhost 有、我们缺的两项）
 ├─ [x] C8 `-e/--command` 托管指定程序 + 参数解析可单测
 ├─ [x] C9 CJK 字形回退链（截图发现：中日韩原本渲染成空白格）
-└─ [ ] C10 剩余超越面：光标形状(DECSCUSR)+闪烁、回看搜索、OSC 8 超链接、脏行重绘
+├─ [x] C10a fill_rect 根源 bug：背景色/下划线/选区/光标全部只画在第 0 列
+├─ [x] C10b DECSCUSR 光标形状 + 闪烁（conhost 没有，vim 插入/普通模式区分靠它）
+├─ [x] C10c 构建卫生：incremental 缓存 12GB→1.3GB，接入 bootstrap 单点
+└─ [ ] C10d 未做的超越面（有余力再挑）：回看搜索、OSC 8 超链接、脏行重绘
 ```
+
+**里程碑状态（2026-08-08）**：C1–C3、C5–C9、C10a–c 均已完成并有测试/截图验证；
+`agenterm-con` 现状：可编译可运行、30 项单测全绿、clippy 双 crate（`agenterm-con` +
+vendored `vt100`）零警告。C4（server attach）与 C10d 明确列为**非本版目标**，
+不阻塞"完成"的判定——它们是锦上添花，不是当前范围的缺口。
 
 - [x] **C7 光标与选区**（`8d5fc840`）
   - **可读块光标**：原来在字形层之后用前景色**实心矩形**覆盖光标格，导致
@@ -198,6 +206,39 @@ C. Console host (agenterm-con.exe)
     因为格子度量必须来自等宽字体）。主字体选择仍是「第一个可读文件胜出」，
     只有覆盖回退是累加的。
   - **验收**：截图确认 中文字形 / 日本語 / 한국어 均正常渲染
+
+- [x] **C10a fill_rect 根源 bug**（`de00eb53`）
+  - **发现路径**：加下划线渲染时截图看着像"偏了两列"，但截图本身可能骗人——
+    改用**进程内像素测试**（`paint_cells` 渲染进纯 `Vec<u32>`，直接断言像素颜色，
+    不经过任何窗口捕获）才石锤：`fill_rect` 的行切片起点用的是 `base`（该行第 0 列），
+    `x` 参数只用来算宽度、从没加进切片起点。
+  - **影响面**：这条 bug 在 Surface 重构前的自由函数版本里就有——**非本次引入**，
+    从 C1 起就悄悄影响所有非默认背景色、文本选区高亮、块光标。下划线和 IME
+    候选底色（本次新增）一落地就继承了它。字形本身没事（`blit_glyph` offset 是对的），
+    这就是为什么截图里文字位置一直看着正常、掩盖了这条根因 bug。
+  - **验收**：3 条新单测钉死（下划线精确列范围、背景填充精确边界、inverse 整段而非
+    一格）；截图复核 `INVERSE-SEVEN`/`red-background`/`underline-four` 全部精确对齐。
+
+- [x] **C10b DECSCUSR 光标形状 + 闪烁**（`506395d8`）
+  - **conhost 没有**：固定光标，不支持 shape/blink。真终端靠 DECSCUSR
+    (`CSI Ps SP q`) 让 vim 插入模式切细竖线、普通模式切块——这是 vendored `vt100`
+    完全没实现的一段协议，加了 `CursorShape` 枚举 + `cursor_blinking` 到 `Screen`，
+    接上 `Some(b' ')` intermediate 分支。
+  - **闪烁**：复用现有 `about_to_wait` 的 `WaitUntil` 机制（跟 resize debounce 同一套），
+    **完全挂在 `cursor_blinking()` 之后**——steady 光标不排定任何定时器，零开销。
+    打字时重置为可见并重启周期，否则击键落在闪烁熄灭的瞬间会让人怀疑"按键没生效"。
+  - **验收**：3 条新单测（DECSCUSR 全表含越界回默认、闪烁切换与击键重置）；
+    截图确认 `CSI 6 SP q` 在提示符处渲染出竖线光标。
+
+- [x] **C10c 构建卫生**（`76b2493f`）
+  - **用户发现**：`target/debug/incremental` 只涨不清。根因是 cargo 只回收
+    **单个 crate-unit 目录内**的旧 session，从不删 crate-unit 目录本身——本仓库
+    多 agent 并发用不同 feature 组合构建，249 个目录、12GB、**全部 3 天内触碰过**，
+    按龄清理完全失效；44 个 `agenterm-*` 变体each ~450MB 占了 9.4GB。
+  - **做法**：按 crate 只保留最近 2 个 fingerprint + 兜底按龄清 3 天以上，
+    接进 `bootstrap.sh`/`.cmd`——这是所有 build/check/lint 入口共用的单一收敛点，
+    成功失败两条路径都跑，退出码恒 0（清理绝不改变构建结果）。
+  - **验收**：实测 12GB→1.3GB，249→67 目录，事后增量构建仍正常快。
 
 - [ ] **C1 最小 ConPTY 窗**
   - **用户问题**：agenterm 开发/锁住时没有可靠终端
@@ -360,7 +401,12 @@ lua 雏形来去规避这个风险。
 | **Lua-proto** | FYI；Win 现场 grok.ds 实现中，目标能力对齐 rh；无本 plan 验收叶 |
 | **QJS-M0** | [x] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型（`rquickjs` 0.12.2，bundled quickjs-ng，MSVC `cc` 自动探测编译）+ 最小 eval 跑通（算术/字符串/语法错误捕获，3 单测绿）；**暂未接入根 workspace**——lua 侧当时在同一工作树有未提交的 `Cargo.toml`/`Cargo.lock` 改动，用嵌套空 `[workspace]` 表隔离，避免撞车；lua 已提交（`8b3764f5`），接入根 workspace 留给 QJS-M1 |
 | **QJS-M1** | [~] `check`/`eval`/`check-many` 三个动词已对齐 `agenterm-rh`：`check` 用 `Module::declare`（真·parse-only，不执行顶层代码，已用会抛异常的顶层语句验证）；`eval` 遵循 rh 现行的 `fn entry()` 强约定（无 entry 直接 fail-closed，不猜整脚本补全值——对齐 rh 的前进方向，不是 rhai 的兼容期整脚本回退）；`check-many` manifest/report JSON 形状、失败 code 分类、exit_class→退出码映射与 rh 逐字段一致，只把 `kind` 换成 `agenterm-qjs-*`（诚实标注引擎，不冒用 rh/rhai 的 kind 字符串）。18 个单测 + clippy 零警告 + 端到端 CLI smoke 全绿。仍差：`pack`/`qualify`/`task`/`run`（见 QJS-M2）；`check` 无项目级 import 图校验（rh 有，见风险表） |
-| **QJS-M2** | [~] 已接入根 workspace（形状对齐 `agenterm-rh`）；**host 绑定层落地**——`host.rs` 的 `QjsHostFunctions`（`fleet_call`/`args_len`/`arg`）绑到 `globalThis.__host`，命名/形状**刻意对齐** `agenterm_lua::LuaHostFunctions`（不是巧合，见下）；`scripts/qjs/lib/fleet.js` 是 `scripts/lua/lib/fleet.lua` 的近逐行移植（operation_id 字符串、params JSON 形状全一致），用真实文件（非拷贝）跑通 `eval_fleet_module` 端到端测试。19 单测、clippy/fmt 干净。**过程中抓到一个真内存安全 bug**：`__host` 闭包最初捕获了 `ctx.clone()`，形成 GC 追不到的引用环，`Runtime` 析构时触发 QuickJS `list_empty(&rt->gc_obj_list)` 断言，**整进程崩溃**（`STATUS_STACK_BUFFER_OVERRUN`），不是测试失败那么轻——15 行最小复现后定位：把 `Ctx` 从"闭包捕获"改成"逐次调用参数"（`rquickjs::FromParam`）即可，已修复并回归测试锁住。**`agenterm::script_backend` 已接线**：`ScriptBackend::Qjs` 变体 + `AGENTERM_SCRIPT_BACKEND=qjs` + `.js`/`.mjs` 入口扩展名映射 + `try_execute_qjs_invocation`（结构镜像 `try_execute_lua_invocation`——同样"未启用→`Ok(None)`"、同样 fleet_bridge/args 接线形状，因为 qjs 和 lua 一样是解释型引擎、没有 rh 那条 AOT/native pack 加载路径）；`src/script_qjs_host.rs` 补 `QjsFleetBridgeFn` 类型别名，和 `script_rh_host.rs`/`script_lua_host.rs` 对称，`grep script_*_host.rs` 三引擎并列可见。6 个新测试镜像既有 lua 测试（backend-from-env/from-entry-path/as_str/check/eval/not-enabled）+ 1 个端到端 fleet_call+args_len+arg 全链路测试，`script_backend` 模块 14/14 全绿。仍差：`task`/`run`/`pack`/`qualify` 动词，以及真实 worker/task 调度路径里谁去调用 `try_execute_qjs_invocation`（目前只是接上了函数，还没接上调用方——rh/lua 的调用方式还需要读懂才能照做） |
+| **QJS-M2** | [~] 已接入根 workspace（形状对齐 `agenterm-rh`）；**host 绑定层落地**——`host.rs` 的 `QjsHostFunctions`（`fleet_call`/`args_len`/`arg`）绑到 `globalThis.__host`，命名/形状**刻意对齐** `agenterm_lua::LuaHostFunctions`（不是巧合，见下）；`scripts/qjs/lib/fleet.js` 是 `scripts/lua/lib/fleet.lua` 的近逐行移植（operation_id 字符串、params JSON 形状全一致），用真实文件（非拷贝）跑通 `eval_fleet_module` 端到端测试。19 单测、clippy/fmt 干净。**过程中抓到一个真内存安全 bug**：`__host` 闭包最初捕获了 `ctx.clone()`，形成 GC 追不到的引用环，`Runtime` 析构时触发 QuickJS `list_empty(&rt->gc_obj_list)` 断言，**整进程崩溃**（`STATUS_STACK_BUFFER_OVERRUN`），不是测试失败那么轻——15 行最小复现后定位：把 `Ctx` 从"闭包捕获"改成"逐次调用参数"（`rquickjs::FromParam`）即可，已修复并回归测试锁住。**`agenterm::script_backend` 已接线**：`ScriptBackend::Qjs` 变体 + `AGENTERM_SCRIPT_BACKEND=qjs` + `.js`/`.mjs` 入口扩展名映射 + `try_execute_qjs_invocation`（结构镜像 `try_execute_lua_invocation`——同样"未启用→`Ok(None)`"、同样 fleet_bridge/args 接线形状，因为 qjs 和 lua 一样是解释型引擎、没有 rh 那条 AOT/native pack 加载路径）；`src/script_qjs_host.rs` 补 `QjsFleetBridgeFn` 类型别名，和 `script_rh_host.rs`/`script_lua_host.rs` 对称，`grep script_*_host.rs` 三引擎并列可见。6 个新测试镜像既有 lua 测试（backend-from-env/from-entry-path/as_str/check/eval/not-enabled）+ 1 个端到端 fleet_call+args_len+arg 全链路测试，`script_backend` 模块 14/14 全绿。**「谁去调用 `try_execute_qjs_invocation`」这条已解，且已用真实 `task run` 复核过，不再是假设**——`src/script_worker.rs`（`execute_inner`）已接线，结构镜像 rh/lua 分支（`#[cfg(not(test))]` 块、`fleet_bridge` 用同一个 `broker.call_json("fleet.call", ...)` 桥接），本次盘点时在共享工作树发现该改动已在但未提交。`cargo test --lib script_backend` 14/14 绿只覆盖 `try_execute_qjs_invocation` 单元层（`#[cfg(not(test))]` 让 `execute_inner` 那段真实分支在 `cargo test` 里根本不编译，rh/lua 同样如此，不是 qjs 独有），所以额外做了一次不经过单测的**真实进程级验证**：手写一个 scratch task manifest（`schema_version: 2`，绕开 `--manifest` 而不碰共享的 `agenterm.tasks.json`）+ 一个 `.js` 任务，`AGENTERM_SCRIPT_BACKEND=qjs agenterm-rhai.exe task run qjs-smoke --manifest <scratch>` → 真跑通，JSON 信封 `ok:true / stdout:"qjs smoke ok\n" / value:7`，`print()` 输出和 `entry()` 返回值都对；**反证对照**：同一个 manifest 不设 `AGENTERM_SCRIPT_BACKEND`（默认落回 rh）→ 正确地因为 `.js` 语法不是合法 rh 而报 `script_parse` 失败退出 1——证明路由确实由 qjs 后端接管，不是巧合碰对。`task check qjs-smoke` 同一路径也过。这条现在可以当已验收。仍差：`pack`/`qualify` CLI 动词（QJS-M3 已补，见下） |
+| **QJS-M3** | [~] `pack`/`qualify`/`run`/`hash` 动词 + `task` 诚实 stub（同 lua 的 `cmd_task`：指向根 `agenterm` 二进制，因为真实 task 调度不在本 crate）；新增 `compile.rs`/`manifest.rs`/`pack.rs`/`qualify.rs`，`lib.rs`/`main.rs` 接线。**`pack` 拿到的是真字节码指纹**——`Module::declare(...).write(...)`（rquickjs 0.12 唯一公开的字节码序列化面），复用 `check()` 已在用、已测的同一条 parse 路径（`Module::declare`），不是第二套会独立漂移的解析器；**但执行仍是重新解析 source，不走字节码加载**——rquickjs 的 `Module::load` 只覆盖 ES module（`export`/`import` 语义、不写 `globalThis`），和 `eval_entry` 全引擎统一用的「顶层 `function entry()` 挂在 globalThis」这个非 module 全局脚本约定不兼容；要接上真加载需要脚本换成 `export function entry(){}` 或构建期自动追加 `export`，还要 drain job queue 等 module 求值的 Promise 完成后再 `module.get("entry")`——这是真功能，不是两行修的事，本轮判断值不值得为了「假装完整」去冒险碰新的 unsafe/GC 路径（QJS-M2 已经在 host 绑定上栽过一次真崩溃），所以先诚实标注为已知缺口，manifest 里的 `bytecode_hash` 目前只是可复现性指纹，不是加载依据。同理 lua 的 pack 也是「real-but-unused bytecode + 重新解析 source」，两边选择的理由不同（lua 是 mlua API 限制，qjs 是 module/global-script 语义不兼容），结论一样。25 个新单测（compile 6 / manifest 2 / pack 6 / qualify 4，另加既有 check/eval/check_many 不变）、`cargo test -p agenterm-qjs --lib` 36/36 绿、`cargo clippy -p agenterm-qjs --lib --all-targets -- -D warnings` 零警告、`cargo clippy --bin agenterm-qjs --no-deps -- -D warnings` 除本 crate 外还检了 agenterm-lua/agenterm-rh/根 agenterm 几个既有警告（均在本次改动文件之外——platform/adapters、script_lua_run.rs、server_strip_ui.rs、script_rh_cli.rs、script_rh_host.rs、script_worker.rs 里一处 redundant_closure——不是本轮引入，未动）、CLI 端到端 smoke（version/check/eval/hash/run/pack build/pack load/qualify/task stub/未知命令退出码 2）全过；`cargo check --workspace` 干净。
+
+**顺手复核了「`check` 无项目级 import 图校验」这条旧记录，发现比原描述更严重，已实测纠正**：不是「能 parse 但不校验 import 图」，而是**任何含 `import` 语句的 qjs 脚本，无论目标文件是否存在，`check()` 现在都直接失败**——`Context::full` 没注册 module loader，`Module::declare` 遇到 `import { value } from "./lib/leaf.js"`（即使 `./lib/leaf.js` 真实存在且合法）会报 `could not load module`，退出码 2；反过来 `eval()`/`run`/`pack`/`qualify` 走的 `eval_entry`（classical script，非 module）对同一段源码给出**完全不同**的错误——`Unexpected token '{'`（`import` 解构语法在非 module 脚本里本来就不合法）。也就是说 qjs 目前的 `entry()`-on-`globalThis` 约定和 ES `import`/`export` **互斥**：不是「多文件项目缺校验」，是「多文件项目现在完全跑不通，check 和 eval 还各自用不同的方式拒绝」。好消息：实测 `scripts/qjs/lib/fleet.js`（目前唯一随包的 qjs 脚本）没用 `import`/`export`，所以这是潜伏缺口，不是已发布的活 bug。要对齐 rh 的 `project_import.rs`（字面量扫描 + 循环/越权检测 + 递归 parse，见该文件）需要先决定 qjs 这层要不要走真 ES module 语义（牵连上面 `pack` 的字节码加载缺口是同一个根因：module vs global-script 两套语义现在都没打通）——这是一个设计决策，不是照抄 rh 就能填的坑，本轮只诚实record，未动手实现。
+
+仍差：项目级多文件 import（上述，比先前记录的更大，需要先做设计决策）；真字节码加载+执行（上述，已知取舍，非遗漏）；`--framed-worker`（lua 有一个但当前代码库里似乎没人 spawn 它——本轮未加，不确定值不值得加，先不做） |
 | **QJS-risks** | [~] 7 条已知风险，2 条已解——「根 workspace C 依赖冲突」（验证 `cargo check --workspace` 干净）；「unrestricted 哲学是否走样」**部分验证**：`__host` 绑定本身不裁剪任何全局对象，`fleet_call`/`arg` 错误路径原样透出宿主错误消息为 JS 异常（`eval::tests::fleet_call_error_surfaces_as_js_exception`），未发现绑定库默认收窄脚本可达面；线程模型风险因这次 GC 崩溃从"理论关注"变成"已验证的真实坑，且已有修复模式"——`Ctx` 不可跨调用捕获，这条经验应写进未来任何 qjs 绑定代码的约定。其余风险仍开放（并行摸索规格对账、无 AOT 性能特征、版本/哈希可复现性、CI 构建耗时）；详见 PRD §「Script engine family」→「Future」→**qjs execution backend** |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
