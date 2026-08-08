@@ -35,6 +35,20 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
             Ok(std::env::temp_dir().to_string_lossy().into_owned())
         })?,
     )?;
+    runtime_table.set(
+        "append_sync",
+        lua.create_function(|_lua, (path, content): (String, String)| {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&path)
+                .map_err(|e| mlua::Error::runtime(format!("append_sync_open: {e}")))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| mlua::Error::runtime(format!("append_sync_write: {e}")))?;
+            Ok(true)
+        })?,
+    )?;
     rhai_table.set("runtime", runtime_table)?;
 
     // rhai::hash table
@@ -427,6 +441,25 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
             table.set("is_symlink", meta.file_type().is_symlink())?;
             table.set("len", meta.len() as i64)?;
             Ok(table)
+        })?,
+    )?;
+
+    // std.fs.try_lock_exclusive(path) → bool
+    fs.set(
+        "try_lock_exclusive",
+        lua.create_function(|_lua, path: String| {
+            // Use create_new: succeeds only if file doesn't exist
+            let result = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path);
+            match result {
+                Ok(_f) => {
+                    // Keep file open (dropped at end of scope) to hold lock
+                    Ok(true)
+                }
+                Err(_) => Ok(false),
+            }
         })?,
     )?;
 
@@ -1656,6 +1689,69 @@ mod tests {
             &host(),
         ).expect("env.names type");
         assert_eq!(r.value, 1);
+    }
+
+    // ── append_sync / try_lock_exclusive ───────────────────────────
+
+    #[test]
+    fn append_sync_writes_to_file() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("append.txt");
+        let e = engine();
+        e.eval(
+            &format!("rhai.runtime.append_sync([[{}]], 'line1\\n')", p.display()),
+            &host(),
+        ).expect("append_sync");
+        let content = std::fs::read_to_string(&p).expect("read");
+        assert_eq!(content, "line1\n");
+    }
+
+    #[test]
+    fn append_sync_accumulates() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("accum.txt");
+        let e = engine();
+        e.eval(
+            &format!("rhai.runtime.append_sync([[{}]], 'a')", p.display()),
+            &host(),
+        ).expect("append1");
+        e.eval(
+            &format!("rhai.runtime.append_sync([[{}]], 'b')", p.display()),
+            &host(),
+        ).expect("append2");
+        let content = std::fs::read_to_string(&p).expect("read");
+        assert_eq!(content, "ab");
+    }
+
+    #[test]
+    fn try_lock_exclusive_success() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("lock_test");
+        let e = engine();
+        let r = e.eval(
+            &format!("return std.fs.try_lock_exclusive([[{}]]) and 1 or 0", p.display()),
+            &host(),
+        ).expect("lock1");
+        assert_eq!(r.value, 1, "first lock should succeed");
+    }
+
+    #[test]
+    fn try_lock_exclusive_second_fails() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("lock_test2");
+        // First open creates the file
+        let _f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&p)
+            .expect("first open");
+        // Second attempt should fail
+        let e = engine();
+        let r = e.eval(
+            &format!("return std.fs.try_lock_exclusive([[{}]]) and 1 or 0", p.display()),
+            &host(),
+        ).expect("lock2");
+        assert_eq!(r.value, 0, "second lock should fail");
     }
 
     // ── fnv1a64 ─────────────────────────────────────────────────────

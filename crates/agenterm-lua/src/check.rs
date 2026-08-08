@@ -21,6 +21,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.fs.rename",
     "std.fs.remove_dir_all",
     "std.fs.symlink_metadata",
+    "std.fs.try_lock_exclusive",
     // std.process
     "std.process.command",
     "std.process.status",
@@ -75,6 +76,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "os.difftime",
     // rhai compatibility
     "rhai.runtime.atomic_write",
+    "rhai.runtime.append_sync",
     "rhai.runtime.temp_dir",
     "rhai.hash.fnv1a64",
     "rhai.task.sleep",
