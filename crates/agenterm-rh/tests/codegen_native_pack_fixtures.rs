@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 4] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 8] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -27,6 +27,36 @@ const FIXTURES: [(&str, &[&str], &[&str]); 4] = [
         "rh_null_unit_compare.rh",
         &[".is_null()"],
         &["rh_host_run_script(RH_SCRIPT_SOURCE)"],
+    ),
+    (
+        "rh_snapshot_tabs_index_return.rh",
+        &["rh_json_get_path_index(&snapshot, &[\"tabs\"], index)"],
+        &["rh_json_string_path_index(&snapshot, &[\"tabs\"]"],
+    ),
+    (
+        "rh_working_context_dot_chain_via_locals.rh",
+        &[
+            "rh_json_get_path(&tab, &[\"working_context\"])",
+            "rh_json_get_path(&wc, &[\"proxy\"])",
+            "rh_json_string_path(&proxy, &[\"source\"])",
+        ],
+        &[],
+    ),
+    (
+        "rh_tab_active_map_key_vs_dot.rh",
+        &[
+            "rh_json_get_path(&tab, &[\"active\"])",
+            "rh_json_get_path_key(&tab, &[], &String::from(\"active\"))",
+        ],
+        &[],
+    ),
+    (
+        "rh_snapshot_tabs_map_key_active.rh",
+        &[
+            "rh_json_array_get(&tabs, ",
+            "rh_json_get_path_key(&tab, &[], &String::from(\"active\"))",
+        ],
+        &["rh_json_string_path_index(&snapshot, &[\"tabs\"]"],
     ),
 ];
 
@@ -126,4 +156,38 @@ fn null_unit_compare_emits_native_json_null_check() {
         FIXTURES[3].1,
         FIXTURES[3].2,
     );
+}
+
+#[test]
+fn snapshot_tabs_index_return_emits_path_index_not_string_index() {
+    assert_native_or_host_eval(FIXTURES[4].0, FIXTURES[4].1, FIXTURES[4].2);
+}
+
+#[test]
+fn working_context_dot_chain_via_locals_stays_native_without_extra_host_eval() {
+    assert_native_or_host_eval(FIXTURES[5].0, FIXTURES[5].1, FIXTURES[5].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[5].0))
+        .expect("transpile working-context dot chain");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn tab_active_map_key_vs_dot_emits_native_key_and_field_reads() {
+    assert_native_or_host_eval(FIXTURES[6].0, FIXTURES[6].1, FIXTURES[6].2);
+}
+
+#[test]
+fn snapshot_tabs_map_key_active_emits_array_get_and_path_key_not_string_index() {
+    assert_native_or_host_eval(FIXTURES[7].0, FIXTURES[7].1, FIXTURES[7].2);
 }

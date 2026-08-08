@@ -120,7 +120,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   GUI/server/PTY isolation
 - [x] lint exposes a versioned JSON result, contains injected malformed
   JSON/UTF-8/conflict/Rhai self-tests, and is represented by mandatory `repo-lint` and
-  `rhai-lint` qualification gates; no optional analyzer is silently treated as
+  `rh-lint` qualification gates; no optional analyzer is silently treated as
   a passed required gate
 - v0.1.7 self-diagnosing test harness (P0)
   - [x] one shared harness assigns a run ID, OS-selected loopback address,

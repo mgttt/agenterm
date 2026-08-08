@@ -2,13 +2,27 @@
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, transpile_cdylib_with_mode};
 
+const CRATE_FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/crates/agenterm-rh/tests/fixtures/"
+);
+
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("fixtures/rh/{name}"))
         .unwrap_or_else(|error| panic!("read fixtures/rh/{name}: {error}"))
 }
 
+fn crate_fixture(name: &str) -> String {
+    std::fs::read_to_string(format!("{CRATE_FIXTURE}{name}"))
+        .unwrap_or_else(|error| panic!("read crate fixture {name}: {error}"))
+}
+
 fn assert_native_fixture(name: &str, needles: &[&str], anti_needles: &[&str]) {
-    let source = fixture(name);
+    let source = if name.starts_with("rh_") {
+        crate_fixture(name)
+    } else {
+        fixture(name)
+    };
     agenterm_rh::check(&source).unwrap_or_else(|error| panic!("check {name}: {error}"));
     let output = transpile_cdylib_with_mode(&source)
         .unwrap_or_else(|error| panic!("transpile {name}: {error}"));
@@ -157,5 +171,68 @@ fn rhai_array_index_property_misparse_emits_parenthesized_index_access() {
         !output.rust.contains("rh_json_get_path_key(&ordered"),
         "{}",
         output.rust
+    );
+}
+
+#[test]
+fn snapshot_tabs_index_return_fixture_emits_path_index_not_string_index() {
+    let source = crate_fixture("rh_snapshot_tabs_index_return.rh");
+    agenterm_rh::check(&source).expect("check rh_snapshot_tabs_index_return");
+    let output = transpile_cdylib_with_mode(&source).expect("transpile rh_snapshot_tabs_index_return");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output
+            .rust
+            .contains("rh_json_get_path_index(&snapshot, &[\"tabs\"], index)"),
+        "{}",
+        output.rust
+    );
+    assert!(
+        !output
+            .rust
+            .contains("rh_json_string_path_index(&snapshot, &[\"tabs\"]"),
+        "{}",
+        output.rust
+    );
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-snapshot-tabs-index-return-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(&source, &dir)
+        .expect("qualify rh_snapshot_tabs_index_return");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 0);
+}
+
+#[test]
+fn working_context_dot_chain_fixture_stays_native_without_extra_host_eval() {
+    assert_native_fixture(
+        "rh_working_context_dot_chain_via_locals.rh",
+        &[
+            "rh_json_get_path(&tab, &[\"working_context\"])",
+            "rh_json_get_path(&wc, &[\"proxy\"])",
+            "rh_json_string_path(&proxy, &[\"source\"])",
+        ],
+        &[],
+    );
+}
+
+#[test]
+fn tab_active_map_key_vs_dot_fixture_emits_native_key_and_field_reads() {
+    assert_native_fixture(
+        "rh_tab_active_map_key_vs_dot.rh",
+        &[
+            "rh_json_get_path(&tab, &[\"active\"])",
+            "rh_json_get_path_key(&tab, &[], &String::from(\"active\"))",
+        ],
+        &[],
     );
 }

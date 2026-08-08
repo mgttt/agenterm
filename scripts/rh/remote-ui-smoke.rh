@@ -458,10 +458,15 @@ fn find_last_run(screen, marker) {
 }
 
 fn process_present(id) {
-    for process in std::process::list() {
+    let processes = std::process::list();
+    let process_count = processes.len;
+    let index = 0;
+    while index < process_count {
+        let process = processes[index];
         if process.id == id {
             return 1;
         }
+        index += 1;
     }
     0
 }
@@ -544,7 +549,8 @@ fn tab_text_geometry(context, cli, id) {
 }
 
 fn parse_json_text(text) {
-    rhai::json::parse(text)
+    let payload = "" + text;
+    rhai::json::parse(payload)
 }
 
 fn screenshot(context, cli, path) {
@@ -636,11 +642,10 @@ test_harness::require(
 let repo = std::path::absolute(args[0]).display;
 let gui_exe = std::path::absolute(args[1]).display;
 let cli = std::path::absolute(args[2]).display;
-let requested_screenshot = if args.len == 4 {
-    std::path::absolute(args[3]).display
-} else {
-    ""
-};
+let requested_screenshot = "";
+if args.len == 4 {
+    requested_screenshot = std::path::absolute(args[3]).display;
+}
 test_harness::require(std::fs::exists(gui_exe), "remote_ui_gui_missing");
 test_harness::require(std::fs::exists(cli), "remote_ui_cli_missing");
 
@@ -1031,6 +1036,7 @@ try {
     let locale_button = require_window_control(replacement_gui.window_control(2129), "locale_button");
     let font_decrease_button = require_window_control(replacement_gui.window_control(2130), "font_decrease_button");
     let font_increase_button = require_window_control(replacement_gui.window_control(2131), "font_increase_button");
+    let composer_send = require_window_control(replacement_gui.window_control(2102), "composer_send");
     let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
     let toolbar_layout = toolbar.layout.toolbar;
     let new_bounds = toolbar_layout["new"];
@@ -1511,8 +1517,7 @@ try {
         "cwd target"
     ).display;
     replacement_composer.set_text(cwd_path);
-    let replacement_send = require_window_control(replacement_gui.window_control(2102), "replacement_send");
-    replacement_send.click();
+    composer_send.click();
     let cwd_prepared = json_cli(context, cli, ["ui-bootstrap"]);
     let cwd_tab = find_tab(cwd_prepared, tab_id);
     let cwd_composer = text_cli(
@@ -1910,14 +1915,11 @@ try {
         "remote_ui_tab_close_cancel_invalid"
     );
     replacement_gui.window_pointer("click", 330, 64);
-    let reopened_tab_close_confirm = require_window_control(replacement_gui.window_control(2119), "reopened_tab_close_confirm");
-    let reopened_tab_close_cancel = require_window_control(replacement_gui.window_control(2120), "reopened_tab_close_cancel");
     test_harness::require(
-        reopened_tab_close_confirm.visible
-            && reopened_tab_close_cancel.visible,
+        tab_close_confirm.visible && tab_close_cancel.visible,
         "remote_ui_tab_close_modal_reopen_missing"
     );
-    reopened_tab_close_confirm.click();
+    tab_close_confirm.click();
     let confirmed_close = json_cli(
         context,
         cli,
@@ -2074,10 +2076,10 @@ try {
     let edited_title = "remote-edited-" + context.run_id;
     let edited_note = "note-" + context.run_id;
     double_click_tab_text(context, cli, replacement_gui, tab_id);
-    let title_editor = require_window_control(replacement_gui.window_control(2105), "title_editor");
+    let title_editor = child_title_editor;
     let note_editor = require_window_control(replacement_gui.window_control(2106), "note_editor");
     let save_button = require_window_control(replacement_gui.window_control(2107), "save_button");
-    let cancel_button = require_window_control(replacement_gui.window_control(2108), "cancel_button");
+    let cancel_button = child_edit_cancel;
     test_harness::require(
         title_editor.visible && save_button.visible,
         "remote_ui_inline_editor_missing"
@@ -2923,7 +2925,6 @@ try {
         "remote_ui_fault_server_did_not_exit"
     );
 
-    let composer_send = require_window_control(replacement_gui.window_control(2102), "composer_send");
     let offline_observed = 0;
     for attempt in 0..3000 {
         if !composer_send.visible {
@@ -2985,7 +2986,7 @@ try {
         "relay-close.json"
     );
     test_harness::require(
-        require_window_control(replacement_gui.window_control(2109), "relay_keep_modal").visible,
+        disconnected_keep.visible,
         "remote_ui_relay_close_modal_invalid"
     );
     discard_cli(

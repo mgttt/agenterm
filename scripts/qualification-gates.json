@@ -27,7 +27,7 @@
       "evidence": []
     },
     {
-      "id": "rhai-lint",
+      "id": "rh-lint",
       "evidence": []
     },
     {
@@ -188,15 +188,15 @@
     {
       "id": "script-smoke",
       "evidence": [
-        "script.rhai-runtime",
-        "script.rhai-fleet",
+        "script.rh-runtime",
+        "script.rh-fleet",
         "script.api-tree",
         "script.fleet-v2",
         "script.fleet-tabs-set-note",
         "script.direct-entry",
         "script.north-star",
-        "script.rhai-robustness-budget",
-        "script.rhai-framed",
+        "script.rh-robustness-budget",
+        "script.rh-framed",
         "script.exit-classes",
         "script.typed-errors",
         "script.modules-tasks",

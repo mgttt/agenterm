@@ -1,7 +1,7 @@
 // Fail-fast repository lint without a PowerShell dependency.
 //
 // Args:
-//   REPO [WORKER] [all|static|rust|rhai] [--json] [--self-test]
+//   REPO [WORKER] [all|static|rust|rh] [--json] [--self-test]
 
 fn entry() {
     if args.len < 1 {
@@ -37,7 +37,7 @@ fn entry() {
         } else if value == "all"
                 || value == "static"
                 || value == "rust"
-                || value == "rhai" {
+                || value == "rh" {
             mode = value;
         } else if value == "--worker" {
             require(index + 1 < args.len, "lint_worker_value_missing");
@@ -222,7 +222,7 @@ fn entry() {
                 "git",
                 [
                     "-C", repo, "ls-files", "--",
-                    "*.rs", "*.toml", "*.rhai", "*.json", "*.md", "*.html",
+                    "*.rs", "*.toml", "*.rh", "*.rhai", "*.json", "*.md", "*.html",
                     "*.yml", "*.yaml", "*.sh", "*.bat", "*.cmd"
                 ],
                 10000,
@@ -304,7 +304,7 @@ fn entry() {
             }
         }
 
-        if mode == "all" || mode == "rhai" {
+        if mode == "all" || mode == "rh" {
             require(
                 std::fs::exists(worker) && std::fs::metadata(worker).is_file,
                 "lint_worker_missing:" + worker

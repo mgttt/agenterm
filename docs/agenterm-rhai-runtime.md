@@ -30,7 +30,7 @@ Delivery plan:
 
 This document defines the stable AgenTerm Rhai object and interface model for
 script authors, runtime implementers, tests, documentation generators, and
-future tool consumers. The Rhai surface is the product contract. Rust, Node.js,
+future tool consumers. The Script surface is the product contract. Rust, Node.js,
 and Bun are research references only and do not own this API.
 
 `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` are normative as defined

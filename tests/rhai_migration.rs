@@ -2415,15 +2415,15 @@ fn rhai_script_smoke_preserves_unrestricted_runtime_and_supervisor_contract() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     for evidence in [
-        "script.rhai-runtime",
-        "script.rhai-fleet",
+        "script.rh-runtime",
+        "script.rh-fleet",
         "script.api-tree",
         "script.fleet-v2",
         "script.fleet-tabs-set-note",
         "script.direct-entry",
         "script.north-star",
-        "script.rhai-robustness-budget",
-        "script.rhai-framed",
+        "script.rh-robustness-budget",
+        "script.rh-framed",
         "script.exit-classes",
         "script.typed-errors",
         "script.modules-tasks",

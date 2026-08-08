@@ -416,7 +416,7 @@
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "deterministic JSON-compatible values, arguments, bounded computation",
-      "evidence_ids": ["script.rhai-runtime"]
+      "evidence_ids": ["script.rh-runtime"]
     },
     {
       "id": "scripting.rhai-fleet",
@@ -424,7 +424,7 @@
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "Script API v2 maps every current typed operation exactly once to `fleet`",
-      "evidence_ids": ["script.rhai-fleet"]
+      "evidence_ids": ["script.rh-fleet"]
     },
     {
       "id": "scripting.api-tree",
@@ -440,7 +440,7 @@
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "source, value, operation, call/expression depth",
-      "evidence_ids": ["script.rhai-robustness-budget", "script.rhai-framed"]
+      "evidence_ids": ["script.rh-robustness-budget", "script.rh-framed"]
     },
     {
       "id": "scripting.supervisor",

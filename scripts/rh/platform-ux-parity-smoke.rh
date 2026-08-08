@@ -450,7 +450,7 @@ fn classify_failure_root(failure) {
         return "ux/wake-contract";
     }
     if failure_text.contains("runtime_error") || failure_text.contains("script_runtime") {
-        return "infra/rhai-runtime";
+        return "infra/script-runtime";
     }
     if failure_text.contains("unsupported platform") {
         return "infra/unsupported-platform";

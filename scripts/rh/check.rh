@@ -1825,10 +1825,10 @@ sequence = map_sequence(ordinary);
 ordinary = run_gate(
     context,
     timing,
-    "rhai-lint",
+    "rh-lint",
     "production rh source lint",
     task(
-        worker, manifest, "lint", 120000, two_task_extra(dist_lint_cli, "rhai"), #{}, 0),
+        worker, manifest, "lint", 120000, two_task_extra(dist_lint_cli, "rh"), #{}, 0),
     repo,
     scratch,
     sequence
@@ -1840,7 +1840,7 @@ ordinary = run_gate(
     context,
     timing,
     "task-catalog",
-    "repository Rhai task catalog",
+    "repository script task catalog",
     task_check_spec(worker, manifest),
     repo,
     scratch,

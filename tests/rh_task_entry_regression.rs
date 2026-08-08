@@ -535,6 +535,30 @@ fn phase_b_smoke_entries_use_host_eval_or_native_pack() {
     }
 }
 
+
+#[test]
+fn script_smoke_host_eval_he_ceiling() {
+    let (source, output) = transpile_project_entry("scripts/rh/script-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert!(
+        matches!(
+            output.execution_mode,
+            agenterm_rh::CdylibExecutionMode::HostEval
+                | agenterm_rh::CdylibExecutionMode::Native
+        ),
+        "script-smoke: {:?}",
+        output.execution_mode
+    );
+    let he = output.rust.matches("rh_host_eval_int(").count();
+    // Pre-cut tip was ~108–116 HE; keep a hard ceiling so rewrites cannot silently regress.
+    assert!(
+        he <= 90,
+        "script-smoke HostEval ceiling exceeded: he={he} (expected <= 90 after idiom rewrite)"
+    );
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+}
+
 #[test]
 fn working_context_smoke_is_past_compat_delegating() {
     assert_host_eval_or_native_bundled_pack("scripts/rh/working-context-smoke.rh");

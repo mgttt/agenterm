@@ -1,0 +1,10 @@
+fn entry() {
+    let tab = rhai::json::parse("{\"working_context\":{\"proxy\":{\"source\":\"launch\"}}}");
+    let wc = tab.working_context;
+    let proxy = wc.proxy;
+    let src = "" + proxy.source;
+    if src != "launch" {
+        return 1;
+    }
+    0
+}

@@ -1,0 +1,18 @@
+fn active_tab_from_snapshot(snapshot) {
+    for index in 0..snapshot.tabs.len {
+        let tab = snapshot.tabs[index];
+        if tab.active != 0 {
+            return tab;
+        }
+    }
+    rhai::json::parse("null")
+}
+
+fn entry() {
+    let snapshot = rhai::json::parse("{\"tabs\":[{\"active\":1,\"id\":\"t1\"}]}");
+    let tab = active_tab_from_snapshot(snapshot);
+    if tab.active != 1 {
+        return 1;
+    }
+    0
+}

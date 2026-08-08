@@ -1,4 +1,4 @@
-// Reject duplicated Cargo executable lists and packaging rules outside Rhai.
+// Reject duplicated Cargo executable lists and packaging rules outside rh tasks.
 //
 // Args: REPO
 

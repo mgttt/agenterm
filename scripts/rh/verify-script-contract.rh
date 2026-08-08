@@ -30,8 +30,8 @@ fn entry() {
         "runtime specification must open with the complete object tree"
     );
     require(
-        specification.contains("The Rhai surface is the product contract."),
-        "runtime specification must declare the Rhai surface as the product contract"
+        specification.contains("The Script surface is the product contract."),
+        "runtime specification must declare the Script surface as the product contract"
     );
 
     let catalog = rhai::json::parse(std::fs::read_to_string(args[1]));
@@ -91,7 +91,7 @@ fn entry() {
     require(legacy_count == 0, "Script API v2 must not retain legacy agent aliases");
 
     print(
-        "PASS: Rhai verified the Script API contract (" +
+        "PASS: Script verified the Script API contract (" +
         stable_count + " stable, " +
         reserved_count + " reserved, " +
         legacy_count + " legacy)"
