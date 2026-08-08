@@ -48,6 +48,12 @@ pub const UI_TAB_CLOSE: &str = "ui.tab.close";
 pub const UI_TAB_EDIT: &str = "ui.tab.edit";
 pub const UI_TAB_EDITOR_SAVE: &str = "ui.tab.editor.save";
 pub const UI_TAB_EDITOR_CANCEL: &str = "ui.tab.editor.cancel";
+pub const UI_CWD_EDITOR_OPEN: &str = "ui.cwd-editor.open";
+pub const UI_CWD_EDITOR_PREPARE: &str = "ui.cwd-editor.prepare";
+pub const UI_CWD_EDITOR_PREPARE_APPEND: &str = "ui.cwd-editor.prepare-append";
+pub const UI_CWD_EDITOR_PREPARE_REPLACE: &str = "ui.cwd-editor.prepare-replace";
+pub const UI_CWD_EDITOR_SEND_NOW: &str = "ui.cwd-editor.send-now";
+pub const UI_NEW_TERMINAL_OPEN: &str = "ui.new-terminal.open";
 pub const UI_TREE_TOGGLE: &str = "ui.tree.toggle";
 pub const UI_COMPOSER_SEND: &str = "ui.composer.send";
 pub const UI_INPUT_POINTER: &str = "ui.input.pointer";
@@ -386,6 +392,32 @@ const TAB_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpe
     minimum: None,
     maximum: None,
 }];
+/// `ui-action cwd-prepare` — writes a directory-change command into the tab's
+/// composer. `--path` is declared required because that is the contract of the
+/// shared `control_dispatch` arm the Windows host relays to; the Unix embedded
+/// host additionally falls back to the CWD editor's own buffer, which is a
+/// host-local convenience an agent must not depend on.
+const CWD_PREPARE_PARAMETERS: &[OperationParameterSpec] = &[
+    TAB_TARGET_PARAMETERS[0],
+    OperationParameterSpec {
+        name: "path",
+        value_type: "string",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "mode",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+];
+/// `cwd-prepare-append` / `cwd-prepare-replace` / `cwd-send-now` — same inputs
+/// minus `--mode`, which their verb already fixes.
+const CWD_PATH_PARAMETERS: &[OperationParameterSpec] =
+    &[CWD_PREPARE_PARAMETERS[0], CWD_PREPARE_PARAMETERS[1]];
 /// `ui-action window-resize` — client-area size in **device pixels**, validated
 /// by the shared `ClientSize::parse` on both hosts.
 const WINDOW_RESIZE_PARAMETERS: &[OperationParameterSpec] = &[
@@ -801,7 +833,11 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         aliases: &[],
         parameters: TAB_TARGET_PARAMETERS,
         result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments", "operation_target_not_found"],
+        // Both hosts report a missing target as an untyped failure, so the only
+        // error identity this operation can honestly advertise is the shared
+        // argument check. Declaring `operation_target_not_found` would promise a
+        // code the dispatcher never emits.
+        errors: &["operation_invalid_arguments"],
         events: &[],
         destructive: true,
         available: true,
@@ -816,7 +852,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         aliases: &[],
         parameters: TAB_TARGET_PARAMETERS,
         result_type: "ui_snapshot",
-        errors: &["operation_invalid_arguments", "operation_target_not_found"],
+        errors: &["operation_invalid_arguments"],
         events: &[],
         destructive: false,
         available: true,
@@ -1081,6 +1117,99 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         "fleet.ui.settings.preset.fancy_night",
         "settings-preset-fancy-night",
     ),
+    // ---- Working context: CWD editor and the new-terminal dialog -------------
+    //
+    // The CWD editor is a focus trap on the Unix host: while it is open the only
+    // accepted verbs are the four below plus `cancel`. That is a precondition an
+    // agent can observe from `ui-snapshot`'s modal, and a reason these verbs must
+    // be discoverable — not a reason to omit them.
+    OperationSpec {
+        id: UI_CWD_EDITOR_OPEN,
+        script_surface: "fleet.ui.cwd_editor.open",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("open-cwd-editor"),
+        aliases: &[],
+        parameters: TAB_TARGET_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_CWD_EDITOR_PREPARE,
+        script_surface: "fleet.ui.cwd_editor.prepare",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("cwd-prepare"),
+        aliases: &[],
+        parameters: CWD_PREPARE_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_CWD_EDITOR_PREPARE_APPEND,
+        script_surface: "fleet.ui.cwd_editor.prepare_append",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("cwd-prepare-append"),
+        aliases: &[],
+        parameters: CWD_PATH_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_CWD_EDITOR_PREPARE_REPLACE,
+        script_surface: "fleet.ui.cwd_editor.prepare_replace",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("cwd-prepare-replace"),
+        aliases: &[],
+        parameters: CWD_PATH_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    // Writes to the live PTY instead of the composer draft, so it is the one
+    // CWD verb whose effect the agent cannot review before it lands.
+    OperationSpec {
+        id: UI_CWD_EDITOR_SEND_NOW,
+        script_surface: "fleet.ui.cwd_editor.send_now",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("cwd-send-now"),
+        aliases: &[],
+        parameters: CWD_PATH_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    // Only the *open* verb is shared. `create`, `shell-*` and the
+    // `new-terminal-set-*` field writers are still `UNIX_ONLY_UI_ACTIONS`, so an
+    // agent can raise this dialog on both hosts but can only drive it on Unix.
+    // Registering the Unix-only half would need a per-platform availability axis
+    // that `OperationSpec::available` does not have; see the audit § F5.
+    nullary_ui_action(
+        UI_NEW_TERMINAL_OPEN,
+        "fleet.ui.new_terminal.open",
+        "open-new-terminal",
+    ),
     OperationSpec {
         id: TERMINAL_PASTE,
         script_surface: "fleet.terminal.paste",
@@ -1227,6 +1356,12 @@ pub(crate) fn operation_for_args(
                 "settings-preset-classic-night" => UI_SETTINGS_PRESET_CLASSIC_NIGHT,
                 "settings-preset-fancy-day" => UI_SETTINGS_PRESET_FANCY_DAY,
                 "settings-preset-fancy-night" => UI_SETTINGS_PRESET_FANCY_NIGHT,
+                "open-cwd-editor" => UI_CWD_EDITOR_OPEN,
+                "cwd-prepare" => UI_CWD_EDITOR_PREPARE,
+                "cwd-prepare-append" => UI_CWD_EDITOR_PREPARE_APPEND,
+                "cwd-prepare-replace" => UI_CWD_EDITOR_PREPARE_REPLACE,
+                "cwd-send-now" => UI_CWD_EDITOR_SEND_NOW,
+                "open-new-terminal" => UI_NEW_TERMINAL_OPEN,
                 "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
                 "select-tab" => UI_TAB_SELECT,
@@ -1653,6 +1788,67 @@ mod tests {
         ] {
             let operation = validate_operation_args(&args(&["ui-action", action])).unwrap();
             assert_eq!(operation.map(|operation| operation.id), Some(expected));
+        }
+    }
+
+    #[test]
+    fn working_context_actions_declare_their_path_and_target() {
+        for (action, expected) in [
+            ("open-cwd-editor", UI_CWD_EDITOR_OPEN),
+            ("cwd-prepare", UI_CWD_EDITOR_PREPARE),
+            ("cwd-prepare-append", UI_CWD_EDITOR_PREPARE_APPEND),
+            ("cwd-prepare-replace", UI_CWD_EDITOR_PREPARE_REPLACE),
+            ("cwd-send-now", UI_CWD_EDITOR_SEND_NOW),
+        ] {
+            let operation = validate_operation_args(&args(&[
+                "ui-action",
+                action,
+                "-t",
+                "@3",
+                "--path",
+                "/tmp",
+            ]))
+            .unwrap_or_else(|error| panic!("{action} rejected its declared options: {error}"));
+            assert_eq!(operation.map(|operation| operation.id), Some(expected));
+        }
+        for id in [
+            UI_CWD_EDITOR_PREPARE,
+            UI_CWD_EDITOR_PREPARE_APPEND,
+            UI_CWD_EDITOR_PREPARE_REPLACE,
+            UI_CWD_EDITOR_SEND_NOW,
+        ] {
+            let operation = operation_by_id(id).unwrap();
+            assert!(
+                operation
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.name == "path" && parameter.required),
+                "{id} must declare --path as required, the cross-host contract"
+            );
+        }
+        assert_eq!(
+            validate_operation_args(&args(&["ui-action", "open-new-terminal"]))
+                .unwrap()
+                .map(|operation| operation.id),
+            Some(UI_NEW_TERMINAL_OPEN)
+        );
+    }
+
+    /// An error identity the dispatcher never emits is the same class of lie as
+    /// a verb no host implements: it invites an agent to branch on a code that
+    /// can never arrive.
+    #[test]
+    fn declared_error_identities_stay_within_the_typed_vocabulary() {
+        for operation in OPERATION_CATALOG {
+            if operation.command != "ui-action" {
+                continue;
+            }
+            assert!(
+                !operation.errors.contains(&"operation_target_not_found"),
+                "{} advertises operation_target_not_found, but the ui-action \
+                 dispatchers report missing targets as untyped failures",
+                operation.id
+            );
         }
     }
 
