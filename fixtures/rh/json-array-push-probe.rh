@@ -1,5 +1,5 @@
 fn entry() {
-    let doc = rhai::json::parse(
+    let doc = rh::json::parse(
         "{\"items\":[{\"name\":\"alpha\"},{\"name\":\"beta\"}]}"
     );
     let names = [];

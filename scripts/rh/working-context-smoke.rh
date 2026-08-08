@@ -48,7 +48,7 @@ fn wait_for_server(context, cli, gui_child, redactions) {
             throw "working_context_gui_early_exit:" +
                 test_harness::redact_text(early_stderr, redactions);
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "working_context_server_timeout";
     0
@@ -61,7 +61,7 @@ fn wait_for_exit(child, code) {
         if child.state == "exited" {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     if child.state == "running" {
         child.kill();
@@ -153,7 +153,7 @@ fn entry() {
         );
         let snapshot_text = "" + snapshot_result.stdout;
         require_no_secret(snapshot_text, secret, "launch_ui_snapshot");
-        let snapshot = rhai::json::parse(snapshot_text);
+        let snapshot = rh::json::parse(snapshot_text);
         let tab = active_tab_from_snapshot(snapshot);
         let working_context = tab.working_context;
         let tab_proxy = working_context.proxy;
@@ -176,7 +176,7 @@ fn entry() {
             redactions
         );
         let launch_pane_text = "" + launch_pane_result.stdout;
-        let launch_pane = rhai::json::parse(launch_pane_text);
+        let launch_pane = rh::json::parse(launch_pane_text);
         let launch_windows = launch_pane.windows;
         let launch_window = launch_windows[0];
         let input_writes = launch_window.input_writes;
@@ -223,7 +223,7 @@ fn entry() {
         );
         let pane_text = "" + pane_result.stdout;
         require_no_secret(pane_text, secret, "archived_pane_snapshot");
-        let pane = rhai::json::parse(pane_text);
+        let pane = rh::json::parse(pane_text);
         let pane_windows = pane.windows;
         let pane_window = pane_windows[0];
         let composer = "" + pane_window.composer;
@@ -373,7 +373,7 @@ fn entry() {
         );
         let restored_text = "" + restored_result.stdout;
         require_no_secret(restored_text, secret, "restart_ui_snapshot");
-        let restored_snapshot = rhai::json::parse(restored_text);
+        let restored_snapshot = rh::json::parse(restored_text);
         let restored_tab = active_tab_from_snapshot(restored_snapshot);
         let restored_working_context = restored_tab.working_context;
         let restored_tab_proxy = restored_working_context.proxy;

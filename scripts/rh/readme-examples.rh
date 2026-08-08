@@ -14,7 +14,7 @@ fn entry() {
 
     let manifest_path = std::path::join(repo, "scripts/artifacts.json").display;
     let manifest_text = std::fs::read_to_string(manifest_path);
-    let manifest = rhai::json::parse(manifest_text);
+    let manifest = rh::json::parse(manifest_text);
     require(manifest.schema_version == 2, "readme_artifact_manifest_schema");
 
     let readme_path = std::path::join(repo, "README.md").display;
@@ -164,7 +164,7 @@ fn entry() {
         );
         require(mux_code == 0, "readme-mux-compatibility");
         let mux_text = std::fs::read_to_string(stdout_path);
-        let compatibility = rhai::json::parse(mux_text);
+        let compatibility = rh::json::parse(mux_text);
         require(
             compatibility.schema_version > 0,
             "README mux compatibility example returned an invalid catalog"

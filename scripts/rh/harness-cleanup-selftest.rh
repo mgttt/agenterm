@@ -73,9 +73,9 @@ fn entry() {
                     failure = "harness_cleanup_proof_incomplete";
                 } else {
                     let cleanup =
-                        rhai::json::parse_file(context.cleanup_path);
+                        rh::json::parse_file(context.cleanup_path);
                     let manifest =
-                        rhai::json::parse_file(context.manifest_path);
+                        rh::json::parse_file(context.manifest_path);
                     if !cleanup.orphan_free
                             || !cleanup.forced_pids.contains(owned_pid)
                             || cleanup.forced_pids.contains(unowned_pid)

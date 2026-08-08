@@ -1,7 +1,7 @@
 import "fixtures/rh/modules/string_helper" as helper;
 
 fn entry() {
-    let document = rhai::json::parse(
+    let document = rh::json::parse(
         "{\"executables\":[{\"name\":\"agenterm-cli.exe\",\"role\":\" cli \"}]}"
     );
     let names = #{};

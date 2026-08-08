@@ -105,7 +105,7 @@ fn entry() {
         metadata_code == 0,
         "supply_chain_cargo_metadata"
     );
-    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata = rh::json::parse_file(metadata_path);
     std::fs::try_remove_file(metadata_path);
     require(
         type_of(metadata.resolve) != "()",
@@ -297,7 +297,7 @@ fn entry() {
         );
     }
 
-    let cargo_lock_hash = rhai::crypto::sha256_file(cargo_lock_path);
+    let cargo_lock_hash = rh::crypto::sha256_file(cargo_lock_path);
     let scratch_name = "spdx-key-" + run_stamp + ".tmp";
     let spdx_scratch = std::path::join(output_parent, scratch_name).display;
     let spdx_packages = [];
@@ -312,8 +312,8 @@ fn entry() {
         let pkg_version = "" + pkg.version;
         let key =
             pkg_name + "\n" + pkg_version + "\n" + package_source;
-        rhai::runtime::atomic_write(spdx_scratch, key);
-        let id_hash = rhai::crypto::sha256_file(spdx_scratch);
+        rh::runtime::atomic_write(spdx_scratch, key);
+        let id_hash = rh::crypto::sha256_file(spdx_scratch);
         let spdx_id = "SPDXRef-Package-" + id_hash;
         let license_text = "";
         if type_of(pkg.license) == "string" {
@@ -403,9 +403,9 @@ fn entry() {
         packages: spdx_packages,
         relationships: relationships
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output,
-        rhai::json::stringify_pretty(document) + "\n"
+        rh::json::stringify_pretty(document) + "\n"
     );
     let dep_count = dependencies.len;
     print(

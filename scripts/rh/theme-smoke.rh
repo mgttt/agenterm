@@ -21,7 +21,7 @@ fn json_cli(context, cli, arguments) {
         []
     );
     let text = "" + output.stdout;
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn text_cli(context, cli, arguments) {
@@ -56,7 +56,7 @@ fn wait_for_server(context, cli, gui_child) {
                 "theme_gui_early_exit:" + output.stderr_text()
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(0, "theme_server_timeout");
     0
@@ -78,7 +78,7 @@ fn wait_for_server_stop(context, cli) {
         if probe.success == 0 && output_text.contains(stopped) {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     test_harness::require(0, "theme_server_stop_timeout");
     0
@@ -91,7 +91,7 @@ fn wait_for_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(0, code);
     return child.wait_with_output(
@@ -252,7 +252,7 @@ fn retain_failure_snapshot(context, cli) {
         0,
         []
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         std::path::join(
             context.failure_directory,
             "ui-snapshot.txt"
@@ -306,7 +306,7 @@ fn entry() {
         std::fs::create_dir_all(
             std::path::parent(context.settings_path).display
         );
-        rhai::runtime::atomic_write(
+        rh::runtime::atomic_write(
             context.settings_path,
             "{\"color_theme\":\"light\",\"terminal_font_size\":14}\n"
         );
@@ -316,14 +316,14 @@ fn entry() {
         text_cli(context, cli, ["ui-action", "stop-server-and-exit"]);
         wait_for_exit(migration_gui, "theme_migration_gui_exit_timeout");
         wait_for_server_stop(context, cli);
-        let migrated = rhai::json::parse_file(context.settings_path);
+        let migrated = rh::json::parse_file(context.settings_path);
         test_harness::require(
             migrated.appearance_preset == "classic-day",
             "legacy_light_migration_failed"
         );
 
         print("STEP launch isolated classic-night workspace and keep a PTY active");
-        rhai::runtime::atomic_write(
+        rh::runtime::atomic_write(
             context.settings_path,
             "{\"appearance_preset\":\"classic-night\"}\n"
         );
@@ -412,7 +412,7 @@ fn entry() {
             ["ui-action", "settings-apply"]
         );
         assert_theme_closed(snapshot, "classic-day");
-        let persisted = rhai::json::parse_file(context.settings_path);
+        let persisted = rh::json::parse_file(context.settings_path);
         test_harness::require(
             persisted.appearance_preset == "classic-day",
             "theme_apply_not_persisted"
@@ -432,13 +432,13 @@ fn entry() {
         text_cli(context, cli, ["ui-action", "settings-apply"]);
         let fancy_applied = json_cli(context, cli, ["ui-snapshot"]);
         assert_theme_closed(fancy_applied, "fancy-day");
-        let fancy_persisted = rhai::json::parse_file(context.settings_path);
+        let fancy_persisted = rh::json::parse_file(context.settings_path);
         test_harness::require(
             fancy_persisted.appearance_preset == "fancy-day",
             "fancy_apply_not_persisted"
         );
-        let classic_shot = rhai::image::inspect_png(day_png);
-        let fancy_shot = rhai::image::inspect_png(fancy_day_png);
+        let classic_shot = rh::image::inspect_png(day_png);
+        let fancy_shot = rh::image::inspect_png(fancy_day_png);
         test_harness::require(
             classic_shot.width == fancy_shot.width
                 && classic_shot.height == fancy_shot.height,
@@ -482,8 +482,8 @@ fn entry() {
                 && std::fs::metadata(day_png).len >= 1000,
             "theme_screenshot_too_small"
         );
-        let dark = rhai::image::inspect_png(night_png);
-        let light = rhai::image::inspect_png(day_png);
+        let dark = rh::image::inspect_png(night_png);
+        let light = rh::image::inspect_png(day_png);
         test_harness::require(
             dark.width == light.width
                 && dark.height == light.height

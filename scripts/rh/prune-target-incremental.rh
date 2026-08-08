@@ -72,7 +72,7 @@ fn entry() {
     let has_manifest = 0;
     let manifest_path = "";
     let invocation = "";
-    let manifest_document = rhai::json::parse("{}");
+    let manifest_document = rh::json::parse("{}");
     if args.len == 6 {
         has_manifest = 1;
         manifest_path = std::path::absolute(args[3]).display;
@@ -88,7 +88,7 @@ fn entry() {
                     && manifest_text.contains(
                         "\"identity_algorithm\":\"full-tree-metadata-v1\""
                     ) {
-                manifest_document = rhai::json::parse(manifest_text);
+                manifest_document = rh::json::parse(manifest_text);
             }
         }
     }

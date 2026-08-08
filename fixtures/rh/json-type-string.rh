@@ -1,5 +1,5 @@
 fn entry() {
-    let document = rhai::json::parse(
+    let document = rh::json::parse(
         "{\"executables\":[{\"name\":\"agenterm.exe\",\"n\":4}]}"
     );
     if type_of(document.executables) != "array" {

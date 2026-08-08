@@ -215,7 +215,7 @@ fn entry() {
                 if std::fs::metadata(path).is_file == 0 {
                     continue;
                 }
-                rhai::json::parse_file(path);
+                rh::json::parse_file(path);
             }
 
             let text_code = std::process::command_stdout_file(
@@ -372,7 +372,7 @@ fn entry() {
         phases: []
     };
     if json == 1 {
-        print(rhai::json::stringify_pretty(report));
+        print(rh::json::stringify_pretty(report));
     } else {
         print("PASS: repository lint (" + duration_ms + " ms)");
     }

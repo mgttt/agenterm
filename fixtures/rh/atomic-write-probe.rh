@@ -1,0 +1,12 @@
+// Probe rh::runtime::atomic_write on a caller-supplied path.
+fn entry() {
+    if args.len != 2 {
+        return rh::fail("expected: PATH CONTENT");
+    }
+
+    let path = args[0];
+    let content = args[1];
+    rh::runtime::atomic_write(path, content);
+    let meta = std::fs::metadata(path);
+    meta.len
+}

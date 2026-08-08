@@ -15,7 +15,7 @@ let workbench_declared_evidence = [
 ];
 
 fn json_null() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn trimmed(value) {
@@ -33,7 +33,7 @@ fn json_cli(context, cli, arguments) {
         []
     );
     let payload = "" + response.stdout;
-    rhai::json::parse(payload)
+    rh::json::parse(payload)
 }
 
 fn text_cli(context, cli, arguments) {
@@ -135,7 +135,7 @@ fn wait_tab_render(context, cli, target) {
                 }
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "workbench_tab_render_timeout:" + target;
     0
@@ -157,7 +157,7 @@ fn wait_tab_label_render(context, cli, target) {
                 }
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "workbench_tab_label_render_timeout:" + target;
     0
@@ -193,7 +193,7 @@ fn wait_for_server(context, cli, gui_child) {
             );
             throw "workbench_gui_early_exit:" + output.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "workbench_server_timeout";
     0
@@ -208,7 +208,7 @@ fn wait_for_window(gui_child) {
         if gui_child.state == "exited" {
             throw "workbench_window_early_exit";
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "workbench_window_timeout";
     0
@@ -243,10 +243,10 @@ fn wait_for_editor_draft(context, cli, target, name_len, note_len) {
             return snapshot;
         }
         last = snapshot;
-        rhai::task::sleep(std::time::Duration::from_millis(10));
+        rh::task::sleep(std::time::Duration::from_millis(10));
     }
     throw "workbench_editor_draft_timeout:" + target +
-        ":" + rhai::json::stringify(last);
+        ":" + rh::json::stringify(last);
 }
 
 fn click_bounds(gui_child, bounds) {
@@ -341,7 +341,7 @@ fn assert_editor_closed(snapshot, target, label) {
             && render_closed != 0
             && actions_closed != 0,
         "workbench_editor_should_be_closed:" + label +
-            ":" + rhai::json::stringify(tab)
+            ":" + rh::json::stringify(tab)
     );
 }
 
@@ -368,7 +368,7 @@ fn assert_editor_open(snapshot, target, label) {
             && tab_actions.save.bounds.width > 0
             && tab_actions.cancel.bounds.width > 0,
         "workbench_editor_should_be_open:" + label +
-            ":" + rhai::json::stringify(tab)
+            ":" + rh::json::stringify(tab)
     );
 }
 
@@ -394,7 +394,7 @@ fn assert_inside(outer, inner, label) {
             && inner.width >= 0
             && inner.height >= 0,
         "workbench_geometry_escape:" + label +
-            ":" + rhai::json::stringify(inner)
+            ":" + rh::json::stringify(inner)
     );
 }
 
@@ -407,7 +407,7 @@ fn retain_failure_snapshot(context, cli) {
         0,
         []
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         std::path::join(
             context.failure_directory,
             "ui-snapshot.txt"
@@ -638,7 +638,7 @@ fn entry() {
                 && root_tab_actions.edit == json_null()
                 && composer_after == composer_before,
             "workbench_save_contract:" +
-                rhai::json::stringify(root_tab)
+                rh::json::stringify(root_tab)
         );
 
         print("STEP mouse Cancel discards both independent drafts");
@@ -815,7 +815,7 @@ fn entry() {
                 proxy = proxy_surface;
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(50));
+            rh::task::sleep(std::time::Duration::from_millis(50));
         }
         test_harness::require(proxy != json_null(), "workbench_proxy_surface_unavailable");
         test_harness::require(
@@ -890,7 +890,7 @@ fn entry() {
                 scroll_snapshot = candidate;
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(25));
+            rh::task::sleep(std::time::Duration::from_millis(25));
         }
         test_harness::require(
             scroll_snapshot != json_null(),
@@ -937,7 +937,7 @@ fn entry() {
                 scrolled = candidate;
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(25));
+            rh::task::sleep(std::time::Duration::from_millis(25));
         }
         test_harness::require(
             scrolled != json_null(),
@@ -1022,7 +1022,7 @@ fn entry() {
                     && tab_render.node.x >= tab.bounds.left
                     && tab_render.name.left < tab_actions.new_child.bounds.left,
                 "workbench_tree_geometry:" + width +
-                    ":" + rhai::json::stringify(tab)
+                    ":" + rh::json::stringify(tab)
             );
         }
         test_harness::emit_evidence(

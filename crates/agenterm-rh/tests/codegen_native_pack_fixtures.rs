@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 14] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -79,7 +79,10 @@ const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
             "rh_clipboard_get_text()",
             "rh_clipboard_set_text(&String::from(\"native-clipboard-probe\"))",
         ],
-        &["rh_host_eval_int(\"rhai::clipboard::"],
+        &[
+            "rh_host_eval_int(\"rh::clipboard::",
+            "rh_host_eval_int(\"rhai::clipboard::",
+        ],
     ),
     (
         "rh_host_api_json_task.rh",
@@ -88,9 +91,26 @@ const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
             "std::thread::sleep(std::time::Duration::from_millis(",
         ],
         &[
+            "rh_host_eval_int(\"rh::json::",
             "rh_host_eval_int(\"rhai::json::",
+            "rh_host_eval_int(\"rh::task::",
             "rh_host_eval_int(\"rhai::task::",
         ],
+    ),
+    (
+        "rh_runtime_atomic_write.rh",
+        &["rh_atomic_write("],
+        &["rh_host_eval_int(\"rh::runtime::atomic_write"],
+    ),
+    (
+        "rh_crypto_sha256_file.rh",
+        &["rh_sha256_file("],
+        &["rh_host_eval_int(\"rh::crypto::sha256_file"],
+    ),
+    (
+        "rh_legacy_rhai_json_parse.rh",
+        &["rh_json_parse("],
+        &["rh_host_eval_int(\"rhai::json::"],
     ),
 ];
 
@@ -278,4 +298,61 @@ fn rh_host_api_json_task_emits_native_json_and_sleep() {
         output.rust
     );
     assert!(output.rust.contains("rh_json_parse("));
+}
+
+#[test]
+fn runtime_atomic_write_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[11].0, FIXTURES[11].1, FIXTURES[11].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[11].0))
+        .expect("transpile runtime atomic_write fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn crypto_sha256_file_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[12].0, FIXTURES[12].1, FIXTURES[12].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[12].0))
+        .expect("transpile crypto sha256_file fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn legacy_rhai_json_parse_stays_native_via_dual_alias() {
+    assert_native_or_host_eval(FIXTURES[13].0, FIXTURES[13].1, FIXTURES[13].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[13].0))
+        .expect("transpile legacy rhai::json::parse fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
 }

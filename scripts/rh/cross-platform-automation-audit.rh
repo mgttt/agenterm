@@ -236,7 +236,7 @@ fn entry() {
     );
 
     let manifest_path = std::path::join(repo, "agenterm.tasks.json").display;
-    let manifest = rhai::json::parse_file(manifest_path);
+    let manifest = rh::json::parse_file(manifest_path);
     let check_task_count = 0;
     for task in manifest.tasks {
         if task.id == "check" {
@@ -352,7 +352,7 @@ fn entry() {
     std::fs::try_remove_file(stdout_path);
 
     print(
-        rhai::json::stringify_pretty(#{
+        rh::json::stringify_pretty(#{
             schema_version: 1,
             checked_files: checked,
             alias_pairs: 5,

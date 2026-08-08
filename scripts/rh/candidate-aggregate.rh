@@ -206,7 +206,7 @@ fn verify_platform(
     let archive_path = std::path::join(asset_root, asset_name).display;
     require_file(archive_path, "candidate_archive_missing");
     let archive_hash =
-        "" + rhai::crypto::sha256_file(archive_path);
+        "" + rh::crypto::sha256_file(archive_path);
     let archive_size =
         file_size(archive_path, "candidate_archive_missing");
     require(
@@ -221,7 +221,7 @@ fn verify_platform(
         std::path::join(asset_root, provenance_name).display;
     require_file(checksum_path, "candidate_checksum_missing");
     let checksum_hash =
-        "" + rhai::crypto::sha256_file(checksum_path);
+        "" + rh::crypto::sha256_file(checksum_path);
     let checksum_size =
         file_size(checksum_path, "candidate_checksum_missing");
     require(
@@ -233,7 +233,7 @@ fn verify_platform(
     verify_checksum(checksum_path, archive_hash, asset_name);
     require_file(provenance_path, "candidate_provenance_missing");
     let provenance_hash =
-        "" + rhai::crypto::sha256_file(provenance_path);
+        "" + rh::crypto::sha256_file(provenance_path);
     let provenance_file_size =
         file_size(provenance_path, "candidate_provenance_missing");
     require(
@@ -255,7 +255,7 @@ fn verify_platform(
         artifact_hash_text,
         sbom_hash_text
     );
-    let provenance = rhai::json::parse_file(provenance_path);
+    let provenance = rh::json::parse_file(provenance_path);
     let provenance_channel = "" + provenance.channel;
     require(
         asset_channel == provenance_channel
@@ -289,8 +289,8 @@ fn validate_receipt(
     let artifact_hash_text = "" + artifact_hash;
     let gate_hash_text = "" + gate_hash;
     let sbom_hash_text = "" + sbom_hash;
-    let receipt = rhai::json::parse_file(receipt_path);
-    let gate_spec = rhai::json::parse_file(gate_path);
+    let receipt = rh::json::parse_file(receipt_path);
+    let gate_spec = rh::json::parse_file(gate_path);
     require(
         receipt.schema_version == 1
             && receipt.product == "AgenTerm"
@@ -397,7 +397,7 @@ fn validate_provenance(
     let artifact_hash_text = "" + artifact_hash;
     let sbom_hash_text = "" + sbom_hash;
     let hash_text = "" + hash;
-    let provenance = rhai::json::parse_file(provenance_path);
+    let provenance = rh::json::parse_file(provenance_path);
     require(
         provenance.schema_version == 1
             && provenance.product == "AgenTerm"
@@ -456,7 +456,7 @@ fn validate_provenance(
 fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, now_ms) {
     let manifest_path =
         std::path::absolute(manifest_path_value).display;
-    let manifest = rhai::json::parse_file(manifest_path);
+    let manifest = rh::json::parse_file(manifest_path);
     let source_root = std::path::absolute(source_root_value).display;
     let asset_root = std::path::absolute(asset_root_value).display;
     let source_sha = "" + manifest.source_sha;
@@ -506,7 +506,7 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
         std::path::join(source_root, workflow_path_rel).display;
     require_file(workflow_path, "candidate_workflow_missing");
     let workflow_hash =
-        "" + rhai::crypto::sha256_file(workflow_path);
+        "" + rh::crypto::sha256_file(workflow_path);
     require(
         workflow_hash == workflow_sha256,
         "candidate_workflow_hash"
@@ -521,13 +521,13 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
         ).display;
     require_file(cargo_path, "candidate_cargo_lock_missing");
     let cargo_hash =
-        "" + rhai::crypto::sha256_file(cargo_path);
+        "" + rh::crypto::sha256_file(cargo_path);
     require_file(artifact_path, "candidate_artifact_manifest_missing");
     let artifact_hash =
-        "" + rhai::crypto::sha256_file(artifact_path);
+        "" + rh::crypto::sha256_file(artifact_path);
     require_file(gate_path, "candidate_gate_manifest_missing");
     let gate_hash =
-        "" + rhai::crypto::sha256_file(gate_path);
+        "" + rh::crypto::sha256_file(gate_path);
     require(
         inputs_cargo == cargo_hash
             && inputs_artifact == artifact_hash
@@ -544,7 +544,7 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
     require_asset_name(sbom_name);
     let sbom_path = std::path::join(asset_root, sbom_name).display;
     require_file(sbom_path, "candidate_sbom_missing");
-    let sbom_hash = "" + rhai::crypto::sha256_file(sbom_path);
+    let sbom_hash = "" + rh::crypto::sha256_file(sbom_path);
     let sbom_size = file_size(sbom_path, "candidate_sbom_missing");
     require(
         sbom_manifest_sha256 == sbom_hash
@@ -561,7 +561,7 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
     let receipt_path = std::path::join(asset_root, receipt_name).display;
     require_file(receipt_path, "candidate_receipt_missing");
     let receipt_hash =
-        "" + rhai::crypto::sha256_file(receipt_path);
+        "" + rh::crypto::sha256_file(receipt_path);
     let receipt_size =
         file_size(receipt_path, "candidate_receipt_missing");
     require(
@@ -654,7 +654,7 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
         require_asset_name(readme_name);
         let path = std::path::join(asset_root, readme_name).display;
         require_file(path, "candidate_preview_readme_missing");
-        let hash = "" + rhai::crypto::sha256_file(path);
+        let hash = "" + rh::crypto::sha256_file(path);
         let readme_sha256 = "";
         let readme_size = 0;
         let entry_found = 0;
@@ -682,7 +682,7 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
         require_asset_name(readme_name_zh);
         let path_zh = std::path::join(asset_root, readme_name_zh).display;
         require_file(path_zh, "candidate_preview_readme_missing");
-        let hash_zh = "" + rhai::crypto::sha256_file(path_zh);
+        let hash_zh = "" + rh::crypto::sha256_file(path_zh);
         let readme_sha256_zh = "";
         let readme_size_zh = 0;
         let entry_found_zh = 0;
@@ -747,7 +747,7 @@ fn build_manifest(
     let metadata_path = std::path::absolute(metadata_path_value).display;
     let asset_root = std::path::absolute(asset_root_value).display;
     let output_path = std::path::absolute(output_path_value).display;
-    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata = rh::json::parse_file(metadata_path);
     let metadata_source_sha = "" + metadata.source_sha;
     let metadata_version = "" + metadata.version;
     let metadata_expected_tag = "" + metadata.expected_tag;
@@ -765,7 +765,7 @@ fn build_manifest(
         std::path::join(source_root, metadata_workflow_path).display;
     require_file(workflow_path, "candidate_workflow_missing");
     let workflow_hash =
-        "" + rhai::crypto::sha256_file(workflow_path);
+        "" + rh::crypto::sha256_file(workflow_path);
     require(
         valid_sha256(metadata_workflow_sha256)
             && metadata_workflow_sha256 == workflow_hash,
@@ -788,12 +788,12 @@ fn build_manifest(
     let receipt_path = std::path::join(asset_root, receipt_name).display;
     require_file(cargo_path, "candidate_cargo_lock_missing");
     let cargo_hash =
-        "" + rhai::crypto::sha256_file(cargo_path);
+        "" + rh::crypto::sha256_file(cargo_path);
     require_file(artifact_path, "candidate_artifact_manifest_missing");
     let artifact_hash =
-        "" + rhai::crypto::sha256_file(artifact_path);
+        "" + rh::crypto::sha256_file(artifact_path);
     require_file(sbom_path, "candidate_sbom_missing");
-    let sbom_hash = "" + rhai::crypto::sha256_file(sbom_path);
+    let sbom_hash = "" + rh::crypto::sha256_file(sbom_path);
 
     let assets = [];
     let mac_channel = "";
@@ -872,7 +872,7 @@ fn build_manifest(
         let archive_path = std::path::join(asset_root, name).display;
         require_file(archive_path, "candidate_archive_missing");
         let archive_hash =
-            "" + rhai::crypto::sha256_file(archive_path);
+            "" + rh::crypto::sha256_file(archive_path);
         let checksum_name = name + ".sha256";
         let provenance_name = name + ".provenance.json";
         require_asset_name(checksum_name);
@@ -883,10 +883,10 @@ fn build_manifest(
             std::path::join(asset_root, provenance_name).display;
         require_file(checksum_path, "candidate_checksum_missing");
         let checksum_hash =
-            "" + rhai::crypto::sha256_file(checksum_path);
+            "" + rh::crypto::sha256_file(checksum_path);
         require_file(provenance_path, "candidate_provenance_missing");
         let provenance_hash =
-            "" + rhai::crypto::sha256_file(provenance_path);
+            "" + rh::crypto::sha256_file(provenance_path);
         verify_checksum(checksum_path, archive_hash, name);
         validate_provenance(
             provenance_path,
@@ -901,7 +901,7 @@ fn build_manifest(
             artifact_hash,
             sbom_hash
         );
-        let provenance = rhai::json::parse_file(provenance_path);
+        let provenance = rh::json::parse_file(provenance_path);
         let channel_text = "" + provenance.channel;
         let provenance_signed = provenance.signed;
         let provenance_notarized = provenance.notarized;
@@ -953,7 +953,7 @@ fn build_manifest(
         let readme_size =
             file_size(readme_path, "candidate_preview_readme_missing");
         let readme_hash =
-            "" + rhai::crypto::sha256_file(readme_path);
+            "" + rh::crypto::sha256_file(readme_path);
         readme_entries.push(#{
             name: readme_name,
             size: readme_size,
@@ -967,7 +967,7 @@ fn build_manifest(
         let readme_size_zh =
             file_size(readme_path_zh, "candidate_preview_readme_missing");
         let readme_hash_zh =
-            "" + rhai::crypto::sha256_file(readme_path_zh);
+            "" + rh::crypto::sha256_file(readme_path_zh);
         readme_entries.push(#{
             name: readme_name_zh,
             size: readme_size_zh,
@@ -976,12 +976,12 @@ fn build_manifest(
     }
 
     require_file(gate_path, "candidate_gate_manifest_missing");
-    let gate_hash = "" + rhai::crypto::sha256_file(gate_path);
+    let gate_hash = "" + rh::crypto::sha256_file(gate_path);
     require_file(receipt_path, "candidate_receipt_missing");
     let receipt_size =
         file_size(receipt_path, "candidate_receipt_missing");
     let receipt_hash =
-        "" + rhai::crypto::sha256_file(receipt_path);
+        "" + rh::crypto::sha256_file(receipt_path);
     let sbom_size = file_size(sbom_path, "candidate_sbom_missing");
 
     let manifest = #{
@@ -1031,9 +1031,9 @@ fn build_manifest(
         output_parent = output_dir;
     }
     std::fs::create_dir_all(output_parent);
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         staging_manifest,
-        rhai::json::stringify_pretty(manifest) + "\n"
+        rh::json::stringify_pretty(manifest) + "\n"
     );
     validate_manifest(
         source_root,
@@ -1041,9 +1041,9 @@ fn build_manifest(
         asset_root,
         std::time::SystemTime::now().unix_millis
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output_path,
-        rhai::json::stringify_pretty(manifest) + "\n"
+        rh::json::stringify_pretty(manifest) + "\n"
     );
     print(
         "CANDIDATE " + metadata_source_sha + " " + metadata_expected_tag +

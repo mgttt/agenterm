@@ -12,9 +12,10 @@ Live `.rh` scripts and AOT packs stop branding host APIs as `rhai::`.
 
 | Metric | Count |
 |--------|------:|
-| `rhai::` call sites | ~647 / 65 files |
-| Distinct `module::fn` | 19 |
-| Top modules | json 290, task 122, crypto 121, runtime 82 |
+| `rhai::` call sites (live `scripts/rh`) | **0** after Wave 3 |
+| Pre-Wave-3 baseline | ~648 / 65 files |
+| Distinct `module::fn` (pre-rename) | 19 |
+| Top modules (pre-rename) | json 290, task 122, crypto 121, runtime 82 |
 
 Top surfaces: `json::parse`, `crypto::sha256_file`, `task::sleep`, `runtime::atomic_write`, `json::parse_file`.
 
@@ -35,7 +36,7 @@ Top surfaces: `json::parse`, `crypto::sha256_file`, `task::sleep`, `runtime::ato
 
 1. **Wave 1 — dual alias window:** ✅ shipped at codegen **rev80** — Engine registers `rh` + legacy `rhai`; `host_api_module` / AOT matchers accept both; catalog publishes `rh.*` aliases (`rhai.*` marked Legacy); fixture `rh_host_api_json_task.rh`.
 2. **Wave 2 — native emit gaps:** close remaining `rh_host_eval_int("rhai::…")` / `"rh::…"` for json/task/crypto/runtime long tail (clipboard already native at rev79).
-3. **Wave 3 — script mass-rename:** mechanical `rhai::` → `rh::` in `scripts/rh/**`, fixtures, embedded eval strings; lint + smoke.
+3. **Wave 3 — script mass-rename:** ✅ live `scripts/rh/**` has **0** `rhai::` call sites; fixtures mostly `rh::` with intentional dual-alias legacy fixture retained.
 4. **Wave 4 — Phase C archive:** drop `rhai` Engine module, eval/run-script Rhai paths, then `agenterm-rhai` PE; scrub residual branding.
 
 **Non-goal:** inventing permission/sandbox policy under Script Runtime.
@@ -44,5 +45,5 @@ Top surfaces: `json::parse`, `crypto::sha256_file`, `task::sleep`, `runtime::ato
 
 - Wave 1: ✅ `cargo test -p agenterm-rh` + `script_catalog` + `rh_task_entry_regression` HE ceilings (script-smoke ≤30, remote-ui ≤12); `rh::`/`rhai::` fixtures Native he=1.
 - Wave 2: golden transpile asserts no `rh_host_eval_int` for corpus host surfaces that already have native emit.
-- Wave 3: `agenterm-rh check-many` + owning smokes HostEval/Native unchanged.
+- Wave 3: ✅ live `scripts/rh` `rhai::`=0; `cargo test -p agenterm-rh` + HE ceilings still green (script-smoke he≤25, remote-ui he≤9).
 - Wave 4: zero live `rhai::` / `agenterm-rhai` operator paths outside archive + intentional historical docs.

@@ -3,8 +3,10 @@
   "kind": "agenterm-rh-check-manifest",
   "files": [
     "fixtures/rh/append-sync-probe.rh",
+    "fixtures/rh/atomic-write-probe.rh",
     "fixtures/rh/break-continue.rh",
     "fixtures/rh/child-lifecycle-probe.rh",
+    "fixtures/rh/crypto-sha256-file-probe.rh",
     "fixtures/rh/direntry-metadata-probe.rh",
     "fixtures/rh/entry.rh",
     "fixtures/rh/fail-dynamic.rh",

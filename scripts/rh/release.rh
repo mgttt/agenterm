@@ -281,14 +281,14 @@ fn entry() {
     if mode == "validate" {
         print(
             "VALID RELEASE PLAN " +
-                rhai::json::stringify(#{
+                rh::json::stringify(#{
                     version: version,
                     tag: tag,
                     source_commit: head,
                     candidate_workflow_sha256:
-                        rhai::crypto::sha256_file(candidate_path),
+                        rh::crypto::sha256_file(candidate_path),
                     promotion_workflow_sha256:
-                        rhai::crypto::sha256_file(promotion_path),
+                        rh::crypto::sha256_file(promotion_path),
                     mutation: false
                 })
         );
@@ -353,7 +353,7 @@ fn entry() {
         std::path::join(package_directory, "package-manifest.json").display;
     let package_result =
         std::path::join(package_directory, "release-result.json").display;
-    let result = rhai::json::parse_file(package_result);
+    let result = rh::json::parse_file(package_result);
     let report = #{
         schema_version: 1,
         mode: mode,
@@ -361,15 +361,15 @@ fn entry() {
         tag: tag,
         source_commit: head,
         candidate_workflow_sha256:
-            rhai::crypto::sha256_file(candidate_path),
+            rh::crypto::sha256_file(candidate_path),
         promotion_workflow_sha256:
-            rhai::crypto::sha256_file(promotion_path),
+            rh::crypto::sha256_file(promotion_path),
         qualification_receipt: receipt_path,
         qualification_receipt_sha256:
-            rhai::crypto::sha256_file(receipt_path),
+            rh::crypto::sha256_file(receipt_path),
         package_directory: package_directory,
         package_manifest_sha256:
-            rhai::crypto::sha256_file(package_manifest),
+            rh::crypto::sha256_file(package_manifest),
         archive: result.archive,
         archive_sha256: result.archive_sha256,
         ready_to_publish: true
@@ -379,9 +379,9 @@ fn entry() {
             repo,
             "target/qualification/release-rehearsal.json"
         ).display;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         report_path,
-        rhai::json::stringify_pretty(report) + "\n"
+        rh::json::stringify_pretty(report) + "\n"
     );
     print("RELEASE REHEARSAL " + report_path);
 

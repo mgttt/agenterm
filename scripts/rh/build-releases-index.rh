@@ -33,7 +33,7 @@ fn entry() {
         "releases_index_assets_missing"
     );
 
-    let manifest = rhai::json::parse_file(manifest_path);
+    let manifest = rh::json::parse_file(manifest_path);
     require(
         manifest.schema_version == 1
             && manifest.product == "AgenTerm"
@@ -93,12 +93,12 @@ fn entry() {
                 && std::fs::metadata(provenance_path).is_file,
             "releases_index_provenance_missing:" + provenance_name
         );
-        let provenance_hash = rhai::crypto::sha256_file(provenance_path);
+        let provenance_hash = rh::crypto::sha256_file(provenance_path);
         require(
             provenance_hash == asset_prov_sha,
             "releases_index_provenance_hash:" + provenance_name
         );
-        let provenance = rhai::json::parse_file(provenance_path);
+        let provenance = rh::json::parse_file(provenance_path);
         // Force string compares: bare JSON==JSON emits integer paths.
         let provenance_version = "" + provenance.version;
         let manifest_version = "" + manifest.version;
@@ -196,7 +196,7 @@ fn entry() {
     let releases = [];
     releases.push(release_entry);
 
-    let manifest_sha256 = rhai::crypto::sha256_file(manifest_path);
+    let manifest_sha256 = rh::crypto::sha256_file(manifest_path);
     let source_block = #{
         kind: "agenterm-release-candidate",
         source_sha: manifest.source_sha,
@@ -229,7 +229,7 @@ fn entry() {
             },
             releases: releases
         };
-        index_text = rhai::json::stringify_pretty(index) + "\n";
+        index_text = rh::json::stringify_pretty(index) + "\n";
     }
     if channel_layout == 1 {
         let index = #{
@@ -240,7 +240,7 @@ fn entry() {
             channels: #{ stable: channel_ptr },
             releases: releases
         };
-        index_text = rhai::json::stringify_pretty(index) + "\n";
+        index_text = rh::json::stringify_pretty(index) + "\n";
     }
     if channel_layout == 2 {
         let index = #{
@@ -251,10 +251,10 @@ fn entry() {
             channels: #{ preview: channel_ptr },
             releases: releases
         };
-        index_text = rhai::json::stringify_pretty(index) + "\n";
+        index_text = rh::json::stringify_pretty(index) + "\n";
     }
 
-    rhai::runtime::atomic_write(output_path, index_text);
+    rh::runtime::atomic_write(output_path, index_text);
 
     let expected_tag = "" + manifest.expected_tag;
     print(

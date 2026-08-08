@@ -63,7 +63,7 @@ fn command_json(context, cli, arguments, expected_failure) {
     let output = invoke(context, cli, arguments, expected_failure);
     let text = "" + output.stdout + output.stderr;
     text.trim();
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn count_tab_events(events, tab_id, kind) {
@@ -98,7 +98,7 @@ fn wait_for_server(context, cli, server) {
             );
             throw "server_smoke_early_exit:" + output.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "server_smoke_ready_timeout";
     0
@@ -111,7 +111,7 @@ fn wait_for_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw code;
     // Unreachable: keep return kind Output (bare throw infers String).

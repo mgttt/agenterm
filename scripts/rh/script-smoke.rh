@@ -25,7 +25,7 @@ fn script_smoke_empty_env() {
 }
 
 fn script_smoke_env_remove_value() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn nested_pid_from_path(pid_path) {
@@ -36,7 +36,7 @@ fn nested_pid_from_path(pid_path) {
 
 fn script_smoke_parse_json(json_text) {
     let payload = "" + json_text;
-    rhai::json::parse(payload)
+    rh::json::parse(payload)
 }
 
 fn script_smoke_parse_int(text_value) {
@@ -75,7 +75,7 @@ fn append_arguments(target, arguments) {
 }
 
 fn script_smoke_write(path, content) {
-    rhai::runtime::atomic_write(path, content);
+    rh::runtime::atomic_write(path, content);
 }
 
 fn script_smoke_copy(from, to) {
@@ -259,13 +259,13 @@ fn script_smoke_append_command_record(
             512
         )
     };
-    rhai::runtime::append_sync(
+    rh::runtime::append_sync(
         context.command_journal_path,
-        rhai::json::stringify(record) + "\n"
+        rh::json::stringify(record) + "\n"
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.command_log_path,
-        rhai::json::stringify_pretty([record]) + "\n"
+        rh::json::stringify_pretty([record]) + "\n"
     );
     0
 }
@@ -371,7 +371,7 @@ fn cli_json(context, cli, arguments, audit_path) {
         script_smoke_empty_env(),
         []
     );
-    rhai::json::parse(result.stdout)
+    rh::json::parse(result.stdout)
 }
 
 fn direct_text(context, script, arguments, audit_path) {
@@ -399,7 +399,7 @@ fn direct_json(context, script, arguments, audit_path) {
         script_smoke_empty_env(),
         []
     );
-    rhai::json::parse(result.stdout)
+    rh::json::parse(result.stdout)
 }
 
 fn failure_text(
@@ -456,7 +456,7 @@ fn wait_new_process(executable_name, existing, timeout_ms) {
                 return pid;
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     throw "script_smoke_new_process_timeout:" + executable_name;
 }
@@ -467,7 +467,7 @@ fn wait_process_gone(pid, timeout_ms) {
         if process_exists(pid) == 0 {
             return;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(10));
+        rh::task::sleep(std::time::Duration::from_millis(10));
     }
     throw "script_smoke_process_remained:" + pid;
 }
@@ -528,19 +528,19 @@ fn wait_http_ready(child, ready_path, timeout_ms) {
     let attempts = timeout_ms / 5;
     for attempt in 0..attempts {
         if std::fs::exists(ready_path) {
-            return rhai::json::parse_file(ready_path);
+            return rh::json::parse_file(ready_path);
         }
         require(
             ("" + child.state) != "exited",
             "script_smoke_http_fixture_early_exit"
         );
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     throw "script_smoke_http_fixture_ready_timeout";
 }
 
 fn u32_header(length) {
-    rhai::bytes::from_array([
+    rh::bytes::from_array([
         (length / 16777216) % 256,
         (length / 65536) % 256,
         (length / 256) % 256,
@@ -555,9 +555,9 @@ fn payload_frame(payload) {
 }
 
 fn json_frame(frame) {
-    let encoded = rhai::json::stringify(frame);
+    let encoded = rh::json::stringify(frame);
     let encoded_text = "" + encoded;
-    let encoded_bytes = rhai::bytes::from_text(encoded_text);
+    let encoded_bytes = rh::bytes::from_text(encoded_text);
     payload_frame(encoded_bytes)
 }
 
@@ -619,7 +619,7 @@ fn wait_snapshot_sidebar(context, cli, audit_path, expected_code) {
         } else if code == expected_code {
             return code;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "script_fleet_sidebar_wait_timeout";
 }
@@ -689,7 +689,7 @@ fn invoke_framed_worker(
             "script_smoke_invalid_frame_payload:" + length
         );
         frames.push(
-            rhai::json::parse(bytes.slice(offset, length).to_text())
+            rh::json::parse(bytes.slice(offset, length).to_text())
         );
         offset += length;
     }
@@ -948,7 +948,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     ).display;
     script_smoke_write(
         catalog_path,
-        rhai::json::stringify_pretty(catalog)
+        rh::json::stringify_pretty(catalog)
     );
     let spec = std::path::join(
         context.owned_root,
@@ -1168,7 +1168,7 @@ fn assert_tasks_and_http(
     let task_result = script_eval_parse(
         context,
         cli,
-        "\nlet slow=rhai::task::after(std::time::Duration::from_millis(100));\nlet fast=rhai::task::after(std::time::Duration::from_millis(1));\nlet winner=rhai::task::race([slow,fast],std::time::Duration::from_secs(1));\nfast.wait(); let changed=slow.cancel();\n#{\n winner:winner,fast_state:fast.state,fast_done:fast.done,\n slow_state:slow.state,slow_cancelled:slow.cancelled,\n cancel_changed_state:changed\n}",
+        "\nlet slow=rh::task::after(std::time::Duration::from_millis(100));\nlet fast=rh::task::after(std::time::Duration::from_millis(1));\nlet winner=rh::task::race([slow,fast],std::time::Duration::from_secs(1));\nfast.wait(); let changed=slow.cancel();\n#{\n winner:winner,fast_state:fast.state,fast_done:fast.done,\n slow_state:slow.state,slow_cancelled:slow.cancelled,\n cancel_changed_state:changed\n}",
         audit_path
     );
     test_harness::require(
@@ -1185,7 +1185,7 @@ fn assert_tasks_and_http(
         cli,
         [
             "script", "eval",
-            "let task=rhai::task::after(std::time::Duration::from_secs(1));\n             try { task.wait(std::time::Duration::from_millis(1)); }\n             catch(error) { print(error); } task.cancel();",
+            "let task=rh::task::after(std::time::Duration::from_secs(1));\n             try { task.wait(std::time::Duration::from_millis(1)); }\n             catch(error) { print(error); } task.cancel();",
             "--profile", "local", "--timeout-ms", "10000"
         ],
         audit_path
@@ -1231,7 +1231,7 @@ fn assert_tasks_and_http(
         ).display;
         script_smoke_write(
             http_file,
-            "\nlet base=args[0]; let tls_base=args[1];\nlet options=#{proxy:0,timeout:std::time::Duration::from_secs(1)};\nlet protocol_options=#{\n proxy:0,timeout:std::time::Duration::from_millis(500)\n};\nlet status=rhai::http::request(\"GET\",base+\"/status\",options);\nlet values=status.header(\"x-test\"); let body=status.body;\nlet status_text=body.collect(16).to_text();\nlet echo=rhai::http::request(\"POST\",base+\"/echo\",#{\n proxy:0,timeout:std::time::Duration::from_secs(2),\n headers:#{\"content-type\":\"application/octet-stream\"},\n body:rhai::bytes::from_text(\"payload\")\n});\nlet echo_text=echo.body.collect(16).to_text();\nlet large=rhai::http::request(\"GET\",base+\"/large\",#{\n proxy:0,timeout:std::time::Duration::from_secs(2),max_body_bytes:4\n});\nlet large_body=large.body; let large_text=large_body.collect(16).to_text();\nlet async_task=rhai::http::start(\"GET\",base+\"/async\",options);\nlet async_kind=async_task.kind;\nlet async_response=async_task.wait(std::time::Duration::from_secs(2));\nlet async_text=async_response.body.collect(16).to_text();\nlet cancel_task=rhai::http::start(\"GET\",base+\"/cancel\",options);\nrhai::task::sleep(std::time::Duration::from_millis(50));\nlet cancel_changed=cancel_task.cancel(); let cancel_error=\"\";\ntry { cancel_task.wait(std::time::Duration::from_secs(1)); }\ncatch(error) { cancel_error=error; }\nrhai::task::sleep(std::time::Duration::from_millis(600));\nlet timeout_error=\"\";\ntry { rhai::http::request(\"GET\",base+\"/slow\",#{\n proxy:0,timeout:std::time::Duration::from_millis(50)\n}); } catch(error) { timeout_error=error; }\nlet malformed_error=\"\";\ntry { rhai::http::request(\"GET\",base+\"/malformed\",protocol_options); }\ncatch(error) { malformed_error=error; }\nlet disconnect_error=\"\";\ntry { rhai::http::request(\"GET\",base+\"/disconnect\",protocol_options); }\ncatch(error) { disconnect_error=error; }\nlet tls_error=\"\";\ntry { rhai::http::request(\"GET\",tls_base+\"/tls\",#{\n proxy:0,timeout:std::time::Duration::from_millis(250)\n}); } catch(error) { tls_error=error; }\nlet proxy_error=\"\";\ntry {\n rhai::http::request(\n  \"GET\",\"http://HTTP_CREDENTIAL_SECRET.invalid/PRIVATE_PATH_SECRET\",\n  #{proxy:\"http://user:PROXY_CREDENTIAL_SECRET@127.0.0.1:1\",\n    timeout:std::time::Duration::from_millis(50)}\n );\n} catch(error) { proxy_error=error; }\n#{\n status:status.status,version:status.version,\n first_header:values[0].to_text(),second_header:values[1].to_text(),\n status_text:status_text,status_kind:body.kind,status_complete:body.complete,\n echo_text:echo_text,large_text:large_text,\n large_truncated:large_body.truncated,large_complete:large_body.complete,\n async_kind:async_kind,async_text:async_text,async_state:async_task.state,\n cancel_changed:cancel_changed,cancel_error:cancel_error,\n cancel_state:cancel_task.state,timeout_error:timeout_error,\n malformed_error:malformed_error,disconnect_error:disconnect_error,\n tls_error:tls_error,proxy_error:proxy_error\n}"
+            "\nlet base=args[0]; let tls_base=args[1];\nlet options=#{proxy:0,timeout:std::time::Duration::from_secs(1)};\nlet protocol_options=#{\n proxy:0,timeout:std::time::Duration::from_millis(500)\n};\nlet status=rh::http::request(\"GET\",base+\"/status\",options);\nlet values=status.header(\"x-test\"); let body=status.body;\nlet status_text=body.collect(16).to_text();\nlet echo=rh::http::request(\"POST\",base+\"/echo\",#{\n proxy:0,timeout:std::time::Duration::from_secs(2),\n headers:#{\"content-type\":\"application/octet-stream\"},\n body:rh::bytes::from_text(\"payload\")\n});\nlet echo_text=echo.body.collect(16).to_text();\nlet large=rh::http::request(\"GET\",base+\"/large\",#{\n proxy:0,timeout:std::time::Duration::from_secs(2),max_body_bytes:4\n});\nlet large_body=large.body; let large_text=large_body.collect(16).to_text();\nlet async_task=rh::http::start(\"GET\",base+\"/async\",options);\nlet async_kind=async_task.kind;\nlet async_response=async_task.wait(std::time::Duration::from_secs(2));\nlet async_text=async_response.body.collect(16).to_text();\nlet cancel_task=rh::http::start(\"GET\",base+\"/cancel\",options);\nrh::task::sleep(std::time::Duration::from_millis(50));\nlet cancel_changed=cancel_task.cancel(); let cancel_error=\"\";\ntry { cancel_task.wait(std::time::Duration::from_secs(1)); }\ncatch(error) { cancel_error=error; }\nrh::task::sleep(std::time::Duration::from_millis(600));\nlet timeout_error=\"\";\ntry { rh::http::request(\"GET\",base+\"/slow\",#{\n proxy:0,timeout:std::time::Duration::from_millis(50)\n}); } catch(error) { timeout_error=error; }\nlet malformed_error=\"\";\ntry { rh::http::request(\"GET\",base+\"/malformed\",protocol_options); }\ncatch(error) { malformed_error=error; }\nlet disconnect_error=\"\";\ntry { rh::http::request(\"GET\",base+\"/disconnect\",protocol_options); }\ncatch(error) { disconnect_error=error; }\nlet tls_error=\"\";\ntry { rh::http::request(\"GET\",tls_base+\"/tls\",#{\n proxy:0,timeout:std::time::Duration::from_millis(250)\n}); } catch(error) { tls_error=error; }\nlet proxy_error=\"\";\ntry {\n rh::http::request(\n  \"GET\",\"http://HTTP_CREDENTIAL_SECRET.invalid/PRIVATE_PATH_SECRET\",\n  #{proxy:\"http://user:PROXY_CREDENTIAL_SECRET@127.0.0.1:1\",\n    timeout:std::time::Duration::from_millis(50)}\n );\n} catch(error) { proxy_error=error; }\n#{\n status:status.status,version:status.version,\n first_header:values[0].to_text(),second_header:values[1].to_text(),\n status_text:status_text,status_kind:body.kind,status_complete:body.complete,\n echo_text:echo_text,large_text:large_text,\n large_truncated:large_body.truncated,large_complete:large_body.complete,\n async_kind:async_kind,async_text:async_text,async_state:async_task.state,\n cancel_changed:cancel_changed,cancel_error:cancel_error,\n cancel_state:cancel_task.state,timeout_error:timeout_error,\n malformed_error:malformed_error,disconnect_error:disconnect_error,\n tls_error:tls_error,proxy_error:proxy_error\n}"
         );
         let http_run_text = cli_text(
             context,
@@ -1277,7 +1277,7 @@ fn assert_tasks_and_http(
                 && proxy_has_http != 0,
             "script_http_result_mismatch"
         );
-        let safe_result = rhai::json::stringify(result);
+        let safe_result = rh::json::stringify(result);
         script_smoke_require_no_secrets(
             safe_result,
             [
@@ -1305,7 +1305,7 @@ fn assert_tasks_and_http(
         let requests = [];
         for line in std::fs::read_to_string(log_path).split("\n") {
             if trimmed(line) != "" {
-                requests.push(rhai::json::parse(line));
+                requests.push(rh::json::parse(line));
             }
         }
         let echo_count = 0;
@@ -1491,7 +1491,7 @@ fn assert_tasks_and_http(
         #{"AGENTERM_TASK_FIXTURE":"fixture-ok"},
         []
     );
-    let named = rhai::json::parse(named_output.stdout);
+    let named = rh::json::parse(named_output.stdout);
     test_harness::require(
         named.ok
             && named.value.answer == 42
@@ -1615,7 +1615,7 @@ fn assert_runtime_and_framing(
         ],
         audit_path
     );
-    let target = rhai::json::parse(target_envelope.stdout);
+    let target = rh::json::parse(target_envelope.stdout);
     let root_profile = matching(target.profiles, "name", "(root)");
     let debug_profile = matching(target.profiles, "name", "debug");
     let root_profile0 = root_profile[0];
@@ -1696,7 +1696,7 @@ fn assert_runtime_and_framing(
             cli,
             "std::fs::write(\"" + data_file + "\", " +
                 data_text_literal + "); " +
-                "rhai::json::parse(std::fs::read_to_string(\"" +
+                "rh::json::parse(std::fs::read_to_string(\"" +
                 data_file + "\")).answer",
             audit_path
         ) == "42",
@@ -1762,7 +1762,7 @@ fn assert_runtime_and_framing(
     let temp_root = script_eval(
         context,
         cli,
-        "rhai::runtime::temp_dir().display",
+        "rh::runtime::temp_dir().display",
         audit_path
     );
     test_harness::require(
@@ -1777,7 +1777,7 @@ fn assert_runtime_and_framing(
     script_eval(
         context,
         cli,
-        "rhai::runtime::atomic_write(" +
+        "rh::runtime::atomic_write(" +
             "\"" + atomic_path + "\"" + ", " +
             "\"" + "{\"state\":\"新\"}" + ")",
         audit_path
@@ -1806,7 +1806,7 @@ fn assert_runtime_and_framing(
     let arbitrary_bytes = script_eval_json(
             context,
             cli,
-            "let b=rhai::bytes::from_array([0,65,255]);\n             #{len:b.len,first:b.get(0),last:b.get(2)}",
+            "let b=rh::bytes::from_array([0,65,255]);\n             #{len:b.len,first:b.get(0),last:b.get(2)}",
             audit_path
         );
     test_harness::require(
@@ -1969,12 +1969,12 @@ fn assert_runtime_and_framing(
     );
 
     print("STEP framed worker sequencing, isolation, rejection, and recovery");
-    let framed = rhai::bytes::from_array([]);
-    framed.append(payload_frame(rhai::bytes::from_text("{")));
+    let framed = rh::bytes::from_array([]);
+    framed.append(payload_frame(rh::bytes::from_text("{")));
     let oversized_payload = script_smoke_pad("", 2097153, "x");
     framed.append(
         payload_frame(
-            rhai::bytes::from_text(oversized_payload)
+            rh::bytes::from_text(oversized_payload)
         )
     );
     framed.append(
@@ -2174,7 +2174,7 @@ fn assert_supervisor(
             child_is_running(interrupted),
             "script_supervisor_parent_fixture_early_exit"
         );
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     test_harness::require(nested_pid > 0, "script_supervisor_nested_pid_missing");
     interrupted.kill();
@@ -2199,7 +2199,7 @@ fn assert_supervisor(
             ],
             audit_path
         );
-        rhai::task::sleep(std::time::Duration::from_millis(100));
+        rh::task::sleep(std::time::Duration::from_millis(100));
         if child_is_running(holder) {
             holders.push(holder);
         } else {
@@ -2239,7 +2239,7 @@ fn assert_supervisor(
         ],
         audit_path
     );
-    rhai::task::sleep(std::time::Duration::from_millis(150));
+    rh::task::sleep(std::time::Duration::from_millis(150));
     test_harness::require(
         child_is_running(replacement),
         "script_supervisor_slot_not_recovered"
@@ -2271,7 +2271,7 @@ fn wait_script_gui(context, cli, gui_child) {
         );
         let probe = probe_command.output();
         if probe.success && gui_facts.top_level_window_present {
-            let snapshot = rhai::json::parse(probe.stdout_text());
+            let snapshot = rh::json::parse(probe.stdout_text());
             test_harness::require(
                 snapshot.client_pid == gui_pid,
                 "script_fleet_gui_lease_owner"
@@ -2282,7 +2282,7 @@ fn wait_script_gui(context, cli, gui_child) {
             ("" + gui_child.state) == "running",
             "script_fleet_gui_early_exit"
         );
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "script_fleet_gui_ready_timeout";
 }
@@ -2296,7 +2296,7 @@ fn wait_repl_pid_file(path, timeout_ms) {
                 return script_smoke_parse_int(value);
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     throw "script_repl_pid_file_timeout:" + path;
 }
@@ -2724,7 +2724,7 @@ fn run_fleet_journey(
                 mutated_visible_flipped = 1;
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(50));
+            rh::task::sleep(std::time::Duration::from_millis(50));
         }
         test_harness::require(
             mutation.ok
@@ -2873,7 +2873,7 @@ fn run_fleet_journey(
         test_harness::require(north_tab_id != "", "script_north_star_tab_missing");
         script_smoke_write(
             std::path::join(project, "config.json").display,
-            rhai::json::stringify_pretty(#{
+            rh::json::stringify_pretty(#{
                 schema_version: 1,
                 message: "AgenTerm daily check：目录与终端",
                 child_program: cli,
@@ -2999,7 +2999,7 @@ fn run_fleet_journey(
                 && std::fs::exists(result_path),
             "script_north_star_lifecycle_mismatch"
         );
-        let persisted = rhai::json::parse_file(result_path);
+        let persisted = rh::json::parse_file(result_path);
         test_harness::require(
             persisted.target == north.target
                 && persisted.fleet.note == north.fleet.note,
@@ -3150,7 +3150,7 @@ fn assert_audit(
     let records = [];
     for line in audit_text.split("\n") {
         if trimmed(line) != "" {
-            records.push(rhai::json::parse(line));
+            records.push(rh::json::parse(line));
         }
     }
     test_harness::require(records.len >= 10, "script_audit_record_count");

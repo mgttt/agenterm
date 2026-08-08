@@ -1,7 +1,7 @@
 // Parse the stage-0 bootstrap timing facts inherited by named native tasks.
 
 fn null_json() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn unavailable(unavailable_reason) {

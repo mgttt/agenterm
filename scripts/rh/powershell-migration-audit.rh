@@ -18,7 +18,7 @@ fn entry() {
         repo,
         "scripts/powershell-migration.json"
     ).display;
-    let ledger = rhai::json::parse(std::fs::read_to_string(ledger_path));
+    let ledger = rh::json::parse(std::fs::read_to_string(ledger_path));
     require(ledger.schema_version == 2, "migration_ledger_schema");
     require(ledger.baseline_count == 43, "migration_ledger_baseline_count");
     require(
@@ -887,6 +887,6 @@ fn entry() {
         "migration_remaining_count: actual=" + report.remaining_count +
             ", expected=" + report.expected_remaining_count
     );
-    print(rhai::json::stringify_pretty(report));
+    print(rh::json::stringify_pretty(report));
     0
 }

@@ -81,6 +81,6 @@ fn entry() {
         samples: 3,
         evidence_directory: evidence
     };
-    print(rhai::json::stringify_pretty(report));
+    print(rh::json::stringify_pretty(report));
     0
 }

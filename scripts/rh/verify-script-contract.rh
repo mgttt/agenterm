@@ -34,7 +34,7 @@ fn entry() {
         "runtime specification must declare the Script surface as the product contract"
     );
 
-    let catalog = rhai::json::parse(std::fs::read_to_string(args[1]));
+    let catalog = rh::json::parse(std::fs::read_to_string(args[1]));
     require(catalog.schema_version == 3, "unexpected script catalog schema");
     require(catalog.api_version == 2, "unexpected Script API major");
     require(catalog.entries.len > 0, "script catalog must not be empty");

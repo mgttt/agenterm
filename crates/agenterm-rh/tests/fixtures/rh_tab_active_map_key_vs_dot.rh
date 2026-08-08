@@ -1,5 +1,5 @@
 fn entry() {
-    let tab = rhai::json::parse("{\"active\":1}");
+    let tab = rh::json::parse("{\"active\":1}");
     let via_dot = tab.active;
     let via_key = tab["active"];
     if via_dot != via_key {

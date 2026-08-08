@@ -337,7 +337,7 @@ fn terminate_observed_processes(identities) {
         if terminated == 0 {
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(100));
+        rh::task::sleep(std::time::Duration::from_millis(100));
     }
     0
 }
@@ -538,7 +538,7 @@ let tag = "v" + version;
 let qualification_root =
     std::path::join(source, "target/qualification").display;
 std::fs::create_dir_all(qualification_root);
-let clone_owner = rhai::runtime::temp_dir().display;
+let clone_owner = rh::runtime::temp_dir().display;
 let nonce =
     std::process::id() + "-" +
     std::time::SystemTime::now().unix_millis;
@@ -563,7 +563,7 @@ let stderr_path =
         "fresh-clone-rehearsal.stderr"
     ).display;
 
-let pending_value = rhai::json::parse("null");
+let pending_value = rh::json::parse("null");
 let evidence = #{
     schema_version: 1,
     started_at_utc: std::time::SystemTime::now().rfc3339,
@@ -774,7 +774,7 @@ try {
             });
             next_timeline = now + 1000;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(500));
+        rh::task::sleep(std::time::Duration::from_millis(500));
         keep_waiting = 0;
         if child_is_running(child) {
             let deadline_now = std::time::SystemTime::now().unix_millis;
@@ -822,8 +822,8 @@ try {
         std::fs::exists(receipt_path) && std::fs::exists(release_path),
         "fresh_clone_delivery_evidence_missing"
     );
-    let receipt = rhai::json::parse_file(receipt_path);
-    let release_report = rhai::json::parse_file(release_path);
+    let receipt = rh::json::parse_file(receipt_path);
+    let release_report = rh::json::parse_file(release_path);
     let gate_count = receipt.gates.len;
     evidence.qualification.gate_count = gate_count;
     let stress_included = receipt.stress_included;
@@ -873,7 +873,7 @@ try {
     let archive_name =
         std::path::PathBuf::from(release_archive).file_name;
     evidence.packaging.archive_name = archive_name;
-    let archive_sha256 = rhai::crypto::sha256_file(release_archive);
+    let archive_sha256 = rh::crypto::sha256_file(release_archive);
     evidence.packaging.archive_sha256 = archive_sha256;
     assert_ok(
         evidence.packaging.archive_sha256 ==
@@ -982,9 +982,9 @@ let unique_processes = sort_processes_by_id(unique_list);
 evidence.process_observation.unique_processes = unique_processes;
 let completed_at = std::time::SystemTime::now().rfc3339;
 evidence.completed_at_utc = completed_at;
-rhai::runtime::atomic_write(
+rh::runtime::atomic_write(
     evidence_path,
-    rhai::json::stringify_pretty(evidence) + "\n"
+    rh::json::stringify_pretty(evidence) + "\n"
 );
 if failure != "" {
     throw failure;

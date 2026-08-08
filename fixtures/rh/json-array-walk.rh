@@ -1,5 +1,5 @@
 fn entry() {
-    let document = rhai::json::parse(
+    let document = rh::json::parse(
         "{\"executables\":[{\"release_budget_bytes\":4},{\"release_budget_bytes\":7}]}"
     );
     if document.executables.len != 2 {

@@ -1,0 +1,7 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: PATH");
+    }
+    let digest = rh::crypto::sha256_file(args[0]);
+    digest.len
+}

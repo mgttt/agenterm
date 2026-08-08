@@ -28,7 +28,7 @@ fn entry() {
     let manifest_path =
         std::path::join(repo, "scripts/artifacts.json").display;
     let manifest_text = std::fs::read_to_string(manifest_path);
-    let manifest = rhai::json::parse(manifest_text);
+    let manifest = rh::json::parse(manifest_text);
 
     let platform_match_count = 0;
     let scripting_cli_count = 0;
@@ -155,7 +155,7 @@ fn entry() {
                         "client_smoke_probe:" + executable_name + ":capabilities"
                     );
                     let cap_text = std::fs::read_to_string(stdout_path);
-                    let capability = rhai::json::parse(cap_text);
+                    let capability = rh::json::parse(cap_text);
 
                     let expected_webview_backend = "";
                     if os_name == "windows" {

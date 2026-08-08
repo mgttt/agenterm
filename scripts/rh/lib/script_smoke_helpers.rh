@@ -174,7 +174,7 @@ fn cli_text(context, cli, arguments, audit_path) {
 }
 
 fn cli_json(context, cli, arguments, audit_path) {
-    rhai::json::parse(
+    rh::json::parse(
         run_cli(
             context,
             cli,
@@ -202,7 +202,7 @@ fn direct_text(context, script, arguments, audit_path) {
 }
 
 fn direct_json(context, script, arguments, audit_path) {
-    rhai::json::parse(
+    rh::json::parse(
         run_program(
             context,
             script,
@@ -261,7 +261,7 @@ fn wait_new_process(executable_name, existing, timeout_ms) {
                 return pid;
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     throw "script_smoke_new_process_timeout:" + executable_name;
 }
@@ -272,7 +272,7 @@ fn wait_process_gone(pid, timeout_ms) {
         if process_exists(pid) == 0 {
             return;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(10));
+        rh::task::sleep(std::time::Duration::from_millis(10));
     }
     throw "script_smoke_process_remained:" + pid;
 }
@@ -333,19 +333,19 @@ fn wait_http_ready(child, ready_path, timeout_ms) {
     let attempts = timeout_ms / 5;
     for attempt in 0..attempts {
         if std::fs::exists(ready_path) {
-            return rhai::json::parse_file(ready_path);
+            return rh::json::parse_file(ready_path);
         }
         require(
             child.state != "exited",
             "script_smoke_http_fixture_early_exit"
         );
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     throw "script_smoke_http_fixture_ready_timeout";
 }
 
 fn u32_header(length) {
-    rhai::bytes::from_array([
+    rh::bytes::from_array([
         (length / 16777216) % 256,
         (length / 65536) % 256,
         (length / 256) % 256,
@@ -361,7 +361,7 @@ fn payload_frame(payload) {
 
 fn json_frame(frame) {
     payload_frame(
-        rhai::bytes::from_text(rhai::json::stringify(frame))
+        rh::bytes::from_text(rh::json::stringify(frame))
     )
 }
 
@@ -412,7 +412,7 @@ fn parse_frames(bytes) {
             "script_smoke_invalid_frame_payload:" + length
         );
         frames.push(
-            rhai::json::parse(bytes.slice(offset, length).to_text())
+            rh::json::parse(bytes.slice(offset, length).to_text())
         );
         offset += length;
     }

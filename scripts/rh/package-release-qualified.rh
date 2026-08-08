@@ -26,7 +26,7 @@ fn entry() {
     let qualified_run = std::fs::read_to_string(sidecar_path);
     qualified_run.trim();
     let result_path = qualified_run + "/release-result.json";
-    let result = rhai::json::parse_file(result_path);
+    let result = rh::json::parse_file(result_path);
     if result.dry_run {
         return rh::fail("release_package_marked_dry_run");
     }
@@ -34,27 +34,27 @@ fn entry() {
     let archive_source = qualified_run + "/" + archive_name;
     let archive_destination = output + "/" + archive_name;
     std::fs::copy(archive_source, archive_destination);
-    let archive_copy_hash = rhai::crypto::sha256_file(archive_destination);
+    let archive_copy_hash = rh::crypto::sha256_file(archive_destination);
     let archive_expected_hash = "" + result.archive_sha256;
     if archive_copy_hash != archive_expected_hash {
         return rh::fail("release_package_copy_hash");
     }
 
     let metadata_path = repo + "/dist/agenterm.json";
-    let metadata = rhai::json::parse_file(metadata_path);
-    let receipt = rhai::json::parse_file(args[1]);
+    let metadata = rh::json::parse_file(metadata_path);
+    let receipt = rh::json::parse_file(args[1]);
     let sbom_source = repo + "/dist/agenterm-sbom.spdx.json";
     let version = "" + metadata.version;
     let sbom_name = "agenterm-" + version + "-sbom.spdx.json";
     let sbom_destination = output + "/" + sbom_name;
     std::fs::copy(sbom_source, sbom_destination);
-    let sbom_copy_hash = rhai::crypto::sha256_file(sbom_destination);
-    let sbom_source_hash = rhai::crypto::sha256_file(sbom_source);
+    let sbom_copy_hash = rh::crypto::sha256_file(sbom_destination);
+    let sbom_source_hash = rh::crypto::sha256_file(sbom_source);
     if sbom_copy_hash != sbom_source_hash {
         return rh::fail("release_sbom_copy_hash");
     }
 
-    let archive_hash = rhai::crypto::sha256_file(archive_destination);
+    let archive_hash = rh::crypto::sha256_file(archive_destination);
     let build_log = "";
     if std::env::has("GITHUB_SERVER_URL")
             && std::env::has("GITHUB_REPOSITORY")
@@ -84,11 +84,11 @@ fn entry() {
     };
     let provenance_destination = archive_destination + ".provenance.json";
     let checksum_destination = archive_destination + ".sha256";
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         provenance_destination,
-        rhai::json::stringify_pretty(provenance) + "\n"
+        rh::json::stringify_pretty(provenance) + "\n"
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         checksum_destination,
         archive_hash + "  " + archive_name + "\n"
     );

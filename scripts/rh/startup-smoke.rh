@@ -95,7 +95,7 @@ fn wait_for_exit(child, timeout_ms, code) {
         if std::time::SystemTime::now().unix_millis - started >= timeout_ms {
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(5));
     }
     throw code_text + ":timeout";
     child.wait_with_output(std::time::Duration::from_millis(0))
@@ -185,7 +185,7 @@ fn entry() {
                     >= 5000 {
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(5));
+            rh::task::sleep(std::time::Duration::from_millis(5));
         }
         if window_ms == 0 {
             test_harness::require(0, "startup_window_discovery_timeout");
@@ -351,7 +351,7 @@ fn entry() {
             close_output.success != 0,
             "startup_close_snapshot_failed:" + close_output.stderr_text()
         );
-        let close_state = rhai::json::parse(close_output.stdout_text());
+        let close_state = rh::json::parse(close_output.stdout_text());
         let close_modal_kind = "" + close_state.modal.kind;
         let close_modal_default = "" + close_state.modal.default_action;
         test_harness::require(

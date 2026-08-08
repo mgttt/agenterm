@@ -1,5 +1,5 @@
 fn entry() {
-    let tab = rhai::json::parse("{\"working_context\":{\"proxy\":{\"source\":\"launch\"}}}");
+    let tab = rh::json::parse("{\"working_context\":{\"proxy\":{\"source\":\"launch\"}}}");
     let wc = tab.working_context;
     let proxy = wc.proxy;
     let src = "" + proxy.source;

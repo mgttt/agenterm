@@ -9,10 +9,12 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 43] = [
+const FIXTURE_NAMES: [&str; 45] = [
     "append-sync-probe.rh",
+    "atomic-write-probe.rh",
     "break-continue.rh",
     "child-lifecycle-probe.rh",
+    "crypto-sha256-file-probe.rh",
     "direntry-metadata-probe.rh",
     "entry.rh",
     "fail-dynamic.rh",

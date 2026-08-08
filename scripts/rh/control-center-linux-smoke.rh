@@ -19,11 +19,11 @@ fn process_output_text(output) {
 
 fn json_from_output(output) {
     let text = "" + output.stdout_text() + output.stderr_text();
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn registry_owner_pid(registry) {
-    let record = rhai::json::parse_file(registry);
+    let record = rh::json::parse_file(registry);
     0 + record.pid
 }
 
@@ -141,7 +141,7 @@ fn unsupported(code, message, backend) {
     let message_text = "" + message;
     let backend_text = "" + backend;
     print(
-        "SKIP " + rhai::json::stringify(#{
+        "SKIP " + rh::json::stringify(#{
             schema_version: 1,
             suite: "control-center-linux-smoke",
             result_class: "skipped",
@@ -271,7 +271,7 @@ fn wait_active_tab(
             );
             throw code_text + "_renderer_exited:" + exited.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code_text + "_timeout:" + last;
 }
@@ -318,7 +318,7 @@ fn wait_protocol(
             );
             throw code_text + "_early_exit:" + exited.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code_text + "_timeout";
 }
@@ -326,10 +326,10 @@ fn wait_protocol(
 fn wait_registry(path, expected_pid, child, code) {
     for attempt in 0..240 {
         if std::fs::exists(path) {
-            let candidate = rhai::json::parse("{}");
+            let candidate = rh::json::parse("{}");
             let parsed = 0;
             try {
-                candidate = rhai::json::parse_file(path);
+                candidate = rh::json::parse_file(path);
                 parsed = 1;
             } catch (error) {
                 parsed = 0;
@@ -349,7 +349,7 @@ fn wait_registry(path, expected_pid, child, code) {
             );
             throw code + "_early_exit:" + exited.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code + "_timeout";
 }
@@ -377,7 +377,7 @@ fn wait_native_window(registry, expected_pid, child, code) {
             );
             throw code_text + "_early_exit:" + exited.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code_text + "_timeout:" + ("" + expected_pid);
 }
@@ -389,7 +389,7 @@ fn wait_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code;
 }
@@ -412,7 +412,7 @@ fn wait_process_gone(pid, code) {
         if process_present(pid) == 0 {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code;
 }
@@ -457,7 +457,7 @@ fn wait_capture(
             );
             throw code_text + "_early_exit:" + exited.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code_text + "_timeout";
 }
@@ -610,7 +610,7 @@ fn wait_x11_window(context, title, child, code) {
             );
             throw code_text + "_early_exit:" + exited.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code_text + ":" + last;
 }
@@ -637,7 +637,7 @@ fn wait_x11_active(context, identity, code) {
         if active_x11_window(context) == identity_text {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code_text;
 }
@@ -980,7 +980,7 @@ fn entry() {
             "connected",
             "control_center_linux_first_frame"
         );
-        let rendered = rhai::image::inspect_png(cockpit_png);
+        let rendered = rh::image::inspect_png(cockpit_png);
         let tab_count = selected.connected_server.tabs.len;
         let expected_tabs = "" + tab_count + " tabs";
         test_harness::require(
@@ -995,7 +995,7 @@ fn entry() {
                 && capture.rendered_snapshot.selected_view == "cockpit"
                 && capture.rendered_snapshot.server_endpoint == endpoint
                 && capture.rendered_snapshot.window_title.contains(expected_tabs)
-                && capture.sha256 == rhai::crypto::sha256_file(cockpit_png)
+                && capture.sha256 == rh::crypto::sha256_file(cockpit_png)
                 && capture.bytes >= 1000
                 && rendered.samples > 0
                 && rendered.luminance > 1.0
@@ -1013,7 +1013,7 @@ fn entry() {
         std::fs::create_dir_all(durable_directory);
         std::fs::copy(cockpit_png, durable_png);
         test_harness::require(
-            rhai::crypto::sha256_file(durable_png) == capture.sha256,
+            rh::crypto::sha256_file(durable_png) == capture.sha256,
             "control_center_linux_durable_png_hash"
         );
         emit_linux_evidence(context, "control-center.linux-renderer-evidence");
@@ -1466,7 +1466,7 @@ fn entry() {
             replacement_capture.owner_pid == recovered.id
                 && replacement_capture.owner_pid != killed_pid
                 && replacement_capture.sha256
-                    == rhai::crypto::sha256_file(replacement_png)
+                    == rh::crypto::sha256_file(replacement_png)
                 && replacement_capture.rendered_snapshot.server_endpoint
                     == endpoint
                 && process_present(replacement_server.id) != 0,

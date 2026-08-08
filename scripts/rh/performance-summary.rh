@@ -48,7 +48,7 @@ fn entry() {
             "performance_summary_sample_missing:" + sample_tag
         );
         let report_text = std::fs::read_to_string(path);
-        let report = rhai::json::parse(report_text);
+        let report = rh::json::parse(report_text);
         require(
             report.schema_version == 2
                 && report.kind == "agenterm-quality-timing"
@@ -122,7 +122,7 @@ fn entry() {
                 "performance_summary_sccache_missing:" + sample_tag
             );
             let stats_text = std::fs::read_to_string(stats_path);
-            let stats = rhai::json::parse(stats_text);
+            let stats = rh::json::parse(stats_text);
 
             // Live `sccache --show-stats --stats-format json` nests counters under
             // `.stats`. Missing JSON paths fail `type_of`, so do not probe optional
@@ -162,7 +162,7 @@ fn entry() {
                 cache_hits: cache_hits,
                 cache_misses: cache_misses,
                 cache_errors: cache_errors,
-                raw_sha256: rhai::crypto::sha256_file(stats_path),
+                raw_sha256: rh::crypto::sha256_file(stats_path),
                 stats_path: stats_name
             });
         }
@@ -245,9 +245,9 @@ fn entry() {
         warm_speedup_percent: warm_speedup_percent,
         sccache: sccache_block
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output,
-        rhai::json::stringify_pretty(summary) + "\n"
+        rh::json::stringify_pretty(summary) + "\n"
     );
 
     let markdown =
@@ -276,7 +276,7 @@ fn entry() {
                 );
                 previous = std::fs::read_to_string(summary_path);
             }
-            rhai::runtime::atomic_write(summary_path, previous + markdown);
+            rh::runtime::atomic_write(summary_path, previous + markdown);
         } else {
             print(markdown);
         }

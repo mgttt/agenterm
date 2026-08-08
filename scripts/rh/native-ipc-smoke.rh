@@ -170,13 +170,13 @@ fn invoke(
         test_harness::require(
             output.success == 0,
             "native_ipc_command_unexpected_success:" +
-                rhai::json::stringify(arguments)
+                rh::json::stringify(arguments)
         );
     } else {
         test_harness::require(
             output.success != 0,
             "native_ipc_command_failed:" +
-                rhai::json::stringify(arguments) + ":" +
+                rh::json::stringify(arguments) + ":" +
                 output.stderr_text()
         );
     }
@@ -209,7 +209,7 @@ fn invoke_json(
     );
     let text = "" + output.stdout + output.stderr;
     text.trim();
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn probe(
@@ -278,7 +278,7 @@ fn wait_protocol(
         if output.success != 0 {
             let text = "" + output.stdout + output.stderr;
             text.trim();
-            let parsed = rhai::json::parse(text);
+            let parsed = rh::json::parse(text);
             return #{
                 transport: "" + parsed.transport,
                 endpoint: "" + parsed.endpoint,
@@ -295,7 +295,7 @@ fn wait_protocol(
             );
             throw "native_ipc_server_early_exit:" + ended.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "native_ipc_server_ready_timeout";
     // Unreachable: keep return kind Json (bare `throw` otherwise infers String).
@@ -309,7 +309,7 @@ fn wait_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
     // Unreachable: keep return kind Output for `.success` at call sites.
@@ -370,7 +370,7 @@ fn registration_by_endpoint(directory, wanted_endpoint, code) {
     for entry in std::fs::read_dir(directory) {
         if entry.is_file && entry.file_name.ends_with(".json") {
             let entry_path = entry.path.display;
-            let record = rhai::json::parse_file(entry_path);
+            let record = rh::json::parse_file(entry_path);
             if record.schema_version == 2
                     && ("" + record.endpoint) == wanted {
                 return #{
@@ -400,7 +400,7 @@ fn registration_schema_counts(directory) {
     for entry in std::fs::read_dir(directory) {
         if entry.is_file && entry.file_name.ends_with(".json") {
             let entry_path = entry.path.display;
-            let value = rhai::json::parse_file(entry_path);
+            let value = rh::json::parse_file(entry_path);
             if value.schema_version == 1 {
                 v1 += 1;
             } else if value.schema_version == 2 {
@@ -814,7 +814,7 @@ fn entry() {
             let alias_text =
                 alias_output.stdout_text() + alias_output.stderr_text();
             alias_text.trim();
-            let alias_parsed = rhai::json::parse(alias_text);
+            let alias_parsed = rh::json::parse(alias_text);
             test_harness::require(
                 alias_parsed.pid == native_pid
                     && alias_parsed.endpoint == native_endpoint
@@ -1134,9 +1134,9 @@ fn entry() {
     let stale_fixture_endpoint = "tcp:127.0.0.1:59998";
     let stale_fixture_nonce = "native-ipc-stale-fixture";
     let stale_fixture_pid = 2147483647;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         stale_fixture_path,
-        rhai::json::stringify_pretty(#{
+        rh::json::stringify_pretty(#{
             schema_version: 2,
             pid: stale_fixture_pid,
             address: "127.0.0.1:59998",
@@ -1206,9 +1206,9 @@ fn entry() {
         native_pid + "-owner-unknown.json"
     ).display;
     let unknown_owner_endpoint = "tcp:127.0.0.1:59997";
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         unknown_owner_path,
-        rhai::json::stringify_pretty(#{
+        rh::json::stringify_pretty(#{
             schema_version: 1,
             pid: native_pid,
             address: "127.0.0.1:59997",
@@ -1263,9 +1263,9 @@ fn entry() {
     let reuse_workspace = native_registration.record_workspace_path;
     let reuse_started = native_registration.record_started_at_unix_ms;
     let reuse_epoch = native_registration.record_server_epoch;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         pid_reuse_path,
-        rhai::json::stringify_pretty(#{
+        rh::json::stringify_pretty(#{
             schema_version: 2,
             pid: reuse_pid,
             endpoint: reuse_endpoint,
