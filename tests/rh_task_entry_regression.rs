@@ -682,3 +682,36 @@ fn native_ipc_smoke_uses_native_bundled_pack() {
         ],
     );
 }
+
+#[test]
+fn control_center_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/control-center-smoke.rh",
+        &[
+            "rh_process_stdout_file(",
+            "rh_host_json_call(\"process.list\"",
+        ],
+    );
+}
+
+#[test]
+fn control_center_macos_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/control-center-macos-smoke.rh",
+        &[
+            "rh_process_stdout_file(",
+            "rh_host_json_call(\"process.list\"",
+        ],
+    );
+}
+
+#[test]
+fn control_center_linux_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/control-center-linux-smoke.rh",
+        &[
+            "rh_process_stdout_file(",
+            "rh_host_json_call(\"process.list\"",
+        ],
+    );
+}

@@ -1809,7 +1809,7 @@
     {
       "id": "control-center-smoke",
       "description": "Prove the isolated Control Center offline contract, typed stable-ID navigation, PID reuse, no-activate launch, renderer failure isolation, Human GUI detach isolation, stale-owner recovery, and orphan-free cleanup",
-      "entry": "scripts/rhai/control-center-smoke.rhai",
+      "entry": "scripts/rh/control-center-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -1829,7 +1829,7 @@
     {
       "id": "control-center-macos-smoke",
       "description": "Prove caller-selected native IPC, renderer-owned Retina evidence, no-activate/focus reuse, server epochs, and process isolation on macOS",
-      "entry": "scripts/rhai/control-center-macos-smoke.rhai",
+      "entry": "scripts/rh/control-center-macos-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -1851,7 +1851,7 @@
     {
       "id": "control-center-linux-smoke",
       "description": "Prove caller-selected native IPC, renderer-owned PNG evidence, focus/reuse, server epochs, renderer replacement, and process isolation on Linux",
-      "entry": "scripts/rhai/control-center-linux-smoke.rhai",
+      "entry": "scripts/rh/control-center-linux-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [

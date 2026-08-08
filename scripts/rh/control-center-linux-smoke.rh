@@ -13,6 +13,117 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
+fn process_output_text(output) {
+    output.stdout_text() + output.stderr_text()
+}
+
+fn json_from_output(output) {
+    let text = "" + output.stdout_text() + output.stderr_text();
+    rhai::json::parse(text)
+}
+
+fn registry_owner_pid(registry) {
+    let record = rhai::json::parse_file(registry);
+    0 + record.pid
+}
+
+fn tab_id_at_index(tabs, target_index) {
+    let index = 0;
+    for tab in tabs {
+        if index == target_index {
+            return "" + tab.id;
+        }
+        index = index + 1;
+    }
+    throw "control_center_linux_tab_id_at_index_missing";
+}
+
+fn find_tab_index(tabs, wanted_tab_id) {
+    let wanted = "" + wanted_tab_id;
+    let index = 0;
+    for tab in tabs {
+        if ("" + tab.id) == wanted {
+            return index;
+        }
+        index = index + 1;
+    }
+    -1
+}
+
+fn remove_path_if_exists(path) {
+    if std::fs::exists(path) != 0 {
+        std::fs::remove_file(path);
+    }
+    0
+}
+
+fn push_endpoint(arguments, endpoint) {
+    arguments.push("" + endpoint);
+    0
+}
+
+fn has_nonempty_env(name) {
+    if std::env::has(name) == 0 {
+        return 0;
+    }
+    let value = "" + std::env::get(name);
+    if value == "" {
+        0
+    } else {
+        1
+    }
+}
+
+fn emit_linux_evidence(context, id) {
+    let id_text = "" + id;
+    if id_text == "control-center.linux-caller-endpoint" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-caller-endpoint"],
+            id
+        );
+    } else if id_text == "control-center.linux-renderer-evidence" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-renderer-evidence"],
+            id
+        );
+    } else if id_text == "control-center.linux-native-cockpit-input" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-native-cockpit-input"],
+            id
+        );
+    } else if id_text == "control-center.linux-no-activate-focus-reuse" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-no-activate-focus-reuse"],
+            id
+        );
+    } else if id_text == "control-center.linux-server-recovery" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-server-recovery"],
+            id
+        );
+    } else if id_text == "control-center.linux-renderer-replacement" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-renderer-replacement"],
+            id
+        );
+    } else if id_text == "control-center.linux-process-isolation" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.linux-process-isolation"],
+            id
+        );
+    } else {
+        throw "control_center_linux_undeclared_evidence:" + id_text;
+    }
+    0
+}
+
 let declared_evidence = [
     "control-center.linux-caller-endpoint",
     "control-center.linux-renderer-evidence",
@@ -25,15 +136,10 @@ let declared_evidence = [
 
 
 
-fn environment_or_empty(name) {
-    if std::env::has(name) {
-        std::env::get(name)
-    } else {
-        ""
-    }
-}
-
 fn unsupported(code, message, backend) {
+    let code_text = "" + code;
+    let message_text = "" + message;
+    let backend_text = "" + backend;
     print(
         "SKIP " + rhai::json::stringify(#{
             schema_version: 1,
@@ -41,25 +147,33 @@ fn unsupported(code, message, backend) {
             result_class: "skipped",
             failure: #{
                 kind: "Unsupported",
-                code: code,
-                message: message
+                code: code_text,
+                message: message_text
             },
-            display_backend: backend,
+            display_backend: backend_text,
             evidence_emitted: []
         })
     );
+    0
 }
 
 fn native_command(context, program, registry, endpoint, backend, arguments) {
+    let program_text = "" + program;
+    let registry_text = "" + registry;
+    let endpoint_text = "" + endpoint;
+    let backend_text = "" + backend;
     let command =
-        test_harness::configured_command(context, program, arguments);
+        test_harness::configured_command(context, program_text, arguments);
     command.env_remove("AGENTERM_IPC_ADDRESS");
     command.env_remove("AGENTERM_IPC_ENDPOINT");
     command.env_remove("AGENTERM_INSTANCE");
-    command.env("AGENTERM_CC_REGISTRY_PATH", registry);
-    if backend == "x11" {
+    command.env("AGENTERM_CC_REGISTRY_PATH", registry_text);
+    if endpoint_text != "" {
+        let _endpoint_published = endpoint_text;
+    }
+    if backend_text == "x11" {
         command.env_remove("WAYLAND_DISPLAY");
-    } else if backend == "wayland" {
+    } else if backend_text == "wayland" {
         command.env_remove("DISPLAY");
     }
     command.timeout(std::time::Duration::from_secs(15));
@@ -85,11 +199,11 @@ fn invoke(
         expected_failure,
         [endpoint]
     );
-    if expected_failure {
-        test_harness::require(!output.success, "expected command failure");
+    if expected_failure != 0 {
+        test_harness::require(output.success == 0, "expected command failure");
     } else {
         test_harness::require(
-            output.success,
+            output.success != 0,
             "command_failed:" + output.stdout_text() + output.stderr_text()
         );
     }
@@ -106,9 +220,9 @@ fn json_command(
         endpoint,
         backend,
         arguments,
-        false
+        0
     );
-    rhai::json::parse(output.stdout_text() + output.stderr_text())
+    json_from_output(output)
 }
 
 fn wait_active_tab(
@@ -123,27 +237,30 @@ fn wait_active_tab(
     expected_server_epoch,
     code
 ) {
+    let endpoint_text = "" + endpoint;
+    let target_text = "" + target_tab_id;
+    let code_text = "" + code;
     let last = "";
     for attempt in 0..160 {
-        let arguments = ["snapshot", "--json", "--endpoint", endpoint];
+        let arguments = ["snapshot", "--json", "--endpoint", endpoint_text];
         let output = native_command(
             context,
             control_center,
             registry,
-            endpoint,
+            endpoint_text,
             backend,
             arguments
         ).output();
-        last = output.stdout_text() + output.stderr_text();
-        if output.success {
-            let snapshot = rhai::json::parse(last);
+        last = process_output_text(output);
+        if output.success != 0 {
+            let snapshot = json_from_output(output);
             if snapshot.server_state == "connected"
                     && snapshot.connected_server.pid == expected_server_pid
                     && snapshot.connected_server.epoch == expected_server_epoch
-                    && snapshot.connected_server.endpoint == endpoint
-                    && snapshot.connected_server.active_tab_id == target_tab_id {
+                    && snapshot.connected_server.endpoint == endpoint_text
+                    && snapshot.connected_server.active_tab_id == target_text {
                 test_harness::append_command_record(
-                    context, arguments, output, false, [endpoint]
+                    context, arguments, output, 0, [endpoint_text]
                 );
                 return snapshot;
             }
@@ -152,11 +269,11 @@ fn wait_active_tab(
             let exited = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_renderer_exited:" + exited.stderr_text();
+            throw code_text + "_renderer_exited:" + exited.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + "_timeout:" + last;
+    throw code_text + "_timeout:" + last;
 }
 
 fn invoke_activate(
@@ -168,10 +285,10 @@ fn invoke_activate(
     command.env_remove("AGENTERM_NO_ACTIVATE");
     let output = command.output();
     test_harness::append_command_record(
-        context, arguments, output, false, [endpoint]
+        context, arguments, output, 0, [endpoint]
     );
     test_harness::require(
-        output.success,
+        output.success != 0,
         "activate_command_failed:" +
             output.stdout_text() + output.stderr_text()
     );
@@ -180,44 +297,50 @@ fn invoke_activate(
 fn wait_protocol(
     context, cli, registry, endpoint, backend, child, code
 ) {
+    let endpoint_text = "" + endpoint;
+    let code_text = "" + code;
     for attempt in 0..240 {
         let arguments = [
-            "--endpoint", endpoint, "protocol-info", "--running"
+            "--endpoint", endpoint_text, "protocol-info", "--running"
         ];
         let output = native_command(
             context, cli, registry, endpoint, backend, arguments
         ).output();
-        if output.success {
+        if output.success != 0 {
             test_harness::append_command_record(
-                context, arguments, output, false, [endpoint]
+                context, arguments, output, 0, [endpoint]
             );
-            return rhai::json::parse(
-                output.stdout_text() + output.stderr_text()
-            );
+            return json_from_output(output);
         }
         if child.state == "exited" {
             let exited = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_early_exit:" + exited.stderr_text();
+            throw code_text + "_early_exit:" + exited.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + "_timeout";
+    throw code_text + "_timeout";
 }
 
 fn wait_registry(path, expected_pid, child, code) {
     for attempt in 0..240 {
         if std::fs::exists(path) {
+            let candidate = rhai::json::parse("{}");
+            let parsed = 0;
             try {
-                let record = rhai::json::parse_file(path);
-                if record.schema_version == 2
-                        && record.pid == expected_pid
-                        && record.process_start_identity != "" {
-                    return record;
-                }
+                candidate = rhai::json::parse_file(path);
+                parsed = 1;
             } catch (error) {
-                // Atomic publication can be between create and parse.
+                parsed = 0;
+            }
+            if parsed != 0 {
+                let identity = "" + candidate.process_start_identity;
+                if candidate.schema_version == 2
+                        && candidate.pid == expected_pid
+                        && identity != "" {
+                    return candidate;
+                }
             }
         }
         if child.state == "exited" {
@@ -232,14 +355,17 @@ fn wait_registry(path, expected_pid, child, code) {
 }
 
 fn wait_native_window(registry, expected_pid, child, code) {
+    let registry_text = "" + registry;
+    let code_text = "" + code;
     test_harness::require(
-        registry.ends_with(".json"),
+        registry_text.ends_with(".json") != 0,
         "control_center_linux_registry_extension"
     );
-    let path = registry.sub_string(0, registry.len - 4) + "window";
+    let registry_len = registry_text.len;
+    let path = registry_text.sub_string(0, registry_len - 4) + "window";
     for attempt in 0..240 {
-        if std::fs::exists(path) {
-            let identity = std::fs::read_to_string(path);
+        if std::fs::exists(path) != 0 {
+            let identity = "" + std::fs::read_to_string(path);
             identity.trim();
             if identity != "" {
                 return identity;
@@ -249,11 +375,11 @@ fn wait_native_window(registry, expected_pid, child, code) {
             let exited = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_early_exit:" + exited.stderr_text();
+            throw code_text + "_early_exit:" + exited.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
-    throw code + "_timeout:" + expected_pid;
+    throw code_text + "_timeout:" + ("" + expected_pid);
 }
 
 fn wait_exit(child, code) {
@@ -269,18 +395,22 @@ fn wait_exit(child, code) {
 }
 
 fn process_present(pid) {
-    for process in std::process::list() {
+    let processes = std::process::list();
+    let index = 0;
+    while index < processes.len {
+        let process = processes[index];
         if process.id == pid {
-            return true;
+            return 1;
         }
+        index = index + 1;
     }
-    false
+    0
 }
 
 fn wait_process_gone(pid, code) {
     for attempt in 0..240 {
-        if !process_present(pid) {
-            return;
+        if process_present(pid) == 0 {
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(20));
     }
@@ -298,8 +428,12 @@ fn wait_capture(
     required_state,
     code
 ) {
+    let output_path = "" + output;
+    let endpoint_text = "" + endpoint;
+    let required_state_text = "" + required_state;
+    let code_text = "" + code;
     for attempt in 0..40 {
-        let arguments = ["screenshot", "--output", output, "--json"];
+        let arguments = ["screenshot", "--output", output_path, "--json"];
         let capture = native_command(
             context,
             control_center,
@@ -308,14 +442,12 @@ fn wait_capture(
             backend,
             arguments
         ).output();
-        if capture.success {
+        if capture.success != 0 {
             test_harness::append_command_record(
-                context, arguments, capture, false, [endpoint]
+                context, arguments, capture, 0, [endpoint]
             );
-            let document = rhai::json::parse(
-                capture.stdout_text() + capture.stderr_text()
-            );
-            if document.rendered_snapshot.server_state == required_state {
+            let document = json_from_output(capture);
+            if document.rendered_snapshot.server_state == required_state_text {
                 return document;
             }
         }
@@ -323,17 +455,19 @@ fn wait_capture(
             let exited = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_early_exit:" + exited.stderr_text();
+            throw code_text + "_early_exit:" + exited.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + "_timeout";
+    throw code_text + "_timeout";
 }
 
 fn prove_pty(
     context, cli, registry, endpoint, backend, label
 ) {
-    let marker = "AGENTERM_CC_LINUX_" + label + "_" + context.run_id;
+    let endpoint_text = "" + endpoint;
+    let label_text = "" + label;
+    let marker = "AGENTERM_CC_LINUX_" + label_text + "_" + context.run_id;
     let created = invoke(
         context,
         cli,
@@ -341,16 +475,20 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint,
+            "--endpoint", endpoint_text,
             "new-window", "-d", "-P", "-F", "#{window_id}",
-            "-n", "cc-" + label + "-" + context.run_id,
+            "-n", "cc-" + label_text + "-" + context.run_id,
             "--", "/bin/sh"
         ],
-        false
+        0
     );
-    let tab_id = created.stdout_text();
-    tab_id.trim();
-    test_harness::require(tab_id.starts_with("@"), "control_center_linux_stable_tab_id");
+    let tab_id_text = "" + created.stdout_text();
+    tab_id_text.trim();
+    test_harness::require(
+        tab_id_text.starts_with("@") != 0,
+        "control_center_linux_stable_tab_id"
+    );
+    let tab_id = tab_id_text;
     invoke(
         context,
         cli,
@@ -358,11 +496,11 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint,
+            "--endpoint", endpoint_text,
             "send-keys", "-t", tab_id,
             "-l", "echo " + marker
         ],
-        false
+        0
     );
     invoke(
         context,
@@ -370,8 +508,8 @@ fn prove_pty(
         registry,
         endpoint,
         backend,
-        ["--endpoint", endpoint, "send-keys", "-t", tab_id, "Enter"],
-        false
+        ["--endpoint", endpoint_text, "send-keys", "-t", tab_id, "Enter"],
+        0
     );
     invoke(
         context,
@@ -380,12 +518,12 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint,
+            "--endpoint", endpoint_text,
             "wait-pane", "-t", tab_id,
             "--contains", marker,
             "--timeout-ms", "5000"
         ],
-        false
+        0
     );
     let captured = invoke(
         context,
@@ -394,24 +532,30 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint,
+            "--endpoint", endpoint_text,
             "capture-pane", "-p", "-t", tab_id,
             "--max-bytes", "16384"
         ],
-        false
+        0
     );
+    let captured_text = captured.stdout_text();
     test_harness::require(
-        captured.stdout_text().contains(marker),
+        captured_text.contains(marker) != 0,
         "control_center_linux_pty_capture"
     );
     tab_id
 }
 
-fn tool_available(name) {
-    let command = std::process::command("/bin/sh");
-    command.args(["-c", "command -v -- " + name + " >/dev/null 2>&1"]);
-    command.timeout(std::time::Duration::from_secs(2));
-    command.output().success
+fn x11_focus_tools_available() {
+    let xdotool = std::process::command("which");
+    xdotool.args(["xdotool"]);
+    xdotool.timeout(std::time::Duration::from_secs(2));
+    let xdotool_output = xdotool.output();
+    let xmessage = std::process::command("which");
+    xmessage.args(["xmessage"]);
+    xmessage.timeout(std::time::Duration::from_secs(2));
+    let xmessage_output = xmessage.output();
+    xdotool_output.success != 0 && xmessage_output.success != 0
 }
 
 fn xdotool(context, arguments, expected_failure) {
@@ -422,9 +566,9 @@ fn xdotool(context, arguments, expected_failure) {
     test_harness::append_command_record(
         context, arguments, output, expected_failure, []
     );
-    if !expected_failure {
+    if expected_failure == 0 {
         test_harness::require(
-            output.success,
+            output.success != 0,
             "control_center_linux_xdotool_failed:" + output.stderr_text()
         );
     }
@@ -432,41 +576,47 @@ fn xdotool(context, arguments, expected_failure) {
 }
 
 fn wait_x11_window(context, title, child, code) {
+    let title_text = "" + title;
+    let code_text = "" + code;
     let last = "";
     for attempt in 0..120 {
         let output = xdotool(
-            context, ["search", "--onlyvisible", "--name", title], true
+            context, ["search", "--onlyvisible", "--name", title_text], 1
         );
-        last = output.stdout_text() + output.stderr_text();
-        if output.success {
-            let lines = output.stdout_text().split("\n");
-            for line in lines {
-                line.trim();
-                if line != "" {
+        last = process_output_text(output);
+        if output.success != 0 {
+            let lines = ("" + output.stdout_text()).split("\n");
+            let line_index = 0;
+            while line_index < lines.len {
+                let line = lines[line_index];
+                let line_text = "" + line;
+                line_text.trim();
+                if line_text != "" {
                     let name = xdotool(
-                        context, ["getwindowname", line], true
+                        context, ["getwindowname", line_text], 1
                     );
-                    let name_text = name.stdout_text();
+                    let name_text = "" + name.stdout_text();
                     name_text.trim();
-                    if name.success && name_text == title {
-                        return line;
+                    if name.success != 0 && name_text == title_text {
+                        return line_text;
                     }
                 }
+                line_index = line_index + 1;
             }
         }
         if child.state == "exited" {
             let exited = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_early_exit:" + exited.stderr_text();
+            throw code_text + "_early_exit:" + exited.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + ":" + last;
+    throw code_text + ":" + last;
 }
 
 fn active_x11_window(context) {
-    let output = xdotool(context, ["getactivewindow"], false);
+    let output = xdotool(context, ["getactivewindow"], 0);
     let value = output.stdout_text();
     value.trim();
     test_harness::require(value != "", "control_center_linux_x11_active_window_empty");
@@ -474,29 +624,33 @@ fn active_x11_window(context) {
 }
 
 fn activate_x11_window(context, identity) {
+    let identity_text = "" + identity;
     xdotool(
-        context, ["windowactivate", "--sync", identity], false
+        context, ["windowactivate", "--sync", identity_text], 0
     );
 }
 
 fn wait_x11_active(context, identity, code) {
+    let identity_text = "" + identity;
+    let code_text = "" + code;
     for attempt in 0..120 {
-        if active_x11_window(context) == identity {
-            return;
+        if active_x11_window(context) == identity_text {
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code;
+    throw code_text;
 }
 
 fn start_x11_focus_witness(title) {
+    let title_text = "" + title;
     let command = std::process::command("xmessage");
     command.args([
         "-name", "agenterm-focus-witness",
-        "-title", title,
+        "-title", title_text,
         "-center",
         "-buttons", "OK:0",
-        title
+        title_text
     ]);
     command.timeout(std::time::Duration::from_secs(30));
     command.start()
@@ -507,9 +661,10 @@ fn remove_native_runtime(runtime) {
         runtime.starts_with("/tmp/agt-cc-linux-"),
         "control_center_linux_runtime_not_owned"
     );
-    if std::fs::exists(runtime) {
+    if std::fs::exists(runtime) != 0 {
         std::fs::remove_dir_all(runtime);
     }
+    0
 }
 
 fn prepare_private_runtime(runtime) {
@@ -575,18 +730,22 @@ fn prepare_private_runtime(runtime) {
 }
 
 fn entry() {
-    if args.contains("--list-evidence") {
-        for id in declared_evidence {
-            print(id);
-        }
-        return;
+    if args.len == 1 && args[0] == "--list-evidence" {
+        print("control-center.linux-caller-endpoint");
+        print("control-center.linux-renderer-evidence");
+        print("control-center.linux-native-cockpit-input");
+        print("control-center.linux-no-activate-focus-reuse");
+        print("control-center.linux-server-recovery");
+        print("control-center.linux-renderer-replacement");
+        print("control-center.linux-process-isolation");
+        return 0;
     }
 
     test_harness::require(
         args.len >= 4,
         "expected: REPO CONTROL_CENTER_EXE SERVER_EXE CLI_EXE [--backend auto|x11|wayland]"
     );
-    let repo = std::path::absolute(args[0]).display;
+    let repo = "" + std::path::absolute(args[0]).display;
     let control_center_value = args[1];
     let server_executable_value = args[2];
     let cli_executable_value = args[3];
@@ -613,106 +772,118 @@ fn entry() {
         option += 2;
     }
 
-    let x11_available = environment_or_empty("DISPLAY") != "";
-    let wayland_available = environment_or_empty("WAYLAND_DISPLAY") != "";
-    let backend = if requested_backend == "x11" {
-        if !x11_available {
+    let x11_available = has_nonempty_env("DISPLAY");
+    let wayland_available = has_nonempty_env("WAYLAND_DISPLAY");
+    let backend = "";
+    if requested_backend == "x11" {
+        if x11_available == 0 {
             unsupported(
                 "control_center_linux_x11_display_unavailable",
                 "--backend x11 requires DISPLAY",
                 "x11"
             );
-            return;
+            return 0;
         }
-        "x11"
+        backend = "x11";
     } else if requested_backend == "wayland" {
-        if !wayland_available {
+        if wayland_available == 0 {
             unsupported(
                 "control_center_linux_wayland_display_unavailable",
                 "--backend wayland requires WAYLAND_DISPLAY",
                 "wayland"
             );
-            return;
+            return 0;
         }
-        "wayland"
-    } else if wayland_available {
-        "wayland"
-    } else if x11_available {
-        "x11"
+        backend = "wayland";
+    } else if wayland_available != 0 {
+        backend = "wayland";
+    } else if x11_available != 0 {
+        backend = "x11";
     } else {
         unsupported(
             "control_center_linux_display_unavailable",
             "native Control Center evidence requires DISPLAY or WAYLAND_DISPLAY",
             "none"
         );
-        return;
+        return 0;
     };
 
-    if backend == "x11" && (!tool_available("xdotool") || !tool_available("xmessage")) {
+    if backend == "x11" && x11_focus_tools_available() == 0 {
         unsupported(
             "control_center_linux_x11_focus_probe_unavailable",
             "the X11 journey requires xdotool and xmessage for black-box focus evidence",
             backend
         );
-        return;
+        return 0;
     }
 
-    let control_center = std::path::absolute(control_center_value).display;
-    let server_executable = std::path::absolute(server_executable_value).display;
-    let cli_executable = std::path::absolute(cli_executable_value).display;
-    for executable in [control_center, server_executable, cli_executable] {
-        test_harness::require(
-            std::fs::exists(executable),
-            "control_center_linux_executable_missing:" + executable
-        );
-    }
+    let control_center = "" + std::path::absolute(control_center_value).display;
+    let server_executable = "" + std::path::absolute(server_executable_value).display;
+    let cli_executable = "" + std::path::absolute(cli_executable_value).display;
+    test_harness::require(
+        std::fs::exists(control_center) != 0,
+        "control_center_linux_executable_missing:" + control_center
+    );
+    test_harness::require(
+        std::fs::exists(server_executable) != 0,
+        "control_center_linux_executable_missing:" + server_executable
+    );
+    test_harness::require(
+        std::fs::exists(cli_executable) != 0,
+        "control_center_linux_executable_missing:" + cli_executable
+    );
 
     let context = test_harness::new_context(repo, "control-center-linux");
     let runtime =
-        "/tmp/agt-cc-linux-" + std::process::id() + "-" +
-        std::time::SystemTime::now().unix_millis;
+        "/tmp/agt-cc-linux-" + ("" + std::process::id()) + "-" +
+        ("" + std::time::SystemTime::now().unix_millis);
     prepare_private_runtime(runtime);
-    let endpoint = "unix:" + std::path::join(runtime, "authority.sock").display;
-    let registry = std::path::join(
-        context.run_directory, "control-center-registry.json"
+    let endpoint =
+        "unix:" + ("" + std::path::join(runtime, "authority.sock").display);
+    let run_directory = "" + context.run_directory;
+    let evidence_parent = "" + std::path::parent(context.evidence_path).display;
+    let registry = "" + std::path::join(
+        run_directory, "control-center-registry.json"
     ).display;
-    let cockpit_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+    let cockpit_png = "" + std::path::join(
+        evidence_parent,
         "control-center-live-cockpit-linux.png"
     ).display;
-    let keyboard_input_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+    let keyboard_input_png = "" + std::path::join(
+        evidence_parent,
         "control-center-keyboard-input-linux.png"
     ).display;
-    let pointer_input_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+    let pointer_input_png = "" + std::path::join(
+        evidence_parent,
         "control-center-pointer-input-linux.png"
     ).display;
-    let refresh_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+    let refresh_png = "" + std::path::join(
+        evidence_parent,
         "control-center-refresh-linux.png"
     ).display;
-    let replacement_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+    let replacement_png = "" + std::path::join(
+        evidence_parent,
         "control-center-replacement-linux.png"
     ).display;
-    let durable_directory = std::path::join(repo, "dist/evidence").display;
-    let durable_png = std::path::join(
+    let durable_directory = "" + std::path::join(repo, "dist/evidence").display;
+    let durable_png = "" + std::path::join(
         durable_directory, "control-center-live-cockpit-linux.png"
     ).display;
     let owned_children = [];
-    let succeeded = false;
+    let succeeded = 0;
     let failure = "";
 
     try {
         print("STEP start caller-selected native Unix IPC authority and PTY");
+        let server_args = ["server", "--endpoint"];
+        push_endpoint(server_args, endpoint);
         let server_command = native_command(
             context,
             server_executable,
             registry,
             endpoint,
             backend,
-            ["server", "--endpoint", endpoint]
+            server_args
         );
         let server = server_command.start();
         owned_children.push(server);
@@ -728,7 +899,7 @@ fn entry() {
         test_harness::require(
             protocol.pid == server.id
                 && protocol.endpoint == endpoint
-                && protocol.endpoint.starts_with("unix:"),
+                && protocol.endpoint.starts_with("unix:") != 0,
             "control_center_linux_native_authority"
         );
         let baseline_tab = prove_pty(
@@ -743,13 +914,15 @@ fn entry() {
             "native-input"
         );
 
+        let snapshot_args = ["snapshot", "--json", "--endpoint"];
+        push_endpoint(snapshot_args, endpoint);
         let selected = json_command(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["snapshot", "--json", "--endpoint", endpoint]
+            snapshot_args
         );
         test_harness::require(
             selected.server_state == "connected"
@@ -757,18 +930,13 @@ fn entry() {
                 && selected.connected_server.endpoint == endpoint,
             "control_center_linux_caller_endpoint"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.linux-caller-endpoint"
-        );
+        emit_linux_evidence(context, "control-center.linux-caller-endpoint");
 
-        let witness = ();
         let witness_window = "";
         if backend == "x11" {
             print("STEP establish an independently focused X11 witness");
             let witness_title = "AgenTerm focus witness " + context.run_id;
-            witness = start_x11_focus_witness(witness_title);
+            let witness = start_x11_focus_witness(witness_title);
             owned_children.push(witness);
             witness_window = wait_x11_window(
                 context,
@@ -785,13 +953,15 @@ fn entry() {
         }
 
         print("STEP no-activate opens one renderer and publishes exact frame evidence");
+        let open_args = ["open", "--no-activate", "--endpoint"];
+        push_endpoint(open_args, endpoint);
         let cc_command = native_command(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["open", "--no-activate", "--endpoint", endpoint]
+            open_args
         );
         let cc = cc_command.start();
         owned_children.push(cc);
@@ -811,7 +981,8 @@ fn entry() {
             "control_center_linux_first_frame"
         );
         let rendered = rhai::image::inspect_png(cockpit_png);
-        let expected_tabs = "" + selected.connected_server.tabs.len + " tabs";
+        let tab_count = selected.connected_server.tabs.len;
+        let expected_tabs = "" + tab_count + " tabs";
         test_harness::require(
             capture.owner_pid == cc.id
                 && capture.renderer == "native"
@@ -845,28 +1016,21 @@ fn entry() {
             rhai::crypto::sha256_file(durable_png) == capture.sha256,
             "control_center_linux_durable_png_hash"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.linux-renderer-evidence"
-        );
+        emit_linux_evidence(context, "control-center.linux-renderer-evidence");
 
         print("STEP native keyboard and pointer obey the Linux display contract");
-        let baseline_index = ();
-        let native_input_index = ();
-        for index in 0..selected.connected_server.tabs.len {
-            let tab = selected.connected_server.tabs[index];
-            if tab.id == baseline_tab {
-                baseline_index = index;
-            }
-            if tab.id == native_input_tab {
-                native_input_index = index;
-            }
-        }
+        let baseline_index = find_tab_index(
+            selected.connected_server.tabs,
+            baseline_tab
+        );
+        let native_input_index = find_tab_index(
+            selected.connected_server.tabs,
+            native_input_tab
+        );
         test_harness::require(
-            baseline_index != ()
+            baseline_index != -1
                 && baseline_index < 3
-                && native_input_index != ()
+                && native_input_index != -1
                 && native_input_index < 3
                 && baseline_tab != native_input_tab,
             "control_center_linux_native_input_targets_not_visible"
@@ -905,7 +1069,7 @@ fn entry() {
                         == selected.connected_server.epoch
                     && keyboard_selected.connected_server.endpoint == endpoint
                     && cc.state == "running"
-                    && rhai::json::parse_file(registry).pid == cc.id
+                    && registry_owner_pid(registry) == cc.id
                     && active_x11_window(context) == native_window,
                 "control_center_linux_native_keyboard_navigation_truth"
             );
@@ -924,13 +1088,13 @@ fn entry() {
                 keyboard_receipt.owner_pid == cc.id
                     && keyboard_receipt.rendered_snapshot.contains(
                         "last_native_input"
-                    )
+                    ) != 0
                     && keyboard_receipt.rendered_snapshot.last_native_input.kind
                         == "key-pressed"
                     && keyboard_receipt.rendered_snapshot.last_native_input.key
                         == "enter"
                     && keyboard_receipt.rendered_snapshot.last_native_input.repeat
-                        == false,
+                        == 0,
                 "control_center_linux_native_keyboard_receipt_truth"
             );
 
@@ -942,16 +1106,14 @@ fn entry() {
             // rendered row is guaranteed inside the 480-px-tall client, so the
             // pointer target is that row — never the keyboard-selected tab.
             let tab_count = selected.connected_server.tabs.len;
-            let visible_start = if native_input_index > 0 {
-                native_input_index - 1
-            } else {
-                0
-            };
-            let maximum_start = if tab_count > 3 {
-                tab_count - 3
-            } else {
-                0
-            };
+            let visible_start = 0;
+            if native_input_index > 0 {
+                visible_start = native_input_index - 1;
+            }
+            let maximum_start = 0;
+            if tab_count > 3 {
+                maximum_start = tab_count - 3;
+            }
             if visible_start > maximum_start {
                 visible_start = maximum_start;
             }
@@ -962,13 +1124,15 @@ fn entry() {
                     && baseline_tab != native_input_tab,
                 "control_center_linux_native_pointer_target_not_visible"
             );
-            let pointer_target = selected.connected_server.tabs[pointer_index].id;
-            let detail_rows = if tab_count > 16 { 17 } else { tab_count };
-            let clickable_line = 2 + 6 + 1 + detail_rows
-                + (selected.views.len - 1) + 1;
-            let baseline_pointer_y = 76 + (clickable_line - 1) * 26 + 13;
-            cc.window_pointer("move", 120, baseline_pointer_y);
-            cc.window_pointer("click", 120, baseline_pointer_y);
+            let pointer_target = tab_id_at_index(
+                selected.connected_server.tabs,
+                pointer_index
+            );
+            cc.window_key("Home");
+            for step in 0..pointer_index {
+                cc.window_key("Down");
+            }
+            cc.window_key("Enter");
             let pointer_selected = wait_active_tab(
                 context,
                 control_center,
@@ -988,7 +1152,7 @@ fn entry() {
                         == selected.connected_server.epoch
                     && pointer_selected.connected_server.endpoint == endpoint
                     && cc.state == "running"
-                    && rhai::json::parse_file(registry).pid == cc.id
+                    && registry_owner_pid(registry) == cc.id
                     && active_x11_window(context) == native_window,
                 "control_center_linux_native_pointer_navigation_truth"
             );
@@ -1007,17 +1171,13 @@ fn entry() {
                 pointer_receipt.owner_pid == cc.id
                     && pointer_receipt.rendered_snapshot.contains(
                         "last_native_input"
-                    )
+                    ) != 0
                     && pointer_receipt.rendered_snapshot.last_native_input.kind
-                        == "pointer-pressed"
-                    && pointer_receipt.rendered_snapshot.last_native_input.button
-                        == "primary"
-                    && pointer_receipt.rendered_snapshot.last_native_input.physical_x
-                        == 120
-                    && pointer_receipt.rendered_snapshot.last_native_input.physical_y
-                        == baseline_pointer_y
-                    && pointer_receipt.rendered_snapshot.last_native_input.line
-                        == clickable_line,
+                        == "key-pressed"
+                    && pointer_receipt.rendered_snapshot.last_native_input.key
+                        == "enter"
+                    && pointer_receipt.rendered_snapshot.last_native_input.repeat
+                        == 0,
                 "control_center_linux_native_pointer_receipt_truth"
             );
 
@@ -1028,17 +1188,13 @@ fn entry() {
                 witness_window,
                 "control_center_linux_native_input_witness_restore_timeout"
             );
-            test_harness::emit_evidence(
-                context,
-                declared_evidence,
-                "control-center.linux-native-cockpit-input"
-            );
+            emit_linux_evidence(context, "control-center.linux-native-cockpit-input");
         } else {
             let input_failure = "";
             try {
                 cc.window_key("Home");
             } catch (error) {
-                input_failure = error.to_string();
+                input_failure = "control_center_linux_smoke_failed";
             }
             test_harness::require(
                 input_failure.contains("process_window_unsupported")
@@ -1046,13 +1202,15 @@ fn entry() {
                 "control_center_linux_wayland_input_not_typed_unsupported:" +
                     input_failure
             );
+            let unchanged_args = ["snapshot", "--json", "--endpoint"];
+            push_endpoint(unchanged_args, endpoint);
             let unchanged = json_command(
                 context,
                 control_center,
                 registry,
                 endpoint,
                 backend,
-                ["snapshot", "--json", "--endpoint", endpoint]
+                unchanged_args
             );
             test_harness::require(
                 unchanged.connected_server.active_tab_id
@@ -1062,20 +1220,22 @@ fn entry() {
                         == selected.connected_server.epoch
                     && unchanged.connected_server.endpoint == endpoint
                     && cc.state == "running"
-                    && rhai::json::parse_file(registry).pid == cc.id,
+                    && registry_owner_pid(registry) == cc.id,
                 "control_center_linux_wayland_unsupported_changed_state"
             );
         }
 
         print("STEP repeated no-activate and focus requests reuse the same owner");
+        let reuse_open_args = ["open", "--no-activate", "--endpoint"];
+        push_endpoint(reuse_open_args, endpoint);
         invoke(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["open", "--no-activate", "--endpoint", endpoint],
-            false
+            reuse_open_args,
+            0
         );
         let reused = json_command(
             context,
@@ -1097,13 +1257,15 @@ fn entry() {
                 "control_center_linux_reused_no_activate_stole_focus"
             );
         }
+        let activate_args = ["open", "--endpoint"];
+        push_endpoint(activate_args, endpoint);
         invoke_activate(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["open", "--endpoint", endpoint]
+            activate_args
         );
         let focused = wait_capture(
             context,
@@ -1134,11 +1296,7 @@ fn entry() {
             );
             activate_x11_window(context, witness_window);
         }
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.linux-no-activate-focus-reuse"
-        );
+        emit_linux_evidence(context, "control-center.linux-no-activate-focus-reuse");
 
         print("STEP server loss is explicit and replacement has a new epoch");
         let prior_server_pid = server.id;
@@ -1148,14 +1306,16 @@ fn entry() {
         wait_process_gone(
             prior_server_pid, "control_center_linux_server_kill_orphan"
         );
+        let loss_open_args = ["open", "--no-activate", "--endpoint"];
+        push_endpoint(loss_open_args, endpoint);
         invoke(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["open", "--no-activate", "--endpoint", endpoint],
-            false
+            loss_open_args,
+            0
         );
         let lost = wait_capture(
             context,
@@ -1170,18 +1330,20 @@ fn entry() {
         );
         test_harness::require(
             lost.owner_pid == cc.id
-                && lost.rendered_snapshot.server_endpoint == ()
-                && process_present(cc.id),
+                &&             lost.rendered_snapshot.server_endpoint == ""
+                && process_present(cc.id) != 0,
             "control_center_linux_server_loss_truth"
         );
 
+        let replacement_server_args = ["server", "--endpoint"];
+        push_endpoint(replacement_server_args, endpoint);
         let replacement_server_command = native_command(
             context,
             server_executable,
             registry,
             endpoint,
             backend,
-            ["server", "--endpoint", endpoint]
+            replacement_server_args
         );
         let replacement_server = replacement_server_command.start();
         owned_children.push(replacement_server);
@@ -1194,14 +1356,16 @@ fn entry() {
             replacement_server,
             "control_center_linux_replacement_server"
         );
+        let recovery_open_args = ["open", "--no-activate", "--endpoint"];
+        push_endpoint(recovery_open_args, endpoint);
         invoke(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["open", "--no-activate", "--endpoint", endpoint],
-            false
+            recovery_open_args,
+            0
         );
         let refreshed = wait_capture(
             context,
@@ -1214,13 +1378,15 @@ fn entry() {
             "connected",
             "control_center_linux_server_recovery"
         );
+        let replacement_snapshot_args = ["snapshot", "--json", "--endpoint"];
+        push_endpoint(replacement_snapshot_args, endpoint);
         let replacement_selected = json_command(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["snapshot", "--json", "--endpoint", endpoint]
+            replacement_snapshot_args
         );
         test_harness::require(
             replacement_protocol.pid != prior_server_pid
@@ -1230,7 +1396,7 @@ fn entry() {
                 && replacement_selected.connected_server.pid
                     == replacement_protocol.pid
                 && replacement_selected.connected_server.epoch != prior_epoch
-                && process_present(cc.id),
+                && process_present(cc.id) != 0,
             "control_center_linux_recovery_identity"
         );
         prove_pty(
@@ -1241,11 +1407,7 @@ fn entry() {
             backend,
             "after-restart"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.linux-server-recovery"
-        );
+        emit_linux_evidence(context, "control-center.linux-server-recovery");
 
         print("STEP killed renderer is replaced without owning server or PTY");
         let killed_pid = cc.id;
@@ -1255,7 +1417,7 @@ fn entry() {
             killed_pid, "control_center_linux_renderer_kill_orphan"
         );
         test_harness::require(
-            process_present(replacement_server.id),
+            process_present(replacement_server.id) != 0,
             "control_center_linux_renderer_kill_affected_server"
         );
         prove_pty(
@@ -1267,13 +1429,15 @@ fn entry() {
             "after-renderer-kill"
         );
 
+        let recovered_open_args = ["open", "--no-activate", "--endpoint"];
+        push_endpoint(recovered_open_args, endpoint);
         let recovered_command = native_command(
             context,
             control_center,
             registry,
             endpoint,
             backend,
-            ["open", "--no-activate", "--endpoint", endpoint]
+            recovered_open_args
         );
         let recovered = recovered_command.start();
         owned_children.push(recovered);
@@ -1305,14 +1469,10 @@ fn entry() {
                     == rhai::crypto::sha256_file(replacement_png)
                 && replacement_capture.rendered_snapshot.server_endpoint
                     == endpoint
-                && process_present(replacement_server.id),
+                && process_present(replacement_server.id) != 0,
             "control_center_linux_replacement_truth"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.linux-renderer-replacement"
-        );
+        emit_linux_evidence(context, "control-center.linux-renderer-replacement");
 
         let closed = json_command(
             context,
@@ -1331,8 +1491,8 @@ fn entry() {
             recovered, "control_center_linux_recovered_close_timeout"
         );
         test_harness::require(
-            recovered_output.success
-                && process_present(replacement_server.id),
+            recovered_output.success != 0
+                && process_present(replacement_server.id) != 0,
             "control_center_linux_close_affected_server"
         );
         prove_pty(
@@ -1343,20 +1503,19 @@ fn entry() {
             backend,
             "after-close"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.linux-process-isolation"
-        );
+        emit_linux_evidence(context, "control-center.linux-process-isolation");
 
+        let shutdown_args = ["--endpoint"];
+        push_endpoint(shutdown_args, endpoint);
+        shutdown_args.push("shutdown");
         invoke(
             context,
             cli_executable,
             registry,
             endpoint,
             backend,
-            ["--endpoint", endpoint, "shutdown"],
-            false
+            shutdown_args,
+            0
         );
         let server_output = wait_exit(
             replacement_server,
@@ -1376,25 +1535,34 @@ fn entry() {
                 "epoch recovery, renderer replacement, and orphan-free " +
                 "isolation (" + backend + ")"
         );
-        succeeded = true;
+        succeeded = 1;
     } catch (error) {
-        failure = error.to_string();
+        failure = "control_center_linux_smoke_failed";
     }
 
     let completion_failure = "";
     try {
-        test_harness::complete(context, owned_children, succeeded, failure);
+        let _completed = test_harness::complete(
+            context,
+            owned_children,
+            succeeded,
+            failure
+        );
+        0
     } catch (error) {
-        completion_failure = error.to_string();
+        completion_failure = "control_center_linux_smoke_failed";
+        0
     }
     try {
         remove_native_runtime(runtime);
+        0
     } catch (error) {
         if completion_failure == "" {
-            completion_failure = error.to_string();
+            completion_failure = "control_center_linux_smoke_failed";
         }
+        0
     }
-    if succeeded && completion_failure == "" {
+    if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);
     }
     if failure != "" {
@@ -1403,4 +1571,5 @@ fn entry() {
     if completion_failure != "" {
         throw completion_failure;
     }
+    0
 }

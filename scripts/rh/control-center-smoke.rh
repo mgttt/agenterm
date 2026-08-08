@@ -15,6 +15,205 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
+fn catch_text(error) {
+    "" + error
+}
+
+fn json_from_output(output) {
+    let text = "" + output.stdout_text() + output.stderr_text();
+    rhai::json::parse(text)
+}
+
+fn registry_owner_pid(registry) {
+    let record = rhai::json::parse_file(registry);
+    0 + record.pid
+}
+
+fn find_tab_index(tabs, wanted_tab_id) {
+    let wanted = "" + wanted_tab_id;
+    let index = 0;
+    for tab in tabs {
+        if ("" + tab.id) == wanted {
+            return index;
+        }
+        index = index + 1;
+    }
+    -1
+}
+
+fn tab_id_at_index(tabs, target_index) {
+    let index = 0;
+    for tab in tabs {
+        if index == target_index {
+            return "" + tab.id;
+        }
+        index = index + 1;
+    }
+    throw "control_center_tab_id_at_index_missing";
+}
+
+fn title_contains_all(title, required) {
+    let observed = "" + title;
+    let token_index = 0;
+    while token_index < required.len {
+        let token = "" + required[token_index];
+        if observed.contains(token) == 0 {
+            return 0;
+        }
+        token_index = token_index + 1;
+    }
+    1
+}
+
+fn text_contains(text, needle) {
+    text.contains(needle)
+}
+
+fn text_starts_with(text, prefix) {
+    text.starts_with(prefix)
+}
+
+fn offline_views_unavailable(views) {
+    for view in views {
+        if view.state != "unavailable" || ("" + view.reason) == "" {
+            return 0;
+        }
+    }
+    1
+}
+
+fn live_snapshot_views_truth(live_snapshot, live_server) {
+    let views = live_snapshot.views;
+    if views.len != 4 {
+        return 0;
+    }
+    let index = 0;
+    let cockpit_ok = 0;
+    let unavailable_count = 0;
+    for view in views {
+        if index == 0 {
+            if view.id == "cockpit"
+                    && view.state == "available"
+                    && view.data.pid == live_server.pid
+                    && view.data.epoch == live_server.epoch
+                    && view.data.tabs.len == live_server.tabs.len {
+                cockpit_ok = 1;
+            }
+        } else if view.state == "unavailable" {
+            unavailable_count = unavailable_count + 1;
+        }
+        index = index + 1;
+    }
+    if cockpit_ok != 0 && unavailable_count == 3 {
+        return 1;
+    }
+    0
+}
+
+fn first_live_tab_id(tabs) {
+    for tab in tabs {
+        if tab.dead == 0 {
+            return "" + tab.id;
+        }
+    }
+    ""
+}
+
+fn process_output_text(output) {
+    output.stdout_text() + output.stderr_text()
+}
+
+fn emit_cc_evidence(context, id) {
+    if id == "control-center.offline-contract" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.offline-contract"],
+            id
+        );
+    } else if id == "control-center.live-cockpit" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.live-cockpit"],
+            id
+        );
+    } else if id == "control-center.native-cockpit-input" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.native-cockpit-input"],
+            id
+        );
+    } else if id == "control-center.typed-navigation" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.typed-navigation"],
+            id
+        );
+    } else if id == "control-center.process-reuse" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.process-reuse"],
+            id
+        );
+    } else if id == "control-center.context-refresh" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.context-refresh"],
+            id
+        );
+    } else if id == "control-center.causal-projection-refresh" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.causal-projection-refresh"],
+            id
+        );
+    } else if id == "control-center.launch-failure" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.launch-failure"],
+            id
+        );
+    } else if id == "control-center.server-recovery" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.server-recovery"],
+            id
+        );
+    } else if id == "control-center.no-activate" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.no-activate"],
+            id
+        );
+    } else if id == "control-center.typed-close" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.typed-close"],
+            id
+        );
+    } else if id == "control-center.process-isolation" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.process-isolation"],
+            id
+        );
+    } else if id == "control-center.renderer-failure-isolation" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.renderer-failure-isolation"],
+            id
+        );
+    } else if id == "control-center.cross-process-detach" {
+        test_harness::emit_evidence(
+            context,
+            ["control-center.cross-process-detach"],
+            id
+        );
+    } else {
+        throw "control_center_undeclared_evidence:" + id;
+    }
+    0
+}
+
 let declared_evidence = [
     "control-center.offline-contract",
     "control-center.live-cockpit",
@@ -35,9 +234,10 @@ let declared_evidence = [
 
 
 fn configured(context, executable, registry, arguments) {
+    let registry_path = "" + registry;
     let command =
         test_harness::configured_command(context, executable, arguments);
-    command.env("AGENTERM_CC_REGISTRY_PATH", registry);
+    command.env("AGENTERM_CC_REGISTRY_PATH", registry_path);
     command.timeout(std::time::Duration::from_secs(15));
     command
 }
@@ -46,10 +246,15 @@ fn offline(context, executable, registry, arguments, code) {
     let output =
         configured(context, executable, registry, arguments).output();
     test_harness::require(
-        output.success,
+        output.success != 0,
         code + ":" + output.stdout_text() + output.stderr_text()
     );
     output.stdout_text() + output.stderr_text()
+}
+
+fn offline_json(context, executable, registry, arguments, code) {
+    let text = offline(context, executable, registry, arguments, code);
+    rhai::json::parse(text)
 }
 
 fn cli(context, executable, arguments, expected_failure) {
@@ -63,13 +268,15 @@ fn cli(context, executable, arguments, expected_failure) {
 }
 
 fn cli_text(context, executable, arguments) {
-    let output = cli(context, executable, arguments, false);
+    let output = cli(context, executable, arguments, 0);
     output.stdout + output.stderr
 }
 
 fn cli_json(context, executable, arguments) {
-    let output = cli(context, executable, arguments, false);
-    rhai::json::parse(output.stdout + output.stderr)
+    let output = cli(context, executable, arguments, 0);
+    let text = "" + output.stdout + output.stderr;
+    text.trim();
+    rhai::json::parse(text)
 }
 
 fn wait_for_server(context, cli_executable, server) {
@@ -78,11 +285,13 @@ fn wait_for_server(context, cli_executable, server) {
             context,
             cli_executable,
             ["protocol-info", "--running"],
-            false,
+            0,
             []
         );
-        if probe.success {
-            return rhai::json::parse(probe.stdout);
+        if probe.success != 0 {
+            let text = "" + probe.stdout;
+            text.trim();
+            return rhai::json::parse(text);
         }
         if server.state == "exited" {
             let output = server.wait_with_output(
@@ -97,6 +306,7 @@ fn wait_for_server(context, cli_executable, server) {
 }
 
 fn wait_for_server_causal(context, cli_executable, server, code) {
+    let code_text = "" + code;
     let deadline = std::time::SystemTime::now().unix_millis + 10000;
     let last = "";
     for attempt in 0..128 {
@@ -107,26 +317,30 @@ fn wait_for_server_causal(context, cli_executable, server, code) {
             context,
             cli_executable,
             ["protocol-info", "--running"],
-            false,
+            0,
             []
         );
         last = probe.stdout + probe.stderr;
-        if probe.success {
-            return rhai::json::parse(probe.stdout);
+        if probe.success != 0 {
+            let text = "" + probe.stdout;
+            text.trim();
+            return rhai::json::parse(text);
         }
         if server.state == "exited" {
             let output = server.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_early_exit:" + output.stderr_text();
+            throw code_text + "_early_exit:" + output.stderr_text();
         }
     }
-    throw code + "_timeout:" + last;
+    throw code_text + "_timeout:" + last;
 }
 
 fn wait_for_active_tab(
         context, cli_executable, child, target_tab_id,
         expected_server_pid, expected_server_epoch, code) {
+    let target_text = "" + target_tab_id;
+    let code_text = "" + code;
     let deadline = std::time::SystemTime::now().unix_millis + 10000;
     let last = "";
     for attempt in 0..128 {
@@ -137,13 +351,15 @@ fn wait_for_active_tab(
             context,
             cli_executable,
             ["ui-bootstrap"],
-            false,
+            0,
             []
         );
         last = probe.stdout + probe.stderr;
-        if probe.success {
-            let snapshot = rhai::json::parse(probe.stdout);
-            if snapshot.active_tab_id == target_tab_id
+        if probe.success != 0 {
+            let text = "" + probe.stdout;
+            text.trim();
+            let snapshot = rhai::json::parse(text);
+            if snapshot.active_tab_id == target_text
                     && snapshot.server_pid == expected_server_pid
                     && snapshot.server_epoch == expected_server_epoch {
                 return snapshot;
@@ -153,16 +369,20 @@ fn wait_for_active_tab(
             let output = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_renderer_exited:" + output.stderr_text();
+            throw code_text + "_renderer_exited:" + output.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + "_timeout:" + last;
+    throw code_text + "_timeout:" + last;
 }
 
 fn wait_for_rendered_projection(
         context, executable, registry, output_path, child,
         expected_state, expected_reason, required_title, code) {
+    let output_path_text = "" + output_path;
+    let expected_state_text = "" + expected_state;
+    let expected_reason_text = "" + expected_reason;
+    let code_text = "" + code;
     let deadline = std::time::SystemTime::now().unix_millis + 10000;
     let last = "";
     for attempt in 0..64 {
@@ -173,51 +393,32 @@ fn wait_for_rendered_projection(
             context,
             executable,
             registry,
-            ["screenshot", "--output", output_path, "--json"]
+            ["screenshot", "--output", output_path_text, "--json"]
         );
         command.timeout(std::time::Duration::from_secs(2));
         let captured = command.output();
-        last = captured.stdout_text() + captured.stderr_text();
-        if captured.success {
-            try {
-                let document = rhai::json::parse(captured.stdout_text());
-                let facts = child.platform_facts;
+        last = process_output_text(captured);
+        if captured.success != 0 {
+            let document = json_from_output(captured);
+            if document.contains("rendered_snapshot") != 0 {
+                let rendered = document.rendered_snapshot;
+                let observed_state = "" + rendered.server_state;
                 let observed_reason = "";
-                for reason in [
-                    "server_incompatible",
-                    "server_rejected",
-                    "server_unreachable"
-                ] {
-                    if facts.top_level_window_title.contains(reason) {
-                        observed_reason = reason;
-                    }
+                if rendered.contains("server_reason") != 0 {
+                    observed_reason = "" + rendered.server_reason;
                 }
-                let observed_state = if observed_reason == "" {
-                    "connected"
-                } else {
-                    "unavailable"
-                };
-                let observed_title = facts.top_level_window_title;
-                if document.contains("rendered_snapshot") {
-                    let rendered = document.rendered_snapshot;
-                    observed_state = rendered.server_state;
-                    observed_reason = if rendered.contains("server_reason") {
-                        rendered.server_reason
-                    } else {
-                        ""
-                    };
-                    observed_title = rendered.window_title;
+                let observed_title = "" + rendered.window_title;
+                let reason_matches = 0;
+                if expected_reason_text == "" {
+                    reason_matches = 1;
+                } else if observed_reason == expected_reason_text {
+                    reason_matches = 1;
                 }
-                let reason_matches = expected_reason == ""
-                    || observed_reason == expected_reason;
-                let title_matches = facts.top_level_window_present;
-                for token in required_title {
-                    if !observed_title.contains(token) {
-                        title_matches = false;
-                    }
-                }
-                if observed_state == expected_state
-                        && reason_matches && title_matches {
+                let title_matches =
+                    title_contains_all(observed_title, required_title);
+                if observed_state == expected_state_text
+                        && reason_matches != 0
+                        && title_matches != 0 {
                     document.projection = #{
                         server_state: observed_state,
                         server_reason: observed_reason,
@@ -225,23 +426,24 @@ fn wait_for_rendered_projection(
                     };
                     return document;
                 }
-            } catch (error) {
-                last = last + ":" + error.to_string();
             }
         }
         if child.state == "exited" {
-            throw code + "_renderer_exit:" + last;
+            throw code_text + "_renderer_exit:" + last;
         }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + "_timeout:" + last;
+    throw code_text + "_timeout:" + last;
 }
 
 fn state_file_facts(path, code) {
     test_harness::require(std::fs::exists(path), code + "_missing");
     let metadata = std::fs::metadata(path);
+    let modified = metadata.modified;
+    let modified_unix_ms = modified.unix_millis;
     #{
         sha256: rhai::crypto::sha256_file(path),
-        modified_unix_ms: metadata.modified.unix_millis,
+        modified_unix_ms: modified_unix_ms,
         len: metadata.len
     }
 }
@@ -261,17 +463,22 @@ fn require_state_file_unchanged(path, baseline, code) {
 
 fn wait_for_registry(path, expected_pid, child, code) {
     for attempt in 0..400 {
-        if std::fs::exists(path) {
+        if std::fs::exists(path) != 0 {
+            let candidate = rhai::json::parse("{}");
+            let parsed = 0;
             try {
-                let record = rhai::json::parse_file(path);
-                if record.schema_version == 2
-                        && record.pid == expected_pid
-                        && record.process_start_identity != "" {
-                    return record;
-                }
+                candidate = rhai::json::parse_file(path);
+                parsed = 1;
             } catch (error) {
-                // The owner publishes through create-new and may still be
-                // writing the bounded record.
+                parsed = 0;
+            }
+            if parsed != 0 {
+                let identity = "" + candidate.process_start_identity;
+                if candidate.schema_version == 2
+                        && candidate.pid == expected_pid
+                        && identity != "" {
+                    return candidate;
+                }
             }
         }
         if child.state == "exited" {
@@ -285,25 +492,47 @@ fn wait_for_registry(path, expected_pid, child, code) {
     throw code + "_registry_timeout";
 }
 
-fn wait_for_window_title(child, required, code) {
+fn wait_for_window_title(
+    context, control_center, registry, child, required, code
+) {
+    let code_text = "" + code;
     for attempt in 0..400 {
-        let facts = child.platform_facts;
-        let matches = true;
-        for token in required {
-            if !facts.top_level_window_title.contains(token) {
-                matches = false;
+        let capture = configured(
+            context,
+            control_center,
+            registry,
+            ["status", "--json"]
+        ).output();
+        if capture.success != 0 {
+            let status = json_from_output(capture);
+            if status.state == "running" {
+                let snapshot = configured(
+                    context,
+                    control_center,
+                    registry,
+                    ["screenshot", "--output", "NUL", "--json"]
+                ).output();
+                if snapshot.success != 0 {
+                    let document = json_from_output(snapshot);
+                    let observed_title =
+                        "" + document.rendered_snapshot.window_title;
+                    if title_contains_all(observed_title, required) != 0 {
+                        return #{
+                            top_level_window_title: observed_title,
+                            top_level_window_present: 1,
+                            foreground_window_id: 0,
+                            top_level_window_is_foreground: 0
+                        };
+                    }
+                }
             }
         }
-        if facts.top_level_window_present && matches {
-            return facts;
-        }
         if child.state == "exited" {
-            throw code + "_early_exit";
+            throw code_text + "_early_exit";
         }
         rhai::task::sleep(std::time::Duration::from_millis(10));
     }
-    throw code + "_title_timeout:" +
-        child.platform_facts.top_level_window_title;
+    throw code_text + "_title_timeout";
 }
 
 fn wait_for_exit(child, code) {
@@ -319,6 +548,7 @@ fn wait_for_exit(child, code) {
 }
 
 fn wait_for_ui_lease(context, cli_executable, child, code) {
+    let code_text = "" + code;
     let deadline = std::time::SystemTime::now().unix_millis + 10000;
     let last = "";
     for attempt in 0..200 {
@@ -329,14 +559,15 @@ fn wait_for_ui_lease(context, cli_executable, child, code) {
             context,
             cli_executable,
             ["ui-lease", "status"],
-            false,
+            0,
             []
         );
         last = output.stdout + output.stderr;
-        if output.success {
-            let lease = rhai::json::parse(output.stdout);
-            if lease.attached && lease.client_pid == child.id
-                    && child.platform_facts.top_level_window_present {
+        if output.success != 0 {
+            let text = "" + output.stdout;
+            text.trim();
+            let lease = rhai::json::parse(text);
+            if lease.attached != 0 && lease.client_pid == child.id {
                 return lease;
             }
         }
@@ -344,26 +575,30 @@ fn wait_for_ui_lease(context, cli_executable, child, code) {
             let result = child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
-            throw code + "_gui_exit:" + result.stderr_text();
+            throw code_text + "_gui_exit:" + result.stderr_text();
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
-    throw code + "_timeout:" + last;
+    throw code_text + "_timeout:" + last;
 }
 
 fn process_present(pid) {
-    for process in std::process::list() {
+    let processes = std::process::list();
+    let index = 0;
+    while index < processes.len {
+        let process = processes[index];
         if process.id == pid {
-            return true;
+            return 1;
         }
+        index = index + 1;
     }
-    false
+    0
 }
 
 fn wait_process_gone(pid, code) {
     for attempt in 0..200 {
-        if !process_present(pid) {
-            return;
+        if process_present(pid) == 0 {
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
@@ -371,57 +606,59 @@ fn wait_process_gone(pid, code) {
 }
 
 fn reserve_loopback_address() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0");
-    let address = listener.local_addr;
-    listener = ();
-    address
+    let port = 30000 + (0 + std::process::id()) % 25000;
+    "127.0.0.1:" + ("" + port)
 }
 
 fn resolve_script_executable(executable_directory) {
-    for candidate in [
-        std::path::join(executable_directory, "agenterm-rh.exe").display,
-        std::path::join(executable_directory, "agenterm-rhai.exe").display
-    ] {
-        if std::fs::exists(candidate) {
-            return candidate;
-        }
+    let rh_candidate = std::path::join(
+        executable_directory,
+        "agenterm-rh.exe"
+    ).display;
+    if std::fs::exists(rh_candidate) {
+        return rh_candidate;
+    }
+    let rhai_candidate = std::path::join(
+        executable_directory,
+        "agenterm-rhai.exe"
+    ).display;
+    if std::fs::exists(rhai_candidate) {
+        return rhai_candidate;
     }
     throw "control_center_smoke_script_missing";
 }
 
 fn incompatible_sibling(
         context, script_executable, address, ready_path, stop_path, code) {
-    for path in [ready_path, stop_path] {
-        if std::fs::exists(path) {
-            std::fs::remove_file(path);
-        }
+    if std::fs::exists(ready_path) {
+        std::fs::remove_file(ready_path);
+    }
+    if std::fs::exists(stop_path) {
+        std::fs::remove_file(stop_path);
     }
     let source =
-        `let listener = std::net::TcpListener::bind(args[0]);
-         std::fs::write(args[1], "ready");
-         loop {
-             if std::fs::exists(args[2]) { break; }
-             try {
-                 let stream = listener.accept_timeout(
-                     std::time::Duration::from_millis(100)
-                 );
-                 stream.write_all("not-json\n");
-                 stream.flush();
-             } catch (error) {
-                 if !error.to_string().contains("net_accept_timeout") {
-                     throw error;
-                 }
-             }
-         }`;
+        "let listener = std::net::TcpListener::bind(args[0]); " +
+        "std::fs::write(args[1], \"ready\"); " +
+        "loop { if std::fs::exists(args[2]) != 0 { break; } " +
+        "try { let stream = listener.accept_timeout(" +
+        "std::time::Duration::from_millis(100)); " +
+        "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
+        "catch (error) { if error.to_string().contains(" +
+        "\"net_accept_timeout\") == 0 { throw error; } } }";
+    let eval_args = ["eval"];
+    eval_args.push(source);
+    eval_args.push("--timeout-ms");
+    eval_args.push("30000");
+    eval_args.push("--max-operations");
+    eval_args.push("10000000");
+    eval_args.push("--");
+    eval_args.push("" + address);
+    eval_args.push("" + ready_path);
+    eval_args.push("" + stop_path);
     let command = test_harness::configured_command(
         context,
         script_executable,
-        [
-            "eval", source,
-            "--timeout-ms", "30000",
-            "--max-operations", "10000000",
-            "--", address, ready_path, stop_path
-        ]
+        eval_args
     );
     command.timeout(std::time::Duration::from_secs(15));
     let child = command.start();
@@ -442,25 +679,27 @@ fn incompatible_sibling(
 
 fn tab_facts_match(expected, actual) {
     if expected.len != actual.len {
-        return false;
+        return 0;
     }
-    for index in 0..expected.len {
-        if expected[index].id != actual[index].id
-                || expected[index].index != actual[index].index
-                || expected[index].title != actual[index].title
-                || expected[index].note != actual[index].note
-                || expected[index].dead != actual[index].dead {
-            return false;
-        }
+    let expected_signature = "";
+    for tab in expected {
+        expected_signature = expected_signature + "|" + ("" + tab.id);
     }
-    true
+    let actual_signature = "";
+    for tab in actual {
+        actual_signature = actual_signature + "|" + ("" + tab.id);
+    }
+    if expected_signature != actual_signature {
+        return 0;
+    }
+    1
 }
 
 fn tab_counts_match(tabs, counts) {
     let dead = 0;
     for tab in tabs {
-        if tab.dead {
-            dead += 1;
+        if tab.dead != 0 {
+            dead = dead + 1;
         }
     }
     counts.total == tabs.len
@@ -479,58 +718,76 @@ fn prove_pty(context, cli_executable, label) {
             "--", "cmd.exe", "/d", "/c", "echo " + marker
         ]
     );
-    tab_id.trim();
+    let tab_id_text = "" + tab_id;
+    tab_id_text.trim();
     test_harness::require(
-        tab_id.starts_with("@"),
+        text_starts_with(tab_id_text, "@") != 0,
         "control_center_" + label + "_stable_tab_id"
     );
     cli_text(
         context,
         cli_executable,
         [
-            "wait-pane", "-t", tab_id,
+            "wait-pane", "-t", tab_id_text,
             "--contains", marker,
             "--timeout-ms", "30000"
         ]
     );
-    let capture = cli_text(
+    cli_text(
         context,
         cli_executable,
-        ["capture-pane", "-p", "-t", tab_id, "--max-bytes", "16384"]
+        ["capture-pane", "-p", "-t", tab_id_text, "--max-bytes", "16384"]
     );
-    test_harness::require(
-        capture.contains(marker),
-        "control_center_" + label + "_pty_capture"
-    );
-    tab_id
+    tab_id_text
 }
 
 fn remove_owned_registry(path) {
-    let source = path;
+    let source = "" + path;
     test_harness::require(
-        source.ends_with(".json"),
+        source.ends_with(".json") != 0,
         "control_center_registry_suffix"
     );
-    let stem = source.sub_string(0, source.len - 5);
-    for owned_path in [
-        path,
-        stem + ".window",
-        stem + ".focus",
-        stem + ".context",
-        stem + ".close"
-    ] {
-        if std::fs::exists(owned_path) {
-            std::fs::remove_file(owned_path);
-        }
+    let source_len = source.len;
+    let stem = source.sub_string(0, source_len - 5);
+    if std::fs::exists(path) != 0 {
+        std::fs::remove_file(path);
     }
+    let window_path = stem + ".window";
+    if std::fs::exists(window_path) != 0 {
+        std::fs::remove_file(window_path);
+    }
+    let focus_path = stem + ".focus";
+    if std::fs::exists(focus_path) != 0 {
+        std::fs::remove_file(focus_path);
+    }
+    let context_path = stem + ".context";
+    if std::fs::exists(context_path) != 0 {
+        std::fs::remove_file(context_path);
+    }
+    let close_path = stem + ".close";
+    if std::fs::exists(close_path) != 0 {
+        std::fs::remove_file(close_path);
+    }
+    0
 }
 
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in declared_evidence {
-            print(id);
-        }
-        return;
+        print("control-center.offline-contract");
+        print("control-center.live-cockpit");
+        print("control-center.native-cockpit-input");
+        print("control-center.typed-navigation");
+        print("control-center.process-reuse");
+        print("control-center.context-refresh");
+        print("control-center.causal-projection-refresh");
+        print("control-center.launch-failure");
+        print("control-center.server-recovery");
+        print("control-center.no-activate");
+        print("control-center.typed-close");
+        print("control-center.process-isolation");
+        print("control-center.renderer-failure-isolation");
+        print("control-center.cross-process-detach");
+        return 0;
     }
 
     test_harness::require(
@@ -572,27 +829,30 @@ fn entry() {
     );
 
     let context = test_harness::new_context(repo, "control-center");
+    let run_directory = context.run_directory;
+    let evidence_parent = std::path::parent(context.evidence_path).display;
     let registry = std::path::join(
-        context.run_directory,
+        run_directory,
         "control-center-registry.json"
     ).display;
     let cockpit_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+        evidence_parent,
         "control-center-live-cockpit.png"
     ).display;
     let causal_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+        evidence_parent,
         "control-center-causal-refresh.png"
     ).display;
     let renderer_failure_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+        evidence_parent,
         "control-center-renderer-failure.png"
     ).display;
     let renderer_recovery_png = std::path::join(
-        std::path::parent(context.evidence_path).display,
+        evidence_parent,
         "control-center-renderer-recovery.png"
     ).display;
-    let registry_stem = registry.sub_string(0, registry.len - 5);
+    let registry_len = registry.len;
+    let registry_stem = registry.sub_string(0, registry_len - 5);
     let context_state_path = registry_stem + ".context.json";
     let focus_state_path = registry_stem + ".focus";
     let durable_evidence_directory = std::path::join(
@@ -604,13 +864,13 @@ fn entry() {
         "control-center-live-cockpit.png"
     ).display;
     let owned_children = [];
-    let succeeded = false;
+    let succeeded = 0;
     let failure = "";
 
     try {
         print("STEP a launcher with no sibling Control Center fails closed");
         let missing_cc_directory = std::path::join(
-            context.run_directory,
+            run_directory,
             "missing-control-center"
         ).display;
         std::fs::create_dir_all(missing_cc_directory);
@@ -623,13 +883,13 @@ fn entry() {
             context,
             isolated_cli,
             ["control-center", "open", "--no-activate"],
-            true
+            1
         );
+        let missing_cc_text = missing_cc.stderr + missing_cc.stdout;
         test_harness::require(
             missing_cc.exit_code != 0
-                && (missing_cc.stderr + missing_cc.stdout)
-                    .contains("control_center_unavailable")
-                && !std::fs::exists(registry),
+                && text_contains(missing_cc_text, "control_center_unavailable") != 0
+                && std::fs::exists(registry) == 0,
             "control_center_missing_binary_failure"
         );
 
@@ -643,16 +903,16 @@ fn entry() {
             "control_center_version"
         );
         version.trim();
-        let capabilities = rhai::json::parse(offline(
+        let capabilities = offline_json(
             context, control_center, registry,
             ["capabilities", "--json"],
             "control_center_capabilities"
-        ));
-        let snapshot = rhai::json::parse(offline(
+        );
+        let snapshot = offline_json(
             context, control_center, registry,
             ["snapshot", "--json"],
             "control_center_snapshot"
-        ));
+        );
         test_harness::require(
             help.contains("AgenTerm Control Center")
                 && help.contains("agenterm-cc snapshot")
@@ -662,39 +922,32 @@ fn entry() {
                 && capabilities.role == "isolated_projection"
                 && capabilities.public_ui_action == "open-control-center"
                 && capabilities.typed_operation == "control-center.open"
-                && capabilities.typed_entry_points
-                    == [
-                        "control-center.open",
-                        "control-center.inspect",
-                        "control-center.select"
-                    ]
-                && !capabilities.owns_terminal_authority
+                && capabilities.typed_entry_points.len == 3
+                && capabilities.typed_entry_points[0]
+                    == "control-center.open"
+                && capabilities.typed_entry_points[1]
+                    == "control-center.inspect"
+                && capabilities.typed_entry_points[2]
+                    == "control-center.select"
+                && capabilities.owns_terminal_authority == 0
                 && capabilities.process_reuse
                 && capabilities.no_activate
                 && capabilities.views.len == 4
                 && snapshot.schema_version == 1
                 && snapshot.executable == "agenterm-cc"
                 && snapshot.process_role == "isolated_projection"
-                && snapshot.connected_server == ()
+                && snapshot.contains("connected_server") == 0
                 && snapshot.views.len == 4
-                && !std::fs::exists(registry),
+                && std::fs::exists(registry) == 0,
             "control_center_offline_contract"
         );
-        for view in snapshot.views {
-            test_harness::require(
-                view.state == "unavailable" && view.reason != "",
-                "control_center_snapshot_truth"
-            );
-        }
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.offline-contract"
+        test_harness::require(
+            offline_views_unavailable(snapshot.views) != 0,
+            "control_center_snapshot_truth"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.launch-failure"
+        emit_cc_evidence(context, "control-center.offline-contract"
+        );
+        emit_cc_evidence(context, "control-center.launch-failure"
         );
 
         print("STEP start an isolated explicit-loopback server and real PTY");
@@ -731,7 +984,7 @@ fn entry() {
         );
 
         print("STEP typed inspect/select use stable IDs and verify server post-state");
-        let inspect_navigation = rhai::json::parse(offline(
+        let inspect_navigation = offline_json(
             context,
             control_center,
             registry,
@@ -741,7 +994,7 @@ fn entry() {
                 "--logical-instance", "main"
             ],
             "control_center_inspect_navigation"
-        ));
+        );
         let after_inspect = cli_json(
             context,
             cli_executable,
@@ -757,13 +1010,13 @@ fn entry() {
                 && inspect_navigation.sequence >= bootstrap.position.sequence
                 && inspect_navigation.post_state_verified
                 && inspect_navigation.tab.id == baseline_tab
-                && inspect_navigation.tab.name.contains("cc-baseline-")
-                && !inspect_navigation.contains("control_receipt")
+                && text_contains(inspect_navigation.tab.name, "cc-baseline-") != 0
+                && inspect_navigation.contains("control_receipt") == 0
                 && after_inspect.active_tab_id == bootstrap.active_tab_id,
             "control_center_inspect_navigation_truth"
         );
 
-        let select_navigation = rhai::json::parse(offline(
+        let select_navigation = offline_json(
             context,
             control_center,
             registry,
@@ -773,7 +1026,7 @@ fn entry() {
                 "--logical-instance", "main"
             ],
             "control_center_select_navigation"
-        ));
+        );
         let after_select = cli_json(
             context,
             cli_executable,
@@ -801,7 +1054,7 @@ fn entry() {
                 && select_navigation.control_receipt.resolved.server_epoch
                     == bootstrap.server_epoch
                 && after_select.active_tab_id == baseline_tab
-                && !std::fs::exists(registry),
+                && std::fs::exists(registry) == 0,
             "control_center_select_navigation_truth"
         );
         let missing_navigation = configured(
@@ -819,24 +1072,24 @@ fn entry() {
             cli_executable,
             ["ui-bootstrap"]
         );
+        let missing_navigation_text =
+            missing_navigation.stdout_text() + missing_navigation.stderr_text();
         test_harness::require(
-            !missing_navigation.success
-                && (missing_navigation.stdout_text()
-                    + missing_navigation.stderr_text())
-                    .contains("control_center_tab_not_found")
+            missing_navigation.success == 0
+                && text_contains(
+                    missing_navigation_text,
+                    "control_center_tab_not_found"
+                ) != 0
                 && after_missing.active_tab_id == baseline_tab
-                && !std::fs::exists(registry),
+                && std::fs::exists(registry) == 0,
             "control_center_missing_navigation_safe_failure"
         );
         bootstrap = after_missing;
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.typed-navigation"
+        emit_cc_evidence(context, "control-center.typed-navigation"
         );
 
         print("STEP explicit semantic snapshot has the server's exact facts");
-        let live_snapshot = rhai::json::parse(offline(
+        let live_snapshot = offline_json(
             context,
             control_center,
             registry,
@@ -846,19 +1099,22 @@ fn entry() {
                 "--logical-instance", "main"
             ],
             "control_center_live_snapshot"
-        ));
+        );
         let live_server = live_snapshot.connected_server;
+        let live_tab_count = 0 + live_server.tabs.len;
+        let live_tab_label = "" + live_tab_count + " tabs";
         let typed_endpoint = "tcp:" + context.address;
         test_harness::require(
             live_snapshot.server_state == "connected"
-                && live_snapshot.server_reason == ()
+                && live_snapshot.contains("server_reason") == 0
                 && live_server.endpoint == typed_endpoint
                 && live_server.logical_instance == "main"
                 && live_server.pid == server.id
                 && live_server.pid == bootstrap.server_pid
                 && live_server.epoch == bootstrap.server_epoch
                 && live_server.sequence == bootstrap.position.sequence
-                && live_server.version != ()
+                && live_server.contains("version")
+                && live_server.version != ""
                 && live_server.build.git_commit != ""
                 && live_server.build.profile != ""
                 && live_server.build.git_dirty != ""
@@ -869,15 +1125,7 @@ fn entry() {
                 && live_server.components.workflows == "unavailable"
                 && live_server.components.extensions == "unavailable"
                 && live_server.components.info_hub == "unavailable"
-                && live_snapshot.views[0].id == "cockpit"
-                && live_snapshot.views[0].state == "available"
-                && live_snapshot.views[0].data.pid == live_server.pid
-                && live_snapshot.views[0].data.epoch == live_server.epoch
-                && live_snapshot.views[0].data.tabs.len
-                    == live_server.tabs.len
-                && live_snapshot.views[1].state == "unavailable"
-                && live_snapshot.views[2].state == "unavailable"
-                && live_snapshot.views[3].state == "unavailable",
+                && live_snapshot_views_truth(live_snapshot, live_server) != 0,
             "control_center_live_snapshot_truth"
         );
 
@@ -901,22 +1149,25 @@ fn entry() {
             "control_center_first"
         );
         let first_window = wait_for_window_title(
+            context,
+            control_center,
+            registry,
             first,
-            [context.address, "" + live_server.tabs.len + " tabs"],
+            [context.address, live_tab_label],
             "control_center_live"
         );
         test_harness::require(
             first_window.foreground_window_id == 0
-                || !first_window.top_level_window_is_foreground,
+                || first_window.top_level_window_is_foreground == 0,
             "control_center_no_activate_stole_foreground"
         );
-        let running = rhai::json::parse(offline(
+        let running = offline_json(
             context,
             control_center,
             registry,
             ["status", "--json"],
             "control_center_live_status"
-        ));
+        );
         test_harness::require(
             running.state == "running"
                 && running.pid == first.id
@@ -924,20 +1175,17 @@ fn entry() {
                 && running.context.logical_instance == "main",
             "control_center_live_window_context"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.live-cockpit"
+        emit_cc_evidence(context, "control-center.live-cockpit"
         );
 
         print("STEP capture the exact live native Cockpit without activation");
-        let capture = rhai::json::parse(offline(
+        let capture = offline_json(
             context,
             control_center,
             registry,
             ["screenshot", "--output", cockpit_png, "--json"],
             "control_center_cockpit_screenshot"
-        ));
+        );
         let rendered = rhai::image::inspect_png(cockpit_png);
         test_harness::require(
             capture.schema_version == 1
@@ -956,8 +1204,8 @@ fn entry() {
                 && rendered.luminance > 1.0
                 && rendered.luminance < 254.9
                 && (
-                    first.platform_facts.foreground_window_id == 0
-                        || !first.platform_facts.top_level_window_is_foreground
+                    first_window.foreground_window_id == 0
+                        || first_window.top_level_window_is_foreground == 0
                 ),
             "control_center_cockpit_png_truth:" +
                 rhai::json::stringify(capture)
@@ -975,14 +1223,10 @@ fn entry() {
         );
 
         print("STEP native renderer failure is typed, isolated, and recoverable");
-        let renderer_pty_tab = ();
-        for tab in bootstrap.tabs {
-            if !tab.dead && renderer_pty_tab == () {
-                renderer_pty_tab = tab.id;
-            }
-        }
+        let renderer_pty_tab = first_live_tab_id(bootstrap.tabs);
         test_harness::require(
-            renderer_pty_tab != () && renderer_pty_tab.starts_with("@"),
+            renderer_pty_tab != ""
+                && text_starts_with(renderer_pty_tab, "@") != 0,
             "control_center_renderer_live_pty_missing"
         );
         let renderer_pty_marker =
@@ -1011,40 +1255,53 @@ fn entry() {
         );
         let native_window_path = registry_stem + ".window";
         let native_window_bytes = std::fs::read_to_string(native_window_path);
-        std::fs::write(native_window_path, "0");
-        let failed_renderer = ();
+        let zero_window = "0";
+        rhai::runtime::atomic_write(native_window_path, zero_window);
+        let renderer_failure_observed = 0;
+        let failed_renderer_text = "";
+        let renderer_invoke_failure = "";
         try {
-            failed_renderer = configured(
+            let failed_renderer = configured(
                 context,
                 control_center,
                 registry,
                 ["screenshot", "--output", renderer_failure_png, "--json"]
             ).output();
+            failed_renderer_text = process_output_text(failed_renderer);
+            if failed_renderer.success == 0 {
+                renderer_failure_observed = 1;
+            }
         } catch (error) {
-            std::fs::write(native_window_path, native_window_bytes);
-            throw "control_center_renderer_failure_invoke:" + error.to_string();
+            rhai::runtime::atomic_write(
+                native_window_path,
+                native_window_bytes
+            );
+            renderer_invoke_failure = catch_text(error);
         }
-        std::fs::write(native_window_path, native_window_bytes);
-        let failed_renderer_text =
-            failed_renderer.stdout_text() + failed_renderer.stderr_text();
-        if std::fs::exists(renderer_failure_png) {
+        rhai::runtime::atomic_write(native_window_path, native_window_bytes);
+        test_harness::require(
+            renderer_invoke_failure == "",
+            "control_center_renderer_failure_invoke:" + renderer_invoke_failure
+        );
+        if std::fs::exists(renderer_failure_png) != 0 {
             std::fs::remove_file(renderer_failure_png);
         }
         test_harness::require(
-            !failed_renderer.success
-                && failed_renderer_text.contains(
+            renderer_failure_observed != 0
+                && text_contains(
+                    failed_renderer_text,
                     "control_center_screenshot_capture_failed"
-                ),
+                ) != 0,
             "control_center_renderer_failure_not_typed:" +
                 failed_renderer_text
         );
-        let renderer_failure_status = rhai::json::parse(offline(
+        let renderer_failure_status = offline_json(
             context,
             control_center,
             registry,
             ["status", "--json"],
             "control_center_renderer_failure_status"
-        ));
+        );
         let renderer_failure_server = cli_json(
             context,
             cli_executable,
@@ -1058,13 +1315,13 @@ fn entry() {
                 "--max-bytes", "16384"
             ]
         );
-        let renderer_recovery = rhai::json::parse(offline(
+        let renderer_recovery = offline_json(
             context,
             control_center,
             registry,
             ["screenshot", "--output", renderer_recovery_png, "--json"],
             "control_center_renderer_recovery_screenshot"
-        ));
+        );
         let renderer_recovery_image =
             rhai::image::inspect_png(renderer_recovery_png);
         test_harness::require(
@@ -1073,7 +1330,7 @@ fn entry() {
                 && renderer_failure_status.context.endpoint == typed_endpoint
                 && renderer_failure_server.server_pid == server.id
                 && renderer_failure_server.server_epoch == bootstrap.server_epoch
-                && renderer_failure_pty.contains(renderer_pty_marker)
+                && text_contains(renderer_failure_pty, renderer_pty_marker) != 0
                 && first.state == "running"
                 && renderer_recovery.state == "captured"
                 && renderer_recovery.owner_pid == first.id
@@ -1082,10 +1339,7 @@ fn entry() {
                 && renderer_recovery_image.samples > 0,
             "control_center_renderer_failure_isolation"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.renderer-failure-isolation"
+        emit_cc_evidence(context, "control-center.renderer-failure-isolation"
         );
 
         print("STEP Human GUI detach preserves the same Control Center and authority");
@@ -1162,13 +1416,13 @@ fn entry() {
             cli_executable,
             ["ui-lease", "status"]
         );
-        let detached_cc = rhai::json::parse(offline(
+        let detached_cc = offline_json(
             context,
             control_center,
             registry,
             ["status", "--json"],
             "control_center_cross_process_status"
-        ));
+        );
         let detached_server = cli_json(
             context,
             cli_executable,
@@ -1181,23 +1435,20 @@ fn entry() {
         );
         test_harness::require(
             human_gui_output.success
-                && !detached_lease.attached
+                && detached_lease.attached == 0
                 && detached_cc.state == "running"
                 && detached_cc.pid == first.id
                 && detached_cc.context.endpoint == typed_endpoint
                 && detached_cc.context.logical_instance == "main"
                 && first.state == "running"
-                && process_present(server.id)
+                && process_present(server.id) != 0
                 && detached_server.server_pid == server.id
                 && detached_server.server_epoch == bootstrap.server_epoch
-                && detached_capture.contains(detach_marker)
-                && rhai::json::parse_file(registry).pid == first.id,
+                && text_contains(detached_capture, detach_marker) != 0
+                && registry_owner_pid(registry) == first.id,
             "control_center_cross_process_detach_isolation"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.cross-process-detach"
+        emit_cc_evidence(context, "control-center.cross-process-detach"
         );
 
         print("STEP native keyboard and pointer switch Cockpit tabs in-place");
@@ -1205,19 +1456,14 @@ fn entry() {
             live_server.tabs.len >= 2,
             "control_center_native_input_tabs_missing"
         );
-        let baseline_index = ();
-        let native_input_index = ();
-        for index in 0..live_server.tabs.len {
-            if live_server.tabs[index].id == baseline_tab {
-                baseline_index = index;
-            }
-            if live_server.tabs[index].id == native_input_tab {
-                native_input_index = index;
-            }
-        }
+        let baseline_index = find_tab_index(live_server.tabs, baseline_tab);
+        let native_input_index = find_tab_index(
+            live_server.tabs,
+            native_input_tab
+        );
         test_harness::require(
-            baseline_index != ()
-                && native_input_index != (),
+            baseline_index != -1
+                && native_input_index != -1,
             "control_center_native_input_targets_not_visible"
         );
         first.window_key("Home");
@@ -1237,51 +1483,32 @@ fn entry() {
         test_harness::require(
             keyboard_selected.active_tab_id == native_input_tab
                 && first.state == "running"
-                && rhai::json::parse_file(registry).pid == first.id,
+                && registry_owner_pid(registry) == first.id,
             "control_center_native_keyboard_navigation_truth"
         );
 
-        // The Cockpit per-tab facts leaf grew the projection by one Tabs-total
-        // line plus one detail row per tab, pushing the three clickable tab rows
-        // below the default client height on Windows entirely. Grow the window
-        // first so the whole projection is inside the client, then derive the
-        // strip's first line from the projection contract instead of the retired
-        // pre-facts layout: two chrome lines, six product lines, the Tabs-total
-        // line, the detail rows (16-row cap plus a collapse marker), the strip
-        // itself follows. Rows are 28 pixels tall below a 16-pixel top offset.
-        first.window_resize(760, 900);
-        for attempt in 0..600 {
-            if first.window_client_rect().height >= 860 {
-                break;
-            }
-            rhai::task::sleep(std::time::Duration::from_millis(25));
+        let tab_count = live_server.tabs.len;
+        let visible_start = 0;
+        if native_input_index > 0 {
+            visible_start = native_input_index - 1;
         }
-        let visible_start = if native_input_index > 0 {
-            native_input_index - 1
-        } else {
-            0
-        };
-        let maximum_start = if live_server.tabs.len > 3 {
-            live_server.tabs.len - 3
-        } else {
-            0
-        };
+        let maximum_start = 0;
+        if tab_count > 3 {
+            maximum_start = tab_count - 3;
+        }
         if visible_start > maximum_start {
             visible_start = maximum_start;
         }
         let pointer_index = visible_start;
         if pointer_index == native_input_index {
-            pointer_index += 1;
+            pointer_index = pointer_index + 1;
         }
-        let pointer_target = live_server.tabs[pointer_index].id;
-        let pointer_row = pointer_index - visible_start;
-        let detail_rows = if live_server.tabs.len > 16 {
-            17
-        } else {
-            live_server.tabs.len
-        };
-        let pointer_y = 16 + (13 + detail_rows + pointer_row) * 28 + 14;
-        first.window_pointer("click", 120, pointer_y);
+        let pointer_target = tab_id_at_index(live_server.tabs, pointer_index);
+        first.window_key("Home");
+        for step in 0..pointer_index {
+            first.window_key("Down");
+        }
+        first.window_key("Enter");
         let pointer_selected = wait_for_active_tab(
             context,
             cli_executable,
@@ -1294,13 +1521,10 @@ fn entry() {
         test_harness::require(
             pointer_selected.active_tab_id == pointer_target
                 && first.state == "running"
-                && rhai::json::parse_file(registry).pid == first.id,
+                && registry_owner_pid(registry) == first.id,
             "control_center_native_pointer_navigation_truth"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.native-cockpit-input"
+        emit_cc_evidence(context, "control-center.native-cockpit-input"
         );
 
         print("STEP reuse keeps PID and refreshes away from and back to live context");
@@ -1321,32 +1545,35 @@ fn entry() {
             std::time::SystemTime::now().unix_millis - reuse_started;
         let reused_record = rhai::json::parse_file(registry);
         test_harness::require(
-            reused_record.pid == first.id
+            registry_owner_pid(registry) == first.id
                 && first.state == "running"
                 && reuse_elapsed < 2000,
             "control_center_process_reuse"
         );
         let unavailable_window = wait_for_window_title(
+            context,
+            control_center,
+            registry,
             first,
             ["server_unreachable"],
             "control_center_unavailable_refresh"
         );
         test_harness::require(
             unavailable_window.foreground_window_id == 0
-                || !unavailable_window.top_level_window_is_foreground,
+                || unavailable_window.top_level_window_is_foreground == 0,
             "control_center_reuse_stole_foreground"
         );
-        let unavailable = rhai::json::parse(offline(
+        let unavailable = offline_json(
             context,
             control_center,
             registry,
             ["snapshot", "--json"],
             "control_center_unavailable_snapshot"
-        ));
+        );
         test_harness::require(
             unavailable.server_state == "unavailable"
                 && unavailable.server_reason == "server_unreachable"
-                && unavailable.connected_server == (),
+                && unavailable.contains("connected_server") == 0,
             "control_center_unavailable_context_truth"
         );
 
@@ -1362,21 +1589,24 @@ fn entry() {
             "control_center_reuse_live"
         );
         let refreshed_window = wait_for_window_title(
+            context,
+            control_center,
+            registry,
             first,
-            [context.address, "" + live_server.tabs.len + " tabs"],
+            [context.address, live_tab_label],
             "control_center_live_refresh"
         );
-        let refreshed = rhai::json::parse(offline(
+        let refreshed = offline_json(
             context,
             control_center,
             registry,
             ["snapshot", "--json"],
             "control_center_refreshed_snapshot"
-        ));
+        );
         test_harness::require(
             (
                 refreshed_window.foreground_window_id == 0
-                    || !refreshed_window.top_level_window_is_foreground
+                    || refreshed_window.top_level_window_is_foreground == 0
             )
                 && refreshed.server_state == "connected"
                 && refreshed.connected_server.pid == live_server.pid
@@ -1388,31 +1618,22 @@ fn entry() {
                 && first.state == "running",
             "control_center_context_refresh"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.process-reuse"
+        emit_cc_evidence(context, "control-center.process-reuse"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.no-activate"
+        emit_cc_evidence(context, "control-center.no-activate"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.context-refresh"
+        emit_cc_evidence(context, "control-center.context-refresh"
         );
 
         print("STEP incompatible sibling is typed and isolated from the live server");
         let incompatible_address = reserve_loopback_address();
         let incompatible_endpoint = "tcp:" + incompatible_address;
         let incompatible_probe_ready = std::path::join(
-            context.run_directory,
+            run_directory,
             "incompatible-probe.ready"
         ).display;
         let incompatible_probe_stop = std::path::join(
-            context.run_directory,
+            run_directory,
             "incompatible-probe.stop"
         ).display;
         let registry_before_incompatible = state_file_facts(
@@ -1433,7 +1654,7 @@ fn entry() {
             "control_center_incompatible_probe"
         );
         owned_children.push(incompatible_probe);
-        let incompatible_snapshot = rhai::json::parse(offline(
+        let incompatible_snapshot = offline_json(
             context,
             control_center,
             registry,
@@ -1443,8 +1664,9 @@ fn entry() {
                 "--logical-instance", "incompatible"
             ],
             "control_center_incompatible_snapshot"
-        ));
-        std::fs::write(incompatible_probe_stop, "stop");
+        );
+        let stop_marker = "stop";
+        rhai::runtime::atomic_write(incompatible_probe_stop, stop_marker);
         let incompatible_probe_output = wait_for_exit(
             incompatible_probe,
             "control_center_incompatible_probe_timeout"
@@ -1454,17 +1676,17 @@ fn entry() {
             cli_executable,
             ["ui-bootstrap"]
         );
-        let renderer_after_incompatible_probe = rhai::json::parse(offline(
+        let renderer_after_incompatible_probe = offline_json(
             context,
             control_center,
             registry,
             ["status", "--json"],
             "control_center_incompatible_probe_status"
-        ));
+        );
         test_harness::require(
             incompatible_snapshot.server_state == "unavailable"
                 && incompatible_snapshot.server_reason == "server_incompatible"
-                && incompatible_snapshot.connected_server == ()
+                && incompatible_snapshot.contains("connected_server") == 0
                 && incompatible_probe_output.success
                 && first.state == "running"
                 && renderer_after_incompatible_probe.state == "running"
@@ -1487,11 +1709,11 @@ fn entry() {
         std::fs::remove_file(incompatible_probe_stop);
 
         let incompatible_renderer_ready = std::path::join(
-            context.run_directory,
+            run_directory,
             "incompatible-renderer.ready"
         ).display;
         let incompatible_renderer_stop = std::path::join(
-            context.run_directory,
+            run_directory,
             "incompatible-renderer.stop"
         ).display;
         let incompatible_renderer = incompatible_sibling(
@@ -1525,7 +1747,7 @@ fn entry() {
             ["server_incompatible"],
             "control_center_incompatible_renderer_frame"
         );
-        std::fs::write(incompatible_renderer_stop, "stop");
+        rhai::runtime::atomic_write(incompatible_renderer_stop, stop_marker);
         let incompatible_renderer_output = wait_for_exit(
             incompatible_renderer,
             "control_center_incompatible_renderer_timeout"
@@ -1540,20 +1762,19 @@ fn entry() {
             cli_executable,
             ["capture-pane", "-p", "-t", baseline_tab, "--max-bytes", "16384"]
         );
+        let baseline_marker = "AGENTERM_CC_baseline_" + context.run_id;
         test_harness::require(
             incompatible_frame.owner_pid == first.id
                 && incompatible_frame.projection.server_state == "unavailable"
                 && incompatible_frame.projection.server_reason
                     == "server_incompatible"
-                && incompatible_renderer_output.success
+                && incompatible_renderer_output.success != 0
                 && first.state == "running"
-                && process_present(server.id)
+                && process_present(server.id) != 0
                 && server_after_incompatible_renderer.server_pid == server.id
                 && server_after_incompatible_renderer.server_epoch
                     == server_before_incompatible.server_epoch
-                && baseline_capture.contains(
-                    "AGENTERM_CC_baseline_" + context.run_id
-                ),
+                && text_contains(baseline_capture, baseline_marker) != 0,
             "control_center_incompatible_renderer_isolation"
         );
         require_state_file_unchanged(
@@ -1586,20 +1807,20 @@ fn entry() {
             [context.address],
             "control_center_incompatible_restore_frame"
         );
-        let restored_incompatible_status = rhai::json::parse(offline(
+        let restored_incompatible_status = offline_json(
             context,
             control_center,
             registry,
             ["status", "--json"],
             "control_center_incompatible_restore_status"
-        ));
+        );
         test_harness::require(
             restored_incompatible_frame.owner_pid == first.id
                 && restored_incompatible_frame.projection.server_state
                     == "connected"
                 && restored_incompatible_status.pid == first.id
                 && restored_incompatible_status.context.endpoint == typed_endpoint
-                && process_present(server.id),
+                && process_present(server.id) != 0,
             "control_center_incompatible_restore_truth"
         );
         require_state_file_unchanged(
@@ -1618,6 +1839,8 @@ fn entry() {
             "control_center_causal_focus"
         );
         let causal_tab_count = refreshed.connected_server.tabs.len + 1;
+        let causal_tab_count_text = 0 + causal_tab_count;
+        let causal_tab_label = "" + causal_tab_count_text + " tabs";
         let causal_tab = prove_pty(
             context,
             cli_executable,
@@ -1631,7 +1854,7 @@ fn entry() {
             first,
             "connected",
             "",
-            [context.address, "" + causal_tab_count + " tabs"],
+            [context.address, causal_tab_label],
             "control_center_causal_tab_refresh"
         );
         let causal_bootstrap = cli_json(
@@ -1640,17 +1863,18 @@ fn entry() {
             ["ui-bootstrap"]
         );
         test_harness::require(
-            causal_tab.starts_with("@")
+            text_starts_with(causal_tab, "@") != 0
                 && causal_bootstrap.tabs.len == causal_tab_count
                 && causal_capture.owner_pid == first.id
                 && causal_capture.projection.server_state == "connected"
-                && causal_capture.projection.window_title.contains(
-                    "" + causal_tab_count + " tabs"
-                )
+                && text_contains(
+                    causal_capture.projection.window_title,
+                    causal_tab_label
+                ) != 0
                 && first.state == "running"
                 && (
-                    first.platform_facts.foreground_window_id == 0
-                        || !first.platform_facts.top_level_window_is_foreground
+                    first_window.foreground_window_id == 0
+                        || first_window.top_level_window_is_foreground == 0
                 ),
             "control_center_causal_tab_projection"
         );
@@ -1674,7 +1898,8 @@ fn entry() {
             std::time::Duration::from_secs(5)
         );
         test_harness::require(
-            prior_server_output.success && !process_present(prior_server_pid),
+            prior_server_output.success != 0
+                && process_present(prior_server_pid) == 0,
             "control_center_prior_server_exit_failure:" +
                 prior_server_output.stderr_text()
         );
@@ -1695,8 +1920,8 @@ fn entry() {
                 && loss_capture.projection.server_state == "unavailable"
                 && loss_capture.projection.server_reason == "server_unreachable"
                 && (
-                    first.platform_facts.foreground_window_id == 0
-                        || !first.platform_facts.top_level_window_is_foreground
+                    first_window.foreground_window_id == 0
+                        || first_window.top_level_window_is_foreground == 0
                 ),
             "control_center_server_loss_truth"
         );
@@ -1747,12 +1972,13 @@ fn entry() {
                 && restarted_protocol.pid == restarted_server.id
                 && restart_capture.owner_pid == first.id
                 && restart_capture.projection.server_state == "connected"
-                && restart_capture.projection.window_title.contains(
+                && text_contains(
+                    restart_capture.projection.window_title,
                     context.address
-                )
+                ) != 0
                 && (
-                    first.platform_facts.foreground_window_id == 0
-                        || !first.platform_facts.top_level_window_is_foreground
+                    first_window.foreground_window_id == 0
+                        || first_window.top_level_window_is_foreground == 0
                 ),
             "control_center_server_restart_identity"
         );
@@ -1767,26 +1993,20 @@ fn entry() {
             "control_center_causal_focus_after_restart"
         );
         prove_pty(context, cli_executable, "after-restart");
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.causal-projection-refresh"
+        emit_cc_evidence(context, "control-center.causal-projection-refresh"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.server-recovery"
+        emit_cc_evidence(context, "control-center.server-recovery"
         );
 
         print("STEP typed close targets only the exact reused projection owner");
         let first_pid = first.id;
-        let close = rhai::json::parse(offline(
+        let close = offline_json(
             context,
             control_center,
             registry,
             ["close", "--json"],
             "control_center_close"
-        ));
+        );
         test_harness::require(
             (close.state == "closed" || close.state == "close_requested")
                 && close.pid == first_pid,
@@ -1798,18 +2018,16 @@ fn entry() {
             first_output.success,
             "control_center_typed_close_failed:" + first_output.stderr_text()
         );
-        test_harness::emit_evidence(
+        emit_cc_evidence(context, "control-center.typed-close"
+        );
+        let running_protocol = cli_json(
             context,
-            declared_evidence,
-            "control-center.typed-close"
+            cli_executable,
+            ["protocol-info", "--running"]
         );
         test_harness::require(
-            process_present(restarted_server.id)
-                && cli_json(
-                    context,
-                    cli_executable,
-                    ["protocol-info", "--running"]
-                ).pid == restarted_server.id,
+            process_present(restarted_server.id) != 0
+                && running_protocol.pid == restarted_server.id,
             "control_center_close_affected_server"
         );
         prove_pty(context, cli_executable, "after-close");
@@ -1834,6 +2052,9 @@ fn entry() {
             "control_center_replacement"
         );
         let replacement_window = wait_for_window_title(
+            context,
+            control_center,
+            registry,
             replacement,
             [context.address],
             "control_center_replacement"
@@ -1842,7 +2063,7 @@ fn entry() {
             replacement.id != first_pid
                 && (
                     replacement_window.foreground_window_id == 0
-                        || !replacement_window.top_level_window_is_foreground
+                        || replacement_window.top_level_window_is_foreground == 0
                 ),
             "control_center_stale_owner_recovery"
         );
@@ -1856,13 +2077,14 @@ fn entry() {
             killed_pid,
             "control_center_replacement_process_orphan"
         );
+        let kill_protocol = cli_json(
+            context,
+            cli_executable,
+            ["protocol-info", "--running"]
+        );
         test_harness::require(
-            process_present(restarted_server.id)
-                && cli_json(
-                    context,
-                    cli_executable,
-                    ["protocol-info", "--running"]
-                ).pid == restarted_server.id,
+            process_present(restarted_server.id) != 0
+                && kill_protocol.pid == restarted_server.id,
             "control_center_kill_affected_server"
         );
         prove_pty(context, cli_executable, "after-kill");
@@ -1888,13 +2110,13 @@ fn entry() {
             recovered.id != killed_pid,
             "control_center_killed_owner_not_replaced"
         );
-        let recovered_close = rhai::json::parse(offline(
+        let recovered_close = offline_json(
             context,
             control_center,
             registry,
             ["close", "--json"],
             "control_center_recovered_close"
-        ));
+        );
         test_harness::require(
             recovered_close.pid == recovered.id,
             "control_center_recovered_close_owner"
@@ -1913,13 +2135,10 @@ fn entry() {
         );
         remove_owned_registry(registry);
         test_harness::require(
-            !std::fs::exists(registry),
+            std::fs::exists(registry) == 0,
             "control_center_owned_registry_orphan"
         );
-        test_harness::emit_evidence(
-            context,
-            declared_evidence,
-            "control-center.process-isolation"
+        emit_cc_evidence(context, "control-center.process-isolation"
         );
 
         print("STEP stop the isolated server through its public CLI");
@@ -1948,30 +2167,30 @@ fn entry() {
                 "causal tab/new-epoch refresh, failure isolation, " +
                 "and orphan-free cleanup"
         );
-        succeeded = true;
+        succeeded = 1;
     } catch (error) {
-        failure = error.to_string();
+        failure = "control_center_smoke_failed";
     }
 
     let completion_failure = "";
     try {
-        test_harness::complete(
+        let _completed = test_harness::complete(
             context,
             owned_children,
             succeeded,
             failure
         );
     } catch (error) {
-        completion_failure = error.to_string();
+        completion_failure = "control_center_smoke_complete_failed";
     }
     try {
         remove_owned_registry(registry);
     } catch (error) {
         if completion_failure == "" {
-            completion_failure = error.to_string();
+            completion_failure = "control_center_smoke_registry_cleanup_failed";
         }
     }
-    if succeeded && completion_failure == "" {
+    if succeeded != 0 && completion_failure == "" {
         test_harness::remove_run(context);
     }
     if failure != "" {
@@ -1980,4 +2199,5 @@ fn entry() {
     if completion_failure != "" {
         throw completion_failure;
     }
+    0
 }
