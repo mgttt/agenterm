@@ -8,6 +8,12 @@ box) rather than by argument. The method itself is packaged as
 [`.claude/skills/decisive-experiment/SKILL.md`](../../.claude/skills/decisive-experiment/SKILL.md) —
 read it before writing a new Q spec.
 
+> 📄 **Reading the whole track at once:** [`SYNTHESIS.md`](./SYNTHESIS.md) — the cross-Q
+> synthesis (shape / cost / permanent residues / conditions under which it fails / what it
+> means for the north star), with an evidence grade on every claim and a
+> **「被推翻的预判」** section. It obeys [`COMPARABILITY.md`](./COMPARABILITY.md)'s 口径
+> constraints, so numbers it refuses to compare are marked **未测定**, not guessed.
+
 > ⚠️ **Not AgenTerm product scope.** No version plan owns this, no `PRD.md`
 > capability state changes. Specs live in `plan/design-*-experiment.md`, code
 > lives here.
