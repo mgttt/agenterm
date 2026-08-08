@@ -136,8 +136,16 @@ pub extern "sysv64" fn sym(_module: *const u8, _name: *const u8) -> *mut u8 {
 // ---------------------------------------------------------------------------
 // ④ call — data-driven native call for the integer/pointer subset.
 // The "signature description" is `nargs`; every argument is a machine word
-// (int or pointer). Floats, structs-by-value and >7 args are out of scope
-// (not needed by the file adapters). On Linux the native convention is sysv64.
+// (int or pointer). Floats and structs-by-value are out of scope. On Linux the
+// native convention is sysv64.
+//
+// Phase 3 (the "+1 capability" step, criterion ④): the arg-count ceiling was
+// raised from 7 to 11. The spawn capability needs CreateProcessA (10 args) on
+// Windows; the register-only 7-arm table could not express it. This is an
+// in-kernel cost of adding a capability — see RESULTS §④. It is a ONE-TIME
+// completion of ④ toward its libffi model (stack args), not per-capability
+// growth: a fully general (asm, variadic) ④ would absorb any arity at zero
+// further in-kernel cost. Recorded honestly rather than hidden.
 // ---------------------------------------------------------------------------
 #[cfg(target_os = "linux")]
 pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> usize {
@@ -154,8 +162,20 @@ pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> 
             4 => (t!(usize, usize, usize, usize))(a[0], a[1], a[2], a[3]),
             5 => (t!(usize, usize, usize, usize, usize))(a[0], a[1], a[2], a[3], a[4]),
             6 => (t!(usize, usize, usize, usize, usize, usize))(a[0], a[1], a[2], a[3], a[4], a[5]),
-            _ => (t!(usize, usize, usize, usize, usize, usize, usize))(
+            7 => (t!(usize, usize, usize, usize, usize, usize, usize))(
                 a[0], a[1], a[2], a[3], a[4], a[5], a[6],
+            ),
+            8 => (t!(usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+            ),
+            9 => (t!(usize, usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8],
+            ),
+            10 => (t!(usize, usize, usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9],
+            ),
+            _ => (t!(usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10],
             ),
         }
     }
@@ -211,6 +231,8 @@ pub extern "sysv64" fn sym(module: *const u8, name: *const u8) -> *mut u8 {
 }
 
 // ④ call — data-driven native call, Windows (win64) convention.
+// Arg ceiling raised 7 -> 11 in Phase 3 for CreateProcessA (10 args). See the
+// Linux `call` note above for why this in-kernel growth is recorded, not hidden.
 #[cfg(windows)]
 pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> usize {
     unsafe {
@@ -226,8 +248,20 @@ pub extern "sysv64" fn call(addr: *mut u8, nargs: usize, args: *const usize) -> 
             4 => (t!(usize, usize, usize, usize))(a[0], a[1], a[2], a[3]),
             5 => (t!(usize, usize, usize, usize, usize))(a[0], a[1], a[2], a[3], a[4]),
             6 => (t!(usize, usize, usize, usize, usize, usize))(a[0], a[1], a[2], a[3], a[4], a[5]),
-            _ => (t!(usize, usize, usize, usize, usize, usize, usize))(
+            7 => (t!(usize, usize, usize, usize, usize, usize, usize))(
                 a[0], a[1], a[2], a[3], a[4], a[5], a[6],
+            ),
+            8 => (t!(usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+            ),
+            9 => (t!(usize, usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8],
+            ),
+            10 => (t!(usize, usize, usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9],
+            ),
+            _ => (t!(usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize))(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10],
             ),
         }
     }

@@ -42,15 +42,21 @@ build_blob() { # <src> <out.bin>
 echo "== variant A (1 layer) =="
 build_exe "$ROOT/pack/variant_a_onelayer/pure_compute.rs"    'dc_variant="a"' A_pure_linux
 build_exe "$ROOT/pack/variant_a_onelayer/read_hash_print.rs" 'dc_variant="a"' A_rhp_linux
+# criterion ④: the new capability (spawn) standalone, and the FUSED product
+# (file+spawn in one artifact) used to measure ④'s (b).
+build_exe "$ROOT/pack/variant_a_onelayer/spawn_echo.rs"      'dc_variant="a"' A_spawn_linux
+build_exe "$ROOT/pack/variant_a_onelayer/fused.rs"           'dc_variant="a"' A_fused_linux
 
 echo "== variant B (2 layer) — payload blobs =="
 build_blob "$ROOT/pack/variant_b_twolayer/payload_pure.rs" blob_pure_linux.bin
 build_blob "$ROOT/pack/variant_b_twolayer/payload_rhp.rs"  blob_rhp_linux.bin
+build_blob "$ROOT/pack/variant_b_twolayer/payload_spawn.rs" blob_spawn_linux.bin
 
 echo "== variant B (2 layer) — kernel/loader (blob embedded) =="
 export DC_BLOB="$OUT/blob_pure_linux.bin"; build_exe "$ROOT/pack/variant_b_twolayer/kernel.rs" 'dc_variant="b"' B_kernel_pure_linux
 export DC_BLOB="$OUT/blob_rhp_linux.bin";  build_exe "$ROOT/pack/variant_b_twolayer/kernel.rs" 'dc_variant="b"' B_kernel_rhp_linux
+export DC_BLOB="$OUT/blob_spawn_linux.bin"; build_exe "$ROOT/pack/variant_b_twolayer/kernel.rs" 'dc_variant="b"' B_kernel_spawn_linux
 unset DC_BLOB
 
 echo "== done. sizes: =="
-( cd "$OUT" && ls -la A_pure_linux A_rhp_linux blob_pure_linux.bin blob_rhp_linux.bin B_kernel_pure_linux B_kernel_rhp_linux )
+( cd "$OUT" && ls -la A_pure_linux A_rhp_linux A_spawn_linux A_fused_linux blob_pure_linux.bin blob_rhp_linux.bin blob_spawn_linux.bin B_kernel_pure_linux B_kernel_rhp_linux B_kernel_spawn_linux )

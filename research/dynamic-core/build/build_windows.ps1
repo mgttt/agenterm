@@ -57,16 +57,23 @@ function Build-Blob($src, $name) {
 Write-Host "== variant A (1 layer) =="
 Build-Exe "$Root\pack\variant_a_onelayer\pure_compute.rs"    "a" "A_pure_windows.exe"
 Build-Exe "$Root\pack\variant_a_onelayer\read_hash_print.rs" "a" "A_rhp_windows.exe"
+# criterion ④: the new capability (spawn) as a standalone 1-layer program, and
+# the FUSED product (file+spawn in one artifact) used to measure ④'s (b).
+Build-Exe "$Root\pack\variant_a_onelayer\spawn_echo.rs"      "a" "A_spawn_windows.exe"
+Build-Exe "$Root\pack\variant_a_onelayer\fused.rs"           "a" "A_fused_windows.exe"
 
 Write-Host "== variant B (2 layer) - payload blobs =="
 Build-Blob "$Root\pack\variant_b_twolayer\payload_pure.rs" "blob_pure_windows.bin"
 Build-Blob "$Root\pack\variant_b_twolayer\payload_rhp.rs"  "blob_rhp_windows.bin"
+Build-Blob "$Root\pack\variant_b_twolayer\payload_spawn.rs" "blob_spawn_windows.bin"
 
 Write-Host "== variant B (2 layer) - kernel/loader (blob embedded) =="
 $env:DC_BLOB = (Join-Path $Out "blob_pure_windows.bin")
 Build-Exe "$Root\pack\variant_b_twolayer\kernel.rs" "b" "B_kernel_pure_windows.exe"
 $env:DC_BLOB = (Join-Path $Out "blob_rhp_windows.bin")
 Build-Exe "$Root\pack\variant_b_twolayer\kernel.rs" "b" "B_kernel_rhp_windows.exe"
+$env:DC_BLOB = (Join-Path $Out "blob_spawn_windows.bin")
+Build-Exe "$Root\pack\variant_b_twolayer\kernel.rs" "b" "B_kernel_spawn_windows.exe"
 Remove-Item Env:\DC_BLOB
 
 Write-Host "== done. sizes: =="
