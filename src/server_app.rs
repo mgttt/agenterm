@@ -56,6 +56,32 @@ const INITIAL_COLUMNS: u16 = 100;
 const IPC_REQUESTS_PER_TICK: usize = 16;
 const SERVER_TICK: Duration = Duration::from_millis(5);
 
+/// Which commands this server hands to the attached GUI client instead of
+/// answering itself.
+///
+/// `ui-input` is the one conditional entry (F1 in
+/// `plan/agent-human-parity-audit.md`). It synthesizes real window events, so
+/// it only means anything in a process that owns a window; but with no client
+/// attached the headless `ui-input` arm has a *better* refusal than the relay's
+/// generic "no GUI client" — it also names the synthetic geometry this server
+/// does publish and stays retryable. Relaying unconditionally would throw that
+/// sentence away.
+fn relays_to_ui_client(command: &str, ui_client_attached: bool) -> bool {
+    match command {
+        "ui-action"
+        | "focus"
+        | "get-settings"
+        | "set-setting"
+        | "screenshot"
+        | "screenshot-pane"
+        | "screenshot-tab"
+        | UI_CLIENT_COMMAND_FOCUS
+        | UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE => true,
+        "ui-input" => ui_client_attached,
+        _ => false,
+    }
+}
+
 fn ui_client_command_requires_server_preapply(args: &[String]) -> bool {
     match args.first().map(String::as_str) {
         Some("focus") => true,
@@ -1398,21 +1424,11 @@ impl ServerState {
             .first()
             .is_some_and(|command| command == "set-composer")
             && self.ui_client_edits_command_target(args);
+        let ui_client_attached = self.ui_lease.active().is_some();
         if inline_editor_set_composer
-            || args.first().is_some_and(|command| {
-                matches!(
-                    command.as_str(),
-                    "ui-action"
-                        | "focus"
-                        | "get-settings"
-                        | "set-setting"
-                        | "screenshot"
-                        | "screenshot-pane"
-                        | "screenshot-tab"
-                        | UI_CLIENT_COMMAND_FOCUS
-                        | UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE
-                )
-            })
+            || args
+                .first()
+                .is_some_and(|command| relays_to_ui_client(command, ui_client_attached))
         {
             return self.enqueue_ui_client_command(args);
         }
@@ -2114,8 +2130,43 @@ fn default_workspace() -> SavedWorkspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        PROJECTION_REPLACEABLE_UI_CLIENT, configure_server_launch, validate_ui_client_snapshot,
+        PROJECTION_REPLACEABLE_UI_CLIENT, configure_server_launch, relays_to_ui_client,
+        validate_ui_client_snapshot,
     };
+
+    /// F1: `ui-input` used to fall through the relay list entirely and land on
+    /// `server_command_unsupported`, i.e. the server told an agent that a
+    /// shipped command did not exist. It now reaches the GUI client whenever
+    /// one is attached -- and only then, so the headless projection keeps the
+    /// more informative refusal that names its synthetic geometry.
+    #[test]
+    fn ui_input_reaches_the_gui_client_only_when_one_is_attached() {
+        assert!(relays_to_ui_client("ui-input", true));
+        assert!(!relays_to_ui_client("ui-input", false));
+        // The unconditional entries must not become focus-dependent by
+        // accident: they answer identically either way.
+        for command in [
+            "ui-action",
+            "focus",
+            "get-settings",
+            "set-setting",
+            "screenshot",
+            "screenshot-pane",
+            "screenshot-tab",
+        ] {
+            assert!(
+                relays_to_ui_client(command, true) && relays_to_ui_client(command, false),
+                "{command} should relay regardless of client attachment"
+            );
+        }
+        // Commands the server owns itself must never be handed away.
+        for command in ["ui-snapshot", "list-windows", "send-keys", "shutdown"] {
+            assert!(
+                !relays_to_ui_client(command, true),
+                "{command} is server-owned"
+            );
+        }
+    }
 
     #[test]
     fn server_arguments_are_internal_bounded_and_loopback_only() {
