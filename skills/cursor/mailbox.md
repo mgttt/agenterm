@@ -15,15 +15,15 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `092d6f9c`（duty handoff） |
-| 待审合 | （无）`origin/cursor/*` ahead=0 |
+| `origin/main` | tip `00f84a89`（scan；handoff 后校正） |
+| 待审合 | `cursor/script-smoke-aot-pack-2fd5`@`6c507ca4` ahead=2（tip 05:05Z） |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0；nudge=0 |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1；nudge=0 |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -64,12 +64,12 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-08T04:26Z
+### 舰队值班会话 · 2026-08-08T05:24Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-c8b0dae5-06b2-4d4f-ac14-2f50a81f020a`
-- URL: https://cursor.com/agents/bc-c8b0dae5-06b2-4d4f-ac14-2f50a81f020a
+- bcId: `bc-3b1f7c2c-e38f-4c97-a65f-db1258babf2c`
+- URL: https://cursor.com/agents/bc-3b1f7c2c-e38f-4c97-a65f-db1258babf2c
 - 分支: `main`
-- tip: `092d6f9c`
+- tip: `00f84a89`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -85,6 +85,7 @@
 
 ## 交接日志
 
+- 2026-08-08T05:24Z · 舰队值班会话(`bc-3b1f7c2c-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 main=00f84a89；nudge=0 未催主控（tip 05:05Z 新鲜）；lock 已清
 - 2026-08-08T04:26Z · 舰队值班会话(`bc-c8b0dae5-…`) · duty: noop findings=0 main=5f4241db；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T01:24Z · 舰队值班会话(`bc-823bbeb5-…`) · duty: noop findings=0 main=c075d6b0；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T00:25Z · 舰队值班会话(`bc-815ae5a0-…`) · duty: noop findings=0 main=38fba119；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
