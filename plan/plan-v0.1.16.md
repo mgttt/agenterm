@@ -237,6 +237,40 @@ C. Console host (agenterm-con.exe)
    TUI（vim 的普通/插入模式切换、鼠标点击上报）没测，因为这些都要先绕开
    同一个方向键/转义序列根因才有意义去测。
 
+**2026-08-08 用户反馈两条，均已处理**：
+
+1. **打字卡顿，经常半秒才响应**——根因找到且已实测确认：`PixelWindowEvent::
+   Wake`（PTY reader 线程收到真输出时 `waker.wake()` 触发，也就是"键盘回显
+   到了"这唯一的信号）落进了 `_ => Continue` 通配分支，从不请求重绘；
+   `agenterm-platform` 的 `dispatch_event` 通用分发路径本身也不会自动重绘
+   （只有 `dispatch_geometry` 会）。于是唯一偶尔把画面刷出来的是**跟这次
+   输入完全无关**的光标闪烁定时器（`BLINK_INTERVAL` 530ms）。**实测**（临时
+   把修复退回去，验证回归测试真的能分辨两种情况）：同一台机器上，修复后
+   稳定在 650–700ms（这段时间基本是脚本刻意等的 400ms + 正常窗口/ConPTY
+   启动开销），修复前反复量到 2.9–3.3 秒——比"经常半秒"这个描述还更糟，
+   不只是"符合"。修法：`Wake` 和 `Keyboard`（后者覆盖纯本地效果——闪烁
+   重置、复制粘贴快捷键、IME，这些不该等 PTY 往返）都补上
+   `window.request_redraw()`。新增 `typed_input_echoes_back_well_under_
+   one_blink_cycle` 黑盒回归测试（时间阈值取在两种实测分布的安全中点，
+   不是精确证明——共享机器上真墙钟计时天然有噪声，但已验证能分辨修复前后）。
+2. **生成的 exe 比 conhost.exe 大了近一倍**——**结论：现在不是**。在一个隔离
+   `git worktree` 里（根 `Cargo.toml` 当时因为另一个 agent 在制品的 LuaJIT
+   vendored 构建卡死，没法直接 `cargo build --release` 整个工作区）临时去掉
+   与 `agenterm-con` 无关的 `agenterm-rh`/`agenterm-lua`/`agenterm-qjs`/
+   `rhai` 依赖并加 `autolib = false`（跳过用不到这些的根 lib target），
+   干净跑通当前 `[profile.release]`（`opt-level="z"`/`lto="thin"`/
+   `codegen-units=1`/`panic="abort"`/`strip=true`，7 月 27 日
+   `d9eebd5f` 起已生效）后的 `agenterm-con.exe`：**880,640 字节**，
+   比 `conhost.exe`（987,136 字节）还**小约 11%**，不是大近一倍。
+   `cargo tree` 复核依赖面（winit/softbuffer/windows-sys/png/ab_glyph/
+   rmux-pty）干净，没有意外膨胀。真正的问题是本地 `dist/agenterm-con.exe`
+   是 8 月 7 日的旧构建产物（2,255,872 字节，`dist/` 本就 gitignore、
+   不受版本控制），早就没跟上后续的多轮修复——**已用干净重建的二进制刷新
+   本地 `dist/agenterm-con.exe`**，用户下次直接对比就是准的。`agenterm-con`
+   只依赖 `agenterm_platform` 和几个纯 Rust crate（不 `use` 根 `agenterm`
+   lib），所以孤立构建里去掉的那几个 crate 从未被链进这个二进制——这个
+   隔离测量结果代表真实产物大小，不是近似值。
+
 **这轮复核踩过的两个真实教训（写给未来的自己）**：
 - **未提交的改动在这个共享检出里不安全**——花了大约 45 分钟写完 agent
   接口的接线代码，还没提交就去跑测试，回来发现整个文件被重置回 HEAD，
