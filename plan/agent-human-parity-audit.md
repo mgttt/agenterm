@@ -88,12 +88,125 @@ focus / caret / anchor / selection，手势可机器验证。
 | **F2** | headless 快照**无任何几何** | `src/server_app.rs:1937-1977`（`projection: "headless_server"`）：`layout` 只有硬编码 `composer:{visible:false,…}`（`:1951-1957`），`focus.surface` 硬编码 `null`（`:1959`），tabs 只有 id/title/pid/state/rows/cols，**无 bounds / selection / render** | **P0** | 开（含决策项 D-1） |
 | **F3** | `send-mouse` 是**活着的谎**：四处声明、零处 dispatch，却仍在 `extensions` 广告 | 声明 `src/commands.rs:61,734`、`src/control_authority.rs:251`、`src/client/mod.rs:5039,5146`；全仓无 dispatch 分支；Unix 落 `unix/frontend/mod.rs:4682-4695` 的 `unix_gui_unsupported`。且其坐标系是**终端 cell**（`-x col -y row`），本就够不到工具栏 | **P1** | 开 |
 | **F4** | `ui-input` **不在 `--help`** | `src/client/mod.rs:5019-5049` 列了 `ui-snapshot`/`ui-action`/`ui-hello`/`ui-bootstrap`/`ui-deltas`/`send-mouse`，**唯独没有 `ui-input`** | **P1** | 开 |
-| **F5** | typed 目录漂移 | `src/operations.rs` 只注册 **10** 个 `ui-action`（`:482-647` + `open-control-center`）；`src/frontend/ui_action_catalog.rs:29-88` 的 `SHARED_UI_ACTIONS` 有 **58** 个、`UNIX_ONLY_UI_ACTIONS`（`:109-121`）**11** 个；CLI help 广告约 40 个。另：`ui-input key` **未注册**（`operations.rs:749-756` 对非 pointer/wheel 返回 `Ok(None)`），`POINTER_PARAMETERS`（`:181-196`）只声明 `x`/`y`，`button`/`action`/`count`/`mods`/`delta-y`/`units`/`key` 全未声明 | **P1** | 开 |
+| **F5** | typed 目录漂移 | `src/operations.rs` 只注册 **10** 个 `ui-action`（`:482-647` + `open-control-center`）；`src/frontend/ui_action_catalog.rs:29-88` 的 `SHARED_UI_ACTIONS` 有 **58** 个、`UNIX_ONLY_UI_ACTIONS`（`:109-121`）**11** 个；CLI help 广告约 40 个。另：`ui-input key` **未注册**（`operations.rs:749-756` 对非 pointer/wheel 返回 `Ok(None)`），`POINTER_PARAMETERS`（`:181-196`）只声明 `x`/`y`，`button`/`action`/`count`/`mods`/`delta-y`/`units`/`key` 全未声明 | **P1** | **shared 面已闭合**（见 §1.1）；`UNIX_ONLY` 11 个仍开 |
 | **F6** | 模态框 / 系统菜单**只给 kind+actions，不给 bounds** | `snapshot_modal()`：`src/frontend/settings.rs:342-354`、`new_terminal.rs:181-189`、`instance_picker.rs:160-173`、`cwd_editor.rs:78-82`、`window_close.rs:46-48`、`close_confirmation.rs:39`；人类那侧**有**完整 hit-test：`unix/frontend/render.rs:413,541,766,809`。`system_menu_json`（`src/ui_snapshot.rs:127-149`）同样只给 id/label/enabled | **P2** | 开 |
 | **F7** | Windows 快照缺 composer caret/anchor/selection | Unix 有（`unix/frontend/mod.rs:3025-3038`）；`remote_frontend.rs` 全文无 `"caret"`/`"anchor"`/`"draft_length"` | **P2** | 开 |
 | **F8** | **声音：产品完全不存在**（双侧缺口） | vt100 内核**已解析** BEL：`third_party/vt100/src/perform.rs:44` → `callbacks.audible_bell()`、`:74` → `visual_bell()`；但 `third_party/vt100/src/callbacks.rs:6,9` 是空默认实现，**`src/` 全仓无人覆盖**。全仓无 `cpal`/`rodio`/`winmm`/`PlaySound`/`Beep` 依赖 | **P2**（产品决策） | 开（决策 D-2 已定，见 §3） |
 | **F9** | **视频 / 帧流不存在** | 全仓无帧流、录制、编码依赖；只有一次一张的 `screenshot` | **P2**（北极星导出） | 开 |
 | **F10** | 结构化反馈是**批量轮询**，非推流 | `ui-deltas`（`UiDeltaBatch`/`UiDeltaEvent`/`UI_DELTA_MAX_EVENTS`，`src/ui_bridge.rs`）+ `wait-*` 谓词；无 subscribe/push 通道 | **P2**（北极星导出） | 开 |
+
+---
+
+## 1.1 F5 落地记录（P-catalog，2026-08-08）
+
+`OPERATION_CATALOG` 从 **32 条 / 10 个 `command: "ui-action"`** 变成
+**77 条 / 55 个**（`+45`）。`SHARED_UI_ACTIONS` 的 58 个字符串现在**全部**能
+经 `operation_for_args` 解析出 typed 身份：55 个 `ui-action` 操作 +
+`open-control-center`（归在 `control-center.open` 名下）＝ 56 个身份，另两个
+`toggle-tabs`、`open-instance` 是 alias。由
+`operations::tests::every_shared_ui_action_has_a_typed_identity` 机器守住。
+
+### 切分原则（为什么这么切，比代码重要）
+
+**① 1 个动词 = 1 个 typed 操作，不做"合并成带参数的家族"。**
+
+考虑过把 `settings-preset-*`(4) + `settings-theme-dark/light`(2) 合成一个
+`ui.settings.preset(preset)`，把 `instance-picker-*`(5) 合成
+`ui.instance_picker(action)`。**否决**，理由：这需要在
+`control_dispatch.rs` **新造**一个带参数的动词，于是同一件事有了两条路
+（旧动词 + 新动词），而目录任务的产品价值恰恰是**让目录等于控制面本身**。
+F3（`send-mouse` 声明四处、零处 dispatch）教训就是"目录描述的东西必须真的
+在那儿"；为了目录好看去改控制面，是把因果颠倒了。
+**例外**：`select-server-tab` / `open-instance` 与 `tabs-toggle` /
+`toggle-tabs` 在 dispatcher 里本来就是**同一条 match 臂**，那是同义词，
+用 `aliases` 表达；这不是合并，是如实记录。
+
+同理保留了 `settings-theme-dark` 与 `settings-preset-classic-night` 这对
+**行为完全相同**的重复项——它们是产品对人类暴露的两个不同按钮，只在目录里
+合并会让目录和产品对不上。要合并，先合并 dispatcher。
+
+**② 模态内动词：全部注册，前置条件靠 `ui-snapshot` 运行时发现。**
+
+`confirm`/`cancel`/`settings-apply`/`cwd-*`/`instance-picker-*`/
+`tab-editor-*`/`keep-server-running`/`stop-server-and-exit` 只在特定模态下
+有意义。**仍然注册**，理由是一条不对称：agent 可以用
+`ui.tab.close`/`ui.settings.open`/`ui.cwd-editor.open` **打开**模态——如果
+不注册 `confirm`/`cancel`，它就有了一个能进不能出的陷阱。
+**暴露入口却隐藏出口，比两个都暴露更危险。**
+前置条件不是靠隐藏表达，而是靠 `ui-snapshot` 的 `modal.kind` +
+`modal.actions`（F6 会再补 bounds），调用时机不对会**报错**而不是静默无效。
+`OperationSpec` 目前没有 `preconditions` 字段（那是 schema 变更），所以前置
+条件写在 `operations.rs` 的分组注释里。
+
+**③ `UNIX_ONLY_UI_ACTIONS`（11 个）不注册。**
+
+`create`、`shell-*`(7)、`new-terminal-set-*`(3) 只在 Unix 存在。不注册因为：
+
+- `OperationSpec::available` 是**一个 bool，没有平台轴**。填 `true` 会在
+  Windows（**已 shipped 的人类平面**）说谎，正是 F3 那一类错误；
+- `catalog_has_stable_unique_ids_and_all_classes` 里 `assert!(operation.available)`
+  把"目录 = 已发布且到处可用的面"写死成了不变量，填 `false` 要先改这条不变量；
+- `ui_action_catalog.rs:104-108` 已经写明"Prefer promoting create / shell-\*
+  only when Windows exposes matching ui-action ids"——先注册 typed 身份等于
+  抢跑那次提升。
+
+**后续工作**：给 `OperationSpec` 加平台可用性轴（`available_on:
+&["unix"]` 之类，需要 bump `OPERATION_CATALOG_SCHEMA_VERSION`），或先让
+Windows 补齐这 11 个动词。二选一之前，agent 在两个平台上都只能"打开新终端
+对话框"而不能驱动它——这是**已知且已记录**的洞，不是漂移。
+
+**④ `events` 一律留空，不是偷懒。**
+
+receipt↔事件关联（`src/client/mod.rs:4119-4138`）要求事件带上 `request_id`
+或 `operation_id`。现在只有 `ui.tabs.*` 做到了（`set_tabs_visible(...,
+UI_TABS_SHOW)` 把操作 id 传进去）。新动词没有这条接线，声明事件等于承诺一个
+**永远不会到达**的关联。等 dispatcher 逐个打上 operation id 再补。
+
+**⑤ `errors` 只写 dispatcher 真的会发的类型码。**
+
+`close-tab`/`edit-tab` 一度声明了 `operation_target_not_found`——错的：两个
+host 找不到目标时发的是 `IpcResponse::failure("can't find tab")`（**无类型**），
+而 `pane.capture` 能声明它是因为 `control_dispatch.rs:1829` 确实
+`typed_failure(..., "operation_target_not_found", ...)`。已改回，并加
+`declared_error_identities_stay_within_the_typed_vocabulary` 守住。
+
+**⑥ 顺手补齐的参数声明（F5 后半）。**
+
+`select-tab`/`new-child`/`toggle-tree`/`composer-send` 原本声明
+`NO_PARAMETERS`，导致 `validate_operation_args` 的"不接受额外参数"规则把
+`-t` 一并拒了——**agent 只能操作当前 tab**。现已声明 `tab` 参数；同时把那条
+arity 检查限制为**只对 `NO_PARAMETERS` 的动词**生效，否则任何带参数的 UI 动词
+都不可达。
+
+### 分类结果
+
+| 家族 | typed id 前缀 | 动词数 | 备注 |
+|------|--------------|--------|------|
+| 窗口 | `ui.window.*` | 6 | `close-window` 是 Control：它只是**请求**关闭并弹确认框 |
+| 字体 / 语言 | `ui.font.*` / `ui.locale.*` | 3 | |
+| 剪贴板 | `terminal.copy-selection` | 1 | 与 `terminal.paste` 配对 |
+| 标签生命周期 | `ui.tab.*` | 7 | `ui.tab.close` = **Destructive**（终结活 PTY + 回滚缓冲） |
+| 设置对话框 | `ui.settings.*` | 14 | 全模态内 |
+| 工作上下文 | `ui.cwd-editor.*` / `ui.new-terminal.open` | 6 | `--path` 声明为必填＝跨 host 契约 |
+| 实例选择器 / server strip | `ui.instance-picker.*` / `ui.server-strip.select` | 7 | `open-instance` 作 alias |
+| 模态收尾 | `ui.modal.*` / `ui.window-close.*` | 4 | `stop-server-and-exit` = **Destructive** |
+
+### 机器守卫（新增）
+
+| 测试 | 守什么 |
+|------|--------|
+| `every_shared_ui_action_has_a_typed_identity` | 目录覆盖**整个** shared 控制面 |
+| `every_typed_ui_action_is_dispatchable_on_both_hosts` | 反向：typed 身份不得指向没人实现的动词（F3 类谎言） |
+| `declared_error_identities_stay_within_the_typed_vocabulary` | 不声明 dispatcher 不发的错误码 |
+| `closing_a_tab_is_classified_destructive` / `stopping_the_server_is_classified_destructive` | 不可逆操作必须带警示标签 |
+
+> **不影响的东西（已实测）**：`script_catalog` 自动从 `OPERATION_CATALOG`
+> 派生（`:185`），不用手改；`tests/rhai_migration.rs` pin 的
+> `"70 catalog entries, 98 public names…"` 数的是
+> `list-commands` 的 **CLI 命令名**（`scripts/rh/prd-alignment.rh:396-456`），
+> 与操作数无关。**要手改的只有** `crates/agenterm-rh/src/shipped_surfaces.rs`。
+
+---
 
 ### 已经做对、**不要回退**的部分
 
@@ -115,7 +228,7 @@ focus / caret / anchor / selection，手势可机器验证。
 | 序 | 叶 | 内容 | 成本 | 泳道 / 热域 | 依赖 |
 |----|-----|------|------|------------|------|
 | 1 | **P-honest** | F3（**实现** `send-mouse`，见 D-3）+ F4（`ui-input` 进 `--help`） | **小** | `src/control_dispatch.rs`（共享，两平台一次到位）、`src/client/mod.rs` | 无 |
-| 2 | **P-catalog** | F5：`operations.rs` 登记 `ui-input key`/`send-mouse` + 补全参数声明 | 小–中 | `src/operations.rs`、`prd/`、`tests/rhai_migration.rs` 计数串 | 1 |
+| 2 | ~~**P-catalog**~~ | F5：`operations.rs` 登记 `ui-input key`/`send-mouse` + 补全参数声明 + **shared `ui-action` 全量登记** | 小–中 | `src/operations.rs`、`crates/agenterm-rh/src/shipped_surfaces.rs` | 1 — **shared 面已完成，见 §1.1**；余 `UNIX_ONLY` 11 个待平台可用性轴 |
 | 3 | **P-headless** | F2：headless 供 synthetic 几何（D-1 已定），解锁 `ui-input` 的 CI 覆盖 | **中** | `server_app.rs` + `ui_geometry` 复用 | 1 |
 | 4 | **P-win-input** | F1：Windows `ui-input` 移植 + `server_app.rs` 中继白名单 | **大** | Win-UX（`remote_frontend*`） | 3（先有 CI 才敢改） |
 | 5 | **P-modal** | F6 + F7：模态/菜单 bounds、Win composer caret | 中 | 两端 | 4 |
@@ -130,6 +243,12 @@ focus / caret / anchor / selection，手势可机器验证。
 命令时，`tests/rhai_migration.rs` 的
 `prd_alignment_task_matches_public_catalogs_and_fails_closed` 会 fail-closed，
 **必须同步更新 `prd/` 目录与该测试里 pin 的计数串**。
+
+> **2026-08-08 更正（实测）**：这条只对**新增 CLI 命令**（`COMMAND_CATALOG`）
+> 成立。该测试 pin 的 `"70 catalog entries, 98 public names…"` 数的是
+> `list-commands` 输出的命令名与别名（`scripts/rh/prd-alignment.rh:396-456`），
+> **与 `OPERATION_CATALOG` 条目数无关**。P-catalog 新增 45 个操作、零个命令，
+> 计数串无需变动。
 
 ---
 
