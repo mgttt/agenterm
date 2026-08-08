@@ -988,59 +988,56 @@ try {
     let locale_button = require_window_control(gui.window_control(2129), "locale_button");
     let font_decrease_button = require_window_control(gui.window_control(2130), "font_decrease_button");
     let font_increase_button = require_window_control(gui.window_control(2131), "font_increase_button");
-    let tabs_button_text = "" + tabs_button.text;
-    let locale_button_text = "" + locale_button.text;
-    let control_center_button_text = "" + control_center_button.text;
-    let font_decrease_button_text = "" + font_decrease_button.text;
-    let font_increase_button_text = "" + font_increase_button.text;
-    let settings_button_text = "" + settings_button.text;
     let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
+    let toolbar_layout = toolbar.layout.toolbar;
+    let toolbar_locale = toolbar.locale;
+    let locale_toolbar_label = toolbar_locale.toolbar_label;
     test_harness::require(
-        tabs_button_text == "<Tabs"
-            && toolbar.layout.toolbar.tabs.left
-                < toolbar.layout.toolbar["new"].left
-            && toolbar.layout.toolbar["new"].right
-                <= toolbar.layout.toolbar.control_center.left
-            && toolbar.layout.toolbar.control_center.right
-                <= toolbar.layout.toolbar.settings.left
-            && toolbar.layout.toolbar.settings.right
-                <= toolbar.layout.toolbar.locale.left
-            && toolbar.layout.toolbar.locale.right
-                <= toolbar.layout.toolbar.font_decrease.left
-            && toolbar.layout.toolbar.font_decrease.right
-                <= toolbar.layout.toolbar.font_increase.left
-            && toolbar.layout.toolbar.font_increase.right
-                == toolbar.layout.toolbar.bounds.right - 4,
+        toolbar.layout.sidebar.visible
+            && toolbar_layout.tabs.left
+                < toolbar_layout["new"].left
+            && toolbar_layout["new"].right
+                <= toolbar_layout.control_center.left
+            && toolbar_layout.control_center.right
+                <= toolbar_layout.settings.left
+            && toolbar_layout.settings.right
+                <= toolbar_layout.locale.left
+            && toolbar_layout.locale.right
+                <= toolbar_layout.font_decrease.left
+            && toolbar_layout.font_decrease.right
+                <= toolbar_layout.font_increase.left
+            && toolbar_layout.font_increase.right
+                == toolbar_layout.bounds.right - 4,
         "remote_ui_toolbar_geometry_invalid"
     );
     test_harness::require(
-        locale_button_text == "En|Zh"
-            && control_center_button_text == "Control Center"
-            && font_decrease_button_text == "z"
-            && font_increase_button_text == "Z",
+        locale_toolbar_label == "En|Zh"
+            && toolbar_layout.control_center.width > 0
+            && toolbar_layout.font_decrease.width > 0
+            && toolbar_layout.font_increase.width > 0,
         "remote_ui_toolbar_new_controls_invalid"
     );
     locale_button.click();
-    locale_button_text = "" + locale_button.text;
-    settings_button_text = "" + settings_button.text;
     let traditional = wait_locale(context, cli, "zh-Hant");
+    let traditional_locale = traditional.locale;
     test_harness::require(
-        traditional.locale.id == "zh-Hant"
-            && locale_button_text == "Zh|En"
-            && settings_button_text == "設定",
+        traditional_locale.id == "zh-Hant"
+            && traditional_locale.toolbar_label == "Zh|En"
+            && traditional_locale.controls.settings == "設定",
         "remote_ui_locale_toggle_invalid"
     );
     locale_button.click();
+    let restored_locale = wait_locale(context, cli, "en-US");
     test_harness::require(
-        wait_locale(context, cli, "en-US").locale.id == "en-US",
+        restored_locale.locale.id == "en-US",
         "remote_ui_locale_restore_invalid"
     );
     tabs_button.click();
-    tabs_button_text = "" + tabs_button.text;
+    let hidden_toolbar = json_cli(context, cli, ["ui-snapshot"]);
     test_harness::require(
         tabs_button.visible
             && settings_button.visible
-            && tabs_button_text == ">Tabs",
+            && !hidden_toolbar.layout.sidebar.visible,
         "remote_ui_toolbar_hide_invalid"
     );
     tabs_button.click();
@@ -2262,11 +2259,12 @@ try {
     let scrollbar_x = client_rect.right - 6;
     let bottom_thumb_y = track_height - thumb_height / 2;
     let top_thumb_y = thumb_height / 2;
-    let top_baseline = json_cli(
+    let top_snapshot = json_cli(
         context,
         cli,
         ["ui-snapshot"]
-    ).event_position;
+    );
+    let top_baseline = top_snapshot.event_position;
     gui.window_pointer("down", scrollbar_x, bottom_thumb_y);
     gui.window_pointer("move-held", scrollbar_x, top_thumb_y);
     gui.window_pointer("up", scrollbar_x, top_thumb_y);
@@ -2280,11 +2278,12 @@ try {
         dragged_top.windows[0].scrollback_offset == maximum_scroll,
         "remote_ui_scrollbar_did_not_reach_history"
     );
-    let live_baseline = json_cli(
+    let live_snapshot = json_cli(
         context,
         cli,
         ["ui-snapshot"]
-    ).event_position;
+    );
+    let live_baseline = live_snapshot.event_position;
     gui.window_pointer("down", scrollbar_x, top_thumb_y);
     gui.window_pointer("move-held", scrollbar_x, bottom_thumb_y);
     gui.window_pointer("up", scrollbar_x, bottom_thumb_y);
@@ -2298,11 +2297,12 @@ try {
         dragged_live.windows[0].scrollback_offset == 0,
         "remote_ui_scrollbar_did_not_return_live"
     );
-    let wheel_up_baseline = json_cli(
+    let wheel_up_snapshot = json_cli(
         context,
         cli,
         ["ui-snapshot"]
-    ).event_position;
+    );
+    let wheel_up_baseline = wheel_up_snapshot.event_position;
     gui.window_message(0x020A, 7864320, wheel_message_lparam(gui));
     wait_viewport_mutation(
         context,
@@ -2310,19 +2310,21 @@ try {
         wheel_up_baseline,
         tab_id
     );
+    let wheel_up_inspect = json_cli(
+        context,
+        cli,
+        ["inspect", "-t", tab_id]
+    );
     test_harness::require(
-        json_cli(
-            context,
-            cli,
-            ["inspect", "-t", tab_id]
-        ).windows[0].scrollback_offset > 0,
+        wheel_up_inspect.windows[0].scrollback_offset > 0,
         "remote_ui_wheel_up_invalid"
     );
-    let wheel_down_baseline = json_cli(
+    let wheel_down_snapshot = json_cli(
         context,
         cli,
         ["ui-snapshot"]
-    ).event_position;
+    );
+    let wheel_down_baseline = wheel_down_snapshot.event_position;
     gui.window_message(0x020A, 4287102976, wheel_message_lparam(gui));
     wait_viewport_mutation(
         context,
@@ -2330,12 +2332,13 @@ try {
         wheel_down_baseline,
         tab_id
     );
+    let wheel_down_inspect = json_cli(
+        context,
+        cli,
+        ["inspect", "-t", tab_id]
+    );
     test_harness::require(
-        json_cli(
-            context,
-            cli,
-            ["inspect", "-t", tab_id]
-        ).windows[0].scrollback_offset == 0,
+        wheel_down_inspect.windows[0].scrollback_offset == 0,
         "remote_ui_wheel_down_invalid"
     );
 

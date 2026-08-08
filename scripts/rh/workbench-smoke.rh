@@ -12,14 +12,12 @@ fn json_null() {
     rhai::json::parse("null")
 }
 
-let declared_evidence = [
-    "ux.workbench-inline-edit",
-    "ux.workbench-compact-tree",
-    "ux.workbench-proxy-archived"
-];
-
 fn declared_evidence_ids() {
-    declared_evidence
+    [
+        "ux.workbench-inline-edit",
+        "ux.workbench-compact-tree",
+        "ux.workbench-proxy-archived"
+    ]
 }
 
 fn json_cli(context, cli, arguments) {
@@ -44,34 +42,76 @@ fn text_cli(context, cli, arguments) {
     ).stdout
 }
 
-fn find_tab(snapshot, target) {
-    for tab in snapshot.tabs {
-        if tab.id == target {
-            return tab;
+fn tab_index(snapshot, target) {
+    let tabs = snapshot.tabs;
+    for index in 0..tabs.len {
+        if tabs[index].id == target {
+            return index;
         }
     }
     throw "workbench_tab_missing:" + target;
 }
 
-fn find_tab_optional(snapshot, target) {
-    let result = json_null();
-    for tab in snapshot.tabs {
-        if tab.id == target {
-            result = tab;
+fn require_matching_editor_actions(left, left_id, right, right_id, label) {
+    let left_actions = json_null();
+    let right_actions = json_null();
+    for tab in left.tabs {
+        if tab.id == left_id {
+            left_actions = tab.actions;
         }
     }
-    result
+    for tab in right.tabs {
+        if tab.id == right_id {
+            right_actions = tab.actions;
+        }
+    }
+    test_harness::require(
+        left_actions.mode == right_actions.mode
+            && left_actions.density == right_actions.density
+            && left_actions.save.id == right_actions.save.id
+            && left_actions.cancel.id == right_actions.cancel.id,
+        label
+    );
+}
+
+fn click_tab_text(gui_child, snapshot, target) {
+    for tab in snapshot.tabs {
+        if tab.id == target {
+            click_bounds(gui_child, tab.render.text);
+            return;
+        }
+    }
+    throw "workbench_tab_missing:" + target;
+}
+
+fn double_click_tab_text(gui_child, snapshot, target) {
+    for tab in snapshot.tabs {
+        if tab.id == target {
+            double_click_text(gui_child, tab.render.text);
+            return;
+        }
+    }
+    throw "workbench_tab_missing:" + target;
+}
+
+fn double_click_tab_message(gui_child, snapshot, target) {
+    for tab in snapshot.tabs {
+        if tab.id == target {
+            double_click_message(gui_child, tab.render.text);
+            return;
+        }
+    }
+    throw "workbench_tab_missing:" + target;
 }
 
 fn wait_tab_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        for tab in snapshot.tabs {
-            if tab.id == target {
-                let render_text = tab.render.text;
-                if render_text.width > 0 {
-                    return tab;
-                }
+        let tabs = snapshot.tabs;
+        for index in 0..tabs.len {
+            if tabs[index].id == target
+                    && tabs[index].render.text.width > 0 {
+                return 0;
             }
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -82,7 +122,9 @@ fn wait_tab_render(context, cli, target) {
 fn wait_tab_label_render(context, cli, target) {
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        for tab in snapshot.tabs {
+        let tabs = snapshot.tabs;
+        for index in 0..tabs.len {
+            let tab = tabs[index];
             if tab.id == target {
                 let tab_render = tab.render;
                 let tab_actions = tab.actions;
@@ -91,7 +133,7 @@ fn wait_tab_label_render(context, cli, target) {
                         && tab_render.node.width > 0
                         && tab_actions.close.bounds.width > 0
                         && tab_actions.new_child.bounds.width > 0 {
-                    return tab;
+                    return 0;
                 }
             }
         }
@@ -100,10 +142,11 @@ fn wait_tab_label_render(context, cli, target) {
     throw "workbench_tab_label_render_timeout:" + target;
 }
 
-fn active_tab(snapshot) {
-    for tab in snapshot.tabs {
-        if tab.active != 0 {
-            return tab;
+fn active_tab_index(snapshot) {
+    let tabs = snapshot.tabs;
+    for index in 0..tabs.len {
+        if tabs[index].active != 0 {
+            return index;
         }
     }
     throw "workbench_active_tab_missing";
@@ -222,7 +265,13 @@ fn set_tab_editor_text(gui_child, name, note) {
 }
 
 fn assert_editor_closed(snapshot, target, label) {
-    let tab = find_tab(snapshot, target);
+    let tab = json_null();
+    for candidate in snapshot.tabs {
+        if candidate.id == target {
+            tab = candidate;
+        }
+    }
+    test_harness::require(tab != json_null(), "workbench_tab_missing:" + target);
     let tab_actions = tab.actions;
     let tab_render = tab.render;
     let snapshot_tab_editor = snapshot.tab_editor;
@@ -242,7 +291,13 @@ fn assert_editor_closed(snapshot, target, label) {
 }
 
 fn assert_editor_open(snapshot, target, label) {
-    let tab = find_tab(snapshot, target);
+    let tab = json_null();
+    for candidate in snapshot.tabs {
+        if candidate.id == target {
+            tab = candidate;
+        }
+    }
+    test_harness::require(tab != json_null(), "workbench_tab_missing:" + target);
     let tab_render = tab.render;
     let tab_actions = tab.actions;
     let snapshot_tab_editor = snapshot.tab_editor;
@@ -309,7 +364,7 @@ fn retain_failure_snapshot(context, cli) {
 
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
-        for id in declared_evidence {
+        for id in declared_evidence_ids() {
             print(id);
         }
         return 0;
@@ -386,13 +441,22 @@ fn entry() {
             ["wait-ui", "--active", root, "--window-state", "restored",
              "--timeout-ms", "30000"]
         );
-        let root_tab = find_tab(snapshot, root);
-        let peer_tab = find_tab(snapshot, peer);
+        let root_tab = json_null();
+        let peer_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+            if tab.id == peer {
+                peer_tab = tab;
+            }
+        }
         assert_editor_closed(snapshot, root, "initial-normal");
 
         print("STEP a single text click selects without entering edit mode");
-        let peer_tab = wait_tab_render(context, cli, peer);
-        click_bounds(gui_child, peer_tab.render.text);
+        wait_tab_render(context, cli, peer);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        click_tab_text(gui_child, snapshot, peer);
         let snapshot = json_cli(
             context,
             cli,
@@ -400,8 +464,9 @@ fn entry() {
              "--timeout-ms", "30000"]
         );
         assert_editor_closed(snapshot, peer, "single-click-peer");
-        let root_tab = wait_tab_render(context, cli, root);
-        click_bounds(gui_child, root_tab.render.text);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        click_tab_text(gui_child, snapshot, root);
         let snapshot = json_cli(
             context,
             cli,
@@ -411,7 +476,14 @@ fn entry() {
         assert_editor_closed(snapshot, root, "single-click-root");
 
         print("STEP non-text double clicks never enter tab editing");
-        let root_tab = wait_tab_render(context, cli, root);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         for zone in [
             root_tab.render.disclosure_hit,
             root_tab.render.status,
@@ -439,8 +511,9 @@ fn entry() {
         print(
             "STEP double-clicking tab text opens independent controls and Save restores normal mode"
         );
-        let root_tab = wait_tab_render(context, cli, root);
-        double_click_text(gui_child, root_tab.render.text);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        double_click_tab_text(gui_child, snapshot, root);
         let snapshot = wait_for_editor(context, cli, root, 1);
         assert_editor_open(snapshot, root, "mouse-double-click");
         let composer_before = text_cli(
@@ -459,10 +532,20 @@ fn entry() {
             saved_note.len
         );
         retain_png_evidence(context, cli, "tab-editor-open");
-        let root_tab = find_tab(snapshot, root);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         click_bounds(gui_child, root_tab.actions.save.bounds);
         let snapshot = wait_for_editor(context, cli, root, 0);
-        let root_tab = find_tab(snapshot, root);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         assert_editor_closed(snapshot, root, "mouse-save");
         retain_png_evidence(context, cli, "tab-editor-normal");
         let composer_after = text_cli(
@@ -470,7 +553,12 @@ fn entry() {
             cli,
             ["show-composer", "-t", root]
         );
-        let root_tab = find_tab(snapshot, root);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         let root_tab_actions = root_tab.actions;
         test_harness::require(
             root_tab.name == saved_name
@@ -482,7 +570,7 @@ fn entry() {
         );
 
         print("STEP mouse Cancel discards both independent drafts");
-        double_click_text(gui_child, root_tab.render.text);
+        double_click_tab_text(gui_child, snapshot, root);
         let snapshot = wait_for_editor(context, cli, root, 1);
         set_tab_editor_text(gui_child, "discarded name", "discarded note");
         wait_for_editor_draft(
@@ -492,10 +580,20 @@ fn entry() {
             "discarded name".len,
             "discarded note".len
         );
-        let root_tab = find_tab(snapshot, root);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         click_bounds(gui_child, root_tab.actions.cancel.bounds);
         let snapshot = wait_for_editor(context, cli, root, 0);
-        let root_tab = find_tab(snapshot, root);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         test_harness::require(
             root_tab.name == saved_name && root_tab.note == saved_note,
             "workbench_cancel_persisted_draft"
@@ -515,13 +613,11 @@ fn entry() {
         json_cli(context, cli, ["ui-action", "edit-tab", "-t", root]);
         let public_snapshot = wait_for_editor(context, cli, root, 1);
         assert_editor_open(public_snapshot, root, "public-edit-tab");
-        let f2_actions = find_tab(f2_snapshot, root).actions;
-        let public_actions = find_tab(public_snapshot, root).actions;
-        test_harness::require(
-            f2_actions.mode == public_actions.mode
-                && f2_actions.density == public_actions.density
-                && f2_actions.save.id == public_actions.save.id
-                && f2_actions.cancel.id == public_actions.cancel.id,
+        require_matching_editor_actions(
+            f2_snapshot,
+            root,
+            public_snapshot,
+            root,
             "workbench_f2_public_editor_mismatch"
         );
         gui_child.window_key("Escape");
@@ -544,10 +640,13 @@ fn entry() {
             root,
             "tab-switch"
         );
-        let root_tab = find_tab(
-            json_cli(context, cli, ["ui-snapshot"]),
-            root
-        );
+        let switch_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let root_tab = json_null();
+        for tab in switch_snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         test_harness::require(
             root_tab.name == saved_name && root_tab.note == saved_note,
             "workbench_tab_switch_persisted_draft"
@@ -570,35 +669,50 @@ fn entry() {
             "tabs-hide"
         );
         json_cli(context, cli, ["ui-action", "tabs-show"]);
-        let root_tab = wait_tab_render(context, cli, root);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let root_tab = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                root_tab = tab;
+            }
+        }
         test_harness::require(
             root_tab.name == saved_name && root_tab.note == saved_note,
             "workbench_tabs_hide_persisted_draft"
         );
 
         print("STEP layout changes invalidate an unfinished double-click candidate");
-        let root_tab = wait_tab_render(context, cli, root);
-        click_bounds(gui_child, root_tab.render.text);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        click_tab_text(gui_child, snapshot, root);
         json_cli(context, cli, ["ui-action", "select-tab", "-t", peer]);
-        double_click_message(gui_child, root_tab.render.text);
+        double_click_tab_message(gui_child, snapshot, root);
         assert_editor_closed(
             json_cli(context, cli, ["ui-snapshot"]),
             root,
             "candidate-tab-switch"
         );
         json_cli(context, cli, ["ui-action", "select-tab", "-t", root]);
-        let root_tab = wait_tab_render(context, cli, root);
-        click_bounds(gui_child, root_tab.render.text);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        click_tab_text(gui_child, snapshot, root);
         json_cli(context, cli, ["ui-action", "tabs-hide"]);
         json_cli(context, cli, ["ui-action", "tabs-show"]);
-        let root_tab = wait_tab_render(context, cli, root);
-        double_click_message(gui_child, root_tab.render.text);
+        wait_tab_render(context, cli, root);
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        double_click_tab_message(gui_child, snapshot, root);
         assert_editor_closed(
             json_cli(context, cli, ["ui-snapshot"]),
             root,
             "candidate-tabs-hide"
         );
-        let pre_resize_text = root_tab.render.text;
+        let pre_resize_text = json_null();
+        for tab in snapshot.tabs {
+            if tab.id == root {
+                pre_resize_text = tab.render.text;
+            }
+        }
         click_bounds(gui_child, pre_resize_text);
         gui_child.window_resize(1000, 680);
         double_click_message(gui_child, pre_resize_text);
@@ -634,7 +748,11 @@ fn entry() {
         );
         test_harness::emit_evidence(
             context,
-            declared_evidence_ids(),
+            [
+                "ux.workbench-inline-edit",
+                "ux.workbench-compact-tree",
+                "ux.workbench-proxy-archived"
+            ],
             "ux.workbench-proxy-archived"
         );
 
@@ -646,7 +764,12 @@ fn entry() {
                 cli,
                 ["ui-action", "new-child", "-t", target]
             );
-            let child = active_tab(snapshot);
+            let child = json_null();
+            for tab in snapshot.tabs {
+                if tab.active != 0 {
+                    child = tab;
+                }
+            }
             let child_name = "层级-" + depth + "-工作";
             let child_note = "备注-" + depth;
             set_tab_editor_text(gui_child, child_name, child_note);
@@ -751,7 +874,11 @@ fn entry() {
         );
         test_harness::emit_evidence(
             context,
-            declared_evidence_ids(),
+            [
+                "ux.workbench-inline-edit",
+                "ux.workbench-compact-tree",
+                "ux.workbench-proxy-archived"
+            ],
             "ux.workbench-inline-edit"
         );
 
@@ -761,7 +888,14 @@ fn entry() {
                 cli,
                 ["ui-action", "tabs-set-width", "--width", "" + width]
             );
-            let tab = wait_tab_label_render(context, cli, target);
+            wait_tab_label_render(context, cli, target);
+            let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+            let tab = json_null();
+            for candidate in snapshot.tabs {
+                if candidate.id == target {
+                    tab = candidate;
+                }
+            }
             let tab_actions = tab.actions;
             let tab_render = tab.render;
             assert_inside(
@@ -791,7 +925,11 @@ fn entry() {
         }
         test_harness::emit_evidence(
             context,
-            declared_evidence_ids(),
+            [
+                "ux.workbench-inline-edit",
+                "ux.workbench-compact-tree",
+                "ux.workbench-proxy-archived"
+            ],
             "ux.workbench-compact-tree"
         );
         print("PASS: inline Tabs editing and compact tree geometry");

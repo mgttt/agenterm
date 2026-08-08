@@ -190,23 +190,28 @@ fn scan_relative_files_with_policy(
                 "corpus aggregate exceeds {SCAN_TOTAL_SOURCE_MAX_BYTES} bytes"
             )));
         }
-        let validation = check_with_project_validation(&source, Some(root)).and_then(|()| {
-            if !require_native_rh_tasks || !relative.ends_with(".rh") {
-                return Ok(());
-            }
-            let output = transpile_cdylib_with_project(root, &source)?;
-            if output.execution_mode == CdylibExecutionMode::Native {
-                Ok(())
-            } else {
-                Err(RhError::Subset {
-                    code: "native_task_interpreter_fallback",
-                    detail: format!(
-                        "native .rh task requires {} interpreter fallback",
-                        output.execution_mode.as_str()
-                    ),
-                })
-            }
-        });
+        let validation = if relative.ends_with(".lua") {
+            // Lua tasks are owned by agenterm-lua; rh corpus only inventories them.
+            Ok(())
+        } else {
+            check_with_project_validation(&source, Some(root)).and_then(|()| {
+                if !require_native_rh_tasks || !relative.ends_with(".rh") {
+                    return Ok(());
+                }
+                let output = transpile_cdylib_with_project(root, &source)?;
+                if output.execution_mode == CdylibExecutionMode::Native {
+                    Ok(())
+                } else {
+                    Err(RhError::Subset {
+                        code: "native_task_interpreter_fallback",
+                        detail: format!(
+                            "native .rh task requires {} interpreter fallback",
+                            output.execution_mode.as_str()
+                        ),
+                    })
+                }
+            })
+        };
         match validation {
             Ok(()) => {
                 passed += 1;

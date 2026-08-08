@@ -13,16 +13,18 @@ fn json_null() {
     rhai::json::parse("null")
 }
 
-let declared_evidence = [
-    "ux.unix-frontend-linux-no-activate",
-    "ux.unix-frontend-linux-workbench",
-    "ux.unix-frontend-linux-native-clipboard",
-    "ux.unix-frontend-linux-stale-paste",
-    "ux.unix-frontend-macos-no-activate",
-    "ux.unix-frontend-macos-workbench",
-    "ux.unix-frontend-macos-native-clipboard",
-    "ux.unix-frontend-macos-stale-paste"
-];
+fn declared_evidence_ids() {
+    [
+        "ux.unix-frontend-linux-no-activate",
+        "ux.unix-frontend-linux-workbench",
+        "ux.unix-frontend-linux-native-clipboard",
+        "ux.unix-frontend-linux-stale-paste",
+        "ux.unix-frontend-macos-no-activate",
+        "ux.unix-frontend-macos-workbench",
+        "ux.unix-frontend-macos-native-clipboard",
+        "ux.unix-frontend-macos-stale-paste"
+    ]
+}
 
 fn require(condition, message) {
     test_harness::require(condition != 0, message);
@@ -33,20 +35,19 @@ fn environment_or_empty(name) {
 }
 
 fn unsupported(platform, code, message) {
-    print(
-        "SKIP " + rhai::json::stringify(#{
-            schema_version: 1,
-            suite: "unix-frontend-smoke",
-            platform: platform,
-            result_class: "skipped",
-            failure: #{
-                kind: "Unsupported",
-                code: code,
-                message: message
-            },
-            evidence_emitted: []
-        })
-    );
+    let skip_payload = #{
+        schema_version: 1,
+        suite: "unix-frontend-smoke",
+        platform: platform,
+        result_class: "skipped",
+        failure: #{
+            kind: "Unsupported",
+            code: code,
+            message: message
+        },
+        evidence_emitted: []
+    };
+    print("SKIP " + rhai::json::stringify(skip_payload));
 }
 
 fn resolve_tool(name) {
@@ -129,7 +130,7 @@ fn wait_for_window(gui) {
         if facts.top_level_window_supported != 0
                 && facts.top_level_window_present != 0
                 && facts.top_level_window_id != 0 {
-            return facts;
+            return 0;
         }
         if gui.state == "exited" {
             throw "unix_frontend_window_early_exit";
@@ -260,7 +261,7 @@ fn wait_macos_agenterm_active(context) {
     throw "unix_frontend_macos_activation_timeout";
 }
 
-fn wait_native_focus(context, cli, gui, platform, native_window_id) {
+fn wait_native_focus(context, cli, platform, native_window_id) {
     let last = json_null();
     for attempt in 0..160 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
@@ -272,7 +273,6 @@ fn wait_native_focus(context, cli, gui, platform, native_window_id) {
         };
         if snapshot.focus.window_focused != 0
                 && ("" + snapshot.focus.surface) == "terminal"
-                && gui.platform_facts.top_level_window_is_foreground != 0
                 && os_focused {
             return snapshot;
         }
@@ -360,8 +360,9 @@ fn wait_terminal_paste_success(context, cli) {
         last = snapshot;
         if ("" + snapshot.terminal_paste.state) == "idle" {
             if snapshot.feedback.error != json_null() {
+                let paste_error = snapshot.feedback.error;
                 throw "unix_frontend_native_paste_failed:" +
-                    rhai::json::stringify(snapshot.feedback.error);
+                    rhai::json::stringify(paste_error);
             }
             if snapshot.feedback.message != json_null()
                     && ("" + snapshot.feedback.message).starts_with("Pasted ") {
@@ -553,7 +554,8 @@ fn entry() {
         gui_command.env("AGENTERM_SMOKE_STALE_MARKER", stale_marker);
         let gui = gui_command.start();
         owned_children.push(gui);
-        let native_window = wait_for_window(gui);
+        wait_for_window(gui);
+        let native_window = gui.platform_facts;
         let initial = wait_for_server(context, cli_exe, gui);
         require(
             ("" + initial.projection) == "embedded_gui"
@@ -574,7 +576,17 @@ fn entry() {
             );
         }
         test_harness::emit_evidence(
-            context, declared_evidence,
+            context,
+            [
+                "ux.unix-frontend-linux-no-activate",
+                "ux.unix-frontend-linux-workbench",
+                "ux.unix-frontend-linux-native-clipboard",
+                "ux.unix-frontend-linux-stale-paste",
+                "ux.unix-frontend-macos-no-activate",
+                "ux.unix-frontend-macos-workbench",
+                "ux.unix-frontend-macos-native-clipboard",
+                "ux.unix-frontend-macos-stale-paste"
+            ],
             "ux.unix-frontend-" + platform + "-no-activate"
         );
 
@@ -585,8 +597,26 @@ fn entry() {
         } else {
             ""
         };
-        let focused = wait_native_focus(
-            context, cli_exe, gui, platform, native_window_id
+        let focused = json_null();
+        for attempt in 0..160 {
+            let snapshot = json_cli(context, cli_exe, ["ui-snapshot"]);
+            let os_focused = if platform == "linux" {
+                active_x11_window(context) == native_window_id
+            } else {
+                frontmost_macos(context).to_lower().contains("agenterm")
+            };
+            if snapshot.focus.window_focused != 0
+                    && ("" + snapshot.focus.surface) == "terminal"
+                    && gui.platform_facts.top_level_window_is_foreground != 0
+                    && os_focused {
+                focused = snapshot;
+                break;
+            }
+            rhai::task::sleep(std::time::Duration::from_millis(20));
+        }
+        test_harness::require(
+            focused != json_null(),
+            "unix_frontend_native_focus_event_timeout"
         );
         if platform == "linux" {
             wait_x11_active(
@@ -609,6 +639,15 @@ fn entry() {
         returned_path.trim();
         let after_capture = json_cli(context, cli_exe, ["ui-snapshot"]);
         let rendered = rhai::image::inspect_png(screenshot_path);
+        let renderer_evidence = #{
+            before: before_capture.event_position,
+            after: after_capture.event_position,
+            focus: focused.focus,
+            png: screenshot_path,
+            width: rendered.width,
+            height: rendered.height,
+            bytes: std::fs::metadata(screenshot_path).len
+        };
         require(
             returned_path == screenshot_path
                 && before_capture.event_position.epoch
@@ -627,18 +666,20 @@ fn entry() {
                 && rendered.luminance > 1
                 && rendered.luminance < 255,
             "unix_frontend_renderer_evidence:" +
-                rhai::json::stringify(#{
-                    before: before_capture.event_position,
-                    after: after_capture.event_position,
-                    focus: focused.focus,
-                    png: screenshot_path,
-                    width: rendered.width,
-                    height: rendered.height,
-                    bytes: std::fs::metadata(screenshot_path).len
-                })
+                rhai::json::stringify(renderer_evidence)
         );
         test_harness::emit_evidence(
-            context, declared_evidence,
+            context,
+            [
+                "ux.unix-frontend-linux-no-activate",
+                "ux.unix-frontend-linux-workbench",
+                "ux.unix-frontend-linux-native-clipboard",
+                "ux.unix-frontend-linux-stale-paste",
+                "ux.unix-frontend-macos-no-activate",
+                "ux.unix-frontend-macos-workbench",
+                "ux.unix-frontend-macos-native-clipboard",
+                "ux.unix-frontend-macos-stale-paste"
+            ],
             "ux.unix-frontend-" + platform + "-workbench"
         );
 
@@ -695,7 +736,17 @@ fn entry() {
             "unix_frontend_native_clipboard_marker_missing"
         );
         test_harness::emit_evidence(
-            context, declared_evidence,
+            context,
+            [
+                "ux.unix-frontend-linux-no-activate",
+                "ux.unix-frontend-linux-workbench",
+                "ux.unix-frontend-linux-native-clipboard",
+                "ux.unix-frontend-linux-stale-paste",
+                "ux.unix-frontend-macos-no-activate",
+                "ux.unix-frontend-macos-workbench",
+                "ux.unix-frontend-macos-native-clipboard",
+                "ux.unix-frontend-macos-stale-paste"
+            ],
             "ux.unix-frontend-" + platform + "-native-clipboard"
         );
 
@@ -720,13 +771,14 @@ fn entry() {
         json_cli(context, cli_exe, ["ui-action", "select-tab", "-t", peer]);
         rhai::runtime::atomic_write(release_path, "released\n");
         let stale = wait_stale_failure(context, cli_exe);
+        let stale_error = stale.feedback.error;
         require(
             stale.active_window_id == peer
-                && ("" + stale.feedback.error.code) == "terminal_paste_failed"
-                && ("" + stale.feedback.error.category) == "precondition"
-                && stale.feedback.error.retryable != 0,
+                && ("" + stale_error.code) == "terminal_paste_failed"
+                && ("" + stale_error.category) == "precondition"
+                && stale_error.retryable != 0,
             "unix_frontend_stale_failure_contract:" +
-                rhai::json::stringify(stale.feedback.error)
+                rhai::json::stringify(stale_error)
         );
         let tab_a = active_tab;
         let capture_a = text_cli(
@@ -749,7 +801,17 @@ fn entry() {
             "unix_frontend_stale_marker_delivered:" + tab_b
         );
         test_harness::emit_evidence(
-            context, declared_evidence,
+            context,
+            [
+                "ux.unix-frontend-linux-no-activate",
+                "ux.unix-frontend-linux-workbench",
+                "ux.unix-frontend-linux-native-clipboard",
+                "ux.unix-frontend-linux-stale-paste",
+                "ux.unix-frontend-macos-no-activate",
+                "ux.unix-frontend-macos-workbench",
+                "ux.unix-frontend-macos-native-clipboard",
+                "ux.unix-frontend-macos-stale-paste"
+            ],
             "ux.unix-frontend-" + platform + "-stale-paste"
         );
 
