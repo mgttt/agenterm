@@ -1391,7 +1391,7 @@ fn stmt_uses_child_binding(stmt: &Stmt, vars: &BTreeSet<String>) -> bool {
 
 fn expr_uses_child_binding(expr: &Expr, vars: &BTreeSet<String>) -> bool {
     for var in vars {
-        if expr_uses_process_param(expr, var, is_child_member_name) {
+        if expr_uses_process_param(expr, var, is_definite_child_member_name) {
             return true;
         }
     }
@@ -12245,6 +12245,41 @@ fn entry() {
         assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
         assert!(
             output.rust.contains("pub fn is_commit(value: String)"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn json_array_lookup_by_id_does_not_infer_child_list() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn find_by_id(values, target) {
+    for value in values {
+        if value.id == target {
+            return value;
+        }
+    }
+    rhai::json::parse("null")
+}
+
+fn entry() {
+    let document = rhai::json::parse("{\"tabs\":[{\"id\":\"@1\"}]}");
+    let found = find_by_id(document.tabs, "@1");
+    if found.id == "@1" {
+        return 0;
+    }
+    rh::fail("missing")
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output
+                .rust
+                .contains("pub fn find_by_id(values: serde_json::Value"),
             "{}",
             output.rust
         );
