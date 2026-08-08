@@ -1,0 +1,4 @@
+fn entry() {
+    let haystack = "agenterm-rh-probe-needle";
+    haystack.index_of("needle")
+}

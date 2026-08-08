@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 27] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 28] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -184,6 +184,11 @@ const FIXTURES: [(&str, &[&str], &[&str]); 27] = [
         "rh_env_has_get.rh",
         &["rh_env_has(", "rh_env_get("],
         &["rh_host_eval_int(\"std::env::has", "rh_host_eval_int(\"std::env::get"],
+    ),
+    (
+        "rh_system_time_rfc3339.rh",
+        &["rh_system_time_now_rfc3339("],
+        &["rh_host_eval_int(\"std::time::SystemTime::now().rfc3339"],
     ),
 ];
 
@@ -543,6 +548,15 @@ fn env_has_get_emits_native_host_calls() {
     assert_native_or_host_eval(FIXTURES[26].0, FIXTURES[26].1, FIXTURES[26].2);
     let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[26].0))
         .expect("transpile env has/get fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn system_time_rfc3339_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[27].0, FIXTURES[27].1, FIXTURES[27].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[27].0))
+        .expect("transpile system time rfc3339 fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
 }
