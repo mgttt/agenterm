@@ -1,11 +1,17 @@
 //! agenterm-qjs — CLI verb shape aligned with `agenterm-rh`
 //! (`crates/agenterm-rh/src/main.rs`) and `agenterm-lua`
 //! (`crates/agenterm-lua/src/main.rs`): `version`, `check`, `eval`, `run`,
-//! `hash`, `pack build`/`pack load`, `qualify`, `check-many`, `task`,
-//! `--help`. Same typed exit-code convention: `0` success, `2` usage/argv
-//! error, `1` for a runtime/qualify/pack failure (matching lua's
-//! convention, not rh's `RhError`-typed one — qjs shares lua's untyped
-//! `Result<u8, String>` dispatch shape here, see `dispatch`/`run` below).
+//! `hash`, `pack build`/`pack load`, `qualify`, `check-many`,
+//! `corpus-scan`, `run-smoke`, `task`, `--help`. Same typed exit-code
+//! convention: `0` success, `2` usage/argv error, `1` for a
+//! runtime/qualify/pack/corpus-scan failure (matching lua's convention,
+//! not rh's `RhError`-typed one — qjs shares lua's untyped
+//! `Result<u8, String>` dispatch shape here, see `run` below).
+//!
+//! Deliberately absent, forever: rh's `caller-inventory`/`compile`/
+//! `transpile`/`--worker`/`--internal-incremental-finalize` — all
+//! native-codegen tooling for rh's AOT pipeline, out of the "capability
+//! alignment" contract by design (see `lib.rs`'s module doc).
 //!
 //! `task` is an honest stub, not a re-implementation: real task dispatch
 //! for the qjs backend already goes through `agenterm::script_backend`'s
@@ -77,6 +83,19 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
         "check-many" => {
             return run_check_many_command(&mut args);
         }
+        "corpus-scan" => {
+            return run_corpus_scan_command(&mut args);
+        }
+        "run-smoke" => {
+            // Bytecode smoke test — delegates to `pack load`, same as
+            // `agenterm-lua`'s `cmd_run_smoke` (a pack dir is what both
+            // engines actually load, not a raw bytecode file).
+            let dir = args
+                .next()
+                .ok_or_else(|| QjsError::Check("usage: agenterm-qjs run-smoke <dir>".into()))?;
+            let mut rest = std::iter::once(dir).chain(args);
+            return run_pack_load(&mut rest);
+        }
         "task" => {
             let rest = args.collect::<Vec<_>>().join(" ");
             eprintln!(
@@ -91,7 +110,7 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
         other => {
             return Err(QjsError::Check(format!(
                 "unknown command `{other}`; try check | eval | run | hash | pack | qualify | \
-                 check-many | task | version"
+                 check-many | corpus-scan | run-smoke | task | version"
             )));
         }
     }
@@ -156,27 +175,60 @@ fn run_pack_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsEr
             println!("  output: {}", dir.display());
             Ok(0)
         }
-        "load" => {
-            let dir = args
-                .next()
-                .map(PathBuf::from)
-                .ok_or_else(|| QjsError::Check("usage: agenterm-qjs pack load <dir>".into()))?;
-            let pack = agenterm_qjs::QjsPack::load(&dir).map_err(QjsError::Check)?;
-            let host = QjsHostFunctions::default();
-            let result = pack.eval(&host)?;
-            if !result.stdout.is_empty() {
-                print!("{}", result.stdout);
-            }
-            println!(
-                "pack load ok: {} -> {}",
-                dir.display(),
-                render_value(result.value.as_ref())
-            );
-            Ok(0)
-        }
+        "load" => run_pack_load(args),
         other => Err(QjsError::Check(format!(
             "pack: unknown subcommand `{other}`; try build or load"
         ))),
+    }
+}
+
+/// `pack load <dir>` — shared by `pack load` and `run-smoke` (lua's
+/// `run-smoke` is the same delegation, see `cmd_run_smoke`'s doc comment).
+fn run_pack_load(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
+    let dir = args
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| QjsError::Check("usage: agenterm-qjs pack load <dir>".into()))?;
+    let pack = agenterm_qjs::QjsPack::load(&dir).map_err(QjsError::Check)?;
+    let host = QjsHostFunctions::default();
+    let result = pack.eval(&host)?;
+    if !result.stdout.is_empty() {
+        print!("{}", result.stdout);
+    }
+    println!(
+        "pack load ok: {} -> {}",
+        dir.display(),
+        render_value(result.value.as_ref())
+    );
+    Ok(0)
+}
+
+/// `corpus-scan [--dir <dir>]` — scan a directory for `.js`/`.mjs` files
+/// and check syntax, mirroring `agenterm-lua`'s `cmd_corpus_scan`.
+fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
+    let collected = args.collect::<Vec<_>>();
+    let dir = match collected.iter().position(|a| a == "--dir") {
+        Some(pos) => collected
+            .get(pos + 1)
+            .map(PathBuf::from)
+            .ok_or_else(|| QjsError::Check("--dir requires a value".into()))?,
+        None => std::env::current_dir()
+            .map_err(|err| QjsError::Check(format!("corpus_scan_cwd: {err}")))?,
+    };
+    let report = agenterm_qjs::scan_directory(&dir)
+        .map_err(|err| QjsError::Check(format!("corpus_scan: {err}")))?;
+    if report.failures == 0 {
+        println!("corpus-scan: {} scripts ok", report.total_scripts);
+        Ok(0)
+    } else {
+        eprintln!(
+            "corpus-scan: {} scripts checked, {} failures",
+            report.total_scripts, report.failures
+        );
+        for failed in &report.failed_files {
+            eprintln!("  {} — {}", failed.path, failed.message);
+        }
+        Ok(1)
     }
 }
 
@@ -274,9 +326,12 @@ agenterm-qjs pack build <file.js> --dir <out>\n  \
 agenterm-qjs pack load <dir>\n  \
 agenterm-qjs qualify <file.js> --dir <out>\n  \
 agenterm-qjs check-many --manifest <file.json> [--project-root DIR] [--timeout-ms N] [--json]\n  \
+agenterm-qjs corpus-scan [--dir <dir>]\n  \
+agenterm-qjs run-smoke <pack-dir>\n  \
 agenterm-qjs task ...  (stub — see plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3)\n  \
 agenterm-qjs version\n\n\
-Not yet implemented: project-level import-graph validation in `check` (rh has\n\
-one, see check.rs); see plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3."
+Not yet implemented: project-level multi-file `import` support in check/eval/\n\
+pack/qualify (rh has one for its own import syntax, see check.rs); see\n\
+plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3/M4."
     );
 }
