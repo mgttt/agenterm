@@ -684,6 +684,18 @@ fn native_ipc_smoke_uses_native_bundled_pack() {
 }
 
 #[test]
+fn check_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/check.rh",
+        &[
+            "rh_json_parse(",
+            "rh_json_stringify(",
+            "pub fn wrap_timing_new(",
+        ],
+    );
+}
+
+#[test]
 fn control_center_smoke_uses_native_bundled_pack() {
     assert_native_bundled_pack(
         "scripts/rh/control-center-smoke.rh",

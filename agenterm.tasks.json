@@ -1421,7 +1421,7 @@
     {
       "id": "check",
       "description": "Run quick, ordinary, or release qualification and emit an exact receipt when stress is included",
-      "entry": "scripts/rhai/check.rhai",
+      "entry": "scripts/rh/check.rh",
       "profile": "local",
       "cwd": ".",
       "args": [

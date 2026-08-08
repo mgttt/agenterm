@@ -2159,6 +2159,18 @@ fn emit_stmt(
                 emit_json_array_value_literal(out, items, ctx)?;
             } else if kind == ValueKind::Json && matches!(expr, Expr::Map(..)) {
                 emit_json_map_literal(out, expr, ctx)?;
+            } else if kind == ValueKind::Json
+                && matches!(
+                    expr,
+                    Expr::Variable(ident, ..)
+                        if ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+                )
+            {
+                // `let smoke_context = context` must clone Json Values.
+                if let Expr::Variable(ident, ..) = expr {
+                    out.push_str(ident.1.as_str());
+                    out.push_str(".clone()");
+                }
             } else if kind == ValueKind::StringList {
                 if let Some((receiver, json, separator)) = string_split_parts(expr, ctx) {
                     emit_string_split_call(out, receiver, json, separator, ctx)?;
@@ -3955,7 +3967,12 @@ fn emit_string_list_push_stmt(
     out.push_str("    ");
     out.push_str(binding);
     out.push_str(".push(");
-    emit_stringish(out, item, ctx)?;
+    // Clone string bindings so `list.push(x); other.push(x)` stays valid.
+    if !emit_owned_string_element(out, item, ctx)? {
+        return Err(RhError::Transpile(
+            "string list push argument must be a stringish value".into(),
+        ));
+    }
     out.push_str(
         ");
 ",

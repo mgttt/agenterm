@@ -160,19 +160,6 @@ fn pass_int(value) {
     value
 }
 
-fn pass_context(value) {
-    let context = value;
-    let _manifest = context.manifest;
-    let _timing = context.timing;
-    context
-}
-
-fn pass_timing(value) {
-    let timing = value;
-    let _gates = timing.gates;
-    timing
-}
-
 fn arg_value(index) {
     args[index]
 }
@@ -1002,18 +989,19 @@ fn quick_prd_alignment_spec(
 }
 
 fn compute_quick_native_bin_root(repo, quick_target) {
+    let target = "" + quick_target;
     if std::env::has("CARGO_TARGET_DIR") {
         let base =
             std::path::absolute(std::env::get("CARGO_TARGET_DIR")).display;
-        if quick_target != "" {
-            let with_target = std::path::join(base, quick_target).display;
+        if target != "" {
+            let with_target = std::path::join(base, target).display;
             return std::path::join(with_target, "debug").display;
         }
         return std::path::join(base, "debug").display;
     }
     let base = std::path::join(repo, "target").display;
-    if quick_target != "" {
-        let with_target = std::path::join(base, quick_target).display;
+    if target != "" {
+        let with_target = std::path::join(base, target).display;
         return std::path::join(with_target, "debug").display;
     }
     std::path::join(base, "debug").display
@@ -1302,12 +1290,13 @@ if quick != 0 {
     let unit_arguments = ["test", "--quiet", "--locked", "--lib"];
     let quick_client_build_args = [];
     if quick_target != "" {
+        let target_text = "" + quick_target;
         clippy_arguments.push("--target");
-        clippy_arguments.push(quick_target);
+        clippy_arguments.push(target_text);
         unit_arguments.push("--target");
-        unit_arguments.push(quick_target);
+        unit_arguments.push(target_text);
         quick_client_build_args.push("--target");
-        quick_client_build_args.push(quick_target);
+        quick_client_build_args.push(target_text);
     }
     let quick_gate_ids = [
         "repo-lint",
@@ -2104,8 +2093,8 @@ if skip_smoke == 0 {
             smoke_timing = map_timing(completed);
             smoke_sequence = map_sequence(completed);
         }
-        context = pass_context(smoke_context);
-        timing = pass_timing(smoke_timing);
+        context = smoke_context;
+        timing = smoke_timing;
         sequence = pass_int(smoke_sequence);
         smoke_index += 1;
     }
@@ -2152,7 +2141,6 @@ if skip_smoke != 0 {
     );
 } else {
     try {
-        context.timing = timing;
         let written =
             wrap_write_receipt(context, repo, receipt_path);
         print("\nQUALIFICATION RECEIPT " + written);
@@ -2169,10 +2157,12 @@ timing = wrap_timing_finish(
     "passed"
 );
 print("\nSlowest completed gates:");
-let slow_ids = [];
-let slow_durations = [];
-slowest_fill(context.results, timing_gate_ids, slow_ids, slow_durations);
-let count = slow_ids.len;
+let gate_results = context.results;
+let slow_gate_ids = copy_string_list(timing_gate_ids);
+let slow_ids = empty_task_extra();
+let slow_durations = empty_task_extra();
+slowest_fill(gate_results, slow_gate_ids, slow_ids, slow_durations);
+let count = 0 + slow_ids.len;
 if count > 8 {
     count = 8;
 }
