@@ -14,8 +14,27 @@ pub mod pack;
 pub mod qualify;
 
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use mlua::{Lua, Value};
+
+/// Cached fleet.lua source for auto-injection.
+static FLEET_SOURCE: OnceLock<String> = OnceLock::new();
+
+fn fleet_source() -> &'static str {
+    FLEET_SOURCE.get_or_init(|| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("scripts")
+            .join("lua")
+            .join("lib")
+            .join("fleet.lua");
+        std::fs::read_to_string(&path).unwrap_or_default()
+    })
+}
 
 /// Type alias for fleet call host function.
 pub type FleetCallFn = Arc<dyn Fn(String, String) -> Result<String, String> + Send + Sync>;
@@ -121,8 +140,15 @@ impl LuaEngine {
         self.inject_host_table(&self.lua, host, &stdout)
             .map_err(LuaError::Host)?;
 
+        // Prepend fleet.lua module source so scripts can use fleet.* APIs.
+        let fleet_src = fleet_source();
+        let fleet_src = fleet_src.trim_end().strip_suffix("return fleet")
+            .unwrap_or(fleet_src)
+            .trim_end();
+        let full_source = format!("{fleet_src}\n{source}");
+
         // Execute the script as a chunk, capturing any return value.
-        let result: mlua::Result<Value> = self.lua.load(source).eval();
+        let result: mlua::Result<Value> = self.lua.load(&full_source).eval();
 
         // Extract return value.
         let value = match result {
@@ -463,6 +489,27 @@ mod tests {
             .expect("eval_with_args");
         assert_eq!(result.value, 0);
         assert!(result.stdout.contains("first second"), "stdout: {}", result.stdout);
+    }
+
+    #[test]
+    fn fleet_auto_injected_available() {
+        let engine = LuaEngine::new().expect("create engine");
+        let host = LuaHostFunctions::default();
+        let result = engine
+            .eval("return fleet ~= nil and 1 or 0", &host)
+            .expect("eval");
+        assert_eq!(result.value, 1, "fleet module should be auto-injected");
+    }
+
+    #[test]
+    fn fleet_auto_injected_call_no_bridge() {
+        let engine = LuaEngine::new().expect("create engine");
+        let host = LuaHostFunctions::default();
+        // Without __host.fleet_call, calls should return nil gracefully
+        let result = engine
+            .eval("local r = fleet.tabs.list(); return r == nil and 1 or 0", &host)
+            .expect("eval");
+        assert_eq!(result.value, 1, "should return nil when no fleet bridge");
     }
 
     #[test]

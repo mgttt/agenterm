@@ -85,22 +85,25 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     )?;
 
     // string.split(s, delim) → table (1-indexed array)
-    lua.globals().set(
-        "string_split",
-        lua.create_function(|lua, (s, delim): (String, String)| {
-            if delim.is_empty() {
-                let t = lua.create_table()?;
-                t.set(1, s)?;
-                return Ok(t);
-            }
-            let parts: Vec<&str> = s.split(&delim).collect();
+    let string_split_fn = lua.create_function(|lua, (s, delim): (String, String)| {
+        if delim.is_empty() {
             let t = lua.create_table()?;
-            for (i, part) in parts.iter().enumerate() {
-                t.set(i + 1, *part)?;
-            }
-            Ok(t)
-        })?,
-    )?;
+            t.set(1, s)?;
+            return Ok(t);
+        }
+        let parts: Vec<&str> = s.split(&delim).collect();
+        let t = lua.create_table()?;
+        for (i, part) in parts.iter().enumerate() {
+            t.set(i + 1, *part)?;
+        }
+        Ok(t)
+    })?;
+    lua.globals().set("string_split", &string_split_fn)?;
+
+    // String.split method alias via string library
+    if let Ok(string_lib) = lua.globals().get::<mlua::Table>("string") {
+        string_lib.set("split", &string_split_fn)?;
+    }
 
     Ok(())
 }
@@ -502,9 +505,40 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
+    // std.process.command_status (alias for status)
+    process.set(
+        "command_status",
+        lua.create_function(|lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
+            let args = table_to_strings(&args_tbl)?;
+            let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+            let (success, exit_code, _, _) = spawn_and_capture(&program, &args, timeout)?;
+            let out = lua.create_table()?;
+            out.set("success", success)?;
+            out.set("exit_code", exit_code)?;
+            Ok(out)
+        })?,
+    )?;
+
     // std.process.stdout_file(program, args, stdout_path, timeout_ms) → {success, exit_code}
     process.set(
         "stdout_file",
+        lua.create_function(
+            |lua, (program, args_tbl, stdout_path, timeout_ms): (String, Table, String, Option<u64>)| {
+                let args = table_to_strings(&args_tbl)?;
+                let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+                let (success, exit_code, _stderr) =
+                    spawn_stdout_file(&program, &args, &stdout_path, timeout)?;
+                let out = lua.create_table()?;
+                out.set("success", success)?;
+                out.set("exit_code", exit_code)?;
+                Ok(out)
+            },
+        )?,
+    )?;
+
+    // std.process.command_stdout_file (alias for stdout_file)
+    process.set(
+        "command_stdout_file",
         lua.create_function(
             |lua, (program, args_tbl, stdout_path, timeout_ms): (String, Table, String, Option<u64>)| {
                 let args = table_to_strings(&args_tbl)?;
@@ -1574,6 +1608,16 @@ mod tests {
             &host(),
         ).expect("split index");
         assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_method_alias() {
+        let e = engine();
+        let r = e.eval(
+            "local p = string.split('a,b', ','); return #p",
+            &host(),
+        ).expect("split method");
+        assert_eq!(r.value, 2);
     }
 
     // ── env.names / create_dir_all / remove_dir ────────────────────

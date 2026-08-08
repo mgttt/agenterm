@@ -25,7 +25,9 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     // std.process
     "std.process.command",
     "std.process.status",
+    "std.process.command_status",
     "std.process.stdout_file",
+    "std.process.command_stdout_file",
     "std.process.id",
     "std.process.list",
     "std.process.kill",
@@ -82,6 +84,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "rhai.task.sleep",
     "rh.fail",
     "string_split",
+    "string.split",
 ];
 
 fn shipped(path: &str) -> bool {

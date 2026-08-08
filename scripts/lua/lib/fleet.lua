@@ -6,6 +6,9 @@ local fleet = {}
 
 local function call(op_id, params)
     params = params or "{}"
+    if __host.fleet_call == nil then
+        return nil
+    end
     local result_json = __host.fleet_call(op_id, params)
     local ok, parsed = pcall(function() return std.json.parse(result_json) end)
     if ok then
