@@ -1887,6 +1887,77 @@ mod tests {
     }
 
     #[test]
+    fn stress_apply_resize_across_extreme_scale_and_window_sizes() {
+        // Reproduce a reported crash: "font grows past a certain size and the
+        // program exits." Sweep scale factors (simulating high-DPI displays
+        // this dev machine does not have) crossed with window sizes from tiny
+        // to large, at every font size in the allowed range, and confirm
+        // apply_resize never panics and never produces a zero-sized grid.
+        for scale_tenths in 5..=40 {
+            let scale = f64::from(scale_tenths) / 10.0;
+            for logical in [8.0, 20.0, 36.0] {
+                for &(w, h) in &[(1u32, 1u32), (50, 50), (960, 600), (3840, 2160)] {
+                    let mut app = ConTerminal::new(None);
+                    app.font_size_logical = logical;
+                    app.apply_resize(w, h, scale);
+                    assert!(app.cols >= 2, "cols degenerated at scale={scale} logical={logical} w={w} h={h}");
+                    assert!(app.rows >= 2, "rows degenerated at scale={scale} logical={logical} w={w} h={h}");
+                    assert!(app.cell_w > 0);
+                    assert!(app.cell_h > 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stress_raster_every_printable_ascii_and_cjk_at_every_clamped_size() {
+        // font::raster clamps internally to [8,72], but sweep the full clamped
+        // range against a wide character set in case some specific glyph's
+        // outline panics ab_glyph's rasterizer at a particular size — the kind
+        // of bug that would only show up for "large font + this app's prompt
+        // happens to contain that glyph," matching a real-use-only report.
+        let mut chars: Vec<char> = (32u8..=126).map(char::from).collect();
+        chars.extend(['中', '文', '字', '形', '日', '本', '語', '한', '국', '어', '➜', '★', '你']);
+        for size in 8u16..=72 {
+            for &ch in &chars {
+                let _ = font::raster(ch, size);
+            }
+        }
+    }
+
+    #[test]
+    fn stress_paint_cells_with_shell_like_output_across_font_sizes() {
+        // End-to-end: real PTY-shaped bytes (prompt, CJK, colors) through the
+        // full paint path at every clamped font size, at a window size small
+        // enough to force the grid toward its floor while the font is large.
+        let bytes: &[u8] =
+            b"C:/dev/agenterm> echo \xe4\xbd\xa0\xe5\xa5\xbd \x1b[1;32mok\x1b[0m\r\n\x1b[4munderline\x1b[0m ";
+        for size in 8u16..=72 {
+            let cell_w = 10u32.max(u32::from(size) / 2);
+            let cell_h = 20u32.max(u32::from(size));
+            let cols = (200u32 / cell_w).clamp(2, 512) as u16;
+            let rows = (200u32 / cell_h).clamp(2, 512) as u16;
+            let mut parser =
+                vt100::Parser::<ConCallbacks>::new_with_callbacks(rows, cols, 0, ConCallbacks::default());
+            parser.process(bytes);
+            let fw = u32::from(cols) * cell_w;
+            let fh = u32::from(rows) * cell_h;
+            let mut pixels = vec![0u32; (fw * fh) as usize];
+            let mut surface = Surface { pixels: &mut pixels, width: fw, height: fh };
+            paint_cells(
+                &mut surface,
+                parser.screen(),
+                None,
+                cell_w,
+                cell_h,
+                Rgb(0xCC, 0xCC, 0xCC),
+                Rgb(0, 0, 0),
+                size,
+            );
+        }
+    }
+
+    #[test]
     fn offline_help_and_version_are_solo() {
         assert_eq!(offline_cli_exit(&["--version".to_owned()]), Some(0));
         assert_eq!(offline_cli_exit(&["--help".to_owned()]), Some(0));
