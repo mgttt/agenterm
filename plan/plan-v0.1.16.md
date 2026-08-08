@@ -218,11 +218,24 @@ C. Console host (agenterm-con.exe)
    （仍是已知缺口）：Ctrl+滚轮缩放没有脚本命令（该逻辑目前只挂在窗口事件
    分派处，不在 `handle_wheel` 里）；拖拽手势（连续 mouse_move 之间保持
    按钮归属)只在真实指针事件下验证过，脚本层还没写覆盖拖拽的黑盒测试。
-4. **`--script`/`--emit-snapshot` 只测过 `cmd.exe`**——没有针对真实 TUI
-   （vim/htop 之类会认 DECCKM/鼠标上报的程序）跑过黑盒测试，因为找不到
-   一个能在这台机器上确定性安装、体积小、行为可预期的 TUI 依赖。C5 的
-   DECCKM/鼠标上报因此仍然只有编码器层 + 单进程内 `ConTerminal` 层的覆盖，
-   没有"真程序在真会话里对方向键/鼠标做出正确反应"这层集成证据。
+4. **部分已补**：找到了那个"确定性安装、体积小、行为可预期"的 TUI 依赖——
+   `less`（随 Git for Windows 一起装的 `usr\bin\less.exe`，这台机器上是
+   `C:\Program Files\Git\usr\bin\less.exe`；开发机装 Git 是近乎普遍的前提，
+   所以可移植性不算差）。新增 `real_tui_less_scrolls_via_character_and_space_keys`：
+   真正驱动一个 raw/cbreak 模式的 curses 风格 TUI（不是 cmd.exe 那种
+   cooked-mode 行编辑器），证明字符键（`j`）和空格键的转发链路
+   （`forward_key` → `write_pty`）在真会话里对真程序确实生效——这是此前
+   完全没有的证据类别，不只是编码器层 + 单进程覆盖。**但 DECCKM/方向键这半
+   仍未补上，而且证据比之前想的更糟**：新增（`#[ignore]`，同旧那条方向键
+   缺口一样如实标记、不装作过了）`real_tui_less_arrow_keys_and_alt_screen_wheel_do_not_scroll_known_gap`
+   证明真实 ArrowDown 在 `less` 里同样不生效——说明缺口 1 的根因不是
+   cmd.exe/cooked-mode 特有的，curses 风格程序读原始转义序列一样受影响；
+   而且顺手挖出一个之前不知道的连带后果：`less` 会进入备用屏（alternate
+   screen），此时 `handle_wheel` 把滚轮转成的是**跟 ArrowUp/ArrowDown 完全
+   相同**的光标键转义序列（`\x1b[A`/`\x1b[B`），于是**备用屏 TUI 里滚轮
+   滚动也被同一个根因坑了**，不只是字面上的方向键按键。仍未做：更复杂的
+   TUI（vim 的普通/插入模式切换、鼠标点击上报）没测，因为这些都要先绕开
+   同一个方向键/转义序列根因才有意义去测。
 
 **这轮复核踩过的两个真实教训（写给未来的自己）**：
 - **未提交的改动在这个共享检出里不安全**——花了大约 45 分钟写完 agent

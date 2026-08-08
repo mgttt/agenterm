@@ -32,6 +32,64 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_agenterm-con")
 }
 
+/// Real GUI/PTY-spawning tests in this file get measurably flakier the more
+/// of them race at once — observed directly, not hypothetically: adding two
+/// more real-TUI tests to this file pushed a previously 100%-green suite
+/// (under default `cargo test` parallelism, which spawns every test
+/// concurrently) into occasional false failures on window/selection state
+/// that pass reliably alone. Rather than pin `--test-threads=1` globally
+/// (which would also serialize the fast pure-CLI tests for no reason) or
+/// pull in a `serial_test` dependency, every test that spawns a real
+/// `ConSession` takes this lock for its whole body. Cheap, dependency-free,
+/// and turns "occasionally flaky under load" back into "always correct," at
+/// the cost of wall-clock time (these tests now run one at a time instead
+/// of racing). `unwrap_or_else` recovers from poisoning rather than letting
+/// one test's panic cascade-fail every test queued behind it — a mutex
+/// serializing OS resource contention has nothing to do with the poisoned
+/// test's own correctness.
+static GUI_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn gui_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    GUI_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Locates a real `less.exe` (bundled with Git for Windows) if one is
+/// installed, for tests that need a genuine raw-mode/curses-style TUI
+/// rather than a cooked-mode shell — closing the gap plan-v0.1.16.md §C
+/// flagged: "no test against a real TUI exists because no dependency was
+/// found that installs reliably on this machine." `less` turns out to
+/// already be exactly that dependency: Git for Windows ships it, and Git
+/// for Windows is a near-universal dev-machine prerequisite (this repo's
+/// own tooling assumes Git). Not on `PATH` for a plain `CreateProcess`
+/// spawn the way it is for this Bash tool's shell, so this checks known
+/// install locations directly and returns `None` (letting the caller skip)
+/// rather than failing outright on a machine that genuinely lacks it —
+/// this is a real environment dependency, not a bug to hard-fail on.
+fn find_less_exe() -> Option<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from(r"C:\Program Files\Git\usr\bin\less.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Git\usr\bin\less.exe"),
+    ];
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+        if let Ok(base) = std::env::var(var) {
+            candidates.push(PathBuf::from(base).join(r"Git\usr\bin\less.exe"));
+        }
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+/// Writes a fixture file of `count` numbered, greppable lines — enough to
+/// force any reasonably-sized terminal window into needing to scroll.
+fn write_numbered_lines(dir: &Path, prefix: &str, count: usize) -> PathBuf {
+    let path = dir.join("lines.txt");
+    let mut content = String::new();
+    for n in 1..=count {
+        content.push_str(&format!("{prefix}{n}\n"));
+    }
+    std::fs::write(&path, content).expect("write fixture lines");
+    path
+}
+
 /// A unique scratch directory per test, so parallel `cargo test` runs never
 /// collide on the same script/snapshot file.
 fn scratch_dir(label: &str) -> PathBuf {
@@ -142,6 +200,11 @@ impl Drop for ConSession {
 
 #[test]
 fn version_and_help_are_synchronous_and_never_open_a_window() {
+    // Deliberately does *not* take `gui_test_guard()`: the whole point of
+    // this test is that it never opens a window or spawns a PTY, so it
+    // does not contend with the tests that do and does not need to wait
+    // its turn behind them.
+    //
     // These exit before any window/PTY is touched (see offline_cli_exit in
     // main()), so a plain synchronous `.output()` is the right tool — no
     // snapshot needed, and if this ever regressed into opening a window
@@ -182,6 +245,7 @@ fn bad_command_line_fails_fast_without_opening_a_window() {
 
 #[test]
 fn dash_e_passthrough_reaches_the_real_child_process() {
+    let _guard = gui_test_guard();
     // Proves -e's argv passthrough end-to-end: not just that the CLI parser
     // builds the right Vec<String> (that's unit-tested), but that a real
     // spawned program actually receives it and its actual output lands on
@@ -212,6 +276,7 @@ fn dash_e_passthrough_reaches_the_real_child_process() {
 
 #[test]
 fn nonexistent_program_via_dash_e_exits_cleanly_instead_of_hanging() {
+    let _guard = gui_test_guard();
     let _dir = scratch_dir("bad-e");
     let mut child = Command::new(binary())
         .arg("--no-activate")
@@ -237,6 +302,7 @@ fn nonexistent_program_via_dash_e_exits_cleanly_instead_of_hanging() {
 
 #[test]
 fn scripted_text_and_paste_both_reach_the_pty() {
+    let _guard = gui_test_guard();
     // Closes a gap this session's own retrospective flagged: paste had unit
     // coverage for its byte-level encoding, but the wiring from
     // ConTerminal::paste_text to a live session was never exercised
@@ -268,6 +334,7 @@ fn scripted_text_and_paste_both_reach_the_pty() {
 
 #[test]
 fn cjk_output_from_a_real_child_process_appears_as_actual_characters() {
+    let _guard = gui_test_guard();
     // Complements the pixel-level CJK regression test (agenterm-con.rs's own
     // font fallback fix) with the layer it cannot cover: that real UTF-8
     // bytes from a real child process survive PTY -> vt100 -> snapshot
@@ -294,6 +361,7 @@ fn cjk_output_from_a_real_child_process_appears_as_actual_characters() {
 
 #[test]
 fn snapshot_reports_a_live_child_until_it_exits() {
+    let _guard = gui_test_guard();
     // child_alive is the field a test (or agent) should poll instead of
     // guessing a fixed delay before asserting a command finished. Verify it
     // actually flips, rather than trusting the field always reads true.
@@ -387,6 +455,7 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
 
 #[test]
 fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
+    let _guard = gui_test_guard();
     // Closes the gap this session's own plan doc flagged in plain writing:
     // "--script has no mouse commands yet." cmd.exe never negotiates mouse
     // reporting (DECSET 1000/1002/1003), so a real click here always falls
@@ -422,6 +491,7 @@ fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
 
 #[test]
 fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
+    let _guard = gui_test_guard();
     // Same gap as above, the scroll half: proves a scripted `wheel` reaches
     // `handle_wheel`'s local-scrollback branch in a live session, not just
     // that `scroll_by`'s clamping is correct in isolation
@@ -469,7 +539,136 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
 }
 
 #[test]
+fn real_tui_less_scrolls_via_character_and_space_keys() {
+    let _guard = gui_test_guard();
+    // Every other test in this file drives cmd.exe — a cooked-mode line
+    // editor. `less` is a genuinely different animal: a raw/cbreak-mode
+    // curses-style TUI that reads keys directly rather than through a line
+    // editor, which is exactly the category of program plan-v0.1.16.md §C
+    // says has zero black-box coverage. This proves character-key and
+    // space-key forwarding (`forward_key` -> `write_pty`) reaches such a
+    // program and it responds correctly — real integration evidence, not
+    // just the encoder-level/single-process coverage that existed before.
+    let Some(less) = find_less_exe() else {
+        eprintln!("skipping: no less.exe found (Git for Windows not detected on this machine)");
+        return;
+    };
+    let dir = scratch_dir("less-jk-space");
+    let lines_path = write_numbered_lines(&dir, "LESS_LINE_", 300);
+    let script = write_script(
+        &dir,
+        r#"[
+            {"wait_ms": 500},
+            {"key": "j"},
+            {"key": "j"},
+            {"key": "j"},
+            {"wait_ms": 300},
+            {"key": "space"},
+            {"wait_ms": 500}
+        ]"#,
+    );
+    let mut session = ConSession::spawn(
+        &dir,
+        &[
+            "--script",
+            script.to_str().unwrap(),
+            "-e",
+            less.to_str().unwrap(),
+            lines_path.to_str().unwrap(),
+        ],
+    );
+    // Deliberately does not first wait to observe the initial (unscrolled)
+    // frame: `less` reads all pty-buffered input the instant it enters raw
+    // mode, so on an occasional slow-scheduled run it can process the
+    // scripted j/j/j/space before this process ever captures a
+    // pre-scroll snapshot — a real, observed flake (line 1 genuinely never
+    // appears in any polled frame that run), not a hypothetical one. The
+    // only fact this test needs is where the view ends up, not that it
+    // transiently passed through line 1 on the way there.
+    let scrolled = session.wait_for(Duration::from_secs(10), |snapshot| {
+        // `less` redraws by clearing then repainting, so an in-flight frame
+        // can transiently show a blank top row; wait for a *settled*
+        // numbered line, not just "no longer line 1".
+        let first_row = snapshot["rows_text"][0].as_str().unwrap_or_default();
+        first_row.starts_with("LESS_LINE_") && first_row != "LESS_LINE_1"
+    });
+    let first_row = scrolled["rows_text"][0].as_str().unwrap_or_default();
+    assert!(
+        first_row.starts_with("LESS_LINE_"),
+        "still expected a LESS_LINE_* row after scrolling, got {first_row:?}: {scrolled}"
+    );
+    let scrolled_to: u64 = first_row.trim_start_matches("LESS_LINE_").parse().unwrap_or(0);
+    assert!(
+        scrolled_to > 1,
+        "3x 'j' + space must have advanced past line 1, top row is {first_row:?}"
+    );
+    let _ = session.child.kill();
+}
+
+#[test]
+#[ignore = "known gap (same root cause as key_command_moves_the_cursor_through_the_real_forward_key_path, see plan/plan-v0.1.16.md): \
+            arrow keys and alternate-screen wheel-as-cursor-keys don't reach less either"]
+fn real_tui_less_arrow_keys_and_alt_screen_wheel_do_not_scroll_known_gap() {
+    let _guard = gui_test_guard();
+    // Companion to `real_tui_less_scrolls_via_character_and_space_keys`:
+    // that test proves plain character/space keys reach a real raw-mode
+    // TUI correctly. This one is the arrow-key half, and it fails —
+    // confirming the standing gap (`key_command_moves_the_cursor_...`,
+    // never root-caused) is not specific to cooked-mode line editors like
+    // cmd.exe: it also blocks a curses-style TUI reading raw escape
+    // sequences directly. It additionally surfaces a related consequence
+    // that wasn't previously known: `less` enters the alternate screen, so
+    // `handle_wheel` translates wheel notches into the *same* cursor-key
+    // escape sequences (`\x1b[A`/`\x1b[B`) real ArrowUp/ArrowDown produce —
+    // meaning wheel scrolling inside any alternate-screen TUI is silently
+    // broken by the same root cause, not just literal arrow keypresses.
+    // Left `#[ignore]`, not deleted or silently green, for the same reason
+    // the original does: this is real, open, and not this binary's own
+    // logic to fix blind.
+    let Some(less) = find_less_exe() else {
+        eprintln!("skipping: no less.exe found (Git for Windows not detected on this machine)");
+        return;
+    };
+    let dir = scratch_dir("less-arrows-wheel");
+    let lines_path = write_numbered_lines(&dir, "LESS_LINE_", 300);
+    let script = write_script(
+        &dir,
+        r#"[
+            {"wait_ms": 500},
+            {"key": "ArrowDown"},
+            {"key": "ArrowDown"},
+            {"wait_ms": 300},
+            {"wheel": {"row": 5, "col": 5, "notches": -3}},
+            {"wait_ms": 500}
+        ]"#,
+    );
+    let mut session = ConSession::spawn(
+        &dir,
+        &[
+            "--script",
+            script.to_str().unwrap(),
+            "-e",
+            less.to_str().unwrap(),
+            lines_path.to_str().unwrap(),
+        ],
+    );
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["rows_text"][0].as_str() == Some("LESS_LINE_1")
+    });
+    let after = session.wait_for(Duration::from_secs(5), |snapshot| {
+        snapshot["rows_text"][0].as_str() != Some("LESS_LINE_1")
+    });
+    // This assert is expected to fail on the currently-affected
+    // environment — that's the point of `#[ignore]`ing the test rather
+    // than asserting the (currently true) opposite, which would silently
+    // start lying the moment this ever gets root-caused and fixed.
+    assert_ne!(after["rows_text"][0], "LESS_LINE_1");
+    let _ = session.child.kill();
+}
+
+#[test]
 fn scripted_screenshot_produces_a_valid_nonempty_png() {
+    let _guard = gui_test_guard();
     // --emit-snapshot proves text; this proves the *feedback* half the
     // product's north star calls out by name — screenshots, not just
     // structured text — actually exists for agenterm-con specifically. Not
