@@ -471,6 +471,12 @@ struct ConTerminal {
     /// Receives PTY output chunks from the reader thread.
     pty_rx: mpsc::Receiver<Vec<u8>>,
 
+    /// Signaled once by the waiter thread when the child process actually
+    /// exits (via Windows' process-exit notification, not PTY EOF — see
+    /// `spawn_pty`). A placeholder with its sender already dropped until
+    /// `spawn_pty` installs the real one, matching `pty_rx`'s own pattern.
+    child_exit_rx: mpsc::Receiver<()>,
+
     /// Logical font size in DIPs. Adjusted by Ctrl+wheel.
     font_size_logical: f64,
 
@@ -541,6 +547,8 @@ impl ConTerminal {
         // Drop the sender on the main side; the reader thread owns the only
         // surviving copy, so Disconnected reliably signals PTY EOF.
         drop(tx);
+        let (exit_tx, exit_rx) = mpsc::channel();
+        drop(exit_tx);
         Self {
             working_dir,
             command: None,
@@ -552,6 +560,7 @@ impl ConTerminal {
             master: None,
             child: None,
             pty_rx: rx,
+            child_exit_rx: exit_rx,
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
             cell_h: 16,
@@ -663,14 +672,49 @@ impl ConTerminal {
             })
             .map_err(|error| PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}")))?;
 
+        // Waiter thread: on Windows, ConPTY's output pipe does not reliably
+        // EOF just because the immediate child process exited — the pipe
+        // stays open as long as the pseudoconsole handle does, which the
+        // master side deliberately holds for the session's lifetime (see the
+        // comment on `child` below). Without this, `-e cmd.exe /c <command>`
+        // — or simply the user's shell exiting normally — left the window
+        // open forever with nothing left to read and nothing to show for it;
+        // caught by a black-box test that waited on a spawned `/c` command's
+        // window to close and it never did. `try_wait`/`wait` go through
+        // Windows' actual process-exit signal (WaitForSingleObject on the
+        // process handle) rather than through PTY I/O, so this is the
+        // correct detection path, not a workaround for the pipe's behavior.
+        let mut waiter = child
+            .try_clone_for_wait()
+            .map_err(|error| PixelWindowError::failed("cmd_wait_clone_failed", format!("{error}")))?;
+        let (exit_tx, exit_rx) = mpsc::channel();
+        let exit_waker = window.waker();
+        thread::Builder::new()
+            .name("agenterm-con-waiter".into())
+            .spawn(move || {
+                let _ = waiter.wait();
+                let _ = exit_tx.send(());
+                let _ = exit_waker.wake();
+            })
+            .map_err(|error| PixelWindowError::failed("cmd_waiter_spawn_failed", format!("{error}")))?;
+
         self.master = Some(master);
         self.child = Some(child);
         self.pty_rx = rx;
+        self.child_exit_rx = exit_rx;
 
         Ok(())
     }
 
     fn drain_pty(&mut self) {
+        // Only `Ok(())` (an actual signal from the waiter thread) means
+        // anything here — both the placeholder channel `new()` installs
+        // before a child exists and a waiter thread that hasn't finished yet
+        // report as empty/disconnected, which must not be mistaken for exit.
+        if let Ok(()) = self.child_exit_rx.try_recv() {
+            self.child_gone = true;
+        }
+
         let mut got_output = false;
         loop {
             match self.pty_rx.try_recv() {
