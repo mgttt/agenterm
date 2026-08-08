@@ -1,6 +1,6 @@
 # Phase C prep: retire live `rhai::` namespace
 
-Tip baseline: Wave 4.1 landed at codegen **rev83** — script-smoke / remote-ui
+Tip baseline: `a21ac868` — Wave 4.1 landed at codegen **rev83** — script-smoke / remote-ui
 Native + AOT `pack=ok` (locked); fresh-clone / workbench / unix / working-context
 remain Native with pack locks. SSOT for sequencing; do not invent a second living
 file map.
