@@ -125,6 +125,38 @@ fn tmp_sibling(path: &Path) -> PathBuf {
     }
 }
 
+/// Encodes an XRGB (`0x00RRGGBB`) pixel buffer as PNG and writes it
+/// atomically (temp file + rename), the same guarantee `write_snapshot_atomic`
+/// gives text state: a poller must never observe a truncated image.
+///
+/// Takes raw pixels rather than a richer type because the pixel buffer's
+/// real type (`Surface`) lives in the main binary file, not this module —
+/// this is the narrow seam between them, not a reason to duplicate PNG
+/// encoding at the call site.
+pub fn write_png_atomic(path: &Path, pixels: &[u32], width: u32, height: u32) -> std::io::Result<()> {
+    let mut rgb = Vec::with_capacity(pixels.len() * 3);
+    for &pixel in pixels {
+        rgb.push(((pixel >> 16) & 0xFF) as u8);
+        rgb.push(((pixel >> 8) & 0xFF) as u8);
+        rgb.push((pixel & 0xFF) as u8);
+    }
+
+    let tmp_path = tmp_sibling(path);
+    {
+        let file = std::fs::File::create(&tmp_path)?;
+        let mut encoder = png::Encoder::new(file, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| std::io::Error::other(format!("png header: {error}")))?;
+        writer
+            .write_image_data(&rgb)
+            .map_err(|error| std::io::Error::other(format!("png data: {error}")))?;
+    }
+    std::fs::rename(&tmp_path, path)
+}
+
 // ---------------------------------------------------------------------------
 // Script: control
 // ---------------------------------------------------------------------------
@@ -166,6 +198,16 @@ pub enum ScriptCommand {
     /// the executor schedules it via the same `about_to_wait` `WaitUntil`
     /// mechanism the resize debounce and cursor blink use.
     WaitMs(u64),
+    /// Captures the next rendered frame as a PNG at the given path.
+    ///
+    /// `--emit-snapshot` proves what *text* is on screen; it cannot prove
+    /// the pixels are right — that needs an actual image, which is exactly
+    /// what caught the `fill_rect` bug earlier this session (every
+    /// text-level check would have passed while backgrounds painted at the
+    /// wrong column). Before this, getting a picture of a running session
+    /// meant an ad hoc PrintWindow script; this is the same capability as a
+    /// first-class, scriptable, in-sequence command.
+    Screenshot(PathBuf),
 }
 
 /// One entry of the raw JSON array — every field optional so serde can parse
@@ -185,6 +227,7 @@ struct RawCommand {
     #[serde(default)]
     shift: bool,
     wait_ms: Option<u64>,
+    screenshot: Option<PathBuf>,
 }
 
 impl RawCommand {
@@ -194,13 +237,14 @@ impl RawCommand {
             self.paste.is_some(),
             self.key.is_some(),
             self.wait_ms.is_some(),
+            self.screenshot.is_some(),
         ]
         .into_iter()
         .filter(|value| *value)
         .count();
         if present != 1 {
             return Err(format!(
-                "script command {index}: exactly one of text/paste/key/wait_ms is required, found {present}"
+                "script command {index}: exactly one of text/paste/key/wait_ms/screenshot is required, found {present}"
             ));
         }
         if let Some(text) = self.text {
@@ -221,6 +265,9 @@ impl RawCommand {
         }
         if let Some(ms) = self.wait_ms {
             return Ok(ScriptCommand::WaitMs(ms));
+        }
+        if let Some(path) = self.screenshot {
+            return Ok(ScriptCommand::Screenshot(path));
         }
         unreachable!("validated exactly one field is present above");
     }
@@ -296,7 +343,8 @@ mod tests {
             {"paste": "pasted\ntext"},
             {"key": "ArrowUp"},
             {"key": "c", "ctrl": true},
-            {"wait_ms": 250}
+            {"wait_ms": 250},
+            {"screenshot": "out.png"}
         ]"#;
         let commands = parse_script(script).expect("valid script");
         assert_eq!(
@@ -317,8 +365,37 @@ mod tests {
                     shift: false,
                 },
                 ScriptCommand::WaitMs(250),
+                ScriptCommand::Screenshot(PathBuf::from("out.png")),
             ]
         );
+    }
+
+    #[test]
+    fn write_png_atomic_produces_a_readable_png_of_the_right_size() {
+        let dir = std::env::temp_dir().join(format!(
+            "agenterm-con-png-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.png");
+        // 2x2, XRGB: red, green, blue, white.
+        let pixels = [0x00FF_0000u32, 0x0000_FF00, 0x0000_00FF, 0x00FF_FFFF];
+        write_png_atomic(&path, &pixels, 2, 2).expect("write png");
+
+        let bytes = std::fs::read(&path).expect("read png back");
+        let decoder = png::Decoder::new(bytes.as_slice());
+        let mut reader = decoder.read_info().expect("valid PNG");
+        assert_eq!(reader.info().width, 2);
+        assert_eq!(reader.info().height, 2);
+        let mut buffer = vec![0u8; reader.output_buffer_size()];
+        reader.next_frame(&mut buffer).expect("decode frame");
+        // First pixel must be red (0xFF, 0x00, 0x00), proving channel order
+        // survived the XRGB -> RGB8 conversion, not just that *a* PNG came out.
+        assert_eq!(&buffer[0..3], &[0xFF, 0x00, 0x00]);
     }
 
     #[test]

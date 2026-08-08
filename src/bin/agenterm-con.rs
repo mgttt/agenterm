@@ -456,6 +456,9 @@ struct ConTerminal {
     /// When the next queued `WaitMs` elapses. `None` when nothing is queued
     /// or the next command is ready to run immediately.
     script_wait_until: Option<Instant>,
+    /// Set by a script `Screenshot` command; captured and cleared by the
+    /// next `render()`, since pixel data only exists transiently there.
+    pending_screenshot: Option<PathBuf>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser<ConCallbacks>,
@@ -556,6 +559,7 @@ impl ConTerminal {
             snapshot_path: None,
             script: VecDeque::new(),
             script_wait_until: None,
+            pending_screenshot: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
@@ -1135,6 +1139,12 @@ impl ConTerminal {
                     self.script_wait_until = Some(until);
                     return Some(until);
                 }
+                ScriptCommand::Screenshot(path) => {
+                    // Pixels only exist transiently inside render(); stash the
+                    // path and let about_to_wait force the redraw that
+                    // actually produces a frame to capture.
+                    self.pending_screenshot = Some(path);
+                }
             }
         }
         None
@@ -1632,6 +1642,14 @@ impl PixelWindowApplication for ConTerminal {
 
         self.write_snapshot_if_requested();
 
+        if let Some(path) = self.pending_screenshot.take() {
+            // Errors are swallowed like the snapshot path: a bad path from a
+            // script must not crash the session it's trying to observe. A
+            // real agent driving this checks for the file; a missing one is
+            // itself the signal something went wrong.
+            let _ = agent_interface::write_png_atomic(path.as_path(), surface.pixels, fw, fh);
+        }
+
         Ok(PixelWindowDirective::Continue)
     }
 
@@ -1682,6 +1700,12 @@ impl PixelWindowApplication for ConTerminal {
 
         if let Some(deadline) = self.drain_script(now) {
             fold_wake(deadline);
+        }
+        // A pending screenshot needs an actual render to happen — pixels
+        // only exist transiently inside render() — so it must force a
+        // redraw even when nothing else did.
+        if self.pending_screenshot.is_some() {
+            redraw = true;
         }
 
         if redraw {
@@ -2345,6 +2369,32 @@ mod tests {
         // cursor shape from the very first frame.
         let parser = parser();
         assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Block);
+    }
+
+    #[test]
+    fn arrow_left_key_command_produces_the_expected_csi_bytes() {
+        // Isolates the encoder from the ConPTY/cmd.exe environment: if this
+        // passes but a real session's cursor still does not move, the bug is
+        // downstream of write_pty, not in event construction or encoding.
+        let mut app = ConTerminal::new(None);
+        app.master = None; // no real PTY; we only care what bytes WOULD be sent
+        // Reconstruct exactly what execute_script_key builds, bypassing
+        // forward_key's PTY write so we can inspect the encoder's output
+        // directly via the same TerminalKeyMode computation forward_key uses.
+        let mode = TerminalKeyMode {
+            application_cursor: app.parser.screen().application_cursor(),
+            ime_active: app.ime_attached,
+        };
+        let event = NormalizedKeyEvent {
+            logical: LogicalKey::Named(NamedKey::ArrowLeft),
+            physical: PhysicalKeyCode::Other,
+            text: None,
+            state: KeyPressState::Pressed,
+            repeat: false,
+            modifiers: ModifierState::default(),
+        };
+        let bytes = terminal_input::key_event_to_bytes(&event, mode);
+        assert_eq!(bytes, Some(b"\x1b[D".to_vec()));
     }
 
     #[test]
