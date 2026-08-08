@@ -40,6 +40,9 @@ use crate::{
             collect_instance_picker_rows,
         },
         new_terminal::{self, NewShellChoice, NewTerminalDialog},
+        pointer_input::{
+            KeyRequest, PointerActionKind, PointerButtonKind, PointerRequest, RequestedModifiers,
+        },
         selection::{
             AutoScrollDirection, AutoScrollStep, RemotePoint, RemoteSelectionGesture,
             SelectionGesturePhase, autoscroll_step, remote_visible_row_selection,
@@ -1236,21 +1239,33 @@ impl RemoteWindowState {
         else {
             return Ok(false);
         };
-        let outcome = self.execute_client_command(&command);
-        let close_after_completion = outcome
-            .as_ref()
-            .ok()
-            .and_then(|_| self.relay_close_after_completion.take());
-        let response = match outcome {
-            Ok(Some(output)) => IpcResponse::success(output),
-            Ok(None) if close_after_completion.is_some() => {
-                IpcResponse::success(self.detached_ui_snapshot_json()?)
+        let mut close_after_completion = None;
+        // `ui-input` owns its own failure vocabulary: a refusal must name the
+        // surface that swallowed the gesture, so it must not be flattened into
+        // the generic `ui_client_command_failed` this funnel produces.
+        let response = if command.args.first().map(String::as_str) == Some("ui-input") {
+            let response = self.execute_ui_input_command(&command.args);
+            if !response.ok {
+                self.last_error = Some(response.error.clone());
             }
-            Ok(None) => IpcResponse::success(self.ui_snapshot_json()?),
-            Err(error) => {
-                let error = format!("{error:#}");
-                self.last_error = Some(error.clone());
-                IpcResponse::typed_failure(error, "ui_client_command_failed", "command", false)
+            response
+        } else {
+            let outcome = self.execute_client_command(&command);
+            close_after_completion = outcome
+                .as_ref()
+                .ok()
+                .and_then(|_| self.relay_close_after_completion.take());
+            match outcome {
+                Ok(Some(output)) => IpcResponse::success(output),
+                Ok(None) if close_after_completion.is_some() => {
+                    IpcResponse::success(self.detached_ui_snapshot_json()?)
+                }
+                Ok(None) => IpcResponse::success(self.ui_snapshot_json()?),
+                Err(error) => {
+                    let error = format!("{error:#}");
+                    self.last_error = Some(error.clone());
+                    IpcResponse::typed_failure(error, "ui_client_command_failed", "command", false)
+                }
             }
         };
         self.client
@@ -1856,6 +1871,407 @@ impl RemoteWindowState {
         }
         self.window.request_redraw();
         Ok(output)
+    }
+
+    /// `ui-input` on the Windows host.
+    ///
+    /// Returns the fresh snapshot on success so a caller can act and observe in
+    /// one round trip, exactly as the Unix host does. Failures do **not** go
+    /// through the generic `ui_client_command_failed` funnel: a refusal has to
+    /// say which surface was in the way (see `UiInputRefusal`).
+    fn execute_ui_input_command(&mut self, args: &[String]) -> IpcResponse {
+        let request = match crate::frontend::pointer_input::parse_pointer_request(args) {
+            Ok(request) => request,
+            Err(error) => {
+                return IpcResponse::typed_failure(
+                    error,
+                    "operation_invalid_arguments",
+                    "validation",
+                    false,
+                );
+            }
+        };
+        if let Err(refusal) = self.apply_pointer_request(request) {
+            return refusal.response();
+        }
+        self.window.request_redraw();
+        match self.ui_snapshot_json() {
+            Ok(json) => IpcResponse::success(json),
+            Err(error) => IpcResponse::typed_failure(
+                format!("{error:#}"),
+                "ui_client_command_failed",
+                "internal",
+                false,
+            ),
+        }
+    }
+
+    /// Drives a `ui-input` request through the ordinary window event path.
+    ///
+    /// Everything a human can do must be reachable from the CLI, and the only
+    /// way to keep the two honest is to make them the *same* code: this builds
+    /// real `ControlWindowEvent`s and hands them to `dispatch_window_event`,
+    /// the one function `ControlWindowApplication::event` also calls. It never
+    /// calls a hit-test or a click handler directly.
+    ///
+    /// Where Windows differs from Unix is *who owns the pixel*. The composer,
+    /// the toolbar and every dialog field here are native child controls, and
+    /// Win32 routes a click over a child straight into that child — the
+    /// workspace event handler is never told. So before synthesizing anything
+    /// this asks the OS which window owns the point (`ControlWindow::control_at`,
+    /// the same router Win32 consults) and then either replays the event that
+    /// child really produces, or refuses out loud. Guessing, or re-deriving the
+    /// control rectangles here, would be the second hit-test this whole design
+    /// exists to prevent.
+    fn apply_pointer_request(&mut self, request: PointerRequest) -> Result<(), UiInputRefusal> {
+        match request {
+            PointerRequest::Pointer {
+                x,
+                y,
+                button,
+                action,
+                count,
+                modifiers,
+            } => {
+                let position = self.ui_input_position(x, y)?;
+                let modifiers = requested_modifier_state(modifiers);
+                let button = match button {
+                    PointerButtonKind::Left => PointerButton::Left,
+                    PointerButtonKind::Right => PointerButton::Right,
+                    PointerButtonKind::Middle => PointerButton::Middle,
+                };
+                // While the window holds pointer capture every message comes to
+                // the parent regardless of which child the cursor is over, so a
+                // drag that began on painted chrome keeps working across the
+                // composer — same as it does for a human.
+                let captured = self.window.pointer_capture_owned().unwrap_or(false);
+                if !captured && let Some(control) = self.window.control_at(position) {
+                    return self.apply_native_control_pointer(control, action, count);
+                }
+                match action {
+                    PointerActionKind::Move => {
+                        self.dispatch_ui_input_event(ControlWindowEvent::PointerMoved {
+                            position,
+                            modifiers,
+                        });
+                    }
+                    PointerActionKind::Press => {
+                        // Move first so the surfaces see the pointer arrive,
+                        // exactly as they would for a real cursor.
+                        self.dispatch_ui_input_event(ControlWindowEvent::PointerMoved {
+                            position,
+                            modifiers,
+                        });
+                        for click in 0..count {
+                            self.dispatch_ui_input_event(ControlWindowEvent::PointerButton {
+                                button,
+                                state: ButtonState::Pressed,
+                                position,
+                                clicks: win32_click_index(click),
+                                modifiers,
+                            });
+                            // Release between repeats, but leave the button
+                            // held after the final press so a caller can drag.
+                            if click + 1 < count {
+                                self.dispatch_ui_input_event(ControlWindowEvent::PointerButton {
+                                    button,
+                                    state: ButtonState::Released,
+                                    position,
+                                    clicks: 1,
+                                    modifiers,
+                                });
+                            }
+                        }
+                    }
+                    PointerActionKind::Release => {
+                        self.dispatch_ui_input_event(ControlWindowEvent::PointerButton {
+                            button,
+                            state: ButtonState::Released,
+                            position,
+                            clicks: 1,
+                            modifiers,
+                        });
+                    }
+                }
+                Ok(())
+            }
+            PointerRequest::Wheel {
+                x,
+                y,
+                delta_y,
+                line_based,
+                modifiers,
+            } => {
+                let position = self.ui_input_position(x, y)?;
+                // A child control that does not consume the wheel hands it to
+                // the parent via `DefWindowProc`, so unlike a click the wheel
+                // reaches the workspace handler wherever the cursor is.
+                self.dispatch_ui_input_event(ControlWindowEvent::Wheel {
+                    delta: if line_based {
+                        ControlWheelDelta::Lines(delta_y as f32)
+                    } else {
+                        ControlWheelDelta::Pixels(delta_y.round() as i32)
+                    },
+                    position,
+                    modifiers: requested_modifier_state(modifiers),
+                });
+                Ok(())
+            }
+            PointerRequest::Key { key, modifiers } => self.apply_key_request(key, modifiers),
+        }
+    }
+
+    /// Replays what a native child control really reports for a click.
+    ///
+    /// A push button turns a click into `WM_COMMAND`, which arrives here as
+    /// `ControlWindowEvent::Command` — the very event this host already
+    /// dispatches for human clicks, so replaying it adds no second code path.
+    /// An `EDIT` has no such event: a click inside it means "put the caret at
+    /// this text offset", and the text buffer belongs to the OS, not to us.
+    /// That case is refused by name rather than left to do nothing.
+    fn apply_native_control_pointer(
+        &mut self,
+        control: ControlId,
+        action: PointerActionKind,
+        count: u8,
+    ) -> Result<(), UiInputRefusal> {
+        if self.is_edit_control(control) {
+            return Err(UiInputRefusal::native_control(format!(
+                "{} is a native Windows EDIT control: it owns its own caret and text, \
+                 so a pixel click there cannot be synthesized through the window's \
+                 event path. Use the text-level command instead ({}).",
+                self.native_control_description(control),
+                self.native_control_alternative(control),
+            )));
+        }
+        if action != PointerActionKind::Press {
+            return Err(UiInputRefusal::native_control(format!(
+                "{} is a native Windows control: it reports a completed click, not \
+                 separate press/move/release phases, so only `--action press` can be \
+                 delivered there",
+                self.native_control_description(control),
+            )));
+        }
+        for _ in 0..count.max(1) {
+            self.dispatch_ui_input_event(ControlWindowEvent::Command(control));
+        }
+        Ok(())
+    }
+
+    /// `ui-input key`, following the real Win32 keyboard pump.
+    ///
+    /// The message loop offers every `WM_KEYDOWN` to the application first and
+    /// only lets `TranslateMessage` turn it into text when nobody consumed it;
+    /// this reproduces that order. What it cannot reproduce is the last hop: if
+    /// nothing consumed the stroke and a native control holds focus, Windows
+    /// delivers the character into that control's own buffer, which this
+    /// process does not own.
+    fn apply_key_request(
+        &mut self,
+        key: KeyRequest,
+        modifiers: RequestedModifiers,
+    ) -> Result<(), UiInputRefusal> {
+        let modifiers = requested_modifier_state(modifiers);
+        let (logical, physical, text) = match &key {
+            KeyRequest::Text(text) => {
+                let physical = text
+                    .chars()
+                    .next()
+                    .filter(char::is_ascii_alphabetic)
+                    .map_or(
+                        input::PhysicalKeyCode::Other,
+                        input::PhysicalKeyCode::Letter,
+                    );
+                (
+                    input::LogicalKey::Character(text.clone()),
+                    physical,
+                    Some(text.clone()),
+                )
+            }
+            KeyRequest::Enter => (
+                input::LogicalKey::Named(input::NamedKey::Enter),
+                input::PhysicalKeyCode::Enter,
+                None,
+            ),
+            KeyRequest::Backspace => (
+                input::LogicalKey::Named(input::NamedKey::Backspace),
+                input::PhysicalKeyCode::Backspace,
+                None,
+            ),
+            KeyRequest::Delete => (
+                input::LogicalKey::Named(input::NamedKey::Delete),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::Tab => (
+                input::LogicalKey::Named(input::NamedKey::Tab),
+                input::PhysicalKeyCode::Tab,
+                None,
+            ),
+            KeyRequest::Escape => (
+                input::LogicalKey::Named(input::NamedKey::Escape),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::ArrowLeft => (
+                input::LogicalKey::Named(input::NamedKey::ArrowLeft),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::ArrowRight => (
+                input::LogicalKey::Named(input::NamedKey::ArrowRight),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::ArrowUp => (
+                input::LogicalKey::Named(input::NamedKey::ArrowUp),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::ArrowDown => (
+                input::LogicalKey::Named(input::NamedKey::ArrowDown),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::Home => (
+                input::LogicalKey::Named(input::NamedKey::Home),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+            KeyRequest::End => (
+                input::LogicalKey::Named(input::NamedKey::End),
+                input::PhysicalKeyCode::Other,
+                None,
+            ),
+        };
+        let target = self.window.focused_target();
+        let consumed = self.dispatch_ui_input_event(ControlWindowEvent::KeyPreview {
+            target,
+            event: input::NormalizedKeyEvent {
+                logical: logical.clone(),
+                physical,
+                text: text.clone(),
+                state: input::KeyPressState::Pressed,
+                repeat: false,
+                modifiers,
+            },
+        });
+        if consumed {
+            return Ok(());
+        }
+        // Nobody claimed the stroke, so Win32 would now hand it to whatever has
+        // focus. Only the window itself routes back into this process.
+        match target {
+            FocusTarget::Window => {
+                if let Some(text) = text {
+                    self.dispatch_ui_input_event(ControlWindowEvent::TextInput(text));
+                }
+                Ok(())
+            }
+            FocusTarget::Control(control) => Err(UiInputRefusal {
+                code: "ui_input_focus_native_control",
+                category: "precondition",
+                retryable: true,
+                message: format!(
+                    "keyboard focus is on {}, a native Windows control that handles this \
+                     key itself; no shortcut claimed the stroke, so it cannot be \
+                     synthesized. Move focus first (`focus terminal`) or use the \
+                     text-level command ({}).",
+                    self.native_control_description(control),
+                    self.native_control_alternative(control),
+                ),
+            }),
+            _ => Err(UiInputRefusal {
+                code: "ui_input_focus_native_control",
+                category: "precondition",
+                retryable: true,
+                message: "the AgenTerm window holds no keyboard focus, so an unclaimed \
+                          keystroke has nowhere to land; run `focus terminal` first"
+                    .to_owned(),
+            }),
+        }
+    }
+
+    /// Validates a requested point against the window it is aimed at.
+    ///
+    /// `ui-snapshot` publishes client-area rectangles, so anything outside the
+    /// client area is a caller mistake worth naming rather than an event to
+    /// deliver into nowhere.
+    fn ui_input_position(&self, x: f64, y: f64) -> Result<PixelPoint, UiInputRefusal> {
+        let client = self.window.client_size();
+        ui_input_point(
+            x,
+            y,
+            i32::try_from(client.width).unwrap_or(i32::MAX),
+            i32::try_from(client.height).unwrap_or(i32::MAX),
+        )
+    }
+
+    /// The single funnel every synthesized event goes through.
+    ///
+    /// Deliberately the same call the message loop makes, so there is exactly
+    /// one place that turns an event into behaviour. Returns whether the event
+    /// was consumed, which the keyboard path needs to mirror Win32's
+    /// "consumed keydown suppresses the character" rule.
+    fn dispatch_ui_input_event(&mut self, event: ControlWindowEvent) -> bool {
+        let (consumed, redraw) = dispatch_window_event(self, event);
+        if redraw {
+            self.window.request_redraw();
+        }
+        consumed
+    }
+
+    /// A name for a native control an agent can match against `ui-snapshot`.
+    ///
+    /// Only the text fields need one: they are the surfaces a pointer gesture
+    /// is refused for, and "control 17" would tell a caller nothing about which
+    /// command to reach for instead.
+    fn native_control_label(&self, control: ControlId) -> Option<&'static str> {
+        [
+            (self.edit, "the composer input"),
+            (self.tab_title_edit, "the inline tab editor title field"),
+            (self.tab_note_edit, "the inline tab editor note field"),
+            (self.settings_font, "the Settings font-family field"),
+            (self.settings_size, "the Settings font-size field"),
+            (self.new_initial_command, "the New terminal command field"),
+            (self.new_http_proxy, "the New terminal HTTP proxy field"),
+            (self.new_https_proxy, "the New terminal HTTPS proxy field"),
+            (self.server_name_edit, "the new-server name field"),
+        ]
+        .into_iter()
+        .find_map(|(id, label)| (id == control).then_some(label))
+    }
+
+    /// The same name, with a fallback that still reads as a sentence for the
+    /// unnamed push buttons.
+    fn native_control_description(&self, control: ControlId) -> &'static str {
+        self.native_control_label(control)
+            .unwrap_or("the button under that point")
+    }
+
+    /// The command that reaches a native control's contents by name.
+    ///
+    /// Only listed where one really exists; where it does not, say so instead
+    /// of pointing an agent at a verb that will fail.
+    fn native_control_alternative(&self, control: ControlId) -> &'static str {
+        for (id, alternative) in [
+            (self.edit, "`set-composer` / `ui-action composer-send`"),
+            (
+                self.tab_title_edit,
+                "`set-composer -t @id` / `ui-action tab-editor-save`",
+            ),
+            (
+                self.tab_note_edit,
+                "`set-composer -t @id` / `ui-action tab-editor-save`",
+            ),
+            (self.settings_font, "`set-setting terminal.font-family`"),
+            (self.settings_size, "`set-setting terminal.font-size`"),
+        ] {
+            if id == control {
+                return alternative;
+            }
+        }
+        "no text-level command exists for this field yet"
     }
 
     fn resolve_stable_tab_target(&mut self, target: &str) -> Result<String> {
@@ -8124,250 +8540,13 @@ impl ControlWindowApplication for RemoteWindowApplication {
         Ok(ControlWindowDirective::Redraw)
     }
 
-    /// REVIEW(macos → windows owner): `ui-input` parity.
-    ///
-    /// v0.1.15 adds `ui-input pointer|wheel` (registered in `src/commands.rs`,
-    /// `src/operations.rs` and `prd/PRD_02_15_command_line.md`), giving an agent
-    /// the pointer affordances a human has, in the same pixel space
-    /// `ui-snapshot` already reports element bounds in. It is implemented on the
-    /// Unix frontend only, so on Windows the command currently does nothing.
-    ///
-    /// The argument parsing is deliberately platform-neutral and already shared:
-    /// `crate::frontend::pointer_input::parse_pointer_request` returns a
-    /// `PointerRequest` with no OS types in it. Porting should be about this
-    /// function — synthesize `ControlWindowEvent::PointerButton`/`PointerMoved`/
-    /// `MouseWheel` and feed them here, exactly as `apply_pointer_request` does
-    /// for `PixelWindowEvent` in `adapters/unix/frontend/mod.rs`.
-    ///
-    /// The one rule worth keeping: do **not** call the hit-test or click
-    /// handlers directly. Routing synthetic gestures through the ordinary event
-    /// path is what stops machine input from drifting away from human input —
-    /// and note the composer here is a native `EDIT` control, so a press
-    /// delivered to the window will not reach it the way it reaches the
-    /// self-drawn Unix composer; that case needs its own decision.
     fn event(
         &mut self,
         _window: &ControlWindow,
         event: ControlWindowEvent,
     ) -> Result<ControlWindowDirective, ControlWindowError> {
         let state = self.state_mut()?;
-        let mut redraw = false;
-        let mut consumed = false;
-        match event {
-            ControlWindowEvent::Poll { .. } => redraw = state.tick(),
-            ControlWindowEvent::Resized { minimized, .. } => {
-                state.layout();
-                if !minimized {
-                    state.resize_active_terminal();
-                }
-                redraw = true;
-            }
-            ControlWindowEvent::CloseRequested => {
-                state.request_window_close();
-                redraw = true;
-                consumed = true;
-            }
-            ControlWindowEvent::FocusChanged(true) => {
-                // Keep focus on any native edit control (composer, inline tab
-                // editor, settings, new-terminal, cwd editor). Without this,
-                // re-activating the window after opening the tab editor yanks
-                // focus back to the main window and typed characters — e.g.
-                // the `@` in `ds4@codex` — fall into the terminal instead of
-                // the title field.
-                let keeps_edit_focus = matches!(
-                    state.window.focused_target(),
-                    FocusTarget::Control(control) if state.is_edit_control(control)
-                );
-                if !keeps_edit_focus {
-                    state.window.focus();
-                }
-            }
-            ControlWindowEvent::KeyPreview { event, .. }
-                if matches!(event.state, input::KeyPressState::Pressed) =>
-            {
-                if let Some(key) = normalized_virtual_key(&event.logical) {
-                    consumed = state.handle_tab_editor_keydown(key, event.modifiers)
-                        || state.handle_cwd_editor_keydown(key, event.modifiers)
-                        || state.handle_composer_keydown(&event)
-                        || state.handle_keyboard_navigation_with_modifiers(key, event.modifiers)
-                        || state.handle_window_keydown(key, event.modifiers);
-                    redraw = consumed;
-                }
-            }
-            ControlWindowEvent::TextInput(text) => {
-                if state.window.focused_target() == FocusTarget::Window {
-                    for value in text.encode_utf16() {
-                        state.terminal_char(value);
-                    }
-                    consumed = true;
-                }
-            }
-            ControlWindowEvent::PointerMoved {
-                position,
-                modifiers,
-            } => {
-                state.pointer_modifiers = modifiers;
-                let cell_changed = state.track_pointer_cell(position.x, position.y);
-                redraw = state.handle_pointer_moved(position.x, position.y) || cell_changed;
-            }
-            ControlWindowEvent::PointerButton {
-                button: PointerButton::Left,
-                state: ButtonState::Pressed,
-                position,
-                clicks,
-                modifiers,
-            } => {
-                state.pointer_modifiers = modifiers;
-                redraw = if clicks > 1 {
-                    state.handle_left_double_click(position.x, position.y, clicks)
-                } else {
-                    state.handle_left_button_down(position.x, position.y)
-                };
-                consumed = true;
-            }
-            ControlWindowEvent::PointerButton {
-                button: PointerButton::Left,
-                state: ButtonState::Released,
-                position,
-                modifiers,
-                clicks: _,
-            } => {
-                state.pointer_modifiers = modifiers;
-                redraw = state.handle_left_button_up(position.x, position.y);
-                consumed = true;
-            }
-            ControlWindowEvent::PointerButton {
-                button: button @ (PointerButton::Right | PointerButton::Middle),
-                state: button_state,
-                position,
-                modifiers,
-                ..
-            } => {
-                state.pointer_modifiers = modifiers;
-                let code = if button == PointerButton::Right { 2 } else { 1 };
-                match button_state {
-                    ButtonState::Pressed => {
-                        // Right-click on a server tab opens the strip context menu
-                        // before any terminal mouse-report forward.
-                        if button == PointerButton::Right
-                            && !state.focus_gate().full_modal_blocked()
-                            && let Some(row) =
-                                state.server_tab_row_at(position.x, position.y).cloned()
-                        {
-                            state.open_server_tab_context_menu(position.x, position.y, &row);
-                            consumed = true;
-                            redraw = true;
-                        } else if state.forward_terminal_mouse(
-                            position.x,
-                            position.y,
-                            Some(code),
-                            true,
-                            false,
-                        ) {
-                            state.mouse_report_button = Some(code);
-                            consumed = true;
-                            redraw = true;
-                        }
-                    }
-                    ButtonState::Released if state.mouse_report_button == Some(code) => {
-                        state.mouse_report_button = None;
-                        let _ = state.forward_terminal_mouse(
-                            position.x,
-                            position.y,
-                            Some(code),
-                            false,
-                            false,
-                        );
-                        state.mouse_report_cell = None;
-                        consumed = true;
-                        redraw = true;
-                    }
-                    ButtonState::Released => {}
-                    _ => {}
-                }
-            }
-            ControlWindowEvent::Wheel {
-                delta: ControlWheelDelta::Lines(lines),
-                position,
-                modifiers,
-            } => {
-                state.pointer_modifiers = modifiers;
-                state.handle_wheel(
-                    position.x,
-                    position.y,
-                    wheel_delta_units(f64::from(lines), true),
-                );
-                redraw = true;
-                consumed = true;
-            }
-            ControlWindowEvent::CaptureChanged(false) => {
-                // If an application mouse gesture was open, emit a release so
-                // TUI buttons are not left thinking the button is still down.
-                if let Some(code) = state.mouse_report_button.take() {
-                    let (x, y) = state
-                        .terminal_selection_pointer
-                        .or_else(|| {
-                            state.last_pointer_cell.map(|(c, r)| {
-                                (
-                                    state.workspace_geometry().terminal.left
-                                        + i32::try_from(c).unwrap_or(0) * state.cell_width.max(1),
-                                    state.workspace_geometry().terminal.top
-                                        + i32::try_from(r).unwrap_or(0) * state.cell_height.max(1),
-                                )
-                            })
-                        })
-                        .unwrap_or((0, 0));
-                    let _ = state.forward_terminal_mouse(x, y, Some(code), false, false);
-                    state.mouse_report_cell = None;
-                }
-                state.tabs_resize_capture_lost();
-                state.sidebar_scrollbar_capture_lost();
-                state.scrollbar_capture_lost();
-                state.terminal_selection_capture_lost();
-            }
-            ControlWindowEvent::Command(control_id) => {
-                Self::command(state, control_id);
-                redraw = true;
-                consumed = true;
-            }
-            ControlWindowEvent::SystemMenuOpening => state.refresh_system_menu(),
-            ControlWindowEvent::SystemMenu(command) => {
-                match command {
-                    SYSTEM_MENU_TOGGLE_TABS_ID => state.toggle_tabs(),
-                    SYSTEM_MENU_OPEN_INSTANCE_ID => {
-                        if let Err(error) =
-                            state.open_instance_picker(InstancePickerMode::OpenAnother)
-                        {
-                            state.last_error = Some(format!("{error:#}"));
-                        }
-                    }
-                    SYSTEM_MENU_COPY_ID => state.system_menu_copy(),
-                    SYSTEM_MENU_PASTE_ID => state.system_menu_paste(),
-                    _ => {}
-                }
-                redraw = true;
-                consumed = true;
-            }
-            ControlWindowEvent::AutomationShortcut { key, modifiers } => {
-                consumed = state.handle_surface_navigation(
-                    key,
-                    modifiers.control,
-                    modifiers.shift,
-                    modifiers.alt,
-                );
-                if !consumed {
-                    consumed = state.handle_window_keydown(key, modifiers);
-                }
-                redraw = consumed;
-            }
-            ControlWindowEvent::RenderActivitySample(activity) => {
-                state.render_activity_sample = Some(activity);
-                state.render_activity_sample_sequence =
-                    state.render_activity_sample_sequence.saturating_add(1);
-                consumed = true;
-            }
-            _ => {}
-        }
+        let (consumed, redraw) = dispatch_window_event(state, event);
         Ok(match (consumed, redraw) {
             (true, true) => ControlWindowDirective::ConsumedAndRedraw,
             (true, false) => ControlWindowDirective::Consumed,
@@ -8394,6 +8573,316 @@ impl ControlWindowApplication for RemoteWindowApplication {
             _ => 0,
         }
     }
+}
+
+/// Why a synthesized `ui-input` gesture could not be delivered.
+///
+/// F1 in `plan/agent-human-parity-audit.md` is not "Windows lacks a feature",
+/// it is "the command silently does nothing" — which teaches an agent that its
+/// coordinates were wrong when in fact the region was never addressable. So
+/// every point this host cannot drive answers with a typed code and a sentence
+/// naming what is in the way, plus the command that does reach it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct UiInputRefusal {
+    code: &'static str,
+    category: &'static str,
+    retryable: bool,
+    message: String,
+}
+
+impl UiInputRefusal {
+    /// A native child control owns the point, so Win32 routes the click into
+    /// the control and the workspace event handler is never told.
+    fn native_control(message: impl Into<String>) -> Self {
+        Self {
+            code: "ui_input_native_control_unreachable",
+            category: "unsupported",
+            retryable: false,
+            message: message.into(),
+        }
+    }
+
+    fn response(self) -> IpcResponse {
+        IpcResponse::typed_failure(self.message, self.code, self.category, self.retryable)
+    }
+}
+
+fn requested_modifier_state(modifiers: RequestedModifiers) -> input::ModifierState {
+    input::ModifierState {
+        control: modifiers.control,
+        shift: modifiers.shift,
+        alt: modifiers.alt,
+        meta: modifiers.meta,
+    }
+}
+
+/// The `clicks` value Win32 reports for the n-th press of a repeat gesture.
+///
+/// Windows alternates `WM_LBUTTONDOWN` (1) and `WM_LBUTTONDBLCLK` (2); it has
+/// no triple-click message at all. Synthesizing `clicks: 3` would hand an agent
+/// a state no human can produce on this host, which is the drift `ui-input`
+/// exists to avoid — so `--count 3` delivers three real clicks and the host
+/// promotes them exactly as far as it promotes a human's three.
+const fn win32_click_index(click: u8) -> u8 {
+    if click % 2 == 1 { 2 } else { 1 }
+}
+
+/// Validates a requested point against the window it is aimed at.
+///
+/// `ui-snapshot` publishes client-area rectangles, so a point outside the
+/// client area is a caller mistake worth naming — delivering it would produce
+/// an event that hit-tests to nothing and looks indistinguishable from a
+/// gesture that worked.
+fn ui_input_point(x: f64, y: f64, width: i32, height: i32) -> Result<PixelPoint, UiInputRefusal> {
+    let point = PixelPoint::new(x.round() as i32, y.round() as i32);
+    if point.x < 0 || point.y < 0 || point.x >= width || point.y >= height {
+        return Err(UiInputRefusal {
+            code: "ui_input_outside_window",
+            category: "validation",
+            retryable: false,
+            message: format!(
+                "({}, {}) is outside the AgenTerm client area ({width}x{height}); \
+                 `ui-snapshot` bounds are client-area coordinates",
+                point.x, point.y
+            ),
+        });
+    }
+    Ok(point)
+}
+
+/// The one place a `ControlWindowEvent` turns into workspace behaviour.
+///
+/// Lifted out of `ControlWindowApplication::event` so `ui-input` can reach it
+/// too (see `RemoteWindowState::apply_pointer_request`). That is the whole
+/// point: a synthetic gesture and a human gesture must be the *same* code from
+/// here down, or the two drift — the Unix composer shipped without mouse
+/// selection for months precisely because window chrome had grown a second
+/// implementation. Anything that hit-tests independently of this function is a
+/// bug, not an optimisation.
+///
+/// Returns `(consumed, redraw)`.
+fn dispatch_window_event(state: &mut RemoteWindowState, event: ControlWindowEvent) -> (bool, bool) {
+    let mut redraw = false;
+    let mut consumed = false;
+    match event {
+        ControlWindowEvent::Poll { .. } => redraw = state.tick(),
+        ControlWindowEvent::Resized { minimized, .. } => {
+            state.layout();
+            if !minimized {
+                state.resize_active_terminal();
+            }
+            redraw = true;
+        }
+        ControlWindowEvent::CloseRequested => {
+            state.request_window_close();
+            redraw = true;
+            consumed = true;
+        }
+        ControlWindowEvent::FocusChanged(true) => {
+            // Keep focus on any native edit control (composer, inline tab
+            // editor, settings, new-terminal, cwd editor). Without this,
+            // re-activating the window after opening the tab editor yanks
+            // focus back to the main window and typed characters — e.g.
+            // the `@` in `ds4@codex` — fall into the terminal instead of
+            // the title field.
+            let keeps_edit_focus = matches!(
+                state.window.focused_target(),
+                FocusTarget::Control(control) if state.is_edit_control(control)
+            );
+            if !keeps_edit_focus {
+                state.window.focus();
+            }
+        }
+        ControlWindowEvent::KeyPreview { event, .. }
+            if matches!(event.state, input::KeyPressState::Pressed) =>
+        {
+            if let Some(key) = normalized_virtual_key(&event.logical) {
+                consumed = state.handle_tab_editor_keydown(key, event.modifiers)
+                    || state.handle_cwd_editor_keydown(key, event.modifiers)
+                    || state.handle_composer_keydown(&event)
+                    || state.handle_keyboard_navigation_with_modifiers(key, event.modifiers)
+                    || state.handle_window_keydown(key, event.modifiers);
+                redraw = consumed;
+            }
+        }
+        ControlWindowEvent::TextInput(text) => {
+            if state.window.focused_target() == FocusTarget::Window {
+                for value in text.encode_utf16() {
+                    state.terminal_char(value);
+                }
+                consumed = true;
+            }
+        }
+        ControlWindowEvent::PointerMoved {
+            position,
+            modifiers,
+        } => {
+            state.pointer_modifiers = modifiers;
+            let cell_changed = state.track_pointer_cell(position.x, position.y);
+            redraw = state.handle_pointer_moved(position.x, position.y) || cell_changed;
+        }
+        ControlWindowEvent::PointerButton {
+            button: PointerButton::Left,
+            state: ButtonState::Pressed,
+            position,
+            clicks,
+            modifiers,
+        } => {
+            state.pointer_modifiers = modifiers;
+            redraw = if clicks > 1 {
+                state.handle_left_double_click(position.x, position.y, clicks)
+            } else {
+                state.handle_left_button_down(position.x, position.y)
+            };
+            consumed = true;
+        }
+        ControlWindowEvent::PointerButton {
+            button: PointerButton::Left,
+            state: ButtonState::Released,
+            position,
+            modifiers,
+            clicks: _,
+        } => {
+            state.pointer_modifiers = modifiers;
+            redraw = state.handle_left_button_up(position.x, position.y);
+            consumed = true;
+        }
+        ControlWindowEvent::PointerButton {
+            button: button @ (PointerButton::Right | PointerButton::Middle),
+            state: button_state,
+            position,
+            modifiers,
+            ..
+        } => {
+            state.pointer_modifiers = modifiers;
+            let code = if button == PointerButton::Right { 2 } else { 1 };
+            match button_state {
+                ButtonState::Pressed => {
+                    // Right-click on a server tab opens the strip context menu
+                    // before any terminal mouse-report forward.
+                    if button == PointerButton::Right
+                        && !state.focus_gate().full_modal_blocked()
+                        && let Some(row) = state.server_tab_row_at(position.x, position.y).cloned()
+                    {
+                        state.open_server_tab_context_menu(position.x, position.y, &row);
+                        consumed = true;
+                        redraw = true;
+                    } else if state.forward_terminal_mouse(
+                        position.x,
+                        position.y,
+                        Some(code),
+                        true,
+                        false,
+                    ) {
+                        state.mouse_report_button = Some(code);
+                        consumed = true;
+                        redraw = true;
+                    }
+                }
+                ButtonState::Released if state.mouse_report_button == Some(code) => {
+                    state.mouse_report_button = None;
+                    let _ = state.forward_terminal_mouse(
+                        position.x,
+                        position.y,
+                        Some(code),
+                        false,
+                        false,
+                    );
+                    state.mouse_report_cell = None;
+                    consumed = true;
+                    redraw = true;
+                }
+                ButtonState::Released => {}
+                _ => {}
+            }
+        }
+        ControlWindowEvent::Wheel {
+            delta,
+            position,
+            modifiers,
+        } => {
+            state.pointer_modifiers = modifiers;
+            // Win32 only ever reports notches, but the contract also
+            // carries pixel deltas and `wheel_delta_units` already speaks
+            // both, so route them through the same accumulator rather than
+            // dropping one variant on the floor.
+            let units = match delta {
+                ControlWheelDelta::Pixels(pixels) => wheel_delta_units(f64::from(pixels), false),
+                ControlWheelDelta::Lines(lines) => wheel_delta_units(f64::from(lines), true),
+                _ => wheel_delta_units(0.0, true),
+            };
+            state.handle_wheel(position.x, position.y, units);
+            redraw = true;
+            consumed = true;
+        }
+        ControlWindowEvent::CaptureChanged(false) => {
+            // If an application mouse gesture was open, emit a release so
+            // TUI buttons are not left thinking the button is still down.
+            if let Some(code) = state.mouse_report_button.take() {
+                let (x, y) = state
+                    .terminal_selection_pointer
+                    .or_else(|| {
+                        state.last_pointer_cell.map(|(c, r)| {
+                            (
+                                state.workspace_geometry().terminal.left
+                                    + i32::try_from(c).unwrap_or(0) * state.cell_width.max(1),
+                                state.workspace_geometry().terminal.top
+                                    + i32::try_from(r).unwrap_or(0) * state.cell_height.max(1),
+                            )
+                        })
+                    })
+                    .unwrap_or((0, 0));
+                let _ = state.forward_terminal_mouse(x, y, Some(code), false, false);
+                state.mouse_report_cell = None;
+            }
+            state.tabs_resize_capture_lost();
+            state.sidebar_scrollbar_capture_lost();
+            state.scrollbar_capture_lost();
+            state.terminal_selection_capture_lost();
+        }
+        ControlWindowEvent::Command(control_id) => {
+            RemoteWindowApplication::command(state, control_id);
+            redraw = true;
+            consumed = true;
+        }
+        ControlWindowEvent::SystemMenuOpening => state.refresh_system_menu(),
+        ControlWindowEvent::SystemMenu(command) => {
+            match command {
+                SYSTEM_MENU_TOGGLE_TABS_ID => state.toggle_tabs(),
+                SYSTEM_MENU_OPEN_INSTANCE_ID => {
+                    if let Err(error) = state.open_instance_picker(InstancePickerMode::OpenAnother)
+                    {
+                        state.last_error = Some(format!("{error:#}"));
+                    }
+                }
+                SYSTEM_MENU_COPY_ID => state.system_menu_copy(),
+                SYSTEM_MENU_PASTE_ID => state.system_menu_paste(),
+                _ => {}
+            }
+            redraw = true;
+            consumed = true;
+        }
+        ControlWindowEvent::AutomationShortcut { key, modifiers } => {
+            consumed = state.handle_surface_navigation(
+                key,
+                modifiers.control,
+                modifiers.shift,
+                modifiers.alt,
+            );
+            if !consumed {
+                consumed = state.handle_window_keydown(key, modifiers);
+            }
+            redraw = consumed;
+        }
+        ControlWindowEvent::RenderActivitySample(activity) => {
+            state.render_activity_sample = Some(activity);
+            state.render_activity_sample_sequence =
+                state.render_activity_sample_sequence.saturating_add(1);
+            consumed = true;
+        }
+        _ => {}
+    }
+    (consumed, redraw)
 }
 
 fn screen_cells(screen: &UiScreenSnapshot) -> Vec<Vec<Option<String>>> {
@@ -9423,5 +9912,77 @@ mod tests {
         assert!(click.matches("@7", 11));
         assert!(!click.matches("@8", 11));
         assert!(!click.matches("@7", 12));
+    }
+
+    /// A synthesized repeat click must be the message sequence Win32 itself
+    /// delivers -- down, double-click, down, ... -- and never a `clicks` value
+    /// no human input can produce. The moment `ui-input` can reach a state a
+    /// mouse cannot, machine and human input have forked.
+    #[test]
+    fn multi_click_replays_the_sequence_windows_itself_reports() {
+        let sequence: Vec<u8> = (0..4).map(win32_click_index).collect();
+        assert_eq!(sequence, vec![1, 2, 1, 2]);
+        assert!(
+            sequence.iter().all(|clicks| *clicks <= 2),
+            "Win32 has no triple-click message; synthesizing one would give an \
+             agent a gesture no human can perform on this host"
+        );
+    }
+
+    /// `ui-snapshot` publishes client-area rectangles, so a point outside the
+    /// client area is a caller error. Delivering it anyway would hit-test to
+    /// nothing and read exactly like a gesture that worked -- the F1 disease.
+    #[test]
+    fn coordinates_outside_the_client_area_are_refused_by_name() {
+        assert!(ui_input_point(0.0, 0.0, 800, 600).is_ok());
+        assert_eq!(
+            ui_input_point(12.4, 48.6, 800, 600).expect("inside"),
+            PixelPoint::new(12, 49)
+        );
+        for (x, y) in [(-1.0, 10.0), (10.0, -1.0), (800.0, 10.0), (10.0, 600.0)] {
+            let refusal = ui_input_point(x, y, 800, 600).expect_err("outside the client area");
+            assert_eq!(refusal.code, "ui_input_outside_window");
+            assert!(
+                refusal.message.contains("800x600"),
+                "the refusal must publish the area it measured against: {}",
+                refusal.message
+            );
+        }
+    }
+
+    /// Every refusal has to survive the wire: an unrecognised category degrades
+    /// to `Internal` on the client, which tells an agent "we broke" instead of
+    /// "that region is not pixel-addressable here".
+    #[test]
+    fn refusals_carry_a_category_the_client_can_read() {
+        let refusals = [
+            ui_input_point(-1.0, 0.0, 10, 10).expect_err("outside"),
+            UiInputRefusal::native_control("composer"),
+            UiInputRefusal {
+                code: "ui_input_focus_native_control",
+                category: "precondition",
+                retryable: true,
+                message: "focus".to_owned(),
+            },
+        ];
+        for refusal in &refusals {
+            assert!(
+                !matches!(
+                    crate::client::error_category_from_wire(refusal.category),
+                    crate::control_contract::ErrorCategory::Internal
+                ),
+                "{} uses a category the client cannot decode",
+                refusal.code
+            );
+            let response = refusal.clone().response();
+            assert!(!response.ok);
+            assert_eq!(response.error_code, refusal.code);
+            assert_eq!(response.retryable, refusal.retryable);
+            assert!(!response.error.is_empty());
+        }
+        // The two pointer refusals must stay distinguishable: "you aimed
+        // outside the window" and "a native control owns that pixel" call for
+        // different corrections.
+        assert_ne!(refusals[0].code, refusals[1].code);
     }
 }
