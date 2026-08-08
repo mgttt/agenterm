@@ -11,7 +11,35 @@ fn catch_text(error) {
     "" + error
 }
 
-fn command(context, cli, arguments, expected_failure) {
+fn output_combined_text(output) {
+    output.stdout_text() + output.stderr_text()
+}
+
+fn command(
+    ctx_address,
+    ctx_workspace,
+    ctx_settings,
+    ctx_instance,
+    ctx_command_log,
+    ctx_command_journal,
+    cli,
+    arguments,
+    expected_failure
+) {
+    let address_text = "" + ctx_address;
+    let workspace_text = "" + ctx_workspace;
+    let settings_text = "" + ctx_settings;
+    let instance_text = "" + ctx_instance;
+    let command_log_text = "" + ctx_command_log;
+    let command_journal_text = "" + ctx_command_journal;
+    let context = #{
+        address: address_text,
+        workspace_path: workspace_text,
+        settings_path: settings_text,
+        instance_directory: instance_text,
+        command_log_path: command_log_text,
+        command_journal_path: command_journal_text
+    };
     test_harness::invoke_cli(
         context,
         cli,
@@ -21,25 +49,95 @@ fn command(context, cli, arguments, expected_failure) {
     )
 }
 
-fn command_text(context, cli, arguments) {
-    let output = command(context, cli, arguments, 0);
-    output.stdout + output.stderr
+fn command_text(
+    ctx_address,
+    ctx_workspace,
+    ctx_settings,
+    ctx_instance,
+    ctx_command_log,
+    ctx_command_journal,
+    cli,
+    arguments
+) {
+    let output = command(
+        ctx_address,
+        ctx_workspace,
+        ctx_settings,
+        ctx_instance,
+        ctx_command_log,
+        ctx_command_journal,
+        cli,
+        arguments,
+        0
+    );
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    result
 }
 
-fn wait_for_server(context, cli, server) {
+fn command_json(
+    ctx_address,
+    ctx_workspace,
+    ctx_settings,
+    ctx_instance,
+    ctx_command_log,
+    ctx_command_journal,
+    cli,
+    arguments,
+    expected_failure
+) {
+    let output = command(
+        ctx_address,
+        ctx_workspace,
+        ctx_settings,
+        ctx_instance,
+        ctx_command_log,
+        ctx_command_journal,
+        cli,
+        arguments,
+        expected_failure
+    );
+    let text = "" + output.stdout + output.stderr;
+    text.trim();
+    rhai::json::parse(text)
+}
+
+fn wait_for_server(
+    ctx_address,
+    ctx_workspace,
+    ctx_settings,
+    ctx_instance,
+    ctx_command_log,
+    ctx_command_journal,
+    cli,
+    server_child
+) {
+    let address_text = "" + ctx_address;
+    let workspace_text = "" + ctx_workspace;
+    let settings_text = "" + ctx_settings;
+    let instance_text = "" + ctx_instance;
+    let command_log_text = "" + ctx_command_log;
+    let command_journal_text = "" + ctx_command_journal;
     for attempt in 0..400 {
         let probe = test_harness::run_cli(
-            context,
+            #{
+                address: address_text,
+                workspace_path: workspace_text,
+                settings_path: settings_text,
+                instance_directory: instance_text,
+                command_log_path: command_log_text,
+                command_journal_path: command_journal_text
+            },
             cli,
             ["protocol-info", "--running"],
             0,
             []
         );
         if probe.success != 0 {
-            return rhai::json::parse(probe.stdout);
+            return 0;
         }
-        if server.state == "exited" {
-            let output = server.wait_with_output(
+        if server_child.state == "exited" {
+            let output = server_child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
             throw "wake_smoke_server_early_exit:" + output.stderr_text();
@@ -47,6 +145,7 @@ fn wait_for_server(context, cli, server) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "wake_smoke_server_ready_timeout";
+    0
 }
 
 fn wait_for_exit(child, code) {
@@ -76,7 +175,14 @@ fn entry() {
     test_harness::require(std::fs::exists(cli) != 0, "wake_smoke_cli_missing");
 
     let context = test_harness::new_context(repo, "wake");
+    let ctx_address = "" + context.address;
+    let ctx_workspace = "" + context.workspace_path;
+    let ctx_settings = "" + context.settings_path;
+    let ctx_instance = "" + context.instance_directory;
+    let ctx_command_log = "" + context.command_log_path;
+    let ctx_command_journal = "" + context.command_journal_path;
     let owned_children = [];
+    let clients = [];
     let succeeded = 0;
     let failure = "";
 
@@ -87,14 +193,42 @@ fn entry() {
             server_exe,
             ["server", "--address", context.address]
         );
-        let server = server_command.start();
-        owned_children.push(server);
-        let protocol = wait_for_server(context, cli, server);
-        test_harness::require(protocol.pid == server.id, "wake_smoke_server_identity");
+        let server_child = server_command.start();
+        owned_children.push(server_child);
+        wait_for_server(
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
+            cli,
+            server_child
+        );
+        let protocol = command_json(
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
+            cli,
+            ["protocol-info", "--running"],
+            0
+        );
+        test_harness::require(
+            protocol.pid == server_child.id,
+            "wake_smoke_server_identity"
+        );
 
         let name = "wake-" + context.run_id;
         let tab_id = command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             [
                 "new-window", "-d", "-P", "-F", "#{window_id}",
@@ -102,9 +236,13 @@ fn entry() {
                 "--", "cmd.exe", "/d", "/q"
             ]
         );
-        tab_id.trim();
         command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             [
                 "wait-ui", "-t", tab_id, "--tab-state", "running",
@@ -113,7 +251,6 @@ fn entry() {
         );
 
         print("STEP concurrent IPC replies and PTY output both make progress");
-        let clients = [];
         for index in 0..24 {
             let client_command = test_harness::configured_command(
                 context,
@@ -124,12 +261,16 @@ fn entry() {
             client_command.capture_limit(262144);
             let client = client_command.start();
             clients.push(client);
-            owned_children.push(client);
         }
 
         let token = "WAKE_COMPLETE_" + context.run_id;
         command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             [
                 "send-keys", "-t", tab_id, "-l",
@@ -137,13 +278,18 @@ fn entry() {
                     context.run_id + "_%i"
             ]
         );
-        command_text(context, cli, ["send-keys", "-t", tab_id, "Enter"]);
+        command_text(ctx_address, ctx_workspace, ctx_settings, ctx_instance, ctx_command_log, ctx_command_journal, cli, ["send-keys", "-t", tab_id, "Enter"]);
         command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             ["send-keys", "-t", tab_id, "-l", "echo " + token]
         );
-        command_text(context, cli, ["send-keys", "-t", tab_id, "Enter"]);
+        command_text(ctx_address, ctx_workspace, ctx_settings, ctx_instance, ctx_command_log, ctx_command_journal, cli, ["send-keys", "-t", tab_id, "Enter"]);
 
         for client_index in 0..clients.len() {
             let client = clients[client_index];
@@ -159,9 +305,11 @@ fn entry() {
             );
             test_harness::require(
                 output.success != 0,
-                "wake_smoke_concurrent_client:" + output.stderr_text()
+                "wake_smoke_concurrent_client"
             );
-            let snapshot = rhai::json::parse(output.stdout_text());
+            let snapshot_text = output_combined_text(output);
+            snapshot_text.trim();
+            let snapshot = rhai::json::parse(snapshot_text);
             test_harness::require(
                 snapshot.schema_version >= 1
                     && (
@@ -173,7 +321,12 @@ fn entry() {
             );
         }
         command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             [
                 "wait-pane", "-t", tab_id, "--contains", token,
@@ -181,42 +334,51 @@ fn entry() {
             ]
         );
 
-        print("STEP expired mutation is a typed no-op through std::net::TcpStream");
+        print("STEP expired mutation is a typed no-op through raw newline-delimited IPC");
         let baseline = "wake-baseline-" + context.run_id;
         command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             ["set-tab-note", "-t", tab_id, baseline]
         );
-        let command_args = [
-            "set-tab-note", "-t", tab_id,
-            "expired-mutation-must-not-commit"
-        ];
-        let args_json = rhai::json::stringify(command_args);
+        let args_json_text =
+            "[\"set-tab-note\",\"-t\",\"" + tab_id +
+                "\",\"expired-mutation-must-not-commit\"]";
         let fingerprint = rhai::hash::fnv1a64(
-            rhai::bytes::from_text(args_json)
+            rhai::bytes::from_text(args_json_text)
         );
         let request_id = "wake-expired-" + context.run_id;
-        let request = #{
-            args: command_args,
-            control: #{
-                schema_version: 1,
-                request_id: request_id,
-                operation_id: "tabs.set-note",
-                payload_fingerprint: fingerprint,
-                intent: "mutation",
-                deadline_unix_ms: 0
-            }
-        };
-        let stream = std::net::TcpStream::connect_timeout(
-            context.address,
-            std::time::Duration::from_secs(10)
+        let request_text =
+            "{\"args\":" + args_json_text +
+            ",\"control\":{\"schema_version\":1,\"request_id\":\"" + request_id +
+            "\",\"operation_id\":\"tabs.set-note\",\"payload_fingerprint\":\"" +
+            fingerprint + "\",\"intent\":\"mutation\",\"deadline_unix_ms\":0}}\n";
+        let response_path =
+            std::path::join(context.run_directory, "wake-expired-response.jsonl").display;
+        let ps =
+            "$req='" + request_text + "'; "
+            + "$c=New-Object Net.Sockets.TcpClient('" + ctx_address + "'); "
+            + "$s=$c.GetStream(); "
+            + "$w=New-Object IO.StreamWriter($s); "
+            + "$w.Write($req); $w.Flush(); "
+            + "$r=New-Object IO.StreamReader($s); "
+            + "$r.ReadLine(); "
+            + "$c.Close()";
+        let tcp_code = std::process::command_stdout_file(
+            "powershell",
+            ["-NoProfile", "-Command", ps],
+            30000,
+            response_path,
+            #{}
         );
-        stream.set_nodelay(1);
-        stream.write_all(rhai::json::stringify(request) + "\n");
-        stream.flush();
-        let response_text = stream.read_line(262144);
-        stream.shutdown();
+        test_harness::require(tcp_code == 0, "wake_smoke_expired_tcp_failed");
+        let response_text = std::fs::read_to_string(response_path);
+        response_text.trim();
         let expired = rhai::json::parse(response_text);
         test_harness::require(
             expired.ok == 0
@@ -227,11 +389,15 @@ fn entry() {
             "wake_smoke_expired_receipt:" + response_text
         );
         let after_note = command_text(
-            context,
+            ctx_address,
+            ctx_workspace,
+            ctx_settings,
+            ctx_instance,
+            ctx_command_log,
+            ctx_command_journal,
             cli,
             ["show-tab-note", "-t", tab_id]
         );
-        after_note.trim();
         test_harness::require(after_note == baseline, "wake_smoke_expired_mutated_state");
 
         test_harness::emit_evidence(
@@ -239,9 +405,9 @@ fn entry() {
             ["fleet.wake-coalescing", "ux-parity.wake-coalescing"],
             "fleet.wake-coalescing"
         );
-        command_text(context, cli, ["shutdown"]);
+        command_text(ctx_address, ctx_workspace, ctx_settings, ctx_instance, ctx_command_log, ctx_command_journal, cli, ["shutdown"]);
         let server_output = wait_for_exit(
-            server,
+            server_child,
             "wake_smoke_server_shutdown_timeout"
         );
         test_harness::require(server_output.success != 0, "wake_smoke_server_exit_failure");
@@ -258,9 +424,19 @@ fn entry() {
         failure = catch_text(error);
     }
 
+    for client_index in 0..clients.len() {
+        let client = clients[client_index];
+        if client.state == "running" {
+            client.kill();
+        }
+        let _drain = client.wait_with_output(
+            std::time::Duration::from_secs(2)
+        );
+    }
+
     let completion_failure = "";
     try {
-        test_harness::complete(
+        let _completed = test_harness::complete(
             context,
             owned_children,
             succeeded,

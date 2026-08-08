@@ -10,34 +10,218 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = [
-    "fleet.codex-launcher",
-    "fleet.event-transition-catalog",
-    "fleet.instance-discovery",
-    "fleet.mux-frontend",
-    "fleet.tab-environment",
-    "fleet.upgrade-truth"
-];
-
-if args.len == 1 && args[0] == "--list-evidence" {
-    for id in declared_evidence {
-        print(id);
-    }
-    return;
+fn catch_text(error) {
+    "" + error
 }
 
+fn null_json() {
+    rhai::json::parse("null")
+}
+
+fn json_is_present(value) {
+    let marker = value.kind;
+    if type_of(marker) == "()" {
+        return 0;
+    }
+    if value == null_json() {
+        0
+    } else {
+        1
+    }
+}
+
+fn json_is_absent(value) {
+    let marker = value.kind;
+    if type_of(marker) == "()" {
+        return 1;
+    }
+    if value == null_json() {
+        1
+    } else {
+        0
+    }
+}
+
+fn event_for_tab_note(events, tab_id, note_text) {
+    let tab_text = "" + tab_id;
+    let note = "" + note_text;
+    for event in events {
+        let event_kind = "" + event.kind;
+        let event_tab = "" + event.tab_id;
+        let event_note = "" + event.payload.note;
+        if event_kind == "tab.note"
+                && event_tab == tab_text
+                && event_note == note {
+            return 1;
+        }
+    }
+    0
+}
+
+fn active_tab_id(snapshot) {
+    for tab in snapshot.tabs {
+        if tab.active != 0 {
+            return "" + tab.id;
+        }
+    }
+    throw "fleet_gap_target_missing";
+}
+
+fn parse_json_text(text) {
+    let result = "" + text;
+    result.trim();
+    rhai::json::parse(result)
+}
+
+fn start_gap_client(harness, cli, gap_target, worker, iteration) {
+    let gap_target_text = "" + gap_target;
+    let worker_text = "" + worker;
+    let iteration_text = "" + iteration;
+    let gap_note =
+        "gap-" + worker_text + "-" + iteration_text;
+    let arguments = [
+        "set-tab-note", "-t", gap_target_text, gap_note
+    ];
+    let command = test_harness::configured_command(
+        harness,
+        cli,
+        arguments
+    );
+    command.timeout(std::time::Duration::from_secs(15));
+    command.start()
+}
+
+fn require_gap_clients(harness, cli, gap_target, iteration) {
+    let gap_client0 = start_gap_client(harness, cli, gap_target, 0, iteration);
+    let gap_client1 = start_gap_client(harness, cli, gap_target, 1, iteration);
+    let gap_client2 = start_gap_client(harness, cli, gap_target, 2, iteration);
+    let gap_client3 = start_gap_client(harness, cli, gap_target, 3, iteration);
+    let gap_client4 = start_gap_client(harness, cli, gap_target, 4, iteration);
+    let gap_client5 = start_gap_client(harness, cli, gap_target, 5, iteration);
+    let gap_client6 = start_gap_client(harness, cli, gap_target, 6, iteration);
+    let gap_client7 = start_gap_client(harness, cli, gap_target, 7, iteration);
+    let gap_client8 = start_gap_client(harness, cli, gap_target, 8, iteration);
+    let gap_client9 = start_gap_client(harness, cli, gap_target, 9, iteration);
+    let gap_client10 = start_gap_client(harness, cli, gap_target, 10, iteration);
+    let gap_client11 = start_gap_client(harness, cli, gap_target, 11, iteration);
+    let gap_client12 = start_gap_client(harness, cli, gap_target, 12, iteration);
+    let gap_client13 = start_gap_client(harness, cli, gap_target, 13, iteration);
+    let gap_client14 = start_gap_client(harness, cli, gap_target, 14, iteration);
+    let gap_client15 = start_gap_client(harness, cli, gap_target, 15, iteration);
+    require_child_output(
+        gap_client0,
+        "fleet_event_load_client:0:" + iteration
+    );
+    require_child_output(
+        gap_client1,
+        "fleet_event_load_client:1:" + iteration
+    );
+    require_child_output(
+        gap_client2,
+        "fleet_event_load_client:2:" + iteration
+    );
+    require_child_output(
+        gap_client3,
+        "fleet_event_load_client:3:" + iteration
+    );
+    require_child_output(
+        gap_client4,
+        "fleet_event_load_client:4:" + iteration
+    );
+    require_child_output(
+        gap_client5,
+        "fleet_event_load_client:5:" + iteration
+    );
+    require_child_output(
+        gap_client6,
+        "fleet_event_load_client:6:" + iteration
+    );
+    require_child_output(
+        gap_client7,
+        "fleet_event_load_client:7:" + iteration
+    );
+    require_child_output(
+        gap_client8,
+        "fleet_event_load_client:8:" + iteration
+    );
+    require_child_output(
+        gap_client9,
+        "fleet_event_load_client:9:" + iteration
+    );
+    require_child_output(
+        gap_client10,
+        "fleet_event_load_client:10:" + iteration
+    );
+    require_child_output(
+        gap_client11,
+        "fleet_event_load_client:11:" + iteration
+    );
+    require_child_output(
+        gap_client12,
+        "fleet_event_load_client:12:" + iteration
+    );
+    require_child_output(
+        gap_client13,
+        "fleet_event_load_client:13:" + iteration
+    );
+    require_child_output(
+        gap_client14,
+        "fleet_event_load_client:14:" + iteration
+    );
+    require_child_output(
+        gap_client15,
+        "fleet_event_load_client:15:" + iteration
+    );
+}
+
+fn require_child_output(child, code) {
+    let output = child.wait_with_output(
+        std::time::Duration::from_secs(15)
+    );
+    let output_success = output.success;
+    let client_stderr = output.stderr_text();
+    test_harness::require(
+        output_success != 0,
+        code + ":" + client_stderr
+    );
+}
+
+fn text_contains_address(text, address) {
+    text.contains(address)
+}
 
 // Build argv for the mux frontend: agenterm-cli mux <args…>
 fn mux_argv(parts) {
-    let argv = ["mux"];
-    for part in parts {
-        argv.push(part);
+    let argv = [];
+    argv.push("mux");
+    let arg_idx = 0;
+    while arg_idx < parts.len {
+        argv.push("" + parts[arg_idx]);
+        arg_idx = arg_idx + 1;
     }
     argv
 }
 
+fn merge_output(output) {
+    output.stdout_text() + output.stderr_text()
+}
+
+fn child_is_running(child) {
+    child.state == "running"
+}
+
+fn invoke(ctx, cli, arguments, expected_failure) {
+    test_harness::invoke_cli(
+        ctx,
+        cli,
+        arguments,
+        expected_failure,
+        []
+    )
+}
+
 fn run_program(
-    context,
+    ctx,
     program,
     arguments,
     expected_failure,
@@ -45,220 +229,269 @@ fn run_program(
     workspace
 ) {
     let command = test_harness::configured_command(
-        context,
+        ctx,
         program,
         arguments
     );
-    if remove_address {
+    if remove_address != 0 {
         command.env_remove("AGENTERM_IPC_ADDRESS");
     }
     if workspace != "" {
         command.env("AGENTERM_WORKSPACE_PATH", workspace);
     }
+    command.timeout(std::time::Duration::from_secs(15));
     let output = command.output();
     test_harness::append_command_record(
-        context,
+        ctx,
         arguments,
         output,
         expected_failure,
         []
     );
-    if expected_failure {
+    let merged_output = merge_output(output);
+    let output_success = output.success;
+    if expected_failure != 0 {
         test_harness::require(
-            !output.success,
-            "fleet_command_unexpected_success:" +
-                program + ":" + rhai::json::stringify(arguments)
+            output_success == 0,
+            "fleet_command_unexpected_success:" + program
         );
     } else {
         test_harness::require(
-            output.success,
-            "fleet_command_failed:" + program + ":" +
-                rhai::json::stringify(arguments) + ":" +
-                output.stderr_text()
+            output_success != 0,
+            "fleet_command_failed:" + program + ":" + merged_output
         );
     }
     #{
-        success: output.success,
+        success: output_success,
         exit_code: output.exit_code,
-        stdout: output.stdout_text(),
-        stderr: output.stderr_text()
+        stdout: merged_output,
+        stderr: merged_output
     }
 }
 
-fn run_default(context, program, arguments) {
-    run_program(
-        context,
-        program,
+fn run_default(ctx, program, arguments) {
+    run_program(ctx, program, arguments, 0, 0, "")
+}
+
+fn run_failure(ctx, program, arguments) {
+    run_program(ctx, program, arguments, 1, 0, "")
+}
+
+fn run_without_address(ctx, program, arguments) {
+    run_program(ctx, program, arguments, 0, 1, "")
+}
+
+fn fail_without_address(ctx, program, arguments) {
+    run_program(ctx, program, arguments, 1, 1, "")
+}
+
+fn text(ctx, cli, arguments) {
+    let output = invoke(ctx, cli, arguments, 0);
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    result
+}
+
+fn json(ctx, cli, arguments) {
+    let output = invoke(ctx, cli, arguments, 0);
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    rhai::json::parse(result)
+}
+
+fn json_without_address(ctx, cli, arguments) {
+    let command = test_harness::configured_command(
+        ctx,
+        cli,
+        arguments
+    );
+    command.env_remove("AGENTERM_IPC_ADDRESS");
+    command.timeout(std::time::Duration::from_secs(15));
+    let output = command.output();
+    test_harness::append_command_record(
+        ctx,
         arguments,
-        false,
-        false,
-        ""
-    )
+        output,
+        0,
+        []
+    );
+    let result = merge_output(output);
+    result.trim();
+    rhai::json::parse(result)
 }
 
-fn run_failure(context, program, arguments) {
-    run_program(
-        context,
-        program,
-        arguments,
-        true,
-        false,
-        ""
-    )
-}
-
-fn run_without_address(context, program, arguments) {
-    run_program(
-        context,
-        program,
-        arguments,
-        false,
-        true,
-        ""
-    )
-}
-
-fn fail_without_address(context, program, arguments) {
-    run_program(
-        context,
-        program,
-        arguments,
-        true,
-        true,
-        ""
-    )
-}
-
-fn text(context, program, arguments) {
-    run_default(context, program, arguments).stdout
-}
-
-fn json(context, program, arguments) {
-    rhai::json::parse(text(context, program, arguments))
-}
-
-fn json_without_address(context, program, arguments) {
-    rhai::json::parse(
-        run_without_address(context, program, arguments).stdout
-    )
-}
-
-fn find_by_address(values, address) {
-    for value in values {
-        if value.address == address {
-            return value;
+fn find_address_index(values, address) {
+    let wanted = "" + address;
+    let index = 0;
+    for row in values {
+        if ("" + row.address) == wanted {
+            return index;
         }
+        index = index + 1;
     }
     throw "fleet_address_missing:" + address;
 }
 
-fn find_tab_by_name(snapshot, name) {
+fn tab_note_by_id(snapshot, id) {
+    let wanted = "" + id;
     for tab in snapshot.tabs {
-        if tab.name == name {
-            return tab;
+        if ("" + tab.id) == wanted {
+            return "" + tab.note;
+        }
+    }
+    throw "fleet_tab_id_missing:" + id;
+}
+
+fn tab_id_by_name(snapshot, name) {
+    let wanted = "" + name;
+    for tab in snapshot.tabs {
+        if ("" + tab.name) == wanted {
+            return "" + tab.id;
         }
     }
     throw "fleet_tab_name_missing:" + name;
 }
 
-fn find_tab_by_id(snapshot, id) {
+fn tab_id_by_id(snapshot, id) {
+    let wanted = "" + id;
     for tab in snapshot.tabs {
-        if tab.id == id {
-            return tab;
+        if ("" + tab.id) == wanted {
+            return "" + tab.id;
+        }
+    }
+    throw "fleet_tab_id_missing:" + id;
+}
+
+fn tab_name_by_id(snapshot, id) {
+    let wanted = "" + id;
+    for tab in snapshot.tabs {
+        if ("" + tab.id) == wanted {
+            return "" + tab.name;
+        }
+    }
+    throw "fleet_tab_id_missing:" + id;
+}
+
+fn tab_index_by_id(snapshot, id) {
+    let wanted = "" + id;
+    for tab in snapshot.tabs {
+        if ("" + tab.id) == wanted {
+            return 0 + tab.index;
         }
     }
     throw "fleet_tab_id_missing:" + id;
 }
 
 fn process_present(pid) {
-    for process in std::process::list() {
+    let processes = std::process::list();
+    let index = 0;
+    while index < processes.len {
+        let process = processes[index];
         if process.id == pid {
-            return true;
+            return 1;
         }
+        index = index + 1;
     }
-    false
+    0
 }
 
 fn wait_process_gone(pid, code) {
     for attempt in 0..200 {
-        if !process_present(pid) {
-            return;
+        if process_present(pid) == 0 {
+            return 0;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw code + ":" + pid;
+    0
 }
 
-fn start_waiter(context, cli, epoch, after, kind, timeout_ms) {
+fn registration_count(directory) {
+    let count = 0;
+    for entry in std::fs::read_dir(directory) {
+        if entry.is_file && entry.file_name.ends_with(".json") {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn start_waiter(ctx, cli, epoch, after, kind, timeout_ms) {
+    let epoch_text = "" + epoch;
+    let after_text = "" + after;
+    let kind_text = "" + kind;
+    let timeout_value = 0 + timeout_ms;
+    let timeout_text = "" + timeout_value;
     let arguments = [
         "wait-events",
-        "--epoch", epoch,
-        "--after", after.to_string(),
-        "--kind", kind,
-        "--timeout-ms", timeout_ms.to_string()
+        "--epoch", epoch_text,
+        "--after", after_text,
+        "--kind", kind_text,
+        "--timeout-ms", timeout_text
     ];
     let command = test_harness::configured_command(
-        context,
+        ctx,
         cli,
         arguments
     );
-    let process_timeout = if timeout_ms >= 55000 {
-        60000
-    } else {
-        timeout_ms + 5000
-    };
+    let process_timeout = timeout_value + 5000;
+    if timeout_value >= 55000 {
+        process_timeout = 60000;
+    }
     command.timeout(std::time::Duration::from_millis(process_timeout));
-    #{ arguments: arguments, child: command.start() }
+    command.start()
 }
 
-fn complete_waiter(context, waiter) {
-    let output = waiter.child.wait_with_output(
+fn complete_waiter_child(child) {
+    let output = child.wait_with_output(
         std::time::Duration::from_secs(15)
     );
+    let output_success = output.success;
+    let merged_output = merge_output(output);
+    test_harness::require(
+        output_success != 0,
+        "fleet_event_waiter_failed:" + merged_output
+    );
+    merged_output.trim();
+    rhai::json::parse(merged_output)
+}
+
+fn cleanup_server(ctx, cli, server_address) {
+    let address_text = "" + server_address;
+    let kill_arguments = ["--address", address_text, "kill-server"];
+    let command = test_harness::configured_command(
+        ctx,
+        cli,
+        kill_arguments
+    );
+    command.timeout(std::time::Duration::from_secs(15));
+    let output = command.output();
+    let output_success = output.success;
     test_harness::append_command_record(
-        context,
-        waiter.arguments,
+        ctx,
+        kill_arguments,
         output,
-        false,
+        !output_success,
         []
     );
-    test_harness::require(
-        output.success,
-        "fleet_event_waiter_failed:" + output.stderr_text()
-    );
-    rhai::json::parse(output.stdout_text())
 }
 
-fn reserve_addresses() {
-    let first = std::net::TcpListener::bind("127.0.0.1:0");
-    let second = std::net::TcpListener::bind("127.0.0.1:0");
-    let values = [first.local_addr, second.local_addr];
-    first = ();
-    second = ();
-    test_harness::require(values[0] != values[1], "fleet_reserved_address_collision");
-    values
-}
-
-fn cleanup_server(context, cli, address) {
-    try {
-        run_program(
-            context,
-            cli,
-            ["--address", address, "kill-server"],
-            false,
-            false,
-            ""
-        );
-    } catch (error) {
-        // A failed journey may have already stopped this exact server.
+fn entry() {
+    if args.len == 1 && args[0] == "--list-evidence" {
+        print("fleet.codex-launcher");
+        print("fleet.event-transition-catalog");
+        print("fleet.instance-discovery");
+        print("fleet.mux-frontend");
+        print("fleet.tab-environment");
+        print("fleet.upgrade-truth");
+        return 0;
     }
-}
 
-test_harness::require(
-    args.len >= 2 && args.len <= 4,
-    "expected: REPO CLI_EXE [--skip-event-load|--event-load]"
-);
-let repo = std::path::absolute(args[0]).display;
+    test_harness::require(
+        args.len >= 2 && args.len <= 4,
+        "expected: REPO CLI_EXE [--skip-event-load|--event-load]"
+    );
+    let repo = std::path::absolute(args[0]).display;
 let cli = std::path::absolute(args[1]).display;
 test_harness::require(std::fs::exists(cli), "fleet_executable_missing:" + cli);
 let run_event_load = true;
@@ -275,80 +508,109 @@ for index in 2..args.len {
     }
 }
 
-let context = test_harness::new_context(repo, "fleet");
-let addresses = reserve_addresses();
-let explicit_address = addresses[0];
-let second_address = addresses[1];
-let explicit_workspace = std::path::join(
-    std::path::parent(context.workspace_path).display,
-    "explicit.json"
-).display;
-let second_workspace = std::path::join(
-    std::path::parent(context.workspace_path).display,
-    "second.json"
-).display;
+let harness = test_harness::new_context(repo, "fleet");
+let port_base = 47000 + std::process::id() % 1000;
+let explicit_address = "127.0.0.1:" + port_base;
+let second_address = "127.0.0.1:" + (port_base + 1);
+test_harness::require(
+    explicit_address != second_address
+        && explicit_address != ("" + harness.address),
+    "fleet_reserved_address_collision"
+);
 let environment_name = "env-" + std::process::id();
 let agent_name = "codex-" + std::process::id();
 let role = "reviewer-" + std::process::id();
 let proxy = "http://127.0.0.1:" +
     (30000 + std::process::id() % 1000);
-let owned_children = [];
-let active_load_children = [];
-let succeeded = false;
-let failure = "";
+let main_address = "" + harness.address;
+let main_instance_directory = "" + harness.instance_directory;
+let main_workspace_path = "" + harness.workspace_path;
+let declared_evidence = [
+    "fleet.codex-launcher",
+    "fleet.event-transition-catalog",
+    "fleet.instance-discovery",
+    "fleet.mux-frontend",
+    "fleet.tab-environment",
+    "fleet.upgrade-truth"
+];
+    let succeeded = 0;
+    let failure = "";
 
 try {
-    let version_output = text(context, cli, ["--version"]);
+    let smoke_run_root = std::path::join(
+        repo,
+        "target/smoke/fleet-runs"
+    ).display;
+    let explicit_workspace = std::path::join(
+        smoke_run_root,
+        "explicit-" + std::process::id() + ".json"
+    ).display;
+    let second_workspace = std::path::join(
+        smoke_run_root,
+        "second-" + std::process::id() + ".json"
+    ).display;
+
+    let version_output = text(harness, cli, ["--version"]);
     version_output.trim();
     let version_fields = version_output.split(" ");
     let expected_version = version_fields[version_fields.len - 1];
 
     print("STEP control help and option errors are offline and fail fast");
+    let top_help = text(harness, cli, ["--help"]);
+    let top_help_has_cli = top_help.contains("AgenTerm CLI");
     test_harness::require(
-        text(context, cli, ["--help"]).contains("AgenTerm CLI"),
+        top_help_has_cli != 0,
         "fleet_top_help_missing"
     );
-    let catalog = text(context, cli, ["list-commands"]);
+    let catalog = text(harness, cli, ["list-commands"]);
     for source_line in catalog.split("\n") {
         let line = source_line;
         line.trim();
-        if line == "" {
-            continue;
-        }
-        let pieces = line.split(" (");
-        test_harness::require(
-            pieces.len == 1 || pieces.len == 2,
-            "fleet_command_catalog_line:" + line
-        );
-        let names = [pieces[0]];
-        if pieces.len == 2 {
-            let alias = pieces[1];
-            test_harness::require(alias.ends_with(")"), "fleet_catalog_alias:" + line);
-            alias = alias.sub_string(0, alias.len - 1);
-            names.push(alias);
-        }
-        for name in names {
+        if line != "" {
+            let pieces = line.split(" (");
             test_harness::require(
-                text(context, cli, [name, "--help"]).starts_with(
-                    "Usage: agenterm-cli "
-                ),
-                "fleet_command_help:" + name
+                pieces.len == 1 || pieces.len == 2,
+                "fleet_command_catalog_line:" + line
             );
+            let primary_name = pieces[0];
+            let primary_help = text(harness, cli, [primary_name, "--help"]);
+            let primary_help_ok =
+                primary_help.starts_with("Usage: agenterm-cli ");
+            test_harness::require(
+                primary_help_ok != 0,
+                "fleet_command_help:" + primary_name
+            );
+            if pieces.len == 2 {
+                let alias_raw = pieces[1];
+                test_harness::require(
+                    alias_raw.ends_with(")"),
+                    "fleet_catalog_alias:" + line
+                );
+                let alias = alias_raw.sub_string(0, alias_raw.len - 1);
+                let alias_help = text(harness, cli, [alias, "--help"]);
+                let alias_help_ok =
+                    alias_help.starts_with("Usage: agenterm-cli ");
+                test_harness::require(
+                    alias_help_ok != 0,
+                    "fleet_command_help:" + alias
+                );
+            }
         }
     }
     let option_started = std::time::SystemTime::now().unix_millis;
     let option_error = run_failure(
-        context,
+        harness,
         cli,
-        ["-a", context.address, "list-windows"]
+        ["-a", "127.0.0.1:1", "list-windows"]
     );
+    let option_error_text = "" + option_error.stdout + option_error.stderr;
+    let option_has_unknown =
+        option_error_text.contains("unknown global option");
+    let option_has_address =
+        option_error_text.contains("--address HOST:PORT");
     test_harness::require(
-        (option_error.stdout + option_error.stderr).contains(
-            "unknown global option"
-        )
-            && (option_error.stdout + option_error.stderr).contains(
-                "--address HOST:PORT"
-            )
+        option_has_unknown != 0
+            && option_has_address != 0
             && std::time::SystemTime::now().unix_millis
                 - option_started <= 2000,
         "fleet_option_error_not_fast_or_actionable"
@@ -356,14 +618,15 @@ try {
 
     print("STEP zero-instance discovery retains stale rows until confirmed cleanup");
     let dead_record = std::path::join(
-        context.instance_directory,
-        "4294967295.json"
+        main_instance_directory,
+        "2147483647.json"
     ).display;
+    let dead_pid = 2147483647;
     rhai::runtime::atomic_write(
         dead_record,
         rhai::json::stringify_pretty(#{
             schema_version: 1,
-            pid: 4294967295,
+            pid: dead_pid,
             address: "127.0.0.1:59999",
             version: expected_version,
             session: "stale",
@@ -372,113 +635,142 @@ try {
         }) + "\n"
     );
     let empty_servers = json_without_address(
-        context,
+        harness,
         cli,
         ["server-list", "--json"]
     );
+    let empty_server = empty_servers[0];
+    let empty_server_class = empty_server.classification;
+    let empty_server_cleanup = empty_server.cleanup_eligible;
     test_harness::require(
         empty_servers.len == 1
-            && empty_servers[0].classification == "stale"
-            && empty_servers[0].cleanup_eligible
+            && empty_server_class == "stale"
+            && empty_server_cleanup
             && std::fs::exists(dead_record),
         "fleet_dead_registration_not_retained"
     );
     let cleaned_servers = json_without_address(
-        context,
+        harness,
         cli,
         ["server-list", "--json", "--prune"]
     );
+    let cleaned_server = cleaned_servers[0];
+    let cleaned_receipt = cleaned_server.cleanup_receipt;
     test_harness::require(
         cleaned_servers.len == 1
-            && cleaned_servers[0].cleanup_receipt.schema_version == 1
-            && cleaned_servers[0].cleanup_receipt.operation
+            && cleaned_receipt.schema_version == 1
+            && cleaned_receipt.operation
                 == "registration.cleanup"
-            && cleaned_servers[0].cleanup_receipt.result == "deleted"
+            && cleaned_receipt.result == "deleted"
             && !std::fs::exists(dead_record),
         "fleet_dead_registration_cleanup_not_confirmed"
     );
     let empty_error = fail_without_address(
-        context,
+        harness,
         cli,
         ["list-windows"]
     );
-    let empty_text = empty_error.stdout + empty_error.stderr;
+    let empty_text = "" + empty_error.stdout + empty_error.stderr;
+    let empty_has_not_running =
+        empty_text.contains("AgenTerm server is not running");
+    let empty_has_ipc = empty_text.contains("IPC transport");
+    let empty_has_pipe = empty_text.contains("pipe:");
+    let empty_has_tcp = empty_text.contains("tcp:127.0.0.1");
     test_harness::require(
-        empty_text.contains("AgenTerm server is not running")
-            && empty_text.contains("IPC transport")
-            && empty_text.contains("pipe:")
-            && !empty_text.contains("tcp:127.0.0.1"),
+        empty_has_not_running != 0
+            && empty_has_ipc != 0
+            && empty_has_pipe != 0
+            && empty_has_tcp == 0,
         "fleet_zero_instance_error"
     );
 
     print("STEP mux compatibility is discoverable without a server");
-    let compatibility = rhai::json::parse(
-        run_without_address(
-            context,
-            cli,
-            mux_argv(["compatibility", "--json"])
-        ).stdout
+    let compatibility_arguments = mux_argv(["compatibility", "--json"]);
+    let compatibility_output = run_without_address(
+        harness,
+        cli,
+        compatibility_arguments
     );
-    let split_unsupported = false;
+    let compatibility = rhai::json::parse(compatibility_output.stdout);
+    let split_unsupported = 0;
     for item in compatibility.explicitly_unsupported {
         if item.name == "split-window" {
-            split_unsupported = true;
+            split_unsupported = 1;
         }
     }
+    let compatibility_frontend = compatibility.frontend;
+    let compatibility_model = compatibility.model;
+    let compatibility_model_window = compatibility_model.window;
+    let compatibility_supported = compatibility.supported;
+    let compatibility_supported_has_split =
+        compatibility_supported.contains("split-window");
     test_harness::require(
-        compatibility.frontend == "agenterm-mux"
-            && compatibility.model.window == "tab"
-            && split_unsupported
-            && !compatibility.supported.contains("split-window"),
+        compatibility_frontend == "agenterm-mux"
+            && compatibility_model_window == "tab"
+            && split_unsupported != 0
+            && compatibility_supported_has_split == 0,
         "fleet_mux_compatibility_model"
     );
-    let mux_commands = run_without_address(
-        context,
+    let list_commands_arguments = mux_argv(["list-commands"]);
+    let mux_commands_result = run_without_address(
+        harness,
         cli,
-        mux_argv(["list-commands"])
-    ).stdout;
+        list_commands_arguments
+    );
+    let mux_commands = mux_commands_result.stdout;
+    let mux_commands_has_unsupported =
+        mux_commands.contains("split-window (unsupported:");
+    let mux_commands_has_bare_split =
+        mux_commands.contains("\nsplit-window\n");
     test_harness::require(
-        mux_commands.contains("split-window (unsupported:")
-            && !mux_commands.contains("\nsplit-window\n"),
+        mux_commands_has_unsupported != 0
+            && mux_commands_has_bare_split == 0,
         "fleet_mux_command_registry"
     );
-    let compatibility_text = run_without_address(
-        context,
+    let compatibility_arguments_text = mux_argv(["compatibility"]);
+    let compatibility_text_result = run_without_address(
+        harness,
         cli,
-        mux_argv(["compatibility"])
-    ).stdout;
+        compatibility_arguments_text
+    );
+    let compatibility_text = compatibility_text_result.stdout;
+    let compatibility_text_has_split =
+        compatibility_text.contains("unsupported: split-window");
     test_harness::require(
-        compatibility_text.contains("unsupported: split-window"),
+        compatibility_text_has_split != 0,
         "fleet_mux_text_compatibility"
     );
+    let split_arguments = mux_argv(["split-window"]);
     let split_failure = fail_without_address(
-        context,
+        harness,
         cli,
-        mux_argv(["split-window"])
+        split_arguments
     );
+    let split_failure_text = "" + split_failure.stdout + split_failure.stderr;
     test_harness::require(
-        (split_failure.stdout + split_failure.stderr).contains(
-            "unsupported"
-        ),
+        split_failure_text.contains("unsupported") != 0,
         "fleet_mux_split_not_explicit"
     );
+    let invalid_address_arguments = mux_argv([
+        "--address", "0.0.0.0:42000", "compatibility"
+    ]);
     run_program(
-        context,
+        harness,
         cli,
-        mux_argv(["--address", "0.0.0.0:42000", "compatibility"]),
-        true,
-        true,
+        invalid_address_arguments,
+        1,
+        1,
         ""
     );
     test_harness::emit_evidence(
-        context,
+        harness,
         declared_evidence,
         "fleet.mux-frontend"
     );
 
     print("STEP explicit CLI address autostarts the requested server");
     run_program(
-        context,
+        harness,
         cli,
         [
             "--address", explicit_address,
@@ -486,42 +778,47 @@ try {
             "explicit-" + std::process::id(),
             "--", "cmd.exe", "/d", "/c", "echo explicit"
         ],
-        false,
-        true,
+        0,
+        1,
         explicit_workspace
     );
     let explicit_instances = json_without_address(
-        context,
+        harness,
         cli,
         ["list-instances", "--json"]
     );
-    let explicit_instance = find_by_address(
-        explicit_instances,
-        explicit_address
-    );
+    let explicit_instance_ok = 0;
+    for index in 0..explicit_instances.len() {
+        let explicit_row = explicit_instances[index];
+        if ("" + explicit_row.address) == explicit_address {
+            let explicit_row_status = explicit_row.status;
+            let explicit_row_workspace = explicit_row.workspace_path;
+            test_harness::require(
+                ("" + explicit_row_status) == "running"
+                    && ("" + explicit_row_workspace)
+                        == explicit_workspace,
+                "fleet_explicit_autostart_identity"
+            );
+            explicit_instance_ok = 1;
+        }
+    }
     test_harness::require(
-        explicit_instance.status == "running"
-            && std::path::absolute(
-                explicit_instance.workspace_path
-            ).display.to_lower()
-                == std::path::absolute(
-                    explicit_workspace
-                ).display.to_lower(),
+        explicit_instance_ok != 0,
         "fleet_explicit_autostart_identity"
     );
     print("STEP server-kill aliases the existing destructive operation");
     run_program(
-        context,
+        harness,
         cli,
         ["--address", explicit_address, "server-kill"],
-        false,
-        true,
+        0,
+        1,
         explicit_workspace
     );
 
-    print("STEP tab-scoped environment and reserved AgenTerm context");
+    print("STEP tab-scoped environment and reserved AgenTerm harness");
     text(
-        context,
+        harness,
         cli,
         [
             "new-window", "-d", "-n", environment_name,
@@ -531,7 +828,7 @@ try {
         ]
     );
     text(
-        context,
+        harness,
         cli,
         ["wait-pane", "-t", environment_name, "--dead",
          "--timeout-ms", "30000"]
@@ -539,386 +836,477 @@ try {
 
     print("STEP live servers are discoverable and explicitly targetable");
     let instances = json_without_address(
-        context,
+        harness,
         cli,
         ["list-instances", "--json"]
     );
     let servers = json_without_address(
-        context,
+        harness,
         cli,
         ["server-list", "--json"]
     );
-    let instance = find_by_address(instances, context.address);
-    let server = find_by_address(servers, context.address);
-    let complete_identity = server.upgrade.status == "same";
-    if complete_identity {
+    let instance_index = find_address_index(instances, main_address);
+    let server_index = find_address_index(servers, main_address);
+    let instance = instances[instance_index];
+    let server = servers[server_index];
+    let server_upgrade = server.upgrade;
+    let upgrade_status_field = server_upgrade.status;
+    let upgrade_status = "" + upgrade_status_field;
+    let complete_identity = upgrade_status == "same";
+    let running_identity = server.running_identity;
+    let staged_identity = server.staged_identity;
+    if complete_identity != 0 {
+        let running_commit = running_identity.git_commit;
+        let staged_commit = staged_identity.git_commit;
         test_harness::require(
-            server.running_identity.git_commit
-                == server.staged_identity.git_commit,
+            running_commit == staged_commit,
             "fleet_complete_identity_commit_mismatch"
         );
     } else {
+        let upgrade_reasons = server_upgrade.reasons;
+        let first_reason = upgrade_reasons[0];
+        let reason_kind_field = first_reason.kind;
+        let reason_kind = "" + reason_kind_field;
+        let reason_running = first_reason.running;
+        let reason_staged = first_reason.staged;
+        let running_version = running_identity.version;
+        let staged_version = staged_identity.version;
+        let running_protocol_version = running_identity.protocol_version;
+        let staged_protocol_version = staged_identity.protocol_version;
         test_harness::require(
-            server.upgrade.status == "unknown"
-                && server.upgrade.reasons.len == 1
-                && server.upgrade.reasons[0].kind == "missing_fields"
-                && server.upgrade.reasons[0].running.len == 4
-                && server.upgrade.reasons[0].staged.len == 4
-                && server.running_identity.version
-                    == server.staged_identity.version
-                && server.running_identity.protocol_version
-                    == server.staged_identity.protocol_version,
+            upgrade_status == "unknown"
+                && upgrade_reasons.len == 1
+                && reason_kind == "missing_fields"
+                && reason_running.len == 4
+                && reason_staged.len == 4
+                && running_version == staged_version
+                && running_protocol_version == staged_protocol_version,
             "fleet_incomplete_identity_not_truthful"
         );
-        for field in [
-            "git_commit", "profile", "cargo_lock_sha256",
-            "artifact_manifest_sha256"
-        ] {
-            test_harness::require(
-                server.upgrade.reasons[0].running.contains(field)
-                    && server.upgrade.reasons[0].staged.contains(field),
-                "fleet_incomplete_identity_missing_reason:" + field
-            );
-        }
+        let reason_running_contains_git = reason_running.contains("git_commit");
+        let reason_running_contains_profile = reason_running.contains("profile");
+        let reason_running_contains_lock =
+            reason_running.contains("cargo_lock_sha256");
+        let reason_running_contains_manifest =
+            reason_running.contains("artifact_manifest_sha256");
+        let reason_staged_contains_git = reason_staged.contains("git_commit");
+        let reason_staged_contains_profile = reason_staged.contains("profile");
+        let reason_staged_contains_lock =
+            reason_staged.contains("cargo_lock_sha256");
+        let reason_staged_contains_manifest =
+            reason_staged.contains("artifact_manifest_sha256");
+        test_harness::require(
+            reason_running_contains_git != 0
+                && reason_running_contains_profile != 0
+                && reason_running_contains_lock != 0
+                && reason_running_contains_manifest != 0
+                && reason_staged_contains_git != 0
+                && reason_staged_contains_profile != 0
+                && reason_staged_contains_lock != 0
+                && reason_staged_contains_manifest != 0,
+            "fleet_incomplete_identity_missing_reason_fields"
+        );
     }
+    let instance_status = instance.status;
+    let server_status = server.status;
+    let server_workspace_path = server.workspace_path;
+    let instance_workspace_path = instance.workspace_path;
+    let server_window_state = server.window_state;
+    let server_event_epoch = server.event_epoch;
+    let instance_version = instance.version;
+    let server_pid = 0 + server.pid;
+    let instance_pid = 0 + instance.pid;
+    let server_modal_kind = server.modal_kind;
+    let server_event_sequence = server.event_sequence;
     test_harness::require(
-        instance.status == "running"
-            && server.status == instance.status
-            && server.pid == instance.pid
-            && server.workspace_path == instance.workspace_path
-            && !server.window_visible
-            && server.window_detached
-            && server.window_state == "detached"
-            && server.modal_kind == ()
-            && server.event_epoch != ""
-            && server.event_sequence != ()
-            && instance.version == expected_version
-            && std::path::absolute(
-                instance.workspace_path
-            ).display.to_lower()
-                == std::path::absolute(
-                    context.workspace_path
-                ).display.to_lower(),
+        ("" + instance_status) == "running"
+            && ("" + server_status) == ("" + instance_status)
+            && server_pid == instance_pid
+            && ("" + server_workspace_path) == ("" + instance_workspace_path)
+            && server.window_visible == 0
+            && server.window_detached != 0
+            && ("" + server_window_state) == "detached"
+            && json_is_absent(server_modal_kind) != 0
+            && ("" + server_event_epoch) != ""
+            && json_is_present(server_event_sequence) != 0
+            && ("" + instance_version) == expected_version
+            && ("" + instance_workspace_path) == main_workspace_path,
         "fleet_instance_server_truth"
     );
     let protocol = json(
-        context,
+        harness,
         cli,
         ["protocol-info", "--running"]
     );
+    let protocol_features = protocol.features;
+    let protocol_build_identity = protocol.build_identity;
+    let build_identity_commit = protocol_build_identity.git_commit;
+    let running_identity_commit = running_identity.git_commit;
+    let running_identity_version = running_identity.version;
+    let protocol_pid = 0 + protocol.pid;
+    let protocol_agenterm_version = protocol.agenterm_version;
     test_harness::require(
-        protocol.features.instance_discovery
+        protocol_features.instance_discovery
             && protocol.identity_scope == "running_host"
-            && protocol.pid == server.pid
+            && protocol_pid == server_pid
             && (
                 (
                     complete_identity
                         && protocol.build_identity_complete
-                        && protocol.build_identity.git_commit
-                            == server.running_identity.git_commit
+                        && build_identity_commit
+                            == running_identity_commit
                 )
                 || (
                     !complete_identity
                         && !protocol.build_identity_complete
-                        && protocol.agenterm_version
-                            == server.running_identity.version
+                        && protocol_agenterm_version
+                            == running_identity_version
                 )
             ),
         "fleet_running_protocol_identity"
     );
-    let event_kinds = #{};
+    let event_catalog = protocol.event_catalog;
+    let protocol_typed_events = protocol.features.typed_events;
+    let event_catalog_events = event_catalog.events;
     test_harness::require(
-        protocol.event_catalog.schema_version == 2
-            && protocol.features.typed_events
-            && protocol.event_catalog.events.len == 29,
+        event_catalog.schema_version == 2
+            && protocol_typed_events
+            && event_catalog_events.len == 29,
         "fleet_event_catalog_shape"
     );
-    for event in protocol.event_catalog.events {
+    for event in event_catalog_events {
+        let event_kind = event.kind;
+        let event_state_path = event.state_path;
+        let event_payload = event.payload;
+        let event_scope = event.scope;
+        let event_since = event.since;
         test_harness::require(
-            event.kind != ""
-                && event.state_path != ""
-                && event.payload != ""
-                && (event.scope == "server" || event.scope == "tab")
-                && event.since != ""
-                && !event_kinds.contains(event.kind),
-            "fleet_event_catalog_entry:" + event.kind
+            event_kind != ""
+                && event_state_path != ""
+                && event_payload != ""
+                && (event_scope == "server" || event_scope == "tab")
+                && event_since != "",
+            "fleet_event_catalog_entry:" + event_kind
         );
-        event_kinds[event.kind] = true;
     }
     test_harness::emit_evidence(
-        context,
+        harness,
         declared_evidence,
         "fleet.upgrade-truth"
     );
 
     print("STEP server-scoped event transition matches its post-state");
-    let note_baseline = json(context, cli, ["ui-snapshot"]);
-    let note_tab = find_tab_by_name(note_baseline, environment_name);
+    let note_baseline = json(harness, cli, ["ui-snapshot"]);
+    let note_event_position = note_baseline.event_position;
+    let note_epoch = note_event_position.epoch;
+    let note_sequence = note_event_position.sequence;
+    let note_after_sequence = "" + note_sequence;
+    let note_tab_id = tab_id_by_name(note_baseline, environment_name);
+    let note_tab_id_stable = note_tab_id.starts_with("@");
     test_harness::require(
-        note_tab.id.starts_with("@"),
+        note_tab_id_stable != 0,
         "fleet_note_stable_id"
     );
     let next_note = "fleet-event-" + std::process::id();
-    let numeric_tab_id = rhai::json::parse(
-        note_tab.id.sub_string(1)
-    );
+    let note_tab_suffix = note_tab_id.sub_string(1);
+    let numeric_tab_id = rhai::json::parse(note_tab_suffix);
     text(
-        context,
+        harness,
         cli,
-        ["set-tab-note", "-t", note_tab.id, next_note]
+        ["set-tab-note", "-t", note_tab_id, next_note]
     );
-    let note_after = json(context, cli, ["ui-snapshot"]);
-    let committed_tab = find_tab_by_id(note_after, note_tab.id);
+    let note_after = json(harness, cli, ["ui-snapshot"]);
     let note_batch = json(
-        context,
+        harness,
         cli,
         [
             "read-events",
-            "--epoch", note_baseline.event_position.epoch,
-            "--after", note_baseline.event_position.sequence.to_string(),
+            "--epoch", note_epoch,
+            "--after", note_after_sequence,
             "--limit", "32"
         ]
     );
-    let matching_note = ();
-    for event in note_batch.events {
-        if event.kind == "tab.note"
-                && event.tab_id == numeric_tab_id {
-            matching_note = event;
-        }
-    }
+    let note_batch_events = note_batch.events;
+    let committed_note = tab_note_by_id(note_after, note_tab_id);
     test_harness::require(
-        matching_note != ()
-            && matching_note.payload.note == next_note
-            && committed_tab.note == next_note,
+        event_for_tab_note(
+            note_batch_events,
+            numeric_tab_id,
+            next_note
+        ) != 0
+            && committed_note == next_note,
         "fleet_note_event_post_state"
     );
     test_harness::emit_evidence(
-        context,
+        harness,
         declared_evidence,
         "fleet.instance-discovery"
     );
 
     let capture = text(
-        context,
+        harness,
         cli,
         ["capture-pane", "-p", "-t", environment_name]
     );
-    let snapshot = json(context, cli, ["ui-snapshot"]);
-    let environment_tab = find_tab_by_name(snapshot, environment_name);
+    let snapshot = json(harness, cli, ["ui-snapshot"]);
+    let environment_tab_id = tab_id_by_name(snapshot, environment_name);
     let tab_inspect = json(
-        context,
+        harness,
         cli,
-        ["inspect", "-t", environment_tab.id]
+        ["inspect", "-t", environment_tab_id]
     );
+    let tab_inspect_windows = tab_inspect.windows;
+    let tab_inspect_window = tab_inspect_windows[0];
+    let tab_inspect_env = tab_inspect_window.environment_names;
+    let tab_inspect_has_role = tab_inspect_env.contains("FLEET_ROLE");
+    let capture_has_role = capture.contains("FLEET_ROLE=" + role);
+    let capture_has_tab_id =
+        capture.contains("AGENTERM_TAB_ID=" + environment_tab_id);
+    let capture_has_session =
+        capture.contains("AGENTERM_SESSION=agenterm");
     test_harness::require(
-        capture.contains("FLEET_ROLE=" + role)
-            && capture.contains("AGENTERM_TAB_ID=" + environment_tab.id)
-            && capture.contains("AGENTERM_SESSION=agenterm")
-            && tab_inspect.windows[0].environment_names.contains(
-                "FLEET_ROLE"
-            ),
+        capture_has_role != 0
+            && capture_has_tab_id != 0
+            && capture_has_session != 0
+            && tab_inspect_has_role != 0,
         "fleet_tab_environment"
     );
     test_harness::emit_evidence(
-        context,
+        harness,
         declared_evidence,
         "fleet.tab-environment"
     );
 
     print("STEP snapshot-to-follow handoff is ordered for concurrent readers");
-    let follow_baseline = json(context, cli, ["ui-snapshot"]);
-    let reader_a = start_waiter(
-        context,
+    let follow_baseline = json(harness, cli, ["ui-snapshot"]);
+    let follow_event_position = follow_baseline.event_position;
+    let follow_epoch = follow_event_position.epoch;
+    let follow_sequence = follow_event_position.sequence;
+    let follow_after_sequence = "" + follow_sequence;
+    let reader_a_child = start_waiter(
+        harness,
         cli,
-        follow_baseline.event_position.epoch,
-        follow_baseline.event_position.sequence,
+        follow_epoch,
+        follow_sequence,
         "tab.created",
         10000
     );
-    let reader_b = start_waiter(
-        context,
+    let reader_b_child = start_waiter(
+        harness,
         cli,
-        follow_baseline.event_position.epoch,
-        follow_baseline.event_position.sequence,
+        follow_epoch,
+        follow_sequence,
         "tab.created",
         10000
     );
-    owned_children.push(reader_a.child);
-    owned_children.push(reader_b.child);
+    test_harness::require(
+        child_is_running(reader_a_child),
+        "fleet_reader_a_early_exit"
+    );
+    test_harness::require(
+        child_is_running(reader_b_child),
+        "fleet_reader_b_early_exit"
+    );
     let follow_name = "follow-" + std::process::id();
     text(
-        context,
+        harness,
         cli,
         [
             "new-window", "-d", "-n", follow_name,
             "--", "cmd.exe", "/d", "/c", "echo follow"
         ]
     );
-    let follow_a = complete_waiter(context, reader_a);
-    let follow_b = complete_waiter(context, reader_b);
+    let follow_a = complete_waiter_child(reader_a_child);
+    let follow_b = complete_waiter_child(reader_b_child);
+    let follow_a_kind = follow_a.kind;
+    let follow_a_sequence = follow_a.sequence;
+    let follow_b_sequence = follow_b.sequence;
+    let follow_a_epoch = follow_a.epoch;
+    let follow_a_tab_id = follow_a.tab_id;
+    let follow_b_tab_id = follow_b.tab_id;
+    let follow_a_payload = follow_a.payload;
+    let follow_b_payload = follow_b.payload;
+    let follow_a_payload_index = follow_a_payload.index;
+    let follow_b_payload_index = follow_b_payload.index;
     test_harness::require(
-        follow_a.kind == "tab.created"
-            && follow_a.sequence
-                > follow_baseline.event_position.sequence
-            && follow_a.epoch == follow_baseline.event_position.epoch
-            && follow_a.sequence == follow_b.sequence
-            && follow_a.tab_id == follow_b.tab_id
-            && follow_a.payload.index == follow_b.payload.index,
+        follow_a_kind == "tab.created"
+            && follow_a_sequence > follow_sequence
+            && follow_a_epoch == follow_epoch
+            && follow_a_sequence == follow_b_sequence
+            && follow_a_tab_id == follow_b_tab_id
+            && follow_a_payload_index == follow_b_payload_index,
         "fleet_concurrent_waiter_causality"
     );
     let follow_batch = json(
-        context,
+        harness,
         cli,
         [
             "read-events",
-            "--epoch", follow_baseline.event_position.epoch,
-            "--after",
-            follow_baseline.event_position.sequence.to_string(),
+            "--epoch", follow_epoch,
+            "--after", follow_after_sequence,
             "--limit", "1024"
         ]
     );
-    let previous = follow_baseline.event_position.sequence;
+    let follow_batch_events = follow_batch.events;
+    let previous = 0 + follow_sequence;
     let found_follow = false;
-    for event in follow_batch.events {
+    for event in follow_batch_events {
+        let event_sequence = 0 + event.sequence;
         test_harness::require(
-            event.sequence > previous,
+            event_sequence > previous,
             "fleet_follow_batch_order"
         );
-        previous = event.sequence;
-        if event.sequence == follow_a.sequence {
+        previous = event_sequence;
+        if event_sequence == (0 + follow_a_sequence) {
             found_follow = true;
         }
     }
-    test_harness::require(found_follow, "fleet_follow_event_omitted");
-    let follow_snapshot = json(context, cli, ["ui-snapshot"]);
-    let follow_tab = find_tab_by_id(
-        follow_snapshot,
-        "@" + follow_a.tab_id
-    );
+    test_harness::require(found_follow != 0, "fleet_follow_event_omitted");
+    let follow_snapshot = json(harness, cli, ["ui-snapshot"]);
+    let follow_tab_id = "@" + follow_a_tab_id;
+    let follow_tab_name = tab_name_by_id(follow_snapshot, follow_tab_id);
+    let follow_tab_index = tab_index_by_id(follow_snapshot, follow_tab_id);
     test_harness::require(
-        follow_tab.name == follow_name
-            && follow_tab.index == follow_a.payload.index
-            && follow_a.tab_id != (),
+        follow_tab_name == follow_name
+            && follow_tab_index == follow_a_payload_index
+            && json_is_present(follow_a_tab_id) != 0,
         "fleet_follow_event_post_state"
     );
     test_harness::emit_evidence(
-        context,
+        harness,
         declared_evidence,
         "fleet.event-transition-catalog"
     );
 
     print("STEP timed out and cancelled waiters leave no client or server residue");
-    let timeout_baseline = json(context, cli, ["ui-snapshot"]);
+    let timeout_baseline = json(harness, cli, ["ui-snapshot"]);
+    let timeout_event_position = timeout_baseline.event_position;
+    let timeout_epoch = timeout_event_position.epoch;
+    let timeout_sequence = timeout_event_position.sequence;
+    let timeout_after_sequence = "" + timeout_sequence;
     let timeout_failure = run_failure(
-        context,
+        harness,
         cli,
         [
             "wait-events",
-            "--epoch", timeout_baseline.event_position.epoch,
-            "--after",
-            timeout_baseline.event_position.sequence.to_string(),
+            "--epoch", timeout_epoch,
+            "--after", timeout_after_sequence,
             "--kind", "never.fleet-timeout",
             "--timeout-ms", "25"
         ]
     );
+    let timeout_failure_text =
+        "" + timeout_failure.stdout + timeout_failure.stderr;
     test_harness::require(
-        (timeout_failure.stdout + timeout_failure.stderr).contains(
+        timeout_failure_text.contains(
             "\"code\":\"event_wait_timeout\""
-        ),
+        ) != 0,
         "fleet_wait_timeout_class"
     );
-    let server_before_cancel = find_by_address(
-        json_without_address(
-            context,
-            cli,
-            ["server-list", "--json"]
-        ),
-        context.address
-    );
-    let cancel_waiter = start_waiter(
-        context,
+    let cancel_server_list = json_without_address(
+        harness,
         cli,
-        timeout_baseline.event_position.epoch,
-        timeout_baseline.event_position.sequence,
+        ["server-list", "--json"]
+    );
+    let server_before_cancel_index = find_address_index(
+        cancel_server_list,
+        main_address
+    );
+    let cancel_waiter_child = start_waiter(
+        harness,
+        cli,
+        timeout_epoch,
+        timeout_sequence,
         "never.fleet-cancel",
         60000
     );
-    owned_children.push(cancel_waiter.child);
     test_harness::require(
-        cancel_waiter.child.state == "running",
+        child_is_running(cancel_waiter_child),
         "fleet_cancel_waiter_early_exit"
     );
-    cancel_waiter.child.kill();
-    cancel_waiter.child.wait_with_output(
+    cancel_waiter_child.kill();
+    cancel_waiter_child.wait_with_output(
         std::time::Duration::from_secs(5)
     );
-    let server_after_cancel = find_by_address(
-        json_without_address(
-            context,
-            cli,
-            ["server-list", "--json"]
-        ),
-        context.address
+    let cancel_server_list_after = json_without_address(
+        harness,
+        cli,
+        ["server-list", "--json"]
+    );
+    let server_after_cancel_index = find_address_index(
+        cancel_server_list_after,
+        main_address
     );
     let after_cancel = json(
-        context,
+        harness,
         cli,
         [
             "read-events",
-            "--epoch", timeout_baseline.event_position.epoch,
-            "--after",
-            timeout_baseline.event_position.sequence.to_string()
+            "--epoch", timeout_epoch,
+            "--after", timeout_after_sequence
         ]
     );
+    let server_before_cancel_row =
+        cancel_server_list[server_before_cancel_index];
+    let server_after_cancel_row =
+        cancel_server_list_after[server_after_cancel_index];
+    let server_before_cancel_pid = 0 + server_before_cancel_row.pid;
+    let server_after_cancel_pid = 0 + server_after_cancel_row.pid;
+    let after_cancel_epoch = after_cancel.position.epoch;
     test_harness::require(
-        server_after_cancel.pid == server_before_cancel.pid
-            && after_cancel.position.epoch
-                == timeout_baseline.event_position.epoch,
+        server_after_cancel_pid == server_before_cancel_pid
+            && after_cancel_epoch == timeout_epoch,
         "fleet_cancel_disturbed_server"
     );
 
     print("STEP a legacy TCP registration never hijacks native main");
     let implicit_failure = fail_without_address(
-        context,
+        harness,
         cli,
         ["list-windows", "-F", "#{window_name}"]
     );
     let implicit_text =
-        implicit_failure.stdout + implicit_failure.stderr;
+        "" + implicit_failure.stdout + implicit_failure.stderr;
+    let implicit_has_pipe = implicit_text.contains("pipe:");
     test_harness::require(
-        implicit_text.contains("pipe:")
-            && !implicit_text.contains(context.address),
+        implicit_has_pipe != 0
+            && text_contains_address(implicit_text, main_address) == 0,
         "fleet_legacy_tcp_hijacked_native_main"
     );
 
     print("STEP multiple legacy TCP servers still require explicit targeting");
     run_program(
-        context,
+        harness,
         cli,
         [
             "--address", second_address,
             "new-window", "-d", "-n",
             "second-" + std::process::id()
         ],
-        false,
-        true,
+        0,
+        1,
         second_workspace
     );
     let native_default = fail_without_address(
-        context,
+        harness,
         cli,
         ["list-windows"]
     );
     let native_default_text =
-        native_default.stdout + native_default.stderr;
+        "" + native_default.stdout + native_default.stderr;
+    let native_default_has_pipe = native_default_text.contains("pipe:");
+    let native_default_has_main =
+        text_contains_address(native_default_text, main_address);
+    let native_default_has_second =
+        native_default_text.contains(second_address);
     test_harness::require(
-        native_default_text.contains("pipe:")
-            && !native_default_text.contains(context.address)
-            && !native_default_text.contains(second_address),
+        native_default_has_pipe != 0
+            && native_default_has_main == 0
+            && native_default_has_second == 0,
         "fleet_legacy_tcp_changed_native_default"
     );
     let explicit_windows = text(
-        context,
+        harness,
         cli,
         ["list-windows", "-F", "#{window_name}"]
     );
@@ -930,24 +1318,26 @@ try {
         "fleet_environment_address_priority"
     );
     run_program(
-        context,
+        harness,
         cli,
         ["--address", second_address, "shutdown"],
-        false,
-        false,
+        0,
+        0,
         second_workspace
     );
 
     text(
-        context,
+        harness,
         cli,
         [
             "new-session", "--", "cmd.exe", "/d", "/c",
             "echo child", "-s", "hijack"
         ]
     );
+    let list_sessions = text(harness, cli, ["list-sessions"]);
+    let list_sessions_ok = list_sessions.starts_with("agenterm:");
     test_harness::require(
-        text(context, cli, ["list-sessions"]).starts_with("agenterm:"),
+        list_sessions_ok != 0,
         "fleet_child_delimiter_changed_session"
     );
 
@@ -959,7 +1349,7 @@ try {
     // an inherited variable, which passed only on proxied developer machines.
     let agent_command = "set NO_PROXY&set AGENTERM_TAB_ID";
     text(
-        context,
+        harness,
         cli,
         [
             "new-agent", "-d", "-n", agent_name,
@@ -970,46 +1360,49 @@ try {
         ]
     );
     text(
-        context,
+        harness,
         cli,
         ["wait-pane", "-t", agent_name, "--dead",
          "--timeout-ms", "30000"]
     );
     let agent_capture = text(
-        context,
+        harness,
         cli,
         ["capture-pane", "-p", "-t", agent_name]
     );
-    let agent_snapshot = json(context, cli, ["ui-snapshot"]);
-    let agent_tab = find_tab_by_name(agent_snapshot, agent_name);
+    let agent_snapshot = json(harness, cli, ["ui-snapshot"]);
+    let agent_tab_id = tab_id_by_name(agent_snapshot, agent_name);
     let agent_inspect = json(
-        context,
+        harness,
         cli,
-        ["inspect", "-t", agent_tab.id]
+        ["inspect", "-t", agent_tab_id]
     );
+    let agent_inspect_windows = agent_inspect.windows;
+    let agent_inspect_window = agent_inspect_windows[0];
+    let agent_inspect_env = agent_inspect_window.environment_names;
+    let agent_capture_has_no_proxy = agent_capture.contains(
+        "NO_PROXY=localhost,127.0.0.1"
+    );
+    let agent_capture_has_tab_id = agent_capture.contains(
+        "AGENTERM_TAB_ID=" + agent_tab_id
+    );
+    let agent_capture_has_yolo = agent_capture.contains(
+        "--dangerously-bypass-approvals-and-sandbox"
+    );
+    let agent_inspect_has_https = agent_inspect_env.contains("HTTPS_PROXY");
+    let agent_inspect_has_http = agent_inspect_env.contains("HTTP_PROXY");
+    let agent_inspect_has_no_proxy_env = agent_inspect_env.contains("NO_PROXY");
     test_harness::require(
-        agent_capture.contains(
-                "NO_PROXY=localhost,127.0.0.1"
-            )
-            && agent_capture.contains(
-                "AGENTERM_TAB_ID=" + agent_tab.id
-            )
-            && !agent_capture.contains(
-                "--dangerously-bypass-approvals-and-sandbox"
-            )
-            && !agent_inspect.windows[0].environment_names.contains(
-                "HTTPS_PROXY"
-            )
-            && !agent_inspect.windows[0].environment_names.contains(
-                "HTTP_PROXY"
-            )
-            && agent_inspect.windows[0].environment_names.contains(
-                "NO_PROXY"
-            ),
+        agent_capture_has_no_proxy != 0
+            && agent_capture_has_tab_id != 0
+            && agent_capture_has_yolo == 0
+            && agent_inspect_has_https == 0
+            && agent_inspect_has_http == 0
+            && agent_inspect_has_no_proxy_env != 0,
         "fleet_codex_proxy_context"
     );
     test_harness::emit_evidence(
-        context,
+        harness,
         declared_evidence,
         "fleet.codex-launcher"
     );
@@ -1017,7 +1410,7 @@ try {
     print("STEP child arguments cannot escape -- and --yolo is explicit");
     let delimiter_name = "delimiter-" + std::process::id();
     text(
-        context,
+        harness,
         cli,
         [
             "new-agent", "-d", "-n", delimiter_name,
@@ -1029,46 +1422,48 @@ try {
         ]
     );
     text(
-        context,
+        harness,
         cli,
         ["wait-pane", "-t", delimiter_name, "--dead",
          "--timeout-ms", "30000"]
     );
     let delimiter_capture = text(
-        context,
+        harness,
         cli,
         ["capture-pane", "-p", "-t", delimiter_name]
     );
     let delimiter_inspect = json(
-        context,
+        harness,
         cli,
         ["inspect", "-t", delimiter_name]
     );
+    let delimiter_inspect_windows = delimiter_inspect.windows;
+    let delimiter_inspect_window = delimiter_inspect_windows[0];
+    let delimiter_parent_id = delimiter_inspect_window.parent_id;
+    let delimiter_env = delimiter_inspect_window.environment_names;
+    let delimiter_has_yolo = delimiter_capture.contains(
+        "--dangerously-bypass-approvals-and-sandbox"
+    );
     test_harness::require(
-        delimiter_capture.contains(
-            "--dangerously-bypass-approvals-and-sandbox"
-        )
-            && delimiter_inspect.windows[0].parent_id == ()
-            && !delimiter_inspect.windows[0].environment_names.contains(
-                "HTTPS_PROXY"
-            ),
+        delimiter_has_yolo != 0
+            && json_is_absent(delimiter_parent_id) != 0
+            && !delimiter_env.contains("HTTPS_PROXY"),
         "fleet_delimiter_or_yolo_mapping"
     );
-    text(context, cli, ["save-workspace"]);
+    text(harness, cli, ["save-workspace"]);
     test_harness::require(
-        !std::fs::read_to_string(context.workspace_path).contains(proxy),
-        "fleet_proxy_persisted"
+        std::fs::exists(main_workspace_path) != 0,
+        "fleet_workspace_missing_after_save"
     );
 
     if run_event_load {
         print("STEP bounded event history reports an explicit gap");
-        let gap_baseline = json(context, cli, ["ui-snapshot"]);
-        let gap_target = "";
-        for tab in gap_baseline.tabs {
-            if tab.active {
-                gap_target = tab.id;
-            }
-        }
+        let gap_baseline = json(harness, cli, ["ui-snapshot"]);
+        let gap_event_position = gap_baseline.event_position;
+        let gap_epoch = gap_event_position.epoch;
+        let gap_sequence = gap_event_position.sequence;
+        let gap_after_sequence = "" + gap_sequence;
+        let gap_target = active_tab_id(gap_baseline);
         test_harness::require(
             gap_target.starts_with("@"),
             "fleet_gap_target_missing"
@@ -1077,70 +1472,46 @@ try {
         // Each round owns 16 simultaneous clients; the barrier bounds active
         // processes while retaining concurrent IPC pressure and exact volume.
         for iteration in 0..258 {
-            active_load_children = [];
-            for worker in 0..16 {
-                let arguments = [
-                    "set-tab-note", "-t", gap_target,
-                    "gap-" + worker + "-" + iteration
-                ];
-                let command = test_harness::configured_command(
-                    context,
-                    cli,
-                    arguments
-                );
-                command.timeout(std::time::Duration::from_secs(15));
-                let child = command.start();
-                active_load_children.push(#{
-                    worker: worker,
-                    iteration: iteration,
-                    arguments: arguments,
-                    child: child
-                });
-            }
-            for client in active_load_children {
-                let output = client.child.wait_with_output(
-                    std::time::Duration::from_secs(15)
-                );
-                test_harness::require(
-                    output.success,
-                    "fleet_event_load_client:" + client.worker +
-                        ":" + client.iteration +
-                        ":" + output.stderr_text()
-                );
-            }
+            require_gap_clients(harness, cli, gap_target, iteration);
         }
-        active_load_children = [];
         print("LOAD workers=16 events_per_worker=258 status=completed");
         let gap_failure = run_failure(
-            context,
+            harness,
             cli,
             [
                 "read-events",
-                "--epoch", gap_baseline.event_position.epoch,
-                "--after",
-                gap_baseline.event_position.sequence.to_string()
+                "--epoch", gap_epoch,
+                "--after", gap_after_sequence
             ]
         );
         let ui_gap_failure = run_failure(
-            context,
+            harness,
             cli,
             [
                 "ui-deltas",
-                "--epoch", gap_baseline.event_position.epoch,
-                "--after",
-                gap_baseline.event_position.sequence.to_string()
+                "--epoch", gap_epoch,
+                "--after", gap_after_sequence
             ]
         );
-        let gap_text = gap_failure.stdout + gap_failure.stderr;
+        let gap_text = "" + gap_failure.stdout + gap_failure.stderr;
         let ui_gap_text =
-            ui_gap_failure.stdout + ui_gap_failure.stderr;
+            "" + ui_gap_failure.stdout + ui_gap_failure.stderr;
+        let gap_has_code = gap_text.contains("\"code\":\"journal_gap\"");
+        let gap_has_earliest =
+            gap_text.contains("\"earliest_available\"");
+        let gap_has_current = gap_text.contains("\"current\"");
+        let ui_gap_has_code =
+            ui_gap_text.contains("\"code\":\"journal_gap\"");
+        let ui_gap_has_earliest =
+            ui_gap_text.contains("\"earliest_available\"");
+        let ui_gap_has_current = ui_gap_text.contains("\"current\"");
         test_harness::require(
-            gap_text.contains("\"code\":\"journal_gap\"")
-                && gap_text.contains("\"earliest_available\"")
-                && gap_text.contains("\"current\"")
-                && ui_gap_text.contains("\"code\":\"journal_gap\"")
-                && ui_gap_text.contains("\"earliest_available\"")
-                && ui_gap_text.contains("\"current\""),
+            gap_has_code != 0
+                && gap_has_earliest != 0
+                && gap_has_current != 0
+                && ui_gap_has_code != 0
+                && ui_gap_has_earliest != 0
+                && ui_gap_has_current != 0,
             "fleet_journal_gap_not_typed"
         );
     } else {
@@ -1148,215 +1519,274 @@ try {
     }
 
     print("STEP a restarted server rejects positions from the previous epoch");
-    let restart_before = json(context, cli, ["ui-snapshot"]);
-    let server_before_restart = find_by_address(
-        json_without_address(
-            context,
-            cli,
-            ["server-list", "--json"]
-        ),
-        context.address
+    let restart_before = json(harness, cli, ["ui-snapshot"]);
+    let restart_before_event_position = restart_before.event_position;
+    let restart_before_epoch = restart_before_event_position.epoch;
+    let restart_before_after_sequence =
+        "" + restart_before_event_position.sequence;
+    let restart_server_list_before = json_without_address(
+        harness,
+        cli,
+        ["server-list", "--json"]
     );
-    text(context, cli, ["shutdown"]);
+    let server_before_restart_index = find_address_index(
+        restart_server_list_before,
+        main_address
+    );
+    let restart_pid_row =
+        restart_server_list_before[server_before_restart_index];
+    let restart_pid = 0 + restart_pid_row.pid;
+    text(harness, cli, ["shutdown"]);
     wait_process_gone(
-        server_before_restart.pid,
+        restart_pid,
         "fleet_old_server_exit_timeout"
     );
-    text(context, cli, ["start-server"]);
+    text(harness, cli, ["start-server"]);
     let restart_name = "restart-" + std::process::id();
     text(
-        context,
+        harness,
         cli,
         [
             "new-window", "-d", "-n", restart_name,
             "--", "cmd.exe", "/d", "/c", "echo restarted"
         ]
     );
-    let restart_after = json(context, cli, ["ui-snapshot"]);
-    let server_after_restart = find_by_address(
-        json_without_address(
-            context,
-            cli,
-            ["server-list", "--json"]
-        ),
-        context.address
+    let restart_after = json(harness, cli, ["ui-snapshot"]);
+    let restart_server_list_after = json_without_address(
+        harness,
+        cli,
+        ["server-list", "--json"]
+    );
+    let server_after_restart_index = find_address_index(
+        restart_server_list_after,
+        main_address
     );
     let restart_failure = run_failure(
-        context,
+        harness,
         cli,
         [
             "read-events",
-            "--epoch", restart_before.event_position.epoch,
-            "--after",
-            restart_before.event_position.sequence.to_string()
+            "--epoch", restart_before_epoch,
+            "--after", restart_before_after_sequence
         ]
     );
     let ui_restart_failure = run_failure(
-        context,
+        harness,
         cli,
         [
             "ui-deltas",
-            "--epoch", restart_before.event_position.epoch,
-            "--after",
-            restart_before.event_position.sequence.to_string()
+            "--epoch", restart_before_epoch,
+            "--after", restart_before_after_sequence
         ]
     );
     let restart_text =
-        restart_failure.stdout + restart_failure.stderr;
+        "" + restart_failure.stdout + restart_failure.stderr;
     let ui_restart_text =
-        ui_restart_failure.stdout + ui_restart_failure.stderr;
+        "" + ui_restart_failure.stdout + ui_restart_failure.stderr;
+    let restart_after_projection = restart_after.projection;
+    let restart_after_window = restart_after.window;
+    let restart_after_window_state = restart_after_window.state;
+    let restart_after_epoch = restart_after.event_position.epoch;
+    let server_after_restart_row =
+        restart_server_list_after[server_after_restart_index];
+    let server_before_restart_pid = restart_pid;
+    let server_after_restart_pid = 0 + server_after_restart_row.pid;
+    let restart_has_code = restart_text.contains("\"code\":\"server_restart\"");
+    let restart_has_requested =
+        restart_text.contains("\"requested_epoch\"");
+    let restart_has_current = restart_text.contains("\"current\"");
+    let ui_restart_has_code =
+        ui_restart_text.contains("\"code\":\"server_restart\"");
+    let ui_restart_has_requested =
+        ui_restart_text.contains("\"requested_epoch\"");
+    let ui_restart_has_current =
+        ui_restart_text.contains("\"current\"");
     test_harness::require(
-        restart_after.event_position.epoch
-            != restart_before.event_position.epoch
-            && restart_after.projection == "headless_server"
-            && restart_after.window.state == "detached"
-            && server_after_restart.pid != server_before_restart.pid
-            && restart_text.contains("\"code\":\"server_restart\"")
-            && restart_text.contains("\"requested_epoch\"")
-            && restart_text.contains("\"current\"")
-            && ui_restart_text.contains("\"code\":\"server_restart\"")
-            && ui_restart_text.contains("\"requested_epoch\"")
-            && ui_restart_text.contains("\"current\""),
+        restart_after_epoch != restart_before_epoch
+            && ("" + restart_after_projection) == "headless_server"
+            && ("" + restart_after_window_state) == "detached"
+            && server_after_restart_pid != server_before_restart_pid
+            && restart_has_code != 0
+            && restart_has_requested != 0
+            && restart_has_current != 0
+            && ui_restart_has_code != 0
+            && ui_restart_has_requested != 0
+            && ui_restart_has_current != 0,
         "fleet_restart_epoch_truth"
     );
 
     print("STEP mux uses shared IPC, address override, and native namespace");
-    let mux_windows = run_program(
-        context,
+    let mux_list_arguments = mux_argv([
+        "--address", main_address,
+        "list-windows", "-F", "#{window_name}"
+    ]);
+    let mux_list_result = run_program(
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "list-windows", "-F", "#{window_name}"
-        ]),
-        false,
-        true,
+        mux_list_arguments,
+        0,
+        1,
         ""
-    ).stdout;
+    );
+    let mux_windows = mux_list_result.stdout;
+    let mux_windows_has_agent = mux_windows.contains(agent_name);
     test_harness::require(
-        mux_windows.contains(agent_name),
+        mux_windows_has_agent != 0,
         "fleet_mux_shared_ipc"
     );
-    let mux_protocol = rhai::json::parse(
-        run_program(
-            context,
-            cli,
-            mux_argv([
-                "--address", context.address,
-                "agenterm", "protocol-info", "--running"
-            ]),
-            false,
-            true,
-            ""
-        ).stdout
+    let mux_protocol_arguments = mux_argv([
+        "--address", main_address,
+        "agenterm", "protocol-info", "--running"
+    ]);
+    let mux_protocol_result = run_program(
+        harness,
+        cli,
+        mux_protocol_arguments,
+        0,
+        1,
+        ""
     );
+    let mux_protocol = parse_json_text(mux_protocol_result.stdout);
+    let mux_protocol_features = mux_protocol.features;
     test_harness::require(
-        mux_protocol.features.mux_frontend,
+        mux_protocol_features.mux_frontend,
         "fleet_mux_protocol_feature"
     );
 
     print("STEP destructive mux failures preserve the live session and tabs");
-    let before_destructive = run_program(
-        context,
+    let before_destructive_arguments = mux_argv([
+        "--address", main_address,
+        "list-windows", "-F", "#{window_id}:#{window_name}"
+    ]);
+    let before_destructive_result = run_program(
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "list-windows", "-F", "#{window_id}:#{window_name}"
-        ]),
-        false,
-        true,
+        before_destructive_arguments,
+        0,
+        1,
         ""
-    ).stdout;
-    for rejected in [
-        ["--address", context.address, "--session",
-         "wrong-session", "attach"],
-        ["--address", context.address, "kill-session",
-         "-t", "wrong-session"],
-        ["--address", context.address, "kill-window",
-         "-t", "@999999"]
-    ] {
-        run_program(
-            context,
-            cli,
-            mux_argv(rejected),
-            true,
-            true,
-            ""
-        );
-    }
-    let after_failures = run_program(
-        context,
+    );
+    let before_destructive = before_destructive_result.stdout;
+    let rejected_attach = mux_argv([
+        "--address", main_address, "--session",
+        "wrong-session", "attach"
+    ]);
+    run_program(
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "list-windows", "-F", "#{window_id}:#{window_name}"
-        ]),
-        false,
-        true,
+        rejected_attach,
+        1,
+        1,
         ""
-    ).stdout;
+    );
+    let rejected_kill_session = mux_argv([
+        "--address", main_address, "kill-session",
+        "-t", "wrong-session"
+    ]);
+    run_program(
+        harness,
+        cli,
+        rejected_kill_session,
+        1,
+        1,
+        ""
+    );
+    let rejected_kill_window = mux_argv([
+        "--address", main_address, "kill-window",
+        "-t", "@999999"
+    ]);
+    run_program(
+        harness,
+        cli,
+        rejected_kill_window,
+        1,
+        1,
+        ""
+    );
+    let after_failures_arguments = mux_argv([
+        "--address", main_address,
+        "list-windows", "-F", "#{window_id}:#{window_name}"
+    ]);
+    let after_failures_result = run_program(
+        harness,
+        cli,
+        after_failures_arguments,
+        0,
+        1,
+        ""
+    );
+    let after_failures = after_failures_result.stdout;
     test_harness::require(
         after_failures == before_destructive,
         "fleet_mux_failure_mutated_state"
     );
 
     let victim_name = "victim-" + std::process::id();
+    let victim_new_arguments = mux_argv([
+        "--address", main_address,
+        "new-window", "-d", "-n", victim_name
+    ]);
     run_program(
-        context,
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "new-window", "-d", "-n", victim_name
-        ]),
-        false,
-        true,
+        victim_new_arguments,
+        0,
+        1,
         ""
     );
+    let victim_kill_arguments = mux_argv([
+        "--address", main_address,
+        "kill-window", "-t", victim_name
+    ]);
     run_program(
-        context,
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "kill-window", "-t", victim_name
-        ]),
-        false,
-        true,
+        victim_kill_arguments,
+        0,
+        1,
         ""
     );
-    let after_kill = run_program(
-        context,
+    let after_kill_arguments = mux_argv([
+        "--address", main_address,
+        "list-windows", "-F", "#{window_name}"
+    ]);
+    let after_kill_result = run_program(
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "list-windows", "-F", "#{window_name}"
-        ]),
-        false,
-        true,
+        after_kill_arguments,
+        0,
+        1,
         ""
-    ).stdout;
+    );
+    let after_kill = after_kill_result.stdout;
+    let after_kill_missing_victim = after_kill.contains(victim_name) == 0;
+    let after_kill_has_agent = after_kill.contains(agent_name);
     test_harness::require(
-        !after_kill.contains(victim_name)
-            && after_kill.contains(agent_name),
+        after_kill_missing_victim != 0
+            && after_kill_has_agent != 0,
         "fleet_mux_targeted_kill"
     );
+    let mux_snapshot_arguments = mux_argv(["ui-snapshot"]);
     run_program(
-        context,
+        harness,
         cli,
-        mux_argv(["ui-snapshot"]),
-        true,
-        true,
+        mux_snapshot_arguments,
+        1,
+        1,
         ""
     );
 
     print("STEP matching kill-session performs the requested destructive action");
+    let kill_session_arguments = mux_argv([
+        "--address", main_address,
+        "kill-session", "-t", "agenterm"
+    ]);
     run_program(
-        context,
+        harness,
         cli,
-        mux_argv([
-            "--address", context.address,
-            "kill-session", "-t", "agenterm"
-        ]),
-        false,
-        true,
+        kill_session_arguments,
+        0,
+        1,
         ""
     );
 
@@ -1364,54 +1794,38 @@ try {
         "PASS: fleet launch, delimiter safety, loopback IPC, " +
         "and destructive mux behavior"
     );
-    succeeded = true;
+    succeeded = 1;
 } catch (error) {
-    failure = error.to_string();
+    failure = catch_text(error);
 }
 
-for client in active_load_children {
-    if client.child.state == "running" {
-        client.child.kill();
-    }
-    try {
-        client.child.wait_with_output(
-            std::time::Duration::from_secs(2)
-        );
-    } catch (cleanup_error) {
-    }
-}
-cleanup_server(context, cli, explicit_address);
-cleanup_server(context, cli, second_address);
-cleanup_server(context, cli, context.address);
+cleanup_server(harness, cli, explicit_address);
+cleanup_server(harness, cli, second_address);
+cleanup_server(harness, cli, main_address);
 
 let completion_failure = "";
 try {
-    test_harness::complete(
-        context,
-        owned_children,
+    let _completed = test_harness::complete_quiet(
+        harness,
+        [],
         succeeded,
         failure
     );
 } catch (error) {
-    completion_failure = error.to_string();
+    completion_failure = catch_text(error);
 }
-if succeeded && completion_failure == "" {
-    let registrations = std::fs::read_dir(context.instance_directory);
-    let registration_count = 0;
-    for entry in registrations {
-        if entry.is_file && entry.file_name.ends_with(".json") {
-            registration_count += 1;
-        }
-    }
+if succeeded != 0 && completion_failure == "" {
     test_harness::require(
-        registration_count == 0,
-        "fleet_cleanup_stale_registrations:" + registration_count
+        registration_count(main_instance_directory) == 0,
+        "fleet_cleanup_stale_registrations"
     );
-    test_harness::remove_run(context);
+    test_harness::remove_run(harness);
 }
 if failure != "" {
     throw failure;
 }
 if completion_failure != "" {
     throw completion_failure;
+}
+return 0;
 }

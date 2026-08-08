@@ -635,3 +635,50 @@ fn native_ipc_compat_smoke_uses_native_bundled_pack() {
         ],
     );
 }
+#[test]
+fn server_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/server-smoke.rh",
+        &[
+            "rh_process_status(",
+            "server_smoke_workspace_missing",
+            "rh_host_json_call(\"process.platform_facts\"",
+        ],
+    );
+}
+
+#[test]
+fn wake_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/wake-smoke.rh",
+        &[
+            "rh_process_status(",
+            "wake_smoke",
+            "rh_host_json_call(\"process.platform_facts\"",
+        ],
+    );
+}
+
+#[test]
+fn fleet_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/fleet-smoke.rh",
+        &[
+            "rh_process_status(",
+            "fleet_executable_missing",
+            "rh_host_json_call(\"process.platform_facts\"",
+        ],
+    );
+}
+
+#[test]
+fn native_ipc_smoke_uses_native_bundled_pack() {
+    assert_native_bundled_pack(
+        "scripts/rh/native-ipc-smoke.rh",
+        &[
+            "rh_process_status(",
+            "native_ipc_server_missing",
+            "rh_host_json_call(\"process.platform_facts\"",
+        ],
+    );
+}

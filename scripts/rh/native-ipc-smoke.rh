@@ -10,16 +10,6 @@
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
-let declared_evidence = [
-    "control.native-local-ipc"
-];
-
-if args.len == 1 && args[0] == "--list-evidence" {
-    print("control.native-local-ipc");
-    return;
-}
-
-
 fn bounded_diagnostic(value) {
     if value.len <= 512 {
         return value;
@@ -27,17 +17,62 @@ fn bounded_diagnostic(value) {
     value.sub_string(0, 512) + "<truncated>"
 }
 
-fn authority_argv(program, arguments) {
-    // Only the agenterm PE uses the `server` subcommand; CLI/mux must not.
-    let name = std::path::PathBuf::from(program).file_name;
-    if name == "agenterm" || name == "agenterm.exe" {
-        let server_args = ["server"];
-        for argument in arguments {
-            server_args.push(argument);
-        }
-        return server_args;
+fn catch_text(error) {
+    "" + error
+}
+
+fn protocol_text(value) {
+    "" + value
+}
+
+fn scoped_settings_path(settings_base, scope_id, is_main) {
+    if is_main != 0 {
+        return std::path::join(settings_base, "settings.json").display;
     }
-    arguments
+    std::path::join(
+        std::path::join(settings_base, "settings").display,
+        scope_id + ".json"
+    ).display
+}
+
+fn macos_settings_root(home_directory) {
+    std::path::join(
+        std::path::join(home_directory, "Library").display,
+        "Application Support"
+    ).display
+}
+
+fn unix_socket_path(endpoint) {
+    let path = "" + endpoint;
+    path.sub_string(5)
+}
+
+fn native_endpoint_shape_ok(transport, endpoint) {
+    if transport == "named_pipe" {
+        return endpoint.starts_with(
+            `pipe:\\.\pipe\agenterm-agt-v1-`
+        );
+    }
+    if transport == "unix" {
+        return endpoint.starts_with("unix:/")
+            && endpoint.ends_with(".sock");
+    }
+    0
+}
+
+fn authority_argv(program, arguments) {
+    let name = std::path::PathBuf::from(program).file_name;
+    let name_text = "" + name;
+    let argv = [];
+    if name_text == "agenterm" || name_text == "agenterm.exe" {
+        argv.push("server");
+    }
+    let arg_idx = 0;
+    while arg_idx < arguments.len {
+        argv.push("" + arguments[arg_idx]);
+        arg_idx = arg_idx + 1;
+    }
+    argv
 }
 
 fn configured(
@@ -49,19 +84,17 @@ fn configured(
     instance,
     workspace
 ) {
+    // Hoist: emit_string_list_arg accepts StringList variables, not local FnCalls.
+    let argv = authority_argv(program, arguments);
     let command = test_harness::configured_command(
         context,
         program,
-        authority_argv(program, arguments)
+        argv
     );
-    for name in [
-        "AGENTERM_IPC_ENDPOINT",
-        "AGENTERM_IPC_ADDRESS",
-        "AGENTERM_INSTANCE",
-        "AGENTERM_SETTINGS_PATH"
-    ] {
-        command.env_remove(name);
-    }
+    command.env_remove("AGENTERM_IPC_ENDPOINT");
+    command.env_remove("AGENTERM_IPC_ADDRESS");
+    command.env_remove("AGENTERM_INSTANCE");
+    command.env_remove("AGENTERM_SETTINGS_PATH");
     if endpoint != "" {
         command.env("AGENTERM_IPC_ENDPOINT", endpoint);
     }
@@ -82,6 +115,27 @@ fn configured(
     command.env("XDG_CONFIG_HOME", context.config_directory);
     command.env("HOME", context.home_directory);
     command
+}
+
+fn spawn_configured(
+    context,
+    program,
+    arguments,
+    endpoint,
+    address,
+    instance,
+    workspace
+) {
+    let command = configured(
+        context,
+        program,
+        arguments,
+        endpoint,
+        address,
+        instance,
+        workspace
+    );
+    command.start()
 }
 
 fn invoke(
@@ -112,15 +166,15 @@ fn invoke(
         expected_failure,
         []
     );
-    if expected_failure {
+    if expected_failure != 0 {
         test_harness::require(
-            !output.success,
+            output.success == 0,
             "native_ipc_command_unexpected_success:" +
                 rhai::json::stringify(arguments)
         );
     } else {
         test_harness::require(
-            output.success,
+            output.success != 0,
             "native_ipc_command_failed:" +
                 rhai::json::stringify(arguments) + ":" +
                 output.stderr_text()
@@ -147,13 +201,15 @@ fn invoke_json(
         context,
         cli,
         arguments,
-        false,
+        0,
         endpoint,
         address,
         instance,
         workspace
     );
-    rhai::json::parse(output.stdout + output.stderr)
+    let text = "" + output.stdout + output.stderr;
+    text.trim();
+    rhai::json::parse(text)
 }
 
 fn probe(
@@ -199,10 +255,15 @@ fn wait_protocol(
     address,
     instance,
     workspace,
-    server
+    server_child
 ) {
     for attempt in 0..200 {
-        let arguments = selector_arguments;
+        let arguments = [];
+        let arg_idx = 0;
+        while arg_idx < selector_arguments.len() {
+            arguments.push("" + selector_arguments[arg_idx]);
+            arg_idx = arg_idx + 1;
+        }
         arguments.push("protocol-info");
         arguments.push("--running");
         let output = probe(
@@ -214,11 +275,22 @@ fn wait_protocol(
             instance,
             workspace
         );
-        if output.success {
-            return rhai::json::parse(output.stdout + output.stderr);
+        if output.success != 0 {
+            let text = "" + output.stdout + output.stderr;
+            text.trim();
+            let parsed = rhai::json::parse(text);
+            return #{
+                transport: "" + parsed.transport,
+                endpoint: "" + parsed.endpoint,
+                server_scope_id: "" + parsed.server_scope_id,
+                settings_path: "" + parsed.settings_path,
+                instance: "" + parsed.instance,
+                pid: 0 + parsed.pid,
+                agenterm_version: "" + parsed.agenterm_version
+            };
         }
-        if server.state == "exited" {
-            let ended = server.wait_with_output(
+        if server_child.state == "exited" {
+            let ended = server_child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
             throw "native_ipc_server_early_exit:" + ended.stderr_text();
@@ -226,6 +298,8 @@ fn wait_protocol(
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "native_ipc_server_ready_timeout";
+    // Unreachable: keep return kind Json (bare `throw` otherwise infers String).
+    #{ pid: 0 }
 }
 
 fn wait_exit(child, code) {
@@ -238,32 +312,82 @@ fn wait_exit(child, code) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
+    // Unreachable: keep return kind Output for `.success` at call sites.
+    child.wait_with_output(std::time::Duration::from_secs(0))
 }
 
-fn find_by_endpoint(rows, endpoint, code) {
+fn normalize_row(row) {
+    #{
+        endpoint: "" + row.endpoint,
+        schema_version: 0 + row.schema_version,
+        registration_schema_version: 0 + row.registration_schema_version,
+        instance: "" + row.instance,
+        transport: "" + row.transport,
+        server_scope_id: "" + row.server_scope_id,
+        status: "" + row.status,
+        classification: "" + row.classification,
+        owner_state: "" + row.owner_state,
+        process_start_identity: "" + row.process_start_identity,
+        lease_nonce: "" + row.lease_nonce,
+        server_epoch: "" + row.server_epoch,
+        event_epoch: "" + row.event_epoch,
+        observed_protocol_pid: 0 + row.observed_protocol_pid,
+        observed_protocol_endpoint: "" + row.observed_protocol_endpoint,
+        observed_protocol_server_scope_id:
+            "" + row.observed_protocol_server_scope_id,
+        legacy_client_compatibility: "" + row.legacy_client_compatibility,
+        cleanup_eligible: row.cleanup_eligible,
+        cleanup_receipt_schema_version: 0 + row.cleanup_receipt.schema_version,
+        cleanup_receipt_operation: "" + row.cleanup_receipt.operation,
+        cleanup_receipt_result: "" + row.cleanup_receipt.result,
+        cleanup_receipt_expected_lease_nonce:
+            "" + row.cleanup_receipt.expected_lease_nonce
+    }
+}
+
+fn find_by_endpoint(rows, wanted_endpoint, code) {
+    let wanted = "" + wanted_endpoint;
     for row in rows {
-        if row.endpoint == endpoint {
-            return row;
+        if ("" + row.endpoint) == wanted {
+            return normalize_row(row);
         }
     }
     throw code;
 }
 
-fn find_by_nonce(rows, nonce, code) {
+fn find_by_nonce(rows, wanted_nonce, code) {
+    let wanted = "" + wanted_nonce;
     for row in rows {
-        if row.lease_nonce == nonce {
-            return row;
+        if ("" + row.lease_nonce) == wanted {
+            return normalize_row(row);
         }
     }
     throw code;
 }
 
-fn registration_by_endpoint(directory, endpoint, code) {
+fn registration_by_endpoint(directory, wanted_endpoint, code) {
+    let wanted = "" + wanted_endpoint;
     for entry in std::fs::read_dir(directory) {
         if entry.is_file && entry.file_name.ends_with(".json") {
-            let record = rhai::json::parse_file(entry.path.display);
-            if record.schema_version == 2 && record.endpoint == endpoint {
-                return #{ path: entry.path.display, record: record };
+            let entry_path = entry.path.display;
+            let record = rhai::json::parse_file(entry_path);
+            if record.schema_version == 2
+                    && ("" + record.endpoint) == wanted {
+                return #{
+                    path: entry_path,
+                    record_pid: 0 + record.pid,
+                    record_endpoint: "" + record.endpoint,
+                    record_logical_instance: "" + record.logical_instance,
+                    record_server_scope_id: "" + record.server_scope_id,
+                    record_version: "" + record.version,
+                    record_session: "" + record.session,
+                    record_workspace_path: "" + record.workspace_path,
+                    record_started_at_unix_ms: 0 + record.started_at_unix_ms,
+                    record_process_start_identity:
+                        "" + record.process_start_identity,
+                    record_lease_nonce: "" + record.lease_nonce,
+                    record_server_epoch: "" + record.server_epoch
+                };
             }
         }
     }
@@ -275,7 +399,8 @@ fn registration_schema_counts(directory) {
     let v2 = 0;
     for entry in std::fs::read_dir(directory) {
         if entry.is_file && entry.file_name.ends_with(".json") {
-            let value = rhai::json::parse_file(entry.path.display);
+            let entry_path = entry.path.display;
+            let value = rhai::json::parse_file(entry_path);
             if value.schema_version == 1 {
                 v1 += 1;
             } else if value.schema_version == 2 {
@@ -297,142 +422,162 @@ fn registration_count(directory) {
 }
 
 fn unix_mode(context, path) {
-    let probes = [
-        ["-c", "%a", path],
-        ["-f", "%Lp", path]
-    ];
-    for arguments in probes {
-        let command = std::process::command("stat");
-        command.args(arguments);
-        command.timeout(std::time::Duration::from_secs(2));
-        let output = command.output();
-        test_harness::append_command_record(
-            context,
-            arguments,
-            output,
-            !output.success,
-            []
-        );
-        if output.success {
-            let text = output.stdout_text();
-            text.trim();
-            return text;
-        }
+    let path_text = "" + path;
+    let stat_command = std::process::command("stat");
+    stat_command.args(["-c", "%a", path_text]);
+    stat_command.timeout(std::time::Duration::from_secs(2));
+    let output = stat_command.output();
+    test_harness::append_command_record(
+        context,
+        ["-c", "%a", path_text],
+        output,
+        !output.success,
+        []
+    );
+    if output.success {
+        let text = output.stdout_text();
+        text.trim();
+        return text;
+    }
+    let fallback = std::process::command("stat");
+    fallback.args(["-f", "%Lp", path_text]);
+    fallback.timeout(std::time::Duration::from_secs(2));
+    let fallback_output = fallback.output();
+    test_harness::append_command_record(
+        context,
+        ["-f", "%Lp", path_text],
+        fallback_output,
+        !fallback_output.success,
+        []
+    );
+    if fallback_output.success {
+        let text = fallback_output.stdout_text();
+        text.trim();
+        return text;
     }
     throw "native_ipc_unix_stat_unavailable";
 }
 
-test_harness::require(args.len >= 3, "expected: REPO SERVER_EXE CLI_EXE");
-let repo = std::path::absolute(args[0]).display;
-let server_exe = args[1];
-let cli = args[2];
-let ci_main_dev = false;
-let option_index = 3;
-while option_index < args.len {
-    let option = args[option_index];
-    if option == "--server" || option == "--cli" {
-        test_harness::require(
-            option_index + 1 < args.len,
-            "native_ipc_option_value_missing:" + option
-        );
-        if option == "--server" {
-            server_exe = args[option_index + 1];
+fn entry() {
+    if args.len == 1 && args[0] == "--list-evidence" {
+        print("control.native-local-ipc");
+        return 0;
+    }
+
+    test_harness::require(args.len >= 3, "expected: REPO SERVER_EXE CLI_EXE");
+    let repo = std::path::absolute(args[0]).display;
+    let server_exe = args[1];
+    let cli = args[2];
+    let ci_main_dev = 0;
+    let option_index = 3;
+    while option_index < args.len {
+        let option = args[option_index];
+        if option == "--server" || option == "--cli" {
+            test_harness::require(
+                option_index + 1 < args.len,
+                "native_ipc_option_value_missing:" + option
+            );
+            if option == "--server" {
+                server_exe = args[option_index + 1];
+            } else {
+                cli = args[option_index + 1];
+            }
+            option_index += 1;
+        } else if option == "--ci-main-dev" {
+            ci_main_dev = 1;
         } else {
-            cli = args[option_index + 1];
+            throw "native_ipc_unknown_option:" + option;
         }
         option_index += 1;
-    } else if option == "--ci-main-dev" {
-        ci_main_dev = true;
-    } else {
-        throw "native_ipc_unknown_option:" + option;
     }
-    option_index += 1;
-}
-server_exe = std::path::absolute(server_exe).display;
-cli = std::path::absolute(cli).display;
-test_harness::require(std::fs::exists(server_exe), "native_ipc_server_missing");
-test_harness::require(std::fs::exists(cli), "native_ipc_cli_missing");
+    let server_exe = std::path::absolute(server_exe).display;
+    let cli = std::path::absolute(cli).display;
+    test_harness::require(std::fs::exists(server_exe) != 0, "native_ipc_server_missing");
+    test_harness::require(std::fs::exists(cli) != 0, "native_ipc_cli_missing");
 
-let context = test_harness::new_context(repo, "native-ipc");
-context.config_directory = std::path::join(
-    context.run_directory,
-    "config"
-).display;
-std::fs::create_dir_all(context.config_directory);
-context.home_directory = std::path::join(
-    context.run_directory,
-    "home"
-).display;
-std::fs::create_dir_all(context.home_directory);
-let unix_bootstrap =
-    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
-        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
-let macos_host =
-    (
-        std::env::has("AGENTERM_HOST_OS")
-            && std::env::get("AGENTERM_HOST_OS") == "macos"
-    )
-        || std::fs::exists("/System/Library/CoreServices");
-let direct_unix_root =
-    if std::fs::exists("/private/tmp") {
-        "/private/tmp"
-    } else if std::fs::exists("/tmp") {
-        "/tmp"
-    } else {
-        ""
-    };
-let windows_host = !unix_bootstrap
-    && (
+    let context = test_harness::new_context(repo, "native-ipc");
+    let config_directory = std::path::join(
+        context.run_directory,
+        "config"
+    ).display;
+    context.config_directory = config_directory;
+    std::fs::create_dir_all(config_directory);
+    let home_directory = std::path::join(
+        context.run_directory,
+        "home"
+    ).display;
+    context.home_directory = home_directory;
+    std::fs::create_dir_all(home_directory);
+    let unix_bootstrap =
+        std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+            && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+    let macos_host =
         (
             std::env::has("AGENTERM_HOST_OS")
-                && std::env::get("AGENTERM_HOST_OS") == "windows"
+                && std::env::get("AGENTERM_HOST_OS") == "macos"
         )
-            || (
-                std::env::has("OS")
-                    && std::env::get("OS") == "Windows_NT"
+            || std::fs::exists("/System/Library/CoreServices") != 0;
+    let direct_unix_root = "";
+    if std::fs::exists("/private/tmp") != 0 {
+        direct_unix_root = "/private/tmp";
+    } else if std::fs::exists("/tmp") != 0 {
+        direct_unix_root = "/tmp";
+    }
+    let windows_host = unix_bootstrap == 0
+        && (
+            (
+                std::env::has("AGENTERM_HOST_OS")
+                    && std::env::get("AGENTERM_HOST_OS") == "windows"
             )
-    );
-let unix_host = unix_bootstrap
-    || (!windows_host && direct_unix_root != "");
-context.native_runtime_directory = if unix_bootstrap {
-    let temporary_root =
+                || (
+                    std::env::has("OS")
+                        && std::env::get("OS") == "Windows_NT"
+                )
+        );
+    let unix_host = unix_bootstrap != 0
+        || (windows_host == 0 && direct_unix_root != "");
+    let runtime_suffix = "/agt-" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis;
+    let native_runtime_directory = "";
+    if unix_bootstrap != 0 {
+        let temporary_root = "/tmp";
         if std::env::has("AGENTERM_HOST_OS")
                 && std::env::get("AGENTERM_HOST_OS") == "macos" {
-            "/private/tmp"
-        } else {
-            "/tmp"
-        };
-    temporary_root + "/agt-" + std::process::id() + "-" +
-        std::time::SystemTime::now().unix_millis
-} else if unix_host {
-    direct_unix_root + "/agt-" + std::process::id() + "-" +
-        std::time::SystemTime::now().unix_millis
-} else {
-    std::path::join(context.run_directory, "runtime").display
-};
-context.native_runtime_external = unix_host;
-std::fs::create_dir_all(context.native_runtime_directory);
-let native_workspace = std::path::join(
-    context.run_directory,
-    "workspace/native-workspace.json"
-).display;
-let tcp_workspace = std::path::join(
-    context.run_directory,
-    "workspace/tcp-workspace.json"
-).display;
-let custom_instance = if ci_main_dev {
-    "main"
-} else {
-    "custom:smoke-" + std::process::id() + "-" +
-        std::time::SystemTime::now().unix_millis
-};
-let dead_endpoint = "tcp:127.0.0.1:1";
-let tcp_endpoint = "tcp:" + context.address;
-let owned_children = [];
-let succeeded = false;
-let failure = "";
+            temporary_root = "/private/tmp";
+        }
+        native_runtime_directory = temporary_root + runtime_suffix;
+    } else if unix_host != 0 {
+        native_runtime_directory = direct_unix_root + runtime_suffix;
+    } else {
+        native_runtime_directory = std::path::join(
+            context.run_directory,
+            "runtime"
+        ).display;
+    }
+    context.native_runtime_directory = native_runtime_directory;
+    context.native_runtime_external = unix_host;
+    std::fs::create_dir_all(native_runtime_directory);
+    let native_workspace = std::path::join(
+        context.run_directory,
+        "workspace/native-workspace.json"
+    ).display;
+    let tcp_workspace = std::path::join(
+        context.run_directory,
+        "workspace/tcp-workspace.json"
+    ).display;
+    let custom_instance = "custom:smoke-" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis;
+    if ci_main_dev != 0 {
+        custom_instance = "main";
+    }
+    let dead_endpoint = "tcp:127.0.0.1:1";
+    let tcp_endpoint = "tcp:" + context.address;
+    let succeeded = 0;
+    let failure = "";
+    let dev_row_ok = 1;
+    let owned_children = [];
 
-try {
+    try {
     print("STEP CLI selector conflicts fail fast and typed");
     // --endpoint may pair with --instance for attach identity; the real
     // conflict is --endpoint with legacy --address.
@@ -446,23 +591,26 @@ try {
             "--address", "127.0.0.1:9",
             "protocol-info", "--running"
         ],
-        true,
+        1,
         "",
         "",
         "",
         native_workspace
     );
-    let conflict_text = conflict.stdout + conflict.stderr;
+    let conflict_text = "" + conflict.stdout + conflict.stderr;
+    let conflict_has_exclusive = conflict_text.contains("mutually exclusive");
+    let conflict_has_selector = conflict_text.contains("ConflictingCliSelectors");
+    let conflict_elapsed =
+        std::time::SystemTime::now().unix_millis - conflict_started;
     test_harness::require(
         conflict.exit_code == 2
-            && conflict_text.contains("mutually exclusive")
-            && conflict_text.contains("ConflictingCliSelectors")
-            && std::time::SystemTime::now().unix_millis
-                - conflict_started < 2000,
+            && conflict_has_exclusive != 0
+            && conflict_has_selector != 0
+            && conflict_elapsed < 2000,
         "native_ipc_selector_conflict_not_typed_or_bounded"
     );
 
-    if unix_host {
+    if unix_host != 0 {
         print("STEP overlong Unix endpoint fails typed and bounded");
         let long_endpoint =
             "unix:/this-path-is-intentionally-longer-than-the-portable-" +
@@ -477,18 +625,23 @@ try {
                 "--endpoint", long_endpoint,
                 "protocol-info", "--running"
             ],
-            true,
+            1,
             "",
             "",
             "",
             native_workspace
         );
-        let long_path_text = long_path.stdout + long_path.stderr;
+        let long_path_text = "" + long_path.stdout + long_path.stderr;
+        let long_path_has_invalid = long_path_text.contains("InvalidEndpoint");
+        let long_path_has_unix = long_path_text.contains(
+            "invalid Unix socket path"
+        );
+        let long_path_elapsed =
+            std::time::SystemTime::now().unix_millis - long_path_started;
         test_harness::require(
-            long_path_text.contains("InvalidEndpoint")
-                && long_path_text.contains("invalid Unix socket path")
-                && std::time::SystemTime::now().unix_millis
-                    - long_path_started < 2000,
+            long_path_has_invalid != 0
+                && long_path_has_unix != 0
+                && long_path_elapsed < 2000,
             "native_ipc_unix_long_path_not_typed_or_bounded"
         );
 
@@ -516,7 +669,7 @@ try {
         );
         let symlink_endpoint =
             "unix:" + symlink_runtime + "/server.sock";
-        let symlink_server = configured(
+        let symlink_server = spawn_configured(
             context,
             server_exe,
             [],
@@ -524,16 +677,19 @@ try {
             "",
             "",
             native_workspace
-        ).start();
+        );
         owned_children.push(symlink_server);
         let symlink_exit = wait_exit(
             symlink_server,
             "native_ipc_unix_symlink_rejection_timeout"
         );
+        let symlink_stderr = symlink_exit.stderr_text();
+        let symlink_has_unsafe = symlink_stderr.contains("UnsafeEndpoint");
+        let symlink_has_link = symlink_stderr.contains("symlink");
         test_harness::require(
-            !symlink_exit.success
-                && symlink_exit.stderr_text().contains("UnsafeEndpoint")
-                && symlink_exit.stderr_text().contains("symlink"),
+            symlink_exit.success == 0
+                && symlink_has_unsafe != 0
+                && symlink_has_link != 0,
             "native_ipc_unix_symlink_not_rejected"
         );
         std::fs::remove_file(symlink_runtime);
@@ -541,7 +697,7 @@ try {
     }
 
     print("STEP isolated logical instance derives its native endpoint");
-    let native_command = configured(
+    let native_server = spawn_configured(
         context,
         server_exe,
         ["--instance", custom_instance],
@@ -550,8 +706,7 @@ try {
         "main",
         native_workspace
     );
-    let native_server = native_command.start();
-    owned_children.push(native_server);
+    let owned_children = [native_server];
     let native_protocol = wait_protocol(
         context,
         cli,
@@ -562,60 +717,52 @@ try {
         native_workspace,
         native_server
     );
-    let native_endpoint_shape = if native_protocol.transport == "named_pipe" {
-        native_protocol.endpoint.starts_with(
-            `pipe:\\.\pipe\agenterm-agt-v1-`
-        )
-    } else if native_protocol.transport == "unix" {
-        native_protocol.endpoint.starts_with("unix:/")
-            && native_protocol.endpoint.ends_with(".sock")
-    } else {
-        false
-    };
-    let settings_root = if native_protocol.transport == "named_pipe" {
-        context.config_directory
-    } else if macos_host {
-        std::path::join(
-            std::path::join(context.home_directory, "Library").display,
-            "Application Support"
-        ).display
-    } else {
-        context.config_directory
-    };
+    let native_transport = native_protocol.transport;
+    let native_endpoint = native_protocol.endpoint;
+    let native_scope_id = native_protocol.server_scope_id;
+    let native_settings_path = native_protocol.settings_path;
+    let native_instance_name = native_protocol.instance;
+    let native_pid = 0 + native_protocol.pid;
+    let native_version = native_protocol.agenterm_version;
+    let native_endpoint_shape = native_endpoint_shape_ok(
+        native_transport,
+        native_endpoint
+    );
+    let settings_root = "" + context.config_directory;
+    if macos_host != 0 && native_transport != "named_pipe" {
+        settings_root = macos_settings_root(context.home_directory);
+    }
+    let settings_dir_name = "agenterm";
+    if native_transport == "named_pipe" {
+        settings_dir_name = "AgenTerm";
+    }
     let settings_base = std::path::join(
         settings_root,
-        if native_protocol.transport == "named_pipe" {
-            "AgenTerm"
-        } else {
-            "agenterm"
-        }
+        settings_dir_name
     ).display;
-    let expected_native_settings = if custom_instance == "main" {
-        std::path::join(settings_base, "settings.json").display
-    } else {
-        std::path::join(
-            std::path::join(settings_base, "settings").display,
-            native_protocol.server_scope_id + ".json"
-        ).display
-    };
+    let expected_native_settings = scoped_settings_path(
+        settings_base,
+        native_scope_id,
+        custom_instance == "main"
+    );
     let expected_native_settings_suffix = std::path::join(
         "settings",
-        native_protocol.server_scope_id + ".json"
+        native_scope_id + ".json"
     ).display;
     test_harness::require(
-        native_protocol.pid == native_server.id
-            && native_protocol.instance == custom_instance
-            && native_endpoint_shape
-            && native_protocol.server_scope_id.starts_with("agt-v1-")
-            && native_protocol.server_scope_id.len == 39
-            && !native_protocol.endpoint.contains(custom_instance),
+        native_pid == native_server.id
+            && native_instance_name == custom_instance
+            && native_endpoint_shape != 0
+            && native_scope_id.starts_with("agt-v1-")
+            && native_scope_id.len == 39
+            && native_endpoint.contains(custom_instance) == 0,
         "native_ipc_custom_native_contract"
     );
     let native_settings_match =
-        native_protocol.settings_path == expected_native_settings
+        native_settings_path == expected_native_settings
             || (
                 custom_instance != "main"
-                    && native_protocol.settings_path.ends_with(
+                    && native_settings_path.ends_with(
                         expected_native_settings_suffix
                     )
             );
@@ -624,22 +771,19 @@ try {
         "native_ipc_custom_native_settings_path:expected=" +
             bounded_diagnostic(expected_native_settings) +
             ":actual=" +
-            bounded_diagnostic(native_protocol.settings_path)
+            bounded_diagnostic(native_settings_path)
     );
-    if native_protocol.transport == "unix" {
-        let socket_path = native_protocol.endpoint.sub_string(5);
+    if native_transport == "unix" {
+        let socket_path = unix_socket_path(native_endpoint);
         let socket_parent = std::path::parent(socket_path).display;
         test_harness::require(
             unix_mode(context, socket_path) == "600"
                 && unix_mode(context, socket_parent) == "700",
             "native_ipc_unix_permissions"
         );
-        if context.native_runtime_directory.starts_with("/private/tmp/") {
+        if native_runtime_directory.starts_with("/private/tmp/") {
             print("STEP /tmp and /private/tmp resolve one macOS authority");
-            let alias_runtime =
-                "/tmp" + context.native_runtime_directory.sub_string(
-                    "/private/tmp".len
-                );
+            let alias_runtime = "/tmp" + runtime_suffix;
             let alias_command = configured(
                 context,
                 cli,
@@ -663,32 +807,33 @@ try {
                 []
             );
             test_harness::require(
-                alias_output.success,
+                alias_output.success != 0,
                 "native_ipc_macos_tmp_alias_unreachable:" +
                     alias_output.stderr_text()
             );
-            let alias_protocol = rhai::json::parse(
-                alias_output.stdout_text() + alias_output.stderr_text()
-            );
+            let alias_text =
+                alias_output.stdout_text() + alias_output.stderr_text();
+            alias_text.trim();
+            let alias_parsed = rhai::json::parse(alias_text);
             test_harness::require(
-                alias_protocol.pid == native_protocol.pid
-                    && alias_protocol.endpoint == native_protocol.endpoint
-                    && alias_protocol.server_scope_id
-                        == native_protocol.server_scope_id,
+                alias_parsed.pid == native_pid
+                    && alias_parsed.endpoint == native_endpoint
+                    && alias_parsed.server_scope_id == native_scope_id,
                 "native_ipc_macos_tmp_alias_split_authority"
             );
         }
     }
 
-    let dev_server = ();
-    let dev_protocol = ();
-    if ci_main_dev {
+    let dev_endpoint = "";
+    let dev_transport = "";
+    let dev_server_scope_id = "";
+    if ci_main_dev != 0 {
         print("STEP main and dev are distinct native authorities");
         let dev_workspace = std::path::join(
             context.run_directory,
             "workspace/dev-workspace.json"
         ).display;
-        let dev_command = configured(
+        let dev_server = spawn_configured(
             context,
             server_exe,
             ["--instance", "dev"],
@@ -697,9 +842,8 @@ try {
             "main",
             dev_workspace
         );
-        dev_server = dev_command.start();
         owned_children.push(dev_server);
-        dev_protocol = wait_protocol(
+        let dev_protocol = wait_protocol(
             context,
             cli,
             ["--instance", "dev"],
@@ -709,25 +853,29 @@ try {
             dev_workspace,
             dev_server
         );
+        dev_endpoint = "" + dev_protocol.endpoint;
+        dev_transport = "" + dev_protocol.transport;
+        dev_server_scope_id = "" + dev_protocol.server_scope_id;
+        let dev_instance = dev_protocol.instance;
+        let dev_settings_path = dev_protocol.settings_path;
+        let dev_expected_settings = std::path::join(
+            std::path::join(settings_base, "settings").display,
+            dev_server_scope_id + ".json"
+        ).display;
         test_harness::require(
-            dev_protocol.instance == "dev"
-                && dev_protocol.transport == native_protocol.transport
-                && dev_protocol.endpoint != native_protocol.endpoint
-                && dev_protocol.server_scope_id
-                    != native_protocol.server_scope_id
-                && dev_protocol.settings_path == std::path::join(
-                    std::path::join(settings_base, "settings").display,
-                    dev_protocol.server_scope_id + ".json"
-                ).display
-                && dev_protocol.settings_path
-                    != native_protocol.settings_path,
+            dev_instance == "dev"
+                && dev_transport == native_transport
+                && dev_endpoint != native_endpoint
+                && dev_server_scope_id != native_scope_id
+                && dev_settings_path == dev_expected_settings
+                && dev_settings_path != native_settings_path,
             "native_ipc_main_dev_authority_separation"
         );
 
         print("STEP duplicate instance authority fails closed and bounded");
         let duplicate_started =
             std::time::SystemTime::now().unix_millis;
-        let duplicate = configured(
+        let duplicate = spawn_configured(
             context,
             server_exe,
             ["--instance", custom_instance],
@@ -735,14 +883,14 @@ try {
             context.address,
             "main",
             native_workspace
-        ).start();
+        );
         owned_children.push(duplicate);
         let duplicate_exit = wait_exit(
             duplicate,
             "native_ipc_duplicate_authority_timeout"
         );
         test_harness::require(
-            !duplicate_exit.success
+            duplicate_exit.success == 0
                 && std::time::SystemTime::now().unix_millis
                     - duplicate_started < 5000,
             "native_ipc_duplicate_authority_not_rejected"
@@ -779,30 +927,32 @@ try {
         override_workspace,
         override_server
     );
+    let override_settings_path = override_protocol.settings_path;
     test_harness::require(
-        override_protocol.settings_path == context.settings_path,
+        override_settings_path == context.settings_path,
         "native_ipc_explicit_settings_override_lost"
     );
     invoke(
         context,
         cli,
         ["--instance", override_instance, "shutdown"],
-        false,
+        0,
         dead_endpoint,
         context.address,
         "main",
         override_workspace
     );
+    let override_shutdown = wait_exit(
+        override_server,
+        "native_ipc_settings_override_shutdown_timeout"
+    );
     test_harness::require(
-        wait_exit(
-            override_server,
-            "native_ipc_settings_override_shutdown_timeout"
-        ).success,
+        override_shutdown.success != 0,
         "native_ipc_settings_override_shutdown_failed"
     );
 
     print("STEP explicit loopback TCP remains a live compatibility route");
-    let tcp_command = configured(
+    let tcp_server = spawn_configured(
         context,
         server_exe,
         ["--address", context.address],
@@ -811,7 +961,6 @@ try {
         custom_instance,
         tcp_workspace
     );
-    let tcp_server = tcp_command.start();
     owned_children.push(tcp_server);
     let tcp_protocol = wait_protocol(
         context,
@@ -823,10 +972,13 @@ try {
         tcp_workspace,
         tcp_server
     );
+    let tcp_pid = 0 + tcp_protocol.pid;
+    let tcp_endpoint_actual = tcp_protocol.endpoint;
+    let tcp_transport = tcp_protocol.transport;
     test_harness::require(
-        tcp_protocol.pid == tcp_server.id
-            && tcp_protocol.endpoint == tcp_endpoint
-            && tcp_protocol.transport == "tcp",
+        tcp_pid == tcp_server.id
+            && tcp_endpoint_actual == tcp_endpoint
+            && tcp_transport == "tcp",
         "native_ipc_explicit_endpoint_precedence"
     );
     let legacy_protocol = invoke_json(
@@ -838,10 +990,13 @@ try {
         custom_instance,
         tcp_workspace
     );
+    let legacy_pid = 0 + legacy_protocol.pid;
+    let legacy_endpoint = "" + legacy_protocol.endpoint;
+    let legacy_transport = "" + legacy_protocol.transport;
     test_harness::require(
-        legacy_protocol.pid == tcp_server.id
-            && legacy_protocol.endpoint == tcp_endpoint
-            && legacy_protocol.transport == "tcp",
+        legacy_pid == tcp_server.id
+            && legacy_endpoint == tcp_endpoint
+            && legacy_transport == "tcp",
         "native_ipc_legacy_address_compatibility"
     );
 
@@ -850,14 +1005,14 @@ try {
         context,
         cli,
         ["protocol-info", "--running"],
-        true,
+        1,
         dead_endpoint,
         context.address,
         custom_instance,
         tcp_workspace
     );
     test_harness::require(
-        !priority.success,
+        priority.success == 0,
         "native_ipc_environment_endpoint_fell_through"
     );
 
@@ -865,9 +1020,15 @@ try {
     let schemas = registration_schema_counts(
         context.instance_directory
     );
+    let expected_v2 = 2;
+    let expected_rows = 2;
+    if ci_main_dev != 0 {
+        expected_v2 = 3;
+        expected_rows = 3;
+    }
     test_harness::require(
         schemas.v1 == 1
-            && schemas.v2 == (if ci_main_dev { 3 } else { 2 }),
+            && schemas.v2 == expected_v2,
         "native_ipc_mixed_registration_fixture"
     );
     let rows = invoke_json(
@@ -880,12 +1041,38 @@ try {
         native_workspace
     );
     test_harness::require(
-        rows.len == (if ci_main_dev { 3 } else { 2 }),
+        rows.len == expected_rows,
         "native_ipc_discovery_not_deduplicated"
     );
+    if ci_main_dev != 0 {
+        let dev_row = find_by_endpoint(
+            rows,
+            dev_endpoint,
+            "native_ipc_dev_row_missing"
+        );
+        let dev_row_instance = dev_row.instance;
+        let dev_row_transport = dev_row.transport;
+        let dev_row_scope = dev_row.server_scope_id;
+        let dev_row_status = dev_row.status;
+        let dev_row_class = dev_row.classification;
+        let dev_row_identity = dev_row.process_start_identity;
+        let dev_row_nonce = dev_row.lease_nonce;
+        if dev_row.schema_version != 2
+                || dev_row.registration_schema_version != 2
+                || dev_row_instance != "dev"
+                || dev_row_transport != dev_transport
+                || dev_row_scope != dev_server_scope_id
+                || dev_row_status != "running"
+                || dev_row_class != "live"
+                || dev_row_identity == ""
+                || dev_row_nonce == ""
+                || dev_row.server_epoch != dev_row.event_epoch {
+            dev_row_ok = 0;
+        }
+    }
     let native_row = find_by_endpoint(
         rows,
-        native_protocol.endpoint,
+        native_endpoint,
         "native_ipc_native_row_missing"
     );
     let tcp_row = find_by_endpoint(
@@ -893,57 +1080,51 @@ try {
         tcp_endpoint,
         "native_ipc_tcp_row_missing"
     );
-    let dev_row_ok = if ci_main_dev {
-        let dev_row = find_by_endpoint(
-            rows,
-            dev_protocol.endpoint,
-            "native_ipc_dev_row_missing"
-        );
-        dev_row.schema_version == 2
-            && dev_row.registration_schema_version == 2
-            && dev_row.instance == "dev"
-            && dev_row.transport == dev_protocol.transport
-            && dev_row.server_scope_id == dev_protocol.server_scope_id
-            && dev_row.status == "running"
-            && dev_row.classification == "live"
-            && dev_row.process_start_identity != ""
-            && dev_row.lease_nonce != ""
-            && dev_row.server_epoch == dev_row.event_epoch
-    } else {
-        true
-    };
+    let native_row_instance = native_row.instance;
+    let native_row_transport = native_row.transport;
+    let native_row_scope = native_row.server_scope_id;
+    let native_row_status = native_row.status;
+    let native_row_class = native_row.classification;
+    let native_row_owner = native_row.owner_state;
+    let native_row_identity = native_row.process_start_identity;
+    let native_row_nonce = native_row.lease_nonce;
+    let native_row_observed_endpoint = native_row.observed_protocol_endpoint;
+    let native_row_observed_scope = native_row.observed_protocol_server_scope_id;
+    let native_row_legacy = native_row.legacy_client_compatibility;
+    let tcp_row_transport = tcp_row.transport;
+    let tcp_row_endpoint_value = tcp_row.endpoint;
+    let tcp_row_status = tcp_row.status;
+    let tcp_row_class = tcp_row.classification;
+    let tcp_row_identity = tcp_row.process_start_identity;
+    let tcp_row_nonce = tcp_row.lease_nonce;
+    let tcp_row_legacy = tcp_row.legacy_client_compatibility;
     let typed_schema_ok =
         native_row.schema_version == 2
             && native_row.registration_schema_version == 2
-            && native_row.instance == custom_instance
-            && native_row.transport == native_protocol.transport
-            && native_row.server_scope_id
-                == native_protocol.server_scope_id
-            && native_row.status == "running"
-            && native_row.classification == "live"
-            && native_row.owner_state == "confirmed_live"
-            && native_row.process_start_identity != ""
-            && native_row.lease_nonce != ""
+            && native_row_instance == custom_instance
+            && native_row_transport == native_transport
+            && native_row_scope == native_scope_id
+            && native_row_status == "running"
+            && native_row_class == "live"
+            && native_row_owner == "confirmed_live"
+            && native_row_identity != ""
+            && native_row_nonce != ""
             && native_row.server_epoch == native_row.event_epoch
-            && native_row.observed_protocol_pid == native_protocol.pid
-            && native_row.observed_protocol_endpoint
-                == native_protocol.endpoint
-            && native_row.observed_protocol_server_scope_id
-                == native_protocol.server_scope_id
-            && native_row.legacy_client_compatibility
-                == "unsupported_no_legacy_listener"
+            && native_row.observed_protocol_pid == native_pid
+            && native_row_observed_endpoint == native_endpoint
+            && native_row_observed_scope == native_scope_id
+            && native_row_legacy == "unsupported_no_legacy_listener"
             && tcp_row.schema_version == 2
             && tcp_row.registration_schema_version == 2
-            && tcp_row.transport == "tcp"
-            && tcp_row.endpoint == tcp_endpoint
-            && tcp_row.status == "running"
-            && tcp_row.classification == "live"
-            && tcp_row.process_start_identity != ""
-            && tcp_row.lease_nonce != ""
+            && tcp_row_transport == "tcp"
+            && tcp_row_endpoint_value == tcp_endpoint
+            && tcp_row_status == "running"
+            && tcp_row_class == "live"
+            && tcp_row_identity != ""
+            && tcp_row_nonce != ""
             && tcp_row.server_epoch == tcp_row.event_epoch
-            && tcp_row.legacy_client_compatibility
-                == "same_tcp_endpoint"
-            && dev_row_ok;
+            && tcp_row_legacy == "same_tcp_endpoint"
+            && dev_row_ok != 0;
 
     print("STEP stale test fixture remains visible until confirmed cleanup");
     let stale_fixture_path = std::path::join(
@@ -952,16 +1133,17 @@ try {
     ).display;
     let stale_fixture_endpoint = "tcp:127.0.0.1:59998";
     let stale_fixture_nonce = "native-ipc-stale-fixture";
+    let stale_fixture_pid = 2147483647;
     rhai::runtime::atomic_write(
         stale_fixture_path,
         rhai::json::stringify_pretty(#{
             schema_version: 2,
-            pid: 4294967295,
+            pid: stale_fixture_pid,
             address: "127.0.0.1:59998",
             endpoint: stale_fixture_endpoint,
             logical_instance: "custom:stale-fixture",
-            server_scope_id: native_protocol.server_scope_id,
-            version: native_protocol.agenterm_version,
+            server_scope_id: native_scope_id,
+            version: native_version,
             session: "stale-fixture",
             workspace_path: "stale-fixture-workspace.json",
             started_at_unix_ms: 1,
@@ -985,10 +1167,11 @@ try {
         stale_fixture_nonce,
         "native_ipc_stale_fixture_row_missing"
     );
+    let stale_row_class = stale_row.classification;
     test_harness::require(
-        stale_row.classification == "stale-test-fixture"
-            && stale_row.cleanup_eligible
-            && std::fs::exists(stale_fixture_path),
+        stale_row_class == "stale-test-fixture"
+            && stale_row.cleanup_eligible != 0
+            && std::fs::exists(stale_fixture_path) != 0,
         "native_ipc_stale_fixture_implicitly_removed"
     );
     let pruned_stale_rows = invoke_json(
@@ -1005,30 +1188,31 @@ try {
         stale_fixture_nonce,
         "native_ipc_stale_fixture_cleanup_receipt_missing"
     );
+    let pruned_cleanup_operation = pruned_stale.cleanup_receipt_operation;
+    let pruned_cleanup_result = pruned_stale.cleanup_receipt_result;
+    let pruned_cleanup_nonce = pruned_stale.cleanup_receipt_expected_lease_nonce;
     test_harness::require(
-        pruned_stale.cleanup_receipt.schema_version == 1
-            && pruned_stale.cleanup_receipt.operation
-                == "registration.cleanup"
-            && pruned_stale.cleanup_receipt.result == "deleted"
-            && pruned_stale.cleanup_receipt.expected_lease_nonce
-                == stale_fixture_nonce
-            && !std::fs::exists(stale_fixture_path),
+        pruned_stale.cleanup_receipt_schema_version == 1
+            && pruned_cleanup_operation == "registration.cleanup"
+            && pruned_cleanup_result == "deleted"
+            && pruned_cleanup_nonce == stale_fixture_nonce
+            && std::fs::exists(stale_fixture_path) == 0,
         "native_ipc_stale_fixture_cleanup_not_confirmed"
     );
 
     print("STEP legacy live-PID ownership remains unknown and ineligible");
     let unknown_owner_path = std::path::join(
         context.instance_directory,
-        native_protocol.pid + "-owner-unknown.json"
+        native_pid + "-owner-unknown.json"
     ).display;
     let unknown_owner_endpoint = "tcp:127.0.0.1:59997";
     rhai::runtime::atomic_write(
         unknown_owner_path,
         rhai::json::stringify_pretty(#{
             schema_version: 1,
-            pid: native_protocol.pid,
+            pid: native_pid,
             address: "127.0.0.1:59997",
-            version: native_protocol.agenterm_version,
+            version: native_version,
             session: "owner-unknown",
             workspace_path: "owner-unknown-workspace.json",
             started_at_unix_ms: 2
@@ -1048,11 +1232,13 @@ try {
         unknown_owner_endpoint,
         "native_ipc_owner_unknown_row_missing"
     );
+    let unknown_owner_class = unknown_owner.classification;
+    let unknown_owner_receipt = unknown_owner.cleanup_receipt_result;
     test_harness::require(
-        unknown_owner.classification == "owner-unknown"
-            && !unknown_owner.cleanup_eligible
-            && unknown_owner.cleanup_receipt.result == "not_eligible"
-            && std::fs::exists(unknown_owner_path),
+        unknown_owner_class == "owner-unknown"
+            && unknown_owner.cleanup_eligible == 0
+            && unknown_owner_receipt == "not_eligible"
+            && std::fs::exists(unknown_owner_path) != 0,
         "native_ipc_owner_unknown_was_removed"
     );
     std::fs::remove_file(unknown_owner_path);
@@ -1060,21 +1246,40 @@ try {
     print("STEP PID-reuse cleanup cannot remove the live generation");
     let native_registration = registration_by_endpoint(
         context.instance_directory,
-        native_protocol.endpoint,
+        native_endpoint,
         "native_ipc_live_registration_missing"
     );
     let pid_reuse_nonce = "native-ipc-pid-reuse-fixture";
     let pid_reuse_path = std::path::join(
         context.instance_directory,
-        native_protocol.pid + "-" + pid_reuse_nonce + ".json"
+        native_pid + "-" + pid_reuse_nonce + ".json"
     ).display;
-    let pid_reuse_record = native_registration.record;
-    pid_reuse_record.process_start_identity = "foreign-process-start";
-    pid_reuse_record.lease_nonce = pid_reuse_nonce;
-    pid_reuse_record.test_fixture = false;
+    let reuse_pid = native_registration.record_pid;
+    let reuse_endpoint = native_registration.record_endpoint;
+    let reuse_instance = native_registration.record_logical_instance;
+    let reuse_scope = native_registration.record_server_scope_id;
+    let reuse_version = native_registration.record_version;
+    let reuse_session = native_registration.record_session;
+    let reuse_workspace = native_registration.record_workspace_path;
+    let reuse_started = native_registration.record_started_at_unix_ms;
+    let reuse_epoch = native_registration.record_server_epoch;
     rhai::runtime::atomic_write(
         pid_reuse_path,
-        rhai::json::stringify_pretty(pid_reuse_record) + "\n"
+        rhai::json::stringify_pretty(#{
+            schema_version: 2,
+            pid: reuse_pid,
+            endpoint: reuse_endpoint,
+            logical_instance: reuse_instance,
+            server_scope_id: reuse_scope,
+            version: reuse_version,
+            session: reuse_session,
+            workspace_path: reuse_workspace,
+            started_at_unix_ms: reuse_started,
+            process_start_identity: "foreign-process-start",
+            lease_nonce: pid_reuse_nonce,
+            server_epoch: reuse_epoch,
+            test_fixture: false
+        }) + "\n"
     );
     let pid_reuse_rows = invoke_json(
         context,
@@ -1090,10 +1295,12 @@ try {
         pid_reuse_nonce,
         "native_ipc_pid_reuse_row_missing"
     );
+    let pid_reuse_class = pid_reuse.classification;
+    let pid_reuse_owner = pid_reuse.owner_state;
     test_harness::require(
-        pid_reuse.classification == "stale"
-            && pid_reuse.owner_state == "pid_reused"
-            && std::fs::exists(native_registration.path),
+        pid_reuse_class == "stale"
+            && pid_reuse_owner == "pid_reused"
+            && std::fs::exists(native_registration.path) != 0,
         "native_ipc_pid_reuse_not_classified"
     );
     let pid_reuse_pruned_rows = invoke_json(
@@ -1110,10 +1317,11 @@ try {
         pid_reuse_nonce,
         "native_ipc_pid_reuse_receipt_missing"
     );
+    let pid_reuse_pruned_result = pid_reuse_pruned.cleanup_receipt_result;
     test_harness::require(
-        pid_reuse_pruned.cleanup_receipt.result == "deleted"
-            && std::fs::exists(native_registration.path)
-            && !std::fs::exists(pid_reuse_path)
+        pid_reuse_pruned_result == "deleted"
+            && std::fs::exists(native_registration.path) != 0
+            && std::fs::exists(pid_reuse_path) == 0
             && native_server.state == "running",
         "native_ipc_pid_reuse_cleanup_crossed_generation"
     );
@@ -1123,18 +1331,18 @@ try {
         context,
         cli,
         ["--instance", custom_instance, "shutdown"],
-        false,
+        0,
         dead_endpoint,
         context.address,
         "main",
         native_workspace
     );
-    if ci_main_dev {
+    if ci_main_dev != 0 {
         invoke(
             context,
             cli,
             ["--instance", "dev", "shutdown"],
-            false,
+            0,
             dead_endpoint,
             context.address,
             "main",
@@ -1145,7 +1353,7 @@ try {
         context,
         cli,
         ["--address", context.address, "shutdown"],
-        false,
+        0,
         dead_endpoint,
         "127.0.0.1:1",
         custom_instance,
@@ -1159,27 +1367,33 @@ try {
         tcp_server,
         "native_ipc_tcp_shutdown_timeout"
     );
-    let dev_exit = if ci_main_dev {
-        wait_exit(
-            dev_server,
-            "native_ipc_dev_shutdown_timeout"
-        )
-    } else {
-        ()
-    };
     test_harness::require(
-        native_exit.success
-            && tcp_exit.success
-            && (!ci_main_dev || dev_exit.success),
+        native_exit.success != 0
+            && tcp_exit.success != 0,
         "native_ipc_server_shutdown_failure"
     );
+    if ci_main_dev != 0 {
+        let dev_stopped = probe(
+            context,
+            cli,
+            ["--instance", "dev", "protocol-info", "--running"],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        test_harness::require(
+            dev_stopped.success == 0,
+            "native_ipc_dev_shutdown_failure"
+        );
+    }
     test_harness::require(
         registration_count(context.instance_directory) == 0,
         "native_ipc_registration_leak"
     );
-    if native_protocol.transport == "named_pipe" {
+    if native_transport == "named_pipe" {
         print("STEP killed Windows authority recovers its exact stale registration");
-        let stale_command = configured(
+        let stale_server = spawn_configured(
             context,
             server_exe,
             ["--instance", custom_instance],
@@ -1188,7 +1402,6 @@ try {
             "main",
             native_workspace
         );
-        let stale_server = stale_command.start();
         owned_children.push(stale_server);
         let stale_protocol = wait_protocol(
             context,
@@ -1205,13 +1418,13 @@ try {
             stale_protocol.endpoint,
             "native_ipc_windows_live_registration_missing"
         );
-        let stale_nonce = stale_registration.record.lease_nonce;
-        let stale_epoch = stale_registration.record.server_epoch;
+        let stale_nonce = stale_registration.record_lease_nonce;
+        let stale_epoch = stale_registration.record_server_epoch;
         test_harness::require(
-            stale_registration.record.pid == stale_protocol.pid
+            stale_registration.record_pid == stale_protocol.pid
                 && stale_nonce != ""
                 && stale_epoch != ""
-                && std::fs::exists(stale_registration.path),
+                && std::fs::exists(stale_registration.path) != 0,
             "native_ipc_windows_live_registration_identity"
         );
 
@@ -1234,17 +1447,18 @@ try {
             stale_nonce,
             "native_ipc_windows_stale_registration_missing"
         );
+        let dead_row_class = dead_row.classification;
         test_harness::require(
-            !stale_exit.success
-                && dead_row.classification == "stale"
-                && dead_row.cleanup_eligible
+            stale_exit.success == 0
+                && dead_row_class == "stale"
+                && dead_row.cleanup_eligible != 0
                 && dead_row.server_epoch == stale_epoch
-                && std::fs::exists(stale_registration.path)
+                && std::fs::exists(stale_registration.path) != 0
                 && registration_count(context.instance_directory) == 1,
             "native_ipc_windows_real_stale_registration"
         );
 
-        let replacement_command = configured(
+        let replacement = spawn_configured(
             context,
             server_exe,
             ["--instance", custom_instance],
@@ -1253,7 +1467,6 @@ try {
             "main",
             native_workspace
         );
-        let replacement = replacement_command.start();
         owned_children.push(replacement);
         let replacement_protocol = wait_protocol(
             context,
@@ -1281,24 +1494,25 @@ try {
         );
         let replacement_row = find_by_nonce(
             replacement_rows,
-            replacement_registration.record.lease_nonce,
+            replacement_registration.record_lease_nonce,
             "native_ipc_windows_replacement_row_missing"
         );
+        let replacement_row_class = replacement_row.classification;
         test_harness::require(
             replacement_protocol.endpoint == stale_protocol.endpoint
                 && replacement_protocol.server_scope_id
                     == stale_protocol.server_scope_id
                 && replacement_protocol.pid != stale_protocol.pid
-                && replacement_registration.record.pid
+                && replacement_registration.record_pid
                     == replacement_protocol.pid
-                && replacement_registration.record.lease_nonce
+                && replacement_registration.record_lease_nonce
                     != stale_nonce
-                && replacement_registration.record.server_epoch
+                && replacement_registration.record_server_epoch
                     != stale_epoch
-                && replacement_row.classification == "live"
+                && replacement_row_class == "live"
                 && replacement_row.server_epoch
                     == replacement_row.event_epoch
-                && !std::fs::exists(stale_registration.path)
+                && std::fs::exists(stale_registration.path) == 0
                 && registration_count(context.instance_directory) == 1,
             "native_ipc_windows_stale_authority_not_recovered"
         );
@@ -1306,7 +1520,7 @@ try {
             context,
             cli,
             ["--instance", custom_instance, "shutdown"],
-            false,
+            0,
             dead_endpoint,
             context.address,
             "main",
@@ -1332,24 +1546,30 @@ try {
             "native_ipc_windows_stale_recovery_cleanup"
         );
     }
-    if native_protocol.transport == "unix" {
-        let native_socket = native_protocol.endpoint.sub_string(5);
+    if native_transport == "unix" {
+        let native_socket = unix_socket_path(native_endpoint);
+        let native_lock_path = native_socket + ".lock";
+        let native_socket_exists = std::fs::exists(native_socket);
+        let native_lock_exists = std::fs::exists(native_lock_path);
         test_harness::require(
-            !std::fs::exists(native_socket)
-                && !std::fs::exists(native_socket + ".lock"),
+            native_socket_exists == 0
+                && native_lock_exists == 0,
             "native_ipc_unix_native_endpoint_leak"
         );
-        if ci_main_dev {
-            let dev_socket = dev_protocol.endpoint.sub_string(5);
+        if ci_main_dev != 0 {
+            let dev_socket = unix_socket_path(dev_endpoint);
+            let dev_lock_path = dev_socket + ".lock";
+            let dev_socket_exists = std::fs::exists(dev_socket);
+            let dev_lock_exists = std::fs::exists(dev_lock_path);
             test_harness::require(
-                !std::fs::exists(dev_socket)
-                    && !std::fs::exists(dev_socket + ".lock"),
+                dev_socket_exists == 0
+                    && dev_lock_exists == 0,
                 "native_ipc_unix_dev_endpoint_leak"
             );
         }
 
         print("STEP killed Unix authority recovers stale endpoint and registration");
-        let stale_command = configured(
+        let stale_server = spawn_configured(
             context,
             server_exe,
             ["--instance", custom_instance],
@@ -1358,7 +1578,6 @@ try {
             "main",
             native_workspace
         );
-        let stale_server = stale_command.start();
         owned_children.push(stale_server);
         let stale_protocol = wait_protocol(
             context,
@@ -1375,15 +1594,20 @@ try {
             stale_server,
             "native_ipc_stale_authority_kill_timeout"
         );
+        let stale_socket_exists = std::fs::exists(native_socket);
+        let stale_lock_path = native_socket + ".lock";
+        let stale_lock_exists = std::fs::exists(stale_lock_path);
+        let stale_registration_count =
+            registration_count(context.instance_directory);
         test_harness::require(
-            !stale_exit.success
-                && std::fs::exists(native_socket)
-                && std::fs::exists(native_socket + ".lock")
-                && registration_count(context.instance_directory) == 1,
+            stale_exit.success == 0
+                && stale_socket_exists != 0
+                && stale_lock_exists != 0
+                && stale_registration_count == 1,
             "native_ipc_stale_authority_fixture"
         );
 
-        let replacement_command = configured(
+        let replacement = spawn_configured(
             context,
             server_exe,
             ["--instance", custom_instance],
@@ -1392,7 +1616,6 @@ try {
             "main",
             native_workspace
         );
-        let replacement = replacement_command.start();
         owned_children.push(replacement);
         let replacement_protocol = wait_protocol(
             context,
@@ -1415,7 +1638,7 @@ try {
             context,
             cli,
             ["--instance", custom_instance, "shutdown"],
-            false,
+            0,
             dead_endpoint,
             context.address,
             "main",
@@ -1425,11 +1648,16 @@ try {
             replacement,
             "native_ipc_stale_replacement_shutdown_timeout"
         );
+        let final_registration_count =
+            registration_count(context.instance_directory);
+        let final_socket_exists = std::fs::exists(native_socket);
+        let final_lock_path = native_socket + ".lock";
+        let final_lock_exists = std::fs::exists(final_lock_path);
         test_harness::require(
-            replacement_exit.success
-                && registration_count(context.instance_directory) == 0
-                && !std::fs::exists(native_socket)
-                && !std::fs::exists(native_socket + ".lock"),
+            replacement_exit.success != 0
+                && final_registration_count == 0
+                && final_socket_exists == 0
+                && final_lock_exists == 0,
             "native_ipc_stale_recovery_cleanup"
         );
     }
@@ -1440,28 +1668,30 @@ try {
 
     test_harness::emit_evidence(
         context,
-        declared_evidence,
+        ["control.native-local-ipc"],
         "control.native-local-ipc"
     );
-    succeeded = true;
+    succeeded = 1;
 } catch (error) {
-    failure = error;
+    failure = catch_text(error);
 }
 
-let result = test_harness::complete(
-    context,
-    owned_children,
-    succeeded,
-    failure
-);
-if context.native_runtime_external
-        && std::fs::exists(context.native_runtime_directory) {
-    std::fs::remove_dir_all(context.native_runtime_directory);
-}
-if succeeded {
-    test_harness::require(result.cleanup.orphan_free, "native_ipc_orphan_cleanup");
-    test_harness::remove_run(context);
-    print("PASS: native IPC selection and migration contract");
-} else {
-    throw failure;
+    let result = test_harness::complete(
+        context,
+        owned_children,
+        succeeded,
+        failure
+    );
+    if context.native_runtime_external != 0
+            && std::fs::exists(context.native_runtime_directory) != 0 {
+        std::fs::remove_dir_all(context.native_runtime_directory);
+    }
+    if succeeded != 0 {
+        test_harness::require(result.cleanup.orphan_free != 0, "native_ipc_orphan_cleanup");
+        test_harness::remove_run(context);
+        print("PASS: native IPC selection and migration contract");
+    } else {
+        throw failure;
+    }
+    0
 }

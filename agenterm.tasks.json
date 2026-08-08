@@ -1932,7 +1932,7 @@
     {
       "id": "fleet-smoke",
       "description": "Prove Fleet discovery, event causality, scoped launch context, Mux safety, restart truth, and optional concurrent journal load",
-      "entry": "scripts/rhai/fleet-smoke.rhai",
+      "entry": "scripts/rh/fleet-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -1974,7 +1974,7 @@
     {
       "id": "native-ipc-smoke",
       "description": "Prove isolated native named-pipe or Unix-socket selection, selector precedence, mixed schema discovery, typed server-list rows, and explicit legacy TCP compatibility",
-      "entry": "scripts/rhai/native-ipc-smoke.rhai",
+      "entry": "scripts/rh/native-ipc-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -2018,7 +2018,7 @@
     {
       "id": "wake-smoke",
       "description": "Prove coalesced server wake delivery across concurrent IPC, PTY output, and an expired raw mutation",
-      "entry": "scripts/rhai/wake-smoke.rhai",
+      "entry": "scripts/rh/wake-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
