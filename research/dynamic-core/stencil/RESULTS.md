@@ -153,10 +153,22 @@ ISA free.
 **Cross-Q closer:** the memcpy+patch engine (`place`/`patch`) has **zero `match opcode`**
 (verified) — the data-flow codegen genuinely became data, echoing Q7's "+1 intent = 0
 marshaller code." But adding a data-flow opcode still costs **+1 decode arm of code**;
-fully datafying the decode *is* building an interpreter — which is **Q9** (whole
-interpreter **3177 B**, no RWX, no stencil table, no ±2 GB constraint). Copy-and-patch
-sits *between* Q2 (all code) and Q9 (all data/interpret) and, on size, is **worse than
-both** here: bigger than Q2's compiler *and* bigger than Q9's interpreter.
+fully datafying the decode *is* building an interpreter — which is **Q9** (no RWX, no
+stencil table, no ±2 GB constraint). Copy-and-patch sits *between* Q2 (all code) and Q9
+(all data/interpret) — and **on size it is worse than Q2**: 5826 B vs 3003 B, the one
+comparison this experiment deliberately made like-for-like.
+
+> **Withdrawn (口径 audit, 2026-08-08):** this paragraph previously also read "**and
+> bigger than Q9's interpreter (3177 B)**". **That comparison does not hold.** Q10's
+> 5826 B is a `no_std` + `panic=abort` **flat-blob subtraction** (code+data) that
+> **excludes** the OS seam; Q9's 3177 B is a **std + default-panic object `.text`** that
+> **includes** the OS intent seam (1269 B of it). Three axes differ at once (tool,
+> build, boundary), and this track has its own evidence that the build axis alone moves
+> bytes by multiples. **Against Q9 the size axis is not measured** — not "stencil is
+> bigger". Making it a real comparison means re-measuring the applier in Q9's 口径 (or
+> `interp.rs` in Q2's). See [`../COMPARABILITY.md`](../COMPARABILITY.md) §2 U2.
+> **Nothing else in this experiment's verdict depends on it**: "not worth it at this
+> scale" rests on 5826 vs 3003 in one ruler, plus ②–⑤.
 
 ---
 

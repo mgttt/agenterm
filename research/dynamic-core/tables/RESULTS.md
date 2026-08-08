@@ -113,10 +113,31 @@ Win64 and SysV share **100%** of the engine (70 LOC single-call core + 42 LOC L3
 | **per-target DATA** (win / sysv) | 57 / 58 | **per target (data)** |
 | **per-intent DATA** | ~5–13 | **per intent (data)** |
 
-**Q1 baseline:** `win64.rs`=137, `sysv64.rs`=109 total; the OS-interface-content portion
-was **~90–110 LOC/target and grows per intent AND per target** (Q1 ⑤). Q7 replaces that
-growing term with a **fixed ~70–112 LOC engine + ~9 LOC/intent of data**. Crossover is
-near two targets; beyond it Q1 grows as targets × intents while Q7's code stays flat.
+**Q1 baseline — and the one comparison that must be stated carefully.** `win64.rs`=137,
+`sysv64.rs`=109 total; the OS-interface-content portion was **~90–110 LOC/target and grows
+per intent AND per target** (Q1 ⑤).
+
+> **⚠️ The two sides do not cover the same capability set.** Q7's engine handles the
+> **single-native-call family only** (Alloc/Open/Read/Close/Write); **`SpawnWait` is absent
+> from both tables and the marshaller cannot lower it** (⑤). Q1's ~90–110 LOC/target
+> **includes exactly the part Q7 excludes** — the spawn struct-building and the SysV
+> fork/branch sequence. So "**70 LOC fixed vs 90–110 LOC/target**" as a bare head-to-head
+> is **not like-for-like**, and it also silently dropped Q7's own **57–58 LOC/target of
+> data**. Stated correctly, **inside the single-call family**:
+>
+> | | fixed cost | per same-ISA target | per intent |
+> |---|--:|--:|--:|
+> | **Q7** (single-call family) | 70–112 LOC **engine code** | **57–58 LOC of DATA**, 0 LOC code | ~5–13 LOC of DATA, 0 LOC code |
+> | **Q1** (same family **+ spawn**) | — | **90–110 LOC of CODE** | grows |
+>
+> **The slope conclusion is untouched by this correction** — it never rested on the
+> intercept: +1 intent and +1 same-ISA target cost the engine **0 lines of code**, verified
+> structurally (`grep -c 'abi.name ==' marshal.rs` → 0; `match .*intent` hits only a doc
+> comment), and *that* is Q7's product. See [`../COMPARABILITY.md`](../COMPARABILITY.md) §2 U4.
+
+Q7 replaces the growing term with a **fixed ~70–112 LOC engine + ~9 LOC/intent of data +
+~57–58 LOC/target of data**. Crossover is near two targets; beyond it Q1 grows as
+targets × intents in **code** while Q7's **code** stays flat and only its **data** grows.
 
 **Emitted bytes: the marshaller adds 0 bytes** and matches/*beats* Q1:
 
@@ -205,8 +226,12 @@ the OS/ABI axis at fixed ISA; the ISA axis is where **I2** bites, flagged not ex
 3. **⑤ = main product:** boundary is **orchestration/control-flow (L3b) + cross-ISA
    restructuring (I2)**, not layout. L3 verdict: **layout needs the 5th primitive (Declare);
    orchestration needs control flow no primitive supplies.**
-4. **③④ quantify:** engine is a fixed ~70–112 LOC (vs Q1's growing ~90–110/target); schema
-   validation is real but checks shape, not naming truth.
+4. **③④ quantify:** engine is a fixed ~70–112 LOC + ~57–58 LOC/target of **data**, against
+   Q1's growing ~90–110 LOC/target of **code** — **like-for-like only inside the single-call
+   family**, since Q1's figure includes the spawn sequence Q7's engine cannot lower at all
+   (see the ⚠️ box under ③). What the verdict rests on is the **slope** (+1 intent / +1 same-ISA
+   target = 0 engine code), not that intercept pair. Schema validation is real but checks
+   shape, not naming truth.
 
 **Verdict: bounded reachable.** The one-seam narrows to data for single native calls and
 stays code for control flow and cross-ISA restructuring.

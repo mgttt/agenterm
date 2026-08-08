@@ -124,11 +124,23 @@ Judgement:
 `kernel4.rs` (four primitives) vs `kernel5.rs` (four + `declare`), identical otherwise.
 `.text` section sum (`llvm-objdump -h`, `-O`, `--crate-type=lib --emit=obj`):
 
-| kernel | `.text` (bytes) | vs Q0 568 B / Q5 644 B |
+| kernel | `.text` (bytes) | Δ |
 |---|--:|---|
-| kernel4 (four primitives) | **550** | baseline (same order as Q0's 568 B four-primitive floor) |
+| kernel4 (four primitives) | **550** | baseline |
 | kernel5 (+ declare) | **732** | — |
-| **Δ declare** | **+182 B .text** (+ ~44 B rodata layout/switch table) | **+33% over kernel4; ≈+28% over Q5's 644 B** |
+| **Δ declare** | **+182 B .text** (+ ~44 B rodata layout/switch table) | **+33% over kernel4** |
+
+> **口径 (2026-08-08 audit) — the Δ is clean, one cross-experiment percentage was not.**
+> Both numbers come from **one file pair, one command, one target** (`-O
+> --crate-type=lib --emit=obj`, std harness, msvc, `llvm-objdump -h` `.text` sum), so
+> **550 → 732 = +182 B = +33%** is a like-for-like delta. **Withdrawn:** this row also
+> read "**≈+28% over Q5's 644 B**". That divides a Δ measured on *this* 550 B baseline by
+> *another experiment's* 644 B — Q5's `prim.rs` on `aarch64-unknown-linux-gnu`, `no_std`
+> + `panic=abort` + `--crate-type staticlib`. Cross-target, cross-build, cross-file: the
+> percentage is meaningless and is deleted rather than repaired. **Δ is only ever divided
+> by its own baseline** ([`../COMPARABILITY.md`](../COMPARABILITY.md) §2 U6, §6 R-P). The
+> 550 ≈ 568 "same order" observation below is kept as an *order-of-magnitude sanity note*,
+> which is all it ever was — **not** a comparable pair.
 
 **But this +182 B is OPTIONAL and avoidable.** `declare`'s three operations are all
 expressible via the existing ③+④:
@@ -239,9 +251,16 @@ rustc --edition 2021 -O --crate-type=lib --emit=obj -A warnings kernel5.rs -o ou
    layout-reachability are the measured facts and are ABI-independent.**
 2. **Linux BTF path analyzed, not executed** (no WSL) — spec §2 posture. The claim "where a host
    publishes layout, ③+④ can fetch it" is argued from CO-RE/BTF, not run here.
-3. **③ byte floor is a Δ measured by object `.text`**, not the same flat-blob strip build as Q0's
-   568 B / Q5's 644 B (spec §3 permits this, explicitly labelled). kernel4's 550 B lands in the same
-   order as Q0's 568 B, supporting comparability of the +182 B delta.
+3. **③ byte floor is a Δ measured by object `.text`**, not the same flat-blob strip build as
+   the **568 B / 644 B** four-primitive numbers (spec §3 permits this, explicitly labelled).
+   **Two corrections from the 2026-08-08 口径 audit:** (a) those 568 / 644 B are **Q5's
+   `isa/kernel/prim.rs`** — a fresh minimal transcription of the four primitives, `no_std` +
+   `panic=abort` on `*-unknown-linux-gnu` — **not Q0's kernel**, which this file previously
+   said (Q0's own kernel artifact is a ~2.7 KB whole stripped ELF, a third 口径 again);
+   (b) kernel4's 550 B landing "in the same order" as 568 B is an **order-of-magnitude
+   sanity note only** — it does **not** make the two numbers divisible, and the
+   cross-experiment percentage that leaned on it has been withdrawn (see ③). The +182 B
+   delta stands on its own baseline (550 → 732) and needs no outside number.
 4. **Publish half (⑤a) is a stub** (`RtlAddFunctionTable` call shape), not a full unwind
    registration — spec §7 defers it; it is enough to show Publish is a ③+④ call, not a new mechanism.
 5. **socket bind uses port 0 / loopback**, no remote traffic — enough to force writing
