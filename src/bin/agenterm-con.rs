@@ -1414,11 +1414,35 @@ impl ConTerminal {
     /// cumulative resize path a reported "zoom past a certain size and the
     /// process exits" crash needs a live session (not an isolated
     /// `apply_resize` call) to actually exercise.
+    ///
+    /// Debounced, not applied synchronously — see the note below on why
+    /// that changed. A fast wheel spin can queue many notches within a few
+    /// hundred milliseconds; this now coalesces them into one grid/PTY
+    /// resize per `RESIZE_DEBOUNCE` window (60ms) via the exact same
+    /// `pending_geometry`/`about_to_wait` mechanism a window drag-resize
+    /// already goes through, instead of duplicating that logic with a
+    /// second, undebounced path.
     fn zoom_font(&mut self, window: &PixelWindow, grow: bool) {
         let delta_size = if grow { 1.0 } else { -1.0 };
         self.font_size_logical = (self.font_size_logical + delta_size).clamp(8.0, 36.0);
+        // Cell metrics (and therefore what glyphs look like) update right
+        // away, independent of the debounce below, so the zoom still reads
+        // as instant — only the expensive part (recomputing cols/rows,
+        // resizing the real ConPTY, resizing the vt100 model) is deferred.
+        // Before this split, *every single notch* fired a full,
+        // synchronous grid+PTY resize with zero throttling — unlike a
+        // window drag-resize, which was already debounced. A hosted
+        // program that repaints on every resize notification (a real TUI,
+        // not just an idle prompt) receiving a burst of a dozen-plus
+        // resizes within milliseconds is a real, previously-untested
+        // stress shape; this brings Ctrl+wheel zoom in line with the
+        // pacing window-resize already gets, on general principle, even
+        // where a specific reported crash from it couldn't be reproduced
+        // (see the black-box tests around `repeated_ctrl_wheel_zoom_...`).
+        self.recompute_metrics(self.scale);
         if let Ok(m) = window.metrics() {
-            self.apply_resize(m.physical_width, m.physical_height, m.scale_factor);
+            self.pending_geometry = Some((m.physical_width, m.physical_height, m.scale_factor));
+            self.last_geometry_at = Instant::now();
         }
         window.request_redraw();
     }

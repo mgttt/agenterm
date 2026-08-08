@@ -888,3 +888,66 @@ fn zooming_in_while_the_shell_is_actively_producing_output_survives() {
     }
     let _ = session.child.kill();
 }
+
+#[test]
+fn rapid_ctrl_wheel_zoom_burst_against_a_repainting_tui_survives() {
+    let _guard = gui_test_guard();
+    // A third hypothesis on the same user-reported "Ctrl+wheel zoom
+    // crashes" report, and the one that led to an actual fix: it might not
+    // be agenterm-con itself panicking, but the *hosted program* struggling
+    // under a burst of resize notifications. Before this test prompted it,
+    // `zoom_font` fired a real ConPTY resize on *every single notch* with
+    // zero debouncing — unlike a window drag-resize, which already goes
+    // through `RESIZE_DEBOUNCE`. A hosted program that repaints on every
+    // resize (a real TUI, unlike an idle `cmd.exe` prompt) getting a dozen
+    // resizes within milliseconds is a real, previously-untested stress
+    // shape, and if the child crashed, agenterm-con would correctly (by its
+    // own child-exit design) close its window right alongside it — which
+    // from the user's side would look exactly like "the terminal window
+    // just vanishes, no error."
+    //
+    // Did not reproduce a crash even before the fix. `zoom_font` now
+    // coalesces rapid notches through the same debounce `pending_geometry`
+    // mechanism a window drag-resize already used, on general principle —
+    // sending a real program a dozen-plus resize notifications in
+    // milliseconds because a wheel spun fast was never good behavior on
+    // its own merits, confirmed crash or not. This test now exercises
+    // exactly that coalescing path against `less`, which actively repaints
+    // on resize.
+    let Some(less) = find_less_exe() else {
+        eprintln!("skipping: no less.exe found");
+        return;
+    };
+    let dir = scratch_dir("less-zoom-burst-probe");
+    let lines_path = write_numbered_lines(&dir, "LESS_LINE_", 500);
+    let mut commands = vec![r#"{"wait_ms": 500}"#.to_owned()];
+    for _ in 0..28 {
+        commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": 1}, "ctrl": true}"#.to_owned());
+    }
+    commands.push(r#"{"wait_ms": 1000}"#.to_owned());
+    let script = write_script(&dir, &format!("[{}]", commands.join(",")));
+
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", less.to_str().unwrap(), lines_path.to_str().unwrap()],
+    );
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last_snapshot = None;
+    loop {
+        if let Ok(Some(status)) = session.child.try_wait() {
+            eprintln!("PROCESS SELF-EXITED: status={status:?}, last snapshot: {last_snapshot:?}");
+            panic!("CRASH REPRODUCED: agenterm-con exited on its own during rapid zoom burst against less");
+        }
+        if let Ok(bytes) = std::fs::read(&session.snapshot_path)
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            last_snapshot = Some(value);
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    eprintln!("survived: last snapshot = {last_snapshot:?}");
+    let _ = session.child.kill();
+}
