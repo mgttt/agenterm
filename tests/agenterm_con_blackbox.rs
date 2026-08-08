@@ -837,3 +837,54 @@ fn scripted_screenshot_produces_a_valid_nonempty_png() {
     assert!(bytes.len() > 1000, "suspiciously small PNG ({} bytes)", bytes.len());
     let _ = session.child.kill();
 }
+
+#[test]
+fn zooming_in_while_the_shell_is_actively_producing_output_survives() {
+    let _guard = gui_test_guard();
+    // A second angle on the same user-reported Ctrl+wheel-zoom crash
+    // (see `repeated_ctrl_wheel_zoom_cycles_survive_without_crashing`),
+    // narrowed by the user's own follow-up: it happens while *enlarging*
+    // (not shrinking) the font. Every other zoom test here zooms against
+    // an otherwise-idle shell; this one grows the font one notch at a time
+    // from the default up toward the max clamp while the shell is
+    // continuously printing new lines (including CJK/box-drawing glyphs,
+    // in case a specific glyph only mis-renders at a larger size) — real
+    // concurrent PTY writes racing real resizes, not an idle session
+    // between zoom steps.
+    let dir = scratch_dir("grow-while-busy");
+    let mut commands = vec![
+        r#"{"text": "for /l %i in (1,1,500) do @echo LINE_%i █▒░ 中文日本語\r"}"#
+            .to_owned(),
+        r#"{"wait_ms": 200}"#.to_owned(),
+    ];
+    for _ in 0..30 {
+        commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": 1}, "ctrl": true}"#.to_owned());
+        commands.push(r#"{"wait_ms": 15}"#.to_owned());
+    }
+    commands.push(r#"{"wait_ms": 500}"#.to_owned());
+    let script = write_script(&dir, &format!("[{}]", commands.join(",")));
+
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    // Doesn't wait to observe LINE_1 specifically: the loop can outrun the
+    // first poll (a real, observed race — see the `less` tests' comments
+    // on the same class of issue), and the point here is just to confirm
+    // the CJK/box-drawing content is actively flowing while zoom happens,
+    // not to catch it at any particular line.
+    session.wait_for(Duration::from_secs(15), |snapshot| {
+        ConSession::screen_text(snapshot).contains("中文日本語")
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if let Ok(Some(status)) = session.child.try_wait() {
+            panic!(
+                "agenterm-con exited on its own while zooming in against a busy shell \
+                 (status: {status:?}) — this is the crash under investigation"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let _ = session.child.kill();
+}
