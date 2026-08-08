@@ -15,7 +15,7 @@ use crate::{
     subset::{compat_validate, validate_ast},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ValueKind {
     Int,
     Bool,
@@ -656,6 +656,8 @@ fn infer_param_kinds(def: &ScriptFuncDef, ctx: &EmitCtx) -> Vec<ValueKind> {
                 ValueKind::ChildList
             } else if param_used_as_string_list(def, param.as_str()) {
                 ValueKind::StringList
+            } else if param_used_as_definite_child(def, param.as_str()) {
+                ValueKind::Child
             } else if param_used_as_json(def, param.as_str(), ctx) {
                 // JSON before Child/Command: `.state`/`.id` are also RhChild members, so a
                 // timing/doc object that reads `.state` plus `.setup_ms` must stay Json.
@@ -694,12 +696,66 @@ fn infer_return_kind(def: &ScriptFuncDef, ctx: &EmitCtx) -> ValueKind {
     let Some(last) = stmts.last() else {
         return ValueKind::Int;
     };
+    if matches!(
+        last,
+        Stmt::Return(_, flags, ..) if flags.contains(ASTFlags::BREAK)
+    ) && let Some(kind) = infer_non_throw_return_kind(&def.body, &mut fn_ctx.clone())
+    {
+        return kind;
+    }
     let expr = match last {
         Stmt::Return(Some(expr), ..) => expr.as_ref(),
         Stmt::Expr(expr) => expr.as_ref(),
         _ => return ValueKind::Int,
     };
     infer_binding_kind(expr, &fn_ctx)
+}
+
+fn infer_non_throw_return_kind(block: &StmtBlock, ctx: &mut EmitCtx) -> Option<ValueKind> {
+    for stmt in block.iter() {
+        match stmt {
+            Stmt::Return(Some(expr), flags, ..) if !flags.contains(ASTFlags::BREAK) => {
+                return Some(infer_binding_kind(expr, ctx));
+            }
+            Stmt::If(boxed, ..) => {
+                let flow = boxed.as_ref();
+                if let Some(kind) = infer_non_throw_return_kind(&flow.body, &mut ctx.clone())
+                    .or_else(|| infer_non_throw_return_kind(&flow.branch, &mut ctx.clone()))
+                {
+                    return Some(kind);
+                }
+            }
+            Stmt::For(boxed, ..) => {
+                let (_, _, flow) = boxed.as_ref();
+                if let Some(kind) = infer_non_throw_return_kind(&flow.body, &mut ctx.clone()) {
+                    return Some(kind);
+                }
+            }
+            Stmt::While(boxed, ..) => {
+                if let Some(kind) =
+                    infer_non_throw_return_kind(&boxed.as_ref().body, &mut ctx.clone())
+                {
+                    return Some(kind);
+                }
+            }
+            Stmt::Block(inner) => {
+                if let Some(kind) = infer_non_throw_return_kind(inner, &mut ctx.clone()) {
+                    return Some(kind);
+                }
+            }
+            Stmt::TryCatch(boxed, ..) => {
+                let flow = boxed.as_ref();
+                if let Some(kind) = infer_non_throw_return_kind(&flow.body, &mut ctx.clone())
+                    .or_else(|| infer_non_throw_return_kind(&flow.branch, &mut ctx.clone()))
+                {
+                    return Some(kind);
+                }
+            }
+            _ => {}
+        }
+        infer_stmt_scope(stmt, ctx);
+    }
+    None
 }
 
 fn infer_stmt_scope(stmt: &Stmt, ctx: &mut EmitCtx) {
@@ -1109,6 +1165,13 @@ fn is_child_member_name(name: &str) -> bool {
     )
 }
 
+fn is_definite_child_member_name(name: &str) -> bool {
+    matches!(
+        name,
+        "platform_facts" | "stderr" | "kill" | "wait_with_output" | "window_key"
+    )
+}
+
 fn is_stream_member_name(name: &str) -> bool {
     name == "read"
 }
@@ -1154,6 +1217,11 @@ fn expr_uses_process_param(expr: &Expr, param: &str, member: fn(&str) -> bool) -
     match &boxed.rhs {
         Expr::Property(property, ..) => member(property.2.as_str()),
         Expr::MethodCall(call, ..) => member(call.name.as_str()),
+        Expr::Dot(..) => {
+            let mut path = Vec::new();
+            append_json_properties(&boxed.rhs, &mut path)
+                && path.first().is_some_and(|name| member(name))
+        }
         _ => false,
     }
 }
@@ -1180,6 +1248,12 @@ fn param_used_as_child(def: &ScriptFuncDef, param: &str) -> bool {
     def.body
         .iter()
         .any(|stmt| stmt_uses_param_with_member(stmt, param, is_child_member_name))
+}
+
+fn param_used_as_definite_child(def: &ScriptFuncDef, param: &str) -> bool {
+    def.body
+        .iter()
+        .any(|stmt| stmt_uses_param_with_member(stmt, param, is_definite_child_member_name))
 }
 
 fn param_used_as_command(def: &ScriptFuncDef, param: &str) -> bool {
@@ -2693,6 +2767,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             || fs_metadata_modified_unix_millis(expr).is_some()
             || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
             || dir_entry_metadata_len(expr, ctx).is_some()
+            || fs_metadata_len_arg(expr).is_some()
             || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len") =>
         {
             ValueKind::Int
@@ -2711,6 +2786,8 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if std_process_command_arg(expr).is_some() => ValueKind::Command,
         _ if command_output_call(expr, ctx).is_some() => ValueKind::Output,
         _ if command_start_call(expr, ctx).is_some() => ValueKind::Child,
+        _ if local_command_receiver_call(expr, ctx, "output").is_some() => ValueKind::Output,
+        _ if local_command_receiver_call(expr, ctx, "start").is_some() => ValueKind::Child,
         _ if child_wait_with_output_call(expr, ctx).is_some() => ValueKind::Output,
         _ if output_stdout_text_call(expr, ctx).is_some() => ValueKind::String,
         _ if output_stderr_text_call(expr, ctx).is_some() => ValueKind::String,
@@ -3634,14 +3711,16 @@ fn emit_child_list_push_stmt(
         return Ok(false);
     };
     let Expr::Variable(child_ident, ..) = item else {
-        return Err(RhError::Transpile(
-            "child list push argument must be a Child binding".into(),
-        ));
+        return Err(RhError::Transpile(format!(
+            "child list push argument must be a Child binding (expr={item:?})"
+        )));
     };
     if ctx.scope.get(child_ident.1.as_str()).copied() != Some(ValueKind::Child) {
-        return Err(RhError::Transpile(
-            "child list push argument must be a Child binding".into(),
-        ));
+        return Err(RhError::Transpile(format!(
+            "child list push argument must be a Child binding (name={}, kind={:?})",
+            child_ident.1,
+            ctx.scope.get(child_ident.1.as_str()).copied()
+        )));
     }
     out.push_str("    ");
     out.push_str(binding);
@@ -3850,6 +3929,31 @@ fn bytes_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
 fn command_output_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
     let (binding, call) = command_method_call(expr, ctx)?;
     (call.name == "output" && call.args.is_empty()).then_some(binding)
+}
+
+fn local_command_receiver_call<'a>(
+    expr: &'a Expr,
+    ctx: &EmitCtx,
+    method: &str,
+) -> Option<&'a rhai::FnCallExpr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::FnCall(receiver, ..) = &boxed.lhs else {
+        return None;
+    };
+    if receiver.namespace.is_empty() {
+        let resolved = resolve_local_fn_name(receiver.name.as_str(), ctx)?;
+        if ctx.local_fn_return_kinds.get(resolved.as_str()).copied() != Some(ValueKind::Command) {
+            return None;
+        }
+    } else {
+        return None;
+    }
+    let Expr::MethodCall(call, ..) = &boxed.rhs else {
+        return None;
+    };
+    (call.name == method && call.args.is_empty()).then_some(receiver)
 }
 
 fn command_start_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
@@ -4095,6 +4199,27 @@ fn emit_command_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
         }
         _ => Ok(false),
     }
+}
+
+fn emit_local_command_receiver_method(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let (receiver, helper) =
+        if let Some(receiver) = local_command_receiver_call(expr, ctx, "output") {
+            (receiver, "rh_command_output")
+        } else if let Some(receiver) = local_command_receiver_call(expr, ctx, "start") {
+            (receiver, "rh_command_start")
+        } else {
+            return Ok(false);
+        };
+    out.push_str("{ let mut command = ");
+    emit_call(out, receiver, ctx)?;
+    out.push_str("; ");
+    out.push_str(helper);
+    out.push_str("(&mut command) }");
+    Ok(true)
 }
 
 fn emit_output_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
@@ -5322,6 +5447,22 @@ fn fs_metadata_modified_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
     None
 }
 
+fn fs_metadata_len_arg<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    if dot_property_name(&boxed.rhs)? != "len" {
+        return None;
+    }
+    if let Some(path) = std_fs_metadata_arg(&boxed.lhs) {
+        return Some((path, "metadata"));
+    }
+    if let Some(path) = std_fs_symlink_metadata_arg(&boxed.lhs) {
+        return Some((path, "symlink_metadata"));
+    }
+    None
+}
+
 fn fs_metadata_modified_unix_millis<'a>(expr: &'a Expr) -> Option<(&'a Expr, &'a str)> {
     let Expr::Dot(outer, ..) = expr else {
         return None;
@@ -5507,6 +5648,26 @@ fn json_value_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'
         }
         _ => None,
     }
+}
+
+fn child_platform_facts_path<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, Vec<&'a str>)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Child) {
+        return None;
+    }
+    let mut path = Vec::new();
+    if !append_json_properties(&boxed.rhs, &mut path)
+        || path.first().copied() != Some("platform_facts")
+    {
+        return None;
+    }
+    path.remove(0);
+    (!path.is_empty()).then_some((ident.1.as_str(), path))
 }
 
 fn append_json_properties<'a>(expr: &'a Expr, path: &mut Vec<&'a str>) -> bool {
@@ -5789,6 +5950,7 @@ fn is_native_json_int_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || fs_metadata_modified_unix_millis(expr).is_some()
         || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
         || dir_entry_metadata_len(expr, ctx).is_some()
+        || fs_metadata_len_arg(expr).is_some()
         || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len")
         || json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty())
         || string_list_index_misparse_len(expr, ctx).is_some()
@@ -5851,6 +6013,14 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         return Ok(());
     }
     if emit_bytes_method(out, expr, ctx)? {
+        return Ok(());
+    }
+    if let Some((binding, path)) = child_platform_facts_path(expr, ctx) {
+        out.push_str("rh_json_string_path(&rh_child_platform_facts(&mut ");
+        out.push_str(binding);
+        out.push_str("), ");
+        emit_json_path(out, &path);
+        out.push(')');
         return Ok(());
     }
     if let Some(argument) = type_of_arg(expr) {
@@ -5980,6 +6150,10 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str("String::from(");
             out.push_str(&format!("\"{value}\""));
             out.push(')');
+        }
+        Expr::FloatConstant(value, ..) => {
+            out.push_str(&format!("{value:?}"));
+            out.push_str(".to_string()");
         }
         _ if let Some((binding, index)) = json_array_index(expr, ctx) => {
             out.push_str("rh_json_as_str(&rh_json_array_get(&");
@@ -6131,8 +6305,17 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
         }
         _ => {
             let rendered = expr_to_rhai(expr).unwrap_or_else(|_| "<unprintable>".into());
+            let scope_kind = match expr {
+                Expr::Dot(boxed, ..) => match &boxed.lhs {
+                    Expr::Variable(ident, ..) => ctx.scope.get(ident.1.as_str()).copied(),
+                    _ => None,
+                },
+                Expr::Variable(ident, ..) => ctx.scope.get(ident.1.as_str()).copied(),
+                _ => None,
+            };
             return Err(RhError::Transpile(format!(
-                "unsupported string expression in native rh: {rendered}"
+                "unsupported string expression in native rh: {rendered} \
+                 (expr={expr:?}, scope_kind={scope_kind:?})"
             )));
         }
     }
@@ -6479,6 +6662,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str(".modified");
             return Ok(());
         }
+        if let Some((path, call_name)) = fs_metadata_len_arg(expr) {
+            emit_fs_metadata_call(out, path, call_name, ctx)?;
+            out.push_str(".len");
+            return Ok(());
+        }
         if let Some((path, call_name)) = fs_metadata_modified_unix_millis(expr) {
             emit_fs_metadata_call(out, path, call_name, ctx)?;
             out.push_str(".modified.unix_millis");
@@ -6520,6 +6708,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if let Some(program) = std_process_command_arg(expr)
             && emit_std_process_command(out, program, ctx)?
         {
+            return Ok(());
+        }
+        if emit_local_command_receiver_method(out, expr, ctx)? {
             return Ok(());
         }
         if emit_command_method(out, expr, ctx)? {
@@ -8853,6 +9044,16 @@ fn emit_string_list_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str("rh_json_array_items(&");
             out.push_str(ident.1.as_str());
             out.push_str(", &[]).into_iter().map(|value| rh_json_as_str(&value)).collect()");
+            Ok(())
+        }
+        _ if let Some((binding, path)) = json_value_path(expr, ctx)
+            && !path.is_empty() =>
+        {
+            out.push_str("rh_json_array_items(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push_str(").into_iter().map(|value| rh_json_as_str(&value)).collect()");
             Ok(())
         }
         Expr::Array(items, ..) => {
@@ -11679,6 +11880,165 @@ fn entry() {
     }
 
     #[test]
+    fn local_child_argument_with_nested_platform_facts_stays_native() {
+        let source = r#"
+fn wait_for_window(child) {
+    let facts = child.platform_facts;
+    if facts.top_level_window_present != 0 {
+        return facts;
+    }
+    child.platform_facts
+}
+
+fn entry() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    let facts = wait_for_window(child);
+    child.kill();
+    facts.top_level_window_present
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("child: RhChild"), "{}", output.rust);
+        assert!(
+            output.rust.contains("wait_for_window(child.clone())"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn child_return_before_terminal_throw_keeps_child_kind() {
+        let source = r#"
+fn start_ready() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    for attempt in 0..2 {
+        if child.state == "running" {
+            return child;
+        }
+    }
+    throw "not_ready";
+}
+
+fn entry() {
+    let children = [];
+    let child = start_ready();
+    children.push(child);
+    child.kill();
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("pub fn start_ready() -> RhChild"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn local_output_text_helper_keeps_output_kind() {
+        let source = r#"
+fn process_output_text(output) {
+    output.stdout_text() + output.stderr_text()
+}
+
+fn entry() {
+    let command = std::process::command("tool");
+    let output = command.output();
+    print(process_output_text(output));
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("output: RhOutput"), "{}", output.rust);
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn local_command_return_can_chain_output_native() {
+        let source = r#"
+fn configured() {
+    std::process::command("tool")
+}
+
+fn entry() {
+    let output = configured().output();
+    print(output.stdout_text() + output.stderr_text());
+    0
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains(
+                "let mut output = { let mut command = configured(); rh_command_output(&mut command) };"
+            ),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn chained_child_platform_facts_string_path_stays_native() {
+        let source = r#"
+fn title(child) {
+    "" + child.platform_facts.top_level_window_title
+}
+
+fn entry() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    let value = title(child);
+    child.kill();
+    value.len
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains(
+                "rh_json_string_path(&rh_child_platform_facts(&mut child), &[\"top_level_window_title\"])"
+            ),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
     fn process_list_uses_structured_native_host_call() {
         let source = r#"
 fn entry() {
@@ -11700,9 +12060,7 @@ fn entry() {
             output.rust
         );
         assert!(
-            output
-                .rust
-                .contains("rh_host_json_call(\"process.list\""),
+            output.rust.contains("rh_host_json_call(\"process.list\""),
             "{}",
             output.rust
         );
@@ -11849,6 +12207,72 @@ fn entry() {
                 .matches("vec![String::from(\"--marker\"), marker.clone()]")
                 .count(),
             2,
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn json_path_coerces_at_local_string_list_boundary() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn consume(values) {
+    let command = std::process::command("tool");
+    command.args(values);
+    0
+}
+
+fn entry() {
+    let document = rhai::json::parse("{\"tabs\":[\"one\",\"two\"]}");
+    consume(document.tabs);
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output.rust.contains(
+                "rh_json_array_items(&document, &[\"tabs\"]).into_iter().map(|value| rh_json_as_str(&value)).collect()"
+            ),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn float_literal_string_coercion_stays_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn entry() {
+    print("scale:" + 1.0);
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(output.rust.contains("1.0.to_string()"), "{}", output.rust);
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn direct_metadata_len_string_coercion_stays_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn entry() {
+    let path = args[0];
+    print("bytes:" + std::fs::metadata(path).len);
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output.rust.contains("rh_metadata(&path).len).to_string()"),
             "{}",
             output.rust
         );
