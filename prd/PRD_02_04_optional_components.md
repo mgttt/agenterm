@@ -18,7 +18,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     catalog and software-distribution market for runtimes, tools and optional
     applications; the market is a discovery and transaction layer over this
     lifecycle, not an authority embedded in GUI startup
-  - [ ] `agenterm-rhai.exe` supplies automation primitives and typed package
+  - [ ] `agenterm-rh.exe` supplies automation primitives and typed package
     tooling contracts, while a future `agenterm-softmgr.exe` exclusively owns
     trust, signature verification, install transactions, rollback and
     elevation; untrusted package manifests are data, never executable policy

@@ -56,11 +56,11 @@ client, and a deliberately bounded tmux/RMUX frontend.
   clipboard.
 - Snapshot-positioned bounded event reads and waits expose explicit restart,
   gap, and timeout results.
-- `agenterm-rh` / `agenterm-rh.exe` is the default task and worker CLI for
-  repository automation (`scripts/rh/*.rh`), observable Fleet tools, and
-  versioned named tasks without linking the scripting engine into the GUI.
-  `agenterm-rhai.exe` remains a compatibility shim for `.rhai` callers,
-  persistent REPL sessions, and one-shot `run`/`eval`/`check`/`api`.
+- `agenterm-rh` / `agenterm-rh.exe` is the task and worker CLI for repository
+  automation (`scripts/rh/*.rh`), observable Fleet tools, and versioned named
+  tasks without linking the scripting engine into the GUI. Archived Rhai sources
+  live under `scripts/archive/rhai/`; the former `agenterm-rhai` shim was
+  removed in Phase C Wave 4.5.
 - `agenterm-cli mcp` is the on-demand read-only MCP surface (no separate
   `agenterm-mcp` PE). Its first v0.1.10 slice serves four metadata-only Fleet
   resources and one bounded `agenterm_wait` tool over stdio; it exposes no
@@ -112,7 +112,7 @@ curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
 
 Download the portable zip for your CPU architecture from
 [GitHub Releases](https://github.com/mgttt/agenterm/releases/latest), extract
-it anywhere, and run `agenterm.exe`. All six client binaries plus build
+it anywhere, and run `agenterm.exe`. All four client binaries plus build
 metadata ship in the same folder — no installer and no admin rights required.
 
 | Architecture | Asset |
@@ -159,7 +159,7 @@ stays in `target/debug/` (`cargo build` or `.\build.bat dev`). Use
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch
 cache while preserving the incremental development `target/`. All modes
-produce six ignored executables plus
+produce four ignored executables plus
 build metadata under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; `agenterm server` starts the headless
@@ -169,11 +169,8 @@ build metadata under `dist/`:
   `snapshot --json`.
 - `dist/agenterm-cli.exe` — full native observation and automation client,
   including `mux` (tmux/RMUX) and `mcp` (stdio sidecar) subcommands.
-- `dist/agenterm-rh` — default native `.rh` task/worker CLI (live automation
-  under `scripts/rh/`).
-- `dist/agenterm-rhai.exe` — compatibility Rhai shim (`run`/`eval`/`repl`/
-  `check`/`api`, legacy `.rhai`); archived Rhai sources live under
-  `scripts/archive/rhai/`.
+- `dist/agenterm-rh` — native `.rh` task/worker CLI (live automation under
+  `scripts/rh/`; archived Rhai under `scripts/archive/rhai/`).
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
@@ -202,7 +199,7 @@ relabeled as available.
 ### Linux GUI
 
 Native Linux `agenterm` and `agenterm-cc` use winit. Control clients
-(`agenterm-cli`, `agenterm-rhai`) do not need display libraries.
+(`agenterm-cli`, `agenterm-rh`) do not need display libraries.
 
 **Release tarballs** ship a small `lib/` directory plus `agenterm` and
 `agenterm-cc` launchers that set `LD_LIBRARY_PATH` before starting their hidden

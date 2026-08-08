@@ -1027,7 +1027,7 @@
         </div>
         <pre class="stack-block" aria-label="Architecture stack" data-i18n-aria-label="stackLabel"><span class="hl">agenterm server</span>  tree · PTY · journal · persistence · no HWND
     ↑ typed IPC · snapshots · waits · receipts
-<span class="hl">clients</span>        agenterm (GUI) · agenterm-cc (Control Center) · agenterm-cli · agenterm-rh · agenterm-rhai (compat)
+<span class="hl">clients</span>        agenterm (GUI) · agenterm-cc (Control Center) · agenterm-cli · agenterm-rh
 <span class="hl">promise</span>        unsupported ops fail explicitly — no false success</pre>
       </div>
     </section>
@@ -1074,7 +1074,7 @@
             <strong data-i18n="visionTitle">Product vision →</strong>
             <span data-i18n="visionBody">Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.</span>
           </a>
-          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-rhai-runtime.md">
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-rhai-runtime.md#historical-rhai-contract">
             <strong data-i18n="scriptTitle">Script runtime specification →</strong>
             <span data-i18n="scriptBody">Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm-rh`.</span>
           </a>
@@ -1129,8 +1129,8 @@
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "Copy", installCopied: "Copied",
           installNoteMacos: "No <code>sudo</code>. Verifies SHA-256, links commands into <code>~/.local/bin</code>, and creates <code>~/Applications/AgenTerm.app</code>. macOS currently ships as a labeled unsigned developer preview — read the <a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md\">safety notes</a> before opting in.",
-          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, <code>agenterm-rh</code>, and the <code>agenterm-rhai</code> compatibility shim into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
-          installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All seven client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
+          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, and <code>agenterm-rh</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
+          installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All four client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
           downloadWindowsCta: "Download for Windows",
           specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specOpen: "<strong>Open</strong> MIT / Apache-2.0", specLoopback: "Loopback IPC only", specSbom: "SBOM + provenance", specServer: "Headless server authority",
           advantagesTitle: "Lightweight. Stable. Yours to audit.",
@@ -1211,8 +1211,8 @@
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "複製", installCopied: "已複製",
           installNoteMacos: "無需 <code>sudo</code>。驗證 SHA-256、將命令連結至 <code>~/.local/bin</code>，並建立 <code>~/Applications/AgenTerm.app</code>。macOS 目前以標示清楚的未簽署開發者預覽版發布——請先閱讀<a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.zh-Hant.md\">安全說明</a>再選擇安裝。",
-          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code>、<code>agenterm-rh</code> 與 <code>agenterm-rhai</code> 相容薄殼連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
-          installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部七個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
+          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code> 與 <code>agenterm-rh</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
+          installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部四個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
           downloadWindowsCta: "下載 Windows 版",
           specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specOpen: "<strong>開源</strong> MIT / Apache-2.0", specLoopback: "僅 loopback IPC", specSbom: "SBOM + provenance", specServer: "無頭 server 權威",
           advantagesTitle: "輕量。穩定。可審計。",

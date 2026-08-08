@@ -139,7 +139,7 @@
 - 2026-08-06T03:22Z · 舰队值班会话(`bc-8af14925-…`) · duty: noop findings=0 main=195103a；未 apply；lock 已清
 - 2026-08-06T02:23Z · 舰队值班会话(`bc-07d1aea6-…`) · duty: noop findings=0 main=0ae2c2f；未 apply；lock 已清
 - 2026-08-06T01:26Z · 舰队值班会话(`bc-98ea34bf-…`) · duty: noop findings=0 main=06c76b2；未 apply；lock 已清
-- 2026-08-06T08:22Z · 主控1 · `plan/agenterm-rhai-app.md`：Thin Base + Rhai App Pack 可行性讨论稿
+- 2026-08-06T08:22Z · 主控1 · historical plan `plan/agenterm-rhai-app.md`：Thin Base + Rhai App Pack 可行性讨论稿
 - 2026-08-06T00:51Z · 主控2(`bc-05b7c357-…`) · 已 spawn 主控1=`bc-a4df769a-…`；CI 重跑=`31060999962` @ `f3b95a5`；本席 IDLE
 - 2026-08-06T00:49Z · 主控2(`bc-05b7c357-…`) · 准备换防；Wry>Tauri 体积结论已写入 plan/evidence
 - 2026-08-06T00:26Z · 舰队值班会话(`bc-0c498e8e-…`) · duty: noop findings=0 main=da25929；未 apply；lock 已清

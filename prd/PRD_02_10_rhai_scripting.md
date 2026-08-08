@@ -2,7 +2,7 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
-Runtime contract: [AgenTerm Script Runtime specification](../docs/agenterm-rhai-runtime.md)
+Runtime contract (historical Rhai): [AgenTerm Script Runtime specification](../docs/agenterm-rhai-runtime.md)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
@@ -16,13 +16,12 @@ position" below). Four engines, in lineage order:
 
 - **Rhai — cancelled as the forward engine direction (2026-08-07).** Was the
   original and, through v0.1.15, default embedded language (tree-walking
-  interpreter, `rhai` crate). `agenterm-rhai.exe` remains shipped as a
-  **compatibility shim** for existing `.rhai` callers per "Shipped baseline"
-  below and receives shim-hardening fixes (`plan/plan-rh-3.md` M23d), but no
-  further Rhai-native capability investment continues — every new capability
-  targets rh, and now lua/qjs. This PRD's title and most of its accumulated
-  detail below describe Rhai/rh history; treat "Rhai" content as the
-  wound-down lineage, not the active target.
+  interpreter, `rhai` crate). The formerly shipped `agenterm-rhai.exe` compatibility
+  shim was **removed** in Phase C Wave 4.5 (2026-08-08); archived `.rhai`
+  sources live under `scripts/archive/rhai/`. No further Rhai-native capability
+  investment continues — every new capability targets rh, and now lua/qjs.
+  This PRD's title and most of its accumulated detail below describe Rhai/rh
+  history; treat "Rhai" content as the wound-down lineage, not the active target.
 - **rh — self-developed, deeper host integration than Rhai
   (`crates/agenterm-rh`, `agenterm-rh` CLI).** Syntax and object model are
   informed by Rhai and by Rust's own `std::` shape, but rh is not an
@@ -69,23 +68,15 @@ behavior match. See
 
 ## Shipped baseline
 
-- [x] `agenterm-rh.exe` is the default task and supervised worker front door:
-  one-shot and persistent supervisors resolve it before the explicit
-  `agenterm-rhai.exe` compatibility fallback and default its execution backend
-  to `rh`. It directly hosts named tasks plus private
+- [x] `agenterm-rh.exe` is the sole task and supervised worker front door:
+  one-shot and persistent supervisors resolve it and default the execution
+  backend to `rh`. It directly hosts named tasks plus private
   `--worker`/`--framed-worker` modes through the shared library.
-  `agenterm-rhai.exe` remains the compatibility public `run`, `eval`, `repl`,
-  `check`, and `api` CLI;
-  its PE now owns only incremental-wrapper and command dispatch code, while
-  `script_worker` in the shared `agenterm` library owns worker, framed
-  protocol, REPL and execute behavior;
-  on Windows, `agenterm-cli.exe script repl ...` is a thin process-forwarding
-  compatibility route to the adjacent `agenterm-rhai` sidecar, inherits
-  stdio and exit status, and never links a second Rhai engine into the control
-  client. Linux and macOS callers invoke `agenterm-rhai` directly because the
-  CLI-hosted Script route is not available there. The existing one-shot
-  supervisor routes retain their single worker topology. All expose the same
-  catalog, parser, supervisor, and runtime.
+  The formerly shipped `agenterm-rhai.exe` compatibility shim, Rhai REPL, and
+  `agenterm-cli script repl` forwarding were **removed** in Phase C Wave 4.5;
+  archived `.rhai` sources remain under `scripts/archive/rhai/` only.
+  The existing one-shot supervisor routes retain their single worker topology.
+  All expose the same catalog, parser, supervisor, and runtime.
 - [x] rh-generated native packs use an AgenTerm-owned `i64` entry ABI and their
   generated Cargo manifest no longer depends on the Rhai crate. Native subset
   packs and compatibility-delegating pack stubs therefore contain no embedded
@@ -125,8 +116,8 @@ behavior match. See
   active `.rhai` to a zero-fallback `.rh` entry; its interpreted implementation
   is retained only under `scripts/archive/rhai/` for migration archaeology.
 - [x] Candidate and Promotion execute all active scripting steps through the
-  packaged `agenterm-rh` front door. Workflow policy tests reject any restored
-  `agenterm-rhai` executable reference; `.rhai` source paths remain explicit
+  packaged   `agenterm-rh` front door. Workflow policy tests reject any restored legacy
+  `agenterm-rhai` executable reference (removed Wave 4.5); `.rhai` source paths remain explicit
   interpreter-migration debt rather than executable-entry ownership.
 - [x] host API v9 exposes native bounded `std::process::command_status` without
   command or path allowlists; timeout, owned process-tree cleanup and typed
@@ -158,14 +149,15 @@ behavior match. See
   task-specific host validator); remaining Rhai callers still import
   `scripts/rh/lib/artifact_manifest.rh`; archived Rhai under
   `scripts/archive/rhai/lib/artifact_manifest.rhai` is migration archaeology only.
-- [x] v0.1.12 retains `agenterm-rhai.exe` / `agenterm-rhai` as the canonical
-  public executable. Although Rhai is the stable runtime contract, the version
-  has no complete external-usage inventory or migration/removal evidence, and
-  introducing a second name during convergence would expand packaging,
-  bootstrap and Candidate scope without user value. A future rename decision
-  must inventory every CI/package/documentation/external caller and keep any
-  compatibility entry as a thin forwarding surface over the one unrestricted
-  implementation; it must never create a second runtime or reduced API.
+- [x] v0.1.12 formerly retained `agenterm-rhai.exe` / `agenterm-rhai` as the
+  canonical public executable (removed in Phase C Wave 4.5). Although Rhai was
+  the stable runtime contract through v0.1.15, the version had no complete
+  external-usage inventory or migration/removal evidence, and introducing a
+  second name during convergence would expand packaging, bootstrap and
+  Candidate scope without user value. A future rename decision must inventory
+  every CI/package/documentation/external caller and keep any compatibility
+  entry as a thin forwarding surface over the one unrestricted implementation;
+  it must never create a second runtime or reduced API.
 - [x] every ordinary invocation receives the same unrestricted local runtime
   surface. No invocation mode, task label, profile, catalog capability, caller,
   or entry point gates API registration or execution; the future Agent harness
@@ -220,9 +212,9 @@ behavior match. See
 - [x] Design choice: Rust (`.rs`) implements the host and Rhai (`.rhai`)
   implements user-authored runtime programs.
 
-## Persistent REPL slice (designed 2026-07-31)
+## Persistent REPL slice (retired 2026-08-08; historical design 2026-07-31)
 
-- [x] `agenterm-rhai repl [OPTIONS] [--] [ARGS...]` starts a true
+- [x] (retired) `agenterm-rhai repl [OPTIONS] [--] [ARGS...]` formerly started a true
   process-local Rhai session. Variables and script-defined functions survive
   from one successful cell to the next; it does not loop over the one-shot
   `eval` command.
@@ -285,7 +277,7 @@ behavior match. See
   cell and its owned nested process; the same outer CLI continues with a fresh
   worker, emits `reason=hard_interrupt` and `side_effects_replayed=false`, and
   leaves no worker or nested-process orphan. Linux/macOS retain the direct
-  `agenterm-rhai` protocol and compile/unit coverage, but no Unix hosted-CLI
+  `agenterm-rh` protocol and compile/unit coverage, but no Unix hosted-CLI
   or native interactive Ctrl+C parity is claimed without its own public native
   journey. Ordinary CI run `30716123255` exposed that a nested Script command
   can create another Unix process group outside the outer worker's `killpg`.
@@ -298,9 +290,9 @@ behavior match. See
   history remains open; memory-only `:history` is not presented as that editor
   behavior.
 
-## v0.1.9 product position
+## v0.1.9 product position (historical Rhai era)
 
-`agenterm-rhai.exe` is AgenTerm's general-purpose local scripting runtime:
+Historical note — formerly, `agenterm-rhai.exe` was AgenTerm's general-purpose local scripting runtime:
 Rhai language plus a Rust-shaped selected `std::` subset, Rhai-native
 extensions, and the AgenTerm-bound Fleet domain. This is a capability overlay,
 not Rust, Node.js, Bun, npm, Cargo, or another Rhai host compatibility layer,
@@ -345,8 +337,8 @@ and it is not positioned as a restricted security plugin.
 
 ## v0.1.9 runtime architecture
 
-- [x] one-shot `run`, `eval`, `check`, `api`, and task invocations still own
-  one fresh `agenterm-rhai.exe` sidecar. `repl` owns one explicit,
+- [x] one-shot `run`, `eval`, `check`, `api`, and task invocations formerly owned
+  one fresh `agenterm-rhai.exe` sidecar (removed Wave 4.5). `repl` formerly owned one explicit,
   foreground, process-local session; neither form creates a persistent system
   daemon or mutable state that survives its public process.
 - [x] an invocation may own a bounded task scheduler. Asynchronous APIs return
@@ -464,8 +456,8 @@ and it is not positioned as a restricted security plugin.
     headers, 64 KiB default and 256 KiB maximum bodies, a 2-second default and
     10-second hard deadline, stable privacy-safe error codes, and the shared
     bounded `Stream`/`Task` contracts.
-  - [x] the 2026-07-29 standard Windows release measurement for the complete
-    v0.1.9 `agenterm-rhai.exe` is 2,740,224 bytes with the reviewed
+  - [x] the historical 2026-07-29 standard Windows release measurement for the
+    retired v0.1.9 `agenterm-rhai.exe` is 2,740,224 bytes with the reviewed
     native-TLS feature set, 405,504 bytes below the existing 3 MiB artifact
     gate; the gate was not raised.
 - [x] `std::net::TcpStream` provides unrestricted DNS/IPv4/IPv6 TCP client
@@ -918,13 +910,13 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   failures, and native AOT qualification for supported control flow.
   The task manifest and automation corpus live as native `.rh` under
   `scripts/rh/` (archived Rhai under `scripts/archive/rhai/`).
-  Worker/REPL implementation has moved from the
-  `agenterm-rhai` binary into the shared `script_worker` library, but its
-  interpreter, host-eval fallback, and AST parsing remain on Rhai while their
-  typed boundaries migrate. Release verification requires both manifest roles
-  and validates each role's declared offline version probe.
+  Worker implementation lives in the shared `script_worker` library; the former
+  `agenterm-rhai` binary was removed in Wave 4.5. Interpreter, host-eval
+  fallback, and AST parsing were retired with the Rhai backend while their
+  typed boundaries migrated to native rh. Release verification requires both
+  manifest roles and validates each role's declared offline version probe.
 - [ ] **Layered deployment** (JVM / JAR analogue):
-  - **Base runtime** — stable PE family (`agenterm`, `agenterm-rhai`, …):
+  - **Base runtime** — stable PE family (`agenterm`, `agenterm-rh`, …):
     host Facade, broker, supervision, qualification; rebases rarely
   - **Application layer** — signed **rh pack** (native artifact + manifest;
     future Logic Pack / gateway pack): load in-process via `script_rh_pack`,

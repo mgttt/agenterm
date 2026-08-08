@@ -3,9 +3,8 @@
 > **Operational note (2026-08):** Live repository automation runs native `.rh`
 > tasks under `scripts/rh/` through **`agenterm-rh`** (task/worker/check-many
 > front door). Legacy Rhai sources live under `scripts/archive/rhai/`. The
-> shipped **`agenterm-rhai`** binary remains a **compatibility shim** for
-> `.rhai` callers, `run`/`eval`/`repl`/`check`/`api`, and Windows
-> `agenterm-cli script …` forwarding — not the live script tree owner.
+> **`agenterm-rhai`** compatibility shim was **retired** in Wave 4.5;
+> `run`/`eval`/`repl` on `.rhai` sources is no longer available.
 > For current capability status see
 > [PRD_02_10](../prd/PRD_02_10_rhai_scripting.md).
 

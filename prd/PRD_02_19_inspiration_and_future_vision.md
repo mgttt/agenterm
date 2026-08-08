@@ -286,7 +286,7 @@ AgenTerm — Local Agent Fleet Work OS
 │
 ├─ [AUTO] Automate & interoperate
 │   ├─ agenterm-cli — observe, act, wait, verify
-│   ├─ agenterm-rhai — unrestricted local runtime, tasks, catalog
+│   ├─ agenterm-rh — unrestricted local runtime, tasks, catalog
 │   ├─ agenterm-mux — bounded tmux/RMUX compatibility
 │   ├─ agenterm-mcp — agent bridge (read-first, then governed tools)
 │   └─ Receipts, replay, typed operations (maturing)
@@ -539,7 +539,7 @@ control plane and optional-component gates are green.
 ### Architectural contract (product direction)
 
 ```text
-agenterm-rhai.exe
+agenterm-rh
   ├─ light HTTP in-process for ordinary scripts
   └─ typed calls to agenterm-net.exe for libp2p / IPFS / heavy transport
 

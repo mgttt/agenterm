@@ -30,7 +30,7 @@ Every shipped leaf must state the user problem, governing invariant or
 authority boundary, observable success evidence, safe failure result, public
 black-box owner, and excluded scope.
 
-`agenterm-rhai.exe` is an unrestricted general-purpose local runtime. Never
+`agenterm-rh` is an unrestricted general-purpose local runtime. Never
 put Agent permission, approval, path, process, network, credential, or tool
 visibility policy into Rhai profiles, API registration, or the Script broker.
 Those policies belong to the future Agent harness that chooses how to invoke
@@ -103,13 +103,13 @@ Use PowerShell from the repository root:
 .\check.cmd              # full public-interface regression
 .\check.cmd --release    # local release gate; skips event-journal load stress
 .\check.cmd --release --include-stress # exact qualification + receipt
-.\dist\agenterm-rhai.exe task run package-qualified --manifest .\agenterm.tasks.json
+.\dist\agenterm-rh.exe task run package-qualified --manifest .\agenterm.tasks.json
 .\release.cmd --rehearse # read-only release validation/rehearsal
 ```
 
 Linux/macOS have matching `./build.sh`, `./check.sh`, `./lint.sh`, and
 `./release.sh` aliases over `scripts/bootstrap.sh`. Native Unix `build` emits
-the six client binaries; default Unix `check` is the portable Quick lane, and
+the four client binaries; default Unix `check` is the portable Quick lane, and
 default Unix `release` is validation-only. Stress qualification, Windows
 packaging and exact-byte qualification remain explicit Windows operations.
 Do not add an unmatched `.cmd` or `.bat`: prefer a named Rhai task, and when a
@@ -404,7 +404,7 @@ LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
 build commands per cell. `src/bin/` currently holds **four** product binaries
-(`agenterm`, `agenterm-cli`, `agenterm-rhai`, `agenterm-cc`). Mux/MCP are
+(`agenterm`, `agenterm-cli`, `agenterm-rh`, `agenterm-cc`). Mux/MCP are
 **`agenterm-cli` subcommands**, not separate PEs. **Prefer building without
 `--bin` filters** so new binaries are covered automatically:
 
@@ -462,6 +462,6 @@ Interactive-terminal and rendering work must be validated on a real Windows host
 Windows-target lint/build/unit-test and control-plane sanity loop; native Linux
 GUI/PTY smokes use the real `DISPLAY=:1` desktop or CI Xvfb instead.
 
-On Linux/macOS, `agenterm-cli script` hosting is Windows-only for now — invoke
-`agenterm-rhai` directly. Instance discovery uses
+Rhai REPL and `agenterm-cli script repl` were removed with Phase C Wave 4.5 —
+invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery uses
 `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).
