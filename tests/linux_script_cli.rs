@@ -1,6 +1,5 @@
 //! Black-box tests for the public Script Runtime CLI on Unix hosts.
-//! Primary surface: `agenterm-rh` and `.rh`. The `agenterm-rhai` compatibility shim
-//! is exercised only where the legacy entry path is still required.
+//! Primary surface: `agenterm-rh` and `.rh`.
 //! Uses `Command::output()` so exit codes are read from `ExitStatus`, not shell pipes.
 
 #[cfg(unix)]
@@ -19,10 +18,6 @@ mod unix {
         env!("CARGO_BIN_EXE_agenterm-rh")
     }
 
-    fn compatibility_shim_bin() -> &'static str {
-        env!("CARGO_BIN_EXE_agenterm-rhai")
-    }
-
     fn run_rh(args: &[&str]) -> std::process::Output {
         let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
         Command::new(rh_bin())
@@ -32,15 +27,6 @@ mod unix {
             .expect("spawn agenterm-rh")
     }
 
-    fn run_compatibility_shim(args: &[&str]) -> std::process::Output {
-        let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
-        Command::new(compatibility_shim_bin())
-            .current_dir(repo_root())
-            .args(args)
-            .output()
-            .expect("spawn agenterm-rhai compatibility shim")
-    }
-
     fn format_output(output: &std::process::Output) -> String {
         format!(
             "status={:?} stdout={} stderr={}",
@@ -48,16 +34,6 @@ mod unix {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         )
-    }
-
-    #[test]
-    fn compatibility_shim_eval_returns_success_envelope() {
-        let output = run_compatibility_shim(&["eval", "40 + 2", "--json"]);
-        assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
-        let envelope: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("decode eval envelope");
-        assert_eq!(envelope["ok"], true);
-        assert_eq!(envelope["value"], 42);
     }
 
     #[test]
@@ -131,10 +107,6 @@ mod unix {
             .expect("spawn agenterm-cli");
         assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // Prefer agenterm-rh wording; accept legacy shim copy until product strings update.
-        assert!(
-            stderr.contains("invoke agenterm-rh directly")
-                || stderr.contains("invoke agenterm-rhai directly")
-        );
+        assert!(stderr.contains("invoke agenterm-rh directly"));
     }
 }

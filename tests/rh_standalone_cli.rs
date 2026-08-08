@@ -33,11 +33,11 @@ impl StandaloneCli {
         fs::hard_link(env!("CARGO_BIN_EXE_agenterm-rh"), &executable)
             .expect("hard-link standalone agenterm-rh");
 
-        for compatibility_name in [root.join("agenterm-rhai"), root.join("agenterm-rhai.exe")] {
+        for stale_name in [root.join("agenterm-rhai"), root.join("agenterm-rhai.exe")] {
             assert!(
-                !compatibility_name.exists(),
-                "compatibility executable unexpectedly exists: {}",
-                compatibility_name.display()
+                !stale_name.exists(),
+                "retired compatibility executable unexpectedly exists: {}",
+                stale_name.display()
             );
         }
 

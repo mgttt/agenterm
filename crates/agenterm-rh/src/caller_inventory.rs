@@ -1,4 +1,4 @@
-//! Report-only inventory of operational `agenterm-rhai` references (M22 prep).
+//! Report-only inventory of retired `agenterm-rhai` operational references (Phase C 4.7).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::RhError;
 
 pub const NEEDLE: &str = "agenterm-rhai";
+pub const BASELINE_FIXTURE: &str = "fixtures/rh/caller-inventory-baseline.json";
 pub const SCAN_FILES_MAX: usize = 4096;
 pub const SCAN_FILE_MAX_BYTES: usize = 2 * 1024 * 1024;
 
@@ -177,15 +178,21 @@ fn categorize_path(relative: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{CallerInventoryOptions, NEEDLE, scan_caller_inventory};
+    use super::{CallerInventoryOptions, BASELINE_FIXTURE, NEEDLE, scan_caller_inventory};
 
     #[test]
-    fn caller_inventory_finds_operational_references() {
+    fn caller_inventory_finds_residual_references() {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let report = scan_caller_inventory(CallerInventoryOptions { project_root: repo })
+        let report = scan_caller_inventory(CallerInventoryOptions {
+            project_root: repo.clone(),
+        })
             .expect("inventory");
         assert_eq!(report.needle, NEEDLE);
-        assert!(report.hit_count >= 40, "hits {}", report.hit_count);
+        assert!(
+            report.hit_count >= 20,
+            "residual migration hits {}",
+            report.hit_count
+        );
         assert!(
             report.categories.get("bootstrap").copied().unwrap_or(0) >= 1,
             "bootstrap callers: {:?}",
@@ -197,11 +204,15 @@ mod tests {
             report.categories
         );
         assert!(
+            repo.join(BASELINE_FIXTURE).is_file(),
+            "baseline fixture missing at {BASELINE_FIXTURE}"
+        );
+        assert!(
             report
                 .hits
                 .iter()
-                .any(|hit| hit.path == "scripts/bootstrap.sh"),
-            "expected bootstrap.sh hit"
+                .any(|hit| hit.path.starts_with("scripts/bootstrap.")),
+            "expected bootstrap hit"
         );
     }
 }

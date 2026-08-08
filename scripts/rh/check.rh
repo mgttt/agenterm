@@ -1018,36 +1018,13 @@ fn resolve_task_rh_cli(dist_rh_cli, repo) {
     )
 }
 
-fn resolve_task_compatibility_worker(compatibility_task_worker, repo) {
-    if compatibility_task_worker != "" {
-        return compatibility_task_worker;
-    }
-    first_nonempty_file(
-        repo,
-        "target/debug/agenterm-rhai.exe",
-        "target/debug/agenterm-rhai"
-    )
-}
-
-fn resolve_worker(
-    dist_rh_cli,
-    task_rh_cli,
-    task_compatibility_worker
-) {
+fn resolve_worker(dist_rh_cli, task_rh_cli) {
     let dist_text = "" + dist_rh_cli;
     let task_text = "" + task_rh_cli;
-    let fallback_text = "" + task_compatibility_worker;
     if dist_text != "" {
         return dist_text;
     }
-    if task_text != "" {
-        return task_text;
-    }
-    print(
-        "COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai shim; " +
-            "agenterm-rh is unavailable"
-    );
-    fallback_text
+    task_text
 }
 
 fn resolve_dist_lint_cli(dist_rh_cli, lint_worker) {
@@ -1788,23 +1765,9 @@ let dist_rh_cli = first_nonempty_file(
     "dist/agenterm-rh.exe",
     "dist/agenterm-rh"
 );
-let compatibility_task_worker = first_nonempty_file(
-    repo,
-    "dist/agenterm-rhai.exe",
-    "dist/agenterm-rhai"
-);
 let task_rh_cli = resolve_task_rh_cli(dist_rh_cli, repo);
-let task_compatibility_worker =
-    resolve_task_compatibility_worker(compatibility_task_worker, repo);
-require(
-    task_rh_cli != "" || task_compatibility_worker != "",
-    "check_dist_task_worker_missing"
-);
-let worker = resolve_worker(
-    dist_rh_cli,
-    task_rh_cli,
-    task_compatibility_worker
-);
+require(task_rh_cli != "", "check_dist_task_worker_missing");
+let worker = resolve_worker(dist_rh_cli, task_rh_cli);
 let dist_lint_cli = resolve_dist_lint_cli(dist_rh_cli, lint_worker);
 let artifact_verification_mode =
     resolve_artifact_verification_mode(release);

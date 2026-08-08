@@ -101,19 +101,63 @@ fn performance_experiment_uses_rh_for_build_and_manifest_tasks() {
 }
 
 #[test]
-fn dist_task_worker_prefers_rh_with_explicit_compatibility_fallback() {
+fn dist_task_worker_requires_rh_cli_without_compatibility_fallback() {
     let rh = CHECK
-        .find("[\"dist/agenterm-rh.exe\", \"dist/agenterm-rh\"]")
+        .find("\"dist/agenterm-rh.exe\"")
         .expect("dist rh candidates");
-    let compatibility = CHECK
-        .find("[\"dist/agenterm-rhai.exe\", \"dist/agenterm-rhai\"]")
-        .expect("dist compatibility candidates");
     let selection = CHECK
-        .find("let worker = if dist_rh_cli != \"\"")
-        .expect("rh-first worker selection");
-    assert!(rh < compatibility && compatibility < selection);
-    assert!(CHECK.contains("COMPATIBILITY FALLBACK: dist task worker uses agenterm-rhai"));
+        .find("let worker = resolve_worker(dist_rh_cli, task_rh_cli)")
+        .expect("rh worker selection");
+    assert!(rh < selection);
     assert!(CHECK.contains("check_dist_task_worker_missing"));
+    assert!(!CHECK.contains("COMPATIBILITY FALLBACK"));
+}
+
+#[test]
+fn artifact_manifest_declares_rh_dev_cli_offline_version_probe() {
+    let executables = ARTIFACT_MANIFEST["executables"]
+        .as_array()
+        .expect("manifest executables");
+    let matches = executables
+        .iter()
+        .filter(|entry| entry["role"] == "rh-dev-cli")
+        .collect::<Vec<_>>();
+    assert_eq!(matches.len(), 1, "expected one rh-dev-cli executable");
+    let rh = matches[0];
+    assert_eq!(rh["name"], "agenterm-rh.exe");
+    assert_eq!(rh["offline_probe"], serde_json::json!(["version"]));
+    assert!(
+        !executables
+            .iter()
+            .any(|entry| entry["role"] == "scripting-cli"),
+        "retired scripting-cli role must not reappear"
+    );
+}
+
+#[test]
+fn artifact_verification_probes_rh_dev_cli_and_rejects_invalid_versions() {
+    assert!(ARTIFACT_VERIFICATION.contains("fn entry("));
+    assert!(ARTIFACT_VERIFICATION.contains("\"rh-dev-cli\""));
+    assert!(ARTIFACT_VERIFICATION.contains("(\"\" + artifact.offline_probe[0]) == \"version\""));
+    assert!(ARTIFACT_VERIFICATION.contains("std::fs::metadata(path).len > 0"));
+    assert!(ARTIFACT_VERIFICATION.contains("std::process::command_stdout_file("));
+    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rh_version"));
+    assert!(!ARTIFACT_VERIFICATION.contains("dist, \"agenterm-rh.exe\""));
+    assert!(!ARTIFACT_VERIFICATION.contains("\"scripting-cli\""));
+}
+
+#[test]
+fn client_smoke_fail_closes_rh_version_probe_from_platform_manifest() {
+    assert!(CLIENT_SMOKE.contains("fn entry("));
+    assert!(CLIENT_SMOKE.contains("metadata.is_file && metadata.len > 0"));
+    assert!(CLIENT_SMOKE.contains("executable_role == \"rh-dev-cli\""));
+    assert!(CLIENT_SMOKE.contains("probe_arg == \"version\""));
+    assert!(CLIENT_SMOKE.contains("std::process::command_status("));
+    assert!(CLIENT_SMOKE.contains("std::process::command_stdout_file("));
+    assert!(CLIENT_SMOKE.contains("banner == \"agenterm-rh \" + package_version"));
+    assert!(CLIENT_SMOKE.contains("rh_dev_cli_count == 1"));
+    assert!(!CLIENT_SMOKE.contains("scripting_cli_count"));
+    assert!(!CLIENT_SMOKE.contains("executable_role == \"scripting-cli\""));
 }
 
 #[test]
@@ -164,56 +208,4 @@ fn rh_binary_is_owned_and_built_by_root_package() {
     assert!(WINDOWS_BOOTSTRAP.contains(root_build));
     assert!(!UNIX_BOOTSTRAP.contains(old_package_build));
     assert!(!WINDOWS_BOOTSTRAP.contains(old_package_build));
-}
-
-#[test]
-fn artifact_manifest_declares_both_rhai_and_rh_offline_version_probes() {
-    let executables = ARTIFACT_MANIFEST["executables"]
-        .as_array()
-        .expect("manifest executables");
-    let role = |expected: &str| {
-        let matches = executables
-            .iter()
-            .filter(|entry| entry["role"] == expected)
-            .collect::<Vec<_>>();
-        assert_eq!(matches.len(), 1, "expected one {expected} executable");
-        matches[0]
-    };
-
-    let rhai = role("scripting-cli");
-    assert_eq!(rhai["name"], "agenterm-rhai.exe");
-    assert_eq!(rhai["offline_probe"], serde_json::json!(["--version"]));
-
-    let rh = role("rh-dev-cli");
-    assert_eq!(rh["name"], "agenterm-rh.exe");
-    assert_eq!(rh["offline_probe"], serde_json::json!(["version"]));
-}
-
-#[test]
-fn artifact_verification_probes_manifest_roles_and_rejects_invalid_versions() {
-    assert!(ARTIFACT_VERIFICATION.contains("fn entry("));
-    assert!(ARTIFACT_VERIFICATION.contains("\"scripting-cli\""));
-    assert!(ARTIFACT_VERIFICATION.contains("\"rh-dev-cli\""));
-    assert!(ARTIFACT_VERIFICATION.contains("(\"\" + artifact.offline_probe[0]) == \"--version\""));
-    assert!(ARTIFACT_VERIFICATION.contains("(\"\" + artifact.offline_probe[0]) == \"version\""));
-    assert!(ARTIFACT_VERIFICATION.contains("std::fs::metadata(path).len > 0"));
-    assert!(ARTIFACT_VERIFICATION.contains("std::process::command_stdout_file("));
-    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rhai_version"));
-    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rh_version"));
-    assert!(!ARTIFACT_VERIFICATION.contains("dist, \"agenterm-rh.exe\""));
-}
-
-#[test]
-fn client_smoke_fail_closes_rh_version_probe_from_platform_manifest() {
-    assert!(CLIENT_SMOKE.contains("fn entry("));
-    assert!(CLIENT_SMOKE.contains("metadata.is_file && metadata.len > 0"));
-    assert!(CLIENT_SMOKE.contains("executable_role == \"scripting-cli\""));
-    assert!(CLIENT_SMOKE.contains("executable_role == \"rh-dev-cli\""));
-    assert!(CLIENT_SMOKE.contains("probe_arg == \"--version\""));
-    assert!(CLIENT_SMOKE.contains("probe_arg == \"version\""));
-    assert!(CLIENT_SMOKE.contains("std::process::command_status("));
-    assert!(CLIENT_SMOKE.contains("std::process::command_stdout_file("));
-    assert!(CLIENT_SMOKE.contains("banner == \"agenterm-rh \" + package_version"));
-    assert!(CLIENT_SMOKE.contains("scripting_cli_count == 1"));
-    assert!(CLIENT_SMOKE.contains("rh_dev_cli_count == 1"));
 }

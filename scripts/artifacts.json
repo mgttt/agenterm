@@ -30,16 +30,6 @@
       "release_budget_bytes": 2097152
     },
     {
-      "name": "agenterm-rhai.exe",
-      "role": "scripting-cli",
-      "pe_subsystem": 3,
-      "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-      "offline_probe": [
-        "--version"
-      ],
-      "release_budget_bytes": 4194304
-    },
-    {
       "name": "agenterm-rh.exe",
       "role": "rh-dev-cli",
       "pe_subsystem": 3,
@@ -85,16 +75,6 @@
           "release_budget_bytes": 2097152
         },
         {
-          "name": "agenterm-rhai.exe",
-          "role": "scripting-cli",
-          "pe_subsystem": 3,
-          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-          "offline_probe": [
-            "--version"
-          ],
-          "release_budget_bytes": 4194304
-        },
-        {
           "name": "agenterm-rh.exe",
           "role": "rh-dev-cli",
           "pe_subsystem": 3,
@@ -138,15 +118,6 @@
           ]
         },
         {
-          "name": "agenterm-rhai.exe",
-          "role": "scripting-cli",
-          "pe_subsystem": 3,
-          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-          "offline_probe": [
-            "--version"
-          ]
-        },
-        {
           "name": "agenterm-rh.exe",
           "role": "rh-dev-cli",
           "pe_subsystem": 3,
@@ -186,14 +157,6 @@
           ]
         },
         {
-          "name": "agenterm-rhai",
-          "role": "scripting-cli",
-          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-          "offline_probe": [
-            "--help"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
@@ -232,14 +195,6 @@
           ]
         },
         {
-          "name": "agenterm-rhai",
-          "role": "scripting-cli",
-          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-          "offline_probe": [
-            "--help"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
@@ -278,14 +233,6 @@
           ]
         },
         {
-          "name": "agenterm-rhai",
-          "role": "scripting-cli",
-          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-          "offline_probe": [
-            "--help"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
@@ -321,14 +268,6 @@
           "documentation_role": "native observation and automation client",
           "offline_probe": [
             "--version"
-          ]
-        },
-        {
-          "name": "agenterm-rhai",
-          "role": "scripting-cli",
-          "documentation_role": "compatibility Rhai shim CLI (primary worker: agenterm-rh)",
-          "offline_probe": [
-            "--help"
           ]
         },
         {

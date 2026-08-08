@@ -31,7 +31,6 @@ fn entry() {
     let manifest = rh::json::parse(manifest_text);
 
     let platform_match_count = 0;
-    let scripting_cli_count = 0;
     let rh_dev_cli_count = 0;
 
     let package_version = "";
@@ -94,18 +93,6 @@ fn entry() {
                 "client_smoke_file_invalid:" + executable_name
             );
 
-            if executable_role == "scripting-cli" {
-                scripting_cli_count += 1;
-                require(
-                    executable.offline_probe.len == 1,
-                    "client_smoke_rhai_version_probe_missing"
-                );
-                let probe_arg = "--version";
-                require(
-                    probe_arg == "--version",
-                    "client_smoke_rhai_version_probe_missing"
-                );
-            }
             if executable_role == "rh-dev-cli" {
                 rh_dev_cli_count += 1;
                 require(
@@ -217,19 +204,6 @@ fn entry() {
                         "client_smoke_webview_host_contract"
                     );
                 }
-                if executable_role == "scripting-cli" {
-                    let probe_arg = "--version";
-                    let probe_code = std::process::command_status(
-                        path,
-                        ["--version"],
-                        10000,
-                        repo_options
-                    );
-                    require(
-                        probe_code == 0,
-                        "client_smoke_probe:" + executable_name + ":" + probe_arg
-                    );
-                }
                 if executable_role == "rh-dev-cli" {
                     let probe_arg = "version";
                     let probe_code = std::process::command_stdout_file(
@@ -257,10 +231,6 @@ fn entry() {
     require(
         platform_match_count == 1,
         "client_smoke_platform_match"
-    );
-    require(
-        scripting_cli_count == 1,
-        "client_smoke_scripting_cli_count"
     );
     require(
         rh_dev_cli_count == 1,

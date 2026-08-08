@@ -32,9 +32,11 @@ fn local_build_installs_a_dock_safe_app_bundle() {
     let applications = root.join("applications");
     fs::create_dir_all(&binaries).expect("create fixture build");
 
-    for name in ["agenterm", "agenterm-cli", "agenterm-rhai"] {
+    for name in ["agenterm", "agenterm-cli", "agenterm-rh"] {
         let body = if name == "agenterm-cli" {
             format!("#!/bin/sh\necho 'agenterm-cli {CURRENT_VERSION}'\n")
+        } else if name == "agenterm-rh" {
+            format!("#!/bin/sh\necho 'agenterm-rh {CURRENT_VERSION}'\n")
         } else {
             "#!/bin/sh\nexit 0\n".to_owned()
         };

@@ -183,45 +183,6 @@ fn entry() {
         std::path::join(dist, "agenterm-cc.exe").display;
     let metadata_version = "" + metadata.version;
 
-    let scripting_matched = 0;
-    for artifact in manifest.executables {
-        if ("" + artifact.role) != "scripting-cli" {
-            continue;
-        }
-        require(
-            scripting_matched == 0,
-            "artifact_role_duplicate:scripting-cli"
-        );
-        scripting_matched = 1;
-        require(
-            artifact.offline_probe.len == 1
-                && ("" + artifact.offline_probe[0]) == "--version",
-            "artifact_version_probe_missing:scripting-cli"
-        );
-        let artifact_name = "" + artifact.name;
-        let path = std::path::join(dist, artifact_name).display;
-        require(
-            std::fs::metadata(path).is_file
-                && std::fs::metadata(path).len > 0,
-            "artifact_version_file_invalid:" + artifact_name
-        );
-        let exit_code = std::process::command_stdout_file(
-            path,
-            ["--version"],
-            30000,
-            stdout_path,
-            probe_options
-        );
-        require(exit_code == 0, "artifact_rhai_version:exit=" + exit_code);
-        let text = std::fs::read_to_string(stdout_path);
-        text.trim();
-        require(
-            text == "agenterm-rhai " + metadata_version,
-            "artifact_rhai_version_mismatch"
-        );
-    }
-    require(scripting_matched == 1, "artifact_role_missing:scripting-cli");
-
     let rh_dev_matched = 0;
     for artifact in manifest.executables {
         if ("" + artifact.role) != "rh-dev-cli" {
