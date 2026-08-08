@@ -1018,13 +1018,16 @@ try {
     let font_increase_button = require_window_control(replacement_gui.window_control(2131), "font_increase_button");
     let toolbar = wait_workspace_toolbar(context, cli, "remote_ui_toolbar_ready_timeout");
     let toolbar_layout = toolbar.layout.toolbar;
+    let new_bounds = toolbar_layout["new"];
+    let new_left = new_bounds["left"];
+    let new_right = new_bounds["right"];
     let toolbar_locale = toolbar.locale;
     let locale_toolbar_label = toolbar_locale.toolbar_label;
     test_harness::require(
         toolbar.layout.sidebar.visible
             && toolbar_layout.tabs.left
-                < toolbar_layout["new"].left
-            && toolbar_layout["new"].right
+                < new_left
+            && new_right
                 <= toolbar_layout.control_center.left
             && toolbar_layout.control_center.right
                 <= toolbar_layout.settings.left
@@ -1903,9 +1906,10 @@ try {
         cli,
         ["ui-bootstrap"]
     );
+    let confirmed_first_tab = confirmed_close.tabs[0];
     test_harness::require(
         confirmed_close.tabs.len == 1
-            && confirmed_close.tabs[0].id == tab_id
+            && confirmed_first_tab["id"] == tab_id
             && confirmed_close.active_tab_id == tab_id
             && !tab_close_confirm.visible,
         "remote_ui_tab_close_confirm_invalid"
@@ -2069,9 +2073,10 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let edited_first_window = edited.windows[0];
     test_harness::require(
-        edited.windows[0].name == edited_title
-            && edited.windows[0].note == edited_note
+        edited_first_window.name == edited_title
+            && edited_first_window.note == edited_note
             && !title_editor.visible,
         "remote_ui_inline_save_invalid"
     );
@@ -2083,8 +2088,9 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let rejected_first_window = rejected.windows[0];
     test_harness::require(
-        rejected.windows[0].name == edited_title
+        rejected_first_window.name == edited_title
             && title_editor.visible,
         "remote_ui_inline_oversize_not_rejected"
     );
@@ -2097,8 +2103,9 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let edit_cancelled_first_window = edit_cancelled.windows[0];
     test_harness::require(
-        edit_cancelled.windows[0].name == edited_title
+        edit_cancelled_first_window.name == edited_title
             && !title_editor.visible,
         "remote_ui_inline_cancel_invalid"
     );
@@ -2305,8 +2312,9 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let dragged_top_window = dragged_top.windows[0];
     test_harness::require(
-        dragged_top.windows[0].scrollback_offset == maximum_scroll,
+        dragged_top_window.scrollback_offset == maximum_scroll,
         "remote_ui_scrollbar_did_not_reach_history"
     );
     let live_snapshot = json_cli(
@@ -2324,8 +2332,9 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let dragged_live_window = dragged_live.windows[0];
     test_harness::require(
-        dragged_live.windows[0].scrollback_offset == 0,
+        dragged_live_window.scrollback_offset == 0,
         "remote_ui_scrollbar_did_not_return_live"
     );
     let wheel_up_snapshot = json_cli(
@@ -2346,8 +2355,9 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let wheel_up_window = wheel_up_inspect.windows[0];
     test_harness::require(
-        wheel_up_inspect.windows[0].scrollback_offset > 0,
+        wheel_up_window.scrollback_offset > 0,
         "remote_ui_wheel_up_invalid"
     );
     let wheel_down_snapshot = json_cli(
@@ -2368,8 +2378,9 @@ try {
         cli,
         ["inspect", "-t", tab_id]
     );
+    let wheel_down_window = wheel_down_inspect.windows[0];
     test_harness::require(
-        wheel_down_inspect.windows[0].scrollback_offset == 0,
+        wheel_down_window.scrollback_offset == 0,
         "remote_ui_wheel_down_invalid"
     );
 

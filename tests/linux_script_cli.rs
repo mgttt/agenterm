@@ -1,4 +1,6 @@
-//! Black-box tests for the public `agenterm-rhai` CLI on Unix hosts.
+//! Black-box tests for the public Script Runtime CLI on Unix hosts.
+//! Primary surface: `agenterm-rh` and `.rh`. The `agenterm-rhai` compatibility shim
+//! is exercised only where the legacy entry path is still required.
 //! Uses `Command::output()` so exit codes are read from `ExitStatus`, not shell pipes.
 
 #[cfg(unix)]
@@ -13,17 +15,30 @@ mod unix {
         Path::new(env!("CARGO_MANIFEST_DIR"))
     }
 
-    fn script_bin() -> &'static str {
+    fn rh_bin() -> &'static str {
+        env!("CARGO_BIN_EXE_agenterm-rh")
+    }
+
+    fn compatibility_shim_bin() -> &'static str {
         env!("CARGO_BIN_EXE_agenterm-rhai")
     }
 
-    fn run(args: &[&str]) -> std::process::Output {
+    fn run_rh(args: &[&str]) -> std::process::Output {
         let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
-        Command::new(script_bin())
+        Command::new(rh_bin())
             .current_dir(repo_root())
             .args(args)
             .output()
-            .expect("spawn agenterm-rhai")
+            .expect("spawn agenterm-rh")
+    }
+
+    fn run_compatibility_shim(args: &[&str]) -> std::process::Output {
+        let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
+        Command::new(compatibility_shim_bin())
+            .current_dir(repo_root())
+            .args(args)
+            .output()
+            .expect("spawn agenterm-rhai compatibility shim")
     }
 
     fn format_output(output: &std::process::Output) -> String {
@@ -36,8 +51,8 @@ mod unix {
     }
 
     #[test]
-    fn public_eval_returns_success_envelope() {
-        let output = run(&["eval", "40 + 2", "--json"]);
+    fn compatibility_shim_eval_returns_success_envelope() {
+        let output = run_compatibility_shim(&["eval", "40 + 2", "--json"]);
         assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
         let envelope: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("decode eval envelope");
@@ -47,28 +62,25 @@ mod unix {
 
     #[test]
     fn public_rh_runs_native_internal_version_policy_task() {
-        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
-            .current_dir(repo_root())
-            .args([
-                "task",
-                "run",
-                "internal-version-policy",
-                "--manifest",
-                "agenterm.tasks.json",
-            ])
-            .output()
-            .expect("spawn agenterm-rh");
+        let output = run_rh(&[
+            "task",
+            "run",
+            "internal-version-policy",
+            "--manifest",
+            "agenterm.tasks.json",
+        ]);
         assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("PASS:"), "unexpected stdout: {stdout}");
     }
 
     #[test]
-    fn public_task_check_accepts_repository_manifest() {
+    fn public_task_check_accepts_ready_task() {
         let manifest = repo_root().join("agenterm.tasks.json");
-        let output = run(&[
+        let output = run_rh(&[
             "task",
             "check",
+            "internal-version-policy",
             "--manifest",
             manifest.to_str().expect("manifest path"),
         ]);
@@ -78,51 +90,35 @@ mod unix {
     }
 
     #[test]
-    fn public_task_run_migration_audit_reports_no_drift() {
-        let manifest = repo_root().join("agenterm.tasks.json");
-        let output = run(&[
-            "task",
-            "run",
-            "migration-audit",
+    fn public_check_many_accepts_repository_fixture_manifest() {
+        let manifest = repo_root().join("fixtures/rh/check-many.json");
+        let output = run_rh(&[
+            "check-many",
             "--manifest",
             manifest.to_str().expect("manifest path"),
-            "--timeout-ms",
-            "60000",
-            "--max-operations",
-            "10000000",
-            "--",
-            ".",
-        ]);
-        assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
-        let report: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("decode migration report");
-        assert_eq!(report["drift"], false);
-        assert_eq!(report["remaining_count"], 0);
-    }
-
-    #[test]
-    fn public_task_run_lint_static_passes() {
-        let manifest = repo_root().join("agenterm.tasks.json");
-        let worker = script_bin();
-        let output = run(&[
-            "task",
-            "run",
-            "lint",
-            "--manifest",
-            manifest.to_str().expect("manifest path"),
-            "--timeout-ms",
-            "120000",
-            "--max-operations",
-            "10000000",
-            "--",
-            ".",
-            worker,
-            "static",
+            "--project-root",
+            repo_root().to_str().expect("repo root"),
         ]);
         assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
-            stdout.contains("PASS: repository lint"),
+            stdout.starts_with("OK ("),
+            "unexpected stdout: {stdout}"
+        );
+    }
+
+    #[test]
+    fn public_check_validates_repository_rh_fixture() {
+        let output = run_rh(&[
+            "check",
+            "fixtures/rh/entry.rh",
+            "--project-root",
+            repo_root().to_str().expect("repo root"),
+        ]);
+        assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("rh check ok: fixtures/rh/entry.rh"),
             "unexpected stdout: {stdout}"
         );
     }
@@ -135,6 +131,10 @@ mod unix {
             .expect("spawn agenterm-cli");
         assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("invoke agenterm-rhai directly"));
+        // Stub message still names the compatibility shim until product copy updates.
+        assert!(
+            stderr.contains("invoke agenterm-rhai directly")
+                || stderr.contains("invoke agenterm-rh directly")
+        );
     }
 }

@@ -139,8 +139,7 @@ fn blank_profile_state() {
     }
 }
 
-fn init_evidence_states(profiles) {
-    let _profiles = profiles;
+fn init_evidence_states() {
     let blank = blank_profile_state();
     #{
         failed: false,
@@ -470,10 +469,10 @@ fn classify_failure_root(failure) {
     "bug/unknown"
 }
 
-fn fail_supported_profiles_for_platform(evidence_states, platform, message, profiles) {
+fn fail_supported_profiles_for_platform(evidence_states, platform, message) {
     let platform_text = "" + platform;
     let ids = [];
-    for profile in profiles {
+    for profile in evidence_profiles {
         let supported = 0;
         if platform_text == "windows" {
             if profile.windows_supported != 0 {
@@ -525,15 +524,15 @@ fn read_task_evidence(context) {
 fn profile_evidence_state(emitted, profile_id) {
     let profile_key = "" + profile_id;
     if emitted.contains(profile_key) == 0 {
-        return #{
-            executed: false,
-            failed: false,
-            root_cause: "",
-            observed: false
-        };
+        return blank_profile_state();
     }
-    let state_value = emitted[profile_key];
-    state_value
+    let entry = emitted[profile_key];
+    return #{
+        executed: entry.executed,
+        failed: entry.failed,
+        root_cause: "" + entry.root_cause,
+        observed: entry.observed
+    };
 }
 
 fn single_platform_state(
@@ -659,7 +658,7 @@ fn current_platform_root(per_platform, platform) {
     per_platform.macos_root
 }
 
-fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profiles) {
+fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
     if emit_matrix == 0 {
         return;
     }
@@ -677,7 +676,7 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
     ).display;
 
     let matrix_result = [];
-    for profile in profiles {
+    for profile in evidence_profiles {
         let profile_branch = "" + profile.branch;
         let profile_scenario = "" + profile.scenario;
         let profile_id = "" + profile.id;
@@ -727,7 +726,7 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix, profile
     let csv_rows = [
         "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
     ];
-    for profile in profiles {
+    for profile in evidence_profiles {
         let profile_branch = "" + profile.branch;
         let profile_scenario = "" + profile.scenario;
         let profile_id = "" + profile.id;
@@ -795,14 +794,21 @@ fn parse_platform_args(positional_args) {
     let platform_arg = positional_args[last_index];
     let platform = platform_arg.to_lower();
 
-    let attempt_repo = absolute(positional_args[args_len - 4]);
-    let attempt_gui = absolute(positional_args[args_len - 3]);
-    let attempt_cli = absolute(positional_args[args_len - 2]);
+    let repo_index = args_len - 4;
+    let gui_index = args_len - 3;
+    let cli_index = args_len - 2;
+    let attempt_repo = absolute(positional_args[repo_index]);
+    let attempt_gui = absolute(positional_args[gui_index]);
+    let attempt_cli = absolute(positional_args[cli_index]);
     if args_len >= 5 {
-        let maybe_repo = absolute(positional_args[args_len - 5]);
-        let maybe_gui = absolute(positional_args[args_len - 4]);
-        let maybe_script = absolute(positional_args[args_len - 3]);
-        let maybe_cli = absolute(positional_args[args_len - 2]);
+        let five_repo_index = args_len - 5;
+        let five_gui_index = args_len - 4;
+        let five_script_index = args_len - 3;
+        let five_cli_index = args_len - 2;
+        let maybe_repo = absolute(positional_args[five_repo_index]);
+        let maybe_gui = absolute(positional_args[five_gui_index]);
+        let maybe_script = absolute(positional_args[five_script_index]);
+        let maybe_cli = absolute(positional_args[five_cli_index]);
         let maybe_script_text = "" + maybe_script;
         let maybe_gui_text = "" + maybe_gui;
         let maybe_cli_text = "" + maybe_cli;
@@ -1098,8 +1104,7 @@ fn entry() {
     let cli_exe = "" + parsed.cli_exe;
     let platform = "" + parsed.platform;
 
-    let profiles = evidence_profiles;
-    let evidence_states = init_evidence_states(profiles);
+    let evidence_states = init_evidence_states();
     let failure_messages = [];
     let succeeded = true;
     let platform_text = platform;
@@ -1124,8 +1129,7 @@ fn entry() {
         evidence_states = fail_supported_profiles_for_platform(
             evidence_states,
             platform_text,
-            preflight_message,
-            profiles
+            preflight_message
         );
         failure_messages.push(preflight_message);
         succeeded = false;
@@ -1250,8 +1254,7 @@ fn entry() {
         context,
         platform_text,
         evidence_states,
-        emit_matrix,
-        profiles
+        emit_matrix
     );
     test_harness::complete(context, [], succeeded, failure);
 }

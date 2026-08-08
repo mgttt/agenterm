@@ -1,0 +1,12 @@
+fn empty_environment() {
+    #{}
+}
+
+fn entry() {
+    let env = empty_environment();
+    env["probe"] = "ok";
+    if env["probe"] != "ok" {
+        return 1;
+    }
+    0
+}

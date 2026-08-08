@@ -40,7 +40,7 @@ fn write_manifest(path: &Path, channel: &str, source: &str) {
             "{}\n",
             serde_json::to_string_pretty(&json!({
                 "schema_version": 1,
-                // Mirrors what release_candidate.rhai actually seals: the
+                // Mirrors what release_candidate.rh actually seals: the
                 // manifest is identified by product, not by a kind field.
                 "product": "AgenTerm",
                 "version": CURRENT_VERSION,
@@ -61,7 +61,7 @@ fn write_manifest(path: &Path, channel: &str, source: &str) {
 
 fn generate(root: &Path, manifest: &Path, source: &str) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rhai"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
         .current_dir(repo)
         .arg("run")
         .arg(repo.join("scripts/rh/promotion-identity.rh"))

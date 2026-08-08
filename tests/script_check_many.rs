@@ -21,7 +21,7 @@ fn fixture() -> Fixture {
         .expect("clock before epoch")
         .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "agenterm-rhai-check-many-{}-{nonce}",
+        "agenterm-rh-check-many-{}-{nonce}",
         std::process::id()
     ));
     fs::create_dir_all(&root).expect("create fixture");
@@ -36,7 +36,7 @@ fn write_manifest(root: &Path, files: Vec<String>) -> PathBuf {
             "{}\n",
             serde_json::to_string_pretty(&json!({
                 "schema_version": 1,
-                "kind": "agenterm-rhai-check-manifest",
+                "kind": "agenterm-rh-check-manifest",
                 "files": files,
             }))
             .expect("encode manifest")
@@ -58,11 +58,11 @@ fn run(root: &Path, arguments: &[&str]) -> Output {
 #[test]
 fn check_many_preserves_typed_check_failures_and_plain_diagnostics() {
     let fixture = fixture();
-    fs::write(fixture.root.join("good.rhai"), "let answer = 40 + 2;\n").expect("write good script");
-    fs::write(fixture.root.join("bad.rhai"), "let broken = ;\n").expect("write bad script");
+    fs::write(fixture.root.join("good.rh"), "let answer = 40 + 2;\n").expect("write good script");
+    fs::write(fixture.root.join("bad.rh"), "let broken = ;\n").expect("write bad script");
     let manifest = write_manifest(
         &fixture.root,
-        vec!["good.rhai".to_owned(), "bad.rhai".to_owned()],
+        vec!["good.rh".to_owned(), "bad.rh".to_owned()],
     );
     let manifest_text = manifest.to_str().expect("manifest path");
     let root_text = fixture.root.to_str().expect("fixture path");
@@ -81,15 +81,16 @@ fn check_many_preserves_typed_check_failures_and_plain_diagnostics() {
     assert_eq!(batch.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&batch.stdout).expect("decode batch report");
     assert_eq!(report["schema_version"], 1);
+    // Legacy report kind retained for JSON schema compatibility; agenterm-rh is the producer.
     assert_eq!(report["kind"], "agenterm-rhai-check-many");
     assert_eq!(report["ok"], false);
     assert_eq!(report["checked_files"], 2);
     assert_eq!(report["failures"].as_array().map(Vec::len), Some(1));
-    assert_eq!(report["failures"][0]["path"], "bad.rhai");
+    assert_eq!(report["failures"][0]["path"], "bad.rh");
 
     let single = run(
         &fixture.root,
-        &["check", "bad.rhai", "--project-root", root_text, "--json"],
+        &["check", "bad.rh", "--project-root", root_text, "--json"],
     );
     assert_eq!(single.status.code(), Some(1));
     let envelope: Value = serde_json::from_slice(&single.stdout).expect("decode check envelope");
@@ -114,7 +115,7 @@ fn check_many_preserves_typed_check_failures_and_plain_diagnostics() {
     assert!(plain.stdout.is_empty());
     let diagnostic = String::from_utf8_lossy(&plain.stderr);
     let payload = diagnostic
-        .strip_prefix("bad.rhai: ")
+        .strip_prefix("bad.rh: ")
         .expect("path-prefixed diagnostic");
     let failure: Value = serde_json::from_str(payload.trim()).expect("typed diagnostic");
     assert_eq!(failure["code"], envelope["failure"]["code"]);
@@ -124,10 +125,10 @@ fn check_many_preserves_typed_check_failures_and_plain_diagnostics() {
 #[test]
 fn check_many_rejects_unbounded_or_ambiguous_manifests() {
     let fixture = fixture();
-    fs::write(fixture.root.join("good.rhai"), "40 + 2\n").expect("write script");
+    fs::write(fixture.root.join("good.rh"), "40 + 2\n").expect("write script");
     let too_many = write_manifest(
         &fixture.root,
-        (0..257).map(|index| format!("file-{index}.rhai")).collect(),
+        (0..257).map(|index| format!("file-{index}.rh")).collect(),
     );
     let rejected = run(
         &fixture.root,
@@ -158,7 +159,7 @@ fn check_many_rejects_unbounded_or_ambiguous_manifests() {
 
     let duplicate = write_manifest(
         &fixture.root,
-        vec!["good.rhai".to_owned(), "./good.rhai".to_owned()],
+        vec!["good.rh".to_owned(), "./good.rh".to_owned()],
     );
     let rejected = run(
         &fixture.root,

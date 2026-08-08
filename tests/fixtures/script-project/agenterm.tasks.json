@@ -37,7 +37,7 @@
     {
       "id": "missing-entry",
       "description": "Intentionally degraded discovery fixture",
-      "entry": "missing.rhai",
+      "entry": "missing.rh",
       "profile": "local"
     },
     {

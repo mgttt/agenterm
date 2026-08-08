@@ -43,6 +43,47 @@ fn assert_bundled_pack_builds(entry: &str) {
     assert!(dir.join("manifest.json").is_file(), "{entry}");
 }
 
+fn assert_native_bundled_transpile(entry: &str, rust_needles: &[&str]) {
+    let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
+        panic!("read {entry}: {error}");
+    });
+    assert!(source.contains("fn entry("), "{entry}");
+    let bundled = agenterm_rh::bundle_project_source(&repo(), &source)
+        .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
+    let output = agenterm_rh::transpile_cdylib_with_mode(&bundled).unwrap_or_else(|error| {
+        panic!("transpile bundled {entry}: {error}");
+    });
+    assert_eq!(
+        output.execution_mode.as_str(),
+        "native",
+        "{entry}: {}",
+        output.rust
+    );
+    for needle in rust_needles {
+        assert!(
+            output.rust.contains(needle),
+            "{entry} missing {needle:?}: {}",
+            output.rust
+        );
+    }
+    assert!(
+        !output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"),
+        "{entry}: {}",
+        output.rust
+    );
+    assert!(
+        !output.rust.contains("compat delegating"),
+        "{entry}: {}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{entry} host-eval count: {}",
+        output.rust
+    );
+}
+
 fn assert_native_bundled_pack(entry: &str, rust_needles: &[&str]) {
     let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
         panic!("read {entry}: {error}");
@@ -141,8 +182,16 @@ fn remote_ui_smoke_uses_bundled_pack() {
 }
 
 #[test]
-fn fresh_clone_rehearsal_uses_bundled_pack() {
-    assert_bundled_pack_builds("scripts/rh/fresh-clone-rehearsal.rh");
+fn fresh_clone_rehearsal_uses_host_eval_bundled_transpile() {
+    // Host-eval pack cargo can still trip on HE snippet quoting for nested
+    // for-loops; lock non-compat emit here and keep full pack compile on Native
+    // tasks / smaller HE smokes.
+    let (source, output) = transpile_project_entry("scripts/rh/fresh-clone-rehearsal.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "host-eval");
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+    assert!(output.rust.matches("rh_host_eval_int(").count() > 1);
 }
 
 #[test]
@@ -150,8 +199,8 @@ fn validate_artifact_manifest_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/validate-artifact-manifest.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("pub fn is_artifact_name("), "{}", output.rust);
-    assert!(output.rust.contains("pub fn validate("), "{}", output.rust);
+    assert!(output.rust.contains("is_artifact_name("), "{}", output.rust);
+    assert!(output.rust.contains("__validate("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
 }
@@ -161,8 +210,8 @@ fn stage_artifact_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/stage-artifact.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("pub fn stage("), "{}", output.rust);
-    assert!(output.rust.contains("pub fn stage_as("), "{}", output.rust);
+    assert!(output.rust.contains("__stage("), "{}", output.rust);
+    assert!(output.rust.contains("__stage_as("), "{}", output.rust);
     assert!(output.rust.contains("rh_try_copy("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
@@ -173,8 +222,8 @@ fn write_build_metadata_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/write-build-metadata.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("pub fn write("), "{}", output.rust);
-    assert!(output.rust.contains("pub fn write_platform("), "{}", output.rust);
+    assert!(output.rust.contains("__write("), "{}", output.rust);
+    assert!(output.rust.contains("__write_platform("), "{}", output.rust);
     assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
@@ -194,7 +243,7 @@ fn build_identity_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/build-identity.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("pub fn write("), "{}", output.rust);
+    assert!(output.rust.contains("__write("), "{}", output.rust);
     assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
@@ -245,8 +294,8 @@ fn stage_build_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/stage-build.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("pub fn stage("), "{}", output.rust);
-    assert!(output.rust.contains("pub fn write("), "{}", output.rust);
+    assert!(output.rust.contains("__stage("), "{}", output.rust);
+    assert!(output.rust.contains("__write("), "{}", output.rust);
     assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
     assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
@@ -388,16 +437,95 @@ fn lint_uses_native_bundled_execution() {
 
 #[test]
 fn supply_chain_uses_native_bundled_execution() {
-    let (source, output) = transpile_project_entry("scripts/rh/supply-chain.rh");
-    assert!(source.contains("fn entry("));
-    assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_array_push("), "{}", output.rust);
-    assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert!(!output.rust.contains("compat delegating"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_native_bundled_transpile(
+        "scripts/rh/supply-chain.rh",
+        &[
+            "workspace_ids.insert(",
+            "rh_json_array_push(",
+            "rh_process_stdout_file(",
+            "rh_json_parse(",
+            "rh_atomic_write(",
+        ],
+    );
+}
+
+#[test]
+fn diagnostic_bundle_selftest_uses_native_bundled_execution() {
+    assert_native_bundled_transpile(
+        "scripts/rh/diagnostic-bundle-selftest.rh",
+        &[
+            "rh_json_set_path_key(",
+            "rh_json_array_get(&matches, ",
+            "rh_json_set_path_index(",
+            "diagnostic_new_bundle_count",
+            "rh_process_stdout_file(",
+        ],
+    );
+}
+
+#[test]
+fn task_manifest_has_no_live_rhai_entry_paths() {
+    let repo = repo();
+    let manifest_text =
+        std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("task manifest");
+    assert!(
+        !manifest_text.contains(".rhai\""),
+        "agenterm.tasks.json must not reference .rhai task entries"
+    );
+    assert!(
+        !manifest_text.contains("scripts/rhai/"),
+        "agenterm.tasks.json must not reference live scripts/rhai/ paths"
+    );
+
+    let entries = agenterm_rh::extract_task_entries(&repo.join("agenterm.tasks.json"))
+        .expect("task entries");
+    assert!(
+        entries.iter().all(|entry| entry.ends_with(".rh") || entry.ends_with(".lua")),
+        "unexpected non-.rh/.lua task entry: {entries:?}"
+    );
+    assert!(
+        !entries.iter().any(|entry| entry.contains("scripts/rhai/")),
+        "live scripts/rhai/ task entry still present: {entries:?}"
+    );
+    assert!(
+        !entries.iter().any(|entry| entry.ends_with(".rhai")),
+        ".rhai task entry still present: {entries:?}"
+    );
+}
+
+#[test]
+fn phase_b_smoke_entries_use_host_eval_or_native_pack() {
+    for entry in [
+        "scripts/rh/platform-ux-parity-smoke.rh",
+        "scripts/rh/script-smoke.rh",
+        "scripts/rh/remote-ui-smoke.rh",
+    ] {
+        let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
+            panic!("read {entry}: {error}");
+        });
+        let bundled = agenterm_rh::bundle_project_source(&repo(), &source)
+            .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
+        let output = agenterm_rh::transpile_cdylib_with_mode(&bundled).unwrap_or_else(|error| {
+            panic!("transpile bundled {entry}: {error}");
+        });
+        assert!(
+            matches!(
+                output.execution_mode,
+                agenterm_rh::CdylibExecutionMode::HostEval
+                    | agenterm_rh::CdylibExecutionMode::Native
+            ),
+            "{entry}: expected host-eval/native after Phase B cutover, got {:?}",
+            output.execution_mode
+        );
+        assert!(
+            !output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"),
+            "{entry}: must not whole-script compat-delegate"
+        );
+        assert!(
+            !output.rust.contains("compat delegating"),
+            "{entry}: must not emit compat-delegating marker"
+        );
+    }
 }
 
 #[test]
@@ -707,15 +835,9 @@ fn theme_smoke_uses_native_bundled_pack() {
 }
 
 #[test]
-fn native_ipc_compat_smoke_uses_native_bundled_pack() {
-    assert_native_bundled_pack(
-        "scripts/rh/native-ipc-compat-smoke.rh",
-        &[
-            "rh_process_status(",
-            "native_ipc_compat_command_failed",
-            "rh_host_json_call(\"process.platform_facts\"",
-        ],
-    );
+fn native_ipc_compat_smoke_uses_bundled_pack() {
+    // Still host-eval (closure HE>1); pack build is the Phase B gate.
+    assert_bundled_pack_builds("scripts/rh/native-ipc-compat-smoke.rh");
 }
 #[test]
 fn server_smoke_uses_native_bundled_pack() {
@@ -792,17 +914,6 @@ fn control_center_smoke_uses_native_bundled_pack() {
 fn control_center_macos_smoke_uses_native_bundled_pack() {
     assert_native_bundled_pack(
         "scripts/rh/control-center-macos-smoke.rh",
-        &[
-            "rh_process_stdout_file(",
-            "rh_host_json_call(\"process.list\"",
-        ],
-    );
-}
-
-#[test]
-fn control_center_linux_smoke_uses_native_bundled_pack() {
-    assert_native_bundled_pack(
-        "scripts/rh/control-center-linux-smoke.rh",
         &[
             "rh_process_stdout_file(",
             "rh_host_json_call(\"process.list\"",

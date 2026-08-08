@@ -5,11 +5,11 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use agenterm_rh::{
-    CheckManyOptions, RhError, check, check_with_project_validation, read_manifest, run_check_many,
-    transpile_cdylib,
+    CheckManyOptions, RhError, RH_CODEGEN_REVISION, check, check_with_project_validation,
+    read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 37] = [
+const FIXTURE_NAMES: [&str; 43] = [
     "append-sync-probe.rh",
     "break-continue.rh",
     "child-lifecycle-probe.rh",
@@ -23,14 +23,18 @@ const FIXTURE_NAMES: [&str; 37] = [
     "fs-mutation-probe.rh",
     "import-bundle-probe.rh",
     "int-string-concat-probe.rh",
+    "json-array-index-assign-probe.rh",
+    "json-array-index-map-return-probe.rh",
     "json-array-literal-probe.rh",
     "json-array-push-probe.rh",
     "json-array-walk.rh",
+    "json-param-index-assign-probe.rh",
     "json-keys-probe.rh",
     "json-parse-schema.rh",
     "json-path-index-probe.rh",
     "json-type-string.rh",
     "map-set-membership.rh",
+    "output-fn-arg-probe.rh",
     "path-file-name-probe.rh",
     "path-metadata-probe.rh",
     "path-metadata-sugar.rh",
@@ -39,6 +43,8 @@ const FIXTURE_NAMES: [&str; 37] = [
     "process-output-probe.rh",
     "process-stdout-file.rh",
     "remove-dir-all-probe.rh",
+    "set-map-loop-assign-probe.rh",
+    "set-map-value-assign-probe.rh",
     "stdlib.rh",
     "string-fn-bundle.rh",
     "string-list-index-probe.rh",
@@ -93,6 +99,11 @@ fn assert_compile_code(error: RhError, expected_code: &str) {
         ),
         other => panic!("expected typed compile error {expected_code}, got {other:?}"),
     }
+}
+
+#[test]
+fn public_codegen_revision_is_seventy_five() {
+    assert_eq!(RH_CODEGEN_REVISION, 75);
 }
 
 #[test]
@@ -155,6 +166,7 @@ fn public_check_many_accepts_the_canonical_fixture_manifest() {
     let repo = repo_root();
     let manifest =
         read_manifest(&repo.join("fixtures/rh/check-many.json")).expect("canonical manifest");
+    let expected_files = manifest.files.len();
     let report = run_check_many(
         manifest,
         CheckManyOptions {
@@ -164,6 +176,6 @@ fn public_check_many_accepts_the_canonical_fixture_manifest() {
     );
 
     assert!(report.ok, "check-many failures: {:?}", report.failures);
-    assert_eq!(report.checked_files, FIXTURE_NAMES.len());
+    assert_eq!(report.checked_files, expected_files);
     assert!(report.failures.is_empty());
 }

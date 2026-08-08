@@ -70,6 +70,26 @@ fn check_accepts_all_fixtures() {
             "fs-mutation-probe",
             include_str!("../fixtures/rh/fs-mutation-probe.rh"),
         ),
+        (
+            "json-array-index-assign-probe",
+            include_str!("../fixtures/rh/json-array-index-assign-probe.rh"),
+        ),
+        (
+            "json-array-index-map-return-probe",
+            include_str!("../fixtures/rh/json-array-index-map-return-probe.rh"),
+        ),
+        (
+            "json-param-index-assign-probe",
+            include_str!("../fixtures/rh/json-param-index-assign-probe.rh"),
+        ),
+        (
+            "set-map-loop-assign-probe",
+            include_str!("../fixtures/rh/set-map-loop-assign-probe.rh"),
+        ),
+        (
+            "set-map-value-assign-probe",
+            include_str!("../fixtures/rh/set-map-value-assign-probe.rh"),
+        ),
     ] {
         check(source).unwrap_or_else(|error| panic!("check failed for {name}: {error}"));
     }
@@ -471,9 +491,7 @@ fn string_fn_bundle_fixture_executes_natively_without_interpreter() {
         output.rust
     );
     assert!(
-        output
-            .rust
-            .contains("pub fn is_artifact_name(name: String)"),
+        output.rust.contains("is_artifact_name(name: String)"),
         "{}",
         output.rust
     );

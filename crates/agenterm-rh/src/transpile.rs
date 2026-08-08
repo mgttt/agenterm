@@ -749,7 +749,12 @@ fn infer_return_kind(def: &ScriptFuncDef, ctx: &EmitCtx) -> ValueKind {
         Stmt::Expr(expr) => expr.as_ref(),
         _ => return ValueKind::Int,
     };
-    infer_binding_kind(expr, &fn_ctx)
+    // Empty `#{}` binds as Set for membership locals, but a function that returns
+    // `#{}` is a JSON object at local-fn / API boundaries (`script_smoke_empty_env`).
+    match infer_binding_kind(expr, &fn_ctx) {
+        ValueKind::Set => ValueKind::Json,
+        other => other,
+    }
 }
 
 fn infer_non_throw_return_kind(block: &StmtBlock, ctx: &mut EmitCtx) -> Option<ValueKind> {
@@ -1737,6 +1742,21 @@ fn expr_uses_child_binding(expr: &Expr, vars: &BTreeSet<String>) -> bool {
     }
 }
 
+fn index_rhs_is_list_index(rhs: &Expr) -> bool {
+    match rhs {
+        Expr::IntegerConstant(..) | Expr::BoolConstant(..) => true,
+        Expr::Variable(ident, ..) => {
+            let name = ident.1.as_str();
+            // Common int counters (`gate_index`, `i`, …). Map-key locals such as
+            // `profile_key` / `name` must stay JSON evidence instead.
+            name.contains("index")
+                || name.ends_with("_i")
+                || matches!(name, "i" | "j" | "k" | "n" | "idx" | "offset" | "pos")
+        }
+        _ => false,
+    }
+}
+
 fn param_used_as_string_list(def: &ScriptFuncDef, param: &str) -> bool {
     def.body
         .iter()
@@ -1822,7 +1842,10 @@ fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
     if let Expr::Index(boxed, ..) = expr
         && is_param_var(&boxed.lhs, param)
     {
-        return true;
+        // Only list-style indexes count as StringList evidence. String keys
+        // (`emitted[profile_key]` / `emitted["k"]`) are JSON map lookups and must
+        // not win over Json param inference (StringList is checked before Json).
+        return index_rhs_is_list_index(&boxed.rhs);
     }
     match expr {
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
@@ -3092,6 +3115,8 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_array_index(expr, ctx).is_some() => ValueKind::Json,
         _ if json_path_array_index(expr, ctx).is_some() => ValueKind::Json,
+        _ if json_path_key_get(expr, ctx).is_some() => ValueKind::Json,
+        _ if json_rhai_array_index_property(expr, ctx).is_some() => ValueKind::Json,
         _ if child_list_index(expr, ctx).is_some() => ValueKind::Child,
         _ if string_list_index(expr, ctx).is_some() => ValueKind::String,
         _ if string_split_parts(expr, ctx).is_some() => ValueKind::StringList,
@@ -5760,10 +5785,16 @@ fn json_rhai_array_index_property_from_index<'a>(
     let Expr::Dot(inner, ..) = &boxed.rhs else {
         return None;
     };
-    let Expr::Variable(index, ..) = &inner.lhs else {
-        return None;
+    // Rhai may use a Variable int counter or a bare IntegerConstant (`arr[0].id`).
+    let index_is_int = match &inner.lhs {
+        Expr::IntegerConstant(..) | Expr::BoolConstant(..) => true,
+        Expr::Variable(index, ..) => matches!(
+            ctx.scope.get(index.1.as_str()).copied(),
+            Some(ValueKind::Int | ValueKind::Bool)
+        ),
+        _ => false,
     };
-    if ctx.scope.get(index.1.as_str()).copied() != Some(ValueKind::Int) {
+    if !index_is_int {
         return None;
     }
     let field = dot_property_name(&inner.rhs)?;
@@ -10113,9 +10144,34 @@ fn binary(
 #[cfg(test)]
 mod tests {
     use super::{
-        CdylibExecutionMode, transpile, transpile_cdylib, transpile_cdylib_with_mode,
-        transpile_cdylib_with_project,
+        CdylibExecutionMode, CdylibTranspileOutput, RhError, transpile, transpile_cdylib,
+        transpile_cdylib_with_mode, transpile_cdylib_with_project,
     };
+
+    const NATIVE_ASSIGN_BLOCKERS: &[&str] = &[
+        "assignment lhs must be a variable",
+        "set index key must be a string binding",
+    ];
+
+    fn assert_transpile_past_assign_lhs_blockers(
+        root: &std::path::Path,
+        rel: &str,
+    ) -> Result<CdylibTranspileOutput, RhError> {
+        let source = std::fs::read_to_string(root.join(rel)).expect("read script");
+        match transpile_cdylib_with_project(root, &source) {
+            Ok(output) => Ok(output),
+            Err(RhError::Transpile(msg)) => {
+                for needle in NATIVE_ASSIGN_BLOCKERS {
+                    assert!(
+                        !msg.contains(needle),
+                        "{rel} still blocked by assign/set-index emit: {msg}"
+                    );
+                }
+                Err(RhError::Transpile(msg))
+            }
+            Err(other) => Err(other),
+        }
+    }
 
 
     #[test]
@@ -13969,5 +14025,38 @@ fn entry() {
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_set_map_loop_value_assignments() {
+        let source = include_str!("../../../fixtures/rh/set-map-loop-assign-probe.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("names.insert(rh_json_as_str(&name))"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_smoke_scripts_past_assign_lhs_blockers() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        for rel in [
+            "scripts/rh/diagnostic-bundle-selftest.rh",
+            "scripts/rh/fresh-clone-rehearsal.rh",
+            "scripts/rh/platform-ux-parity-smoke.rh",
+            "scripts/rh/script-smoke.rh",
+        ] {
+            let _ = assert_transpile_past_assign_lhs_blockers(&root, rel);
+        }
     }
 }

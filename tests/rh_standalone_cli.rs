@@ -273,6 +273,7 @@ fn standalone_check_many_has_success_schema_plain_ok_and_typed_configuration_exi
     );
     let report = decode_stdout(&json_output);
     assert_eq!(report["schema_version"], 1);
+    // Legacy report kind retained for JSON schema compatibility; agenterm-rh is the producer.
     assert_eq!(report["kind"], "agenterm-rhai-check-many");
     assert_eq!(report["ok"], true);
     assert_eq!(report["checked_files"], 2);
@@ -322,7 +323,7 @@ fn standalone_check_many_has_success_schema_plain_ok_and_typed_configuration_exi
 #[test]
 fn standalone_task_discovery_and_check_do_not_need_compatibility_binary() {
     let cli = StandaloneCli::new("tasks");
-    cli.write("scripts/check.rhai", "40 + 2\n");
+    cli.write("scripts/check.rh", "fn entry() { 40 + 2 }\n");
     let manifest = cli.write(
         "agenterm.tasks.json",
         serde_json::to_vec_pretty(&json!({
@@ -338,7 +339,7 @@ fn standalone_task_discovery_and_check_do_not_need_compatibility_binary() {
             "tasks": [{
                 "id": "check",
                 "description": "Standalone task discovery fixture",
-                "entry": "scripts/check.rhai",
+                "entry": "scripts/check.rh",
                 "profile": "local",
             }],
         }))

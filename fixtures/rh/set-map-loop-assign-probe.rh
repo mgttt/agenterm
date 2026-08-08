@@ -1,0 +1,13 @@
+fn entry() {
+    let names = #{};
+    let manifest = #{
+        diagnostics: ["alpha", "beta"]
+    };
+    for name in manifest.diagnostics {
+        names[name] = true;
+    }
+    if !names.contains("alpha") {
+        return rh::fail("missing_alpha");
+    }
+    0
+}

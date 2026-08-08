@@ -1,0 +1,9 @@
+fn entry() {
+    let m = #{};
+    let gate_key = "a";
+    m[gate_key] = "passed";
+    if m[gate_key] != "passed" {
+        return 1;
+    }
+    0
+}

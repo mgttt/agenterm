@@ -8,7 +8,6 @@
 import "scripts/rh/lib/test_harness" as test_harness;
 // Inlined from scripts/rh/lib/script_smoke_helpers.rh for native AOT (do not edit lib copy).
 
-let script_smoke_empty_env = #{};
 
 // Public-process and binary-protocol helpers for the Script Runtime journey (INT-only).
 
@@ -19,6 +18,38 @@ fn require(condition, message) {
     } else {
         0;
     }
+}
+
+fn script_smoke_empty_env() {
+    #{}
+}
+
+fn script_smoke_env_remove_value() {
+    rhai::json::parse("null")
+}
+
+fn nested_pid_from_path(pid_path) {
+    trimmed(std::fs::read_to_string(pid_path)).parse_int()
+}
+
+fn framed_recovery_ok(frame) {
+    frame.payload.ok
+}
+
+fn framed_recovery_stdout(frame) {
+    frame.payload.stdout
+}
+
+fn framed_recovery_value(frame) {
+    frame.payload.value
+}
+
+fn process_output_exit_code(output) {
+    output.exit_code
+}
+
+fn process_output_stderr_text(output) {
+    output.stderr_text()
 }
 
 fn child_is_running(child) {
@@ -49,7 +80,8 @@ fn configured_program(
     let env_settings = environment;
     for name in env_settings.keys() {
         let value = env_settings[name];
-        if value == () {
+        // Unit/`()` compares are not string-emittable in native rh; use type_of.
+        if type_of(value) == "()" {
             command.env_remove(name);
         } else {
             command.env(name, "" + value);
@@ -252,7 +284,7 @@ fn cli_text(context, cli, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env,
+        script_smoke_empty_env(),
         []
     );
     let text = result.stdout;
@@ -267,7 +299,7 @@ fn cli_json(context, cli, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env,
+        script_smoke_empty_env(),
         []
     );
     rhai::json::parse(result.stdout)
@@ -280,7 +312,7 @@ fn direct_text(context, script, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env,
+        script_smoke_empty_env(),
         []
     );
     let text = result.stdout;
@@ -295,7 +327,7 @@ fn direct_json(context, script, arguments, audit_path) {
         arguments,
         0,
         audit_path,
-        script_smoke_empty_env,
+        script_smoke_empty_env(),
         []
     );
     rhai::json::parse(result.stdout)
@@ -314,7 +346,7 @@ fn failure_text(
         arguments,
         expected_exit,
         audit_path,
-        script_smoke_empty_env,
+        script_smoke_empty_env(),
         []
     );
     result.stdout + result.stderr
@@ -376,7 +408,7 @@ fn start_script_client(
         cli,
         command_arguments,
         audit_path,
-        script_smoke_empty_env
+        script_smoke_empty_env()
     ).start()
 }
 
@@ -411,7 +443,7 @@ fn start_http_fixture(
             "10000"
         ],
         "",
-        script_smoke_empty_env
+        script_smoke_empty_env()
     ).start()
 }
 
@@ -447,7 +479,9 @@ fn payload_frame(payload) {
 
 fn json_frame(frame) {
     let encoded = rhai::json::stringify(frame);
-    payload_frame(rhai::bytes::from_text(encoded))
+    let encoded_text = "" + encoded;
+    let encoded_bytes = rhai::bytes::from_text(encoded_text);
+    payload_frame(encoded_bytes)
 }
 
 fn framed_invocation(frame_id, invocation_id, source, version) {
@@ -479,10 +513,10 @@ fn framed_invocation(frame_id, invocation_id, source, version) {
 }
 
 fn sidebar_visible_code(snapshot) {
-    if snapshot.layout == () {
+    if type_of(snapshot.layout) == "()" {
         return -1;
     }
-    if snapshot.layout.sidebar == () {
+    if type_of(snapshot.layout.sidebar) == "()" {
         return -1;
     }
     if snapshot.layout.sidebar.visible {
@@ -513,10 +547,21 @@ fn wait_snapshot_sidebar(context, cli, audit_path, expected_code) {
     throw "script_fleet_sidebar_wait_timeout";
 }
 
-fn active_tab_index(snapshot) {
+fn active_tab_id_from_snapshot(snapshot) {
     for index in 0..snapshot.tabs.len {
-        if snapshot.tabs[index].active != 0 {
-            return index;
+        let tab = snapshot.tabs[index];
+        if tab.active != 0 {
+            return tab["id"];
+        }
+    }
+    throw "script_fleet_active_tab_missing";
+}
+
+fn active_tab_note_from_snapshot(snapshot) {
+    for index in 0..snapshot.tabs.len {
+        let tab = snapshot.tabs[index];
+        if tab.active != 0 {
+            return tab["note"];
         }
     }
     throw "script_fleet_active_tab_missing";
@@ -532,7 +577,7 @@ fn invoke_framed_worker(
         script,
         ["--framed-worker"],
         "",
-        script_smoke_empty_env
+        script_smoke_empty_env()
     );
     command.stdin_bytes(input_bytes);
     command.capture_limit(262144);
@@ -680,22 +725,29 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
                 .contains("std.process.Output.require_success"),
         "script_api_failure_contract_mismatch"
     );
+    let bytes_entries = matching(
+        catalog.entries,
+        "stable_id",
+        "rhai.bytes.from-array"
+    );
+    let command_builder_entries = matching(
+        catalog.entries,
+        "stable_id",
+        "std.process.command-builder"
+    );
+    let fleet_tabs_new_entries = matching(
+        catalog.entries,
+        "stable_id",
+        "fleet.tabs.new"
+    );
+    let command_builder_entry = command_builder_entries[0];
+    let fleet_tabs_new_entry = fleet_tabs_new_entries[0];
+    let command_builder_surface_path =
+        command_builder_entry["surface_path"];
     test_harness::require(
-        matching(
-            catalog.entries,
-            "stable_id",
-            "rhai.bytes.from-array"
-        ).len == 1
-            && matching(
-                catalog.entries,
-                "stable_id",
-                "std.process.command-builder"
-            )[0].surface_path.contains("stdin_bytes")
-            && matching(
-                catalog.entries,
-                "stable_id",
-                "fleet.tabs.new"
-            )[0].status == "planned",
+        bytes_entries.len == 1
+            && command_builder_surface_path.contains("stdin_bytes")
+            && fleet_tabs_new_entry["status"] == "planned",
         "script_api_required_entries_missing"
     );
     let operation_id_list = [];
@@ -740,7 +792,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         script,
         ["api", "--json"],
         "",
-        #{}
+        script_smoke_empty_env()
     );
     let pipe_child = pipe_command.start();
     let prefix = pipe_child.stdout.read(
@@ -781,14 +833,16 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         ],
         audit_path
     );
+    let planned_value = planned.value;
+    let planned_view = planned_value.view;
     test_harness::require(
         planned.ok
-            && planned.value.view["module"] == "fleet"
-            && planned.value.view.status == "planned"
-            && planned.value.entries.len > 0,
+            && planned_view["module"] == "fleet"
+            && planned_view.status == "planned"
+            && planned_value.entries.len > 0,
         "script_api_planned_fleet_view_mismatch"
     );
-    for entry in planned.value.entries {
+    for entry in planned_value.entries {
         test_harness::require(
             entry.status == "planned"
                 && entry.stable_id.starts_with("fleet."),
@@ -969,16 +1023,15 @@ fn assert_process_and_streams(
         ["--version"],
         0,
         "",
-        #{},
+        script_smoke_empty_env(),
         []
     );
     let expected = trimmed(version_output.stdout);
-    let cli_literal = "\"" + cli + "\"";
     let stream = rhai::json::parse(
         script_eval(
             context,
             cli,
-            "\nlet command=std::process::command(" + cli_literal + ");\ncommand.arg(\"--version\");\nlet child=command.start();\nlet stream=child.stdout;\nlet first=stream.read(2,std::time::Duration::from_secs(1)).to_text();\nlet rest=stream.collect(64,std::time::Duration::from_secs(1)).to_text();\nlet output=child.wait_with_output();\nlet empty=stream.read(1);\n#{\n id:stream.id,kind:stream.kind,state:stream.state,\n buffered:stream.buffered_bytes,truncated:stream.truncated,\n complete:stream.complete,first:first,rest:rest,empty:empty.len,\n final:output.stdout_text(),output_complete:output.complete\n}",
+            "\nlet command=std::process::command(\"" + cli + "\");\ncommand.arg(\"--version\");\nlet child=command.start();\nlet stream=child.stdout;\nlet first=stream.read(2,std::time::Duration::from_secs(1)).to_text();\nlet rest=stream.collect(64,std::time::Duration::from_secs(1)).to_text();\nlet output=child.wait_with_output();\nlet empty=stream.read(1);\n#{\n id:stream.id,kind:stream.kind,state:stream.state,\n buffered:stream.buffered_bytes,truncated:stream.truncated,\n complete:stream.complete,first:first,rest:rest,empty:empty.len,\n final:output.stdout_text(),output_complete:output.complete\n}",
             audit_path
         )
     );
@@ -1000,7 +1053,7 @@ fn assert_process_and_streams(
         script_eval(
             context,
             cli,
-            "\nlet command=std::process::command(" + cli_literal + ");\ncommand.arg(\"--version\"); command.capture_limit(4);\nlet child=command.start(); let stream=child.stdout;\nlet delivered=stream.collect(64).to_text();\nlet output=child.wait_with_output();\n#{\n stdout:output.stdout_text(),truncated:output.truncated,\n complete:output.complete,delivered:delivered,\n stream_truncated:stream.truncated,stream_complete:stream.complete\n}",
+            "\nlet command=std::process::command(\"" + cli + "\");\ncommand.arg(\"--version\"); command.capture_limit(4);\nlet child=command.start(); let stream=child.stdout;\nlet delivered=stream.collect(64).to_text();\nlet output=child.wait_with_output();\n#{\n stdout:output.stdout_text(),truncated:output.truncated,\n complete:output.complete,delivered:delivered,\n stream_truncated:stream.truncated,stream_complete:stream.complete\n}",
             audit_path
         )
     );
@@ -1246,6 +1299,9 @@ fn assert_tasks_and_http(
     let ready = matching(catalog.tasks, "id", "daily-check");
     let missing = matching(catalog.tasks, "id", "missing-entry");
     let unknown = matching(catalog.tasks, "id", "unknown-field");
+    let ready0 = ready[0];
+    let missing0 = missing[0];
+    let unknown0 = unknown[0];
     test_harness::require(
         catalog.schema_version == 2
             && catalog.script_api_version == 2
@@ -1254,11 +1310,11 @@ fn assert_tasks_and_http(
             && catalog.origin.id == "agenterm"
             && catalog.compatible
             && ready.len == 1
-            && ready[0].status == "ready"
+            && ready0.status == "ready"
             && missing.len == 1
-            && missing[0].status == "degraded"
+            && missing0.status == "degraded"
             && unknown.len == 1
-            && unknown[0].status == "degraded",
+            && unknown0.status == "degraded",
         "script_task_catalog_mismatch"
     );
     let shown = cli_json(
@@ -1270,10 +1326,11 @@ fn assert_tasks_and_http(
         ],
         audit_path
     );
+    let shown_task0 = shown.tasks[0];
     test_harness::require(
         shown.project_version == "1.0.0"
             && shown.tasks.len == 1
-            && shown.tasks[0].entry == "main.rhai",
+            && shown_task0.entry == "main.rhai",
         "script_task_show_mismatch"
     );
     test_harness::require(
@@ -1318,11 +1375,12 @@ fn assert_tasks_and_http(
         ],
         audit_path
     );
+    let incompatible_task0 = incompatible_list.tasks[0];
     test_harness::require(
         !incompatible_list.compatible
             && incompatible_list.compatibility_reason ==
                 "capability_unknown: future.capability"
-            && incompatible_list.tasks[0].status == "ready",
+            && incompatible_task0.status == "ready",
         "script_task_incompatible_not_inspectable"
     );
     for operation in ["check", "run"] {
@@ -1374,7 +1432,7 @@ fn assert_tasks_and_http(
         ],
         2,
         audit_path,
-        #{"AGENTERM_TASK_FIXTURE": ()},
+        #{"AGENTERM_TASK_FIXTURE": script_smoke_env_remove_value()},
         []
     );
     test_harness::require(
@@ -1494,6 +1552,8 @@ fn assert_runtime_and_framing(
     let target = rhai::json::parse(target_envelope.stdout);
     let root_profile = matching(target.profiles, "name", "(root)");
     let debug_profile = matching(target.profiles, "name", "debug");
+    let root_profile0 = root_profile[0];
+    let debug_profile0 = debug_profile[0];
     test_harness::require(
         target_envelope.ok
             && target.schema_version == 1
@@ -1503,9 +1563,9 @@ fn assert_runtime_and_framing(
             && target.files == 3
             && target.bytes == 9
             && root_profile.len == 1
-            && root_profile[0].files == 1
+            && root_profile0.files == 1
             && debug_profile.len == 1
-            && debug_profile[0].files == 2,
+            && debug_profile0.files == 2,
         "script_target_report_mismatch"
     );
 
@@ -1563,16 +1623,15 @@ fn assert_runtime_and_framing(
         runtime_dir,
         "local-data.json"
     ).display;
-    let data_literal = "\"" + data_file + "\"";
     let data_text_literal = "\"{\\\"answer\\\":42}\"";
     test_harness::require(
         script_eval(
             context,
             cli,
-            "std::fs::write(" + data_literal + ", " +
+            "std::fs::write(\"" + data_file + "\", " +
                 data_text_literal + "); " +
-                "rhai::json::parse(std::fs::read_to_string(" +
-                data_literal + ")).answer",
+                "rhai::json::parse(std::fs::read_to_string(\"" +
+                data_file + "\")).answer",
             audit_path
         ) == "42",
         "script_local_fs_json_mismatch"
@@ -1673,7 +1732,7 @@ fn assert_runtime_and_framing(
         script_eval(
             context,
             cli,
-            "std::path::PathBuf::from(" + data_literal + ").extension",
+            "std::path::PathBuf::from(\"" + data_file + "\").extension",
             audit_path
         ) == "json",
         "script_typed_path_mismatch"
@@ -1830,7 +1889,7 @@ fn assert_runtime_and_framing(
         script,
         ["--worker"],
         "",
-        #{}
+        script_smoke_empty_env()
     );
     malformed_command.stdin_text("{");
     let malformed = malformed_command.output();
@@ -1848,7 +1907,7 @@ fn assert_runtime_and_framing(
         script,
         ["--worker"],
         "",
-        #{}
+        script_smoke_empty_env()
     );
     oversized_command.stdin_text(oversized_text);
     let oversized = oversized_command.output();
@@ -1910,12 +1969,18 @@ fn assert_runtime_and_framing(
         framed
     );
     let codes = [];
-    let recovered = ();
+    let recovered_found = 0;
+    let recovered_ok = 0;
+    let recovered_stdout = "";
+    let recovered_value = 0;
     for frame in frames {
         if frame.frame_id == "recovery" {
-            recovered = frame;
+            recovered_found = 1;
+            recovered_ok = framed_recovery_ok(frame);
+            recovered_stdout = framed_recovery_stdout(frame);
+            recovered_value = framed_recovery_value(frame);
         }
-        if frame.payload.failure != () {
+        if type_of(frame.payload.failure) != "()" {
             codes.push(frame.payload.failure.code);
         }
     }
@@ -1925,10 +1990,10 @@ fn assert_runtime_and_framing(
             && codes.contains("protocol_frame_too_large")
             && codes.contains("protocol_duplicate_invocation")
             && codes.contains("protocol_unsupported_frame_version")
-            && recovered != ()
-            && recovered.payload.ok
-            && recovered.payload.stdout == "framed-output\n"
-            && recovered.payload.value == 42,
+            && recovered_found != 0
+            && recovered_ok != 0
+            && recovered_stdout == "framed-output\n"
+            && recovered_value == 42,
         "script_framed_recovery_mismatch"
     );
     let cancel_invoke = #{
@@ -1970,12 +2035,14 @@ fn assert_runtime_and_framing(
         script,
         cancel_bytes
     );
+    let cancel_frame0 = cancel_frames[0];
+    let cancel_failure = cancel_frame0.payload.failure;
     test_harness::require(
         cancel_frames.len == 1
-            && cancel_frames[0].frame_id == "cancel-invoke"
-            && cancel_frames[0].payload.failure.code ==
+            && cancel_frame0.frame_id == "cancel-invoke"
+            && cancel_failure.code ==
                 "limit_cancelled"
-            && cancel_frames[0].payload.exit_class == "cancelled",
+            && cancel_failure.exit_class == "cancelled",
         "script_framed_cancel_mismatch"
     );
 }
@@ -2058,9 +2125,7 @@ fn assert_supervisor(
     let nested_pid = 0;
     for attempt in 0..600 {
         if std::fs::exists(pid_path) {
-            nested_pid = trimmed(
-                std::fs::read_to_string(pid_path)
-            ).parse_int();
+            nested_pid = nested_pid_from_path(pid_path);
             break;
         }
         test_harness::require(
@@ -2078,7 +2143,9 @@ fn assert_supervisor(
     // The number already occupied by release/check/task ancestors varies with
     // the caller, so a fixed holder count would make this evidence flaky.
     let holders = [];
-    let denied_output = ();
+    let denied_found = 0;
+    let denied_exit_code = 0;
+    let denied_stderr = "";
     for index in 0..8 {
         let holder = start_script_client(
             context,
@@ -2094,9 +2161,12 @@ fn assert_supervisor(
         if child_is_running(holder) {
             holders.push(holder);
         } else {
-            denied_output = holder.wait_with_output(
+            denied_found = 1;
+            let denied = holder.wait_with_output(
                 std::time::Duration::from_secs(3)
             );
+            denied_exit_code = process_output_exit_code(denied);
+            denied_stderr = process_output_stderr_text(denied);
             break;
         }
     }
@@ -2105,18 +2175,19 @@ fn assert_supervisor(
         "script_supervisor_no_holder_acquired"
     );
     test_harness::require(
-        denied_output != (),
+        denied_found != 0,
         "script_supervisor_global_limit_not_enforced"
     );
     test_harness::require(
-        denied_output.exit_code == 2
-            && denied_output.stderr_text().contains(
+        denied_exit_code == 2
+            && denied_stderr.contains(
                 "\"code\":\"host_concurrency_limit\""
             ),
         "script_supervisor_concurrency_untyped"
     );
-    holders[0].kill();
-    holders[0].wait_with_output(std::time::Duration::from_secs(2));
+    let first_holder = holders[0];
+    first_holder.kill();
+    first_holder.wait_with_output(std::time::Duration::from_secs(2));
     let replacement = start_script_client(
         context,
         cli,
@@ -2133,10 +2204,11 @@ fn assert_supervisor(
         "script_supervisor_slot_not_recovered"
     );
     for index in 1..holders.len {
-        if child_is_running(holders[index]) {
-            holders[index].kill();
+        let holder = holders[index];
+        if child_is_running(holder) {
+            holder.kill();
         }
-        holders[index].wait_with_output(
+        holder.wait_with_output(
             std::time::Duration::from_secs(2)
         );
     }
@@ -2161,7 +2233,7 @@ fn wait_script_gui(context, cli, gui_child) {
                 "--timeout-ms", "100"
             ],
             "",
-            #{}
+            script_smoke_empty_env()
         );
         let probe = probe_command.output();
         if probe.success && gui_facts.top_level_window_present {
@@ -2411,7 +2483,7 @@ fn run_fleet_journey(
         gui,
         ["--no-activate", "--address", context.address],
         "",
-        #{}
+        script_smoke_empty_env()
     );
     let gui_child = gui_command.start();
     try {
@@ -2513,20 +2585,19 @@ fn run_fleet_journey(
                 && capture.value.max_bytes == 32,
             "script_fleet_observation_mismatch"
         );
-        let epoch = "\"" + snapshot.event_position.epoch + "\"";
         let batch = cli_json(
             context,
             cli,
             [
                 "script", "eval",
-                "fleet.events.read(" + epoch + ", " +
+                "fleet.events.read(\"" + snapshot.event_position.epoch + "\", " +
                     snapshot.event_position.sequence + ", 16)",
                 "--profile", "observe", "--json"
             ],
             audit_path
         );
         test_harness::require(
-            batch.ok && batch.value.position != (),
+            batch.ok && type_of(batch.value.position) != "()",
             "script_fleet_event_read_mismatch"
         );
         let restart = failure_text(
@@ -2617,8 +2688,8 @@ fn run_fleet_journey(
                 ["ui-snapshot"],
                 audit_path
             );
-            if mutated_snapshot.layout != ()
-                    && mutated_snapshot.layout.sidebar != ()
+            if type_of(mutated_snapshot.layout) != "()"
+                    && type_of(mutated_snapshot.layout.sidebar) != "()"
                     && sidebar_visible_code(mutated_snapshot)
                         != baseline_visible {
                 mutated_visible_flipped = 1;
@@ -2662,13 +2733,14 @@ fn run_fleet_journey(
             ["ui-snapshot"],
             audit_path
         );
-        let active_tab = restored.tabs[active_tab_index(restored)];
-        test_harness::require(active_tab != (), "script_fleet_active_tab_missing");
+        let active_tab_id = active_tab_id_from_snapshot(restored);
+        let active_tab_note = active_tab_note_from_snapshot(restored);
+        test_harness::require(active_tab_id != "", "script_fleet_active_tab_missing");
         let note = "Script API v2 目录 " + std::process::id();
         let note_mutation = script_eval_json(
             context,
             cli,
-            "\nlet receipt=fleet.tabs.set_note(\n " + "\"" + active_tab.id + "\"" + "," + "\"" + note + "\"" + "\n);\n#{\n operation_id:receipt.operation_id,outcome:receipt.outcome,\n event_count:receipt.events.len(),\n event_kind:if receipt.events.is_empty(){\"\"}else{receipt.events[0].kind},\n verified:receipt.post_state.verified,\n tab:receipt.post_state.value.id,note:receipt.post_state.value.note\n}",
+            "\nlet receipt=fleet.tabs.set_note(\n " + "\"" + active_tab_id + "\"" + "," + "\"" + note + "\"" + "\n);\n#{\n operation_id:receipt.operation_id,outcome:receipt.outcome,\n event_count:receipt.events.len(),\n event_kind:if receipt.events.is_empty(){\"\"}else{receipt.events[0].kind},\n verified:receipt.post_state.verified,\n tab:receipt.post_state.value.id,note:receipt.post_state.value.note\n}",
             audit_path
         );
         test_harness::require(
@@ -2677,7 +2749,7 @@ fn run_fleet_journey(
                 && note_mutation.value.event_count >= 1
                 && note_mutation.value.event_kind == "tab.note"
                 && note_mutation.value.verified
-                && note_mutation.value.tab == active_tab.id
+                && note_mutation.value.tab == active_tab_id
                 && note_mutation.value.note == note,
             "script_fleet_note_receipt_mismatch"
         );
@@ -2686,8 +2758,8 @@ fn run_fleet_journey(
                 context,
                 cli,
                 "fleet.tabs.set_note(" +
-                    "\"" + active_tab.id + "\"" + ", " +
-                    "\"" + active_tab.note + "\"" +
+                    "\"" + active_tab_id + "\"" + ", " +
+                    "\"" + active_tab_note + "\"" +
                     ").post_state.verified",
                 audit_path
             ) == "true",
@@ -2767,8 +2839,9 @@ fn run_fleet_journey(
             ["ui-snapshot"],
             audit_path
         );
-        let north_tab = latest.tabs[active_tab_index(latest)];
-        test_harness::require(north_tab != (), "script_north_star_tab_missing");
+        let north_tab_id = active_tab_id_from_snapshot(latest);
+        let north_tab_note = active_tab_note_from_snapshot(latest);
+        test_harness::require(north_tab_id != "", "script_north_star_tab_missing");
         std::fs::write(
             std::path::join(project, "config.json").display,
             rhai::json::stringify_pretty(#{
@@ -2778,7 +2851,7 @@ fn run_fleet_journey(
                 child_a_args: ["--version"],
                 child_b_args: ["list-commands"],
                 loopback_url: ready.url + "/status",
-                tab_id: north_tab.id,
+                tab_id: north_tab_id,
                 result_path: result_path
             })
         );
@@ -2828,18 +2901,22 @@ fn run_fleet_journey(
             ],
             audit_path
         );
+        let direct_task0 = direct_catalog.tasks[0];
+        let direct_task_contract = direct_task0.contract;
+        let direct_show_task0 = direct_show.tasks[0];
+        let expected_daily_check_evidence = ["task.daily-check"];
         test_harness::require(
             direct_catalog.project_id ==
                 "agenterm-rhai-daily-check"
                 && direct_catalog.schema_version == 3
                 && direct_catalog.compatible
                 && direct_catalog.tasks.len == 1
-                && direct_catalog.tasks[0].status == "ready"
-                && direct_catalog.tasks[0].contract.inputs.len == 3
-                && direct_catalog.tasks[0].contract.evidence ==
-                    ["task.daily-check"]
+                && direct_task0.status == "ready"
+                && direct_task_contract.inputs.len == 3
+                && direct_task_contract.evidence ==
+                    expected_daily_check_evidence
                 && direct_show.compatible
-                && direct_show.tasks[0].entry == "daily-check.rh",
+                && direct_show_task0.entry == "daily-check.rh",
             "script_north_star_catalog_mismatch"
         );
         test_harness::require(
@@ -2909,8 +2986,8 @@ fn run_fleet_journey(
                 context,
                 cli,
                 "fleet.tabs.set_note(" +
-                    "\"" + north_tab.id + "\"" + ", " +
-                    "\"" + north_tab.note + "\"" +
+                    "\"" + north_tab_id + "\"" + ", " +
+                    "\"" + north_tab_note + "\"" +
                     ").post_state.verified",
                 audit_path
             ) == "true",
@@ -2974,7 +3051,7 @@ fn run_fleet_journey(
                 ["kill-server"],
                 0,
                 "",
-                #{},
+                script_smoke_empty_env(),
                 []
             );
         } catch (cleanup_error) {
@@ -3140,7 +3217,7 @@ fn assert_audit(
         ["script", "eval", "1"],
         1,
         runtime_dir,
-        #{},
+        script_smoke_empty_env(),
         []
     );
     test_harness::require(
