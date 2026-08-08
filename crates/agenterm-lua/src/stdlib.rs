@@ -142,6 +142,16 @@ fn spawn_and_capture(
     args: &[String],
     timeout_ms: u64,
 ) -> Result<(bool, i32, String, String), mlua::Error> {
+    spawn_and_capture_ext(program, args, timeout_ms, None)
+}
+
+/// Spawn with optional options table (current_dir, env, env_remove).
+fn spawn_and_capture_ext(
+    program: &str,
+    args: &[String],
+    timeout_ms: u64,
+    options: Option<&mlua::Table>,
+) -> Result<(bool, i32, String, String), mlua::Error> {
     use std::process::{Command, Stdio};
 
     let mut cmd = Command::new(program);
@@ -149,6 +159,23 @@ fn spawn_and_capture(
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+
+    // Apply options if present
+    if let Some(opts) = options {
+        if let Ok(current_dir) = opts.get::<String>("current_dir") {
+            cmd.current_dir(&current_dir);
+        }
+        if let Ok(env) = opts.get::<mlua::Table>("env") {
+            for (k, v) in env.pairs::<String, String>().flatten() {
+                cmd.env(k, v);
+            }
+        }
+        if let Ok(env_remove) = opts.get::<mlua::Table>("env_remove") {
+            for key in env_remove.sequence_values::<String>().flatten() {
+                cmd.env_remove(key);
+            }
+        }
+    }
 
     let mut child = cmd
         .spawn()
@@ -528,6 +555,31 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
                 Ok(ret == 0)
             }
         })?,
+    )?;
+
+    // std.process.command_ext(program, args, timeout_ms, options) — with env/dir options
+    process.set(
+        "command_ext",
+        lua.create_function(
+            |lua,
+             (program, args_tbl, timeout_ms, options_tbl): (
+                String,
+                Table,
+                Option<u64>,
+                Option<Table>,
+            )| {
+                let args = table_to_strings(&args_tbl)?;
+                let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+                let (success, exit_code, stdout, stderr) =
+                    spawn_and_capture_ext(&program, &args, timeout, options_tbl.as_ref())?;
+                let out = lua.create_table()?;
+                out.set("success", success)?;
+                out.set("exit_code", exit_code)?;
+                out.set("stdout", stdout)?;
+                out.set("stderr", stderr)?;
+                Ok(out)
+            },
+        )?,
     )?;
 
     Ok(process)
@@ -1547,6 +1599,63 @@ mod tests {
             &host(),
         ).expect("remove_dir nonempty");
         assert_eq!(r.value, 1, "remove_dir should fail on non-empty dir");
+    }
+
+    // ── process::command_ext with options ──────────────────────────
+
+    #[test]
+    fn command_ext_with_current_dir() {
+        let repo = std::env::current_dir().expect("cwd");
+        let e = engine();
+        let r = e.eval(
+            &format!(
+                "local out = std.process.command_ext('git', {{'rev-parse', '--show-prefix'}}, 5000, {{current_dir = [[{}]]}}); return out.exit_code",
+                repo.display()
+            ),
+            &host(),
+        ).expect("command_ext with current_dir");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn command_ext_with_env() {
+        let e = engine();
+        let r = e.eval(
+            "local out = std.process.command_ext('cmd', {'/c', 'echo', '%AGENTERM_LUA_TEST%'}, 5000, {env = {AGENTERM_LUA_TEST = 'hello_marker'}}); print(out.stdout); return out.exit_code",
+            &host(),
+        ).expect("command_ext with env");
+        assert_eq!(r.value, 0);
+        assert!(r.stdout.contains("hello_marker"), "stdout: {}", r.stdout);
+    }
+
+    #[test]
+    fn command_ext_with_env_remove() {
+        let e = engine();
+        let r = e.eval(
+            "local out = std.process.command_ext('cmd', {'/c', 'echo', '%AGENTERM_LUA_REMOVE_TEST%'}, 5000, {env_remove = {'AGENTERM_LUA_REMOVE_TEST'}}); return out.exit_code",
+            &host(),
+        ).expect("command_ext with env_remove");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn command_ext_no_options_same_as_command() {
+        let e = engine();
+        let r = e.eval(
+            "local out = std.process.command_ext('cmd', {'/c', 'echo', 'ok'}, 5000, nil); return out.exit_code",
+            &host(),
+        ).expect("command_ext no options");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn env_names_returns_array() {
+        let e = engine();
+        let r = e.eval(
+            "local n = std.env.names(); return type(n) == 'table' and #n > 0 and 1 or 0",
+            &host(),
+        ).expect("env.names type");
+        assert_eq!(r.value, 1);
     }
 
     // ── fnv1a64 ─────────────────────────────────────────────────────
