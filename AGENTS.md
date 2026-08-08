@@ -267,7 +267,7 @@ fixed sleeps. Rendering investigations should capture both structured state and
 PNG evidence.
 
 The GUI must expose its native window before starting the initial ConPTY.
-`scripts/rhai/startup-smoke.rhai` guards a one-second local first-window budget
+`scripts/rh/startup-smoke.rh` guards a one-second local first-window budget
 and then waits through public state until the asynchronous terminal becomes
 ready.
 
@@ -455,7 +455,7 @@ test target is linted. On Linux, `cargo fmt --check` runs natively.
 
 **Wine / ConPTY limits**: Wine cannot sustain an interactive ConPTY shell — a
 tab's `cmd.exe` starts and immediately exits `dead`, so live terminal I/O,
-`capture-pane` output, and the GUI smoke suites (`scripts/rhai/*-smoke.rhai`)
+`capture-pane` output, and the GUI smoke suites (`scripts/rh/*-smoke.rh`)
 cannot pass on Linux.
 Interactive-terminal and rendering work must be validated on a real Windows host
 (that is what CI on `windows-latest` covers). Treat Linux Wine here as a fast
