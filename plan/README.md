@@ -24,6 +24,7 @@
 | [`design-rh-aot.md`](design-rh-aot.md) | **rh 并行 AOT 轨**（check / transpile / backend 切换） |
 | [`design-dynamic-core-experiment.md`](design-dynamic-core-experiment.md) | **研究轨**（非产品范围）：动态核 1 层 vs 2 层的判决性实验 → **已判决：2 层**；实现在 `research/dynamic-core/` |
 | [`design-neutral-ir-experiment.md`](design-neutral-ir-experiment.md) | **研究轨**：中立 IR 能否把 ABI/布局推迟给降级（同 ISA 双 ABI 隔离）；承接上条 §7 |
+| [`design-os-interface-as-data-experiment.md`](design-os-interface-as-data-experiment.md) | **研究轨**：Q7 —— OS 接口内容能否从每目标手写代码变成数据表（固定编组器）；承接 Q1 泄漏 L1–L5 → **已判决：有边界可达**；实现在 `research/dynamic-core/tables/` |
 | [`reference-cross-target-execution.md`](reference-cross-target-execution.md) | **研究轨参考**（常驻，非任务单）：跨目标执行技术空间综述 —— 中立 IR 失败史与根因、二进制翻译、验证型字节码、OS 轴、装载机制；含「与动态核架构的对照」 |
 
 ## 已归档（勿当任务单）
