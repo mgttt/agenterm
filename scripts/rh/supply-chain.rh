@@ -407,7 +407,7 @@ fn entry() {
         output,
         rhai::json::stringify_pretty(document) + "\n"
     );
-    let dep_count = "" + sorted_dependencies.len;
+    let dep_count = dependencies.len;
     print(
         "PASS: wrote deterministic SPDX inventory for " +
             dep_count +
