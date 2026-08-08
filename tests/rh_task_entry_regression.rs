@@ -493,39 +493,51 @@ fn task_manifest_has_no_live_rhai_entry_paths() {
     );
 }
 
+fn assert_host_eval_or_native_bundled_pack(entry: &str) {
+    let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
+        panic!("read {entry}: {error}");
+    });
+    let bundled = agenterm_rh::bundle_project_source(&repo(), &source)
+        .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
+    let output = agenterm_rh::transpile_cdylib_with_mode(&bundled).unwrap_or_else(|error| {
+        panic!("transpile bundled {entry}: {error}");
+    });
+    assert!(
+        matches!(
+            output.execution_mode,
+            agenterm_rh::CdylibExecutionMode::HostEval
+                | agenterm_rh::CdylibExecutionMode::Native
+        ),
+        "{entry}: expected host-eval/native after Phase B cutover, got {:?}",
+        output.execution_mode
+    );
+    assert!(
+        !output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"),
+        "{entry}: must not whole-script compat-delegate"
+    );
+    assert!(
+        !output.rust.contains("compat delegating"),
+        "{entry}: must not emit compat-delegating marker"
+    );
+}
+
 #[test]
 fn phase_b_smoke_entries_use_host_eval_or_native_pack() {
     for entry in [
         "scripts/rh/platform-ux-parity-smoke.rh",
         "scripts/rh/script-smoke.rh",
         "scripts/rh/remote-ui-smoke.rh",
+        "scripts/rh/workbench-smoke.rh",
+        "scripts/rh/unix-frontend-smoke.rh",
+        "scripts/rh/fresh-clone-rehearsal.rh",
     ] {
-        let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
-            panic!("read {entry}: {error}");
-        });
-        let bundled = agenterm_rh::bundle_project_source(&repo(), &source)
-            .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
-        let output = agenterm_rh::transpile_cdylib_with_mode(&bundled).unwrap_or_else(|error| {
-            panic!("transpile bundled {entry}: {error}");
-        });
-        assert!(
-            matches!(
-                output.execution_mode,
-                agenterm_rh::CdylibExecutionMode::HostEval
-                    | agenterm_rh::CdylibExecutionMode::Native
-            ),
-            "{entry}: expected host-eval/native after Phase B cutover, got {:?}",
-            output.execution_mode
-        );
-        assert!(
-            !output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"),
-            "{entry}: must not whole-script compat-delegate"
-        );
-        assert!(
-            !output.rust.contains("compat delegating"),
-            "{entry}: must not emit compat-delegating marker"
-        );
+        assert_host_eval_or_native_bundled_pack(entry);
     }
+}
+
+#[test]
+fn working_context_smoke_is_past_compat_delegating() {
+    assert_host_eval_or_native_bundled_pack("scripts/rh/working-context-smoke.rh");
 }
 
 #[test]

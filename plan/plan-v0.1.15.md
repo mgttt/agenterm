@@ -105,7 +105,8 @@ v0.1.15  Feedback shift-left & release-lane economics
 │  ├─ [ ] B1 agenterm-net-research 移出 release 门（→ CI 或夜间车道）
 │  │     实测每轮 2.8min；research 隔离验证不属于产品资格证明
 │  │     涉及 qualification-gates.json（fail-closed 声明）+ 政策复核
-│  │     现状（review，已核）：check.rhai if release 内独立 gate（600s）、
+│  │     现状（review，已核）：`scripts/rh/check.rh` if release 内独立 gate（600s；
+│  │     历史称 `check.rhai`，已归档至 `scripts/archive/rhai/`）、
 │  │     qualification-gates.json 已声明、非 release 路径已标 skipped
 │  │     ——移出=把「release 专属」改成「push CI 跑一次」，路径清晰
 │  ├─ [ ] B2 缓存 key 对版本行归一化后再 hash
@@ -408,7 +409,7 @@ v0.1.15  Feedback shift-left & release-lane economics
 - [x] **R3 net-research 移出 release 门**（原 B1）
   - **动机**：142.2s／16.4%，耗时第二名，却与发布产物正确性关系最弱
   - **做法**：改为 push CI 跑一次；**不是删除**——保留验证，只换车道
-  - **落地**：`check.rhai` release 块不再跑 `agenterm-net-research`；
+  - **落地**：`scripts/rh/check.rh` release 块不再跑 `agenterm-net-research`；
     `scripts/qualification-gates.json` 去掉该 required gate；
     push CI linux 仍 `AGENTERM_BOOTSTRAP_TASK: agenterm-net-research`。
   - **验收**：release 门不再含该 gate 且 push CI 含之；
@@ -1151,7 +1152,7 @@ L′. v0.1.14 carry-forward
 
 | 泳道 | 主机 / agent | 叶（优先序） | 文件域（可写） | 禁区 / 备注 |
 |------|--------------|--------------|---------------|-------------|
-| **CI-R** | 任意一台，**独占一人** | §2.2 序 1–3、6：**R1→R2→A4→R3/A3→R4** | `.github/workflows/*`、`scripts/rhai/check*.rhai`、qualification / cache 相关声明 | 不碰 GUI 巨石；R4 自身是新车道须 dry-run 自证 |
+| **CI-R** | 任意一台，**独占一人** | §2.2 序 1–3、6：**R1→R2→A4→R3/A3→R4** | `.github/workflows/*`、`scripts/rh/check*.rh`、qualification / cache 相关声明 | 不碰 GUI 巨石；R4 自身是新车道须 dry-run 自证 |
 | **G-install** | **优先 OSX**（§8真机）；Lnx 可选复验 | **G3→G7a→G2→G6**（与 R 正交并行） | `install.sh`、version / `installed.json` 写出路径、相关 docs | **不**改 keep-server 默认（G7b/c/d 等 G-P2）；G7a 纯文案可先做 |
 | **Win-UX** | **Windows agent** | **U2** 真机回归；**P0-3** breakaway 若仍欠；用户现场 Win-only 痛点；B′/M 文档若排期到 | `windows/remote_frontend*` 最小 diff；已 SHARED 的只改 present | 新 ui-action 先 catalog；strip/picker 深度仍 Win-first，Unix 不默默假实现 |
 | **Unix-UX** | **OSX agent 主责**（单写 `unix/frontend`） | **O1b** 状态栏 IME（已拍板）；§11余叶；对 **SHARED** 的诚实接线 / 真机 | `unix/frontend/**`、`adapters/macos/**`、共享 `frontend/*` 仅当语义真共享 | **禁止**复刻 server-strip 全量当本版必做；读 `ui_action_catalog` WINDOWS_ONLY 的 `parity-gap` |
@@ -1202,7 +1203,7 @@ L′. v0.1.14 carry-forward
 
 **Win 已交棒的 CI-R 证据指针**：`ci.yml`（v3-slim target + script-smoke）、  
 `candidate.yml`（cargo-home restore-keys + timing/bootstrap summary）、  
-`check.rhai` + `qualification-gates.json`（net-research 出 release 门）。
+`scripts/rh/check.rh` + `qualification-gates.json`（net-research 出 release 门）。
 
 ### 2.3 明确不做速度优化的部分
 
@@ -1691,7 +1692,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 | 2026-08-06 | **goal-crate-platform 封装完结（contract）**：G8 `font-decrease`/`font-increase`/`toggle-locale` Unix 补 ui-action 并升 SHARED（方法本已存在）；gap 文写「完结定义」+ G3/G4 标 out-of-goal residual；WINDOWS_ONLY 余 14=strip/picker+settings-scope（产品叶非 OS 泄漏）；成功清单在 `goal-crate-platform.md` 勾选 |
 | 2026-08-06 | **三端并发派工写入本文 §2.2.1**（用户要求不另开 orchestrate 文件）：泳道 CI-R / G-install / Win-UX / Unix-UX / Lnx-env / S-HOLD；unix/frontend 单写者=OSX；shared-first + 热文件互斥；§1.5 与 §11 指针回链 |
 | 2026-08-06 | **章节编号改为阿拉伯数字** `x.y.z`（废止「一、二·二-b」等中文章节号）；交叉引用同步为 `§2.2.1` 等形式；原 CLI 专节与结构 §9 撞号 → CLI 改为 **§12** |
-| 2026-08-06 | **Win CI-R 主波落地**：R1 CI target **v3-slim**；R2 Candidate cargo-home **restore-keys**；R3 net-research 出 release 门（gates.json + check.rhai），push CI linux 仍跑；A3 script-smoke 进 windows release-lane-smokes；A4 Candidate summary 强化 bootstrap 行。R4 未做。OSX/Lnx 接手见 **§2.2.2** |
+| 2026-08-06 | **Win CI-R 主波落地**：R1 CI target **v3-slim**；R2 Candidate cargo-home **restore-keys**；R3 net-research 出 release 门（gates.json + `check.rhai`，现 `scripts/rh/check.rh`），push CI linux 仍跑；A3 script-smoke 进 windows release-lane-smokes；A4 Candidate summary 强化 bootstrap 行。R4 未做。OSX/Lnx 接手见 **§2.2.2** |
 | 2026-08-06 | **移除 agenterm-mux / agenterm-mcp 独立 PE**：用户拍板不保留兼容入口；权威入口仅为 `agenterm-cli mux` / `agenterm-cli mcp`。Cargo bins、artifacts.json、install、smokes、PRD 已同步。 |
 | 2026-08-06 | **续推**：R4 dry_run 配置合入 `release.yml`；H4 全平台 `sbom_sha256`；G3 `agenterm --version` + `installed.json`；G2 断链清理；G7a 文案加强。G6 releases 修剪仍开 |
 | 2026-08-06 | **续推 2**：G6 `prune_old_releases`（`AGENTERM_RELEASES_KEEP`）；U3 Win tab PTY resize debounce 100ms；P0-3 文档/单测锁 breakaway autostart。U2 真机/H1 releases.json/B′/M 仍开 |
@@ -1715,7 +1716,7 @@ SBOM + sha256 推导——本仓的发布链已经产出这三样（见 §7.3 �
 |------|-----|--------|
 | **O（本规格）** | **本 macOS 机 agent** | `adapters/macos/**`、unix frontend 粘贴/IME 消费侧、`install.sh` 文案级、本机证据 |
 | Win IME I1–I3 | 已入 main / Win agent | `adapters/windows/**` — **O 禁写** |
-| 发布链 R/A/H | 他 agent | workflows / check.rhai — O 勿抢 |
+| 发布链 R/A/H | 他 agent | workflows / `scripts/rh/check.rh` — O 勿抢 |
 | N1 Linux 半叶 | 另派 | `adapters/linux/ime.rs` — O 默认可只留 stub 注释 |
 
 ### 11.2 作业树（执行序）
@@ -2261,7 +2262,7 @@ HOLD 多 agent 并行
 
 | 域 | 代表路径 | 与谁易撞 |
 |----|----------|----------|
-| 发布链 | `.github/workflows/*`, `scripts/rhai/check*.rhai` | A/B/E 组 |
+| 发布链 | `.github/workflows/*`, `scripts/rh/check*.rh` | A/B/E 组 |
 | 安装更新 | `install.sh`, CLI update 相关 | G/H 组 |
 | 结构闸 | `src/platform/boundary_tests.rs`, `plan/ARCHITECTURE.md` | **S 组自有** |
 | 双主机 GUI | `unix/frontend/**`, `windows/remote_frontend.rs` | UX/parity 他方 |

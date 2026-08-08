@@ -4,14 +4,12 @@ use std::path::PathBuf;
 
 use agenterm_rh::{check, qualify_pack_dir, transpile_cdylib_with_mode, CdylibExecutionMode};
 
-const NATIVE_PACK_FIXTURES: [&str; 3] = [
+const NATIVE_PACK_FIXTURES: [&str; 4] = [
     "rh_empty_map_fn_return.rh",
     "rh_json_map_key_chain_via_locals.rh",
     "rh_array_index_property_via_local.rh",
+    "rh_null_unit_compare.rh",
 ];
-
-/// Skipped when `check` fails on tip; see `codegen_native_pack_fixtures` handoff.
-const OPTIONAL_NULL_UNIT_FIXTURE: &str = "rh_null_unit_compare.rh";
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -66,21 +64,6 @@ fn array_index_property_via_local_pack_qualifies_native() {
 }
 
 #[test]
-fn null_unit_compare_pack_optional() {
-    let source = read_fixture(OPTIONAL_NULL_UNIT_FIXTURE);
-    if check(&source).is_err() {
-        eprintln!(
-            "handoff: skipping {OPTIONAL_NULL_UNIT_FIXTURE} pack qualification — () / null compare check unsupported on tip"
-        );
-        return;
-    }
-    let output = transpile_cdylib_with_mode(&source)
-        .unwrap_or_else(|error| panic!("transpile {OPTIONAL_NULL_UNIT_FIXTURE}: {error}"));
-    if output.execution_mode == CdylibExecutionMode::CompatDelegating {
-        eprintln!(
-            "handoff: skipping {OPTIONAL_NULL_UNIT_FIXTURE} pack qualification — check passes but compat-delegating on tip"
-        );
-        return;
-    }
-    assert_native_pack_fixture(OPTIONAL_NULL_UNIT_FIXTURE);
+fn null_unit_compare_pack_qualifies_native() {
+    assert_native_pack_fixture(NATIVE_PACK_FIXTURES[3]);
 }

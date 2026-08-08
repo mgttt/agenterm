@@ -65,7 +65,7 @@ fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
         .arg("--")
         .arg(directory)
         .arg(artifacts);
-    command.args(extra).output().expect("run Rhai cleanup task")
+    command.args(extra).output().expect("run native cleanup task")
 }
 
 fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
@@ -81,7 +81,7 @@ fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
         .arg(repo_under_test)
         .arg(target)
         .output()
-        .expect("run Rhai target preparation task")
+        .expect("run native target preparation task")
 }
 
 fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
@@ -97,7 +97,7 @@ fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
         .arg(destination)
         .arg(name)
         .output()
-        .expect("run Rhai artifact staging task")
+        .expect("run native artifact staging task")
 }
 
 fn run_validate_artifact_manifest() -> Output {
@@ -109,7 +109,7 @@ fn run_validate_artifact_manifest() -> Output {
         .args(["task", "run", "validate-artifact-manifest", "--manifest"])
         .arg(manifest)
         .output()
-        .expect("run Rhai artifact-manifest validation task")
+        .expect("run native artifact-manifest validation task")
 }
 
 fn run_validate_artifact_manifest_fixture(path: &Path) -> Output {
@@ -208,7 +208,7 @@ fn run_write_build_metadata(
     for (name, value) in environment {
         command.env(name, value);
     }
-    command.output().expect("run Rhai build-metadata task")
+    command.output().expect("run native build-metadata task")
 }
 
 fn run_stage_build(
@@ -245,7 +245,7 @@ fn run_stage_build(
     for name in BUILD_IDENTITY_ENVIRONMENT {
         command.env_remove(name);
     }
-    command.output().expect("run Rhai stage-build task")
+    command.output().expect("run native stage-build task")
 }
 
 fn run_migration_audit(repo_under_test: &Path) -> Output {
@@ -260,7 +260,7 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
         .arg("--")
         .arg(repo_under_test)
         .output()
-        .expect("run Rhai migration-audit task")
+        .expect("run migration-audit task (shim; native path needs Windows host)")
 }
 
 fn run_prd_alignment(repo_under_test: &Path) -> Output {
@@ -1934,7 +1934,7 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     let workflow = repo.join(".github").join("workflows").join("release.yml");
     fs::create_dir_all(workflow.parent().expect("workflow parent"))
         .expect("create workflow parent");
-    fs::write(&workflow, b"run: agenterm-rhai task run package\n").expect("write clean workflow");
+    fs::write(&workflow, b"run: agenterm-rh task run package\n").expect("write clean workflow");
     let generic_shell = repo.join("scripts").join("fixture.sh");
     fs::write(&generic_shell, b"#!/usr/bin/env sh\nset -eu\n").expect("write clean shell fixture");
     let generic_rhai = repo.join("scripts").join("fixture.rhai");
@@ -1994,7 +1994,7 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
         .contains("migration_powershell_automation_reference:")
     );
 
-    fs::write(&workflow, b"run: agenterm-rhai task run package\n")
+    fs::write(&workflow, b"run: agenterm-rh task run package\n")
         .expect("remove stale workflow reference");
 
     let bootstrap = repo.join("scripts").join("bootstrap.cmd");

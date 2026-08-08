@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 3] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 4] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -23,10 +23,12 @@ const FIXTURES: [(&str, &[&str], &[&str]); 3] = [
         ],
         &["rh_json_get_path_key(&ordered"],
     ),
+    (
+        "rh_null_unit_compare.rh",
+        &[".is_null()"],
+        &["rh_host_run_script(RH_SCRIPT_SOURCE)"],
+    ),
 ];
-
-/// `value == ()` null/unit compare is still under investigation; see handoff.
-const NULL_UNIT_FIXTURE: &str = "rh_null_unit_compare.rh";
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -78,8 +80,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_seventy_six() {
-    assert_eq!(RH_CODEGEN_REVISION, 76);
+fn codegen_revision_is_seventy_seven() {
+    assert_eq!(RH_CODEGEN_REVISION, 77);
 }
 
 #[test]
@@ -118,32 +120,10 @@ fn array_index_property_via_local_emits_index_not_key_path() {
 }
 
 #[test]
-fn null_unit_compare_fixture_status() {
-    let source = read_fixture(NULL_UNIT_FIXTURE);
-    match check(&source) {
-        Ok(()) => {
-            let output = transpile_cdylib_with_mode(&source)
-                .unwrap_or_else(|error| panic!("transpile {NULL_UNIT_FIXTURE}: {error}"));
-            if output.execution_mode == CdylibExecutionMode::CompatDelegating {
-                eprintln!(
-                    "handoff: {NULL_UNIT_FIXTURE} check passes but still compat-delegating on tip — () / null compare native emit pending"
-                );
-                return;
-            }
-            assert!(
-                matches!(
-                    output.execution_mode,
-                    CdylibExecutionMode::Native | CdylibExecutionMode::HostEval
-                ),
-                "{NULL_UNIT_FIXTURE}: expected native or host-eval when not compat, got {:?}\n{}",
-                output.execution_mode,
-                output.rust
-            );
-        }
-        Err(error) => {
-            eprintln!(
-                "handoff: {NULL_UNIT_FIXTURE} check still unsupported on tip: {error}"
-            );
-        }
-    }
+fn null_unit_compare_emits_native_json_null_check() {
+    assert_native_or_host_eval(
+        FIXTURES[3].0,
+        FIXTURES[3].1,
+        FIXTURES[3].2,
+    );
 }

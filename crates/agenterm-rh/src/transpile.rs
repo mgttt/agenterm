@@ -1129,6 +1129,13 @@ fn call_site_arg_kind_for_param_upgrade(arg: &Expr, ctx: &EmitCtx) -> Option<Val
             .get(call.name.as_str())
             .copied()
             .unwrap_or(ValueKind::Int),
+        _ if json_path_array_index(arg, ctx).is_some()
+            || json_path_key_get(arg, ctx).is_some()
+            || json_array_index(arg, ctx).is_some()
+            || json_rhai_array_index_property(arg, ctx).is_some() =>
+        {
+            ValueKind::Json
+        }
         _ => return None,
     };
     // Empty `#{}` is Set in bindings but is a JSON object at API boundaries.
@@ -1909,6 +1916,12 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
         Expr::Dot(boxed, ..) => {
             if is_param_var(&boxed.lhs, param) {
                 match &boxed.rhs {
+                    // Rhai parses `param.field[index]` as Dot(param, Index(Property, …)).
+                    Expr::Index(index_box, ..)
+                        if matches!(&index_box.lhs, Expr::Property(..)) =>
+                    {
+                        return true;
+                    }
                     // `param.len` is shared by strings/arrays — not JSON-only.
                     Expr::Property(property, ..) if property.2.as_str() == "len" => false,
                     Expr::Property(property, ..) => !is_process_member_name(property.2.as_str()),
@@ -8061,6 +8074,9 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push_str(if *value { "true" } else { "false" });
             out.push(')');
         }
+        Expr::Unit(..) => {
+            out.push_str("serde_json::Value::Null");
+        }
         Expr::Map(..) => emit_json_map_literal(out, expr, ctx)?,
         Expr::Array(items, ..) if items.is_empty() => {
             out.push_str("serde_json::Value::Array(Vec::new())");
@@ -9849,7 +9865,12 @@ fn emit_json_arg(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(),
             Ok(())
         }
         Expr::Map(..) | Expr::Array(..) => emit_json_value_expr(out, expr, ctx),
-        _ if json_value_path(expr, ctx).is_some() || json_array_index(expr, ctx).is_some() => {
+        _ if json_value_path(expr, ctx).is_some()
+            || json_array_index(expr, ctx).is_some()
+            || json_path_array_index(expr, ctx).is_some()
+            || json_path_key_get(expr, ctx).is_some()
+            || json_rhai_array_index_property(expr, ctx).is_some() =>
+        {
             emit_json_value_expr(out, expr, ctx)
         }
         _ => Err(RhError::Transpile(format!(
@@ -10061,6 +10082,106 @@ fn emit_op(out: &mut String, op: &Token, args: &[Expr], ctx: &mut EmitCtx) -> Re
     }
 }
 
+fn is_unit_expr(expr: &Expr) -> bool {
+    matches!(expr, Expr::Unit(..))
+}
+
+fn is_json_null_compare_value(expr: &Expr, ctx: &EmitCtx) -> bool {
+    if let Expr::Variable(ident, ..) = expr {
+        return matches!(
+            ctx.scope.get(ident.1.as_str()).copied(),
+            Some(ValueKind::Json)
+        );
+    }
+    json_path_key_get(expr, ctx).is_some()
+        || json_path_array_index(expr, ctx).is_some()
+        || json_array_index(expr, ctx).is_some()
+        || json_rhai_array_index_property(expr, ctx).is_some()
+        || json_value_path(expr, ctx).is_some()
+}
+
+fn json_unit_compare_pair<'a>(
+    lhs: &'a Expr,
+    rhs: &'a Expr,
+    ctx: &EmitCtx,
+) -> Option<(&'a Expr, bool)> {
+    if is_unit_expr(rhs) && is_json_null_compare_value(lhs, ctx) {
+        Some((lhs, true))
+    } else if is_unit_expr(lhs) && is_json_null_compare_value(rhs, ctx) {
+        Some((rhs, true))
+    } else {
+        None
+    }
+}
+
+fn emit_json_value_operand(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    if let Expr::Variable(ident, ..) = expr
+        && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
+    {
+        out.push_str(ident.1.as_str());
+        return Ok(());
+    }
+    if let Some((binding, path, key)) = json_path_key_get(expr, ctx) {
+        out.push_str("rh_json_get_path_key(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push_str(", &");
+        emit_json_map_key(out, key, ctx)?;
+        out.push(')');
+        return Ok(());
+    }
+    if let Some((binding, path, index)) = json_path_array_index(expr, ctx) {
+        out.push_str("rh_json_get_path_index(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push_str(", ");
+        emit_intish(out, index, ctx)?;
+        out.push(')');
+        return Ok(());
+    }
+    if let Some((binding, index)) = json_array_index(expr, ctx) {
+        out.push_str("rh_json_array_get(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_intish(out, index, ctx)?;
+        out.push(')');
+        return Ok(());
+    }
+    if let Some((binding, path, index, field)) = json_rhai_array_index_property(expr, ctx) {
+        out.push_str("rh_json_get_path(&rh_json_get_path_index(&");
+        out.push_str(binding);
+        out.push_str(", ");
+        emit_json_path(out, &path);
+        out.push_str(", ");
+        emit_intish(out, index, ctx)?;
+        out.push_str("), &[");
+        out.push_str(&format!("{field:?}"));
+        out.push_str("])");
+        return Ok(());
+    }
+    if let Some((binding, path)) = json_value_path(expr, ctx) {
+        if path.is_empty() {
+            out.push_str(binding);
+        } else {
+            out.push_str("rh_json_get_path(&");
+            out.push_str(binding);
+            out.push_str(", ");
+            emit_json_path(out, &path);
+            out.push(')');
+        }
+        return Ok(());
+    }
+    Err(RhError::Transpile(format!(
+        "json null compare operand must be a JSON value (expr={expr:?})"
+    )))
+}
+
 fn comparison_binary(
     out: &mut String,
     op: &str,
@@ -10069,6 +10190,18 @@ fn comparison_binary(
     ctx: &mut EmitCtx,
 ) -> Result<(), RhError> {
     if ctx.cdylib {
+        if let Some((json_expr, _)) = json_unit_compare_pair(lhs, rhs, ctx) {
+            // `((value.is_null())) as INT` / `(!(value.is_null())) as INT`
+            // so `!` applies to the bool before the INT cast.
+            out.push('(');
+            if op == "!=" {
+                out.push('!');
+            }
+            out.push('(');
+            emit_json_value_operand(out, json_expr, ctx)?;
+            out.push_str(".is_null())) as INT");
+            return Ok(());
+        }
         out.push('(');
         if prefers_string_ops(lhs, rhs, ctx) {
             emit_stringish(out, lhs, ctx)?;
@@ -10502,6 +10635,83 @@ fn entry() {
         );
         assert!(
             !output.rust.contains("rh_json_get_path_key(&ordered"),
+            "{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn cdylib_transpile_emits_json_null_unit_compare() {
+        let source = include_str!("../tests/fixtures/rh_null_unit_compare.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("serde_json::Value::Null"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains(".is_null())) as INT"),
+            "null/unit compare must close bool group before INT cast: {}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn json_path_array_index_binding_stays_json_not_string() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn active_tab_from_snapshot(snapshot) {
+    for index in 0..snapshot.tabs.len {
+        let tab = snapshot.tabs[index];
+        if tab.active != 0 {
+            return tab;
+        }
+    }
+    rhai::json::parse("null")
+}
+
+fn entry() {
+    let snapshot = rhai::json::parse("{\"tabs\":[{\"active\":1}]}");
+    let tab = active_tab_from_snapshot(snapshot);
+    if tab.active != 1 {
+        return rh::fail("tab");
+    }
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert!(
+            matches!(
+                output.execution_mode,
+                CdylibExecutionMode::Native | CdylibExecutionMode::HostEval
+            ),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("rh_json_get_path_index(&snapshot, &[\"tabs\"], index)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            !output
+                .rust
+                .contains("rh_json_string_path_index(&snapshot, &[\"tabs\"]"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("pub fn active_tab_from_snapshot(mut snapshot: serde_json::Value)"),
             "{}",
             output.rust
         );

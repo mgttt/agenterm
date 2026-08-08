@@ -46,8 +46,8 @@ fn assert_native_fixture(name: &str, needles: &[&str], anti_needles: &[&str]) {
 }
 
 #[test]
-fn codegen_revision_is_seventy_six() {
-    assert_eq!(RH_CODEGEN_REVISION, 76);
+fn codegen_revision_is_seventy_seven() {
+    assert_eq!(RH_CODEGEN_REVISION, 77);
 }
 
 #[test]

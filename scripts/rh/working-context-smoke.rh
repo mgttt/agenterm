@@ -14,20 +14,17 @@ fn require_no_secret(text, secret, location) {
     );
 }
 
-fn active_tab_index(snapshot) {
-    // Touch JSON path so the param infers Json (bare tabs.len loops stay INT).
+fn active_tab_from_snapshot(snapshot) {
+    // Bind tabs + index-local first so return kind stays Json (not Bool).
     let tabs = snapshot.tabs;
-    let found_index = -1;
     for index in 0..tabs.len {
-        let tab = snapshot.tabs[index];
-        if tab.active != 0 {
-            found_index = index;
+        let tab = tabs[index];
+        let is_active = tab["active"];
+        if is_active != 0 {
+            return tab;
         }
     }
-    if found_index < 0 {
-        throw "working_context_active_tab_missing";
-    }
-    found_index
+    throw "working_context_active_tab_missing";
 }
 
 fn wait_for_server(context, cli, gui_child, redactions) {
@@ -157,17 +154,20 @@ fn entry() {
         let snapshot_text = "" + snapshot_result.stdout;
         require_no_secret(snapshot_text, secret, "launch_ui_snapshot");
         let snapshot = rhai::json::parse(snapshot_text);
-        let tab = snapshot.tabs[active_tab_index(snapshot)];
-        let proxy_source = "" + tab.working_context.proxy.source;
+        let tab = active_tab_from_snapshot(snapshot);
+        let working_context = tab.working_context;
+        let tab_proxy = working_context.proxy;
+        let proxy_source = "" + tab_proxy.source;
         test_harness::require(
-            tab.working_context.proxy.configured != 0
+            tab_proxy.configured != 0
                 && proxy_source == "launch"
-                && tab.working_context.proxy.endpoint_visible == 0
-                && tab.working_context.proxy.credential_revealed == 0,
+                && tab_proxy.endpoint_visible == 0
+                && tab_proxy.credential_revealed == 0,
             "working_context_launch_proxy_facts"
         );
         let tab_id = "" + tab.id;
-        let epoch = "" + snapshot.event_position.epoch;
+        let event_position = snapshot.event_position;
+        let epoch = "" + event_position.epoch;
         let launch_pane_result = test_harness::invoke_cli(
             context,
             cli,
@@ -177,13 +177,17 @@ fn entry() {
         );
         let launch_pane_text = "" + launch_pane_result.stdout;
         let launch_pane = rhai::json::parse(launch_pane_text);
-        let launch_window = launch_pane.windows[0];
+        let launch_windows = launch_pane.windows;
+        let launch_window = launch_windows[0];
         let input_writes = launch_window.input_writes;
-        let proxy_status = snapshot.layout.status_bar.proxy;
+        let layout = snapshot.layout;
+        let status_bar = layout.status_bar;
+        let proxy_status = status_bar.proxy;
+        let proxy_bounds = proxy_status.bounds;
         test_harness::require(
             proxy_status.archived != 0
                 && proxy_status.available == 0
-                && proxy_status.bounds.width == 0
+                && proxy_bounds.width == 0
                 && type_of(proxy_status.action) == "()"
                 && type_of(proxy_status.eye_action) == "()",
             "working_context_archived_surface_visible"
@@ -220,7 +224,8 @@ fn entry() {
         let pane_text = "" + pane_result.stdout;
         require_no_secret(pane_text, secret, "archived_pane_snapshot");
         let pane = rhai::json::parse(pane_text);
-        let pane_window = pane.windows[0];
+        let pane_windows = pane.windows;
+        let pane_window = pane_windows[0];
         let composer = "" + pane_window.composer;
         test_harness::require(
             pane_window.input_writes == input_writes
@@ -369,23 +374,24 @@ fn entry() {
         let restored_text = "" + restored_result.stdout;
         require_no_secret(restored_text, secret, "restart_ui_snapshot");
         let restored_snapshot = rhai::json::parse(restored_text);
-        let restored_tab =
-            restored_snapshot.tabs[active_tab_index(restored_snapshot)];
-        let restored_proxy_source =
-            "" + restored_tab.working_context.proxy.source;
+        let restored_tab = active_tab_from_snapshot(restored_snapshot);
+        let restored_working_context = restored_tab.working_context;
+        let restored_tab_proxy = restored_working_context.proxy;
+        let restored_cwd = restored_working_context.cwd;
+        let restored_proxy_source = "" + restored_tab_proxy.source;
         let restored_id = "" + restored_tab.id;
         let restored_name = "" + restored_tab.name;
         let restored_note = "" + restored_tab.note;
-        let restored_cwd_source =
-            "" + restored_tab.working_context.cwd.source;
-        let restored_cwd_path = "" + restored_tab.working_context.cwd.path;
-        let restored_cwd_confirmed =
-            "" + restored_tab.working_context.cwd.confirmed_path;
+        let restored_cwd_source = "" + restored_cwd.source;
+        let restored_cwd_path = "" + restored_cwd.path;
+        let restored_cwd_confirmed = "" + restored_cwd.confirmed_path;
         test_harness::require(
-            restored_tab.working_context.proxy.configured == 0
+            restored_tab_proxy.configured == 0
                 && restored_proxy_source == "off",
             "working_context_proxy_persisted"
         );
+        let restored_layout = restored_snapshot.layout;
+        let restored_sidebar = restored_layout.sidebar;
         test_harness::require(
             restored_id == persistent_id
                 && restored_name == persistent_name
@@ -393,12 +399,12 @@ fn entry() {
                 && restored_tab.draft != 0
                 && restored_tab.active != 0
                 && restored_cwd_source == "launch"
-                && restored_tab.working_context.cwd.pending == 0
+                && restored_cwd.pending == 0
                 && restored_cwd_path == restored_cwd_confirmed
                 && restored_cwd_path
                     != "C:\\restart-request-must-not-persist"
-                && restored_snapshot.layout.sidebar.configured_width == 250
-                && restored_snapshot.layout.sidebar.visible != 0,
+                && restored_sidebar.configured_width == 250
+                && restored_sidebar.visible != 0,
             "working_context_workspace_metadata_not_restored"
         );
         test_harness::invoke_cli(
