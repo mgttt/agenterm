@@ -1662,7 +1662,7 @@
     {
       "id": "qualification-selftest",
       "description": "Prove qualification manifests, results, provenance, and diagnostics fail closed",
-      "entry": "scripts/rhai/qualification-selftest.rhai",
+      "entry": "scripts/rh/qualification-selftest.rh",
       "profile": "local",
       "cwd": ".",
       "args": [

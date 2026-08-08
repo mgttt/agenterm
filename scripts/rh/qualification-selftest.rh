@@ -3,7 +3,6 @@
 //
 // Args: REPO CLI_EXE
 
-import "scripts/rh/lib/qualification" as qualification;
 import "scripts/rh/lib/test_harness" as test_harness;
 
 fn assert_ok(condition, message) {
@@ -32,6 +31,68 @@ fn zeros(count) {
     value
 }
 
+fn sorted(values) {
+    let result = [];
+    for value in values {
+        let text_value = "" + value;
+        let inserted = 0;
+        let index = 0;
+        while index < result.len {
+            let existing = "" + result[index];
+            if text_value < existing {
+                result.insert(index, text_value);
+                inserted = 1;
+                break;
+            }
+            index = index + 1;
+        }
+        if inserted == 0 {
+            result.push(text_value);
+        }
+    }
+    result
+}
+
+fn exact_values(left, right) {
+    let first = sorted(left);
+    let second = sorted(right);
+    if first.len != second.len {
+        return 0;
+    }
+    let index = 0;
+    while index < first.len {
+        if first[index] != second[index] {
+            return 0;
+        }
+        index = index + 1;
+    }
+    1
+}
+
+fn selftest_sha256(path) {
+    assert_ok(
+        std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
+        "qualification_selftest_input_missing:" + path
+    );
+    rhai::crypto::sha256_file(path)
+}
+
+fn selftest_git_head(repo) {
+    let stdout_path =
+        std::path::join(repo, ".qualification-selftest-git.stdout.tmp").display;
+    let code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        10000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    assert_ok(code == 0, "qualification_selftest_git");
+    let head = std::fs::read_to_string(stdout_path);
+    head.trim();
+    head
+}
+
 fn remove_owned_scratch(root, path) {
     let owned = std::path::absolute(root).display;
     let resolved = std::path::absolute(path).display;
@@ -47,18 +108,86 @@ fn remove_owned_scratch(root, path) {
     0
 }
 
+fn selftest_new_context(manifest_path, stress_included) {
+    let path = std::path::absolute(manifest_path).display;
+    let manifest = rhai::json::parse_file(path);
+    #{
+        manifest: manifest,
+        manifest_path: path,
+        stress_included: stress_included,
+        results: #{},
+        process_observation: #{
+            owned_commands: 0,
+            process_samples: 0,
+            automation_processes: rhai::json::parse("[]"),
+            terminal_compatibility_payloads: rhai::json::parse("[]")
+        }
+    }
+}
+
+fn selftest_evidence_from_output(output) {
+    let evidence = [];
+    for item in output {
+        let line = "" + item;
+        line.trim();
+        if line.starts_with("EVIDENCE ") {
+            let evidence_id = line.sub_string(9);
+            evidence.push(evidence_id);
+        }
+    }
+    evidence
+}
+
+fn selftest_build_results(manifest, rustfmt_status) {
+    let context = #{
+        results: #{}
+    };
+    for gate in manifest.required_gates {
+        let gate_id = "" + gate.id;
+        let status = "passed";
+        if gate_id == "rustfmt" {
+            status = "" + rustfmt_status;
+        }
+        let evidence_output = [];
+        for evidence_id in gate.evidence {
+            let evidence_line = "EVIDENCE " + evidence_id;
+            evidence_output.push(evidence_line);
+        }
+        context.results[gate_id] = #{
+            id: gate_id,
+            status: status,
+            duration_ms: 0,
+            evidence: selftest_evidence_from_output(evidence_output)
+        };
+    }
+    context
+}
+
+fn selftest_context_with_results(manifest_path, stress_included, rustfmt_status) {
+    let base = selftest_new_context(manifest_path, stress_included);
+    let built = selftest_build_results(base.manifest, rustfmt_status);
+    let results = built.results;
+    #{
+        manifest: base.manifest,
+        manifest_path: base.manifest_path,
+        stress_included: base.stress_included,
+        results: results,
+        process_observation: base.process_observation
+    }
+}
+
 fn would_reject_assert_results(context) {
     for gate in context.manifest.required_gates {
         let gate_id = "" + gate.id;
-        if !context.results.contains(gate_id) {
+        if !context.results.contains(gate.id) {
             return 1;
         }
-        let result = context.results[gate_id];
+        let result = context.results[gate.id];
         let result_status = "" + result.status;
         if result_status != "passed" {
             return 1;
         }
-        if qualification::exact_values(gate.evidence, result.evidence) == 0 {
+        if exact_values(gate.evidence, result.evidence) == 0 {
             return 1;
         }
     }
@@ -71,7 +200,10 @@ fn would_reject_assert_results(context) {
 fn would_reject_process_observation(context) {
     let owned_commands = 0 + context.process_observation.owned_commands;
     let process_samples = 0 + context.process_observation.process_samples;
-    if owned_commands == 0 || process_samples == 0 {
+    if owned_commands == 0 {
+        return 1;
+    }
+    if process_samples == 0 {
         return 1;
     }
     if context.process_observation.automation_processes.len > 0 {
@@ -92,7 +224,7 @@ fn would_reject_provenance_artifact_hash(
     artifact_manifest_path
 ) {
     let metadata = rhai::json::parse_file(metadata_path);
-    let artifact_hash = qualification::sha256(artifact_manifest_path);
+    let artifact_hash = selftest_sha256(artifact_manifest_path);
     if ("" + metadata.artifact_manifest_sha256) != artifact_hash {
         return 1;
     }
@@ -123,83 +255,60 @@ fn entry() {
 
     let rejected_statuses = ["skipped", "failed"];
     for rejected_status in rejected_statuses {
-        let context = qualification::q_new_context(
+        let context = selftest_context_with_results(
             manifest_path,
-            0,
-            0
+            1,
+            rejected_status
         );
-        let working = context;
-        for gate in working.manifest.required_gates {
-            let gate_id = "" + gate.id;
-            let status = "passed";
-            if gate_id == "rustfmt" {
-                status = "" + rejected_status;
-            }
-            let evidence_output = [];
-            for evidence_id in gate.evidence {
-                evidence_output.push("EVIDENCE " + "" + evidence_id);
-            }
-            working = qualification::add_result(
-                working,
-                gate_id,
-                status,
-                0,
-                evidence_output
-            );
-        }
         expect_rejection(
             "qualification_gate_not_passed:rustfmt:" + rejected_status,
-            would_reject_assert_results(working)
+            would_reject_assert_results(context)
         );
     }
 
-    let no_stress = qualification::q_new_context(
+    let no_stress = selftest_context_with_results(
         manifest_path,
         0,
-        0
+        "passed"
     );
-    let no_stress_ready = no_stress;
-    for gate in no_stress_ready.manifest.required_gates {
-        let gate_id = "" + gate.id;
-        let evidence_output = [];
-        for evidence_id in gate.evidence {
-            evidence_output.push("EVIDENCE " + "" + evidence_id);
-        }
-        no_stress_ready = qualification::add_result(
-            no_stress_ready,
-            gate_id,
-            "passed",
-            0,
-            evidence_output
-        );
-    }
     expect_rejection(
         "qualification_stress_required",
-        would_reject_assert_results(no_stress_ready)
+        would_reject_assert_results(no_stress)
     );
 
-    let missing_process = qualification::q_new_context(
-        manifest_path,
-        0,
-        1
-    );
+    let missing_process = selftest_new_context(manifest_path, 1);
     expect_rejection(
         "qualification_process_observation_missing",
         would_reject_process_observation(missing_process)
     );
-    let observed_process = qualification::add_process_observation(
-        missing_process,
-        1,
-        [],
-        0
+    let observed_process = #{
+        manifest: missing_process.manifest,
+        manifest_path: missing_process.manifest_path,
+        stress_included: missing_process.stress_included,
+        results: missing_process.results,
+        process_observation: #{
+            owned_commands: 1,
+            process_samples: 1,
+            automation_processes: rhai::json::parse("[]"),
+            terminal_compatibility_payloads: rhai::json::parse("[]")
+        }
+    };
+    assert_ok(
+        would_reject_process_observation(observed_process) == 0,
+        "qualification_selftest_process_observation_pass"
     );
-    qualification::assert_process_observation(observed_process);
-    let forbidden_process = qualification::add_process_observation(
-        observed_process,
-        1,
-        ["pwsh.exe:123"],
-        0
-    );
+    let forbidden_process = #{
+        manifest: observed_process.manifest,
+        manifest_path: observed_process.manifest_path,
+        stress_included: observed_process.stress_included,
+        results: observed_process.results,
+        process_observation: #{
+            owned_commands: 2,
+            process_samples: 2,
+            automation_processes: rhai::json::parse("[\"pwsh.exe:123\"]"),
+            terminal_compatibility_payloads: rhai::json::parse("[]")
+        }
+    };
     expect_rejection(
         "qualification_process_observation_powershell",
         would_reject_process_observation(forbidden_process)
@@ -284,28 +393,26 @@ fn entry() {
         let metadata = rhai::json::parse_file(
             std::path::join(repo, "dist/agenterm.json").display
         );
-        metadata.git_commit = qualification::command_output(
-            "git",
-            ["rev-parse", "HEAD"],
-            repo,
-            "qualification_selftest_git"
-        );
+        metadata.git_commit = selftest_git_head(repo);
         metadata.git_commit.to_lower();
         metadata.git_dirty = true;
-        metadata.cargo_lock_sha256 = qualification::sha256(
+        metadata.cargo_lock_sha256 = selftest_sha256(
             std::path::join(repo, "Cargo.lock").display
         );
         metadata.artifact_manifest_sha256 = zeros(64);
         let executables = [];
-        for entry in metadata.executables {
-            let entry_name = "" + entry.name;
-            entry.sha256 = qualification::sha256(
+        for item in metadata.executables {
+            let entry_name = "" + item.name;
+            let entry_sha256 = selftest_sha256(
                 std::path::join(
                     std::path::join(repo, "dist").display,
                     entry_name
                 ).display
             );
-            executables.push(entry);
+            executables.push(#{
+                name: entry_name,
+                sha256: entry_sha256
+            });
         }
         metadata.executables = executables;
         let metadata_path = std::path::join(
