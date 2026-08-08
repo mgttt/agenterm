@@ -1482,13 +1482,6 @@ fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
                 return true;
             }
         }
-        if is_param_var(&boxed.lhs, param) {
-            if let Expr::Property(property, ..) = &boxed.rhs {
-                if property.2.as_str() == "len" {
-                    return true;
-                }
-            }
-        }
     }
     if let Expr::FnCall(call, ..) = expr {
         if let Some(argv_index) = process_command_argv_arg_index(call)
@@ -12236,6 +12229,36 @@ fn entry() {
             output.rust.contains(
                 "rh_json_array_items(&document, &[\"tabs\"]).into_iter().map(|value| rh_json_as_str(&value)).collect()"
             ),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn string_length_does_not_infer_string_list_parameter() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn is_commit(value) {
+    let n = value.len;
+    if n == 40 {
+        return value.to_lower() == value;
+    }
+    0
+}
+
+fn entry() {
+    if is_commit(args[0]) {
+        return 0;
+    }
+    rh::fail("invalid_commit")
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output.rust.contains("pub fn is_commit(value: String)"),
             "{}",
             output.rust
         );
