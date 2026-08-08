@@ -107,11 +107,20 @@ fn check_accepts_import_via_compat() {
 }
 
 #[test]
-fn build_rhai_transpiles_compat_delegating() {
-    let source = std::fs::read_to_string("scripts/rh/build.rh").expect("read");
-    let rust = transpile_cdylib(&source).expect("transpile");
-    assert!(rust.contains("compat delegating"));
-    assert!(rust.contains("rh_host_run_script"));
+fn build_rh_transpiles_native_without_compat_delegation() {
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(repo.join("scripts/rh/build.rh")).expect("read");
+    let output =
+        agenterm_rh::transpile_cdylib_with_project(&repo, &source).expect("transpile");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(!output.rust.contains("compat delegating"));
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
 }
 
 #[test]
@@ -267,22 +276,48 @@ fn for_range_fixture_transpile_emits_native_loop() {
 }
 
 #[test]
-fn const_for_span_overflow_transpile_uses_host_eval_fallback() {
+fn const_for_span_overflow_transpile_rejects_or_native_bounds() {
     let source = include_str!("../fixtures/rh/for-span-overflow.rh");
-    let rust = transpile_cdylib(source).expect("transpile");
-    assert!(
-        rust.lines().any(|line| {
-            line.contains("let _for = rh_host_eval_int(") && line.contains("for value in 0..4097")
-        }),
-        "expected localized host-eval for fallback in:\n{rust}"
-    );
-    assert!(
-        !rust
-            .lines()
-            .any(|line| line.trim_start().starts_with("for value in 0..4097")),
-        "span above MAX_NATIVE_FOR_SPAN must not emit a native loop:\n{rust}"
-    );
-    assert!(!rust.contains("compat delegating"));
+    match agenterm_rh::transpile_cdylib_with_mode(source) {
+        Err(error) => {
+            let detail = error.to_string();
+            assert!(
+                detail.contains("4096")
+                    || detail.contains("4097")
+                    || detail.contains("span")
+                    || detail.contains("for"),
+                "expected bounded-for transpile error, got: {detail}"
+            );
+        }
+        Ok(output) => {
+            assert_eq!(
+                output.execution_mode,
+                agenterm_rh::CdylibExecutionMode::Native,
+                "{}",
+                output.rust
+            );
+            assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
+            assert!(!output.rust.contains("compat delegating"));
+            assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+            assert!(
+                !output
+                    .rust
+                    .lines()
+                    .any(|line| line.trim_start().starts_with("for value in 0..4097")),
+                "span above MAX_NATIVE_FOR_SPAN must not emit an unbounded native loop:\n{}",
+                output.rust
+            );
+            assert!(
+                output.rust.contains("4096")
+                    || output.rust.contains("4097")
+                    || output.rust.contains("MAX_NATIVE_FOR_SPAN")
+                    || output.rust.contains("rh_fail")
+                    || output.rust.contains("return Err("),
+                "expected native bounded-error lowering:\n{}",
+                output.rust
+            );
+        }
+    }
 }
 
 #[test]

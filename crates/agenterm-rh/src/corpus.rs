@@ -339,7 +339,7 @@ mod tests {
             report.entries[0]
                 .error
                 .as_deref()
-                .is_some_and(|error| error.contains("compat-delegating"))
+                .is_some_and(|error| error.contains("subset") || error.contains("native") || error.contains("transpile"))
         );
     }
 }

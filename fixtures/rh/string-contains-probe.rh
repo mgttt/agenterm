@@ -1,0 +1,8 @@
+// Probe native string contains for substring membership checks.
+fn entry() {
+    let haystack = "agenterm-rh-probe-needle";
+    if haystack.contains("needle") {
+        return haystack.len;
+    }
+    0
+}

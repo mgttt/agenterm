@@ -1,0 +1,11 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: JSON_PATH");
+    }
+
+    let doc = rh::json::parse_file(args[0]);
+    if doc.schema_version == 1 {
+        return 1;
+    }
+    0
+}

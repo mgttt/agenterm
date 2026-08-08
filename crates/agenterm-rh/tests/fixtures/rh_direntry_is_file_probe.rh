@@ -1,0 +1,13 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: DIRECTORY");
+    }
+
+    let files = 0;
+    for entry in std::fs::read_dir(args[0]) {
+        if entry.is_file {
+            files += 1;
+        }
+    }
+    files
+}

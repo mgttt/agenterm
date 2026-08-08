@@ -1,0 +1,8 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: PATH");
+    }
+
+    let text = std::fs::read_to_string(args[0]);
+    text.len
+}

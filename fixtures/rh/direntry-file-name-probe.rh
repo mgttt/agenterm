@@ -1,0 +1,15 @@
+// Probe native DirEntry.file_name during read_dir iteration.
+// Args: DIRECTORY
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: DIRECTORY");
+    }
+
+    let score = 0;
+    for entry in std::fs::read_dir(args[0]) {
+        if entry.file_name.len > 0 {
+            score += 1;
+        }
+    }
+    score
+}

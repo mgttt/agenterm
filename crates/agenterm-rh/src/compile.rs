@@ -231,7 +231,7 @@ mod tests {
         let manifest = out.with_extension("manifest.json");
         let _ = std::fs::remove_file(&manifest);
 
-        let output = compile_native("fn add(a, b) { a + b }", &out).expect("compile");
+        let output = compile_native("fn entry() { 0 }", &out).expect("compile");
         assert!(out.is_file());
         assert!(output.manifest_path.is_file());
         assert_eq!(output.native_hash, super::hash_file(&out).expect("hash"));

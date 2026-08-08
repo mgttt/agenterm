@@ -44,17 +44,17 @@
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",
         "std.time.system-time-rfc3339",
-        "rhai.task.sleep",
-        "rhai.json.parse",
-        "rhai.json.parse-file",
-        "rhai.json.stringify-pretty",
-        "rhai.bytes.from-array",
-        "rhai.crypto.sha256-file",
-        "rhai.hash.fnv1a64",
-        "rhai.image.inspect-png",
-        "rhai.clipboard.get-text",
-        "rhai.clipboard.set-text",
-        "rhai.runtime.atomic-write"
+        "rh.task.sleep",
+        "rh.json.parse",
+        "rh.json.parse-file",
+        "rh.json.stringify-pretty",
+        "rh.bytes.from-array",
+        "rh.crypto.sha256-file",
+        "rh.hash.fnv1a64",
+        "rh.image.inspect-png",
+        "rh.clipboard.get-text",
+        "rh.clipboard.set-text",
+        "rh.runtime.atomic-write"
       ]
     },
     "origin": {

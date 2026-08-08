@@ -131,71 +131,9 @@ fn rh_backend_run_matches_eval_for_entry_fixture() {
 }
 
 #[test]
-fn rh_backend_compat_unit_keeps_stdout_without_synthetic_value() {
+fn rh_backend_native_throw_surfaces_host_error() {
     with_rh_backend(|| {
-        let source = r#"
-fn entry() {
-    switch 1 {
-        1 => print("compat-unit"),
-        _ => ()
-    }
-}
-"#;
-        let result = try_execute_rh_invocation(
-            ScriptOperation::Run,
-            source,
-            RhInvocationOptions {
-                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-                ..RhInvocationOptions::default()
-            },
-            None,
-        )
-        .expect("run")
-        .expect("rh handled");
-        assert_eq!(result.stdout, "compat-unit\n");
-        assert_eq!(result.value, None);
-    });
-}
-
-#[test]
-fn rh_backend_compat_preserves_typed_non_integer_value() {
-    with_rh_backend(|| {
-        let source = r#"
-fn entry() {
-    switch 1 {
-        1 => true,
-        _ => false
-    }
-}
-"#;
-        let result = try_execute_rh_invocation(
-            ScriptOperation::Run,
-            source,
-            RhInvocationOptions {
-                project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-                ..RhInvocationOptions::default()
-            },
-            None,
-        )
-        .expect("run")
-        .expect("rh handled");
-        assert_eq!(result.value, Some(serde_json::json!(true)));
-        assert_eq!(result.stdout, "");
-    });
-}
-
-#[test]
-fn rh_backend_whole_script_compat_throw_is_an_error() {
-    with_rh_backend(|| {
-        let source = r#"
-fn entry() {
-    switch 1 {
-        1 => (),
-        _ => ()
-    }
-    throw "compat boom";
-}
-"#;
+        let source = r#"fn entry() { throw "native boom"; }"#;
         let result = try_execute_rh_invocation(
             ScriptOperation::Run,
             source,
@@ -207,18 +145,17 @@ fn entry() {
         );
         let error = match result {
             Err(error) => error,
-            Ok(_) => panic!("whole-script compat throw must fail"),
+            Ok(_) => panic!("native throw must fail"),
         };
+        let detail = error.to_string();
         assert!(
-            error
-                .to_string()
-                .contains("rh_host_run_script: Runtime error: compat boom"),
-            "missing stable host error detail: {error}"
+            detail.contains("rh_fail:") && detail.contains("native boom"),
+            "missing stable native throw host error detail: {error}"
         );
 
         let healthy = try_execute_rh_invocation(
             ScriptOperation::Run,
-            "fn entry() { switch 1 { 1 => 42, _ => 0 } }",
+            "fn entry() { 42 }",
             RhInvocationOptions {
                 project_root: Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
                 ..RhInvocationOptions::default()

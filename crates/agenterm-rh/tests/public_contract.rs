@@ -9,7 +9,7 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 71] = [
+const FIXTURE_NAMES: [&str; 77] = [
     "append-sync-probe.rh",
     "atomic-write-probe.rh",
     "break-continue.rh",
@@ -23,6 +23,8 @@ const FIXTURE_NAMES: [&str; 71] = [
     "command-args-json-probe.rh",
     "command-stdin-text-probe.rh",
     "crypto-sha256-file-probe.rh",
+    "direntry-file-name-probe.rh",
+    "direntry-is-file-probe.rh",
     "direntry-metadata-probe.rh",
     "duration-task-sleep-probe.rh",
     "entry.rh",
@@ -46,6 +48,7 @@ const FIXTURE_NAMES: [&str; 71] = [
     "json-keys-probe.rh",
     "json-marker-run-probe.rh",
     "json-param-index-assign-probe.rh",
+    "json-parse-file-probe.rh",
     "json-parse-schema.rh",
     "json-path-index-probe.rh",
     "json-stringify-probe.rh",
@@ -67,13 +70,16 @@ const FIXTURE_NAMES: [&str; 71] = [
     "set-map-loop-assign-probe.rh",
     "set-map-value-assign-probe.rh",
     "std-fs-exists-probe.rh",
+    "std-fs-read-to-string-probe.rh",
     "std-fs-write-probe.rh",
     "stdlib.rh",
+    "string-contains-probe.rh",
     "string-fn-bundle.rh",
     "string-index-of-probe.rh",
     "string-list-index-probe.rh",
     "string-list-set-probe.rh",
     "string-split-probe.rh",
+    "string-to-lower-probe.rh",
     "string-validate.rh",
     "system-time-rfc3339-probe.rh",
     "system-time-unix-millis-probe.rh",
@@ -83,11 +89,10 @@ const FIXTURE_NAMES: [&str; 71] = [
     "while.rh"
 ];
 
-const CONTROL_FLOW_FIXTURES: [&str; 8] = [
+const CONTROL_FLOW_FIXTURES: [&str; 7] = [
     "break-continue.rh",
     "for-dyn-range.rh",
     "for-range.rh",
-    "for-span-overflow.rh",
     "try-catch.rh",
     "try-ok.rh",
     "while-count.rh",

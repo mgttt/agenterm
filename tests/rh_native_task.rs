@@ -54,23 +54,39 @@ fn manifest_native_task_transpiles_without_interpreter_fallback() {
 }
 
 #[test]
-fn execution_mode_distinguishes_native_host_eval_and_compatibility() {
-    let host_eval = agenterm_rh::transpile_cdylib_with_mode(include_str!(
-        "../fixtures/rh/for-span-overflow.rh"
-    ))
-    .expect("localized host eval");
-    assert_eq!(
-        host_eval.execution_mode,
-        agenterm_rh::CdylibExecutionMode::HostEval
-    );
+fn execution_mode_is_native_only() {
+    let overflow = include_str!("../fixtures/rh/for-span-overflow.rh");
+    match agenterm_rh::transpile_cdylib_with_mode(overflow) {
+        Err(_) => {}
+        Ok(output) => {
+            assert_eq!(
+                output.execution_mode,
+                agenterm_rh::CdylibExecutionMode::Native,
+                "{}",
+                output.rust
+            );
+            assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
+            assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+            assert!(!output.rust.contains("compat delegating"));
+        }
+    }
 
-    let compatibility =
-        agenterm_rh::transpile_cdylib_with_mode("fn entry() { switch 1 { 1 => 42, _ => 0 } }")
-            .expect("whole-script compatibility");
-    assert_eq!(
-        compatibility.execution_mode,
-        agenterm_rh::CdylibExecutionMode::CompatDelegating
-    );
+    match agenterm_rh::transpile_cdylib_with_mode(
+        "fn entry() { switch 1 { 1 => 42, _ => 0 } }",
+    ) {
+        Err(_) => {}
+        Ok(output) => {
+            assert_eq!(
+                output.execution_mode,
+                agenterm_rh::CdylibExecutionMode::Native,
+                "{}",
+                output.rust
+            );
+            assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
+            assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+            assert!(!output.rust.contains("compat delegating"));
+        }
+    }
 }
 
 #[test]

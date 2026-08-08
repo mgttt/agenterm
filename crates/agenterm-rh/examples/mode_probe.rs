@@ -97,7 +97,7 @@ fn main() -> ExitCode {
             }
         }
     }
-    if output.execution_mode.as_str() != "native" || he > 1 {
+    if output.execution_mode.as_str() != "native" || he > 0 {
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
