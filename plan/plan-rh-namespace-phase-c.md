@@ -33,17 +33,16 @@ Top surfaces: `json::parse`, `crypto::sha256_file`, `task::sleep`, `runtime::ato
 
 ## Sequenced leaves
 
-1. **Wave 1 — dual alias window:** register `rh` + keep `rhai`; centralize transpile/catalog namespace constants; accept both in `uses_host_surface`.
-2. **Wave 2 — native emit gaps:** close remaining `rh_host_eval_int("rhai::…")` for json/task/crypto/runtime long tail (clipboard already native at rev79).
+1. **Wave 1 — dual alias window:** ✅ shipped at codegen **rev80** — Engine registers `rh` + legacy `rhai`; `host_api_module` / AOT matchers accept both; catalog publishes `rh.*` aliases (`rhai.*` marked Legacy); fixture `rh_host_api_json_task.rh`.
+2. **Wave 2 — native emit gaps:** close remaining `rh_host_eval_int("rhai::…")` / `"rh::…"` for json/task/crypto/runtime long tail (clipboard already native at rev79).
 3. **Wave 3 — script mass-rename:** mechanical `rhai::` → `rh::` in `scripts/rh/**`, fixtures, embedded eval strings; lint + smoke.
 4. **Wave 4 — Phase C archive:** drop `rhai` Engine module, eval/run-script Rhai paths, then `agenterm-rhai` PE; scrub residual branding.
 
-**Non-goal:** script-rename before Wave 1 (breaks check/transpile/pack).
 **Non-goal:** inventing permission/sandbox policy under Script Runtime.
 
 ## Evidence per wave
 
-- Wave 1: `cargo test -p agenterm-rh`, catalog registration guards, one pack per submodule.
-- Wave 2: golden transpile asserts no `rh_host_eval_int("rhai::` for corpus fixtures.
+- Wave 1: ✅ `cargo test -p agenterm-rh` + `script_catalog` + `rh_task_entry_regression` HE ceilings (script-smoke ≤30, remote-ui ≤12); `rh::`/`rhai::` fixtures Native he=1.
+- Wave 2: golden transpile asserts no `rh_host_eval_int` for corpus host surfaces that already have native emit.
 - Wave 3: `agenterm-rh check-many` + owning smokes HostEval/Native unchanged.
 - Wave 4: zero live `rhai::` / `agenterm-rhai` operator paths outside archive + intentional historical docs.

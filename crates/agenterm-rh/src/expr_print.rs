@@ -344,7 +344,9 @@ fn range_inner(out: &mut String, op: &str, start: &Expr, end: &Expr) -> Result<(
 
 pub fn uses_host_surface(expr: &Expr) -> bool {
     match expr {
-        Expr::Variable(ident, ..) => matches!(ident.1.as_str(), "std" | "rhai" | "fleet"),
+        Expr::Variable(ident, ..) => {
+            matches!(ident.1.as_str(), "std" | "rh" | "rhai" | "fleet")
+        }
         Expr::Dot(boxed, ..) => uses_host_surface(&boxed.lhs) || uses_host_surface(&boxed.rhs),
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => {
             !call.namespace.is_empty()
