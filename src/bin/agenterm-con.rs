@@ -31,7 +31,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey};
+use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButton};
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
@@ -401,10 +401,12 @@ A standalone console host (conhost equivalent). No tabs, no server, no Fleet.
                  capturing pixels.
 
   --script PATH  Read a JSON array of input commands from PATH and play them
-                 back through the real keyboard/paste code paths — text,
-                 paste, key (with ctrl/alt/shift), wait_ms. Lets a test or
-                 another agent drive a session without OS-level input
-                 injection. See src/bin/agenterm-con/agent_interface.rs.
+                 back through the real keyboard/paste/mouse code paths —
+                 text, paste, key (with ctrl/alt/shift), wait_ms, click
+                 (row/col/button, with ctrl/alt/shift), mouse_move
+                 (row/col), wheel (row/col/notches). Lets a test or another
+                 agent drive a session without OS-level input injection.
+                 See src/bin/agenterm-con/agent_interface.rs.
 
 Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 ~/.config (Unix) with keys: font_size, cols, rows (all optional).
@@ -1043,17 +1045,30 @@ impl ConTerminal {
     }
 
     /// Scrolls the viewport by `lines` (positive = toward older output).
+    ///
+    /// Delegates the upper clamp to `Screen::set_scrollback` itself rather
+    /// than re-deriving "how much scrollback is available" here: vendored
+    /// `vt100`'s `Screen::scrollback()` returns the *current* offset (its
+    /// own doc comment says so — "0 when the normal screen is in view"),
+    /// not the available range, and there is no public accessor for the
+    /// latter. A prior version of this function added that current offset
+    /// to itself as a stand-in for the bound (`scrollback() +
+    /// self.scroll_offset`), which is always exactly `2 * scroll_offset` —
+    /// zero from a fresh view — so scrolling never moved past the very
+    /// first notch. `scroll_by(10)` on a fresh terminal still correctly
+    /// stays at `0`, which is why the existing unit test covering that case
+    /// could not tell the two behaviors apart; only a live session with
+    /// real scrolled-off content (a black-box `--script` `wheel` test)
+    /// caught it. `set_scrollback` internally clamps to the real buffered
+    /// row count (`rows.min(self.scrollback.len())`), so reading the offset
+    /// back after calling it is the correct value, not a guess.
     fn scroll_by(&mut self, lines: isize) {
         if self.parser.screen().alternate_screen() {
             return;
         }
-        let max = self.parser.screen().scrollback() + self.scroll_offset;
-        let target = self.scroll_offset as isize + lines;
-        let clamped = target.clamp(0, max as isize) as usize;
-        if clamped != self.scroll_offset {
-            self.scroll_offset = clamped;
-            self.parser.screen_mut().set_scrollback(clamped);
-        }
+        let requested = (self.scroll_offset as isize + lines).max(0) as usize;
+        self.parser.screen_mut().set_scrollback(requested);
+        self.scroll_offset = self.parser.screen().scrollback();
     }
 
     fn scroll_to_bottom(&mut self) {
@@ -1071,6 +1086,20 @@ impl ConTerminal {
             row: (phys_y / self.cell_h as f64) as u16,
             col: (phys_x / self.cell_w as f64) as u16,
         }
+    }
+
+    /// The inverse of [`Self::hit_test`]: a logical position that lands back
+    /// on `point` when hit-tested. Targets the cell's center, not its
+    /// top-left corner, so the result is robust to `hit_test`'s truncating
+    /// division rather than sitting exactly on a rounding boundary. This is
+    /// what lets `--script` mouse commands take cell coordinates (what a
+    /// script author actually thinks in) while still driving the same
+    /// pixel-position-based handlers real pointer events go through.
+    fn terminal_point_to_logical(&self, point: TerminalPoint) -> LogicalPoint {
+        let phys_x = f64::from(point.col) * self.cell_w as f64 + self.cell_w as f64 / 2.0;
+        let phys_y = f64::from(point.row) * self.cell_h as f64 + self.cell_h as f64 / 2.0;
+        let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
+        LogicalPoint { x: phys_x / scale, y: phys_y / scale }
     }
 
     fn copy_selection(&self) {
@@ -1117,7 +1146,7 @@ impl ConTerminal {
     /// Returns the instant to next wake for the caller to fold into its own
     /// `WaitUntil` decision, or `None` when the queue is empty and nothing
     /// is scheduled.
-    fn drain_script(&mut self, now: Instant) -> Option<Instant> {
+    fn drain_script(&mut self, window: &PixelWindow, now: Instant) -> Option<Instant> {
         if let Some(until) = self.script_wait_until {
             if now < until {
                 return Some(until);
@@ -1144,6 +1173,15 @@ impl ConTerminal {
                     // path and let about_to_wait force the redraw that
                     // actually produces a frame to capture.
                     self.pending_screenshot = Some(path);
+                }
+                ScriptCommand::Click { row, col, button, ctrl, alt, shift } => {
+                    self.execute_script_click(window, row, col, button, ctrl, alt, shift);
+                }
+                ScriptCommand::MouseMove { row, col } => {
+                    self.execute_script_mouse_move(window, row, col);
+                }
+                ScriptCommand::Wheel { row, col, notches } => {
+                    self.execute_script_wheel(window, row, col, notches);
                 }
             }
         }
@@ -1182,6 +1220,64 @@ impl ConTerminal {
             modifiers,
         };
         self.forward_key(&event);
+    }
+
+    /// Presses then releases a mouse button at a cell coordinate for a
+    /// `--script` `click` command, through the same `handle_pointer_button`
+    /// path a real click takes (application mouse reporting first, local
+    /// click-counting/selection second) — see [`ScriptCommand::Click`].
+    #[allow(clippy::too_many_arguments)]
+    fn execute_script_click(
+        &mut self,
+        window: &PixelWindow,
+        row: u16,
+        col: u16,
+        button: ScriptMouseButton,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    ) {
+        let modifiers = ModifierState { control: ctrl, alt, shift, meta: false };
+        let position = self.terminal_point_to_logical(TerminalPoint { row, col });
+        let platform_button = match button {
+            ScriptMouseButton::Left => PointerButton::Left,
+            ScriptMouseButton::Middle => PointerButton::Middle,
+            ScriptMouseButton::Right => PointerButton::Right,
+        };
+        self.handle_pointer_button(
+            window,
+            platform_button,
+            PointerButtonState::Pressed,
+            Some(position),
+            &modifiers,
+        );
+        self.handle_pointer_button(
+            window,
+            platform_button,
+            PointerButtonState::Released,
+            Some(position),
+            &modifiers,
+        );
+    }
+
+    /// Moves the pointer to a cell coordinate for a `--script` `mouse_move`
+    /// command, through `handle_pointer_moved` — see
+    /// [`ScriptCommand::MouseMove`].
+    fn execute_script_mouse_move(&mut self, window: &PixelWindow, row: u16, col: u16) {
+        let position = self.terminal_point_to_logical(TerminalPoint { row, col });
+        self.handle_pointer_moved(window, position, &ModifierState::default());
+    }
+
+    /// One wheel notch's worth of scroll at a cell coordinate for a
+    /// `--script` `wheel` command, through `handle_wheel` — see
+    /// [`ScriptCommand::Wheel`]. `handle_wheel` itself never requests a
+    /// redraw (real wheel events get that from the `MouseWheel` dispatch
+    /// arm that calls it), so this mirrors that call site rather than
+    /// leaving a scripted scroll invisible until the next unrelated redraw.
+    fn execute_script_wheel(&mut self, window: &PixelWindow, row: u16, col: u16, notches: f32) {
+        let position = self.terminal_point_to_logical(TerminalPoint { row, col });
+        self.handle_wheel(notches, &ModifierState::default(), Some(position));
+        window.request_redraw();
     }
 
     /// Builds the current [`ScreenSnapshot`] for `--emit-snapshot`.
@@ -1415,6 +1511,33 @@ impl ConTerminal {
             _ => {}
         }
     }
+
+    /// Routes a pointer move: an application gesture in flight keeps
+    /// ownership so its press/release stay paired; otherwise extends local
+    /// selection, or reports hover motion under `ANY_MOTION` (1003).
+    /// Factored out of the `PointerMoved` event arm so a `--script`
+    /// `mouse_move` command drives the identical logic a real OS pointer
+    /// move does, not a lookalike.
+    fn handle_pointer_moved(
+        &mut self,
+        window: &PixelWindow,
+        position: LogicalPoint,
+        modifiers: &agenterm_platform::input::ModifierState,
+    ) {
+        let pt = self.hit_test(&position);
+        if self.mouse_dragging {
+            let button = self.active_button.unwrap_or(0);
+            self.report_mouse(button, pt, true, true, modifiers);
+        } else if self.selecting {
+            if let Some((anchor, _)) = self.selection {
+                self.selection = Some((anchor, pt));
+                window.request_redraw();
+            }
+        } else if self.mouse_mode().0 == terminal_input::ApplicationMouseMode::AnyMotion {
+            // 1003: report motion with no button held (button 3 = none).
+            self.report_mouse(3, pt, true, true, modifiers);
+        }
+    }
 }
 
 impl PixelWindowApplication for ConTerminal {
@@ -1522,21 +1645,7 @@ impl PixelWindowApplication for ConTerminal {
                 modifiers,
                 ..
             } => {
-                let pt = self.hit_test(&position);
-                // An application gesture in flight keeps ownership so its
-                // press/release stay paired; otherwise extend local selection.
-                if self.mouse_dragging {
-                    let button = self.active_button.unwrap_or(0);
-                    self.report_mouse(button, pt, true, true, &modifiers);
-                } else if self.selecting {
-                    if let Some((anchor, _)) = self.selection {
-                        self.selection = Some((anchor, pt));
-                        window.request_redraw();
-                    }
-                } else if self.mouse_mode().0 == terminal_input::ApplicationMouseMode::AnyMotion {
-                    // 1003: report motion with no button held (button 3 = none).
-                    self.report_mouse(3, pt, true, true, &modifiers);
-                }
+                self.handle_pointer_moved(window, position, &modifiers);
                 Ok(PixelWindowDirective::Continue)
             }
             _ => Ok(PixelWindowDirective::Continue),
@@ -1698,7 +1807,7 @@ impl PixelWindowApplication for ConTerminal {
             fold_wake(self.last_blink_at + BLINK_INTERVAL);
         }
 
-        if let Some(deadline) = self.drain_script(now) {
+        if let Some(deadline) = self.drain_script(window, now) {
             fold_wake(deadline);
         }
         // A pending screenshot needs an actual render to happen — pixels
@@ -2039,6 +2148,40 @@ mod tests {
         // ...and scrolling down from the bottom must not underflow.
         app.scroll_by(-10);
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scrolling_up_actually_moves_once_real_content_is_off_screen() {
+        // Complements `scrolling_clamps_to_available_scrollback`, which only
+        // ever exercises a terminal with nothing scrolled off — a case where
+        // "clamped to 0 because there's nothing to see" and "clamped to 0
+        // because the bound was computed wrong" are indistinguishable, and
+        // did not catch a real bug: `scroll_by`'s old bound was
+        // `screen().scrollback() + scroll_offset`, but vendored vt100's
+        // `Screen::scrollback()` returns the *current* offset (its own doc
+        // comment says so), not the available range — so the bound was
+        // always `2 * scroll_offset`, i.e. always 0 from a fresh view, and
+        // wheel-up silently never worked in a live session. Only caught by
+        // a black-box `--script` `wheel` test against a real session with
+        // actual scrolled-off lines; this pins the same fact as a fast unit
+        // test so it can't regress silently again.
+        let mut app = ConTerminal::new(None);
+        app.parser.screen_mut().set_size(4, 40);
+        for line in 0..20 {
+            app.parser.process(format!("line{line}\r\n").as_bytes());
+        }
+        assert_eq!(app.scroll_offset, 0);
+
+        app.scroll_by(3);
+        assert_eq!(app.scroll_offset, 3, "3 lines of real scrollback exist; scrolling up must move");
+
+        // Overshooting clamps to what's actually buffered, not to 0.
+        app.scroll_by(1000);
+        let max = app.scroll_offset;
+        assert!(max > 3, "clamp must be the real available scrollback, not stuck at the first move");
+
+        app.scroll_by(-1000);
+        assert_eq!(app.scroll_offset, 0, "scrolling back down must return to the bottom");
     }
 
     #[test]

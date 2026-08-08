@@ -191,9 +191,33 @@ C. Console host (agenterm-con.exe)
    按键事件给 cooked-mode 行编辑器——但没有工具确证，只是最可能的解释。
 2. **IME 端到端从未自动化验证过**——一直标注"待人工验证"，这轮也没有变，
    因为没有可编程的方式驱动真实输入法。
-3. **鼠标事件没有进 `--script`**——控制接口目前只有 text/key/paste/wait/screenshot，
-   没有 click/move/wheel。既然产品北极星明确要"100% 操控"，这是个已知的、
-   故意暂缓的缺口，不是疏漏，下一步该补。
+3. ~~**鼠标事件没有进 `--script`**~~ ——**2026-08-08 已补**：新增
+   `click`(row/col/button[+ctrl/alt/shift])/`mouse_move`(row/col)/
+   `wheel`(row/col/notches) 三个命令，都走真实路径——`click` 是
+   `handle_pointer_button` 的按下+抬起一对（应用抓鼠标优先，本地
+   点击计数/选区其次，和真实点击完全一致的分支），`mouse_move` 是新拆出的
+   `handle_pointer_moved`（原来内联在 `PointerMoved` 事件分支里，拆出来
+   是为了脚本和真实指针事件走同一份代码，不是各自维护一份），`wheel` 直接
+   调用 `handle_wheel`。坐标是格坐标（行/列），不是像素——脚本作者按格子
+   想事情，`terminal_point_to_logical`（`hit_test` 的反函数，取格子中心
+   而非左上角，避开截断除法的边界）负责换算成 handler 要的像素位置。
+   **顺手挖出一个真 bug**：`scroll_by` 的上界算成
+   `screen().scrollback() + scroll_offset`——但 vendored vt100 的
+   `Screen::scrollback()` 文档写明返回的是**当前**滚动偏移，不是可用范围，
+   于是上界恒等于 `2 * scroll_offset`，从底部开始永远是 0，**滚轮向上翻
+   在真实会话里从没生效过**。既有单测 `scrolling_clamps_to_available_scrollback`
+   测不出来——它只测"没滚出去过东西"的场景，这时"正确地钳到 0"和"算错了
+   所以恒为 0"看起来一模一样。只有真会话里先滚出真内容、再滚轮的黑盒测试
+   （新增的 `scripted_wheel_moves_the_real_scrollback_offset_up_then_down`）
+   能分辨两者。修法：不在 `scroll_by` 里自己猜上界，直接把请求值丢给
+   `Screen::set_scrollback`（它内部已经正确钳到 `self.scrollback.len()`），
+   再把钳过的结果读回来——顺带补了一条单测
+   `scrolling_up_actually_moves_once_real_content_is_off_screen` 钉死这个
+   区分度，不依赖真实进程也能挡住这个回归。8 条新单测 + 2 条新黑盒集成测试
+   （click 落点选区、wheel 双向滚动）全绿；`--help` 同步更新。不在本轮范围
+   （仍是已知缺口）：Ctrl+滚轮缩放没有脚本命令（该逻辑目前只挂在窗口事件
+   分派处，不在 `handle_wheel` 里）；拖拽手势（连续 mouse_move 之间保持
+   按钮归属)只在真实指针事件下验证过，脚本层还没写覆盖拖拽的黑盒测试。
 4. **`--script`/`--emit-snapshot` 只测过 `cmd.exe`**——没有针对真实 TUI
    （vim/htop 之类会认 DECCKM/鼠标上报的程序）跑过黑盒测试，因为找不到
    一个能在这台机器上确定性安装、体积小、行为可预期的 TUI 依赖。C5 的

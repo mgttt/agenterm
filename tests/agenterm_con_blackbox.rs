@@ -386,6 +386,89 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
 }
 
 #[test]
+fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
+    // Closes the gap this session's own plan doc flagged in plain writing:
+    // "--script has no mouse commands yet." cmd.exe never negotiates mouse
+    // reporting (DECSET 1000/1002/1003), so a real click here always falls
+    // through `handle_pointer_button`'s local path — a single left click
+    // selects exactly the clicked cell (both selection endpoints equal),
+    // which is state a script/agent can observe nowhere except this
+    // wiring: the encoder-level pieces (`register_click`, `hit_test`) are
+    // already unit-tested in isolation, but never through a live session
+    // driven by `--script`.
+    let dir = scratch_dir("click-selection");
+    let script = write_script(
+        &dir,
+        r#"[
+            {"text": "echo CLICK_MARKER\r"},
+            {"wait_ms": 300},
+            {"click": {"row": 3, "col": 5}},
+            {"wait_ms": 200}
+        ]"#,
+    );
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["selection"].is_array()
+    });
+    assert_eq!(snapshot["selection"][0]["row"], 3, "{snapshot}");
+    assert_eq!(snapshot["selection"][0]["col"], 5, "{snapshot}");
+    assert_eq!(snapshot["selection"][1]["row"], 3, "{snapshot}");
+    assert_eq!(snapshot["selection"][1]["col"], 5, "{snapshot}");
+    let _ = session.child.kill();
+}
+
+#[test]
+fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
+    // Same gap as above, the scroll half: proves a scripted `wheel` reaches
+    // `handle_wheel`'s local-scrollback branch in a live session, not just
+    // that `scroll_by`'s clamping is correct in isolation
+    // (`scrolling_clamps_to_available_scrollback` already covers that).
+    // Both directions in one session: scrolling down after scrolling up is
+    // what proves `notches`' sign is actually wired through, not just that
+    // *a* wheel command moves the offset off zero once.
+    let dir = scratch_dir("wheel-scroll");
+    let script = write_script(
+        &dir,
+        r#"[
+            {"text": "for /l %i in (1,1,120) do @echo SCROLL_LINE_%i\r"},
+            {"wait_ms": 6000},
+            {"wheel": {"row": 0, "col": 0, "notches": 5}},
+            {"wait_ms": 200},
+            {"wheel": {"row": 0, "col": 0, "notches": -2}},
+            {"wait_ms": 200}
+        ]"#,
+    );
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    // wait_ms in the script paces the wheel commands, not this poll — but the
+    // wheel commands only move the offset meaningfully once the loop has
+    // actually pushed 200 lines into scrollback, so this confirms that
+    // happened before trusting the scroll assertions below.
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("SCROLL_LINE_120")
+    });
+    let scrolled_up = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["scroll_offset"].as_u64().unwrap_or(0) > 0
+    });
+    let offset_after_up = scrolled_up["scroll_offset"].as_u64().unwrap();
+    assert_eq!(offset_after_up, 5, "5 wheel-up notches must move exactly 5 lines: {scrolled_up}");
+
+    let scrolled_down = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["scroll_offset"].as_u64() == Some(3)
+    });
+    assert_eq!(
+        scrolled_down["scroll_offset"], 3,
+        "wheel-down after wheel-up must move back down, not clamp or ignore the sign"
+    );
+    let _ = session.child.kill();
+}
+
+#[test]
 fn scripted_screenshot_produces_a_valid_nonempty_png() {
     // --emit-snapshot proves text; this proves the *feedback* half the
     // product's north star calls out by name — screenshots, not just

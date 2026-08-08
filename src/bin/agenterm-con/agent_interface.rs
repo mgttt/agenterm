@@ -171,6 +171,18 @@ pub enum ScriptKey {
     Char(char),
 }
 
+/// Which physical button a scripted [`ScriptCommand::Click`] presses. A
+/// closed set (not a raw code) so a script author gets a loud parse error on
+/// a typo instead of an ambiguous number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScriptMouseButton {
+    #[default]
+    Left,
+    Middle,
+    Right,
+}
+
 /// One command in a `--script` file, already validated — by the time this
 /// type exists, `key` names have been resolved and mutually-exclusive fields
 /// have been checked, so the executor never has to fail mid-script.
@@ -208,12 +220,66 @@ pub enum ScriptCommand {
     /// meant an ad hoc PrintWindow script; this is the same capability as a
     /// first-class, scriptable, in-sequence command.
     Screenshot(PathBuf),
+    /// Presses then releases a mouse button at a cell coordinate, through
+    /// the same `handle_pointer_button` path a real click takes — so an
+    /// application that has grabbed mouse reporting (DECSET 1000/1002/1003
+    /// + 1006) sees a real press/release pair, and one that hasn't gets the
+    /// same local click-counting (select/word-select/line-select) a human
+    /// click does. Closes the gap this binary's docs flagged: `--script`
+    /// had text/key/paste but nothing that reaches `report_mouse` at all.
+    Click {
+        row: u16,
+        col: u16,
+        button: ScriptMouseButton,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    },
+    /// Moves the pointer to a cell coordinate without a button transition —
+    /// drives `handle_pointer_moved`, so a dragging selection extends, an
+    /// application-owned drag reports motion, and `ANY_MOTION` (1003)
+    /// hover reporting fires exactly as it would for a real mouse move.
+    MouseMove { row: u16, col: u16 },
+    /// One wheel notch's worth of scroll at a cell coordinate, through
+    /// `handle_wheel` — so the same three-tier precedence a real wheel
+    /// gesture gets (application report → alternate-screen cursor keys →
+    /// local scrollback) applies to a scripted one. Positive `notches`
+    /// scrolls up (back through history), negative scrolls down. Does not
+    /// cover Ctrl+wheel font-size zoom, which lives in the window-event
+    /// handler above this struct's reach, not in `handle_wheel` itself.
+    Wheel { row: u16, col: u16, notches: f32 },
 }
 
 /// One entry of the raw JSON array — every field optional so serde can parse
 /// it uniformly, then [`validate`](RawCommand::validate) enforces "exactly
 /// one action" instead of silently picking one when a script author sets two
 /// by mistake.
+/// A cell coordinate as it appears in script JSON — shared shape for
+/// `mouse_move` and (nested in [`RawClick`]/[`RawWheel`]) `click`/`wheel`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPoint {
+    row: u16,
+    col: u16,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawClick {
+    row: u16,
+    col: u16,
+    #[serde(default)]
+    button: ScriptMouseButton,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWheel {
+    row: u16,
+    col: u16,
+    notches: f32,
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawCommand {
@@ -228,6 +294,9 @@ struct RawCommand {
     shift: bool,
     wait_ms: Option<u64>,
     screenshot: Option<PathBuf>,
+    click: Option<RawClick>,
+    mouse_move: Option<RawPoint>,
+    wheel: Option<RawWheel>,
 }
 
 impl RawCommand {
@@ -238,13 +307,16 @@ impl RawCommand {
             self.key.is_some(),
             self.wait_ms.is_some(),
             self.screenshot.is_some(),
+            self.click.is_some(),
+            self.mouse_move.is_some(),
+            self.wheel.is_some(),
         ]
         .into_iter()
         .filter(|value| *value)
         .count();
         if present != 1 {
             return Err(format!(
-                "script command {index}: exactly one of text/paste/key/wait_ms/screenshot is required, found {present}"
+                "script command {index}: exactly one of text/paste/key/wait_ms/screenshot/click/mouse_move/wheel is required, found {present}"
             ));
         }
         if let Some(text) = self.text {
@@ -268,6 +340,26 @@ impl RawCommand {
         }
         if let Some(path) = self.screenshot {
             return Ok(ScriptCommand::Screenshot(path));
+        }
+        if let Some(click) = self.click {
+            return Ok(ScriptCommand::Click {
+                row: click.row,
+                col: click.col,
+                button: click.button,
+                ctrl: self.ctrl,
+                alt: self.alt,
+                shift: self.shift,
+            });
+        }
+        if let Some(point) = self.mouse_move {
+            return Ok(ScriptCommand::MouseMove { row: point.row, col: point.col });
+        }
+        if let Some(wheel) = self.wheel {
+            return Ok(ScriptCommand::Wheel {
+                row: wheel.row,
+                col: wheel.col,
+                notches: wheel.notches,
+            });
         }
         unreachable!("validated exactly one field is present above");
     }
@@ -412,11 +504,62 @@ mod tests {
     }
 
     #[test]
+    fn parses_mouse_commands() {
+        let script = br#"[
+            {"click": {"row": 3, "col": 10}},
+            {"click": {"row": 3, "col": 10, "button": "right"}},
+            {"click": {"row": 0, "col": 0, "button": "middle"}, "shift": true},
+            {"mouse_move": {"row": 5, "col": 20}},
+            {"wheel": {"row": 5, "col": 20, "notches": 3}},
+            {"wheel": {"row": 5, "col": 20, "notches": -1.5}}
+        ]"#;
+        let commands = parse_script(script).expect("valid script");
+        assert_eq!(
+            commands,
+            vec![
+                ScriptCommand::Click {
+                    row: 3,
+                    col: 10,
+                    button: ScriptMouseButton::Left,
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                },
+                ScriptCommand::Click {
+                    row: 3,
+                    col: 10,
+                    button: ScriptMouseButton::Right,
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                },
+                ScriptCommand::Click {
+                    row: 0,
+                    col: 0,
+                    button: ScriptMouseButton::Middle,
+                    ctrl: false,
+                    alt: false,
+                    shift: true,
+                },
+                ScriptCommand::MouseMove { row: 5, col: 20 },
+                ScriptCommand::Wheel { row: 5, col: 20, notches: 3.0 },
+                ScriptCommand::Wheel { row: 5, col: 20, notches: -1.5 },
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_a_command_with_two_actions_rather_than_silently_picking_one() {
         let script = br#"[{"text": "a", "paste": "b"}]"#;
         let error = parse_script(script).expect_err("must reject ambiguous command");
         assert!(error.contains("command 0"), "{error}");
         assert!(error.contains("exactly one"), "{error}");
+    }
+
+    #[test]
+    fn rejects_a_click_with_an_unknown_button_name() {
+        let script = br#"[{"click": {"row": 0, "col": 0, "button": "super"}}]"#;
+        assert!(parse_script(script).is_err());
     }
 
     #[test]
