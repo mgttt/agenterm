@@ -231,6 +231,16 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (&["filesystem_metadata"], NO_STRINGS),
         ),
         shipped_local_entry(
+            "std.fs.exists-case-exact",
+            "system/filesystem/exists-case-exact",
+            "std::fs::exists_case_exact",
+            None,
+            RustMapping::None,
+            // Native/AOT pack surface; interpret path uses exists(path).
+            "exists(path)",
+            (&["filesystem_metadata", "case_exact_path_components"], NO_STRINGS),
+        ),
+        shipped_local_entry(
             "std.fs.metadata",
             "system/filesystem/metadata",
             "std::fs::metadata",
@@ -785,6 +795,32 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ],
         ),
         shipped_local_entry(
+            "std.process.command-status",
+            "system/process/command-status",
+            "std::process::command_status",
+            Some("std::process::Command::status"),
+            RustMapping::Adapted,
+            // Native/AOT pack free-form; interpret path uses Command.output().
+            "native pack free-form; command.output()",
+            (
+                &["no_implicit_shell", "typed_timeout", "job_object_cleanup"],
+                &["process_program_empty", "process_spawn", "process_timeout"],
+            ),
+        ),
+        shipped_local_entry(
+            "std.process.command-stdout-file",
+            "system/process/command-stdout-file",
+            "std::process::command_stdout_file",
+            None,
+            RustMapping::None,
+            // Native/AOT pack free-form; interpret path uses Command.stdout_file.
+            "native pack free-form; command.stdout_file(path)",
+            (
+                &["no_implicit_shell", "typed_timeout", "job_object_cleanup", "stdout_to_path"],
+                &["process_program_empty", "process_spawn", "process_timeout"],
+            ),
+        ),
+        shipped_local_entry(
             "std.process.id",
             "system/process/id",
             "std::process::id",
@@ -1005,6 +1041,25 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::Adapted,
             "std::time::Duration::from_secs(value)",
             (&["maximum_60_seconds"], &["duration_seconds"]),
+        ),
+        shipped_local_entry(
+            "rh.fail",
+            "runtime/control/fail",
+            "rh::fail",
+            None,
+            RustMapping::None,
+            // Transpile/AOT helper; not an Engine module function.
+            "native fail helper",
+            (NO_STRINGS, &["script_fail"]),
+        ),
+        shipped_local_entry(
+            "std.string.split",
+            "data/string/split",
+            "String.split",
+            Some("str::split"),
+            RustMapping::Adapted,
+            "text.split(separator)",
+            (&["returns_string_list"], NO_STRINGS),
         ),
         shipped_local_entry(
             "rh.json.parse",
@@ -1820,6 +1875,18 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "AgenTerm captures and bounds output instead of writing an ambient console",
         );
     }
+    if stable_id == "rh.fail" {
+        return agenterm_specific_comparisons(
+            "rh::fail is an AgenTerm typed script failure helper with no Node/Bun core analogue",
+        );
+    }
+    if stable_id == "std.string.split" {
+        return similar_comparisons(
+            "String.prototype.split",
+            "String.prototype.split",
+            "AgenTerm returns a typed StringList rather than a JavaScript array",
+        );
+    }
     if stable_id.starts_with("std.fs.") {
         return similar_comparisons(
             "node:fs",
@@ -2145,9 +2212,14 @@ mod tests {
         "std.process.command-builder",
         "std.process.command-output",
         "std.process.command-start",
+        "std.process.command-status",
+        "std.process.command-stdout-file",
         "std.process.child",
         "std.process.child-window-input",
         "std.process.output",
+        "std.fs.exists-case-exact",
+        "std.string.split",
+        "rh.fail",
         "rh.stream.handle",
         "rh.bytes.length",
         "rh.bytes.raw-operations",

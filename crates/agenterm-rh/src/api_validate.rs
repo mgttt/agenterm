@@ -117,7 +117,10 @@ pub fn qualified_function_calls(source: &str) -> Vec<String> {
             index = (index + 2).min(bytes.len());
             continue;
         }
-        if source[index..].starts_with("std::") || source[index..].starts_with("rhai::") {
+        if source[index..].starts_with("std::")
+            || source[index..].starts_with("rh::")
+            || source[index..].starts_with("rhai::")
+        {
             let start = index;
             while index < bytes.len()
                 && (bytes[index] == b'_'
