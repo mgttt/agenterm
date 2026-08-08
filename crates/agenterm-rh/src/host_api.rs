@@ -5,19 +5,11 @@ pub const RH_CODEGEN_REVISION: u32 = 83;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
-/// Legacy host API module root; kept until Phase C Wave 3/4 script and Engine cleanup.
-pub const RHAI_LEGACY_HOST_API_ROOT: &str = "rhai";
-
 /// Host API submodule suffix after `rh::` or legacy `rhai::` (e.g. `json`, `task`).
 pub fn host_api_module(namespace: &str) -> Option<&'static str> {
     let rest = namespace
         .strip_prefix(RH_HOST_API_ROOT)
-        .and_then(|rest| rest.strip_prefix("::"))
-        .or_else(|| {
-            namespace
-                .strip_prefix(RHAI_LEGACY_HOST_API_ROOT)
-                .and_then(|rest| rest.strip_prefix("::"))
-        })?;
+        .and_then(|rest| rest.strip_prefix("::"))?;
     match rest {
         "json" => Some("json"),
         "task" => Some("task"),

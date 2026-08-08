@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 28] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 27] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -106,11 +106,6 @@ const FIXTURES: [(&str, &[&str], &[&str]); 28] = [
         "rh_crypto_sha256_file.rh",
         &["rh_sha256_file("],
         &["rh_host_eval_int(\"rh::crypto::sha256_file"],
-    ),
-    (
-        "rh_legacy_rhai_json_parse.rh",
-        &["rh_json_parse("],
-        &["rh_host_eval_int(\"rhai::json::"],
     ),
     (
         "rh_bytes_from_array.rh",
@@ -417,28 +412,9 @@ fn crypto_sha256_file_emits_native_host_call() {
 }
 
 #[test]
-fn legacy_rhai_json_parse_stays_native_via_dual_alias() {
+fn bytes_from_array_emits_native_bytes_constructors() {
     assert_native_or_host_eval(FIXTURES[13].0, FIXTURES[13].1, FIXTURES[13].2);
     let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[13].0))
-        .expect("transpile legacy rhai::json::parse fixture");
-    assert_eq!(
-        output.execution_mode,
-        CdylibExecutionMode::Native,
-        "{}",
-        output.rust
-    );
-    assert_eq!(
-        output.rust.matches("rh_host_eval_int(").count(),
-        1,
-        "{}",
-        output.rust
-    );
-}
-
-#[test]
-fn bytes_from_array_emits_native_bytes_constructors() {
-    assert_native_or_host_eval(FIXTURES[14].0, FIXTURES[14].1, FIXTURES[14].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[14].0))
         .expect("transpile bytes from_array fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -446,8 +422,8 @@ fn bytes_from_array_emits_native_bytes_constructors() {
 
 #[test]
 fn process_kill_emits_native_host_call() {
-    assert_native_or_host_eval(FIXTURES[15].0, FIXTURES[15].1, FIXTURES[15].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[15].0))
+    assert_native_or_host_eval(FIXTURES[14].0, FIXTURES[14].1, FIXTURES[14].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[14].0))
         .expect("transpile process kill fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -455,8 +431,8 @@ fn process_kill_emits_native_host_call() {
 
 #[test]
 fn command_arg_emits_native_single_arg_append() {
-    assert_native_or_host_eval(FIXTURES[16].0, FIXTURES[16].1, FIXTURES[16].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[16].0))
+    assert_native_or_host_eval(FIXTURES[15].0, FIXTURES[15].1, FIXTURES[15].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[15].0))
         .expect("transpile command arg fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -464,8 +440,8 @@ fn command_arg_emits_native_single_arg_append() {
 
 #[test]
 fn string_index_of_emits_native_find_helper() {
-    assert_native_or_host_eval(FIXTURES[17].0, FIXTURES[17].1, FIXTURES[17].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[17].0))
+    assert_native_or_host_eval(FIXTURES[16].0, FIXTURES[16].1, FIXTURES[16].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[16].0))
         .expect("transpile string index_of fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -473,8 +449,8 @@ fn string_index_of_emits_native_find_helper() {
 
 #[test]
 fn std_fs_write_emits_native_host_call() {
-    assert_native_or_host_eval(FIXTURES[18].0, FIXTURES[18].1, FIXTURES[18].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[18].0))
+    assert_native_or_host_eval(FIXTURES[17].0, FIXTURES[17].1, FIXTURES[17].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[17].0))
         .expect("transpile std fs write fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -482,8 +458,8 @@ fn std_fs_write_emits_native_host_call() {
 
 #[test]
 fn json_marker_run_properties_emit_native_path_reads() {
-    assert_native_or_host_eval(FIXTURES[19].0, FIXTURES[19].1, FIXTURES[19].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[19].0))
+    assert_native_or_host_eval(FIXTURES[18].0, FIXTURES[18].1, FIXTURES[18].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[18].0))
         .expect("transpile json marker_run properties fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -491,8 +467,8 @@ fn json_marker_run_properties_emit_native_path_reads() {
 
 #[test]
 fn bytes_append_emits_native_bytes_mutation() {
-    assert_native_or_host_eval(FIXTURES[20].0, FIXTURES[20].1, FIXTURES[20].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[20].0))
+    assert_native_or_host_eval(FIXTURES[19].0, FIXTURES[19].1, FIXTURES[19].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[19].0))
         .expect("transpile bytes append fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -500,8 +476,8 @@ fn bytes_append_emits_native_bytes_mutation() {
 
 #[test]
 fn command_stdin_text_emits_native_command_mutation() {
-    assert_native_or_host_eval(FIXTURES[21].0, FIXTURES[21].1, FIXTURES[21].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[21].0))
+    assert_native_or_host_eval(FIXTURES[20].0, FIXTURES[20].1, FIXTURES[20].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[20].0))
         .expect("transpile command stdin_text fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -509,8 +485,8 @@ fn command_stdin_text_emits_native_command_mutation() {
 
 #[test]
 fn child_stdout_emits_native_stream_access() {
-    assert_native_or_host_eval(FIXTURES[22].0, FIXTURES[22].1, FIXTURES[22].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[22].0))
+    assert_native_or_host_eval(FIXTURES[21].0, FIXTURES[21].1, FIXTURES[21].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[21].0))
         .expect("transpile child stdout fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -518,8 +494,8 @@ fn child_stdout_emits_native_stream_access() {
 
 #[test]
 fn command_args_json_emits_native_argv_coercion() {
-    assert_native_or_host_eval(FIXTURES[23].0, FIXTURES[23].1, FIXTURES[23].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[23].0))
+    assert_native_or_host_eval(FIXTURES[22].0, FIXTURES[22].1, FIXTURES[22].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[22].0))
         .expect("transpile command args json fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -527,8 +503,8 @@ fn command_args_json_emits_native_argv_coercion() {
 
 #[test]
 fn json_stringify_pretty_emits_native_host_call() {
-    assert_native_or_host_eval(FIXTURES[24].0, FIXTURES[24].1, FIXTURES[24].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[24].0))
+    assert_native_or_host_eval(FIXTURES[23].0, FIXTURES[23].1, FIXTURES[23].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[23].0))
         .expect("transpile json stringify_pretty fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -536,8 +512,8 @@ fn json_stringify_pretty_emits_native_host_call() {
 
 #[test]
 fn hash_fnv1a64_emits_native_host_call() {
-    assert_native_or_host_eval(FIXTURES[25].0, FIXTURES[25].1, FIXTURES[25].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[25].0))
+    assert_native_or_host_eval(FIXTURES[24].0, FIXTURES[24].1, FIXTURES[24].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[24].0))
         .expect("transpile hash fnv1a64 fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -545,8 +521,8 @@ fn hash_fnv1a64_emits_native_host_call() {
 
 #[test]
 fn env_has_get_emits_native_host_calls() {
-    assert_native_or_host_eval(FIXTURES[26].0, FIXTURES[26].1, FIXTURES[26].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[26].0))
+    assert_native_or_host_eval(FIXTURES[25].0, FIXTURES[25].1, FIXTURES[25].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[25].0))
         .expect("transpile env has/get fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
@@ -554,8 +530,8 @@ fn env_has_get_emits_native_host_calls() {
 
 #[test]
 fn system_time_rfc3339_emits_native_host_call() {
-    assert_native_or_host_eval(FIXTURES[27].0, FIXTURES[27].1, FIXTURES[27].2);
-    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[27].0))
+    assert_native_or_host_eval(FIXTURES[26].0, FIXTURES[26].1, FIXTURES[26].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[26].0))
         .expect("transpile system time rfc3339 fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);

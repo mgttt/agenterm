@@ -11594,11 +11594,11 @@ fn active_tab_from_snapshot(snapshot) {
             return tab;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn entry() {
-    let snapshot = rhai::json::parse("{\"tabs\":[{\"active\":1}]}");
+    let snapshot = rh::json::parse("{\"tabs\":[{\"active\":1}]}");
     let tab = active_tab_from_snapshot(snapshot);
     if tab.active != 1 {
         return rh::fail("tab");
@@ -11820,7 +11820,7 @@ fn entry() {
         assert!(
             !output
                 .rust
-                .contains("rh_host_eval_int(\"rhai::json::parse_file"),
+                .contains("rh_host_eval_int(\"rh::json::parse_file"),
             "{}",
             output.rust
         );
@@ -11854,7 +11854,7 @@ fn entry() {
     #[test]
     fn cdylib_transpile_emits_nested_json_parse_read_to_string() {
         let output = transpile_cdylib_with_mode(
-            "fn entry() { let path = args[0]; let doc = rhai::json::parse(std::fs::read_to_string(path)); doc.schema_version }",
+            "fn entry() { let path = args[0]; let doc = rh::json::parse(std::fs::read_to_string(path)); doc.schema_version }",
         )
         .expect("transpile");
         assert_eq!(
@@ -12258,7 +12258,7 @@ fn entry() {
         items.push(#{ name: line, size: 1 });
     }
     let manifest = #{ schema_version: 2, executables: items };
-    let pretty = rhai::json::stringify_pretty(manifest);
+    let pretty = rh::json::stringify_pretty(manifest);
     pretty.len + lines.len
 }"#,
         )
@@ -12294,10 +12294,10 @@ fn entry() {
             r#"fn entry() {
     if std::env::has("PATH") {
         let path = args[0];
-        let digest = rhai::crypto::sha256_file(path);
+        let digest = rh::crypto::sha256_file(path);
         digest.to_lower();
         let _stamp = std::time::SystemTime::now().rfc3339;
-        rhai::runtime::atomic_write(path, digest);
+        rh::runtime::atomic_write(path, digest);
         let meta = std::fs::symlink_metadata(path);
         meta.len
     } else {
@@ -12340,9 +12340,9 @@ fn entry() {
     let timing = #{
         workload: #{
             identity: workload_identity,
-            fingerprint: rhai::hash::fnv1a64(
-                rhai::bytes::from_text(
-                    rhai::json::stringify(workload_identity)
+            fingerprint: rh::hash::fnv1a64(
+                rh::bytes::from_text(
+                    rh::json::stringify(workload_identity)
                 )
             )
         }
@@ -12869,7 +12869,7 @@ fn entry() {
 fn finish(timing) {
     let output_path = timing.output_path;
     std::fs::create_dir_all(std::path::parent(output_path).display);
-    rhai::runtime::atomic_write(output_path, "{}\n");
+    rh::runtime::atomic_write(output_path, "{}\n");
     0
 }
 fn entry() {
@@ -12898,9 +12898,9 @@ fn entry() {
         let source = r#"
 fn write_receipt(report, output_path) {
     std::fs::create_dir_all(std::path::parent(output_path).display);
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output_path,
-        rhai::json::stringify_pretty(report) + "\n"
+        rh::json::stringify_pretty(report) + "\n"
     );
     0
 }
@@ -13077,7 +13077,7 @@ fn entry() { stage_copy(args[0], args[1]) }
     fn cdylib_transpile_emits_json_array_push_in_loop_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let doc = rhai::json::parse(args[0]);
+    let doc = rh::json::parse(args[0]);
     let names = [];
     for item in doc.items {
         names.push(item.name);
@@ -13102,7 +13102,7 @@ fn entry() { stage_copy(args[0], args[1]) }
     fn cdylib_transpile_emits_json_property_assign_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let metadata = rhai::json::parse("{}");
+    let metadata = rh::json::parse("{}");
     metadata.git_commit = "abc";
     metadata.git_dirty = true;
     metadata.executables = [];
@@ -13144,8 +13144,8 @@ fn entry() { stage_copy(args[0], args[1]) }
     fn cdylib_transpile_emits_json_path_key_and_index_field_assign_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let context = rhai::json::parse("{\"results\":{}}");
-    let timing = rhai::json::parse("{\"gates\":[{\"id\":\"a\",\"status\":\"not_run\",\"duration_ms\":0}]}");
+    let context = rh::json::parse("{\"results\":{}}");
+    let timing = rh::json::parse("{\"gates\":[{\"id\":\"a\",\"status\":\"not_run\",\"duration_ms\":0}]}");
     let gate_key = "a";
     let index = 0;
     context.results[gate_key] = #{ id: gate_key, status: "passed" };
@@ -13217,10 +13217,10 @@ fn entry() { stage_copy(args[0], args[1]) }
     fn cdylib_transpile_emits_json_field_and_index_assign_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let metadata = rhai::json::parse("{\"git_commit\":\"\",\"git_dirty\":false}");
+    let metadata = rh::json::parse("{\"git_commit\":\"\",\"git_dirty\":false}");
     metadata.git_commit = args[0];
     metadata.git_dirty = true;
-    let timing = rhai::json::parse("{\"gates\":[{\"status\":\"not_run\",\"duration_ms\":0}]}");
+    let timing = rh::json::parse("{\"gates\":[{\"status\":\"not_run\",\"duration_ms\":0}]}");
     let index = 0;
     timing.gates[index].status = "passed";
     timing.gates[index].duration_ms = 12;
@@ -13253,8 +13253,8 @@ fn entry() { stage_copy(args[0], args[1]) }
     fn cdylib_transpile_emits_hash_fnv1a64_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let doc = rhai::json::parse("{\"a\":1}");
-    let fingerprint = rhai::hash::fnv1a64(rhai::bytes::from_text(rhai::json::stringify(doc)));
+    let doc = rh::json::parse("{\"a\":1}");
+    let fingerprint = rh::hash::fnv1a64(rh::bytes::from_text(rh::json::stringify(doc)));
     fingerprint.len
 }"#,
         )
@@ -13269,7 +13269,7 @@ fn entry() { stage_copy(args[0], args[1]) }
         assert!(
             !output
                 .rust
-                .contains("rh_host_eval_int(\"rhai::hash::fnv1a64")
+                .contains("rh_host_eval_int(\"rh::hash::fnv1a64")
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     }
@@ -13278,7 +13278,7 @@ fn entry() { stage_copy(args[0], args[1]) }
     fn cdylib_transpile_emits_json_path_plus_assign_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let context = rhai::json::parse("{\"process_observation\":{\"owned_commands\":0,\"process_samples\":0}}");
+    let context = rh::json::parse("{\"process_observation\":{\"owned_commands\":0,\"process_samples\":0}}");
     context.process_observation.owned_commands += 1;
     context.process_observation.process_samples += 2;
     context.process_observation.owned_commands
@@ -13320,8 +13320,8 @@ fn add_result(context, lines) {
     context
 }
 fn entry() {
-    let context = rhai::json::parse("{\"lines\":[]}");
-    let gate = rhai::json::parse("{\"evidence\":[\"a\"]}");
+    let context = rh::json::parse("{\"lines\":[]}");
+    let gate = rh::json::parse("{\"evidence\":[\"a\"]}");
     context = add_result(context, evidence_lines(gate.evidence));
     context.lines.len
 }"#,
@@ -13345,7 +13345,7 @@ fn entry() {
     fn cdylib_transpile_json_path_array_push_contains_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let context = rhai::json::parse("{\"process_observation\":{\"automation_processes\":[]}}");
+    let context = rh::json::parse("{\"process_observation\":{\"automation_processes\":[]}}");
     let process_text = "powershell";
     if context.process_observation.automation_processes.contains(process_text) == 0 {
         context.process_observation.automation_processes.push(process_text);
@@ -13379,8 +13379,8 @@ fn entry() {
         // post-loop `"" + metadata_entry.sha256` (qualification artifact hash).
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let metadata = rhai::json::parse("{\"executables\":[{\"name\":\"a\",\"sha256\":\"deadbeef\"}]}");
-    let metadata_entry = rhai::json::parse("null");
+    let metadata = rh::json::parse("{\"executables\":[{\"name\":\"a\",\"sha256\":\"deadbeef\"}]}");
+    let metadata_entry = rh::json::parse("null");
     for entry in metadata.executables {
         metadata_entry = entry;
     }
@@ -13410,7 +13410,7 @@ fn entry() {
         // literal may infer StringList (harness pending-directory lists).
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let doc = rhai::json::parse(args[0]);
+    let doc = rh::json::parse(args[0]);
     let pair = [doc.a, 42];
     pair.len
 }"#,
@@ -13464,7 +13464,7 @@ fn entry() {
     fn cdylib_transpile_emits_set_key_from_json_path_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let doc = rhai::json::parse(args[0]);
+    let doc = rh::json::parse(args[0]);
     let seen = #{};
     seen[doc.id] = true;
     seen.contains(doc.id)
@@ -13641,7 +13641,7 @@ fn entry() {
     #[test]
     fn cdylib_transpile_emits_json_stringify_native() {
         let output = transpile_cdylib_with_mode(
-            r#"fn entry() { let doc = #{ answer: 42 }; let text = rhai::json::stringify(doc); text.len }"#,
+            r#"fn entry() { let doc = #{ answer: 42 }; let text = rh::json::stringify(doc); text.len }"#,
         )
         .expect("transpile");
         assert_eq!(
@@ -13658,7 +13658,7 @@ fn entry() {
         assert!(
             !output
                 .rust
-                .contains("rh_host_eval_int(\"rhai::json::stringify"),
+                .contains("rh_host_eval_int(\"rh::json::stringify"),
             "{}",
             output.rust
         );
@@ -13668,7 +13668,7 @@ fn entry() {
     #[test]
     fn cdylib_transpile_emits_append_sync_native() {
         let output = transpile_cdylib_with_mode(
-            r#"fn entry() { let path = args[0]; rhai::runtime::append_sync(path, "tail") }"#,
+            r#"fn entry() { let path = args[0]; rh::runtime::append_sync(path, "tail") }"#,
         )
         .expect("transpile");
         assert_eq!(
@@ -13685,7 +13685,7 @@ fn entry() {
         assert!(
             !output
                 .rust
-                .contains("rh_host_eval_int(\"rhai::runtime::append_sync"),
+                .contains("rh_host_eval_int(\"rh::runtime::append_sync"),
             "{}",
             output.rust
         );
@@ -14364,7 +14364,7 @@ fn entry() {
         let source = r#"
 fn entry() {
     let path = args[0];
-    let image = rhai::image::inspect_png(path);
+    let image = rh::image::inspect_png(path);
     require(image.width > 0, "width");
     require(image.luminance >= 0, "luminance");
     0
@@ -14391,9 +14391,9 @@ fn entry() {
     fn clipboard_get_set_text_uses_structured_native_host_call() {
         let source = r#"
 fn entry() {
-    let before = rhai::clipboard::get_text();
-    rhai::clipboard::set_text("probe");
-    let after = rhai::clipboard::get_text();
+    let before = rh::clipboard::get_text();
+    rh::clipboard::set_text("probe");
+    let after = rh::clipboard::get_text();
     before.len() + after.len()
 }
 "#;
@@ -14415,7 +14415,7 @@ fn entry() {
             output.rust
         );
         assert!(
-            !output.rust.contains("rh_host_eval_int(\"rhai::clipboard::"),
+            !output.rust.contains("rh_host_eval_int(\"rh::clipboard::"),
             "{}",
             output.rust
         );
@@ -14551,7 +14551,7 @@ fn consume(values) {
 }
 
 fn entry() {
-    let document = rhai::json::parse("{\"tabs\":[\"one\",\"two\"]}");
+    let document = rh::json::parse("{\"tabs\":[\"one\",\"two\"]}");
     consume(document.tabs);
     0
 }
@@ -14764,11 +14764,11 @@ fn find_by_id(values, target) {
             return value;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn entry() {
-    let document = rhai::json::parse("{\"tabs\":[{\"id\":\"@1\"}]}");
+    let document = rh::json::parse("{\"tabs\":[{\"id\":\"@1\"}]}");
     let found = find_by_id(document.tabs, "@1");
     if found.id == "@1" {
         return 0;
@@ -15087,8 +15087,8 @@ fn entry() { 0 }"#,
     fn cdylib_transpile_emits_json_path_push_with_path_key_arg_native() {
         let output = transpile_cdylib_with_mode(
             r#"fn entry() {
-    let receipt = rhai::json::parse("{\"gates\":[]}");
-    let context = rhai::json::parse("{\"results\":{\"a\":{\"id\":\"a\"}}}");
+    let receipt = rh::json::parse("{\"gates\":[]}");
+    let context = rh::json::parse("{\"results\":{\"a\":{\"id\":\"a\"}}}");
     let gate_id = "a";
     receipt.gates.push(context.results[gate_id]);
     receipt.gates.len
@@ -15218,7 +15218,7 @@ fn entry() {
 fn entry() {
     let command = std::process::command("true");
     command.env_remove("AGENTERM_IPC_ADDRESS");
-    rhai::task::sleep(std::time::Duration::from_millis(1));
+    rh::task::sleep(std::time::Duration::from_millis(1));
     0
 }
 "#,
@@ -15360,7 +15360,7 @@ fn entry() {
         assert!(output.rust.contains("rh_json_parse("));
         assert!(output.rust.contains("std::thread::sleep("));
         assert!(
-            !output.rust.contains("rh_host_eval_int(\"rhai::json::"),
+            !output.rust.contains("rh_host_eval_int(\"rh::json::"),
             "{}",
             output.rust
         );

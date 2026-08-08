@@ -189,7 +189,7 @@ fn json_array_fixture_executes_natively_without_interpreter() {
 #[test]
 fn json_schema_native_pack_executes_without_interpreter() {
     let source = r#"fn entry() {
-        let document = rhai::json::parse("{\"schema_version\":2}");
+        let document = rh::json::parse("{\"schema_version\":2}");
         document.schema_version
     }"#;
     let dir = std::env::temp_dir().join(format!("agenterm-rh-json-schema-{}", std::process::id()));
