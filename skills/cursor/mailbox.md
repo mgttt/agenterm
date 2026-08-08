@@ -15,7 +15,7 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-|  | tip （duty handoff） |
+| `origin/main` | tip `9eec888f`（duty handoff） |
 | 待审合 | （无）`origin/cursor/*` ahead=0 |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
@@ -69,7 +69,7 @@
 - bcId: `bc-815ae5a0-9440-4fca-9ef3-94fbc7d482b1`
 - URL: https://cursor.com/agents/bc-815ae5a0-9440-4fca-9ef3-94fbc7d482b1
 - 分支: `main`
-- tip: `38fba119`
+- tip: `9eec888f`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
