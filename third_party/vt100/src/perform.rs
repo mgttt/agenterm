@@ -91,7 +91,7 @@ impl<CB: crate::callbacks::Callbacks> vte::Perform for WrappedScreen<CB> {
         _ignore: bool,
         c: char,
     ) {
-        let unhandled = |screen: &mut crate::screen::Screen| {
+        let mut unhandled = |screen: &mut crate::screen::Screen| {
             self.callbacks.unhandled_csi(
                 screen,
                 intermediates.first().copied(),
@@ -182,6 +182,11 @@ impl<CB: crate::callbacks::Callbacks> vte::Perform for WrappedScreen<CB> {
                         c,
                     );
                 }
+            },
+            // DECSCUSR: `CSI Ps SP q` — cursor shape/blink.
+            Some(b' ') => match c {
+                'q' => self.screen.decscusr(canonicalize_params_1(params, 0)),
+                _ => unhandled(&mut self.screen),
             },
             Some(i) => {
                 self.callbacks.unhandled_csi(

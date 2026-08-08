@@ -61,6 +61,21 @@ const fn mouse_mode_rank(mode: MouseProtocolMode) -> u8 {
     }
 }
 
+/// The cursor shape set by DECSCUSR (`CSI Ps SP q`).
+///
+/// An application uses this to distinguish, say, insert mode (bar) from
+/// normal mode (block) — vim and other modal editors rely on it.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+pub enum CursorShape {
+    /// A solid block covering the full cell (Ps 0, 1, or 2).
+    #[default]
+    Block,
+    /// A line under the cell (Ps 3 or 4).
+    Underline,
+    /// A thin vertical bar at the cell's left edge (Ps 5 or 6).
+    Bar,
+}
+
 /// Represents the overall terminal state.
 #[derive(Clone, Debug)]
 pub struct Screen {
@@ -73,6 +88,9 @@ pub struct Screen {
     modes: u8,
     mouse_protocol_mode: MouseProtocolMode,
     mouse_protocol_encoding: MouseProtocolEncoding,
+    cursor_shape: CursorShape,
+    // xterm/conhost default to a blinking cursor absent any DECSCUSR.
+    cursor_blinking: bool,
 }
 
 impl Screen {
@@ -92,7 +110,43 @@ impl Screen {
             modes: 0,
             mouse_protocol_mode: MouseProtocolMode::default(),
             mouse_protocol_encoding: MouseProtocolEncoding::default(),
+            cursor_shape: CursorShape::default(),
+            cursor_blinking: true,
         }
+    }
+
+    /// Handles DECSCUSR (`CSI Ps SP q`): sets the cursor shape and blink.
+    ///
+    /// `Ps` values, per xterm: 0/1 blinking block, 2 steady block, 3
+    /// blinking underline, 4 steady underline, 5 blinking bar, 6 steady bar.
+    /// An unrecognized value resets to the default (blinking block) rather
+    /// than leaving stale state, matching how xterm treats out-of-range
+    /// DECSCUSR parameters.
+    pub(crate) fn decscusr(&mut self, param: u16) {
+        let (shape, blinking) = match param {
+            0 | 1 => (CursorShape::Block, true),
+            2 => (CursorShape::Block, false),
+            3 => (CursorShape::Underline, true),
+            4 => (CursorShape::Underline, false),
+            5 => (CursorShape::Bar, true),
+            6 => (CursorShape::Bar, false),
+            _ => (CursorShape::default(), true),
+        };
+        self.cursor_shape = shape;
+        self.cursor_blinking = blinking;
+    }
+
+    /// The cursor shape the application last requested via DECSCUSR.
+    #[must_use]
+    pub fn cursor_shape(&self) -> CursorShape {
+        self.cursor_shape
+    }
+
+    /// Whether the application requested a blinking cursor via DECSCUSR.
+    /// True is the default absent any DECSCUSR, matching xterm/conhost.
+    #[must_use]
+    pub fn cursor_blinking(&self) -> bool {
+        self.cursor_blinking
     }
 
     /// Resizes the terminal.

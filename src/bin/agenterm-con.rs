@@ -118,6 +118,10 @@ const READ_BUF: usize = 8192;
 /// which would drag a Win32 dependency into a platform-neutral binary.
 const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
+/// Cursor blink half-period, matching the Windows default caret blink rate
+/// rather than reading GetCaretBlinkTime, for the same reason as above.
+const BLINK_INTERVAL: Duration = Duration::from_millis(530);
+
 /// Horizontal lean per pixel of height for faux italic (SGR 3), roughly the
 /// 12-degree slant real italic faces use.
 const ITALIC_SHEAR: f32 = 0.21;
@@ -431,6 +435,12 @@ struct ConTerminal {
     /// reports the same button that was pressed.
     active_button: Option<u8>,
 
+    /// Whether the cursor is in its "on" phase of the blink cycle. Ignored
+    /// entirely when `screen.cursor_blinking()` is false (a steady cursor).
+    blink_visible: bool,
+    /// When `blink_visible` last flipped, for pacing the next flip.
+    last_blink_at: Instant,
+
     /// In-progress IME composition, drawn inline at the cursor. While this is
     /// non-empty the keystrokes feeding the composition must not also be sent
     /// to the PTY — the IME delivers the result once, as a commit.
@@ -480,6 +490,8 @@ impl ConTerminal {
             mouse_dragging: false,
             last_reported_cell: None,
             active_button: None,
+            blink_visible: true,
+            last_blink_at: Instant::now(),
             ime_preedit: String::new(),
             ime_attached: false,
             last_click: None,
@@ -818,6 +830,12 @@ impl ConTerminal {
         if self.exit || self.child_gone {
             return;
         }
+
+        // Typing always shows the cursor and restarts the blink cycle —
+        // every terminal does this so the cursor is never invisible right
+        // when you start typing, which reads as "did that keystroke land?"
+        self.blink_visible = true;
+        self.last_blink_at = Instant::now();
 
         // Keys that feed an active composition belong to the IME, not the PTY.
         // Forwarding them too would double-type the Latin keys behind a
@@ -1288,6 +1306,12 @@ impl PixelWindowApplication for ConTerminal {
         let screen = self.parser.screen();
         let cursor = screen.cursor_position();
         let cursor_hidden = screen.hide_cursor();
+        let cursor_shape = screen.cursor_shape();
+        // A steady request always shows the cursor; a blinking one is gated
+        // by the timer in about_to_wait. conhost draws the caret the same
+        // way — this is parity, not an enhancement — but getting it right
+        // matters for vim/nvim, which switch shape *and* blink per mode.
+        let cursor_visible_now = !screen.cursor_blinking() || self.blink_visible;
         paint_cells(&mut surface, screen, self.selection, self.cell_w, self.cell_h, self.default_fg, self.default_bg, self.font_size_px);
 
         // IME composition, drawn over the cells to the right of the cursor and
@@ -1300,17 +1324,15 @@ impl PixelWindowApplication for ConTerminal {
             self.draw_preedit(&mut surface, cursor)
         };
 
-        // Block cursor, drawn as a properly inverted cell rather than an opaque
-        // fill: the character under the cursor stays readable, as it does in
-        // conhost. Hidden while scrolled back, where it would point at a cell
-        // the application is no longer writing to.
-        if !cursor_hidden && self.scroll_offset == 0 {
+        // Cursor. Hidden while scrolled back (it would point at a cell the
+        // application is no longer writing to) or mid-blink-off.
+        if !cursor_hidden && self.scroll_offset == 0 && cursor_visible_now {
             let cursor_col = u32::from(cursor.1) + preedit_cells;
             let cx = cursor_col * self.cell_w;
             let cy = u32::from(cursor.0) * self.cell_h;
             if cx < fw && cy < fh {
                 // A wide (CJK) glyph under the cursor must be covered whole,
-                // otherwise the cursor bisects it.
+                // otherwise a block cursor would bisect it.
                 let under = (preedit_cells == 0)
                     .then(|| screen.cell(cursor.0, cursor.1))
                     .flatten();
@@ -1318,20 +1340,39 @@ impl PixelWindowApplication for ConTerminal {
                     Some(cell) if cell.is_wide() => self.cell_w * 2,
                     _ => self.cell_w,
                 };
-                surface.fill_rect(cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
 
-                let glyph = under
-                    .filter(|cell| cell.has_contents())
-                    .and_then(|cell| {
-                        font::raster(first_grapheme(cell.contents()), self.font_size_px)
-                    });
-                if let Some(glyph) = glyph {
-                    surface.blit_glyph(
-                        &glyph,
-                        CellRect { x: cx, y: cy, w: span, h: self.cell_h },
-                        self.default_bg,
-                        0.0,
-                    );
+                match cursor_shape {
+                    vt100::CursorShape::Block => {
+                        // Drawn as a properly inverted cell rather than an
+                        // opaque fill, so the character underneath stays
+                        // readable — you can see what you're about to type
+                        // over, as in conhost.
+                        surface.fill_rect(cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
+                        let glyph = under
+                            .filter(|cell| cell.has_contents())
+                            .and_then(|cell| {
+                                font::raster(first_grapheme(cell.contents()), self.font_size_px)
+                            });
+                        if let Some(glyph) = glyph {
+                            surface.blit_glyph(
+                                &glyph,
+                                CellRect { x: cx, y: cy, w: span, h: self.cell_h },
+                                self.default_bg,
+                                0.0,
+                            );
+                        }
+                    }
+                    // Underline/bar are decorations, not a cover: the glyph
+                    // paint_cells already drew stays as-is underneath them.
+                    vt100::CursorShape::Underline => {
+                        const THICKNESS: u32 = 2;
+                        let y = cy + self.cell_h.saturating_sub(THICKNESS);
+                        surface.fill_rect(cx, y, span, THICKNESS, self.default_fg.to_xrgb());
+                    }
+                    vt100::CursorShape::Bar => {
+                        const THICKNESS: u32 = 2;
+                        surface.fill_rect(cx, cy, THICKNESS, self.cell_h, self.default_fg.to_xrgb());
+                    }
                 }
             }
         }
@@ -1358,6 +1399,19 @@ impl PixelWindowApplication for ConTerminal {
             }
             return Ok(PixelWindowDirective::WaitUntil(
                 self.last_geometry_at + RESIZE_DEBOUNCE,
+            ));
+        }
+
+        // A steady cursor needs no timer at all — only pay the periodic
+        // wake-up cost while the application actually asked for a blink.
+        if self.parser.screen().cursor_blinking() {
+            if now.duration_since(self.last_blink_at) >= BLINK_INTERVAL {
+                self.blink_visible = !self.blink_visible;
+                self.last_blink_at = now;
+                window.request_redraw();
+            }
+            return Ok(PixelWindowDirective::WaitUntil(
+                self.last_blink_at + BLINK_INTERVAL,
             ));
         }
 
@@ -1955,6 +2009,69 @@ mod tests {
                 size,
             );
         }
+    }
+
+    #[test]
+    fn decscusr_selects_shape_and_blink() {
+        let mut parser = parser();
+        // Default before any DECSCUSR: blinking block.
+        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Block);
+        assert!(parser.screen().cursor_blinking());
+
+        parser.process(b"\x1b[6 q"); // steady bar (insert-mode convention)
+        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Bar);
+        assert!(!parser.screen().cursor_blinking());
+
+        parser.process(b"\x1b[3 q"); // blinking underline
+        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Underline);
+        assert!(parser.screen().cursor_blinking());
+
+        parser.process(b"\x1b[2 q"); // steady block
+        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Block);
+        assert!(!parser.screen().cursor_blinking());
+
+        // Out-of-range resets to the default rather than leaving stale state.
+        parser.process(b"\x1b[9 q");
+        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Block);
+        assert!(parser.screen().cursor_blinking());
+    }
+
+    #[test]
+    fn blink_toggles_on_the_configured_interval_and_resets_on_keystroke() {
+        let mut app = ConTerminal::new(None);
+        assert!(app.blink_visible);
+        let start = app.last_blink_at;
+
+        // Simulate the interval having elapsed by moving the recorded time
+        // into the past rather than sleeping — deterministic and instant.
+        app.last_blink_at = start - BLINK_INTERVAL - Duration::from_millis(1);
+        let due = app.last_blink_at;
+        let now = Instant::now();
+        assert!(now.duration_since(due) >= BLINK_INTERVAL);
+
+        // A keystroke must force the cursor back to visible immediately,
+        // regardless of blink phase — this is what stops "did that key even
+        // register?" moments.
+        app.blink_visible = false;
+        let key = NormalizedKeyEvent {
+            logical: LogicalKey::Character("a".to_owned()),
+            physical: agenterm_platform::input::PhysicalKeyCode::Other,
+            text: Some("a".to_owned()),
+            state: KeyPressState::Pressed,
+            repeat: false,
+            modifiers: ModifierState::default(),
+        };
+        app.forward_key(&key);
+        assert!(app.blink_visible);
+    }
+
+    #[test]
+    fn cursor_shape_default_is_block_absent_any_decscusr() {
+        // Regression guard: paint_cells and the cursor overlay must agree
+        // with vt100's own default, or a fresh terminal would draw the wrong
+        // cursor shape from the very first frame.
+        let parser = parser();
+        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Block);
     }
 
     #[test]
