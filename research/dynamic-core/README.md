@@ -149,35 +149,48 @@ question the landing experiments (Q10 stencil / Q12 landing gate / Q13 declare) 
 **three execution routes were built and run to the metal — what is the verdict?** One
 four-axis table.
 
-| route | size | ISA cost | gate 1 — get executable memory | gate 2 — will the hardware run it |
+| route | size (**mind the 口径 — see note**) | ISA cost | gate 1 — get executable memory | gate 2 — will the hardware run it |
 |---|---|---|---|---|
-| **interpret** (Q9 / Q12) | **1908 B** eval-core / **3177 B** whole interpreter | **0** (ISA-specific LOC in eval-core = 0, grep-verified) | **not needed** — never asks for RX memory | **structurally immune** to all four second gates (nothing generated to land on / flush / unwind / relocate) |
-| **JIT lowering** (Q2 / Q12) | **3003 B** | **~307 LOC/ISA** (Q5) | **cut by ACG** — all three exec-memory routes → 1655 | needs **~1%** hardening (ENDBR +4 B/entry; unwind ~40 LOC / ~34 B, deferrable); **placement immune by construction** |
-| **stencil** (Q10 / Q12) | **5826 B** (code+data, Q2口径) | data + an irreducible per-ISA code residual | **cut by ACG** (same `VirtualAlloc`/`VirtualProtect` path — structural, *not* separately measured under ACG) | **placement detonates on contact** — the ±2GB `PC32` hole; Q10 hit it and had to arena-co-locate |
+| **interpret** (Q9 / Q12) | **1908 B** eval-core / **3177 B** whole interpreter — *口径 Q9: object `.text`, msvc, std + default panic; the 3177 **includes** the OS intent seam (1269 B)* | **0** (ISA-specific LOC in eval-core = 0, grep-verified) | **not needed** — never asks for RX memory | **structurally immune** to all four second gates (nothing generated to land on / flush / unwind / relocate) |
+| **JIT lowering** (Q2 / Q12) | **3003 B** — *口径 Q2: flat-PIC blob subtraction (code+data), ELF, no_std + `panic=abort`; **excludes** the OS layer (env table / adapters are "not in X")* | **307–350 LOC/ISA** (Q5: aarch64 307, x86-64 350) | **cut by ACG** — all three exec-memory routes → 1655 | hardening = **+4 B/entry (ENDBR)** and **~34 B/generated function (unwind, deferrable)** of *emitted* bytes; the ~40 LOC of encoder this adds to the lowerer itself is **not measured** |
+| **stencil** (Q10 / Q12) | **5826 B** (code+data) — *口径 Q2, deliberately identical, so this one **is** directly comparable to 3003 B* | data + an irreducible per-ISA code residual | **cut by ACG** (same `VirtualAlloc`/`VirtualProtect` path — structural, *not* separately measured under ACG) | **placement detonates on contact** — the ±2GB `PC32` hole; Q10 hit it and had to arena-co-locate |
 
-**Two limits that MUST travel with this table**, or the section will be read as
+> **The size column is not one ruler.** Only the JIT and stencil cells share a 口径
+> (Q10 built to Q2's flat-blob measurement on purpose — 5826 vs 3003 = 1.94× **is** a
+> valid comparison). The interpreter cell is measured differently on three axes at once
+> (object `.text` vs flat subtraction; std vs `no_std`+`panic=abort`; **with** vs
+> **without** the OS intent layer), so it **must not** be divided against the other two.
+> Full boundary table and the recommended unified 口径: [`COMPARABILITY.md`](./COMPARABILITY.md).
+
+**Three limits that MUST travel with this table**, or the section will be read as
 over-claiming:
 
 1. **Interpretation's price is compute-density ≈77×** (Q9): OS-bound payloads are **1.0×**,
    but hot compute inner loops run **≈77×** slower than optimized native. The route wins
-   all four axes above *only with this one hard caveat attached*.
+   the ISA axis and both gate axes *only with this one hard caveat attached*.
 2. **Immunity here is a usability argument, not a security argument.** Q9 measured only
    size / speed / coverage; Q12 measured that the interpreter still *runs* on a hardened
    platform where codegen is blocked. **"The interpreter is safer" was never measured** and
    must not be implied (see R1 §12.3 B7).
+3. **The single-ISA size axis is UNDECIDED, not decided either way.** The three routes'
+   byte numbers were produced under **incompatible 口径** (table note above), so no
+   route may be called "the smallest" or "not smaller" on raw bytes. Within the one
+   valid pair, stencil (5826 B) **is** 1.94× Q2's JIT (3003 B). Everything else on this
+   axis needs a re-measurement in one 口径 — see [`COMPARABILITY.md`](./COMPARABILITY.md) §2 U1/U2.
 
 **Verdict — the default framing is inverted.** "JIT as the main path, interpretation as
-the fallback" is turned over by four *independent* measurements: interpretation is
-**ISA-free** (0 vs ~307 LOC/ISA — the lowerer's *bulk is* the per-ISA encoder the
+the fallback" is turned over by three *independent* measurements: interpretation is
+**ISA-free** (0 vs 307–350 LOC/ISA — the lowerer's *bulk is* the per-ISA encoder the
 interpreter simply lacks), **needs no executable memory** (survives ACG at gate 1), and is
 **structurally immune to every second gate**, while the two codegen routes grow *larger the
-more platform they must satisfy* — stencil, the fullest codegen form, is the **largest of
-the three (5826 B)** and detonates on placement. (Note the honest size nuance: on *raw
-single-ISA* bytes the interpreter's 3177 B is **not** smaller than Q2's minimal 3003 B
-lowerer — the inversion rests on ISA-scaling + the two platform gates, not on single-ISA
-byte count.) So: **interpretation is the floor; JIT is the conditional accelerator you add
+more platform they must satisfy* — stencil, the fullest codegen form, is **larger than the
+JIT it was supposed to shrink (5826 vs 3003 B, same 口径)** and detonates on placement.
+**The inversion rests on ISA-scaling + the two platform gates, and on nothing else** — in
+particular it does *not* rest on single-ISA byte count, which is not comparably measured
+(limit 3). So: **interpretation is the floor; JIT is the conditional accelerator you add
 back where the ≈77× compute tax is worth paying and the platform still permits codegen** —
-holding the 77× and the un-measured security question as the two standing caveats.
+holding the 77×, the un-measured security question, and the un-comparable size axis as the
+three standing caveats.
 
 ---
 
