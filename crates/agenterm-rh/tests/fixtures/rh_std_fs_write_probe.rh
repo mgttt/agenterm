@@ -1,0 +1,4 @@
+fn entry() {
+    std::fs::write(args[0], args[1]);
+    0
+}

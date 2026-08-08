@@ -1,0 +1,5 @@
+fn entry() {
+    let command = std::process::command("tool");
+    command.stdin_text("hello\n");
+    0
+}

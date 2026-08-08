@@ -1,0 +1,6 @@
+// Probe native command.args with JSON argv list.
+fn entry() {
+    let command = std::process::command("agenterm-cli");
+    command.args([]);
+    0
+}

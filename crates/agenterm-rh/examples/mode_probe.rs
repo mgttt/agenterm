@@ -56,7 +56,8 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let he = output.rust.matches("rh_host_eval_int(").count();
+    // Count call sites only (`fn rh_host_eval_int(snippet` is not a call).
+    let he = output.rust.matches("rh_host_eval_int(\"").count();
     println!("entry={}", path.display());
     println!("mode={}", output.execution_mode.as_str());
     println!("host_eval_int={he}");
@@ -64,6 +65,15 @@ fn main() -> ExitCode {
         "compat_delegating={}",
         output.rust.contains("compat delegating")
     );
+    if env::var_os("RH_DUMP_HOST_EVAL").is_some() {
+        for (i, part) in output.rust.split("rh_host_eval_int(\"").enumerate() {
+            if i == 0 {
+                continue;
+            }
+            let snip = part.split('"').next().unwrap_or("");
+            println!("host_eval[{i}]=\"{snip}\"");
+        }
+    }
     if pack {
         let bundled = match agenterm_rh::bundle_project_source(&root, &source) {
             Ok(text) => text,

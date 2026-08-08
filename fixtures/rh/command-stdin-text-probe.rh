@@ -1,0 +1,6 @@
+// Probe native command.stdin_text for piped worker input.
+fn entry() {
+    let command = std::process::command("tool");
+    command.stdin_text("hello\n");
+    0
+}

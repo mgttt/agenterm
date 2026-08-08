@@ -140,7 +140,7 @@ const FIXTURES: [(&str, &[&str], &[&str]); 28] = [
     (
         "rh_json_marker_run_properties.rh",
         &[
-            "rh_json_get_path(&marker_run, &[\"text\"])",
+            "rh_json_string_path(&marker_run, &[\"text\"])",
             "rh_json_get_path(&marker_run, &[\"row\"])",
             "rh_json_get_path(&marker_run, &[\"column\"])",
         ],
@@ -242,8 +242,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_eighty_two() {
-    assert_eq!(RH_CODEGEN_REVISION, 82);
+fn codegen_revision_is_eighty_three() {
+    assert_eq!(RH_CODEGEN_REVISION, 83);
 }
 
 #[test]

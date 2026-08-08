@@ -1,0 +1,7 @@
+// Probe native child.stdout stream handle access.
+fn entry() {
+    let command = std::process::command("tool");
+    let child = command.start();
+    child.stdout;
+    0
+}

@@ -640,9 +640,17 @@ fn unix_frontend_smoke_pack_builds() {
 
 #[test]
 fn working_context_smoke_pack_builds() {
-    // script-smoke/remote-ui select Native he=1 but still have AOT typecheck debt;
-    // only lock pack build where cargo succeeds today.
     assert_bundled_aot_pack_builds("scripts/rh/working-context-smoke.rh");
+}
+
+#[test]
+fn script_smoke_pack_builds() {
+    assert_bundled_aot_pack_builds("scripts/rh/script-smoke.rh");
+}
+
+#[test]
+fn remote_ui_smoke_pack_builds() {
+    assert_bundled_aot_pack_builds("scripts/rh/remote-ui-smoke.rh");
 }
 
 #[test]
