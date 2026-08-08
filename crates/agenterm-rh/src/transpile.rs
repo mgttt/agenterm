@@ -2730,6 +2730,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_array_index(expr, ctx).is_some() => ValueKind::Json,
         _ if json_path_array_index(expr, ctx).is_some() => ValueKind::Json,
+        _ if child_list_index(expr, ctx).is_some() => ValueKind::Child,
         _ if string_list_index(expr, ctx).is_some() => ValueKind::String,
         _ if string_split_parts(expr, ctx).is_some() => ValueKind::StringList,
         _ if json_stringify_pretty_arg(expr).is_some() => ValueKind::String,
@@ -4707,6 +4708,19 @@ fn string_list_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     }
     let rhs = string_list_index_rhs(&boxed.rhs)?;
     Some((ident.1.as_str(), rhs))
+}
+
+fn child_list_index<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a Expr)> {
+    let Expr::Index(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::ChildList) {
+        return None;
+    }
+    Some((ident.1.as_str(), &boxed.rhs))
 }
 
 fn is_stringish_array_item(expr: &Expr, ctx: &EmitCtx) -> bool {
@@ -6766,6 +6780,14 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some((binding, index)) = string_list_index(expr, ctx) {
             emit_string_list_index(out, binding, index, ctx)?;
+            return Ok(());
+        }
+        if let Some((binding, index)) = child_list_index(expr, ctx) {
+            out.push_str("rh_child_share(&mut ");
+            out.push_str(binding);
+            out.push('[');
+            emit_intish(out, index, ctx)?;
+            out.push_str(" as usize])");
             return Ok(());
         }
         if let Some((binding, index)) = json_array_index(expr, ctx) {
@@ -12280,6 +12302,35 @@ fn entry() {
             output
                 .rust
                 .contains("pub fn find_by_id(values: serde_json::Value"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn child_list_index_preserves_child_kind() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn entry() {
+    let command = std::process::command("tool");
+    let first = command.start();
+    let children = [first];
+    let index = 0;
+    let child = children[index];
+    if child.state == "running" {
+        child.kill();
+    }
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output
+                .rust
+                .contains("let mut child = rh_child_share(&mut children[index as usize]);"),
             "{}",
             output.rust
         );
