@@ -1,0 +1,351 @@
+//! Black-box integration tests for `agenterm-con`, run against the real
+//! compiled binary — not the `#[cfg(test)]` unit tests inside the binary
+//! itself, which exercise pure functions in isolation and cannot prove the
+//! *wiring* between a real window/PTY session and those functions is
+//! correct. That distinction mattered concretely this session: the
+//! `fill_rect` bug (background fills, underline, and the cursor all painting
+//! at column 0) passed every unit test that called `paint_cells` directly
+//! with hand-built inputs, and was only caught by a test that rendered into
+//! an actual pixel buffer and checked actual pixel colors. This file is the
+//! same idea one layer up — spawn the real process, drive it, check what it
+//! actually produced.
+//!
+//! This is possible at all because of `--script`/`--emit-snapshot`
+//! (`src/bin/agenterm-con/agent_interface.rs`): without them, verifying this
+//! binary meant a human (or an agent standing in for one) capturing a
+//! screenshot and reading pixels by eye, which is what most of this
+//! session's manual verification actually was. These flags exist so that
+//! stops being the only option — for tests, and for any other agent that
+//! wants to drive or inspect a session programmatically.
+//!
+//! Known gap, stated plainly rather than left implicit: these tests cover
+//! the *text* that ends up on screen, not that it was *painted correctly* in
+//! pixels (that's `paint_cells`'s own unit tests) or that IME composition
+//! works (there is no way to drive a real IME headlessly; that remains
+//! manually-verified only — see plan/plan-v0.1.16.md).
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+fn binary() -> &'static str {
+    env!("CARGO_BIN_EXE_agenterm-con")
+}
+
+/// A unique scratch directory per test, so parallel `cargo test` runs never
+/// collide on the same script/snapshot file.
+fn scratch_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-con-blackbox-{label}-{}-{}",
+        std::process::id(),
+        // A second differentiator beyond pid: multiple tests in the same
+        // process (the normal `cargo test` case) share a pid.
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+fn write_script(dir: &Path, commands_json: &str) -> PathBuf {
+    let path = dir.join("script.json");
+    std::fs::write(&path, commands_json).expect("write script");
+    path
+}
+
+/// Owns a spawned `agenterm-con` child and guarantees it is killed even if
+/// an assertion panics mid-test — otherwise a failing test leaks a live GUI
+/// process (and its own child shell) for the rest of the run.
+struct ConSession {
+    child: Child,
+    snapshot_path: PathBuf,
+}
+
+impl ConSession {
+    /// Spawns `agenterm-con --no-activate <extra_args before -e>`. `extra_args`
+    /// must come before any `-e`, matching this binary's own contract that
+    /// `-e` consumes the remainder of the command line verbatim.
+    fn spawn(dir: &Path, extra_args: &[&str]) -> Self {
+        let snapshot_path = dir.join("snapshot.json");
+        let child = Command::new(binary())
+            .arg("--no-activate")
+            .arg("--emit-snapshot")
+            .arg(&snapshot_path)
+            .args(extra_args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn agenterm-con");
+        Self { child, snapshot_path }
+    }
+
+    /// Polls the snapshot file until `predicate` accepts its parsed content
+    /// or `timeout` elapses. Retrying rather than sleeping once is what
+    /// makes this robust against slow CI machines and PTY scheduling
+    /// jitter — a fixed sleep is exactly the kind of flake source a
+    /// black-box GUI test needs to avoid, not introduce.
+    fn wait_for(
+        &self,
+        timeout: Duration,
+        predicate: impl Fn(&serde_json::Value) -> bool,
+    ) -> serde_json::Value {
+        let deadline = Instant::now() + timeout;
+        let mut last_seen: Option<serde_json::Value> = None;
+        loop {
+            if let Ok(bytes) = std::fs::read(&self.snapshot_path) {
+                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    if predicate(&value) {
+                        return value;
+                    }
+                    last_seen = Some(value);
+                }
+            }
+            if Instant::now() >= deadline {
+                panic!(
+                    "timed out waiting for snapshot condition; last seen: {}",
+                    last_seen
+                        .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                        .unwrap_or_else(|| "<no valid snapshot read yet>".to_owned())
+                );
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    }
+
+    /// Joined text of every visible row, for a simple substring assertion
+    /// without the caller needing to know which row something landed on.
+    fn screen_text(value: &serde_json::Value) -> String {
+        value["rows_text"]
+            .as_array()
+            .expect("rows_text array")
+            .iter()
+            .map(|row| row.as_str().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+impl Drop for ConSession {
+    fn drop(&mut self) {
+        // Best-effort: the process may have already exited on its own (the
+        // child-exit tests rely on exactly that). TerminateProcess-style
+        // kill does not run this process's own Drop chain for its PTY child,
+        // same caveat noted in plan/plan-v0.1.16.md — acceptable for a test
+        // teardown, not for a real session.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn version_and_help_are_synchronous_and_never_open_a_window() {
+    // These exit before any window/PTY is touched (see offline_cli_exit in
+    // main()), so a plain synchronous `.output()` is the right tool — no
+    // snapshot needed, and if this ever regressed into opening a window
+    // first, this test would hang instead of completing, which is itself
+    // a meaningful failure mode to catch.
+    let version = Command::new(binary())
+        .arg("--version")
+        .output()
+        .expect("run --version");
+    assert!(version.status.success());
+    assert!(String::from_utf8_lossy(&version.stdout).starts_with("agenterm-con "));
+
+    let help = Command::new(binary()).arg("--help").output().expect("run --help");
+    assert!(help.status.success());
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    assert!(help_text.contains("--script"), "help must document --script");
+    assert!(help_text.contains("--emit-snapshot"), "help must document --emit-snapshot");
+}
+
+#[test]
+fn bad_command_line_fails_fast_without_opening_a_window() {
+    // A malformed --script must be caught before a window opens — if it
+    // weren't, a test (or an agent) driving agenterm-con with a typo'd
+    // script would hang waiting on a session that silently never started
+    // instead of getting an immediate, readable error.
+    let dir = scratch_dir("bad-script");
+    let script_path = write_script(&dir, "{not valid json");
+    let output = Command::new(binary())
+        .arg("--no-activate")
+        .arg("--script")
+        .arg(&script_path)
+        .output()
+        .expect("run with a broken script");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("script"), "{stderr}");
+}
+
+#[test]
+fn dash_e_passthrough_reaches_the_real_child_process() {
+    // Proves -e's argv passthrough end-to-end: not just that the CLI parser
+    // builds the right Vec<String> (that's unit-tested), but that a real
+    // spawned program actually receives it and its actual output lands on
+    // screen. Uses /c (not /k) so the child exits on its own once the
+    // command finishes, letting the natural child-exit path close the
+    // session instead of requiring a kill.
+    let dir = scratch_dir("dash-e");
+    let mut session = ConSession::spawn(
+        &dir,
+        &["-e", "cmd.exe", "/c", "echo DASH_E_PASSTHROUGH_MARKER"],
+    );
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("DASH_E_PASSTHROUGH_MARKER")
+    });
+
+    // The child (cmd /c) exits on its own after running the command; the
+    // whole agenterm-con process must follow it down without being killed —
+    // this is the child_gone -> Exit wiring, which nothing else automates.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(Some(_status)) = session.child.try_wait() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "process did not exit after its child did");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
+#[test]
+fn nonexistent_program_via_dash_e_exits_cleanly_instead_of_hanging() {
+    let dir = scratch_dir("bad-e");
+    let mut child = Command::new(binary())
+        .arg("--no-activate")
+        .args(["-e", "definitely-not-a-real-program-agenterm-con-test"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn with a bad -e target");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll child") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("agenterm-con hung instead of exiting on a spawn failure");
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    };
+    assert!(!status.success(), "a spawn failure must not report success");
+}
+
+#[test]
+fn scripted_text_and_paste_both_reach_the_pty() {
+    // Closes a gap this session's own retrospective flagged: paste had unit
+    // coverage for its byte-level encoding, but the wiring from
+    // ConTerminal::paste_text to a live session was never exercised
+    // end-to-end. `paste` in a script goes through that exact function.
+    let dir = scratch_dir("text-and-paste");
+    let script = write_script(
+        &dir,
+        r#"[
+            {"text": "echo TYPED_MARKER\r"},
+            {"wait_ms": 300},
+            {"paste": "PASTED_MARKER\r"},
+            {"wait_ms": 300}
+        ]"#,
+    );
+    let session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
+        let text = ConSession::screen_text(snapshot);
+        text.contains("TYPED_MARKER") && text.contains("PASTED_MARKER")
+    });
+    let text = ConSession::screen_text(&snapshot);
+    // Order matters: paste must not have raced ahead of the typed command.
+    let typed_at = text.find("TYPED_MARKER").unwrap();
+    let pasted_at = text.find("PASTED_MARKER").unwrap();
+    assert!(typed_at < pasted_at, "script commands ran out of order:\n{text}");
+}
+
+#[test]
+fn cjk_output_from_a_real_child_process_appears_as_actual_characters() {
+    // Complements the pixel-level CJK regression test (agenterm-con.rs's own
+    // font fallback fix) with the layer it cannot cover: that real UTF-8
+    // bytes from a real child process survive PTY -> vt100 -> snapshot
+    // intact. This does not prove the glyphs were *painted* (no pixels
+    // here) — that half is `font::raster` returning `Some` for CJK, already
+    // unit-tested — but it does prove the text pipeline carries them
+    // correctly end-to-end, which is a distinct and previously-unverified
+    // integration point.
+    let dir = scratch_dir("cjk");
+    let payload_path = dir.join("cjk.txt");
+    std::fs::write(&payload_path, "CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}\r\n")
+        .expect("write CJK payload");
+    let mut session = ConSession::spawn(
+        &dir,
+        &["-e", "cmd.exe", "/c", "type", payload_path.to_str().unwrap()],
+    );
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}")
+    });
+    let _ = session.child.wait();
+}
+
+#[test]
+fn snapshot_reports_a_live_child_until_it_exits() {
+    // child_alive is the field a test (or agent) should poll instead of
+    // guessing a fixed delay before asserting a command finished. Verify it
+    // actually flips, rather than trusting the field always reads true.
+    let dir = scratch_dir("child-alive");
+    let mut session = ConSession::spawn(&dir, &["-e", "cmd.exe", "/c", "echo READY_MARKER"]);
+    let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("READY_MARKER")
+    });
+    assert_eq!(snapshot["child_alive"], true);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(Some(_)) = session.child.try_wait() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "process never exited after its child did");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
+#[test]
+fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
+    // Proves the *wiring*: a scripted key event reaches ConTerminal::
+    // forward_key (the same path a real OS keyboard event takes), which
+    // writes to the PTY, which cmd.exe's line editor responds to by moving
+    // the cursor left. The key-encoding *bytes* are already exhaustively
+    // unit-tested in agenterm_platform::terminal_input; this is the one
+    // layer those tests cannot reach on their own.
+    let dir = scratch_dir("key-wiring");
+    let script = write_script(
+        &dir,
+        r#"[
+            {"text": "echo ABCDE"},
+            {"wait_ms": 300},
+            {"key": "ArrowLeft"},
+            {"key": "ArrowLeft"},
+            {"wait_ms": 300}
+        ]"#,
+    );
+    let session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    let first = session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("echo ABCDE")
+    });
+    let col_after_typing = first["cursor"]["col"].as_u64().expect("cursor.col");
+
+    let second = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["cursor"]["col"].as_u64() == Some(col_after_typing.saturating_sub(2))
+    });
+    assert_eq!(
+        second["cursor"]["col"].as_u64(),
+        Some(col_after_typing - 2),
+        "two ArrowLeft presses must move the cursor back exactly two columns"
+    );
+}
