@@ -110,6 +110,9 @@ pub fn try_execute_rh_invocation(
     };
 
     match operation {
+        // Unreachable in practice: `script_worker.rs::execute_inner` short-circuits
+        // `ScriptOperation::Api` before ever calling into this backend dispatch.
+        // Kept only so this match stays exhaustive over `ScriptOperation`.
         ScriptOperation::Api => Ok(None),
         ScriptOperation::Check => {
             if !source.is_empty() {
@@ -158,6 +161,41 @@ pub fn try_execute_rh_invocation(
 
 fn json_value_from_entry(entry_value: i64) -> Option<serde_json::Value> {
     Some(serde_json::Value::from(entry_value))
+}
+
+/// Build the `args_len`/`arg` host-function closures shared by the lua and
+/// qjs backends from a script invocation's `arguments` value.
+///
+/// `LuaHostFunctions` and `QjsHostFunctions` declare `args_len`/`arg` with
+/// structurally identical trait-object types: `Arc<dyn Fn() -> i64 + Send +
+/// Sync>` for `args_len`, and `Arc<dyn Fn(i64) -> Result<String, String> +
+/// Send + Sync>` for `arg` (aliased per-crate as `ArgFn`). Type aliases
+/// don't create distinct types, so the same pair of closures can be
+/// assigned directly to either engine's host-function struct.
+type ScriptArgsAccessors = (
+    Arc<dyn Fn() -> i64 + Send + Sync>,
+    Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync>,
+);
+
+fn script_args_accessors(arguments: Value) -> ScriptArgsAccessors {
+    let args_for_len = arguments.clone();
+    let args_for_arg = arguments;
+    let args_len: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
+        args_for_len
+            .as_array()
+            .map(|a| a.len() as i64)
+            .unwrap_or(0)
+    });
+    let arg: Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync> =
+        Arc::new(move |index: i64| {
+            args_for_arg
+                .as_array()
+                .and_then(|a| a.get(index as usize))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+                .ok_or_else(|| format!("argument {index} is unavailable"))
+        });
+    (args_len, arg)
 }
 
 fn resolve_rh_pack(
@@ -242,6 +280,9 @@ pub fn try_execute_lua_invocation(
     let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
 
     match operation {
+        // Unreachable in practice: `script_worker.rs::execute_inner` short-circuits
+        // `ScriptOperation::Api` before ever calling into this backend dispatch.
+        // Kept only so this match stays exhaustive over `ScriptOperation`.
         ScriptOperation::Api => Ok(None),
         ScriptOperation::Check => {
             engine.check(source).map_err(|e| e.to_string())?;
@@ -263,24 +304,10 @@ pub fn try_execute_lua_invocation(
             }
 
             // Wire args_len / arg from options.arguments
-            let args = options.arguments.clone();
-            if let Some(ref arguments) = args {
-                let args_for_len = arguments.clone();
-                let args_for_arg = arguments.clone();
-                host.args_len = Some(Arc::new(move || {
-                    args_for_len
-                        .as_array()
-                        .map(|a| a.len() as i64)
-                        .unwrap_or(0)
-                }));
-                host.arg = Some(Arc::new(move |index: i64| {
-                    args_for_arg
-                        .as_array()
-                        .and_then(|a| a.get(index as usize))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_owned())
-                        .ok_or_else(|| format!("argument {index} is unavailable"))
-                }));
+            if let Some(arguments) = options.arguments.clone() {
+                let (args_len, arg) = script_args_accessors(arguments);
+                host.args_len = Some(args_len);
+                host.arg = Some(arg);
             }
 
             let result = engine
@@ -328,6 +355,9 @@ pub fn try_execute_qjs_invocation(
     }
 
     match operation {
+        // Unreachable in practice: `script_worker.rs::execute_inner` short-circuits
+        // `ScriptOperation::Api` before ever calling into this backend dispatch.
+        // Kept only so this match stays exhaustive over `ScriptOperation`.
         ScriptOperation::Api => Ok(None),
         ScriptOperation::Check => {
             agenterm_qjs::check(source, "invocation.js").map_err(|e| e.to_string())?;
@@ -347,24 +377,10 @@ pub fn try_execute_qjs_invocation(
             }
 
             // Wire args_len / arg from options.arguments
-            let args = options.arguments.clone();
-            if let Some(ref arguments) = args {
-                let args_for_len = arguments.clone();
-                let args_for_arg = arguments.clone();
-                host.args_len = Some(Arc::new(move || {
-                    args_for_len
-                        .as_array()
-                        .map(|a| a.len() as i64)
-                        .unwrap_or(0)
-                }));
-                host.arg = Some(Arc::new(move |index: i64| {
-                    args_for_arg
-                        .as_array()
-                        .and_then(|a| a.get(index as usize))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_owned())
-                        .ok_or_else(|| format!("argument {index} is unavailable"))
-                }));
+            if let Some(arguments) = options.arguments.clone() {
+                let (args_len, arg) = script_args_accessors(arguments);
+                host.args_len = Some(args_len);
+                host.arg = Some(arg);
             }
 
             let result = agenterm_qjs::eval_entry_with_host(source, "invocation.js", &host)
