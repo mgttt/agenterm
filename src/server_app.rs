@@ -41,7 +41,11 @@ use crate::{
     },
     ui_interaction::{UiInteraction, parse_ui_interaction},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
-    ui_snapshot::{PROJECTION_REPLACEABLE_UI_CLIENT, is_replaceable_ui_client_snapshot_visible},
+    ui_snapshot::{
+        GEOMETRY_SOURCE_SYNTHETIC, HeadlessViewport, PROJECTION_REPLACEABLE_UI_CLIENT,
+        SyntheticTerminalInput, is_replaceable_ui_client_snapshot_visible, synthetic_layout_json,
+        synthetic_tab_row_json,
+    },
     wake_signal::WakeSignal,
     working_context::{CwdSource, cwd_command, validate_path},
     workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
@@ -1462,6 +1466,20 @@ impl ServerState {
                     true,
                 )
             }
+            // `ui-input` is implemented -- it just needs a window to synthesize
+            // events into. Reporting it as "not implemented" would send an
+            // agent looking for a missing feature instead of attaching a GUI,
+            // and would mark the failure unretryable when a retry is exactly
+            // what fixes it. The geometry to aim at is already published here,
+            // tagged `geometry_source: "synthetic"`.
+            Some("ui-input") => IpcResponse::typed_failure(
+                "ui-input needs an attached GUI client: this headless server publishes \
+                 synthetic geometry but has no window to dispatch pointer, wheel or key \
+                 events into",
+                "ui_client_unavailable",
+                "availability",
+                true,
+            ),
             Some(command) => IpcResponse::typed_failure(
                 format!("headless AgenTerm server does not implement `{command}`"),
                 "server_command_unsupported",
@@ -1934,10 +1952,14 @@ impl ControlHost for ServerState {
         {
             return Some(snapshot.json.clone());
         }
+        let (viewport, layout, terminal, geometry_rows) = self.synthetic_geometry();
         Some(
             serde_json::to_string_pretty(&serde_json::json!({
                 "schema_version": 1,
                 "projection": "headless_server",
+                // Every pixel rectangle below was computed, not measured. See
+                // `ui_snapshot::GEOMETRY_SOURCE_SYNTHETIC`.
+                "geometry_source": GEOMETRY_SOURCE_SYNTHETIC,
                 "server_pid": std::process::id(),
                 "event_position": position,
                 "active_tab_id": self.active.map(|id| format!("@{id}")),
@@ -1948,23 +1970,32 @@ impl ControlHost for ServerState {
                     "minimized": false,
                     "state": "detached",
                 },
-                "layout": {
-                    "composer": {
-                        "visible": false,
-                        "input_visible": false,
-                        "send_visible": false,
-                    },
-                },
+                "layout": synthetic_layout_json(viewport, &layout, terminal),
+                // A headless server has no keyboard focus and no modal stack.
+                // Synthesising either would be fiction, not layout maths.
                 "focus": {
                     "surface": serde_json::Value::Null,
                     "window_id": self.active.map(|id| format!("@{id}")),
                 },
                 "modal": serde_json::Value::Null,
-                "tabs": self.tabs.iter().map(|tab| serde_json::json!({
+                "tabs": self.tabs.iter().map(|tab| {
+                    let row = geometry_rows.iter().find(|row| row.id == tab.id);
+                    let geometry = row.and_then(|row| row.viewport_position).map(|position| {
+                        synthetic_tab_row_json(
+                            &layout,
+                            position,
+                            row.map(|row| row.depth).unwrap_or_default(),
+                            self.active == Some(tab.id),
+                        )
+                    });
+                    serde_json::json!({
                     "id": format!("@{}", tab.id),
                     "index": tab.index,
                     "parent_id": tab.parent_id.map(|id| format!("@{id}")),
+                    "depth": row.map(|row| row.depth),
+                    "has_children": self.tabs.iter().any(|child| child.parent_id == Some(tab.id)),
                     "collapsed": self.collapsed_tabs.contains(&tab.id),
+                    "visible": row.is_some_and(|row| row.viewport_position.is_some()),
                     "name": tab.title,
                     "note": tab.note,
                     "active": self.active == Some(tab.id),
@@ -1974,10 +2005,89 @@ impl ControlHost for ServerState {
                     "exit_code": tab.exited,
                     "rows": tab.last_size.0,
                     "cols": tab.last_size.1,
-                })).collect::<Vec<_>>(),
+                    "bounds": geometry.as_ref().map(|value| value["bounds"].clone()),
+                    "render": geometry.as_ref().map(|value| value["render"].clone()),
+                    "actions": geometry
+                        .as_ref()
+                        .map(|value| value["actions"].clone())
+                        .unwrap_or(serde_json::Value::Null),
+                })}).collect::<Vec<_>>(),
             }))
             .unwrap_or_default(),
         )
+    }
+}
+
+/// One tree row of the synthetic sidebar: its depth, and where it lands in the
+/// visible viewport (`None` once the nominal window runs out of rows).
+struct SyntheticTreeRow {
+    id: u64,
+    depth: usize,
+    viewport_position: Option<usize>,
+}
+
+impl ServerState {
+    /// Run the shared `ui_geometry` layout over a nominal viewport.
+    ///
+    /// This is the whole of D-1: the layout is a pure function, so a server
+    /// with no window can still answer "where would the Close button be" using
+    /// the *same* code the GUI hosts use, and an agent can exercise
+    /// perceive->act routing in CI. It proves hit/route/dispatch reasoning, not
+    /// rendering; a live-window smoke stays mandatory for pixels.
+    fn synthetic_geometry(
+        &mut self,
+    ) -> (
+        HeadlessViewport,
+        crate::ui_geometry::WorkspaceLayout,
+        Option<SyntheticTerminalInput>,
+        Vec<SyntheticTreeRow>,
+    ) {
+        let config = crate::settings::load_config();
+        let viewport = HeadlessViewport::resolve();
+        let layout = viewport.layout(config.tabs_visible, i32::from(config.tabs_width));
+        let capacity = crate::ui_geometry::sidebar_row_capacity(layout.sidebar_tree.height());
+        let nodes = self
+            .tabs
+            .iter()
+            .map(|tab| crate::tab_tree::TabTreeNode {
+                id: tab.id,
+                parent_id: tab.parent_id,
+                sort_key: tab.index,
+            })
+            .collect::<Vec<_>>();
+        let all_rows = crate::tab_tree::tree_rows(&nodes);
+        let visible = crate::tab_tree::visible_tree_rows(&all_rows, &self.collapsed_tabs);
+        let geometry_rows = all_rows
+            .iter()
+            .map(|row| SyntheticTreeRow {
+                id: row.id,
+                depth: row.depth,
+                viewport_position: config
+                    .tabs_visible
+                    .then(|| {
+                        visible
+                            .iter()
+                            .position(|candidate| candidate.id == row.id)
+                            .filter(|position| *position < capacity)
+                    })
+                    .flatten(),
+            })
+            .collect::<Vec<_>>();
+        let terminal = self.active_synthetic_terminal();
+        (viewport, layout, terminal, geometry_rows)
+    }
+
+    fn active_synthetic_terminal(&mut self) -> Option<SyntheticTerminalInput> {
+        let active = self.active?;
+        let position = self.tabs.iter().position(|tab| tab.id == active)?;
+        let (rows, cols) = self.tabs[position].last_size;
+        let (scrollback_offset, max_scrollback) = self.tabs[position].scrollback_bounds();
+        Some(SyntheticTerminalInput {
+            rows,
+            cols,
+            scrollback_offset,
+            max_scrollback,
+        })
     }
 }
 

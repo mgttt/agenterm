@@ -4,12 +4,28 @@ use crate::{
     settings::AppConfig,
     theme::AppearancePreset,
     ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
-    ui_geometry::{PixelRect, TerminalScrollbarGeometry, pixel_rect_json},
+    ui_geometry::{
+        PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, TreeRowActionDensity,
+        TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, WorkspaceToolbarLayout,
+        composer_geometry, pixel_rect_json, sidebar_row_capacity, sidebar_tree_row_geometry,
+        terminal_scrollbar_geometry, workspace_layout,
+    },
     working_context::{CwdTracker, ProxyState, ShellKind},
 };
 
 pub(crate) const PROJECTION_EMBEDDED_GUI: &str = "embedded_gui";
 pub(crate) const PROJECTION_REPLACEABLE_UI_CLIENT: &str = "replaceable_ui_client";
+
+/// Bounds in this snapshot were measured from a window that a compositor
+/// actually laid out and painted.
+pub(crate) const GEOMETRY_SOURCE_RENDERED: &str = "rendered";
+/// Bounds in this snapshot were computed by the shared `ui_geometry` layout
+/// functions from a **nominal** viewport. No window exists.
+///
+/// A consumer must treat these as a model of where chrome *would* be, good
+/// enough to exercise hit/route/dispatch logic, and never as evidence that
+/// anything was rendered. Pixel fidelity still needs a live-window smoke.
+pub(crate) const GEOMETRY_SOURCE_SYNTHETIC: &str = "synthetic";
 
 pub(crate) const SYSTEM_MENU_COPY_ID: u32 = 0x1f00;
 pub(crate) const SYSTEM_MENU_PASTE_ID: u32 = 0x1f10;
@@ -244,10 +260,412 @@ pub(crate) fn schema_version_json() -> u32 {
     UI_CLIENT_STATE_SCHEMA_VERSION
 }
 
+pub(crate) fn workspace_toolbar_snapshot_json(
+    toolbar: WorkspaceToolbarLayout,
+) -> serde_json::Value {
+    serde_json::json!({
+        "bounds": pixel_rect_json(toolbar.bounds),
+        "new": pixel_rect_json(toolbar.new_tab),
+        "tabs": pixel_rect_json(toolbar.tabs),
+        "control_center": pixel_rect_json(toolbar.control_center),
+        "settings": pixel_rect_json(toolbar.settings),
+        "locale": pixel_rect_json(toolbar.locale),
+        "font_decrease": pixel_rect_json(toolbar.font_decrease),
+        "font_increase": pixel_rect_json(toolbar.font_increase),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic (headless) geometry
+// ---------------------------------------------------------------------------
+//
+// The workspace layout is a **pure function** of a client rectangle plus the
+// chrome heights (`src/ui_geometry.rs`). A headless server therefore does not
+// need a window to say where the toolbar buttons, tab rows, composer input and
+// scrollbars would sit -- it only needs a viewport to feed the same function
+// both GUI hosts feed. Publishing that lets an agent exercise perceive->act
+// routing in CI, which is impossible while the only geometry lives behind a
+// live window.
+//
+// Everything produced here is tagged `GEOMETRY_SOURCE_SYNTHETIC`.
+
+/// Overrides the nominal headless viewport, as `"<width>x<height>"`.
+pub(crate) const HEADLESS_VIEWPORT_ENV: &str = "AGENTERM_HEADLESS_VIEWPORT";
+
+/// Built-in nominal client area.
+///
+/// A fixed default is deliberate. Deriving the viewport from a tab's rows and
+/// columns would require cell metrics, and cell metrics require a font and a
+/// DPI that a headless server does not have; inventing them would make the
+/// bounds *look* measured while being no more real, and would make them jitter
+/// whenever a pane is resized. A constant keeps synthetic geometry
+/// reproducible, which is the property CI needs, and the environment override
+/// lets a caller replay a specific real window size before checking the same
+/// gesture against a live one.
+const HEADLESS_DEFAULT_WIDTH: i32 = 1280;
+const HEADLESS_DEFAULT_HEIGHT: i32 = 800;
+const HEADLESS_MIN_WIDTH: i32 = 320;
+const HEADLESS_MIN_HEIGHT: i32 = 240;
+const HEADLESS_MAX_EDGE: i32 = 16_384;
+
+/// Chrome heights match the GUI host shipped on *this* platform, so synthetic
+/// geometry and the window an agent may attach later agree. The two hosts
+/// currently disagree (Windows composer 104, Unix 64), so the value is also
+/// published rather than left for a caller to guess.
+#[cfg(windows)]
+const HEADLESS_COMPOSER_HEIGHT: i32 = 104;
+#[cfg(not(windows))]
+const HEADLESS_COMPOSER_HEIGHT: i32 = 64;
+const HEADLESS_STATUS_HEIGHT: i32 = 26;
+const HEADLESS_SERVER_STRIP_HEIGHT: i32 = 34;
+
+/// The nominal client area a headless projection lays chrome out in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HeadlessViewport {
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    /// `"default"` or `"environment"`.
+    pub(crate) source: &'static str,
+    pub(crate) composer_height: i32,
+    pub(crate) status_height: i32,
+    pub(crate) server_strip_height: i32,
+}
+
+impl HeadlessViewport {
+    pub(crate) fn resolve() -> Self {
+        let (width, height, source) = std::env::var(HEADLESS_VIEWPORT_ENV)
+            .ok()
+            .as_deref()
+            .and_then(parse_headless_viewport)
+            .map(|(width, height)| (width, height, "environment"))
+            .unwrap_or((HEADLESS_DEFAULT_WIDTH, HEADLESS_DEFAULT_HEIGHT, "default"));
+        Self {
+            width,
+            height,
+            source,
+            composer_height: HEADLESS_COMPOSER_HEIGHT,
+            status_height: HEADLESS_STATUS_HEIGHT,
+            server_strip_height: HEADLESS_SERVER_STRIP_HEIGHT,
+        }
+    }
+
+    pub(crate) fn layout(self, tabs_visible: bool, configured_tabs_width: i32) -> WorkspaceLayout {
+        workspace_layout(WorkspaceLayoutInput {
+            client_width: self.width,
+            client_height: self.height,
+            tabs_visible,
+            configured_tabs_width,
+            composer_height: self.composer_height,
+            status_height: self.status_height,
+            server_strip_height: self.server_strip_height,
+        })
+    }
+
+    pub(crate) fn json(self) -> serde_json::Value {
+        serde_json::json!({
+            "width": self.width,
+            "height": self.height,
+            "source": self.source,
+            "environment_variable": HEADLESS_VIEWPORT_ENV,
+            "composer_height": self.composer_height,
+            "status_height": self.status_height,
+            "server_strip_height": self.server_strip_height,
+        })
+    }
+}
+
+/// Parse `"<width>x<height>"`, rejecting anything outside a plausible window.
+///
+/// An out-of-range request is refused rather than clamped: silently laying out
+/// a 40x40 "window" would publish bounds a caller could not act on while
+/// looking exactly like a request that was honoured.
+fn parse_headless_viewport(raw: &str) -> Option<(i32, i32)> {
+    let (width, height) = raw.trim().split_once(['x', 'X'])?;
+    let width = width.trim().parse::<i32>().ok()?;
+    let height = height.trim().parse::<i32>().ok()?;
+    ((HEADLESS_MIN_WIDTH..=HEADLESS_MAX_EDGE).contains(&width)
+        && (HEADLESS_MIN_HEIGHT..=HEADLESS_MAX_EDGE).contains(&height))
+    .then_some((width, height))
+}
+
+/// Terminal facts a headless projection needs to place the scrollbar.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SyntheticTerminalInput {
+    pub(crate) rows: u16,
+    pub(crate) cols: u16,
+    pub(crate) scrollback_offset: usize,
+    pub(crate) max_scrollback: usize,
+}
+
+/// The `layout` block of a headless snapshot, in the same shape the embedded
+/// GUI publishes so an agent's parser does not fork per projection.
+///
+/// `composer.visible` and friends stay `false`: visibility describes the real
+/// client, of which there is none. The bounds next to them describe where the
+/// composer *would* be. That pairing is the honest one -- nothing is on screen,
+/// and here is the layout a window would get.
+pub(crate) fn synthetic_layout_json(
+    viewport: HeadlessViewport,
+    layout: &WorkspaceLayout,
+    terminal: Option<SyntheticTerminalInput>,
+) -> serde_json::Value {
+    let composer = composer_geometry(layout.composer);
+    serde_json::json!({
+        "geometry_source": GEOMETRY_SOURCE_SYNTHETIC,
+        "viewport": viewport.json(),
+        "sidebar": {
+            "x": layout.sidebar.left,
+            "y": layout.sidebar.top,
+            "visible": layout.tabs_visible,
+            "configured_width": layout.configured_tabs_width,
+            "effective_width": layout.effective_tabs_width,
+            "width": layout.sidebar.width(),
+            "height": layout.sidebar.height(),
+            "bounds": pixel_rect_json(layout.sidebar),
+            "tree": pixel_rect_json(layout.sidebar_tree),
+            "resize_grip": layout.resize_grip.map(pixel_rect_json),
+            "resizing": false,
+            "row_capacity": sidebar_row_capacity(layout.sidebar_tree.height()),
+        },
+        "toolbar": layout.workspace_toolbar.map(workspace_toolbar_snapshot_json),
+        "server_strip": layout.server_strip.map(|strip| serde_json::json!({
+            "bounds": pixel_rect_json(strip),
+            // Chips enumerate live instances, which is a fleet query rather
+            // than layout maths; a headless projection publishes the strip it
+            // would draw them into and leaves the roster to `list-instances`.
+            "tabs": serde_json::Value::Null,
+        })),
+        "sidebar_clock": layout.sidebar_clock.map(pixel_rect_json),
+        "terminal": {
+            "x": layout.terminal.left,
+            "y": layout.terminal.top,
+            "width": layout.terminal.width(),
+            "viewport_width": (layout.terminal.width() - TERMINAL_SCROLLBAR_WIDTH).max(0),
+            "height": layout.terminal.height(),
+            "bounds": pixel_rect_json(layout.terminal),
+            "rows": terminal.map(|terminal| terminal.rows),
+            "cols": terminal.map(|terminal| terminal.cols),
+            "scrollbar": terminal.map(|terminal| {
+                let geometry = terminal_scrollbar_geometry(
+                    layout.terminal,
+                    usize::from(terminal.rows),
+                    terminal.scrollback_offset,
+                    terminal.max_scrollback,
+                );
+                scrollbar_state_json(
+                    &geometry,
+                    terminal.scrollback_offset,
+                    terminal.max_scrollback,
+                )
+            }),
+        },
+        "composer": {
+            "visible": false,
+            "input_visible": false,
+            "send_visible": false,
+            "x": layout.composer.left,
+            "y": layout.composer.top,
+            "width": layout.composer.width(),
+            "height": layout.composer.height(),
+            "bounds": pixel_rect_json(layout.composer),
+            "input": {
+                "bounds": pixel_rect_json(composer.input),
+                "target_rows": 3,
+                "vertical_scrollbar": true,
+            },
+            "send": {"bounds": pixel_rect_json(composer.send)},
+        },
+        "status_bar": {
+            "x": layout.status.left,
+            "y": layout.status.top,
+            "width": layout.status.width(),
+            "height": layout.status.height(),
+            "bounds": pixel_rect_json(layout.status),
+            "tabs_recovery": layout.status_segments.tabs_recovery.map(pixel_rect_json),
+            "cwd": {
+                "bounds": pixel_rect_json(layout.status_segments.cwd),
+                "action": "open-cwd-editor",
+            },
+            "proxy": archived_proxy_status_json(layout.status_segments.proxy),
+            "provider": "placeholder",
+        },
+    })
+}
+
+const fn tree_action_density_name(density: TreeRowActionDensity) -> &'static str {
+    match density {
+        TreeRowActionDensity::Full => "full",
+        TreeRowActionDensity::Compact => "compact",
+    }
+}
+
+/// Per-row tab geometry (`bounds` / `render` / `actions`) for a headless
+/// projection, matching the embedded GUI's keys.
+///
+/// `actions` is populated only for the active row because only the active row
+/// draws Add/Close, exactly as the GUI hosts do.
+pub(crate) fn synthetic_tab_row_json(
+    layout: &WorkspaceLayout,
+    viewport_position: usize,
+    depth: usize,
+    active: bool,
+) -> serde_json::Value {
+    let geometry = sidebar_tree_row_geometry(
+        layout.sidebar_tree,
+        viewport_position,
+        depth,
+        TreeRowMode::Normal,
+    );
+    let action = |id: &str, label: &str, bounds: PixelRect| {
+        serde_json::json!({
+            "id": id,
+            "label": label,
+            "bounds": pixel_rect_json(bounds),
+            "x": bounds.left,
+            "y": bounds.top,
+            "width": bounds.width(),
+            "height": bounds.height(),
+        })
+    };
+    serde_json::json!({
+        "bounds": pixel_rect_json(geometry.row),
+        "render": {
+            "mode": "normal",
+            "row": pixel_rect_json(geometry.row),
+            "selection": pixel_rect_json(geometry.selection),
+            "node": {"x": geometry.node_x, "y": geometry.node_y},
+            "expander": pixel_rect_json(geometry.expander),
+            "status": pixel_rect_json(geometry.status),
+            "disclosure_hit": pixel_rect_json(geometry.disclosure_hit),
+            "text": pixel_rect_json(geometry.text),
+            "name": pixel_rect_json(geometry.name),
+            "note": pixel_rect_json(geometry.note),
+            "editors": serde_json::Value::Null,
+        },
+        "actions": active.then(|| serde_json::json!({
+            "mode": "normal",
+            "density": tree_action_density_name(geometry.actions.density),
+            "new_child": action(
+                "new-child",
+                "Add",
+                geometry.actions.add_child.expect("a normal row has Add"),
+            ),
+            "close": action("close-tab", "Close", geometry.actions.secondary),
+        })),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::settings::AppConfig;
+
+    fn rect(value: &serde_json::Value) -> (i64, i64, i64, i64) {
+        (
+            value["left"].as_i64().expect("left"),
+            value["top"].as_i64().expect("top"),
+            value["right"].as_i64().expect("right"),
+            value["bottom"].as_i64().expect("bottom"),
+        )
+    }
+
+    #[test]
+    fn a_headless_viewport_request_is_honoured_or_refused_but_never_silently_clamped() {
+        assert_eq!(parse_headless_viewport("1024x768"), Some((1024, 768)));
+        assert_eq!(parse_headless_viewport(" 1024 X 768 "), Some((1024, 768)));
+        // A window this small could not hold the chrome an agent would click,
+        // so publishing a clamped layout for it would be a lie about what was
+        // asked for.
+        assert_eq!(parse_headless_viewport("40x40"), None);
+        assert_eq!(parse_headless_viewport("99999x600"), None);
+        for malformed in ["1024", "1024*768", "axb", "", "-800x600"] {
+            assert_eq!(parse_headless_viewport(malformed), None, "{malformed}");
+        }
+    }
+
+    /// The point of D-1: bounds an agent can aim `ui-input` at exist without a
+    /// window, and are labelled so nobody mistakes them for rendered pixels.
+    #[test]
+    fn synthetic_layout_publishes_actionable_chrome_and_labels_itself() {
+        let viewport = HeadlessViewport::resolve();
+        let layout = viewport.layout(true, 250);
+        let value = synthetic_layout_json(
+            viewport,
+            &layout,
+            Some(SyntheticTerminalInput {
+                rows: 30,
+                cols: 100,
+                scrollback_offset: 0,
+                max_scrollback: 500,
+            }),
+        );
+
+        assert_eq!(value["geometry_source"], GEOMETRY_SOURCE_SYNTHETIC);
+        assert_eq!(value["viewport"]["width"], viewport.width);
+        assert_eq!(value["viewport"]["source"], "default");
+
+        let toolbar = &value["toolbar"];
+        let client = (
+            0_i64,
+            0_i64,
+            i64::from(viewport.width),
+            i64::from(viewport.height),
+        );
+        for key in [
+            "new",
+            "tabs",
+            "control_center",
+            "settings",
+            "locale",
+            "font_decrease",
+            "font_increase",
+        ] {
+            let (left, top, right, bottom) = rect(&toolbar[key]);
+            assert!(right > left && bottom > top, "{key} is degenerate");
+            assert!(
+                left >= client.0 && top >= client.1 && right <= client.2 && bottom <= client.3,
+                "{key} escapes the nominal viewport"
+            );
+        }
+
+        // Visibility describes the (absent) real client; bounds describe the
+        // layout a window would get. Both must be present and must not be
+        // confused with each other.
+        assert_eq!(value["composer"]["visible"], false);
+        let (left, top, right, bottom) = rect(&value["composer"]["input"]["bounds"]);
+        assert!(right > left && bottom > top);
+        assert!(top >= i64::from(layout.composer.top));
+        assert!(bottom <= i64::from(layout.composer.bottom));
+
+        let (track_left, _, track_right, _) = rect(&value["terminal"]["scrollbar"]["track"]);
+        assert!(track_right - track_left == i64::from(TERMINAL_SCROLLBAR_WIDTH));
+        assert_eq!(value["terminal"]["rows"], 30);
+    }
+
+    /// Two tab rows must occupy disjoint rectangles, otherwise a pointer aimed
+    /// at the centre of one would route to the other and the whole exercise is
+    /// worthless.
+    #[test]
+    fn synthetic_tab_rows_are_disjoint_and_expose_close_only_on_the_active_row() {
+        let viewport = HeadlessViewport::resolve();
+        let layout = viewport.layout(true, 250);
+        let first = synthetic_tab_row_json(&layout, 0, 0, true);
+        let second = synthetic_tab_row_json(&layout, 1, 1, false);
+
+        let (_, first_top, _, first_bottom) = rect(&first["bounds"]);
+        let (_, second_top, _, second_bottom) = rect(&second["bounds"]);
+        assert!(first_bottom <= second_top, "rows overlap");
+        assert!(first_bottom > first_top && second_bottom > second_top);
+        assert!(second_bottom <= i64::from(layout.sidebar_tree.bottom));
+
+        // Only the active row draws Add/Close, exactly as the GUI hosts do.
+        let close = &first["actions"]["close"];
+        assert_eq!(close["id"], "close-tab");
+        let (close_left, close_top, close_right, close_bottom) = rect(&close["bounds"]);
+        assert!(close_right > close_left && close_bottom > close_top);
+        assert!(close_top >= first_top && close_bottom <= first_bottom);
+        assert!(second["actions"].is_null());
+    }
 
     #[test]
     fn locale_and_settings_blocks_match_win_shape() {

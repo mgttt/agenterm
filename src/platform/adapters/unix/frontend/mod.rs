@@ -2877,6 +2877,9 @@ impl UnixApp {
             "schema_version": schema_version_json(),
             "protocol_version": 1,
             "projection": PROJECTION_EMBEDDED_GUI,
+            // Bounds below come from a real laid-out window, unlike the
+            // headless projection's synthetic geometry.
+            "geometry_source": crate::ui_snapshot::GEOMETRY_SOURCE_RENDERED,
             "client_pid": std::process::id(),
             "server_pid": std::process::id(),
             "event_position": event_position_json(&journal_position.epoch, journal_position.sequence),
@@ -6718,17 +6721,10 @@ fn terminal_paste_target_is_current(
         && !modal_surface_active
 }
 
+/// Delegates to the shared shape so the embedded GUI and the headless
+/// projection can never publish different toolbar keys for the same layout.
 fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_json::Value {
-    serde_json::json!({
-        "bounds": pixel_rect_json(toolbar.bounds),
-        "new": pixel_rect_json(toolbar.new_tab),
-        "tabs": pixel_rect_json(toolbar.tabs),
-        "control_center": pixel_rect_json(toolbar.control_center),
-        "settings": pixel_rect_json(toolbar.settings),
-        "locale": pixel_rect_json(toolbar.locale),
-        "font_decrease": pixel_rect_json(toolbar.font_decrease),
-        "font_increase": pixel_rect_json(toolbar.font_increase),
-    })
+    crate::ui_snapshot::workspace_toolbar_snapshot_json(toolbar)
 }
 
 #[cfg(test)]

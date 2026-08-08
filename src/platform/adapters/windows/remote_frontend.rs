@@ -2344,6 +2344,9 @@ impl RemoteWindowState {
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
             "projection": PROJECTION_REPLACEABLE_UI_CLIENT,
+            // Bounds below come from a real laid-out window, unlike the
+            // headless projection's synthetic geometry.
+            "geometry_source": crate::ui_snapshot::GEOMETRY_SOURCE_RENDERED,
             "client_pid": std::process::id(),
             "server_pid": source.server_pid,
             "event_position": {
