@@ -200,21 +200,77 @@ fn cmd_run(args: &[String]) -> Result<u8, String> {
     Ok(0)
 }
 
-/// `task <subcommand>` — delegate to agenterm main binary.
+/// `task <subcommand>` — task manifest operations.
 fn cmd_task(args: &[String]) -> Result<u8, String> {
     if args.is_empty() {
-        eprintln!("task: expected subcommand: list, show, check, run");
+        eprintln!("task: expected subcommand: list, run, show");
         return Ok(1);
     }
-    // Task execution is handled by the main agenterm binary (agenterm-rhai/agenterm-rh).
-    // agenterm-lua supports individual task entries through the
-    // AGENTERM_SCRIPT_BACKEND=lua worker path (--framed-worker).
-    eprintln!(
-        "task: use `agenterm-rhai task {}` or `AGENTERM_SCRIPT_BACKEND=lua agenterm-rhai task {}`",
-        args.join(" "),
-        args.join(" ")
-    );
-    Ok(0)
+    let manifest_path = require_flag_value(args, "--manifest", "task requires --manifest <file>")?;
+    let manifest = read_file(&manifest_path)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&manifest).map_err(|e| format!("manifest_json: {e}"))?;
+    let tasks = parsed["tasks"]
+        .as_array()
+        .ok_or("task_manifest_tasks: expected array")?;
+
+    match args[0].as_str() {
+        "list" => {
+            for task in tasks {
+                let id = task["id"].as_str().unwrap_or("?");
+                let entry = task["entry"].as_str().unwrap_or("?");
+                println!("{id}  {entry}");
+            }
+            Ok(0)
+        }
+        "show" => {
+            let id = args.get(1).ok_or("task show <id>")?;
+            for task in tasks {
+                if task["id"].as_str() == Some(id) {
+                    println!("{}", serde_json::to_string_pretty(task).map_err(|e| e.to_string())?);
+                    return Ok(0);
+                }
+            }
+            Err(format!("task_not_found: {id}"))
+        }
+        "run" => {
+            let id = args.get(1).ok_or("task run <id>")?;
+            for task in tasks {
+                if task["id"].as_str() == Some(id) {
+                    let entry = task["entry"]
+                        .as_str()
+                        .ok_or("task_entry_missing")?;
+                    let _cwd = task["cwd"].as_str().unwrap_or(".");
+                    let task_args: Vec<String> = task["args"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .map(|v| v.as_str().unwrap_or("").to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let source = std::fs::read_to_string(entry)
+                        .map_err(|e| format!("read_entry {entry}: {e}"))?;
+                    let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
+                    let base_host = agenterm_lua::LuaHostFunctions::default();
+                    let result = engine
+                        .eval_with_args(&source, &base_host, &task_args)
+                        .map_err(|e| e.to_string())?;
+                    if !result.stdout.is_empty() {
+                        print!("{}", result.stdout);
+                    }
+                    println!("task run ok: {id} -> {}", result.value);
+                    return Ok(result.value as u8);
+                }
+            }
+            Err(format!("task_not_found: {id}"))
+        }
+        _ => {
+            eprintln!("task: unknown subcommand: {}", args[0]);
+            Ok(1)
+        }
+    }
 }
 
 /// `run-smoke <pack.luac>` — bytecode smoke test (delegates to pack load).

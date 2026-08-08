@@ -2702,6 +2702,17 @@
       ]
     },
     {
+      "id": "lua-build-identity",
+      "description": "Lua production task: freeze build identity into batch env file",
+      "entry": "scripts/lua/build_identity.lua",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dev", "build-identity.bat"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
       "id": "lua-check",
       "description": "Lua production task example: lint scripts/lua/ directory for syntax errors",
       "entry": "scripts/lua/check.lua",
