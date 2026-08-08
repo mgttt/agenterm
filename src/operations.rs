@@ -23,6 +23,8 @@ pub const UI_TREE_TOGGLE: &str = "ui.tree.toggle";
 pub const UI_COMPOSER_SEND: &str = "ui.composer.send";
 pub const UI_INPUT_POINTER: &str = "ui.input.pointer";
 pub const UI_INPUT_WHEEL: &str = "ui.input.wheel";
+pub const UI_INPUT_KEY: &str = "ui.input.key";
+pub const TERMINAL_MOUSE: &str = "terminal.mouse";
 pub const TABS_SET_NOTE: &str = "tabs.set-note";
 pub const TAB_NOTE_MAX_BYTES: usize = 4096;
 
@@ -178,6 +180,8 @@ const CAPTURE_PARAMETERS: &[OperationParameterSpec] = &[
         maximum: Some(1024 * 1024),
     },
 ];
+/// `ui-input pointer` — window-chrome mouse in **pixel** coordinates, in the
+/// same space `ui-snapshot` reports bounds in.
 const POINTER_PARAMETERS: &[OperationParameterSpec] = &[
     OperationParameterSpec {
         name: "x",
@@ -190,6 +194,131 @@ const POINTER_PARAMETERS: &[OperationParameterSpec] = &[
         name: "y",
         value_type: "number",
         required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "button",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "action",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "count",
+        value_type: "integer",
+        required: false,
+        minimum: Some(1),
+        maximum: Some(3),
+    },
+    OperationParameterSpec {
+        name: "mods",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+];
+/// `ui-input wheel` — `delta_y` is required, which is why wheel cannot share
+/// the pointer parameter set.
+const WHEEL_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "x",
+        value_type: "number",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "y",
+        value_type: "number",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "delta_y",
+        value_type: "number",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "units",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "mods",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+];
+/// `ui-input key` — no coordinates; the key goes to whatever surface holds
+/// focus, exactly as a human keystroke would.
+const UI_KEY_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "key",
+        value_type: "string",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "mods",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+];
+/// `send-mouse` — the PTY-level mouse, reported to the application inside the
+/// pane. Coordinates are **terminal cells**, a different space from
+/// `ui-input pointer`'s pixels; the two are layers, not alternatives.
+const TERMINAL_MOUSE_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "x",
+        value_type: "integer",
+        required: true,
+        minimum: Some(0),
+        maximum: Some(u16::MAX as i64),
+    },
+    OperationParameterSpec {
+        name: "y",
+        value_type: "integer",
+        required: true,
+        minimum: Some(0),
+        maximum: Some(u16::MAX as i64),
+    },
+    OperationParameterSpec {
+        name: "button",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "action",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "protocol",
+        value_type: "string",
+        required: false,
         minimum: None,
         maximum: None,
     },
@@ -620,13 +749,48 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         command: "ui-input",
         action: Some("wheel"),
         aliases: &[],
-        parameters: POINTER_PARAMETERS,
+        parameters: WHEEL_PARAMETERS,
         result_type: "ui_snapshot",
         errors: &["operation_invalid_arguments"],
         events: &[],
         destructive: false,
         available: true,
         since: "0.1.15",
+    },
+    OperationSpec {
+        id: UI_INPUT_KEY,
+        script_surface: "fleet.ui.input.key",
+        class: OperationClass::Control,
+        command: "ui-input",
+        action: Some("key"),
+        aliases: &[],
+        parameters: UI_KEY_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: TERMINAL_MOUSE,
+        script_surface: "fleet.terminal.mouse",
+        class: OperationClass::Control,
+        command: "send-mouse",
+        action: None,
+        aliases: &[],
+        parameters: TERMINAL_MOUSE_PARAMETERS,
+        result_type: "text",
+        errors: &[
+            "operation_invalid_arguments",
+            "terminal_mouse_reporting_inactive",
+            "terminal_mouse_encoding_range",
+            "terminal_not_writable",
+        ],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
     },
     OperationSpec {
         id: UI_WINDOW_ACTIVATE,
@@ -746,10 +910,12 @@ pub(crate) fn operation_for_args(
         }
         "kill-server" | "server-kill" => operation_by_id("server.kill"),
         "shutdown" => operation_by_id("workspace.shutdown"),
+        "send-mouse" => operation_by_id(TERMINAL_MOUSE),
         "ui-input" => {
             let id = match args.get(1).map(String::as_str) {
                 Some("pointer") => UI_INPUT_POINTER,
                 Some("wheel") => UI_INPUT_WHEEL,
+                Some("key") => UI_INPUT_KEY,
                 _ => return Ok(None),
             };
             operation_by_id(id)
