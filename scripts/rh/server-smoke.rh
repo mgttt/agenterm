@@ -11,7 +11,31 @@ fn catch_text(error) {
     "" + error
 }
 
-fn command(context, cli, arguments, expected_failure) {
+fn configured_server_command(
+    server_exe,
+    address,
+    workspace_path,
+    settings_path,
+    instance_directory
+) {
+    let address_text = "" + address;
+    let workspace_text = "" + workspace_path;
+    let settings_text = "" + settings_path;
+    let instance_text = "" + instance_directory;
+    let command = std::process::command("" + server_exe);
+    let command_arguments = ["server", "--address", address_text];
+    command.args(command_arguments);
+    command.env("AGENTERM_IPC_ADDRESS", address_text);
+    command.env("AGENTERM_WORKSPACE_PATH", workspace_text);
+    command.env("AGENTERM_SETTINGS_PATH", settings_text);
+    command.env("AGENTERM_INSTANCE_DIR", instance_text);
+    command.env("AGENTERM_NO_ACTIVATE", "1");
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    command
+}
+
+fn invoke(context, cli, arguments, expected_failure) {
     test_harness::invoke_cli(
         context,
         cli,
@@ -22,43 +46,32 @@ fn command(context, cli, arguments, expected_failure) {
 }
 
 fn command_text(context, cli, arguments) {
-    let output = command(context, cli, arguments, 0);
-    output.stdout + output.stderr
+    let output = invoke(context, cli, arguments, 0);
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    result
 }
 
 fn command_text_expect(context, cli, arguments, expected_failure) {
-    let output = command(
-        context,
-        cli,
-        arguments,
-        expected_failure
-    );
-    output.stdout + output.stderr
+    let output = invoke(context, cli, arguments, expected_failure);
+    let result = "" + output.stdout + output.stderr;
+    result.trim();
+    result
 }
 
 fn command_json(context, cli, arguments, expected_failure) {
-    let output = command(
-        context,
-        cli,
-        arguments,
-        expected_failure
-    );
-    rhai::json::parse(output.stdout + output.stderr)
-}
-
-fn find_by_id(values, id, code) {
-    for value in values {
-        if value.id == id {
-            return value;
-        }
-    }
-    throw code;
+    let output = invoke(context, cli, arguments, expected_failure);
+    let text = "" + output.stdout + output.stderr;
+    text.trim();
+    rhai::json::parse(text)
 }
 
 fn count_tab_events(events, tab_id, kind) {
+    let tab_id_text = "" + tab_id;
+    let kind_text = "" + kind;
     let count = 0;
     for event in events {
-        if event.tab_id == tab_id && event.kind == kind {
+        if ("" + event.tab_id) == tab_id_text && ("" + event.kind) == kind_text {
             count += 1;
         }
     }
@@ -66,6 +79,8 @@ fn count_tab_events(events, tab_id, kind) {
 }
 
 fn wait_for_server(context, cli, server) {
+    // Return INT readiness only; protocol JSON is read in entry() so nested
+    // ui_bridge fields stay native-typed.
     for attempt in 0..400 {
         let probe = test_harness::run_cli(
             context,
@@ -75,9 +90,9 @@ fn wait_for_server(context, cli, server) {
             []
         );
         if probe.success != 0 {
-            return rhai::json::parse(probe.stdout);
+            return 0;
         }
-        if server.state == "exited" {
+        if ("" + server.state) == "exited" {
             let output = server.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
@@ -86,11 +101,12 @@ fn wait_for_server(context, cli, server) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "server_smoke_ready_timeout";
+    0
 }
 
 fn wait_for_exit(child, code) {
     for attempt in 0..200 {
-        if child.state == "exited" {
+        if ("" + child.state) == "exited" {
             return child.wait_with_output(
                 std::time::Duration::from_secs(2)
             );
@@ -98,6 +114,8 @@ fn wait_for_exit(child, code) {
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     throw code;
+    // Unreachable: keep return kind Output (bare throw infers String).
+    child.wait_with_output(std::time::Duration::from_secs(0))
 }
 
 fn entry() {
@@ -114,6 +132,13 @@ fn entry() {
     test_harness::require(std::fs::exists(cli) != 0, "server_smoke_cli_missing");
 
     let context = test_harness::new_context(repo, "server");
+    let run_id = context.run_id;
+    // Force path/address locals to String so std::fs::exists and Command.env
+    // stay native (JSON child fields otherwise fall back to host-eval).
+    let server_address = "" + context.address;
+    let server_workspace = "" + context.workspace_path;
+    let server_settings = "" + context.settings_path;
+    let server_instance = "" + context.instance_directory;
     let worker_pid = std::process::id();
     let owned_children = [];
     let succeeded = 0;
@@ -121,22 +146,34 @@ fn entry() {
 
     try {
         print("STEP start internal headless server");
-        let server_command = test_harness::configured_command(
-            context,
+        let server_command = configured_server_command(
             server_exe,
-            ["server", "--address", context.address]
+            server_address,
+            server_workspace,
+            server_settings,
+            server_instance
         );
         let server = server_command.start();
         owned_children.push(server);
-        let protocol = wait_for_server(context, cli, server);
+        wait_for_server(
+            context,
+            cli,
+            server
+        );
+        let protocol = command_json(
+            context,
+            cli,
+            ["protocol-info", "--running"],
+            0
+        );
         let server_facts = server.platform_facts;
-        // Coerce nested JSON string fields before compare (native string emit).
-        let ownership_mode = "" + protocol.ui_bridge.ownership_mode;
-        let server_executable = "" + protocol.ui_bridge.server_executable;
-        let replaceable_ui = protocol.ui_bridge.replaceable_ui;
-        let interactive_lease = protocol.ui_bridge.interactive_lease;
-        let reconnect = protocol.ui_bridge.reconnect;
-        let rollback_proven = protocol.ui_bridge.rollback_proven;
+        let ui_bridge = protocol.ui_bridge;
+        let ownership_mode = "" + ui_bridge.ownership_mode;
+        let server_executable = "" + ui_bridge.server_executable;
+        let replaceable_ui = ui_bridge.replaceable_ui;
+        let interactive_lease = ui_bridge.interactive_lease;
+        let reconnect = ui_bridge.reconnect;
+        let rollback_proven = ui_bridge.rollback_proven;
         test_harness::require(
             server_facts.top_level_window_supported != 0
                 && server_facts.top_level_window_present == 0
@@ -151,7 +188,7 @@ fn entry() {
         );
 
         print("STEP acquire, renew, conflict, heartbeat, and detach the UI lease");
-        let lease_client_id = "server-smoke-ui-" + context.run_id;
+        let lease_client_id = "server-smoke-ui-" + run_id;
         let attach_args = [
             "ui-lease", "attach",
             "--client-id", lease_client_id,
@@ -159,12 +196,12 @@ fn entry() {
         ];
         let lease = command_json(context, cli, attach_args, 0);
         let same_lease = command_json(context, cli, attach_args, 0);
-        let conflict = command_text(
+        let conflict = command_text_expect(
             context,
             cli,
             [
                 "ui-lease", "attach",
-                "--client-id", "conflict-" + context.run_id,
+                "--client-id", "conflict-" + run_id,
                 "--client-pid", "" + server.id
             ],
             1
@@ -198,12 +235,11 @@ fn entry() {
             cli,
             [
                 "new-window", "-d", "-P", "-F", "#{window_id}",
-                "-n", "interaction-" + context.run_id,
+                "-n", "interaction-" + run_id,
                 "--", "cmd.exe", "/d", "/q"
             ]
         );
-        interaction_tab.trim();
-        let unauthorized = command_text(
+        let unauthorized = command_text_expect(
             context,
             cli,
             [
@@ -266,11 +302,14 @@ fn entry() {
             ["ui-bootstrap"],
             0
         );
-        let interaction_state = find_by_id(
-            interaction_bootstrap.tabs,
-            interaction_tab,
-            "server_smoke_interaction_tab_missing"
-        );
+        let interaction_rows = 0;
+        let interaction_columns = 0;
+        for tab in interaction_bootstrap.tabs {
+            if ("" + tab.id) == interaction_tab {
+                interaction_rows = 0 + tab.screen.rows;
+                interaction_columns = 0 + tab.screen.columns;
+            }
+        }
         test_harness::require(
             unauthorized.contains("does not match the current owner")
                 && selected.action == "select"
@@ -279,8 +318,8 @@ fn entry() {
                 && resized.columns == 90
                 && input.input_bytes == input_text.len
                 && interaction_bootstrap.active_tab_id == interaction_tab
-                && interaction_state.screen.rows == 24
-                && interaction_state.screen.columns == 90,
+                && interaction_rows == 24
+                && interaction_columns == 90,
             "server_smoke_lease_gated_interaction"
         );
         let acknowledged = command_json(
@@ -294,7 +333,7 @@ fn entry() {
             ],
             0
         );
-        let regression = command_text(
+        let regression = command_text_expect(
             context,
             cli,
             [
@@ -338,33 +377,43 @@ fn entry() {
             cli,
             [
                 "ui-hello", "--minimum", "1", "--maximum", "1",
-                "--client-id", "server-smoke-" + context.run_id
+                "--client-id", "server-smoke-" + run_id
             ],
             0
         );
-        for capability in [
-            "interactive_lease",
-            "lease_gated_interaction",
-            "replaceable_ui_client",
-            "lease_owned_client_state",
-            "lease_owned_client_commands",
-            "in_place_reconnect"
-        ] {
-            test_harness::require(
-                hello.capabilities.contains(capability) != 0,
-                "server_smoke_capability_missing:" + capability
-            );
-        }
+        test_harness::require(
+            hello.capabilities.contains("interactive_lease") != 0,
+            "server_smoke_capability_missing:interactive_lease"
+        );
+        test_harness::require(
+            hello.capabilities.contains("lease_gated_interaction") != 0,
+            "server_smoke_capability_missing:lease_gated_interaction"
+        );
+        test_harness::require(
+            hello.capabilities.contains("replaceable_ui_client") != 0,
+            "server_smoke_capability_missing:replaceable_ui_client"
+        );
+        test_harness::require(
+            hello.capabilities.contains("lease_owned_client_state") != 0,
+            "server_smoke_capability_missing:lease_owned_client_state"
+        );
+        test_harness::require(
+            hello.capabilities.contains("lease_owned_client_commands") != 0,
+            "server_smoke_capability_missing:lease_owned_client_commands"
+        );
+        test_harness::require(
+            hello.capabilities.contains("in_place_reconnect") != 0,
+            "server_smoke_capability_missing:in_place_reconnect"
+        );
         let tab_id = command_text(
             context,
             cli,
             [
                 "new-window", "-d", "-P", "-F", "#{window_id}",
-                "-n", "headless-" + context.run_id,
+                "-n", "headless-" + run_id,
                 "--", "cmd.exe", "/d", "/c", "echo AGENTERM_HEADLESS_OK"
             ]
         );
-        tab_id.trim();
         test_harness::require(tab_id.starts_with("@"), "server_smoke_stable_tab_id");
         command_text(
             context,
@@ -386,10 +435,10 @@ fn entry() {
         );
 
         print("STEP prove server-owned receipt replay and asynchronous completion");
-        let receipt_request_id = "server-receipt-" + context.run_id;
+        let receipt_request_id = "server-receipt-" + run_id;
         let receipt_args = [
             "--request-id", receipt_request_id, "--receipt-json",
-            "set-tab-note", "-t", tab_id, "receipt-note-" + context.run_id
+            "set-tab-note", "-t", tab_id, "receipt-note-" + run_id
         ];
         let first_receipt = command_json(context, cli, receipt_args, 0);
         let replayed_receipt = command_json(context, cli, receipt_args, 0);
@@ -413,7 +462,7 @@ fn entry() {
         );
         let bootstrap = command_json(context, cli, ["ui-bootstrap"], 0);
         let interactive_tab = bootstrap.active_tab_id;
-        let submission_marker = "AGENTERM_SERVER_RECEIPT_" + context.run_id;
+        let submission_marker = "AGENTERM_SERVER_RECEIPT_" + run_id;
         command_text(
             context,
             cli,
@@ -422,7 +471,7 @@ fn entry() {
                 "echo " + submission_marker
             ]
         );
-        let submission_request_id = "server-submit-" + context.run_id;
+        let submission_request_id = "server-submit-" + run_id;
         let submission_args = [
             "--request-id", submission_request_id, "--receipt-json",
             "send-composer", "-t", interactive_tab
@@ -462,7 +511,7 @@ fn entry() {
         );
 
         print("STEP follow server-owned events into terminal post-state");
-        let note = "server-note-" + context.run_id;
+        let note = "server-note-" + run_id;
         command_text(
             context,
             cli,
@@ -480,21 +529,23 @@ fn entry() {
             ],
             0
         );
-        let tab = find_by_id(
-            bootstrap.tabs,
-            tab_id,
-            "server_smoke_bootstrap_tab_missing"
-        );
-        let post_state = find_by_id(
-            deltas.tab_updates,
-            tab_id,
-            "server_smoke_delta_tab_missing"
-        );
+        let tab_note = "";
+        for tab in bootstrap.tabs {
+            if ("" + tab.id) == tab_id {
+                tab_note = "" + tab.note;
+            }
+        }
+        let post_note = "";
+        for tab in deltas.tab_updates {
+            if ("" + tab.id) == tab_id {
+                post_note = "" + tab.note;
+            }
+        }
         test_harness::require(
             hello.server_pid == server.id
                 && bootstrap.server_pid == server.id
-                && tab.note == note
-                && post_state.note == note
+                && tab_note == note
+                && post_note == note
                 && count_tab_events(
                     deltas.events,
                     tab_id,
@@ -508,7 +559,7 @@ fn entry() {
         print("STEP persist and stop server without a GUI process");
         command_text(context, cli, ["save-workspace"]);
         test_harness::require(
-            std::fs::exists(context.workspace_path) != 0,
+            std::fs::exists(server_workspace) != 0,
             "server_smoke_workspace_missing"
         );
         test_harness::emit_evidence(
@@ -521,8 +572,9 @@ fn entry() {
             server,
             "server_smoke_shutdown_timeout"
         );
+        let server_exit_ok = 0 + server_output.success;
         test_harness::require(
-            server_output.success != 0,
+            server_exit_ok != 0,
             "server_smoke_server_exit_failure"
         );
         print(
@@ -535,7 +587,7 @@ fn entry() {
 
     let completion_failure = "";
     try {
-        test_harness::complete(
+        let _completed = test_harness::complete(
             context,
             owned_children,
             succeeded,

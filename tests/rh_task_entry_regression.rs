@@ -568,7 +568,7 @@ fn cli_smoke_uses_native_bundled_pack() {
         "scripts/rh/cli-smoke.rh",
         &[
             "rh_process_stdout_file(",
-            "rh_host_json_call(\"process.list\"",
+            "rh_host_json_call(\"process.platform_facts\"",
             "cli_smoke_gui_missing",
         ],
     );
@@ -619,7 +619,7 @@ fn theme_smoke_uses_native_bundled_pack() {
         &[
             "rh_process_stdout_file(",
             "theme_server_timeout",
-            "rh_host_json_call(\"process.list\"",
+            "rh_host_json_call(\"image.inspect_png\"",
         ],
     );
 }
@@ -631,7 +631,7 @@ fn native_ipc_compat_smoke_uses_native_bundled_pack() {
         &[
             "rh_process_status(",
             "native_ipc_compat_command_failed",
-            "rh_host_json_call(\"process.list\"",
+            "rh_host_json_call(\"process.platform_facts\"",
         ],
     );
 }

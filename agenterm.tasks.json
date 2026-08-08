@@ -1953,7 +1953,7 @@
     {
       "id": "server-smoke",
       "description": "Prove split headless server ownership, leases, PTY state, receipts, events, persistence, and native window absence",
-      "entry": "scripts/rhai/server-smoke.rhai",
+      "entry": "scripts/rh/server-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
