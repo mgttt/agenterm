@@ -12,7 +12,7 @@ fn assert_ok(condition, message) {
 }
 
 fn promotion_lowercase_hex(value, length) {
-    if type_of(value) != "string" || value.len != length {
+    if value.len != length {
         return 0;
     }
     for character in value {
@@ -24,7 +24,7 @@ fn promotion_lowercase_hex(value, length) {
 }
 
 fn promotion_decimal(value) {
-    if type_of(value) != "string" || value == "" {
+    if value == "" {
         return 0;
     }
     for character in value {
@@ -33,6 +33,16 @@ fn promotion_decimal(value) {
         }
     }
     1
+}
+
+fn promotion_allowed_mac_channel(channel) {
+    if channel == "release" {
+        return 1;
+    }
+    if channel == "macos-unsigned-preview" {
+        return 1;
+    }
+    0
 }
 
 fn entry() {
@@ -80,7 +90,7 @@ fn entry() {
     assert_ok(channels.len == 1, "promotion_identity_macos_channels");
     let mac_channel = channels[0];
     assert_ok(
-        ["release", "macos-unsigned-preview"].contains(mac_channel),
+        promotion_allowed_mac_channel(mac_channel),
         "promotion_identity_macos_channel"
     );
 
@@ -107,13 +117,16 @@ fn entry() {
             "Do not disable Gatekeeper globally or recursively remove quarantine.";
     }
 
+    let body_digest_path = output + ".body.tmp";
+    rhai::runtime::atomic_write(body_digest_path, body);
+    let body_sha256 = rhai::crypto::sha256_file(body_digest_path);
+    std::fs::try_remove_file(body_digest_path);
     let identity = #{
         schema_version: 1,
         kind: "agenterm-promotion-identity",
         marker: marker,
         body: body,
-        body_sha256:
-            rhai::crypto::sha256(rhai::bytes::from_text(body)),
+        body_sha256: body_sha256,
         candidate_run_id: candidate_run_id,
         source_sha: source_sha,
         version: manifest.version,
@@ -125,5 +138,5 @@ fn entry() {
         output,
         rhai::json::stringify_pretty(identity) + "\n"
     );
-    identity
+    0
 }

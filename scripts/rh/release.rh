@@ -4,7 +4,7 @@
 
 import "scripts/rh/lib/package_qualified" as package_qualified;
 
-fn assert_ok(condition, message) {
+fn require_ok(condition, message) {
     if condition == 0 {
         throw message;
     } else {
@@ -12,166 +12,68 @@ fn assert_ok(condition, message) {
     }
 }
 
-fn normalized(value) {
-    let text = value.to_string();
-    text.replace("\r\n", "\n");
-    text.replace("\r", "\n");
-    text
-}
-
-fn trimmed(value) {
-    let text = normalized(value);
-    text.trim();
-    text
-}
-
-fn tail(value, maximum) {
-    let text = normalized(value);
-    if text.len <= maximum {
-        return text;
-    }
-    text.sub_string(text.len - maximum, maximum)
-}
-
-fn git_output(repo, arguments, code) {
-    let stdout_path =
-        std::path::join(repo, ".release-git.stdout.tmp").display;
-    let argv = ["-C", repo];
-    argv.append(arguments);
-    let exit_code = std::process::command_stdout_file(
-        "git",
-        argv,
-        30000,
-        stdout_path,
-        #{ current_dir: repo }
-    );
-    assert_ok(exit_code == 0, code);
-    trimmed(std::fs::read_to_string(stdout_path));
-}
-
-fn release_valid_identifier(value) {
+fn valid_identifier(value) {
     if value == "" {
-        return 0;
+        return false;
     }
     for character in value {
-        let text = character.to_string();
         if !"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-"
-                .contains(text) {
-            return 0;
+                .contains(character.to_string()) {
+            return false;
         }
     }
-    1
+    true
 }
 
-fn release_valid_numeric(value) {
+fn valid_numeric(value) {
     if value == "" || (value.len > 1 && value.starts_with("0")) {
-        return 0;
+        return false;
     }
     for character in value {
         if !"0123456789".contains(character.to_string()) {
-            return 0;
+            return false;
         }
     }
-    1
+    true
 }
 
-fn release_valid_version(value) {
+fn valid_version(value) {
+    if value == "" || value.contains("/") || value.contains("\\") {
+        return false;
+    }
     let build_parts = value.split("+");
-    if build_parts.len > 2
-            || (build_parts.len == 2
-                && release_valid_identifier(build_parts[1]) == 0) {
-        return 0;
+    if build_parts.len > 2 {
+        return false;
+    }
+    if build_parts.len == 2 {
+        let build_suffix = build_parts[1];
+        if !valid_identifier(build_suffix) {
+            return false;
+        }
     }
     let public_version = build_parts[0];
     let prerelease_parts = public_version.split("-");
-    if prerelease_parts.len > 2
-            || (prerelease_parts.len == 2
-                && release_valid_identifier(prerelease_parts[1]) == 0) {
-        return 0;
+    if prerelease_parts.len > 2 {
+        return false;
     }
-    let core = prerelease_parts[0].split(".");
-    if core.len == 3
-            && release_valid_numeric(core[0])
-            && release_valid_numeric(core[1])
-            && release_valid_numeric(core[2]) {
-        return 1;
-    }
-    0
-}
-
-fn package_version(repo) {
-    let cargo =
-        std::fs::read_to_string(std::path::join(repo, "Cargo.toml").display);
-    let in_package = 0;
-    let version = "";
-    for source_line in cargo.split("\n") {
-        let line = source_line;
-        line.trim();
-        if line.starts_with("[") {
-            in_package = line == "[package]";
-            continue;
-        }
-        if in_package && line.starts_with("version") {
-            let parts = line.split("\"");
-            if parts.len >= 2 {
-                version = parts[1];
-                break;
-            }
+    if prerelease_parts.len == 2 {
+        let prerelease_suffix = prerelease_parts[1];
+        if !valid_identifier(prerelease_suffix) {
+            return false;
         }
     }
-    assert_ok(
-        release_valid_version(version),
-        "release_version_invalid:" + version
-    );
-    version
-}
-
-fn assert_clean_main(repo) {
-    assert_ok(
-        git_output(repo, ["branch", "--show-current"], "release_git_branch")
-            == "main",
-        "release_branch_not_main"
-    );
-    assert_ok(
-        git_output(
-            repo,
-            ["status", "--porcelain", "--untracked-files=normal"],
-            "release_git_status"
-        ) == "",
-        "release_worktree_not_clean"
-    );
-}
-
-fn assert_workflow(repo) {
-    let promotion_path =
-        std::path::join(repo, ".github/workflows/release.yml").display;
-    let candidate_path =
-        std::path::join(repo, ".github/workflows/candidate.yml").display;
-    let promotion = std::fs::read_to_string(promotion_path);
-    let candidate = std::fs::read_to_string(candidate_path);
-    assert_ok(
-        candidate.contains("workflow_dispatch:")
-            && candidate.contains("source_sha:")
-            && candidate.contains("check.cmd --release --include-stress")
-            && candidate.contains("expected == \"v0.1.7\"")
-            && candidate.contains("release-candidate-${{ github.run_id }}"),
-        "release_candidate_workflow_contract"
-    );
-    assert_ok(
-        promotion.contains("workflow_dispatch:")
-            && promotion.contains("candidate_run_id:")
-            && promotion.contains("confirmation:")
-            && promotion.contains("environment: release")
-            && promotion.contains("contents: write")
-            && promotion.contains("--clobber") == 0
-            && promotion.contains("cargo build") == 0
-            && promotion.contains("check.cmd --release") == 0,
-        "release_workflow_contract"
-    );
-    #{
-        candidate_path: candidate_path,
-        promotion_path: promotion_path
+    let core = prerelease_parts[0];
+    let parts = core.split(".");
+    if parts.len != 3 {
+        return false;
     }
+    let major = parts[0];
+    let minor = parts[1];
+    let patch = parts[2];
+    if !valid_numeric(major) || !valid_numeric(minor) || !valid_numeric(patch) {
+        return false;
+    }
+    true
 }
 
 fn run_quality(repo) {
@@ -182,16 +84,18 @@ fn run_quality(repo) {
         std::path::join(output_root, "release-check.stdout").display;
     let stderr_path =
         std::path::join(output_root, "release-check.stderr").display;
-    assert_ok(
+    require_ok(
         std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
         "release_bootstrap_worker_missing"
     );
     let worker =
         std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
+    let task_manifest =
+        std::path::join(repo, "agenterm.tasks.json").display;
     let command = std::process::command(worker);
     command.args([
         "task", "run", "check",
-        "--manifest", std::path::join(repo, "agenterm.tasks.json").display,
+        "--manifest", task_manifest,
         "--", "--release", "--include-stress"
     ]);
     command.current_dir(repo);
@@ -200,148 +104,287 @@ fn run_quality(repo) {
     command.stderr_file(stderr_path);
     let output = command.output();
     if output.success == 0 {
-        let diagnostic =
-            if std::fs::exists(stderr_path) {
-                std::fs::read_to_string(stderr_path)
-            } else {
-                ""
-            } +
-            if std::fs::exists(stdout_path) {
-                std::fs::read_to_string(stdout_path)
-            } else {
-                ""
-            };
-        throw "release_quality_gate:" + tail(diagnostic, 16384);
+        let diagnostic = "";
+        if std::fs::exists(stderr_path) {
+            diagnostic = std::fs::read_to_string(stderr_path);
+        }
+        if std::fs::exists(stdout_path) {
+            diagnostic = diagnostic + std::fs::read_to_string(stdout_path);
+        }
+        diagnostic.replace("\r\n", "\n");
+        diagnostic.replace("\r", "\n");
+        if diagnostic.len > 16384 {
+            diagnostic = diagnostic.sub_string(
+                diagnostic.len - 16384,
+                16384
+            );
+        }
+        throw "release_quality_gate:" + diagnostic;
     }
     if std::fs::exists(stdout_path) {
-        print(tail(std::fs::read_to_string(stdout_path), 4096));
+        let success_tail = std::fs::read_to_string(stdout_path);
+        success_tail.replace("\r\n", "\n");
+        success_tail.replace("\r", "\n");
+        if success_tail.len > 4096 {
+            success_tail = success_tail.sub_string(
+                success_tail.len - 4096,
+                4096
+            );
+        }
+        print(success_tail);
     }
+    0
 }
 
 fn entry() {
-assert_ok(args.len <= 2, "expected: [REPO] [--rehearse]");
-let repo = std::env::current_dir().display;
-let mode = "publish";
-if args.len == 1 {
-    if args[0] == "--rehearse" {
-        mode = "rehearse";
-    } else if args[0] == "validate"
-            || args[0] == "rehearse"
-            || args[0] == "publish" {
-        mode = args[0];
-    } else {
+    require_ok(args.len <= 2, "expected: [REPO] [--rehearse]");
+    let repo = std::env::current_dir().display;
+    let mode = "publish";
+    if args.len == 1 {
+        if args[0] == "--rehearse" {
+            mode = "rehearse";
+        } else if args[0] == "validate"
+                || args[0] == "rehearse"
+                || args[0] == "publish" {
+            mode = args[0];
+        } else {
+            repo = std::path::absolute(args[0]).display;
+        }
+    } else if args.len == 2 {
         repo = std::path::absolute(args[0]).display;
+        if args[1] == "--rehearse" {
+            mode = "rehearse";
+        } else {
+            mode = args[1];
+        }
     }
-} else if args.len == 2 {
-    repo = std::path::absolute(args[0]).display;
-    mode = args[1];
-    if mode == "--rehearse" {
-        mode = "rehearse";
+    let unix_bootstrap = false;
+    if std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+            && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix" {
+        unix_bootstrap = true;
     }
-}
-let unix_bootstrap =
-    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
-        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
-if unix_bootstrap && args.len == 0 {
-    mode = "validate";
-}
-assert_ok(
-    unix_bootstrap == 0 || mode == "validate",
-    "release_package_requires_windows"
-);
-assert_ok(
-    mode == "validate" || mode == "rehearse" || mode == "publish",
-    "release_mode:" + mode
-);
-
-assert_clean_main(repo);
-let version = package_version(repo);
-assert_ok(
-    version != "0.1.7",
-    "release_internal_version_0.1.7"
-);
-let tag = "v" + version;
-assert_ok(
-    git_output(repo, ["tag", "--list", tag], "release_git_tags") == "",
-    "release_tag_exists:" + tag
-);
-let workflows = assert_workflow(repo);
-let head = git_output(repo, ["rev-parse", "HEAD"], "release_git_head");
-if mode == "validate" {
-    print(
-        "VALID RELEASE PLAN " +
-            rhai::json::stringify(#{
-                version: version,
-                tag: tag,
-                source_commit: head,
-                candidate_workflow_sha256:
-                    rhai::crypto::sha256_file(workflows.candidate_path),
-                promotion_workflow_sha256:
-                    rhai::crypto::sha256_file(workflows.promotion_path),
-                mutation: 0
-            })
+    if unix_bootstrap && args.len == 0 {
+        mode = "validate";
+    }
+    require_ok(
+        !unix_bootstrap || mode == "validate",
+        "release_package_requires_windows"
     );
-    return 0;
-}
-if mode == "publish" {
-    throw "release_promotion_requires_github_workflow:" +
-        "run Release Candidate for " + head +
-        ", review it, then run Release with candidate_run_id and publish-" +
-        tag;
-}
-
-print("QUALIFY AgenTerm " + version + " from main@" + head);
-run_quality(repo);
-assert_clean_main(repo);
-assert_ok(
-    git_output(repo, ["rev-parse", "HEAD"], "release_git_head_after_check")
-        == head,
-    "release_head_changed_during_quality"
-);
-
-let receipt_path =
-    std::path::join(repo, "target/qualification/receipt.json").display;
-let package_root =
-    std::path::join(repo, "target/qualification/package-rehearsal").display;
-let package_directory =
-    package_qualified::build_release_package(
-        repo,
-        receipt_path,
-        package_root
+    require_ok(
+        mode == "validate" || mode == "rehearse" || mode == "publish",
+        "release_mode:" + mode
     );
-let package_manifest =
-    std::path::join(package_directory, "package-manifest.json").display;
-let package_result =
-    std::path::join(package_directory, "release-result.json").display;
-let result = rhai::json::parse_file(package_result);
-let report = #{
-    schema_version: 1,
-    mode: mode,
-    version: version,
-    tag: tag,
-    source_commit: head,
-    candidate_workflow_sha256:
-        rhai::crypto::sha256_file(workflows.candidate_path),
-    promotion_workflow_sha256:
-        rhai::crypto::sha256_file(workflows.promotion_path),
-    qualification_receipt: receipt_path,
-    qualification_receipt_sha256:
-        rhai::crypto::sha256_file(receipt_path),
-    package_directory: package_directory,
-    package_manifest_sha256:
-        rhai::crypto::sha256_file(package_manifest),
-    archive: result.archive,
-    archive_sha256: result.archive_sha256,
-    ready_to_publish: 1
-};
-let report_path =
-    std::path::join(repo, "target/qualification/release-rehearsal.json").display;
-rhai::runtime::atomic_write(
-    report_path,
-    rhai::json::stringify_pretty(report) + "\n"
-);
-print("RELEASE REHEARSAL " + report_path);
 
-print("PASS: local rehearsal completed; no tag, push, or Release occurred");
+    let stdout_path =
+        std::path::join(repo, ".release-git.stdout.tmp").display;
+    let branch_code = std::process::command_stdout_file(
+        "git",
+        ["branch", "--show-current"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(branch_code == 0, "release_git_branch");
+    let branch = std::fs::read_to_string(stdout_path);
+    branch.trim();
+    require_ok(branch == "main", "release_branch_not_main");
+    let status_code = std::process::command_stdout_file(
+        "git",
+        ["status", "--porcelain", "--untracked-files=normal"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(status_code == 0, "release_git_status");
+    let status = std::fs::read_to_string(stdout_path);
+    status.trim();
+    require_ok(status == "", "release_worktree_not_clean");
+
+    let cargo =
+        std::fs::read_to_string(std::path::join(repo, "Cargo.toml").display);
+    let in_package = false;
+    let version = "";
+    for source_line in cargo.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line.starts_with("[") {
+            if line == "[package]" {
+                in_package = true;
+            } else {
+                in_package = false;
+            }
+            continue;
+        }
+        if in_package && line.starts_with("version") {
+            let parts = line.split("\"");
+            if parts.len >= 2 {
+                version = parts[1];
+                break;
+            }
+        }
+    }
+    require_ok(
+        valid_version(version),
+        "release_version_invalid:" + version
+    );
+    require_ok(version != "0.1.7", "release_internal_version_0.1.7");
+    let tag = "v" + version;
+    let tag_code = std::process::command_stdout_file(
+        "git",
+        ["tag", "--list", tag],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(tag_code == 0, "release_git_tags");
+    let existing_tag = std::fs::read_to_string(stdout_path);
+    existing_tag.trim();
+    require_ok(existing_tag == "", "release_tag_exists:" + tag);
+
+    let promotion_path =
+        std::path::join(repo, ".github/workflows/release.yml").display;
+    let candidate_path =
+        std::path::join(repo, ".github/workflows/candidate.yml").display;
+    let promotion = std::fs::read_to_string(promotion_path);
+    let candidate = std::fs::read_to_string(candidate_path);
+    require_ok(
+        candidate.contains("workflow_dispatch:")
+            && candidate.contains("source_sha:")
+            && candidate.contains("check.cmd --release --include-stress")
+            && candidate.contains("expected == \"v0.1.7\"")
+            && candidate.contains("release-candidate-${{ github.run_id }}"),
+        "release_candidate_workflow_contract"
+    );
+    require_ok(
+        promotion.contains("workflow_dispatch:")
+            && promotion.contains("candidate_run_id:")
+            && promotion.contains("confirmation:")
+            && promotion.contains("environment: release")
+            && promotion.contains("contents: write")
+            && promotion.contains("--clobber") == 0
+            && promotion.contains("cargo build") == 0
+            && promotion.contains("check.cmd --release") == 0,
+        "release_workflow_contract"
+    );
+
+    let head_code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(head_code == 0, "release_git_head");
+    let head = std::fs::read_to_string(stdout_path);
+    head.trim();
+
+    if mode == "validate" {
+        print(
+            "VALID RELEASE PLAN " +
+                rhai::json::stringify(#{
+                    version: version,
+                    tag: tag,
+                    source_commit: head,
+                    candidate_workflow_sha256:
+                        rhai::crypto::sha256_file(candidate_path),
+                    promotion_workflow_sha256:
+                        rhai::crypto::sha256_file(promotion_path),
+                    mutation: false
+                })
+        );
+        return 0;
+    }
+    if mode == "publish" {
+        throw "release_promotion_requires_github_workflow:" +
+            "run Release Candidate for " + head +
+            ", review it, then run Release with candidate_run_id and publish-" +
+            tag;
+    }
+
+    print("QUALIFY AgenTerm " + version + " from main@" + head);
+    run_quality(repo);
+
+    let branch_after_code = std::process::command_stdout_file(
+        "git",
+        ["branch", "--show-current"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(branch_after_code == 0, "release_git_branch");
+    branch = std::fs::read_to_string(stdout_path);
+    branch.trim();
+    require_ok(branch == "main", "release_branch_not_main");
+    let status_after_code = std::process::command_stdout_file(
+        "git",
+        ["status", "--porcelain", "--untracked-files=normal"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(status_after_code == 0, "release_git_status");
+    status = std::fs::read_to_string(stdout_path);
+    status.trim();
+    require_ok(status == "", "release_worktree_not_clean");
+
+    let head_after_code = std::process::command_stdout_file(
+        "git",
+        ["rev-parse", "HEAD"],
+        30000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    require_ok(head_after_code == 0, "release_git_head_after_check");
+    let head_after = std::fs::read_to_string(stdout_path);
+    head_after.trim();
+    require_ok(head_after == head, "release_head_changed_during_quality");
+
+    let receipt_path =
+        std::path::join(repo, "target/qualification/receipt.json").display;
+    let package_root =
+        std::path::join(repo, "target/qualification/package-rehearsal").display;
+    let package_directory =
+        package_qualified::build_release_package(
+            repo,
+            receipt_path,
+            package_root
+        );
+    let package_manifest =
+        std::path::join(package_directory, "package-manifest.json").display;
+    let package_result =
+        std::path::join(package_directory, "release-result.json").display;
+    let result = rhai::json::parse_file(package_result);
+    let report = #{
+        schema_version: 1,
+        mode: mode,
+        version: version,
+        tag: tag,
+        source_commit: head,
+        candidate_workflow_sha256:
+            rhai::crypto::sha256_file(candidate_path),
+        promotion_workflow_sha256:
+            rhai::crypto::sha256_file(promotion_path),
+        qualification_receipt: receipt_path,
+        qualification_receipt_sha256:
+            rhai::crypto::sha256_file(receipt_path),
+        package_directory: package_directory,
+        package_manifest_sha256:
+            rhai::crypto::sha256_file(package_manifest),
+        archive: result.archive,
+        archive_sha256: result.archive_sha256,
+        ready_to_publish: true
+    };
+    let report_path =
+        std::path::join(
+            repo,
+            "target/qualification/release-rehearsal.json"
+        ).display;
+    rhai::runtime::atomic_write(
+        report_path,
+        rhai::json::stringify_pretty(report) + "\n"
+    );
+    print("RELEASE REHEARSAL " + report_path);
+
+    print("PASS: local rehearsal completed; no tag, push, or Release occurred");
     0;
 }

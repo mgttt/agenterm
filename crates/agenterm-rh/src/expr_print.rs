@@ -1,6 +1,6 @@
 //! Render Rhai AST fragments back to source for host-side evaluation.
 
-use rhai::{Expr, FnCallExpr, Stmt, Token};
+use rhai::{ASTFlags, Expr, FnCallExpr, Stmt, Token};
 
 use crate::RhError;
 
@@ -118,6 +118,21 @@ fn print_stmt(out: &mut String, stmt: &Stmt, trailing_semi: bool) -> Result<(), 
         }
         Stmt::FnCall(call, ..) => {
             print_call(out, call.as_ref())?;
+            if trailing_semi {
+                out.push(';');
+            }
+        }
+        Stmt::BreakLoop(expr, flags, ..) => {
+            if expr.is_some() {
+                return Err(RhError::Transpile(
+                    "expr_print break/continue with value is unsupported".into(),
+                ));
+            }
+            if flags.contains(ASTFlags::BREAK) {
+                out.push_str("break");
+            } else {
+                out.push_str("continue");
+            }
             if trailing_semi {
                 out.push(';');
             }

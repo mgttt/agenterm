@@ -13,18 +13,20 @@ fn q_require(condition, code) {
 fn sorted(values) {
     let result = [];
     for value in values {
+        let text_value = "" + value;
         let inserted = 0;
         let index = 0;
         while index < result.len {
-            if value < result[index] {
-                result.insert(index, value);
+            let existing = "" + result[index];
+            if text_value < existing {
+                result.insert(index, text_value);
                 inserted = 1;
                 break;
             }
             index = index + 1;
         }
         if inserted == 0 {
-            result.push(value);
+            result.push(text_value);
         }
     }
     result
@@ -53,26 +55,29 @@ fn valid_id(value, allow_period) {
         return 0;
     }
     let previous_separator = 0;
-    for character in text_value {
-        let piece = character.to_string();
-        let alphabet =
-            if allow_period != 0 {
-                "abcdefghijklmnopqrstuvwxyz0123456789.-"
-            } else {
-                "abcdefghijklmnopqrstuvwxyz0123456789-"
-            };
-        if !alphabet.contains(piece)
-                || (
-                    (piece == "." || piece == "-")
-                        && previous_separator != 0
-                ) {
-            return 0;
+    let index = 0;
+    while index < text_value.len {
+        let piece = text_value.sub_string(index, 1);
+        if allow_period != 0 {
+            if !"abcdefghijklmnopqrstuvwxyz0123456789.-".contains(piece)
+                    || (
+                        (piece == "." || piece == "-")
+                            && previous_separator != 0
+                    ) {
+                return 0;
+            }
+        } else {
+            if !"abcdefghijklmnopqrstuvwxyz0123456789-".contains(piece)
+                    || (piece == "-" && previous_separator != 0) {
+                return 0;
+            }
         }
         if piece == "." || piece == "-" {
             previous_separator = 1;
         } else {
             previous_separator = 0;
         }
+        index = index + 1;
     }
     1
 }
@@ -147,8 +152,11 @@ fn add_process_observation(
     observed_powershell,
     terminal_compatibility
 ) {
-    context.process_observation.owned_commands += 1;
-    context.process_observation.process_samples += 0 + process_samples;
+    let owned_commands = 0 + context.process_observation.owned_commands;
+    let process_sample_count = 0 + context.process_observation.process_samples;
+    context.process_observation.owned_commands = owned_commands + 1;
+    context.process_observation.process_samples =
+        process_sample_count + process_samples;
     for process in observed_powershell {
         let process_text = "" + process;
         if terminal_compatibility != 0 {
@@ -180,22 +188,15 @@ fn assert_process_observation(context) {
     0
 }
 
-fn gate_by_id(manifest, id) {
-    let found = 0;
-    let gate_value = ();
-    let gate_id = "" + id;
+fn gate_declared(manifest, gate_key) {
+    let key = "" + gate_key;
     for gate in manifest.required_gates {
         let current_id = "" + gate.id;
-        if current_id == gate_id {
-            q_require(
-                found == 0,
-                "qualification_gate_duplicate:" + gate_id
-            );
-            found = 1;
-            gate_value = gate;
+        if current_id == key {
+            return 1;
         }
     }
-    gate_value
+    0
 }
 
 fn evidence_from_output(output) {
@@ -227,7 +228,7 @@ fn add_result(context, gate_id, status, duration_ms, output) {
         "qualification_result_duplicate:" + gate_key
     );
     q_require(
-        gate_by_id(context.manifest, gate_key) != (),
+        gate_declared(context.manifest, gate_key) != 0,
         "qualification_result_undeclared:" + gate_key
     );
     let evidence = evidence_from_output(output);
@@ -280,21 +281,23 @@ fn timing_source(repo) {
     }
 }
 
-fn timing_allowed_lanes() {
-    let lanes = #{};
-    lanes["quick"] = true;
-    lanes["ordinary"] = true;
-    lanes["candidate"] = true;
-    lanes
+fn timing_lane_allowed(lane_text) {
+    let lane = "" + lane_text;
+    if lane == "quick" || lane == "ordinary" || lane == "candidate" {
+        return 1;
+    }
+    0
 }
 
-fn timing_gate_statuses() {
-    let statuses = #{};
-    statuses["passed"] = true;
-    statuses["failed"] = true;
-    statuses["skipped"] = true;
-    statuses["not_run"] = true;
-    statuses
+fn timing_gate_status_allowed(status_text) {
+    let status = "" + status_text;
+    if status == "passed"
+            || status == "failed"
+            || status == "skipped"
+            || status == "not_run" {
+        return 1;
+    }
+    0
 }
 
 fn new_timing(
@@ -309,7 +312,7 @@ fn new_timing(
     let lane_text = "" + lane;
     let profile_text = "" + profile;
     q_require(
-        timing_allowed_lanes().contains(lane_text),
+        timing_lane_allowed(lane_text) != 0,
         "quality_timing_lane"
     );
     q_require(profile_text != "", "quality_timing_profile");
@@ -318,8 +321,9 @@ fn new_timing(
     let manifest = std::path::absolute(manifest_path).display;
     let ids = #{};
     let gates = [];
-    for id in gate_ids {
-        let gate_id = "" + id;
+    let gate_index = 0;
+    while gate_index < gate_ids.len {
+        let gate_id = "" + gate_ids[gate_index];
         q_require(
             valid_id(gate_id, 0) != 0 && !ids.contains(gate_id),
             "quality_timing_gate_id:" + gate_id
@@ -330,6 +334,7 @@ fn new_timing(
             status: "not_run",
             duration_ms: 0
         });
+        gate_index = gate_index + 1;
     }
     let workload_identity = #{
         lane: lane_text,
@@ -373,34 +378,38 @@ fn new_timing(
 fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
     let status_text = "" + status;
     let gate_key = "" + gate_id;
-    let allowed = timing_gate_statuses();
     q_require(
-        allowed.contains(status_text),
+        timing_gate_status_allowed(status_text) != 0,
         "quality_timing_gate_status:" + status_text
     );
     q_require(duration_ms >= 0, "quality_timing_gate_duration");
     let found = 0;
+    let match_index = 0;
     let index = 0;
     while index < timing.gates.len {
-        let gate_entry_id = "" + timing.gates[index].id;
+        let gate_entry = timing.gates[index];
+        let gate_entry_id = "" + gate_entry.id;
         if gate_entry_id == gate_key {
             q_require(found == 0, "quality_timing_gate_duplicate:" + gate_key);
+            let gate_status = "" + gate_entry.status;
             q_require(
-                timing.gates[index].status == "not_run",
+                gate_status == "not_run",
                 "quality_timing_gate_transition:" + gate_key
             );
-            timing.gates[index].status = status_text;
-            timing.gates[index].duration_ms = duration_ms;
+            match_index = index;
             found = 1;
         }
         index = index + 1;
     }
     q_require(found != 0, "quality_timing_gate_undeclared:" + gate_key);
+    timing.gates[match_index].status = status_text;
+    timing.gates[match_index].duration_ms = duration_ms;
     if status_text == "failed"
             && timing.first_failure == bootstrap_timing::null_json() {
+        let started_at_unix_ms = timing.started_at_unix_ms;
         let elapsed_ms =
             std::time::SystemTime::now().unix_millis
-                - timing.started_at_unix_ms;
+                - started_at_unix_ms;
         timing.first_failure = #{
             kind: "gate",
             gate_id: gate_key,
@@ -419,16 +428,17 @@ fn timing_fail_stage(timing, stage_id) {
         "quality_timing_failure_stage:" + stage_text
     );
     if timing.first_failure == bootstrap_timing::null_json() {
+        let started_at_unix_ms = timing.started_at_unix_ms;
         let elapsed_ms =
             std::time::SystemTime::now().unix_millis
-                - timing.started_at_unix_ms;
+                - started_at_unix_ms;
         timing.first_failure = #{
             kind: "stage",
             stage_id: stage_text,
             elapsed_ms: elapsed_ms
         };
     }
-    timing_finish(timing, "failed")
+    return timing_finish(timing, "failed");
 }
 
 fn timing_finish(timing, status) {
@@ -437,26 +447,32 @@ fn timing_finish(timing, status) {
         status_text == "passed" || status_text == "failed",
         "quality_timing_run_status:" + status_text
     );
+    let started_at_unix_ms = timing.started_at_unix_ms;
+    let bootstrap = timing.bootstrap;
+    let total_wall_ms =
+        std::time::SystemTime::now().unix_millis
+            - started_at_unix_ms;
+    let wall_time = bootstrap_timing::wall_time(
+        bootstrap,
+        total_wall_ms
+    );
     timing.status = status_text;
     timing.completed_at_utc = std::time::SystemTime::now().rfc3339;
-    timing.total_wall_ms =
-        std::time::SystemTime::now().unix_millis
-            - timing.started_at_unix_ms;
-    timing.wall_time = bootstrap_timing::wall_time(
-        timing.bootstrap,
-        timing.total_wall_ms
-    );
+    timing.total_wall_ms = total_wall_ms;
+    timing.wall_time = wall_time;
     let output_path = timing.output_path;
-    let report = timing;
-    report.remove("output_path");
-    report.remove("started_at_unix_ms");
+    let started_at_unix_ms = timing.started_at_unix_ms;
+    timing.remove("output_path");
+    timing.remove("started_at_unix_ms");
     std::fs::create_dir_all(
         std::path::parent(output_path).display
     );
     rhai::runtime::atomic_write(
         output_path,
-        rhai::json::stringify_pretty(report) + "\n"
+        rhai::json::stringify_pretty(timing) + "\n"
     );
+    timing.output_path = output_path;
+    timing.started_at_unix_ms = started_at_unix_ms;
     timing
 }
 
@@ -464,10 +480,10 @@ fn assert_results(context) {
     for gate in context.manifest.required_gates {
         let gate_id = "" + gate.id;
         q_require(
-            context.results.contains(gate_id),
+            context.results.contains(gate.id),
             "qualification_gate_missing:" + gate_id
         );
-        let result = context.results[gate_id];
+        let result = context.results[gate.id];
         let result_status = "" + result.status;
         q_require(
             result_status == "passed",
@@ -608,6 +624,7 @@ fn write_receipt(context, repo, output_path) {
     assert_results(context);
     assert_process_observation(context);
     let root = std::path::absolute(repo).display;
+    let process_observation = context.process_observation;
     let schema_version = context.manifest.receipt_schema_version;
     let receipt = #{
         schema_version: schema_version,
@@ -620,7 +637,7 @@ fn write_receipt(context, repo, output_path) {
             path: "scripts/qualification-gates.json",
             sha256: context.manifest_sha256
         },
-        process_observation: context.process_observation,
+        process_observation: process_observation,
         provenance: provenance(
             root,
             std::path::join(root, "dist/agenterm.json").display,
@@ -634,8 +651,7 @@ fn write_receipt(context, repo, output_path) {
         gates: []
     };
     for gate in context.manifest.required_gates {
-        let gate_id = "" + gate.id;
-        receipt.gates.push(context.results[gate_id]);
+        receipt.gates.push(context.results[gate.id]);
     }
     let path = std::path::absolute(output_path).display;
     std::fs::create_dir_all(

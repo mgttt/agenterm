@@ -1508,14 +1508,8 @@ fn expr_uses_string_list_param(expr: &Expr, param: &str) -> bool {
 }
 
 fn param_used_as_child_list(def: &ScriptFuncDef, param: &str) -> bool {
-    if def.body.iter().any(|stmt| {
-        let (Stmt::Expr(expr) | Stmt::Return(Some(expr), ..)) = stmt else {
-            return false;
-        };
-        expr_uses_child_list_param(expr.as_ref(), param)
-    }) {
-        return true;
-    }
+    // Only definite Child iteration proves ChildList. Bare `.len` / indexing is
+    // shared with StringList and must not win the param-kind race.
     def.body.iter().any(|stmt| {
         let Stmt::For(boxed, ..) = stmt else {
             return false;
@@ -1527,30 +1521,6 @@ fn param_used_as_child_list(def: &ScriptFuncDef, param: &str) -> bool {
                 &child_aliases_in_block(counter.name.as_str(), &flow.body),
             )
     })
-}
-
-fn expr_uses_child_list_param(expr: &Expr, param: &str) -> bool {
-    if let Expr::Dot(boxed, ..) = expr
-        && is_param_var(&boxed.lhs, param)
-        && let Expr::Property(property, ..) = &boxed.rhs
-    {
-        return property.2.as_str() == "len";
-    }
-    match expr {
-        Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => call
-            .args
-            .iter()
-            .any(|arg| expr_uses_child_list_param(arg, param)),
-        Expr::Dot(boxed, ..) | Expr::Index(boxed, ..) => {
-            expr_uses_child_list_param(&boxed.lhs, param)
-                || expr_uses_child_list_param(&boxed.rhs, param)
-        }
-        Expr::Map(map, ..) => map
-            .0
-            .iter()
-            .any(|(_, value)| expr_uses_child_list_param(value, param)),
-        _ => false,
-    }
 }
 
 fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
@@ -12312,6 +12282,39 @@ fn entry() {
         assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
         assert!(
             output.rust.contains("pub fn is_commit(value: String)"),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn indexed_string_list_param_with_len_stays_string_list() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn new_timing(gate_ids) {
+    require(gate_ids.len > 0, "empty");
+    let gate_index = 0;
+    while gate_index < gate_ids.len {
+        let gate_id = "" + gate_ids[gate_index];
+        print(gate_id);
+        gate_index = gate_index + 1;
+    }
+    0
+}
+
+fn entry() {
+    new_timing(["repo-lint", "rustfmt"]);
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output
+                .rust
+                .contains("pub fn new_timing(gate_ids: Vec<String>)"),
             "{}",
             output.rust
         );
