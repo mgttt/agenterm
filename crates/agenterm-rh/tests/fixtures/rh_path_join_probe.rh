@@ -1,0 +1,8 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: ROOT");
+    }
+
+    let joined = std::path::join(args[0], "child").display;
+    joined.len
+}

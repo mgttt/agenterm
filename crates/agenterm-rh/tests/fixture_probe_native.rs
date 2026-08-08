@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, check, transpile_cdylib_with_mode};
 
-const NEW_PUBLIC_PROBES: [(&str, &[&str]); 8] = [
+const NEW_PUBLIC_PROBES: [(&str, &[&str]); 14] = [
     (
         "bytes-append-probe.rh",
         &["rh_bytes_append(", "rh_bytes_from_text("],
@@ -23,6 +23,18 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 8] = [
         &["rh_command_stdin_text(", "String::from(\"hello\\n\")"],
     ),
     (
+        "duration-task-sleep-probe.rh",
+        &["std::thread::sleep(std::time::Duration::from_millis("],
+    ),
+    (
+        "env-current-dir-probe.rh",
+        &["rh_env_current_dir()"],
+    ),
+    (
+        "env-parse-int-probe.rh",
+        &["rh_env_has(", "rh_env_parse_int("],
+    ),
+    (
         "json-marker-run-probe.rh",
         &[
             "rh_json_string_path(&marker_run, &[\"text\"])",
@@ -30,8 +42,20 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 8] = [
             "rh_json_get_path(&marker_run, &[\"column\"])",
         ],
     ),
+    (
+        "json-stringify-probe.rh",
+        &["rh_json_stringify("],
+    ),
+    (
+        "path-join-probe.rh",
+        &["rh_path_join("],
+    ),
     ("process-kill-probe.rh", &["rh_process_kill(4242)"]),
     ("std-fs-write-probe.rh", &["rh_std_fs_write("]),
+    (
+        "string-list-set-probe.rh",
+        &["rh_string_list_set(&mut parts,"],
+    ),
 ];
 
 fn repo_root() -> PathBuf {

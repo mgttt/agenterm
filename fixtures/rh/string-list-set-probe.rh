@@ -1,0 +1,9 @@
+// Probe native StringList index assignment via rh_string_list_set.
+fn entry() {
+    let parts = "alpha.beta.gamma".split(".");
+    parts[1] = "probe";
+    if parts[1] != "probe" {
+        return rh::fail("string_list_set");
+    }
+    parts[1].len
+}

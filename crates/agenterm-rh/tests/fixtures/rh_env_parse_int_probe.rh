@@ -1,0 +1,11 @@
+fn entry() {
+    if args.len != 1 {
+        return rh::fail("expected: NAME");
+    }
+
+    if std::env::has(args[0]) == 0 {
+        return 0;
+    }
+
+    std::env::get(args[0]).parse_int()
+}
