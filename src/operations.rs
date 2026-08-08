@@ -54,6 +54,17 @@ pub const UI_CWD_EDITOR_PREPARE_APPEND: &str = "ui.cwd-editor.prepare-append";
 pub const UI_CWD_EDITOR_PREPARE_REPLACE: &str = "ui.cwd-editor.prepare-replace";
 pub const UI_CWD_EDITOR_SEND_NOW: &str = "ui.cwd-editor.send-now";
 pub const UI_NEW_TERMINAL_OPEN: &str = "ui.new-terminal.open";
+pub const UI_INSTANCE_PICKER_OPEN: &str = "ui.instance-picker.open";
+pub const UI_INSTANCE_PICKER_NEXT: &str = "ui.instance-picker.next";
+pub const UI_INSTANCE_PICKER_PREV: &str = "ui.instance-picker.prev";
+pub const UI_INSTANCE_PICKER_SELECT: &str = "ui.instance-picker.select";
+pub const UI_INSTANCE_PICKER_CONFIRM: &str = "ui.instance-picker.confirm";
+pub const UI_INSTANCE_PICKER_CANCEL: &str = "ui.instance-picker.cancel";
+pub const UI_SERVER_STRIP_SELECT: &str = "ui.server-strip.select";
+pub const UI_MODAL_CONFIRM: &str = "ui.modal.confirm";
+pub const UI_MODAL_CANCEL: &str = "ui.modal.cancel";
+pub const UI_WINDOW_CLOSE_KEEP_SERVER: &str = "ui.window-close.keep-server-running";
+pub const UI_WINDOW_CLOSE_STOP_SERVER: &str = "ui.window-close.stop-server-and-exit";
 pub const UI_TREE_TOGGLE: &str = "ui.tree.toggle";
 pub const UI_COMPOSER_SEND: &str = "ui.composer.send";
 pub const UI_INPUT_POINTER: &str = "ui.input.pointer";
@@ -418,6 +429,42 @@ const CWD_PREPARE_PARAMETERS: &[OperationParameterSpec] = &[
 /// minus `--mode`, which their verb already fixes.
 const CWD_PATH_PARAMETERS: &[OperationParameterSpec] =
     &[CWD_PREPARE_PARAMETERS[0], CWD_PREPARE_PARAMETERS[1]];
+/// `ui-action open-instance-picker` — `--mode` defaults to `attach`.
+const INSTANCE_PICKER_OPEN_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpec {
+    name: "mode",
+    value_type: "string",
+    required: false,
+    minimum: None,
+    maximum: None,
+}];
+/// `ui-action instance-picker-select` — exactly one of `--name` or `--pid`.
+/// Neither is individually required, which the flat parameter schema cannot
+/// express; the dispatcher rejects the empty case. Note this is **not** the
+/// global `--instance`, which chooses the control endpoint rather than a row.
+const INSTANCE_PICKER_SELECT_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "name",
+        value_type: "string",
+        required: false,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "pid",
+        value_type: "uint32",
+        required: false,
+        minimum: Some(0),
+        maximum: None,
+    },
+];
+/// `ui-action select-server-tab INSTANCE` — the instance name is positional.
+const SERVER_STRIP_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpec {
+    name: "instance",
+    value_type: "string",
+    required: true,
+    minimum: None,
+    maximum: None,
+}];
 /// `ui-action window-resize` — client-area size in **device pixels**, validated
 /// by the shared `ClientSize::parse` on both hosts.
 const WINDOW_RESIZE_PARAMETERS: &[OperationParameterSpec] = &[
@@ -1210,6 +1257,107 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         "fleet.ui.new_terminal.open",
         "open-new-terminal",
     ),
+    // ---- Instance picker and server strip ------------------------------------
+    OperationSpec {
+        id: UI_INSTANCE_PICKER_OPEN,
+        script_surface: "fleet.ui.instance_picker.open",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("open-instance-picker"),
+        aliases: &[],
+        parameters: INSTANCE_PICKER_OPEN_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    nullary_ui_action(
+        UI_INSTANCE_PICKER_NEXT,
+        "fleet.ui.instance_picker.next",
+        "instance-picker-next",
+    ),
+    nullary_ui_action(
+        UI_INSTANCE_PICKER_PREV,
+        "fleet.ui.instance_picker.prev",
+        "instance-picker-prev",
+    ),
+    OperationSpec {
+        id: UI_INSTANCE_PICKER_SELECT,
+        script_surface: "fleet.ui.instance_picker.select",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("instance-picker-select"),
+        aliases: &[],
+        parameters: INSTANCE_PICKER_SELECT_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    nullary_ui_action(
+        UI_INSTANCE_PICKER_CONFIRM,
+        "fleet.ui.instance_picker.confirm",
+        "instance-picker-confirm",
+    ),
+    nullary_ui_action(
+        UI_INSTANCE_PICKER_CANCEL,
+        "fleet.ui.instance_picker.cancel",
+        "instance-picker-cancel",
+    ),
+    // `open-instance` is a synonym arm in the same dispatcher match, so it is an
+    // alias rather than a second identity.
+    OperationSpec {
+        id: UI_SERVER_STRIP_SELECT,
+        script_surface: "fleet.ui.server_strip.select",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("select-server-tab"),
+        aliases: &["open-instance"],
+        parameters: SERVER_STRIP_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    // ---- Modal resolution ----------------------------------------------------
+    //
+    // `confirm` / `cancel` are the generic answers to whatever modal is open;
+    // they are the only way an agent can finish a flow it started with
+    // `ui.tab.close`, `ui.settings.open`, or `ui.cwd-editor.open`. Without a
+    // typed identity the agent could raise modals it had no typed way to
+    // dismiss, which is worse than exposing them. `ui-snapshot` reports which
+    // modal is pending; both verbs fail when none is.
+    nullary_ui_action(UI_MODAL_CONFIRM, "fleet.ui.modal.confirm", "confirm"),
+    nullary_ui_action(UI_MODAL_CANCEL, "fleet.ui.modal.cancel", "cancel"),
+    // The two branches of the window-close confirmation. They are separate
+    // verbs, not `confirm`/`cancel`, because the choice is which of two
+    // irreversible outcomes to take, not whether to proceed.
+    nullary_ui_action(
+        UI_WINDOW_CLOSE_KEEP_SERVER,
+        "fleet.ui.window_close.keep_server_running",
+        "keep-server-running",
+    ),
+    OperationSpec {
+        id: UI_WINDOW_CLOSE_STOP_SERVER,
+        script_surface: "fleet.ui.window_close.stop_server_and_exit",
+        class: OperationClass::Destructive,
+        command: "ui-action",
+        action: Some("stop-server-and-exit"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: true,
+        available: true,
+        since: "0.1.16",
+    },
     OperationSpec {
         id: TERMINAL_PASTE,
         script_surface: "fleet.terminal.paste",
@@ -1362,6 +1510,17 @@ pub(crate) fn operation_for_args(
                 "cwd-prepare-replace" => UI_CWD_EDITOR_PREPARE_REPLACE,
                 "cwd-send-now" => UI_CWD_EDITOR_SEND_NOW,
                 "open-new-terminal" => UI_NEW_TERMINAL_OPEN,
+                "open-instance-picker" => UI_INSTANCE_PICKER_OPEN,
+                "instance-picker-next" => UI_INSTANCE_PICKER_NEXT,
+                "instance-picker-prev" => UI_INSTANCE_PICKER_PREV,
+                "instance-picker-select" => UI_INSTANCE_PICKER_SELECT,
+                "instance-picker-confirm" => UI_INSTANCE_PICKER_CONFIRM,
+                "instance-picker-cancel" => UI_INSTANCE_PICKER_CANCEL,
+                "select-server-tab" | "open-instance" => UI_SERVER_STRIP_SELECT,
+                "confirm" => UI_MODAL_CONFIRM,
+                "cancel" => UI_MODAL_CANCEL,
+                "keep-server-running" => UI_WINDOW_CLOSE_KEEP_SERVER,
+                "stop-server-and-exit" => UI_WINDOW_CLOSE_STOP_SERVER,
                 "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
                 "select-tab" => UI_TAB_SELECT,
@@ -1831,6 +1990,97 @@ mod tests {
                 .unwrap()
                 .map(|operation| operation.id),
             Some(UI_NEW_TERMINAL_OPEN)
+        );
+    }
+
+    #[test]
+    fn instance_picker_and_modal_resolution_have_stable_identities() {
+        for (action, expected) in [
+            ("open-instance-picker", UI_INSTANCE_PICKER_OPEN),
+            ("instance-picker-next", UI_INSTANCE_PICKER_NEXT),
+            ("instance-picker-prev", UI_INSTANCE_PICKER_PREV),
+            ("instance-picker-confirm", UI_INSTANCE_PICKER_CONFIRM),
+            ("instance-picker-cancel", UI_INSTANCE_PICKER_CANCEL),
+            ("confirm", UI_MODAL_CONFIRM),
+            ("cancel", UI_MODAL_CANCEL),
+            ("keep-server-running", UI_WINDOW_CLOSE_KEEP_SERVER),
+            ("stop-server-and-exit", UI_WINDOW_CLOSE_STOP_SERVER),
+        ] {
+            let operation = validate_operation_args(&args(&["ui-action", action])).unwrap();
+            assert_eq!(operation.map(|operation| operation.id), Some(expected));
+        }
+        assert_eq!(
+            validate_operation_args(&args(&[
+                "ui-action",
+                "open-instance-picker",
+                "--mode",
+                "new"
+            ]))
+            .unwrap()
+            .map(|operation| operation.id),
+            Some(UI_INSTANCE_PICKER_OPEN)
+        );
+        assert_eq!(
+            validate_operation_args(&args(&[
+                "ui-action",
+                "instance-picker-select",
+                "--pid",
+                "42"
+            ]))
+            .unwrap()
+            .map(|operation| operation.id),
+            Some(UI_INSTANCE_PICKER_SELECT)
+        );
+    }
+
+    /// `select-server-tab` and `open-instance` are one arm of the dispatcher
+    /// match, so they must be one identity with an alias, not two identities.
+    #[test]
+    fn server_strip_selection_keeps_one_identity_for_both_public_verbs() {
+        for action in ["select-server-tab", "open-instance"] {
+            let operation =
+                validate_operation_args(&args(&["ui-action", action, "workbench"])).unwrap();
+            assert_eq!(
+                operation.map(|operation| operation.id),
+                Some(UI_SERVER_STRIP_SELECT)
+            );
+        }
+    }
+
+    /// Ending the server is the most irreversible thing the window-close modal
+    /// offers, so it must not be classified like its "keep running" sibling.
+    #[test]
+    fn stopping_the_server_is_classified_destructive() {
+        let stop = operation_by_id(UI_WINDOW_CLOSE_STOP_SERVER).unwrap();
+        assert_eq!(stop.class, OperationClass::Destructive);
+        assert!(stop.destructive);
+        assert!(
+            !operation_by_id(UI_WINDOW_CLOSE_KEEP_SERVER)
+                .unwrap()
+                .destructive
+        );
+    }
+
+    /// The point of P-catalog: the typed map must cover the whole shared
+    /// control plane, not a sample of it. `UNIX_ONLY_UI_ACTIONS` is excluded on
+    /// purpose (see the audit § F5) because `available` has no platform axis.
+    #[test]
+    fn every_shared_ui_action_has_a_typed_identity() {
+        use crate::frontend::ui_action_catalog::SHARED_UI_ACTIONS;
+
+        let missing: Vec<&str> = SHARED_UI_ACTIONS
+            .iter()
+            .copied()
+            .filter(|action| {
+                operation_for_args(&args(&["ui-action", action]))
+                    .ok()
+                    .flatten()
+                    .is_none()
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "shared ui-actions without a typed identity: {missing:?}"
         );
     }
 
