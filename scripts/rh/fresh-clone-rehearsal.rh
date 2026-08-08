@@ -232,29 +232,6 @@ fn unique_names(processes) {
     sort_string_list(names)
 }
 
-fn sort_processes_by_id(processes) {
-    let ordered = [];
-    let item_index = 0;
-    while item_index < processes.len {
-        let process = processes[item_index];
-        let inserted = 0;
-        let order_index = 0;
-        while order_index < ordered.len {
-            if process.id < ordered[order_index].id {
-                ordered.insert(order_index, process);
-                inserted = 1;
-                break;
-            }
-            order_index += 1;
-        }
-        if inserted == 0 {
-            ordered.push(process);
-        }
-        item_index += 1;
-    }
-    ordered
-}
-
 fn exact_terminal_payload(observed, typed) {
     let first = sort_string_list(observed);
     let second = sort_string_list(typed);
@@ -292,11 +269,10 @@ fn release_archive_path(report) {
 fn remove_owned_clone(qualification_root, clone) {
     let owner = std::path::absolute(qualification_root).display;
     let target = std::path::absolute(clone).display;
+    let target_name = std::path::PathBuf::from(target).file_name;
     assert_ok(
         std::path::parent(target).display.to_lower() == owner.to_lower()
-            && std::path::PathBuf::from(target).file_name.starts_with(
-                "fresh-clone-owned-"
-            ),
+            && target_name.starts_with("fresh-clone-owned-"),
         "fresh_clone_cleanup_outside_owned_root:" + target
     );
     if std::fs::exists(target) {
@@ -538,7 +514,9 @@ let tag = "v" + version;
 let qualification_root =
     std::path::join(source, "target/qualification").display;
 std::fs::create_dir_all(qualification_root);
-let clone_owner = rh::runtime::temp_dir().display;
+let clone_owner =
+    std::path::join(qualification_root, "fresh-clone-workspace").display;
+std::fs::create_dir_all(clone_owner);
 let nonce =
     std::process::id() + "-" +
     std::time::SystemTime::now().unix_millis;
@@ -631,6 +609,7 @@ let owned_ids = #{};
 let identities = #{};
 let unique = #{};
 let unique_list = [];
+let clone_git = std::path::join(clone, ".git").display;
 try {
     git_output([
             "-C", source,
@@ -948,7 +927,7 @@ try {
         remaining_after.len == 0,
         "fresh_clone_owned_process_cleanup_failed"
     );
-    if std::fs::exists(std::path::join(clone, ".git").display) {
+    if std::fs::exists(clone_git) {
         try {
             git_output(["-C", clone, "remote", "set-url", "origin", "redacted://fresh-clone-removed"], clone, 120000, "fresh_clone_redact_origin");
             git_output(["-C", clone, "remote", "set-url", "--push", "origin", "redacted://fresh-clone-removed"], clone, 120000, "fresh_clone_redact_push_origin");
@@ -978,7 +957,7 @@ try {
     evidence.success = 0;
 }
 
-let unique_processes = sort_processes_by_id(unique_list);
+let unique_processes = unique_list;
 evidence.process_observation.unique_processes = unique_processes;
 let completed_at = std::time::SystemTime::now().rfc3339;
 evidence.completed_at_utc = completed_at;

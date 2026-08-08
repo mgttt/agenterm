@@ -1,0 +1,8 @@
+// Probe native std::env::has/get for shipped environment introspection.
+fn entry() {
+    if std::env::has("PATH") == 0 {
+        return 0;
+    }
+    let path = std::env::get("PATH");
+    path.len
+}

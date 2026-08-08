@@ -1,0 +1,4 @@
+fn entry() {
+    rh::hash::fnv1a64(rh::bytes::from_text("native-pack-probe"));
+    0
+}

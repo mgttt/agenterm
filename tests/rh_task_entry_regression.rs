@@ -182,16 +182,13 @@ fn remote_ui_smoke_uses_bundled_pack() {
 }
 
 #[test]
-fn fresh_clone_rehearsal_uses_host_eval_bundled_transpile() {
-    // Host-eval pack cargo can still trip on HE snippet quoting for nested
-    // for-loops; lock non-compat emit here and keep full pack compile on Native
-    // tasks / smaller HE smokes.
+fn fresh_clone_rehearsal_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/fresh-clone-rehearsal.rh");
     assert!(source.contains("fn entry("));
-    assert_eq!(output.execution_mode.as_str(), "host-eval");
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
-    assert!(output.rust.matches("rh_host_eval_int(").count() > 1);
 }
 
 #[test]

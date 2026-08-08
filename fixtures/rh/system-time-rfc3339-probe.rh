@@ -1,0 +1,5 @@
+// Probe native std::time::SystemTime::now().rfc3339 for evidence timestamps.
+fn entry() {
+    let stamp = std::time::SystemTime::now().rfc3339;
+    stamp.len
+}

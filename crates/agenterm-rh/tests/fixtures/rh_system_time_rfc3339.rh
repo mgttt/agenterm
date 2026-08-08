@@ -1,0 +1,4 @@
+fn entry() {
+    let stamp = std::time::SystemTime::now().rfc3339;
+    stamp.len
+}

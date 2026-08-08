@@ -9,20 +9,23 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 45] = [
+const FIXTURE_NAMES: [&str; 51] = [
     "append-sync-probe.rh",
     "atomic-write-probe.rh",
     "break-continue.rh",
+    "bytes-from-array-probe.rh",
     "child-lifecycle-probe.rh",
     "crypto-sha256-file-probe.rh",
     "direntry-metadata-probe.rh",
     "entry.rh",
+    "env-has-get-probe.rh",
     "fail-dynamic.rh",
     "fleet.rh",
     "for-dyn-range.rh",
     "for-range.rh",
     "for-span-overflow.rh",
     "fs-mutation-probe.rh",
+    "hash-fnv1a64-probe.rh",
     "import-bundle-probe.rh",
     "int-string-concat-probe.rh",
     "json-array-index-assign-probe.rh",
@@ -30,10 +33,11 @@ const FIXTURE_NAMES: [&str; 45] = [
     "json-array-literal-probe.rh",
     "json-array-push-probe.rh",
     "json-array-walk.rh",
-    "json-param-index-assign-probe.rh",
     "json-keys-probe.rh",
+    "json-param-index-assign-probe.rh",
     "json-parse-schema.rh",
     "json-path-index-probe.rh",
+    "json-stringify-pretty-probe.rh",
     "json-type-string.rh",
     "map-set-membership.rh",
     "output-fn-arg-probe.rh",
@@ -49,12 +53,14 @@ const FIXTURE_NAMES: [&str; 45] = [
     "set-map-value-assign-probe.rh",
     "stdlib.rh",
     "string-fn-bundle.rh",
+    "string-index-of-probe.rh",
     "string-list-index-probe.rh",
     "string-validate.rh",
+    "system-time-rfc3339-probe.rh",
     "try-catch.rh",
     "try-ok.rh",
     "while-count.rh",
-    "while.rh",
+    "while.rh"
 ];
 
 const CONTROL_FLOW_FIXTURES: [&str; 8] = [

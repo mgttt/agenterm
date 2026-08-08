@@ -162,20 +162,17 @@ fn set_evidence_state(states, evidence_id, failure_message) {
     if states.contains(evidence_key) == 0 {
         return states;
     }
-    let next_state = if failure_text == "" {
-        #{
-            executed: true,
-            failed: false,
-            root_cause: "",
-            observed: true
-        }
-    } else {
-        #{
-            executed: true,
-            failed: true,
-            root_cause: classify_failure_root(failure_text),
-            observed: true
-        }
+    let next_failed = 0;
+    let next_root_cause = "";
+    if failure_text != "" {
+        next_failed = 1;
+        next_root_cause = classify_failure_root(failure_text);
+    }
+    let next_state = #{
+        executed: true,
+        failed: next_failed,
+        root_cause: next_root_cause,
+        observed: true
     };
     let next_failed = states.failed;
     if failure_text != "" {

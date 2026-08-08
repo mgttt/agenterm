@@ -1,0 +1,5 @@
+// Probe native string index_of for substring discovery in logs.
+fn entry() {
+    let haystack = "agenterm-rh-probe-needle";
+    haystack.index_of("needle")
+}
