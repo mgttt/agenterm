@@ -571,23 +571,11 @@ fn workbench_smoke_uses_native_bundled_execution() {
 
 
 #[test]
-fn unix_frontend_smoke_host_eval_he_ceiling() {
+fn unix_frontend_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/unix-frontend-smoke.rh");
     assert!(source.contains("fn entry("));
-    assert!(
-        matches!(
-            output.execution_mode,
-            agenterm_rh::CdylibExecutionMode::HostEval
-                | agenterm_rh::CdylibExecutionMode::Native
-        ),
-        "unix-frontend-smoke: {:?}",
-        output.execution_mode
-    );
-    let he = output.rust.matches("rh_host_eval_int(").count();
-    assert!(
-        he <= 12,
-        "unix-frontend-smoke HostEval ceiling exceeded: he={he} (expected <= 12)"
-    );
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
 }

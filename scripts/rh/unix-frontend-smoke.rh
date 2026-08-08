@@ -51,6 +51,12 @@ fn unsupported(platform, code, message) {
     print("SKIP " + rhai::json::stringify(skip_payload));
 }
 
+fn normalized_text(value) {
+    let text = "" + value;
+    text = text.trim();
+    text
+}
+
 fn resolve_tool(name) {
     let command = std::process::command("/bin/sh");
     let probe_args = ["-c", "command -v -- " + name];
@@ -188,20 +194,6 @@ fn xdotool_search_name(context, title) {
     output
 }
 
-fn xdotool_getwindowname(context, window_id) {
-    let command = std::process::command("xdotool");
-    command.args(["getwindowname", window_id]);
-    command.timeout(std::time::Duration::from_secs(3));
-    let output = command.output();
-    xdotool_record(
-        context,
-        ["getwindowname", window_id],
-        output,
-        1
-    );
-    output
-}
-
 fn xdotool_getactivewindow(context) {
     let command = std::process::command("xdotool");
     command.args(["getactivewindow"]);
@@ -210,20 +202,6 @@ fn xdotool_getactivewindow(context) {
     xdotool_record(
         context,
         ["getactivewindow"],
-        output,
-        0
-    );
-    output
-}
-
-fn xdotool_windowactivate(context, window_id) {
-    let command = std::process::command("xdotool");
-    command.args(["windowactivate", "--sync", window_id]);
-    command.timeout(std::time::Duration::from_secs(3));
-    let output = command.output();
-    xdotool_record(
-        context,
-        ["windowactivate", "--sync", window_id],
         output,
         0
     );
@@ -241,11 +219,20 @@ fn wait_x11_window(context, title, child) {
                 let id = "" + raw;
                 id = id.trim();
                 if id != "" {
-                    let name = xdotool_getwindowname(context, id);
+                    let name_command = std::process::command("xdotool");
+                    name_command.args(["getwindowname", id]);
+                    name_command.timeout(std::time::Duration::from_secs(3));
+                    let name = name_command.output();
+                    xdotool_record(
+                        context,
+                        ["getwindowname", id],
+                        name,
+                        1
+                    );
                     let actual = "" + name.stdout_text();
                     actual = actual.trim();
                     if name.success != 0 && actual == title {
-                        return id;
+                        return normalized_text(id);
                     }
                 }
                 line_index += 1;
@@ -366,11 +353,11 @@ fn wait_native_focus(context, cli, platform, native_window_id) {
     throw "unix_frontend_native_focus_event_timeout";
 }
 
-fn set_native_clipboard(context, platform, helper, text) {
+fn set_native_clipboard(context, platform, text) {
     let payload_path = clipboard_payload_path(context);
     rhai::runtime::atomic_write(payload_path, text);
     if platform == "linux" {
-        let command = std::process::command(helper);
+        let command = std::process::command("xclip");
         command.args([
             "-selection", "clipboard", "-loops", "2", "-silent", payload_path
         ]);
@@ -379,7 +366,7 @@ fn set_native_clipboard(context, platform, helper, text) {
     }
     let command = std::process::command("/bin/sh");
     command.args([
-        "-c", "cat \"$1\" | \"$2\"", "sh", payload_path, helper
+        "-c", "cat \"$1\" | pbcopy", "sh", payload_path
     ]);
     command.timeout(std::time::Duration::from_secs(5));
     let output = command.output();
@@ -396,7 +383,7 @@ fn set_native_clipboard(context, platform, helper, text) {
     );
 }
 
-fn wait_linux_clipboard_owner(context, helper, expected, owner) {
+fn wait_linux_clipboard_owner(context, expected, owner) {
     for attempt in 0..100 {
         if owner.state == "exited" {
             let output = owner.wait_with_output(
@@ -405,7 +392,7 @@ fn wait_linux_clipboard_owner(context, helper, expected, owner) {
             throw "unix_frontend_xclip_owner_exited:" +
                 output.stderr_text();
         }
-        let command = std::process::command(helper);
+        let command = std::process::command("xclip");
         command.args(["-selection", "clipboard", "-o"]);
         command.timeout(std::time::Duration::from_secs(2));
         let output = command.output();
@@ -634,7 +621,16 @@ fn entry() {
         let witness = start_x11_witness(witness_title);
         owned_children.push(witness);
         witness_id = wait_x11_window(context, witness_title, witness);
-        xdotool_windowactivate(context, witness_id);
+        let activate_command = std::process::command("xdotool");
+        activate_command.args(["windowactivate", "--sync", witness_id]);
+        activate_command.timeout(std::time::Duration::from_secs(3));
+        let activate_output = activate_command.output();
+        xdotool_record(
+            context,
+            ["windowactivate", "--sync", witness_id],
+            activate_output,
+            0
+        );
         wait_x11_active(
             context, witness_id, "unix_frontend_witness_activation_timeout"
         );
@@ -798,7 +794,7 @@ fn entry() {
         if platform == "linux" {
             let payload_path = clipboard_payload_path(context);
             rhai::runtime::atomic_write(payload_path, clipboard_text);
-            let clipboard_command = std::process::command(clipboard_writer);
+            let clipboard_command = std::process::command("xclip");
             clipboard_command.args([
                 "-selection", "clipboard", "-loops", "2", "-silent",
                 payload_path
@@ -807,11 +803,11 @@ fn entry() {
             let clipboard_owner = clipboard_command.start();
             owned_children.push(clipboard_owner);
             wait_linux_clipboard_owner(
-                context, clipboard_reader, clipboard_text, clipboard_owner
+                context, clipboard_text, clipboard_owner
             );
         } else {
             set_native_clipboard(
-                context, platform, clipboard_writer, clipboard_text
+                context, platform, clipboard_text
             );
         }
         let paste_baseline = json_cli(context, cli_exe, ["ui-snapshot"]);
