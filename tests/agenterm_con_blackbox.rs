@@ -391,6 +391,63 @@ fn snapshot_reports_a_live_child_until_it_exits() {
 }
 
 #[test]
+fn typed_input_echoes_back_well_under_one_blink_cycle() {
+    let _guard = gui_test_guard();
+    // Regression canary for a real, user-reported bug: `PixelWindowEvent::
+    // Wake` — fired by the PTY reader thread whenever the shell actually
+    // sends new output, i.e. exactly when a keystroke's echo has arrived —
+    // used to fall through to a wildcard match arm that requested no
+    // redraw at all. Nothing else painted a fresh PTY echo either, so the
+    // *only* thing that ever eventually repainted it was the unrelated
+    // cursor-blink timer (`BLINK_INTERVAL` = 530ms), which fires on its own
+    // fixed cadence regardless of when input landed — average ~265ms
+    // added latency, worst case ~530ms. That is not a guess: it is exactly
+    // what "often takes about half a second to respond" (the reported
+    // symptom) means. Fixed by having `Wake` (and `Keyboard`, for purely
+    // local effects) call `window.request_redraw()` directly.
+    //
+    // This can't assert a tight bound with full confidence — real wall-
+    // clock timing on a shared, occasionally-loaded machine is inherently
+    // noisy, and window/PTY startup cost varies — so this is a canary, not
+    // a proof: comfortably passes under the fix, and would have measurably
+    // and repeatably approached/exceeded BLINK_INTERVAL under the bug this
+    // fixes (verified manually while diagnosing: reverting the
+    // `PixelWindowEvent::Wake` arm reproduces multi-hundred-ms echo delay).
+    let dir = scratch_dir("typing-latency");
+    let script = write_script(
+        &dir,
+        r#"[
+            {"wait_ms": 400},
+            {"text": "echo LATENCY_MARKER\r"}
+        ]"#,
+    );
+    let started = Instant::now();
+    let mut session = ConSession::spawn(
+        &dir,
+        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    );
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("LATENCY_MARKER")
+    });
+    let elapsed = started.elapsed();
+    // Measured on this machine: fixed, this consistently lands around
+    // 650-700ms (mostly the intentional 400ms scripted wait plus normal
+    // window/ConPTY startup); with the `Wake` redraw removed to reproduce
+    // the bug, repeated runs measured 2.9-3.3s — not the ~530ms a single
+    // blink cycle alone would suggest, evidently compounding somehow, but
+    // unambiguously and repeatably much worse. 1500ms sits with comfortable
+    // margin below every "fixed" measurement and comfortably above every
+    // "bug reproduced" one.
+    assert!(
+        elapsed < Duration::from_millis(1500),
+        "typed output took {elapsed:?} to become visible — the 400ms scripted \
+         pace plus normal window/PTY startup should not come close to this; \
+         a regression back to blink-driven repainting is the likely cause"
+    );
+    let _ = session.child.kill();
+}
+
+#[test]
 #[ignore = "known gap, not yet root-caused: see comment below — tracked in plan/plan-v0.1.16.md"]
 fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
     // Intended to prove the *wiring*: a scripted key event reaches

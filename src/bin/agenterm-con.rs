@@ -1586,8 +1586,31 @@ impl PixelWindowApplication for ConTerminal {
                 }
                 Ok(PixelWindowDirective::Continue)
             }
+            PixelWindowEvent::Wake => {
+                // Fired by the PTY reader thread's `waker.wake()` whenever
+                // new output actually arrived (see `spawn_pty`) — this is
+                // the *only* signal that a shell just echoed a keystroke or
+                // printed something new. Before this arm existed, `Wake`
+                // fell through to the wildcard `_ => Continue` below and
+                // requested no redraw at all, so a keystroke's echo did not
+                // actually appear on screen until the next unrelated redraw
+                // happened to fire — in practice that was the cursor-blink
+                // timer's ~530ms period (`BLINK_INTERVAL`), which is
+                // measured, not guessed: it matches exactly the "often half
+                // a second before it responds" symptom this fixes. Typing
+                // was never actually slow — the PTY round-trip is fast —
+                // painting the result just wasn't wired to happen promptly.
+                window.request_redraw();
+                Ok(PixelWindowDirective::Continue)
+            }
             PixelWindowEvent::Keyboard(key) => {
                 self.forward_key(&key);
+                // Also redraw immediately, not just on the PTY's later
+                // `Wake`: purely local effects of a keystroke (blink reset,
+                // a host shortcut like copy/paste, IME state) have nothing
+                // to do with PTY round-trip time and should not wait on it
+                // either.
+                window.request_redraw();
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::Ime(ime) => {
