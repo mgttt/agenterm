@@ -62,12 +62,14 @@ impl Drop for InvocationTempScope {
 }
 
 pub fn register_local(engine: &mut Engine) {
-    let (std_module, rhai_module) = build_local_modules(engine);
+    let (std_module, host_api_module) = build_local_modules(engine);
     engine.register_static_module("std", Shared::new(std_module));
-    engine.register_static_module("rhai", Shared::new(rhai_module));
+    let host_api = Shared::new(host_api_module);
+    engine.register_static_module(agenterm_rh::RH_HOST_API_ROOT, host_api.clone());
+    engine.register_static_module(agenterm_rh::RHAI_LEGACY_HOST_API_ROOT, host_api);
 }
 
-/// Build the `std` and `rhai` module trees plus every type and getter
+/// Build the `std` and host API (`rh` / legacy `rhai`) module trees plus every type and getter
 /// registration exactly as the runtime receives them. The catalog-vs-
 /// registration guard walks this tree, so construction stays here instead of
 /// being duplicated for tests.

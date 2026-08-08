@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 10] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -81,6 +81,17 @@ const FIXTURES: [(&str, &[&str], &[&str]); 10] = [
         ],
         &["rh_host_eval_int(\"rhai::clipboard::"],
     ),
+    (
+        "rh_host_api_json_task.rh",
+        &[
+            "rh_json_parse(",
+            "std::thread::sleep(std::time::Duration::from_millis(",
+        ],
+        &[
+            "rh_host_eval_int(\"rhai::json::",
+            "rh_host_eval_int(\"rhai::task::",
+        ],
+    ),
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -133,8 +144,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_seventy_nine() {
-    assert_eq!(RH_CODEGEN_REVISION, 79);
+fn codegen_revision_is_eighty() {
+    assert_eq!(RH_CODEGEN_REVISION, 80);
 }
 
 #[test]
@@ -251,4 +262,20 @@ fn clipboard_get_set_text_emits_native_host_json_calls() {
         "{}",
         output.rust
     );
+}
+
+#[test]
+fn rh_host_api_json_task_emits_native_json_and_sleep() {
+    assert_native_or_host_eval(FIXTURES[10].0, FIXTURES[10].1, FIXTURES[10].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[10].0))
+        .expect("transpile rh host api json/task fixture");
+    assert!(
+        matches!(
+            output.execution_mode,
+            CdylibExecutionMode::Native | CdylibExecutionMode::HostEval
+        ),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("rh_json_parse("));
 }

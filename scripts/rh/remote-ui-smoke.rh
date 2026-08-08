@@ -58,6 +58,14 @@ fn output_stderr_text(output) {
     output.stderr_text()
 }
 
+fn remote_ui_write(path, content) {
+    std::fs::write(path, content);
+}
+
+fn remote_ui_kill(pid) {
+    std::process::kill(pid);
+}
+
 fn crypto_sha256_path(path_value) {
     let path = std::path::absolute("" + path_value).display;
     rhai::crypto::sha256_file(path)
@@ -357,6 +365,14 @@ fn text_starts_with(text, prefix) {
     haystack.starts_with(lead)
 }
 
+fn remote_ui_require_contains(text, needle, message) {
+    let haystack = "" + text;
+    let fragment = "" + needle;
+    if !haystack.contains(fragment) {
+        throw message;
+    }
+}
+
 fn measure_theme_render(
         context, cli, gui, settings_button, settings_cancel,
         baseline_theme, target_theme, label, round) {
@@ -461,6 +477,12 @@ fn find_last_run(screen, marker) {
         }
     }
     found
+}
+
+fn marker_text_offset(text, needle) {
+    let haystack = "" + text;
+    let fragment = "" + needle;
+    haystack.index_of(fragment)
 }
 
 fn process_present(id) {
@@ -607,7 +629,8 @@ fn pane_screenshot(context, cli, path) {
 }
 
 fn instance_directory_empty(context) {
-    for dir_entry in std::fs::read_dir(context.instance_directory) {
+    let directory = "" + context.instance_directory;
+    for dir_entry in std::fs::read_dir(directory) {
         return 0;
     }
     1
@@ -1670,8 +1693,12 @@ try {
         ["show-composer", "-t", tab_id]
     ));
     test_harness::require(
-        text_starts_with(prepared_cmd, protected_draft)
-            && prepared_cmd.contains("cd /d \"C:\\Program Files\""),
+        text_starts_with(prepared_cmd, protected_draft),
+        "remote_ui_cmd_cwd_quote_invalid:" + prepared_cmd
+    );
+    remote_ui_require_contains(
+        prepared_cmd,
+        "cd /d \"C:\\Program Files\"",
         "remote_ui_cmd_cwd_quote_invalid:" + prepared_cmd
     );
     let pane_input_after = text_cli(
@@ -2462,7 +2489,7 @@ try {
         context.run_directory,
         "alternate-wheel.txt"
     ).display;
-    std::fs::write(
+    remote_ui_write(
         alternate_fixture,
 `param([string]$ResultPath)
 $escape = [char]27
@@ -2615,8 +2642,10 @@ try {
         marker_run != json_null(),
         "remote_ui_selection_marker_run_missing"
     );
+    let marker_text = marker_run.text;
+    let marker_row_value = 0 + marker_run.row;
     let marker_column =
-        marker_run.column + marker_run.text.index_of(copy_marker);
+        0 + marker_run.column + marker_text_offset(marker_text, copy_marker);
     let selection_rect = replacement_gui.window_client_rect();
     let terminal_left = 360;
     let terminal_width = selection_rect.right - terminal_left - 12;
@@ -2630,7 +2659,7 @@ try {
         "remote_ui_selection_cell_geometry_invalid"
     );
     let selection_y =
-        marker_run.row * cell_height + cell_height / 2;
+        marker_row_value * cell_height + cell_height / 2;
     let selection_start_x =
         terminal_left + marker_column * cell_width + cell_width / 2;
     let selection_end_x =
@@ -2797,7 +2826,7 @@ try {
         context.run_directory,
         "bracketed-paste.txt"
     ).display;
-    std::fs::write(
+    remote_ui_write(
         bracketed_fixture,
 `param([string]$ResultPath, [string]$Payload)
 $escape = [char]27
@@ -2969,7 +2998,7 @@ try {
     let reconnect_window_id = reconnect_facts.top_level_window_id;
     let old_server_pid = replacement_bootstrap.server_pid;
     let old_server_epoch = replacement_bootstrap.server_epoch;
-    std::process::kill(old_server_pid);
+    remote_ui_kill(old_server_pid);
     wait_process_gone(
         old_server_pid,
         "remote_ui_fault_server_did_not_exit"
@@ -3160,7 +3189,7 @@ if succeeded == 0 {
     for pid in known_server_pids {
         if process_present(pid) {
             try {
-                std::process::kill(pid);
+                remote_ui_kill(pid);
                 wait_process_gone(
                     pid,
                     "remote_ui_failure_server_cleanup_timeout"

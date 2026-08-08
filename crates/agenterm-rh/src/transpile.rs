@@ -11,7 +11,7 @@ use crate::{
         uses_host_surface, var_len_name,
     },
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
-    host_api::{emit_host_runtime, rust_raw_string_literal},
+    host_api::{emit_host_runtime, host_api_module, rust_raw_string_literal},
     subset::{compat_validate, validate_ast},
 };
 
@@ -1132,7 +1132,7 @@ fn call_site_arg_kind_for_param_upgrade(arg: &Expr, ctx: &EmitCtx) -> Option<Val
             infer_binding_kind(arg, ctx)
         }
         Expr::FnCall(call, ..)
-            if call.namespace.to_string() == "rhai::json"
+            if call_host_api_module(call) == Some("json")
                 && (call.name == "parse" || call.name == "parse_file") =>
         {
             ValueKind::Json
@@ -1930,7 +1930,7 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
         Expr::FnCall(call, ..) => {
             // Known JSON-consuming callees. Merely passing `param` to an
             // arbitrary call is not JSON evidence (strings are passed too).
-            if ((call.namespace.to_string() == "rhai::json"
+            if ((call_host_api_module(call) == Some("json")
                 && (call.name == "stringify_pretty" || call.name == "stringify"))
                 || (call.namespace.is_empty()
                     && (call.name == "stringify_pretty" || call.name == "stringify")))
@@ -3855,14 +3855,20 @@ fn env_current_dir_display(expr: &Expr) -> bool {
     call.namespace.to_string() == "std::env" && call.name == "current_dir" && call.args.is_empty()
 }
 
+
+fn call_host_api_module(call: &rhai::FnCallExpr) -> Option<&str> {
+    host_api_module(&call.namespace.to_string())
+}
+
+fn is_host_api_call(call: &rhai::FnCallExpr, module: &str, name: &str, arity: usize) -> bool {
+    call_host_api_module(call) == Some(module) && call.name == name && call.args.len() == arity
+}
+
 fn json_parse_file_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::json"
-        || call.name != "parse_file"
-        || call.args.len() != 1
-    {
+    if !is_host_api_call(call, "json", "parse_file", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -3967,10 +3973,7 @@ fn crypto_sha256_file_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::crypto"
-        || call.name != "sha256_file"
-        || call.args.len() != 1
-    {
+    if !is_host_api_call(call, "crypto", "sha256_file", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -3980,8 +3983,7 @@ fn hash_fnv1a64_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::hash" || call.name != "fnv1a64" || call.args.len() != 1
-    {
+    if !is_host_api_call(call, "hash", "fnv1a64", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -3991,10 +3993,7 @@ fn bytes_from_text_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::bytes"
-        || call.name != "from_text"
-        || call.args.len() != 1
-    {
+    if !is_host_api_call(call, "bytes", "from_text", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -4004,10 +4003,7 @@ fn runtime_atomic_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::runtime"
-        || call.name != "atomic_write"
-        || call.args.len() != 2
-    {
+    if !is_host_api_call(call, "runtime", "atomic_write", 2) {
         return None;
     }
     Some((&call.args[0], &call.args[1]))
@@ -4017,10 +4013,7 @@ fn json_stringify_pretty_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::json"
-        || call.name != "stringify_pretty"
-        || call.args.len() != 1
-    {
+    if !is_host_api_call(call, "json", "stringify_pretty", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -4030,10 +4023,7 @@ fn json_stringify_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::json"
-        || call.name != "stringify"
-        || call.args.len() != 1
-    {
+    if !is_host_api_call(call, "json", "stringify", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -4043,10 +4033,7 @@ fn runtime_append_sync_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::runtime"
-        || call.name != "append_sync"
-        || call.args.len() != 2
-    {
+    if !is_host_api_call(call, "runtime", "append_sync", 2) {
         return None;
     }
     Some((&call.args[0], &call.args[1]))
@@ -4070,29 +4057,21 @@ fn image_inspect_png_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    (call.namespace.to_string() == "rhai::image"
-        && call.name == "inspect_png"
-        && call.args.len() == 1)
-        .then(|| &call.args[0])
+    is_host_api_call(call, "image", "inspect_png", 1).then(|| &call.args[0])
 }
 
 fn clipboard_get_text_arg(expr: &Expr) -> bool {
     let Expr::FnCall(call, ..) = expr else {
         return false;
     };
-    call.namespace.to_string() == "rhai::clipboard"
-        && call.name == "get_text"
-        && call.args.is_empty()
+    is_host_api_call(call, "clipboard", "get_text", 0)
 }
 
 fn clipboard_set_text_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    (call.namespace.to_string() == "rhai::clipboard"
-        && call.name == "set_text"
-        && call.args.len() == 1)
-        .then(|| &call.args[0])
+    is_host_api_call(call, "clipboard", "set_text", 1).then(|| &call.args[0])
 }
 
 fn std_process_command_arg(expr: &Expr) -> Option<&Expr> {
@@ -4733,7 +4712,7 @@ fn task_sleep_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() == "rhai::task" && call.name == "sleep" && call.args.len() == 1 {
+    if is_host_api_call(call, "task", "sleep", 1) {
         Some(&call.args[0])
     } else {
         None
@@ -6747,7 +6726,7 @@ fn json_parse_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
     };
-    if call.namespace.to_string() != "rhai::json" || call.name != "parse" || call.args.len() != 1 {
+    if !is_host_api_call(call, "json", "parse", 1) {
         return None;
     }
     Some(&call.args[0])
@@ -8573,9 +8552,7 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
             out.push(')');
         }
         Expr::FnCall(call, ..)
-            if call.namespace.to_string() == "rhai::json"
-                && call.name == "parse"
-                && call.args.len() == 1 =>
+            if is_host_api_call(call, "json", "parse", 1) =>
         {
             out.push_str("rh_json_parse(&");
             emit_stringish(out, &call.args[0], ctx)?;
@@ -14748,6 +14725,28 @@ fn entry() {
         assert!(
             output.rust.contains("let _for = rh_host_eval_int(\"for piece in line.split('\\\"')"),
             "expected escaped quote in host-eval for snippet:\n{}",
+            output.rust
+        );
+    }
+
+    #[test]
+    fn rh_host_api_namespace_fixture_transpiles_native() {
+        let source = include_str!("../tests/fixtures/rh_host_api_json_task.rh");
+        let output = transpile_cdylib_with_mode(source).expect("transpile rh:: host api");
+        assert!(
+            matches!(
+                output.execution_mode,
+                CdylibExecutionMode::Native | CdylibExecutionMode::HostEval
+            ),
+            "{:?}\n{}",
+            output.execution_mode,
+            output.rust
+        );
+        assert!(output.rust.contains("rh_json_parse("));
+        assert!(output.rust.contains("std::thread::sleep("));
+        assert!(
+            !output.rust.contains("rh_host_eval_int(\"rhai::json::"),
+            "{}",
             output.rust
         );
     }

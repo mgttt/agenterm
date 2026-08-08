@@ -393,7 +393,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     baseline
 - Scripting public-interface evidence gate
   - Rhai black-box evidence
-    - [x] the named `scripts/rhai/script-smoke.rhai` journey drives only
+    - [x] the named `scripts/rh/script-smoke.rh` journey drives only
       public Script CLI, raw documented worker protocol, and typed runtime
       objects; no test links the Rhai host or invokes a private Rust worker API
     - [x] fixtures prove deterministic output, typed Fleet observation and
@@ -543,12 +543,12 @@ costs a full candidate cycle:
 - [ ] `.github/workflows/release.yml` runs from `--ref main`. Fixing it does
   **not** require a new candidate; re-dispatch promotion against the existing
   one.
-- [ ] `scripts/rhai/promotion-identity.rhai` and
+- [ ] `scripts/rh/promotion-identity.rh` and
   `scripts/rh/candidate-verify.rh` are checked out at the candidate's
   `source_sha`. Fixing them **requires a new candidate** — reusing the old one
   reproduces the identical failure no matter how correct `main` is.
 - [ ] Anything the candidate build itself runs — gate scripts, smoke scripts,
-  `scripts/rhai/lib/release_candidate.rhai` — likewise requires a new candidate.
+  `scripts/rh/lib/release_candidate.rh` — likewise requires a new candidate.
 
 ### Cost structure
 
@@ -562,7 +562,7 @@ costs a full candidate cycle:
 
 - [ ] Download the sealed bundle and replay the promotion scripts offline
   before dispatching promotion. `candidate-verify.rh` and
-  `promotion-identity.rhai` both run against a downloaded bundle and reproduce
+  `promotion-identity.rh` both run against a downloaded bundle and reproduce
   CI's result exactly, and the publish job's assertions — body digest, marker
   reconstruction, channel uniqueness — can be recomputed with `jq` and
   `sha256sum`. This surfaces in seconds what otherwise costs a full cycle.

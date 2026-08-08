@@ -1,7 +1,36 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 79;
+pub const RH_CODEGEN_REVISION: u32 = 80;
+
+/// First-class host API module root registered on the Engine and accepted by AOT emit.
+pub const RH_HOST_API_ROOT: &str = "rh";
+/// Legacy host API module root; kept until Phase C Wave 3/4 script and Engine cleanup.
+pub const RHAI_LEGACY_HOST_API_ROOT: &str = "rhai";
+
+/// Host API submodule suffix after `rh::` or legacy `rhai::` (e.g. `json`, `task`).
+pub fn host_api_module(namespace: &str) -> Option<&'static str> {
+    let rest = namespace
+        .strip_prefix(RH_HOST_API_ROOT)
+        .and_then(|rest| rest.strip_prefix("::"))
+        .or_else(|| {
+            namespace
+                .strip_prefix(RHAI_LEGACY_HOST_API_ROOT)
+                .and_then(|rest| rest.strip_prefix("::"))
+        })?;
+    match rest {
+        "json" => Some("json"),
+        "task" => Some("task"),
+        "crypto" => Some("crypto"),
+        "runtime" => Some("runtime"),
+        "bytes" => Some("bytes"),
+        "http" => Some("http"),
+        "image" => Some("image"),
+        "clipboard" => Some("clipboard"),
+        "hash" => Some("hash"),
+        _ => None,
+    }
+}
 pub const RH_HOST_OUT_CAP: u32 = 65536;
 pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;

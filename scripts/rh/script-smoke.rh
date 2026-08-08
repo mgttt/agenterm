@@ -29,7 +29,40 @@ fn script_smoke_env_remove_value() {
 }
 
 fn nested_pid_from_path(pid_path) {
-    trimmed(std::fs::read_to_string(pid_path)).parse_int()
+    let raw = std::fs::read_to_string(pid_path);
+    let text = trimmed(raw);
+    script_smoke_parse_int(text)
+}
+
+fn script_smoke_parse_json(json_text) {
+    let payload = "" + json_text;
+    rhai::json::parse(payload)
+}
+
+fn script_smoke_parse_int(text_value) {
+    let digits = "" + text_value;
+    digits.parse_int()
+}
+
+fn script_smoke_path_absent(path) {
+    if std::fs::exists(path) {
+        0
+    } else {
+        1
+    }
+}
+
+fn script_eval_parse_int(context, cli, source, audit_path) {
+    let text = script_eval(context, cli, source, audit_path);
+    text.parse_int()
+}
+
+fn script_smoke_pad(text, target_len, ch) {
+    let padded = "" + text;
+    while padded.len < target_len {
+        padded += ch;
+    }
+    padded
 }
 
 fn append_arguments(target, arguments) {
@@ -42,7 +75,7 @@ fn append_arguments(target, arguments) {
 }
 
 fn script_smoke_write(path, content) {
-    std::fs::write(path, content);
+    rhai::runtime::atomic_write(path, content);
 }
 
 fn script_smoke_copy(from, to) {
@@ -70,15 +103,12 @@ fn script_smoke_require_no_secrets(text, secrets, message) {
     }
 }
 
-fn pipe_stdout_prefix(pipe_child) {
-    let pipe_stdout = pipe_child.stdout;
-    let prefix_chunk = pipe_stdout.read(
+fn pipe_stream_prefix(stream) {
+    let chunk = stream.read(
         4096,
         std::time::Duration::from_secs(2)
     );
-    let prefix = prefix_chunk.to_text();
-    pipe_stdout.close();
-    prefix
+    chunk.to_text()
 }
 
 fn script_smoke_child_stop(child) {
@@ -281,14 +311,6 @@ fn run_program(
     let stdout = output.stdout_text();
     let stderr = output.stderr_text();
     let bytes = output.stdout;
-    let complete = 0;
-    if output.complete {
-        complete = 1;
-    }
-    let truncated = 0;
-    if output.truncated {
-        truncated = 1;
-    }
     let success = 0;
     if output.success {
         success = 1;
@@ -298,9 +320,7 @@ fn run_program(
         exit_code: output.exit_code,
         stdout: stdout,
         stderr: stderr,
-        bytes: bytes,
-        complete: complete,
-        truncated: truncated
+        bytes: bytes
     }
 }
 
@@ -736,7 +756,8 @@ fn script_eval_json(context, cli, source, audit_path) {
 }
 
 fn script_eval_parse(context, cli, source, audit_path) {
-    rhai::json::parse(script_eval(context, cli, source, audit_path))
+    let text = script_eval(context, cli, source, audit_path);
+    script_smoke_parse_json(text)
 }
 
 fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
@@ -854,7 +875,8 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         script_smoke_empty_env()
     );
     let pipe_child = pipe_command.start();
-    let prefix = pipe_stdout_prefix(pipe_child);
+    let pipe_stream = pipe_child.stdout;
+    let prefix = pipe_stream_prefix(pipe_stream);
     let pipe_output = pipe_child.wait_with_output(
         std::time::Duration::from_secs(5)
     );
@@ -985,7 +1007,7 @@ fn assert_process_and_streams(
         ],
         audit_path
     );
-    let process_result = rhai::json::parse(process_text);
+    let process_result = script_smoke_parse_json(process_text);
     let process_stderr = process_result.stderr;
     let process_stderr_has_cwd = process_stderr.contains("cwd:");
     let process_stderr_has_runtime = process_stderr.contains("script-runtime");
@@ -1078,13 +1100,15 @@ fn assert_process_and_streams(
         script_smoke_empty_env(),
         []
     );
-    let expected = trimmed(version_output.stdout);
+    let expected = trimmed("" + version_output.stdout);
+    let expected_suffix = expected.sub_string(2);
     let stream = script_eval_parse(
         context,
         cli,
         "\nlet command=std::process::command(\"" + cli + "\");\ncommand.arg(\"--version\");\nlet child=command.start();\nlet stream=child.stdout;\nlet first=stream.read(2,std::time::Duration::from_secs(1)).to_text();\nlet rest=stream.collect(64,std::time::Duration::from_secs(1)).to_text();\nlet output=child.wait_with_output();\nlet empty=stream.read(1);\n#{\n id:stream.id,kind:stream.kind,state:stream.state,\n buffered:stream.buffered_bytes,truncated:stream.truncated,\n complete:stream.complete,first:first,rest:rest,empty:empty.len,\n final:output.stdout_text(),output_complete:output.complete\n}",
         audit_path
     );
+    let expected_tail = expected_suffix;
     test_harness::require(
         stream.id > 0
             && stream.kind == "bytes"
@@ -1093,7 +1117,7 @@ fn assert_process_and_streams(
             && !stream.truncated
             && stream.complete
             && stream.first == "ag"
-            && trimmed(stream.rest) == expected.sub_string(2)
+            && trimmed(stream.rest) == expected_tail
             && stream.empty == 0
             && trimmed(stream.final) == expected
             && stream.output_complete,
@@ -1221,7 +1245,7 @@ fn assert_tasks_and_http(
             ],
             audit_path
         );
-        let result = rhai::json::parse(http_run_text);
+        let result = script_smoke_parse_json(http_run_text);
         let cancel_has_task = result.cancel_error.contains("task_cancelled");
         let timeout_has_http = result.timeout_error.contains("http_timeout");
         let malformed_has_http = result.malformed_error.contains("http_");
@@ -1699,12 +1723,12 @@ fn assert_runtime_and_framing(
         audit_path
     );
     test_harness::require(
-        script_eval(
+        script_eval_parse_int(
             context,
             cli,
             "std::fs::copy(" + "\"" + fs_source + "\"" + ", " + "\"" + fs_copy + "\"" + ")",
             audit_path
-        ).parse_int() > 0,
+        ) > 0,
         "script_fs_copy_count_invalid"
     );
     script_eval(
@@ -1742,7 +1766,7 @@ fn assert_runtime_and_framing(
         audit_path
     );
     test_harness::require(
-        temp_root != "" && !std::fs::exists(temp_root),
+        temp_root != "" && script_smoke_path_absent(temp_root) != 0,
         "script_invocation_temp_survived"
     );
     let atomic_path = std::path::join(
@@ -1864,8 +1888,9 @@ fn assert_runtime_and_framing(
         ],
         audit_path
     );
+    let pure_id = pure_id_text.parse_int();
     test_harness::require(
-        pure_id_text.parse_int() > 0,
+        pure_id > 0,
         "script_legacy_pure_process_restricted"
     );
     let operation_limit = failure_text(
@@ -1892,8 +1917,7 @@ fn assert_runtime_and_framing(
     );
     script_smoke_require_contains(wall_limit, "\"code\":\"limit_wall_time\"", "script_wall_limit_untyped");
     script_smoke_require_contains(wall_limit, "\"exit_class\":\"limit\"", "script_wall_limit_untyped");
-    let huge_source = "";
-    huge_source.pad(262145, " ");
+    let huge_source = script_smoke_pad("", 262145, " ");
     script_smoke_write(source_file, huge_source);
     let source_limit = failure_text(
         context,
@@ -1921,8 +1945,7 @@ fn assert_runtime_and_framing(
         malformed.exit_code == 1 && malformed_has_code != 0,
         "script_worker_malformed_untyped"
     );
-    let oversized_text = "";
-    oversized_text.pad(2097153, "x");
+    let oversized_text = script_smoke_pad("", 2097153, "x");
     let oversized_command = configured_program(
         context,
         script,
@@ -1948,8 +1971,7 @@ fn assert_runtime_and_framing(
     print("STEP framed worker sequencing, isolation, rejection, and recovery");
     let framed = rhai::bytes::from_array([]);
     framed.append(payload_frame(rhai::bytes::from_text("{")));
-    let oversized_payload = "";
-    oversized_payload.pad(2097153, "x");
+    let oversized_payload = script_smoke_pad("", 2097153, "x");
     framed.append(
         payload_frame(
             rhai::bytes::from_text(oversized_payload)
@@ -2223,14 +2245,7 @@ fn assert_supervisor(
         "script_supervisor_slot_not_recovered"
     );
     for index in 1..holders.len {
-        let holder = holders[index];
-        if child_is_running(holder) {
-            script_smoke_child_stop(holder);
-        } else {
-            holder.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
-        }
+        script_smoke_child_stop(holders[index]);
     }
     script_smoke_child_stop(replacement);
     test_harness::require(
@@ -2278,7 +2293,7 @@ fn wait_repl_pid_file(path, timeout_ms) {
         if std::fs::exists(path) {
             let value = trimmed(std::fs::read_to_string(path));
             if value != "" {
-                return value.parse_int();
+                return script_smoke_parse_int(value);
             }
         }
         rhai::task::sleep(std::time::Duration::from_millis(5));
@@ -3233,11 +3248,9 @@ fn assert_audit(
         script_smoke_empty_env(),
         []
     );
-    test_harness::require(
-        (
-            audit_failure.stdout +
-            audit_failure.stderr
-        ).contains("\"code\":\"host_audit_write\""),
+    script_smoke_require_contains(
+        audit_failure.stdout + audit_failure.stderr,
+        "\"code\":\"host_audit_write\"",
         "script_audit_write_failure_not_fail_closed"
     );
 }
