@@ -466,28 +466,97 @@ fn classify_failure_root(failure) {
     "bug/unknown"
 }
 
+fn push_supported_profile_id(
+    ids,
+    platform_text,
+    profile_id,
+    windows_supported,
+    linux_supported,
+    macos_supported
+) {
+    let supported = 0;
+    if platform_text == "windows" {
+        if windows_supported != 0 {
+            supported = 1;
+        }
+    } else if platform_text == "linux" {
+        if linux_supported != 0 {
+            supported = 1;
+        }
+    } else {
+        if macos_supported != 0 {
+            supported = 1;
+        }
+    }
+    if supported != 0 {
+        ids.push("" + profile_id);
+    }
+    ids
+}
+
 fn fail_supported_profiles_for_platform(evidence_states, platform, message) {
     let platform_text = "" + platform;
     let ids = [];
-    for profile in evidence_profiles {
-        let supported = 0;
-        if platform_text == "windows" {
-            if profile.windows_supported != 0 {
-                supported = 1;
-            }
-        } else if platform_text == "linux" {
-            if profile.linux_supported != 0 {
-                supported = 1;
-            }
-        } else {
-            if profile.macos_supported != 0 {
-                supported = 1;
-            }
-        }
-        if supported != 0 {
-            ids.push("" + profile.id);
-        }
-    }
+    // Unrolled: native AOT cannot iterate module-level evidence_profiles maps.
+    ids = push_supported_profile_id(ids, platform_text, "ux-parity.startup", 1, 1, 1);
+    ids = push_supported_profile_id(ids, platform_text, "ux-parity.startup-title", 1, 1, 1);
+    ids = push_supported_profile_id(ids, platform_text, "ux-parity.wake-coalescing", 1, 1, 1);
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.linux.unix-frontend.workbench",
+        0,
+        1,
+        0
+    );
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.linux.unix-frontend.clipboard",
+        0,
+        1,
+        0
+    );
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.macos.unix-frontend.workbench",
+        0,
+        0,
+        1
+    );
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.macos.unix-frontend.clipboard",
+        0,
+        0,
+        1
+    );
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.remote-ui.replaceable-client",
+        1,
+        0,
+        0
+    );
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.remote-ui.selection",
+        1,
+        0,
+        0
+    );
+    ids = push_supported_profile_id(
+        ids,
+        platform_text,
+        "ux-parity.window-focus-contract",
+        1,
+        1,
+        1
+    );
     mark_evidence_state(evidence_states, ids, message)
 }
 
@@ -655,9 +724,82 @@ fn current_platform_root(per_platform, platform) {
     per_platform.macos_root
 }
 
+fn append_matrix_json_row(
+    matrix_result,
+    platform_text,
+    evidence_states,
+    profile_branch,
+    profile_scenario,
+    profile_id,
+    profile_owner,
+    windows_supported,
+    linux_supported,
+    macos_supported,
+    unsupported_root_cause
+) {
+    let per_platform = platform_state_for(
+        windows_supported,
+        linux_supported,
+        macos_supported,
+        unsupported_root_cause,
+        profile_id,
+        platform_text,
+        evidence_states
+    );
+    let row_state = current_platform_state(per_platform, platform_text);
+    let row_root = current_platform_root(per_platform, platform_text);
+    let record = #{
+        branch: profile_branch,
+        scenario: profile_scenario,
+        evidence_id: profile_id,
+        windows: per_platform.windows,
+        linux: per_platform.linux,
+        macos: per_platform.macos,
+        state: row_state,
+        root_cause: row_root,
+        owner: profile_owner
+    };
+    matrix_result.push(record);
+    matrix_result
+}
+
+fn append_matrix_csv_row(
+    csv_rows,
+    context,
+    timestamp,
+    suite,
+    platform_text,
+    evidence_states,
+    profile_branch,
+    profile_scenario,
+    profile_id,
+    profile_owner,
+    windows_supported,
+    linux_supported,
+    macos_supported,
+    unsupported_root_cause
+) {
+    let per_platform = platform_state_for(
+        windows_supported,
+        linux_supported,
+        macos_supported,
+        unsupported_root_cause,
+        profile_id,
+        platform_text,
+        evidence_states
+    );
+    let row_state = current_platform_state(per_platform, platform_text);
+    let row_root = current_platform_root(per_platform, platform_text);
+    let row = context.run_id + "," + timestamp + "," + suite + "," +
+        profile_branch + "," + profile_scenario + "," + profile_id + "," +
+        platform_text + "," + row_state + "," + row_root + "," + profile_owner;
+    csv_rows.push(row);
+    csv_rows
+}
+
 fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
     if emit_matrix == 0 {
-        return;
+        return 0;
     }
 
     let platform_text = "" + platform;
@@ -673,35 +815,57 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
     ).display;
 
     let matrix_result = [];
-    for profile in evidence_profiles {
-        let profile_branch = "" + profile.branch;
-        let profile_scenario = "" + profile.scenario;
-        let profile_id = "" + profile.id;
-        let profile_owner = "" + profile.owner;
-        let per_platform = platform_state_for(
-            profile.windows_supported,
-            profile.linux_supported,
-            profile.macos_supported,
-            profile.unsupported_root_cause,
-            profile_id,
-            platform_text,
-            evidence_states
-        );
-        let row_state = current_platform_state(per_platform, platform_text);
-        let row_root = current_platform_root(per_platform, platform_text);
-        let record = #{
-            branch: profile_branch,
-            scenario: profile_scenario,
-            evidence_id: profile_id,
-            windows: per_platform.windows,
-            linux: per_platform.linux,
-            macos: per_platform.macos,
-            state: row_state,
-            root_cause: row_root,
-            owner: profile_owner
-        };
-        matrix_result.push(record);
-    }
+    // Unrolled: native AOT cannot iterate module-level evidence_profiles maps.
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "startup", "first-window-startup", "ux-parity.startup", "platform",
+        1, 1, 1, ""
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "startup", "startup-title", "ux-parity.startup-title", "platform",
+        1, 1, 1, ""
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "ux-startup", "gui-wake-contract", "ux-parity.wake-coalescing", "platform",
+        1, 1, 1, ""
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "frontend-lx", "linux-workbench", "ux-parity.linux.unix-frontend.workbench", "ui",
+        0, 1, 0, "platform-gap"
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "frontend-lx", "linux-clipboard", "ux-parity.linux.unix-frontend.clipboard", "platform",
+        0, 1, 0, "platform-gap"
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "frontend-mx", "macos-workbench", "ux-parity.macos.unix-frontend.workbench", "ui",
+        0, 0, 1, "platform-gap"
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "frontend-mx", "macos-clipboard", "ux-parity.macos.unix-frontend.clipboard", "platform",
+        0, 0, 1, "platform-gap"
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "remote-ui", "replaceable-client", "ux-parity.remote-ui.replaceable-client", "ui",
+        1, 0, 0, "windows-only-contract"
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "remote-ui", "selection", "ux-parity.remote-ui.selection", "ui",
+        1, 0, 0, "windows-only-contract"
+    );
+    matrix_result = append_matrix_json_row(
+        matrix_result, platform_text, evidence_states,
+        "ux-startup", "window-focus-contract", "ux-parity.window-focus-contract", "ui",
+        1, 1, 1, ""
+    );
 
     let json_payload = #{
         run_id: context.run_id,
@@ -723,27 +887,56 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
     let csv_rows = [
         "run_id,timestamp_utc,suite,branch,scenario,evidence_id,platform,state,root_cause,owner"
     ];
-    for profile in evidence_profiles {
-        let profile_branch = "" + profile.branch;
-        let profile_scenario = "" + profile.scenario;
-        let profile_id = "" + profile.id;
-        let profile_owner = "" + profile.owner;
-        let per_platform = platform_state_for(
-            profile.windows_supported,
-            profile.linux_supported,
-            profile.macos_supported,
-            profile.unsupported_root_cause,
-            profile_id,
-            platform_text,
-            evidence_states
-        );
-        let row_state = current_platform_state(per_platform, platform_text);
-        let row_root = current_platform_root(per_platform, platform_text);
-        let row = context.run_id + "," + timestamp + "," + suite + "," +
-            profile_branch + "," + profile_scenario + "," + profile_id + "," +
-            platform_text + "," + row_state + "," + row_root + "," + profile_owner;
-        csv_rows.push(row);
-    }
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "startup", "first-window-startup", "ux-parity.startup", "platform",
+        1, 1, 1, ""
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "startup", "startup-title", "ux-parity.startup-title", "platform",
+        1, 1, 1, ""
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "ux-startup", "gui-wake-contract", "ux-parity.wake-coalescing", "platform",
+        1, 1, 1, ""
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "frontend-lx", "linux-workbench", "ux-parity.linux.unix-frontend.workbench", "ui",
+        0, 1, 0, "platform-gap"
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "frontend-lx", "linux-clipboard", "ux-parity.linux.unix-frontend.clipboard", "platform",
+        0, 1, 0, "platform-gap"
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "frontend-mx", "macos-workbench", "ux-parity.macos.unix-frontend.workbench", "ui",
+        0, 0, 1, "platform-gap"
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "frontend-mx", "macos-clipboard", "ux-parity.macos.unix-frontend.clipboard", "platform",
+        0, 0, 1, "platform-gap"
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "remote-ui", "replaceable-client", "ux-parity.remote-ui.replaceable-client", "ui",
+        1, 0, 0, "windows-only-contract"
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "remote-ui", "selection", "ux-parity.remote-ui.selection", "ui",
+        1, 0, 0, "windows-only-contract"
+    );
+    csv_rows = append_matrix_csv_row(
+        csv_rows, context, timestamp, suite, platform_text, evidence_states,
+        "ux-startup", "window-focus-contract", "ux-parity.window-focus-contract", "ui",
+        1, 1, 1, ""
+    );
     let csv_body = "";
     let row_index = 0;
     while row_index < csv_rows.len {

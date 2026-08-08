@@ -64,12 +64,10 @@ impl Drop for InvocationTempScope {
 pub fn register_local(engine: &mut Engine) {
     let (std_module, host_api_module) = build_local_modules(engine);
     engine.register_static_module("std", Shared::new(std_module));
-    let host_api = Shared::new(host_api_module);
-    engine.register_static_module(agenterm_rh::RH_HOST_API_ROOT, host_api.clone());
-    engine.register_static_module(agenterm_rh::RHAI_LEGACY_HOST_API_ROOT, host_api);
+    engine.register_static_module(agenterm_rh::RH_HOST_API_ROOT, Shared::new(host_api_module));
 }
 
-/// Build the `std` and host API (`rh` / legacy `rhai`) module trees plus every type and getter
+/// Build the `std` and host API (`rh`) module trees plus every type and getter
 /// registration exactly as the runtime receives them. The catalog-vs-
 /// registration guard walks this tree, so construction stays here instead of
 /// being duplicated for tests.
@@ -701,13 +699,13 @@ mod tests {
         );
         assert_eq!(
             engine
-                .eval::<String>(r#"rhai::json::stringify(rhai::json::parse(`{"answer":42}`))"#,)
+                .eval::<String>(r#"rh::json::stringify(rh::json::parse(`{"answer":42}`))"#,)
                 .unwrap(),
             r#"{"answer":42}"#
         );
         assert_eq!(
             engine
-                .eval::<String>(r#"rhai::bytes::from_text("hello").to_text()"#)
+                .eval::<String>(r#"rh::bytes::from_text("hello").to_text()"#)
                 .unwrap(),
             "hello"
         );
@@ -715,9 +713,9 @@ mod tests {
             engine
                 .eval::<String>(
                     r#"
-                        let bytes = rhai::bytes::from_text("hello");
+                        let bytes = rh::bytes::from_text("hello");
                         let tail = bytes.slice(1, 2);
-                        bytes.append(rhai::bytes::from_text("!"));
+                        bytes.append(rh::bytes::from_text("!"));
                         `${bytes.get(0)}:${tail.to_text()}:${bytes.to_text()}`
                     "#,
                 )
@@ -728,7 +726,7 @@ mod tests {
             engine
                 .eval::<String>(
                     r#"
-                        let bytes = rhai::bytes::from_array([0, 127, 128, 255]);
+                        let bytes = rh::bytes::from_array([0, 127, 128, 255]);
                         `${bytes.len}:${bytes.get(0)}:${bytes.get(3)}`
                     "#,
                 )
@@ -737,7 +735,7 @@ mod tests {
         );
         assert!(
             engine
-                .eval::<Dynamic>("rhai::bytes::from_array([256])")
+                .eval::<Dynamic>("rh::bytes::from_array([256])")
                 .unwrap_err()
                 .to_string()
                 .contains("bytes_value_range")
@@ -758,7 +756,7 @@ mod tests {
         .unwrap();
         let script_path = path.to_string_lossy().replace('\\', "\\\\");
         let value = local_engine()
-            .eval::<rhai::Map>(&format!(r#"rhai::json::parse_file("{script_path}")"#))
+            .eval::<rhai::Map>(&format!(r#"rh::json::parse_file("{script_path}")"#))
             .unwrap();
         assert_eq!(
             value["payload"].clone().into_string().unwrap().len(),
@@ -776,7 +774,7 @@ mod tests {
         let engine = local_engine();
         assert_eq!(
             engine
-                .eval::<String>(r#"rhai::crypto::sha256(rhai::bytes::from_text("abc"))"#)
+                .eval::<String>(r#"rh::crypto::sha256(rh::bytes::from_text("abc"))"#)
                 .unwrap(),
             expected
         );
@@ -790,7 +788,7 @@ mod tests {
         let path = fixture.to_string_lossy().replace('\\', "\\\\");
         assert_eq!(
             engine
-                .eval::<String>(&format!(r#"rhai::crypto::sha256_file("{path}")"#))
+                .eval::<String>(&format!(r#"rh::crypto::sha256_file("{path}")"#))
                 .unwrap(),
             expected
         );
@@ -801,7 +799,7 @@ mod tests {
     fn fnv1a64_hash_is_fixed_width_and_wire_compatible() {
         assert_eq!(
             local_engine()
-                .eval::<String>(r#"rhai::hash::fnv1a64(rhai::bytes::from_text("abc"))"#)
+                .eval::<String>(r#"rh::hash::fnv1a64(rh::bytes::from_text("abc"))"#)
                 .unwrap(),
             "fnv1a64:e71fa2190541574b"
         );
@@ -951,8 +949,8 @@ mod tests {
             let _scope = enter_invocation_temp_root(Some(&root));
             let source = format!(
                 r#"
-                    let temp = rhai::runtime::temp_dir();
-                    rhai::runtime::atomic_write("{}", `{{"value":"新"}}`);
+                    let temp = rh::runtime::temp_dir();
+                    rh::runtime::atomic_write("{}", `{{"value":"新"}}`);
                     #{{ temp: temp.display, value: std::fs::read_to_string("{}") }}
                 "#,
                 literal(&destination),
@@ -971,7 +969,7 @@ mod tests {
             );
         }
         let error = local_engine()
-            .eval::<ScriptPath>("rhai::runtime::temp_dir()")
+            .eval::<ScriptPath>("rh::runtime::temp_dir()")
             .unwrap_err()
             .to_string();
         assert!(error.contains("runtime_temp_unavailable"));
@@ -1004,12 +1002,12 @@ mod tests {
         let path = destination.to_string_lossy().replace('\\', "\\\\");
         let source = format!(
             r#"
-                rhai::runtime::append_sync("{path}", "text-界");
-                rhai::runtime::append_sync_bytes(
+                rh::runtime::append_sync("{path}", "text-界");
+                rh::runtime::append_sync_bytes(
                     "{path}",
-                    rhai::bytes::from_array([0, 255, 10])
+                    rh::bytes::from_array([0, 255, 10])
                 );
-                rhai::runtime::append_sync("{path}", "tail");
+                rh::runtime::append_sync("{path}", "tail");
             "#
         );
         local_engine().run(&source).unwrap();
@@ -1036,7 +1034,7 @@ mod tests {
             let engine = local_engine();
             engine
                 .run(&format!(
-                    r#"rhai::runtime::append_sync("{path}", "first");"#
+                    r#"rh::runtime::append_sync("{path}", "first");"#
                 ))
                 .unwrap();
         }
@@ -1059,7 +1057,7 @@ mod tests {
         let destination = root.join("missing-parent").join("record.log");
         let path = destination.to_string_lossy().replace('\\', "\\\\");
         let error = local_engine()
-            .run(&format!(r#"rhai::runtime::append_sync("{path}", "x");"#))
+            .run(&format!(r#"rh::runtime::append_sync("{path}", "x");"#))
             .unwrap_err()
             .to_string();
         assert!(error.contains("runtime_append_open"));

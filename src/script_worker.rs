@@ -2068,7 +2068,7 @@ mod tests {
 
         let mut shipped = invocation(
             ScriptOperation::Check,
-            r#"rhai::json::parse(`{"answer":42}`)"#,
+            r#"rh::json::parse(`{"answer":42}`)"#,
         );
         shipped.profile = ScriptProfile::Local;
         assert!(execute(shipped).ok);
