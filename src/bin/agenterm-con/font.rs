@@ -75,6 +75,40 @@ impl GlyphCache {
     }
 }
 
+/// Largest glyph coverage bitmap dimension this renderer will ever allocate,
+/// in either axis. Far larger than any real glyph needs at the `[8, 72]`
+/// pixel sizes `raster`/`cell_metrics` clamp their callers to — this only
+/// ever engages on bogus outline data, never on legitimate output.
+///
+/// Defensive, not just a size guard: an unusual or malformed glyph outline
+/// reporting an enormous bounding box is real font-rasterizer territory
+/// (exotic/buggy fonts do sometimes yield nonsensical extents from outline
+/// parsing). Without this clamp, `width * height` computed in `u32` before
+/// widening to `usize` for the allocation can silently wrap in a release
+/// build (no overflow-checks there) instead of panicking the way a debug
+/// build would — a wrapped product undersizes the alpha buffer, but the
+/// rasterizer's own draw-callback index math still multiplies by the real
+/// (unclamped) width, which is an out-of-bounds *write*, not just an
+/// oversized allocation. Under this binary's release profile
+/// (`panic = "abort"`), any panic anywhere — caller included — is a silent,
+/// dialog-free process exit: exactly the symptom a "renders fine at every
+/// size on this machine's fonts, but crashes on some machine's font at some
+/// size" report would produce, and not reproducible by sweeping this
+/// machine's own installed fonts.
+const MAX_GLYPH_DIM: u32 = 4096;
+
+/// Converts a glyph outline's raw pixel-space width/height (from
+/// `ab_glyph::OutlinedGlyph::px_bounds()`, which is font data, not
+/// something this renderer controls) into a safe allocation size. Pulled
+/// out of `raster_uncached` as a pure function so the clamp itself — the
+/// actual fix — is directly unit-testable without needing a real font file
+/// that happens to produce a pathological outline.
+fn clamp_glyph_dims(width: f32, height: f32) -> (u32, u32) {
+    let width = (width.max(0.0) as u32).min(MAX_GLYPH_DIM);
+    let height = (height.max(0.0) as u32).min(MAX_GLYPH_DIM);
+    (width, height)
+}
+
 struct Face {
     name: &'static str,
     font: FontArc,
@@ -131,9 +165,8 @@ impl Renderer {
             let glyph_id = scaled.glyph_id(ch);
             let outlined = scaled.outline_glyph(glyph_id.with_scale(PxScale::from(f32::from(size_px))))?;
             let bounds = outlined.px_bounds();
-            let width = bounds.width().max(0.0) as u32;
-            let height = bounds.height().max(0.0) as u32;
-            let mut alpha = vec![0u8; (width * height) as usize];
+            let (width, height) = clamp_glyph_dims(bounds.width(), bounds.height());
+            let mut alpha = vec![0u8; width as usize * height as usize];
             outlined.draw(|x, y, coverage| {
                 if x < width && y < height {
                     alpha[(y * width + x) as usize] = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -287,6 +320,40 @@ fn bitmap_glyph(ch: char, size_px: u16) -> Option<RasterGlyph> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clamp_glyph_dims_passes_through_normal_sizes() {
+        // A real glyph at a real clamped font size — must come out unchanged.
+        assert_eq!(clamp_glyph_dims(42.0, 58.0), (42, 58));
+    }
+
+    #[test]
+    fn clamp_glyph_dims_caps_pathological_outline_bounds() {
+        // Simulates the bug this guards against: a font outline reporting
+        // an enormous bounding box. Before the fix, `width * height` in
+        // `u32` would silently wrap in release (e.g. 100_000 * 100_000 far
+        // exceeds `u32::MAX`), and the draw callback's index math would
+        // then write past whatever undersized buffer that wrapped product
+        // allocated — an out-of-bounds write. Post-fix, both dimensions are
+        // capped, so the product can never approach overflow in the first
+        // place, in any build profile.
+        let (width, height) = clamp_glyph_dims(1_000_000.0, 1_000_000.0);
+        assert!(width <= MAX_GLYPH_DIM);
+        assert!(height <= MAX_GLYPH_DIM);
+        // The product itself must be safely representable and small enough
+        // that the allocation this feeds is never a real concern.
+        assert!(u64::from(width) * u64::from(height) <= u64::from(MAX_GLYPH_DIM) * u64::from(MAX_GLYPH_DIM));
+    }
+
+    #[test]
+    fn clamp_glyph_dims_handles_negative_and_nan_bounds() {
+        // `ab_glyph`'s bounds are attacker/font-controlled floats in
+        // practice, not just "large" — must not panic or produce a
+        // nonsensical (e.g. huge via a bad cast) result for any input.
+        assert_eq!(clamp_glyph_dims(-5.0, -5.0), (0, 0));
+        assert_eq!(clamp_glyph_dims(f32::NAN, f32::NAN), (0, 0));
+        assert_eq!(clamp_glyph_dims(f32::INFINITY, f32::INFINITY), (MAX_GLYPH_DIM, MAX_GLYPH_DIM));
+    }
 
     #[test]
     fn bitmap_fallback_renders_ascii() {
