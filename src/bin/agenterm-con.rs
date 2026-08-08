@@ -45,15 +45,83 @@ use agenterm_platform::window_host::{
 
 use palette::Rgb;
 
-/// VT callback storage for OSC sequences (window title, etc.).
+/// VT callback storage for OSC sequences (window title, etc.) and terminal
+/// query replies (see `unhandled_csi` below) that need to be written back
+/// to the PTY.
 #[derive(Default)]
 struct ConCallbacks {
     title: Option<String>,
+    /// Bytes queued by a terminal-query reply (DA1/CPR/DSR — see
+    /// `unhandled_csi`), drained and written to the PTY by `drain_pty`
+    /// right after the batch of input that produced them finishes
+    /// processing. A callback only gets `&mut Screen`, not PTY write
+    /// access, so this is the seam between "recognized a query" and
+    /// "actually answered it."
+    pending_replies: Vec<u8>,
 }
 
 impl vt100::Callbacks for ConCallbacks {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
         self.title = Some(String::from_utf8_lossy(title).trim().to_string());
+    }
+
+    /// Real, previously-missing terminal-query support — discovered as a
+    /// genuine hang, not a cosmetic gap: `claude` (a modern, real-world
+    /// Node/Ink TUI) run inside this binary via `-e` produced zero output
+    /// and never returned, indefinitely, while the identical command via a
+    /// plain `cmd.exe /c` outside agenterm-con completed in under a
+    /// second. Root cause, confirmed by reading vendored vt100's own
+    /// `csi_dispatch`: neither DA1 (`CSI c`, "what are you") nor CPR
+    /// (`CSI 6n`, "where is the cursor") is in its handled-final-byte list
+    /// for the no-intermediate case — both fall through to
+    /// `unhandled_csi`, which every terminal-facing callback in this
+    /// codebase left as the trait's no-op default. A program that queries
+    /// the terminal and *blocks* waiting for a reply before proceeding —
+    /// exactly what sophisticated TUIs do to detect real capabilities —
+    /// hangs forever against a terminal that never answers. This is very
+    /// likely the deeper, more general version of "some effects don't
+    /// render in real TUI programs": a program that never gets past its
+    /// own capability probe never gets to rendering anything at all.
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        intermediate1: Option<u8>,
+        _intermediate2: Option<u8>,
+        params: &[&[u16]],
+        final_byte: char,
+    ) {
+        // Private-mode sequences (`CSI ? ...`) and anything else with an
+        // intermediate byte are a different, larger space (DEC private
+        // mode queries, etc.) — out of scope for this fix, which targets
+        // specifically the two queries proven to actually hang a real
+        // program.
+        if intermediate1.is_some() {
+            return;
+        }
+        match final_byte {
+            // DA1 (Primary Device Attributes). Real terminals differ in
+            // exact capability bits; `\x1b[?1;2c` ("VT100 with Advanced
+            // Video Option") is the same class of minimal-but-valid answer
+            // xterm and other emulators have shipped as a baseline for
+            // decades — enough for a program that just wants confirmation
+            // something is listening before it proceeds.
+            'c' => self.pending_replies.extend_from_slice(b"\x1b[?1;2c"),
+            'n' => match params.first().and_then(|p| p.first()) {
+                // CPR (Cursor Position Report), 1-indexed per the spec —
+                // reads the screen's actual current cursor position, not a
+                // placeholder, so a program that positions itself relative
+                // to the reported location gets the truth.
+                Some(6) => {
+                    let (row, col) = screen.cursor_position();
+                    let reply = format!("\x1b[{};{}R", row + 1, col + 1);
+                    self.pending_replies.extend_from_slice(reply.as_bytes());
+                }
+                // DSR "are you OK?" -> "0n" (terminal OK, no malfunction).
+                Some(5) => self.pending_replies.extend_from_slice(b"\x1b[0n"),
+                _ => {}
+            },
+            _ => {}
+        }
     }
 }
 
@@ -729,6 +797,15 @@ impl ConTerminal {
                 Ok(bytes) => {
                     self.parser.process(&bytes);
                     got_output = true;
+                    // Flush any terminal-query reply (DA1/CPR/DSR) right
+                    // after the input that triggered it, not batched until
+                    // this whole read loop empties out — a program that
+                    // blocks on the reply before sending anything else
+                    // should see it as promptly as a real terminal would.
+                    let replies = std::mem::take(&mut self.parser.callbacks_mut().pending_replies);
+                    if !replies.is_empty() {
+                        self.write_pty(&replies);
+                    }
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -2172,6 +2249,53 @@ mod tests {
 
     fn parser() -> vt100::Parser<ConCallbacks> {
         vt100::Parser::<ConCallbacks>::new_with_callbacks(24, 80, 0, ConCallbacks::default())
+    }
+
+    /// Regression coverage for a real, confirmed hang: `claude` (a real
+    /// modern Node/Ink TUI) run through `-e` produced zero output and never
+    /// returned — indefinitely — while the identical command via a plain
+    /// `cmd.exe /c` outside this binary completed in under a second. Root
+    /// cause: neither DA1 (`CSI c`) nor CPR (`CSI 6n`) was answered, and a
+    /// program that blocks waiting for either reply before proceeding hangs
+    /// forever against a terminal that never responds. Confirmed fixed
+    /// live (not just by this unit test): the same `claude --help`
+    /// invocation that previously produced nothing now renders its full
+    /// output through this binary.
+    #[test]
+    fn da1_query_gets_a_reply_queued_for_the_pty() {
+        let mut parser = parser();
+        parser.process(b"\x1b[c");
+        assert_eq!(parser.callbacks().pending_replies, b"\x1b[?1;2c");
+    }
+
+    #[test]
+    fn cpr_query_reports_the_real_current_cursor_position() {
+        let mut parser = parser();
+        // Two lines of output move the cursor to row 1 (0-indexed), col 0 —
+        // reported 1-indexed per the CPR spec, so row 2, col 1.
+        parser.process(b"hello\r\nworld");
+        parser.callbacks_mut().pending_replies.clear();
+        parser.process(b"\x1b[6n");
+        assert_eq!(parser.callbacks().pending_replies, b"\x1b[2;6R");
+    }
+
+    #[test]
+    fn dsr_ok_query_gets_a_reply_queued() {
+        let mut parser = parser();
+        parser.process(b"\x1b[5n");
+        assert_eq!(parser.callbacks().pending_replies, b"\x1b[0n");
+    }
+
+    #[test]
+    fn unrecognized_csi_queries_are_left_unanswered_not_guessed_at() {
+        // Anything with an intermediate byte (private-mode queries, etc.)
+        // or an unrecognized final byte must not get a made-up reply —
+        // silence is the correct, honest answer for a query this binary
+        // does not actually understand, not a guess that could mislead the
+        // caller into thinking a real capability exists.
+        let mut parser = parser();
+        parser.process(b"\x1b[?15n"); // DEC-private status (printer), unhandled
+        assert!(parser.callbacks().pending_replies.is_empty());
     }
 
     /// The escape-sequence tables are covered exhaustively in
