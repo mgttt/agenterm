@@ -149,6 +149,8 @@ behavior match. See
   task-specific host validator); remaining Rhai callers still import
   `scripts/rh/lib/artifact_manifest.rh`; archived Rhai under
   `scripts/archive/rhai/lib/artifact_manifest.rhai` is migration archaeology only.
+- [x] one-shot `run`, `eval`, `check`, `api`, and task invocations still own
+  native execution through script workers and evidence-first command routing.
 - [x] v0.1.12 formerly retained `agenterm-rhai.exe` / `agenterm-rhai` as the
   canonical public executable (removed in Phase C Wave 4.5). Although Rhai was
   the stable runtime contract through v0.1.15, the version had no complete

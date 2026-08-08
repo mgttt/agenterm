@@ -140,6 +140,24 @@ pub(crate) fn archived_proxy_status_json(bounds: PixelRect) -> serde_json::Value
     })
 }
 
+/// Shared status-bar shape for the active input method.
+///
+/// Hosts own discovery of the current input source; snapshots own the stable
+/// JSON contract and geometry. A host that cannot observe a source still
+/// publishes the segment as disabled so clients never need projection-specific
+/// parsing.
+pub(crate) fn ime_status_snapshot_json(
+    bounds: PixelRect,
+    status: Option<&agenterm_platform::ime::ImeStatus>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "bounds": pixel_rect_json(bounds),
+        "label": status
+            .map(agenterm_platform::ime::ImeStatus::label)
+            .unwrap_or_else(|| "IME: off".to_owned()),
+    })
+}
+
 pub(crate) fn system_menu_json(
     toggle_checked: bool,
     copy_enabled: bool,
@@ -486,6 +504,7 @@ pub(crate) fn synthetic_layout_json(
                 "bounds": pixel_rect_json(layout.status_segments.cwd),
                 "action": "open-cwd-editor",
             },
+            "ime": ime_status_snapshot_json(layout.status_segments.ime, None),
             "proxy": archived_proxy_status_json(layout.status_segments.proxy),
             "provider": "placeholder",
         },

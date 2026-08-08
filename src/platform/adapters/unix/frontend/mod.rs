@@ -103,9 +103,9 @@ use crate::frontend::text_selection::{self, TextCursor};
 use crate::frontend::window_close::{WindowCloseChoice, WindowCloseDialog};
 use crate::ui_snapshot::{
     PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
-    embedded_window_json, event_position_json, locale_json, schema_version_json,
-    scrollbar_state_json, settings_json, system_menu_json, terminal_interaction_json,
-    working_context_json,
+    embedded_window_json, event_position_json, ime_status_snapshot_json, locale_json,
+    schema_version_json, scrollbar_state_json, settings_json, system_menu_json,
+    terminal_interaction_json, working_context_json,
 };
 
 use crate::frontend::new_terminal::{NewTerminalDialog, ui_action_open};
@@ -2725,6 +2725,7 @@ impl UnixApp {
             scrollbar_state_json(&geometry, offset, maximum)
         });
         let journal_position = self.event_journal.position();
+        let ime_status = agenterm_platform::ime::status();
         let (copy_enabled, paste_enabled) = self.system_menu_clipboard_state();
         let sidebar_scrollbar = self
             .sidebar_scrollbar_state()
@@ -2998,12 +2999,10 @@ impl UnixApp {
                         "bounds": pixel_rect_json(layout.status_segments.cwd),
                         "action": "open-cwd-editor",
                     },
-                    "ime": {
-                        "bounds": pixel_rect_json(layout.status_segments.ime),
-                        "label": agenterm_platform::ime::status()
-                            .map(|status| status.label())
-                            .unwrap_or_else(|| "IME: off".to_owned()),
-                    },
+                    "ime": ime_status_snapshot_json(
+                        layout.status_segments.ime,
+                        ime_status.as_ref(),
+                    ),
                     "proxy": archived_proxy_status_json(layout.status_segments.proxy),
                     "provider": "placeholder",
                 },

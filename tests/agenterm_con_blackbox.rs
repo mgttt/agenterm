@@ -341,7 +341,11 @@ fn nonexistent_program_via_dash_e_exits_cleanly_instead_of_hanging() {
         }
         std::thread::sleep(Duration::from_millis(30));
     };
-    assert!(!status.success(), "a spawn failure must not report success");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "a child spawn failure must map to the ordinary runtime-error exit code"
+    );
 }
 
 #[test]
@@ -467,13 +471,17 @@ fn typed_input_echoes_back_well_under_one_blink_cycle() {
     let script = write_script(
         &dir,
         r#"[
-            {"wait_ms": 400},
+            {"text": "echo LATENCY_READY\r"},
+            {"wait_ms": 200},
             {"text": "echo LATENCY_MARKER\r"}
         ]"#,
     );
-    let started = Instant::now();
     let args = interactive_shell_args(&script);
     let mut session = ConSession::spawn(&dir, &args);
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        ConSession::screen_text(snapshot).contains("LATENCY_READY")
+    });
+    let started = Instant::now();
     session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("LATENCY_MARKER")
     });
@@ -724,13 +732,20 @@ fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
         commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": 40}, "ctrl": true}"#.to_owned());
         commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": -40}, "ctrl": true}"#.to_owned());
     }
+    commands.push(r#"{"wait_ms": 250}"#.to_owned());
+    commands.push(r#"{"text": "echo ZOOM_DONE\r"}"#.to_owned());
     commands.push(r#"{"wait_ms": 300}"#.to_owned());
     let script_json = format!("[{}]", commands.join(","));
     let script = write_script(&dir, &script_json);
 
-    let mut session = ConSession::spawn(
-        &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+    let args = interactive_shell_args(script.as_path());
+    let mut session = ConSession::spawn(&dir, &args);
+    let completed = session.wait_for(Duration::from_secs(30), |snapshot| {
+        ConSession::screen_text(snapshot).contains("ZOOM_DONE")
+    });
+    assert_eq!(
+        completed["child_alive"], true,
+        "shell must remain alive after the final zoom checkpoint: {completed}"
     );
     let snapshot = session.wait_for(Duration::from_secs(15), |snapshot| {
         ConSession::screen_text(snapshot).contains("ZOOM_TEST_MARKER")

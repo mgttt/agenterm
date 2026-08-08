@@ -11,6 +11,25 @@ build through the Apple Notary Service.
 Use it only if you understand that overriding macOS security for unchecked
 software carries additional risk.
 
+Only when the signed macOS asset returns HTTP `404` or `410` does `install.sh`
+automatically fall back to the separately named `-unsigned-preview` archive.
+Every other download error, including transport, authentication, rate-limit,
+and server failures, fails closed. The installer always prints the trust
+warning to stderr before downloading the preview; there is no option that
+suppresses the warning.
+
+For a signed release, the installer requires provenance to state
+`channel=release`, `signed=true`, and `notarized=true`. It also performs a
+strict local Apple code-signature check on every required executable and
+requires each signature to identify an Apple Developer ID Application
+authority. Signed-release trust is therefore inferred from both the provenance
+claims and local executable verification, rather than from either signal alone.
+
+`AGENTERM_ALLOW_UNSIGNED_PREVIEW=1` is retained only as a compatibility
+acknowledgment for older install commands. It does not force unsigned bytes,
+skip provenance or local signature verification, suppress the warning, or
+change the install record.
+
 ## Verify the download first
 
 Download these three files for your architecture from the same GitHub Release:
@@ -32,6 +51,10 @@ source commit, architecture, archive SHA-256, `Cargo.lock` hash, artifact
 manifest hash, and GitHub Actions build-log URL. The same Release also provides
 `agenterm-…-sbom.spdx.json`, the dependency inventory generated from the locked
 release source.
+
+The installer performs the same SHA-256 and provenance checks automatically.
+For this preview it additionally requires provenance to state
+`channel=macos-unsigned-preview`, `signed=false`, and `notarized=false`.
 
 ## Open the preview
 

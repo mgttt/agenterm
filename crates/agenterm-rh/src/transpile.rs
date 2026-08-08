@@ -3492,7 +3492,18 @@ fn string_concat_args<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a Expr, &'
     if !matches!(call.op_token.as_ref(), Some(Token::Plus)) || call.args.len() != 2 {
         return None;
     }
-    prefers_string_ops(&call.args[0], &call.args[1], ctx).then_some((&call.args[0], &call.args[1]))
+    let lhs = &call.args[0];
+    let rhs = &call.args[1];
+    let has_len_operand = json_array_len_path(lhs, ctx).is_some()
+        || json_array_len_path(rhs, ctx).is_some()
+        || json_object_keys_len_path(lhs, ctx).is_some()
+        || json_object_keys_len_path(rhs, ctx).is_some()
+        || is_var_len_expr(lhs)
+        || is_var_len_expr(rhs);
+    let is_string_concat = prefers_string_ops(lhs, rhs, ctx)
+        || (has_len_operand
+            && (is_explicit_string_expr(lhs, ctx) || is_explicit_string_expr(rhs, ctx)));
+    is_string_concat.then_some((lhs, rhs))
 }
 
 const MAX_NATIVE_FOR_SPAN: i64 = 4096;

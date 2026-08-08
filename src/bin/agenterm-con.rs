@@ -27,7 +27,8 @@ mod palette;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -407,6 +408,7 @@ fn main() {
     let config = load_config();
 
     let mut app = ConTerminal::new(working_dir.clone());
+    let command_failed = Arc::clone(&app.command_failed);
     app.command = command;
     app.snapshot_path = snapshot_path;
     app.script = script.unwrap_or_default().into();
@@ -443,6 +445,9 @@ fn main() {
         let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
             "agenterm-con: {error}"
         ));
+        std::process::exit(1);
+    }
+    if command_failed.load(Ordering::Acquire) {
         std::process::exit(1);
     }
 }
@@ -552,6 +557,10 @@ struct ConTerminal {
     /// `spawn_pty` installs the real one, matching `pty_rx`'s own pattern.
     child_exit_rx: mpsc::Receiver<()>,
 
+    /// Set before the waiter reports that an explicit `-e` command failed, so
+    /// `main` can return the CLI runtime-error code after the window loop exits.
+    command_failed: Arc<AtomicBool>,
+
     /// Logical font size in DIPs. Adjusted by Ctrl+wheel.
     font_size_logical: f64,
 
@@ -637,6 +646,7 @@ impl ConTerminal {
             child: None,
             pty_rx: rx,
             child_exit_rx: exit_rx,
+            command_failed: Arc::new(AtomicBool::new(false)),
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
             cell_h: 16,
@@ -765,10 +775,19 @@ impl ConTerminal {
             .map_err(|error| PixelWindowError::failed("cmd_wait_clone_failed", format!("{error}")))?;
         let (exit_tx, exit_rx) = mpsc::channel();
         let exit_waker = window.waker();
+        let explicit_command = self.command.is_some();
+        let command_failed = Arc::clone(&self.command_failed);
         thread::Builder::new()
             .name("agenterm-con-waiter".into())
             .spawn(move || {
-                let _ = waiter.wait();
+                let wait_result = waiter.wait();
+                if explicit_command
+                    && !wait_result
+                        .as_ref()
+                        .is_ok_and(std::process::ExitStatus::success)
+                {
+                    command_failed.store(true, Ordering::Release);
+                }
                 let _ = exit_tx.send(());
                 let _ = exit_waker.wake();
             })
@@ -808,10 +827,10 @@ impl ConTerminal {
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.child_gone = true;
-                    break;
-                }
+                // PTY EOF can race ahead of the process waiter. The waiter is
+                // authoritative because it records an explicit command's exit
+                // status before telling the window loop to terminate.
+                Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
         // New output snaps scrollback to bottom.

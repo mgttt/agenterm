@@ -11,7 +11,7 @@
 #   AGENTERM_INSTALL_DIR=$HOME/.local/share/agenterm
 #   AGENTERM_BIN_DIR=$HOME/.local/bin
 #   AGENTERM_NO_LAUNCH=1
-#   AGENTERM_ALLOW_UNSIGNED_PREVIEW=1
+#   AGENTERM_ALLOW_UNSIGNED_PREVIEW=1  # compatibility acknowledgment only
 
 set -euo pipefail
 
@@ -23,6 +23,7 @@ APPLICATIONS_DIR="${AGENTERM_APPLICATIONS_DIR:-${HOME}/Applications}"
 NO_LAUNCH="${AGENTERM_NO_LAUNCH:-0}"
 ALLOW_UNSIGNED_PREVIEW="${AGENTERM_ALLOW_UNSIGNED_PREVIEW:-0}"
 DOWNLOAD_BASE="${AGENTERM_DOWNLOAD_BASE:-}"
+USE_UNSIGNED_PREVIEW="0"
 TMP_DIR=""
 LOCAL_BUILD_DIR=""
 
@@ -34,6 +35,21 @@ fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
 }
+
+warn_trust_preview() {
+  {
+    printf '==> %s\n' "************************************************************"
+    printf '==> %s\n' "WARNING: installing unsigned macOS preview archive"
+    printf '==> %s\n' "This binary is developer-preview level and is not Apple-signed"
+    printf '==> %s\n' "Trust only if you understand the signed-certificate gap."
+    printf '==> %s\n' "Proceed only for explicitly trusted environment and source."
+    printf '==> %s\n' "To run it, launch: ${APPLICATIONS_DIR}/AgenTerm.app"
+    printf '==> %s\n' "If Gatekeeper blocks launch, open System Settings -> Privacy & Security"
+    printf '==> %s\n' "and click 'Open Anyway' for this app path."
+    printf '==> %s\n' "************************************************************"
+  } >&2
+}
+
 
 cleanup() {
   if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
@@ -57,7 +73,7 @@ Environment variables:
   AGENTERM_BIN_DIR                  Command symlink directory (default: ~/.local/bin)
   AGENTERM_APPLICATIONS_DIR         macOS app directory (default: ~/Applications)
   AGENTERM_NO_LAUNCH=1              Install without starting the GUI
-  AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 Permit a labeled macOS unsigned preview
+  AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 Compatibility acknowledgment; does not force or select unsigned bytes
   AGENTERM_RELEASES_KEEP=N          Keep current + (N-1) prior release dirs (default 2)
 EOF
 }
@@ -117,6 +133,20 @@ download() {
     options+=(--proto '=https' --tlsv1.2)
   fi
   curl "${options[@]}" --output "$destination" "$url"
+}
+
+# Downloads one candidate asset and reports the final HTTP status on stdout.
+# Callers may distinguish a missing release asset (404/410) from transport,
+# authentication, rate-limit, and server failures without weakening fail-closed
+# behavior for the latter classes.
+download_with_http_status() {
+  local url="$1"
+  local destination="$2"
+  local -a options=(--fail --silent --show-error --location --retry 3)
+  if [[ "$url" == https://* ]]; then
+    options+=(--proto '=https' --tlsv1.2)
+  fi
+  curl "${options[@]}" --output "$destination" --write-out '%{http_code}' "$url"
 }
 
 replace_symlink() {
@@ -222,6 +252,7 @@ EOF
   "version": "$RELEASE_VERSION",
   "tag": "$VERSION",
   "channel": "local-build",
+  "distribution": "local",
   "variant": "$OS-$ARCH-local",
   "source_commit": "",
   "sha256": "",
@@ -231,7 +262,7 @@ EOF
 }
 EOF
   say "Installed local AgenTerm $RELEASE_VERSION to $RELEASE_DIR"
-  say "Install record: $CURRENT_LINK/installed.json"
+  say "Install record: $CURRENT_LINK/installed.json (distribution local)"
   say "Commands are available in $BIN_DIR"
   say "Dock application is available at $APP_DIR"
   if [[ "$NO_LAUNCH" != "1" ]]; then
@@ -251,9 +282,9 @@ if [[ -z "$DOWNLOAD_BASE" ]]; then
 fi
 
 PACKAGE_STEM="agenterm-${RELEASE_VERSION}-${OS}-${ARCH}"
-if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" == "1" ]]; then
-  PACKAGE_STEM="${PACKAGE_STEM}-unsigned-preview"
-fi
+SIGNED_STEM="${PACKAGE_STEM}"
+UNSIGNED_STEM="${PACKAGE_STEM}-unsigned-preview"
+PACKAGE_STEM="${SIGNED_STEM}"
 ARCHIVE_NAME="${PACKAGE_STEM}.${ARCHIVE_EXTENSION}"
 ARCHIVE_URL="${DOWNLOAD_BASE%/}/$ARCHIVE_NAME"
 CHECKSUM_URL="${ARCHIVE_URL}.sha256"
@@ -267,17 +298,50 @@ STAGING_DIR="$TMP_DIR/payload"
 mkdir -p "$STAGING_DIR"
 
 say "Downloading AgenTerm $VERSION for $OS-$ARCH"
-if ! download "$ARCHIVE_URL" "$ARCHIVE_PATH"; then
-  if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" != "1" ]]; then
-    fail "signed macOS asset is unavailable; set AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 only if you accept the developer-preview trust model"
+SIGNED_HTTP_STATUS=""
+if ! SIGNED_HTTP_STATUS="$(download_with_http_status "$ARCHIVE_URL" "$ARCHIVE_PATH")"; then
+  if [[ "$OS" != "macos" ]]; then
+    fail "release asset is unavailable: $ARCHIVE_URL"
   fi
-  fail "release asset is unavailable: $ARCHIVE_URL"
+
+  case "$SIGNED_HTTP_STATUS" in
+    404 | 410) ;;
+    *)
+      fail "signed macOS asset download failed (HTTP ${SIGNED_HTTP_STATUS:-unknown}); refusing unsigned fallback: $ARCHIVE_URL"
+      ;;
+  esac
+
+  if [[ "$ALLOW_UNSIGNED_PREVIEW" == "1" || "$ALLOW_UNSIGNED_PREVIEW" == "true" ]]; then
+    say "Unsigned-preview compatibility acknowledgment was supplied."
+  else
+    say "No signed macOS asset is available for $VERSION;"
+    say "automatically falling back to unsigned preview for installability."
+  fi
+  USE_UNSIGNED_PREVIEW="1"
+  warn_trust_preview
+
+  PACKAGE_STEM="$UNSIGNED_STEM"
+  ARCHIVE_NAME="${PACKAGE_STEM}.${ARCHIVE_EXTENSION}"
+  ARCHIVE_URL="${DOWNLOAD_BASE%/}/$ARCHIVE_NAME"
+  CHECKSUM_URL="${ARCHIVE_URL}.sha256"
+  PROVENANCE_URL="${ARCHIVE_URL}.provenance.json"
+  ARCHIVE_PATH="$TMP_DIR/$ARCHIVE_NAME"
+  CHECKSUM_PATH="$ARCHIVE_PATH.sha256"
+  PROVENANCE_PATH="$ARCHIVE_PATH.provenance.json"
+
+  download "$ARCHIVE_URL" "$ARCHIVE_PATH" || fail "release asset is unavailable: $ARCHIVE_URL"
+  download "$CHECKSUM_URL" "$CHECKSUM_PATH" ||
+    fail "release checksum is unavailable: $CHECKSUM_URL"
+  # H3: download supply-chain provenance (companion to every sealed asset).
+  download "$PROVENANCE_URL" "$PROVENANCE_PATH" ||
+    fail "release provenance is unavailable: $PROVENANCE_URL"
+else
+  download "$CHECKSUM_URL" "$CHECKSUM_PATH" ||
+    fail "release checksum is unavailable: $CHECKSUM_PATH"
+  # H3: download supply-chain provenance (companion to every sealed asset).
+  download "$PROVENANCE_URL" "$PROVENANCE_PATH" ||
+    fail "release provenance is unavailable: $PROVENANCE_URL"
 fi
-download "$CHECKSUM_URL" "$CHECKSUM_PATH" ||
-  fail "release checksum is unavailable: $CHECKSUM_URL"
-# H3: download supply-chain provenance (companion to every sealed asset).
-download "$PROVENANCE_URL" "$PROVENANCE_PATH" ||
-  fail "release provenance is unavailable: $PROVENANCE_URL"
 
 EXPECTED_SHA256="$(awk 'NR == 1 { print $1 }' "$CHECKSUM_PATH")"
 [[ "$EXPECTED_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] ||
@@ -295,12 +359,25 @@ NORMALIZED_EXPECTED_SHA256="$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[
   fail "SHA-256 verification failed for $ARCHIVE_NAME"
 say "Verified SHA-256: $NORMALIZED_ACTUAL_SHA256"
 
-# H3: verify provenance against measured digest / requested tag and print it.
+# H3: verify provenance against measured digest, requested tag, and the exact
+# selected signing/channel semantics before any payload is installed.
 command -v python3 >/dev/null 2>&1 || fail "python3 is required to verify release provenance"
+EXPECTED_PROVENANCE_CHANNEL="release"
+EXPECTED_PROVENANCE_SIGNED="false"
+EXPECTED_PROVENANCE_NOTARIZED="false"
+if [[ "$OS" == "macos" ]]; then
+  if [[ "$USE_UNSIGNED_PREVIEW" == "1" ]]; then
+    EXPECTED_PROVENANCE_CHANNEL="macos-unsigned-preview"
+  else
+    EXPECTED_PROVENANCE_SIGNED="true"
+    EXPECTED_PROVENANCE_NOTARIZED="true"
+  fi
+fi
 PROVENANCE_REPORT="$(
-  python3 - "$PROVENANCE_PATH" "$NORMALIZED_ACTUAL_SHA256" "$RELEASE_VERSION" "$VERSION" "$ARCHIVE_NAME" <<'PY'
+  python3 - "$PROVENANCE_PATH" "$NORMALIZED_ACTUAL_SHA256" "$RELEASE_VERSION" "$VERSION" "$ARCHIVE_NAME" \
+    "$OS" "$ARCH" "$EXPECTED_PROVENANCE_CHANNEL" "$EXPECTED_PROVENANCE_SIGNED" "$EXPECTED_PROVENANCE_NOTARIZED" <<'PY'
 import json, sys
-path, measured, version, tag, artifact = sys.argv[1:6]
+path, measured, version, tag, artifact, expected_os, expected_arch, expected_channel, expected_signed, expected_notarized = sys.argv[1:11]
 with open(path, encoding="utf-8") as fh:
     prov = json.load(fh)
 errors = []
@@ -313,6 +390,11 @@ expect("product", "AgenTerm")
 expect("version", version)
 expect("source_tag", tag)
 expect("artifact", artifact)
+expect("os", expected_os)
+expect("arch", expected_arch)
+expect("channel", expected_channel)
+expect("signed", expected_signed == "true")
+expect("notarized", expected_notarized == "true")
 got_sha = str(prov.get("sha256", "")).lower()
 if got_sha != measured.lower():
     errors.append(f"sha256: provenance {got_sha!r} != measured {measured.lower()!r}")
@@ -357,7 +439,7 @@ for executable in "${REQUIRED_EXECUTABLES[@]}"; do
   chmod +x "$STAGING_DIR/$executable"
 done
 
-if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" != "1" ]]; then
+if [[ "$OS" == "macos" && "$USE_UNSIGNED_PREVIEW" != "1" ]]; then
   command -v codesign >/dev/null 2>&1 || fail "codesign is required on macOS"
   for executable in "${REQUIRED_EXECUTABLES[@]}"; do
     codesign --verify --strict "$STAGING_DIR/$executable" >/dev/null 2>&1 ||
@@ -494,9 +576,11 @@ fi
 # G3/H3: machine-readable install record + retained provenance evidence.
 INSTALLED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u)"
 CHANNEL="release"
+DISTRIBUTION="stable"
 VARIANT="$OS-$ARCH"
-if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" == "1" ]]; then
+if [[ "$OS" == "macos" && "$USE_UNSIGNED_PREVIEW" == "1" ]]; then
   CHANNEL="macos-unsigned-preview"
+  DISTRIBUTION="preview"
   VARIANT="${VARIANT}-unsigned-preview"
 fi
 # Prefer the verified companion provenance we just downloaded.
@@ -509,7 +593,6 @@ PROVENANCE_SIGNED=""
 PROVENANCE_NOTARIZED=""
 PROVENANCE_SBOM=""
 PROVENANCE_BUILD_LOG=""
-PROVENANCE_CHANNEL=""
 if [[ -f "$RELEASE_DIR/agenterm.provenance.json" ]]; then
   eval "$(
     python3 - "$RELEASE_DIR/agenterm.provenance.json" <<'PY'
@@ -522,12 +605,8 @@ emit("PROVENANCE_SIGNED", p.get("signed", ""))
 emit("PROVENANCE_NOTARIZED", p.get("notarized", ""))
 emit("PROVENANCE_SBOM", p.get("sbom_sha256", ""))
 emit("PROVENANCE_BUILD_LOG", p.get("build_log", ""))
-emit("PROVENANCE_CHANNEL", p.get("channel", ""))
 PY
   )"
-  if [[ -n "$PROVENANCE_CHANNEL" ]]; then
-    CHANNEL="$PROVENANCE_CHANNEL"
-  fi
 fi
 # Escape JSON string values for installed.json body.
 json_escape() {
@@ -535,6 +614,7 @@ json_escape() {
 }
 SOURCE_COMMIT_JSON="$(json_escape "$SOURCE_COMMIT")"
 CHANNEL_JSON="$(json_escape "$CHANNEL")"
+DISTRIBUTION_JSON="$(json_escape "$DISTRIBUTION")"
 VARIANT_JSON="$(json_escape "$VARIANT")"
 SHA_JSON="$(json_escape "$NORMALIZED_ACTUAL_SHA256")"
 INSTALLED_AT_JSON="$(json_escape "$INSTALLED_AT")"
@@ -553,12 +633,15 @@ cat >"$RELEASE_DIR/installed.json" <<EOF
   "version": $VERSION_JSON,
   "tag": $TAG_JSON,
   "channel": $CHANNEL_JSON,
+  "distribution": $DISTRIBUTION_JSON,
   "variant": $VARIANT_JSON,
   "source_commit": $SOURCE_COMMIT_JSON,
   "sha256": $SHA_JSON,
   "installed_at": $INSTALLED_AT_JSON,
   "os": $OS_JSON,
   "arch": $ARCH_JSON,
+  "signed": $EXPECTED_PROVENANCE_SIGNED,
+  "notarized": $EXPECTED_PROVENANCE_NOTARIZED,
   "provenance": $PROVENANCE_BODY
 }
 EOF
@@ -572,7 +655,7 @@ fi
 
 say "Installed AgenTerm $VERSION to $RELEASE_DIR"
 say "Commands are available in $BIN_DIR"
-say "Install record: $CURRENT_LINK/installed.json (version $RELEASE_VERSION)"
+say "Install record: $CURRENT_LINK/installed.json (version $RELEASE_VERSION, distribution $DISTRIBUTION)"
 if [[ -n "$SOURCE_COMMIT" ]]; then
   say "Supply-chain: commit=$SOURCE_COMMIT signed=${PROVENANCE_SIGNED:-?} notarized=${PROVENANCE_NOTARIZED:-?}"
 fi

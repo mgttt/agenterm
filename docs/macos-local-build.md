@@ -16,17 +16,25 @@ After the app opens, keep **AgenTerm.app** in the Dock. The installer also
 copies the local build into a versioned directory under
 `~/.local/share/agenterm` and refreshes commands under `~/.local/bin`.
 
-## Why plain `./install.sh` may return 404
+## How the Release installer handles a missing signed asset
 
 Running `./install.sh` without `--local-build` selects the Release installer.
-It downloads the package for the current version and requires a signed macOS
-asset for the stable channel. If that Release asset has not been published,
-the installer reports HTTP 404 and exits without changing the active install.
+On macOS, when the signed release archive is not available it will
+automatically fall back to the `-unsigned-preview` package and prints a trust
+warning that cannot be skipped. If Gatekeeper blocks launch, open
+System Settings → Privacy & Security and choose **Open Anyway** for
+`~/Applications/AgenTerm.app`.
 
-For a source checkout, use `--local-build target/debug`; do not set
-`AGENTERM_ALLOW_UNSIGNED_PREVIEW=1`. That environment variable is only an
-explicit opt-in for a published unsigned-preview archive and is not needed for
-your own local build.
+Only an explicit HTTP 404 or 410 for the signed asset permits this fallback.
+Transport, authentication, rate-limit, and server failures stop the install
+instead of silently downgrading it.
+
+For a source checkout, use `--local-build target/debug`. Your local build is
+unsigned-but-local and still does not change release-channel trust decisions.
+
+Older commands may still set `AGENTERM_ALLOW_UNSIGNED_PREVIEW=1`. It is now a
+compatibility acknowledgment only: it does not force the preview, suppress the
+warning, skip signed-asset verification, or alter the install record.
 
 For an optimized local build, use:
 
