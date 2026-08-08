@@ -25,12 +25,22 @@ for other agents. Same bar as credentials.
 | Shell env when `~` is wrong medium | `$HOME`, `$SHELL` (still no expanded host path) |
 | Current checkout root in commands | “from repository root” + relative command; **never** `cd` + host absolute |
 
+**Home map (mandatory):** any path under a user home directory becomes
+**`~/` + the part after the home root**. This covers Darwin, Linux, and Windows
+alike. Do **not** keep platform home roots in the tree — not real usernames,
+not `<name>` placeholders, not “example” homes in plan/goal/docs.
+
+| Class | Action |
+|-------|--------|
+| In-repo path written as absolute | → repo-relative |
+| Under user home (any host layout) | → `~/...` |
+| Product data already under home | → `~/...` form only |
+
 **Forbidden in prose, tables, examples, and “bad example” columns alike:**
 
-- Expanded home absolutes (macOS/Linux/Windows host forms)
-- Token placeholders that re-teach OS-specific roots (do **not** write
-  host-layout templates such as “Users/…”, “home/…”, or “Users\\…” in docs;
-  describe the class as “host absolute home path” and show only the **good** form)
+- Expanded host home absolutes (every OS)
+- Re-teaching OS-specific home roots in docs (describe the class as
+  “host absolute home path”; show only the good form `~/...`)
 
 | Also never write | Write instead |
 |------------------|---------------|
@@ -40,16 +50,18 @@ for other agents. Same bar as credentials.
 Windows readers map `~/...` to the user profile mentally; do not dual-write
 `%USERPROFILE%` unless a Windows-only script truly requires that expansion.
 
+**Exception (code only):** unit tests that assert path *parsers* may use fixed
+synthetic absolute strings; they must not embed a real account name. Docs and
+agent goals never get that exception.
+
 **Mandatory pre-commit / post-write self-check** on every new or edited text file:
 
 ```bash
-# From repository root; any hit = rewrite before commit
-# Blocks expanded home roots on common hosts (do not put those roots in docs)
-rg -nE '(^|[^~])(/Users/|/home/|[A-Za-z]:\\\\Users\\\\)|@gmail\.com|@qq\.com|@163\.com' \
-  --glob '!target/**' --glob '!**/node_modules/**' path/to/file
+# From repository root; any hit = rewrite before commit (→ repo-relative or ~/)
+./scripts/doc-redact-check.sh path/to/file
 ```
 
-- Path hit → repo-relative or `~/...`
+- Path hit → repo-relative or `~/...` (home-absolute always collapses to `~/`)
 - Credential-like values → placeholders only
 - Handoff prompts for other agents: **same scrub**; “internal plan” is not exempt
 
