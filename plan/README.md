@@ -13,6 +13,7 @@
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix **可见行为**差距地图 |
 | [`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) | 平台 UX 证据矩阵（+ template） |
 | [`precision-audit.md`](precision-audit.md) | 窄域正确性审计表（L2/L3 等） |
+| [`agent-human-parity-audit.md`](agent-human-parity-audit.md) | **Agent↔Human 交互面**对齐审计（键鼠/声音/截图/结构树）+ 待办与决策项 |
 | [`plan-control-center-ux.md`](plan-control-center-ux.md) | L-CC / v0.2.0 UX 任务书 |
 | [`design-control-center-ux.md`](design-control-center-ux.md) | CC 布局/IA 设计 SSOT（实现级） |
 | [`plan-cc-automation-cli.md`](plan-cc-automation-cli.md) | CC 自动化 CLI 设计稿（未实现） |
