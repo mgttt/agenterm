@@ -28,7 +28,12 @@ pub const CONTROL_CENTER_STATUS: &str = "control-center.status";
 pub const CONTROL_CENTER_SNAPSHOT: &str = "control-center.snapshot";
 pub const CONTROL_CENTER_CLOSE: &str = "control-center.close";
 pub const UI_TAB_SELECT: &str = "ui.tab.select";
+pub const UI_TAB_NEW: &str = "ui.tab.new";
 pub const UI_TAB_NEW_CHILD: &str = "ui.tab.new-child";
+pub const UI_TAB_CLOSE: &str = "ui.tab.close";
+pub const UI_TAB_EDIT: &str = "ui.tab.edit";
+pub const UI_TAB_EDITOR_SAVE: &str = "ui.tab.editor.save";
+pub const UI_TAB_EDITOR_CANCEL: &str = "ui.tab.editor.cancel";
 pub const UI_TREE_TOGGLE: &str = "ui.tree.toggle";
 pub const UI_COMPOSER_SEND: &str = "ui.composer.send";
 pub const UI_INPUT_POINTER: &str = "ui.input.pointer";
@@ -356,6 +361,17 @@ const TAB_NOTE_PARAMETERS: &[OperationParameterSpec] = &[
         maximum: Some(TAB_NOTE_MAX_BYTES as i64),
     },
 ];
+/// Optional `-t` targeting shared by the tab-scoped UI actions. Omitting it
+/// means "the active tab", which is what a human click on the current tab does.
+/// The dispatcher's `resolve_target_position` also accepts an index or a title;
+/// the stable `@ID` form is the only one an agent should rely on.
+const TAB_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpec {
+    name: "tab",
+    value_type: "stable_tab_id",
+    required: false,
+    minimum: None,
+    maximum: None,
+}];
 /// `ui-action window-resize` — client-area size in **device pixels**, validated
 /// by the shared `ClientSize::parse` on both hosts.
 const WINDOW_RESIZE_PARAMETERS: &[OperationParameterSpec] = &[
@@ -695,6 +711,8 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         available: true,
         since: "0.1.6",
     },
+    // The tab-scoped verbs all honour `-t`; declaring it is what makes them
+    // useful to an agent, which otherwise could only ever hit the active tab.
     OperationSpec {
         id: UI_TAB_SELECT,
         script_surface: "fleet.ui.tab.select",
@@ -702,13 +720,28 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         command: "ui-action",
         action: Some("select-tab"),
         aliases: &[],
-        parameters: NO_PARAMETERS,
+        parameters: TAB_TARGET_PARAMETERS,
         result_type: "ui_snapshot",
         errors: &["operation_invalid_arguments"],
         events: &[],
         destructive: false,
         available: true,
         since: "0.1.15",
+    },
+    OperationSpec {
+        id: UI_TAB_NEW,
+        script_surface: "fleet.ui.tab.new",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("new-tab"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
     },
     OperationSpec {
         id: UI_TAB_NEW_CHILD,
@@ -717,13 +750,79 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         command: "ui-action",
         action: Some("new-child"),
         aliases: &[],
-        parameters: NO_PARAMETERS,
+        parameters: TAB_TARGET_PARAMETERS,
         result_type: "ui_snapshot",
         errors: &["operation_invalid_arguments"],
         events: &[],
         destructive: false,
         available: true,
         since: "0.1.15",
+    },
+    // Destructive: it ends a live PTY and drops that tab's scrollback. The
+    // catalog is classification only, but an autonomous driver deserves the
+    // same warning label a human gets from the close confirmation.
+    OperationSpec {
+        id: UI_TAB_CLOSE,
+        script_surface: "fleet.ui.tab.close",
+        class: OperationClass::Destructive,
+        command: "ui-action",
+        action: Some("close-tab"),
+        aliases: &[],
+        parameters: TAB_TARGET_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments", "operation_target_not_found"],
+        events: &[],
+        destructive: true,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_TAB_EDIT,
+        script_surface: "fleet.ui.tab.edit",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("edit-tab"),
+        aliases: &[],
+        parameters: TAB_TARGET_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments", "operation_target_not_found"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    // Precondition: the tab title editor must be open (`ui.tab.edit`, or a
+    // human double-click). `ui-snapshot` reports the editor state; calling
+    // these without it fails rather than silently doing nothing.
+    OperationSpec {
+        id: UI_TAB_EDITOR_SAVE,
+        script_surface: "fleet.ui.tab.editor.save",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("tab-editor-save"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_TAB_EDITOR_CANCEL,
+        script_surface: "fleet.ui.tab.editor.cancel",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("tab-editor-cancel"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
     },
     OperationSpec {
         id: UI_TREE_TOGGLE,
@@ -732,7 +831,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         command: "ui-action",
         action: Some("toggle-tree"),
         aliases: &[],
-        parameters: NO_PARAMETERS,
+        parameters: TAB_TARGET_PARAMETERS,
         result_type: "ui_snapshot",
         errors: &["operation_invalid_arguments"],
         events: &[],
@@ -747,7 +846,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         command: "ui-action",
         action: Some("composer-send"),
         aliases: &[],
-        parameters: NO_PARAMETERS,
+        parameters: TAB_TARGET_PARAMETERS,
         result_type: "ui_snapshot",
         errors: &["operation_invalid_arguments"],
         events: &[],
@@ -1123,7 +1222,12 @@ pub(crate) fn operation_for_args(
                 "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
                 "select-tab" => UI_TAB_SELECT,
+                "new-tab" => UI_TAB_NEW,
                 "new-child" => UI_TAB_NEW_CHILD,
+                "close-tab" => UI_TAB_CLOSE,
+                "edit-tab" => UI_TAB_EDIT,
+                "tab-editor-save" => UI_TAB_EDITOR_SAVE,
+                "tab-editor-cancel" => UI_TAB_EDITOR_CANCEL,
                 "toggle-tree" => UI_TREE_TOGGLE,
                 "composer-send" => UI_COMPOSER_SEND,
                 action if action.starts_with("tabs-") => {
@@ -1476,6 +1580,45 @@ mod tests {
                 "nullary UI action {action} must reject extra arguments"
             );
         }
+    }
+
+    #[test]
+    fn tab_lifecycle_actions_have_stable_identities_and_optional_targets() {
+        for (action, expected) in [
+            ("new-tab", UI_TAB_NEW),
+            ("close-tab", UI_TAB_CLOSE),
+            ("edit-tab", UI_TAB_EDIT),
+            ("tab-editor-save", UI_TAB_EDITOR_SAVE),
+            ("tab-editor-cancel", UI_TAB_EDITOR_CANCEL),
+        ] {
+            let operation = validate_operation_args(&args(&["ui-action", action])).unwrap();
+            assert_eq!(operation.map(|operation| operation.id), Some(expected));
+        }
+        for action in [
+            "select-tab",
+            "new-child",
+            "close-tab",
+            "edit-tab",
+            "toggle-tree",
+        ] {
+            let operation = validate_operation_args(&args(&["ui-action", action, "-t", "@7"]))
+                .unwrap_or_else(|error| panic!("{action} rejected its declared -t: {error}"));
+            assert!(operation.is_some_and(|operation| {
+                operation
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.name == "tab")
+            }));
+        }
+    }
+
+    /// Closing a tab ends a live PTY, so it must carry the same warning label
+    /// as the other irreversible operations.
+    #[test]
+    fn closing_a_tab_is_classified_destructive() {
+        let close = operation_by_id(UI_TAB_CLOSE).unwrap();
+        assert_eq!(close.class, OperationClass::Destructive);
+        assert!(close.destructive);
     }
 
     /// `window-resize` is the first typed UI action that carries options, so it
