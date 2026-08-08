@@ -614,10 +614,17 @@ fn emit_fn(out: &mut String, def: &ScriptFuncDef, ctx: &mut EmitCtx) -> Result<(
             out.push_str(", ");
         }
         if fn_ctx.cdylib {
-            // Child/Command methods take &mut self in host helpers.
+            // Child/Command methods take &mut self in host helpers. JSON/list
+            // params are also mutated in place (path assign, push, remove).
             if matches!(
                 *kind,
-                ValueKind::Child | ValueKind::Command | ValueKind::Stream
+                ValueKind::Child
+                    | ValueKind::Command
+                    | ValueKind::Stream
+                    | ValueKind::Json
+                    | ValueKind::StringList
+                    | ValueKind::ChildList
+                    | ValueKind::Set
             ) {
                 out.push_str("mut ");
             }
@@ -12314,11 +12321,62 @@ fn entry() {
         assert!(
             output
                 .rust
-                .contains("pub fn new_timing(gate_ids: Vec<String>)"),
+                .contains("pub fn new_timing(mut gate_ids: Vec<String>)"),
             "{}",
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    }
+
+    #[test]
+    fn json_param_mutation_emits_mutable_binding() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn finish(timing) {
+    timing.status = "passed";
+    timing
+}
+
+fn entry() {
+    let timing = #{ status: "running" };
+    let done = finish(timing);
+    if done.status == "passed" {
+        return 0;
+    }
+    rh::fail("bad")
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(
+            output
+                .rust
+                .contains("pub fn finish(mut timing: serde_json::Value)"),
+            "{}",
+            output.rust
+        );
+        let dir = tempfile::tempdir().expect("pack dir");
+        let pack = crate::build_pack_dir(
+            r#"
+fn finish(timing) {
+    timing.status = "passed";
+    timing
+}
+
+fn entry() {
+    let timing = #{ status: "running" };
+    let done = finish(timing);
+    if done.status == "passed" {
+        return 0;
+    }
+    rh::fail("bad")
+}
+"#,
+            dir.path(),
+        )
+        .expect("pack");
+        assert!(pack.native_path.exists());
     }
 
     #[test]
