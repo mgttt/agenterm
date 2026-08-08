@@ -305,6 +305,7 @@ pub(crate) trait ControlWindowBackend {
     fn client_size(&self) -> PixelSize;
     fn state(&self) -> ControlWindowState;
     fn focused_target(&self) -> FocusTarget;
+    fn control_at(&self, point: PixelPoint) -> Option<ControlId>;
     fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError>;
     fn set_presentation(&self, presentation: WindowPresentation);
     fn show_without_activation(&self);
@@ -385,6 +386,18 @@ impl ControlWindow {
     }
     pub fn focused_target(&self) -> FocusTarget {
         self.0.focused_target()
+    }
+    /// Which child control, if any, owns a client-area point.
+    ///
+    /// This asks the host the same question it answers when routing a real
+    /// click; it is not a re-derived hit-test, and it must not become one.
+    /// `None` means the window itself receives the pointer event, so a
+    /// synthesized gesture reaches the application's own handler. `Some(id)`
+    /// means a native control would swallow the click before the application
+    /// ever sees it, which is exactly what a synthetic gesture has to detect so
+    /// it can refuse out loud instead of doing nothing at all.
+    pub fn control_at(&self, point: PixelPoint) -> Option<ControlId> {
+        self.0.control_at(point)
     }
     pub fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError> {
         self.0.set_client_size(size)
