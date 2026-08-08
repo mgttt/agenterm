@@ -45,6 +45,18 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     )?;
     rhai_table.set("hash", hash_table)?;
 
+    // rhai::task table
+    let task_table = lua.create_table()?;
+    task_table.set(
+        "sleep",
+        lua.create_function(|_lua, ms: i64| {
+            let duration = std::time::Duration::from_millis(ms.max(0) as u64);
+            std::thread::sleep(duration);
+            Ok(0)
+        })?,
+    )?;
+    rhai_table.set("task", task_table)?;
+
     lua.globals().set("rhai", rhai_table)?;
 
     // rh::fail global
@@ -56,6 +68,24 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
                 Err(mlua::Error::runtime(format!("rh_fail: {msg}")))
             })?,
         )])?,
+    )?;
+
+    // string.split(s, delim) → table (1-indexed array)
+    lua.globals().set(
+        "string_split",
+        lua.create_function(|lua, (s, delim): (String, String)| {
+            if delim.is_empty() {
+                let t = lua.create_table()?;
+                t.set(1, s)?;
+                return Ok(t);
+            }
+            let parts: Vec<&str> = s.split(&delim).collect();
+            let t = lua.create_table()?;
+            for (i, part) in parts.iter().enumerate() {
+                t.set(i + 1, *part)?;
+            }
+            Ok(t)
+        })?,
     )?;
 
     Ok(())
@@ -277,13 +307,33 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
-    // std.fs.create_dir(path) → true | nil, err  (alias for create_dir_all)
+    // std.fs.create_dir(path) → true | nil, err
     fs.set(
         "create_dir",
         lua.create_function(|_lua, path: String| {
             std::fs::create_dir_all(&path)
                 .map(|()| true)
                 .map_err(|e| mlua::Error::runtime(format!("fs_create_dir: {e}")))
+        })?,
+    )?;
+
+    // std.fs.create_dir_all(path) → true | nil, err (rh naming alias)
+    fs.set(
+        "create_dir_all",
+        lua.create_function(|_lua, path: String| {
+            std::fs::create_dir_all(&path)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_create_dir_all: {e}")))
+        })?,
+    )?;
+
+    // std.fs.remove_dir(path) → true | nil, err (empty dirs only)
+    fs.set(
+        "remove_dir",
+        lua.create_function(|_lua, path: String| {
+            std::fs::remove_dir(&path)
+                .map(|()| true)
+                .map_err(|e| mlua::Error::runtime(format!("fs_remove_dir: {e}")))
         })?,
     )?;
 
@@ -579,6 +629,17 @@ fn build_env(lua: &Lua) -> Result<Table, mlua::Error> {
             std::env::current_dir()
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|e| mlua::Error::runtime(format!("env_current_dir: {e}")))
+        })?,
+    )?;
+
+    // std.env.names() → table (array of string)
+    env.set(
+        "names",
+        lua.create_function(|lua, ()| {
+            let names: Vec<String> = std::env::vars_os()
+                .map(|(k, _)| k.to_string_lossy().into_owned())
+                .collect();
+            lua.to_value(&names)
         })?,
     )?;
 
@@ -1358,6 +1419,134 @@ mod tests {
         if let Ok(r) = r {
             assert_eq!(r.value, 1, "expected rh.fail to trigger error");
         }
+    }
+
+    // ── sleep / split ──────────────────────────────────────────────
+
+    #[test]
+    fn task_sleep_returns_zero() {
+        let e = engine();
+        let r = e.eval("return rhai.task.sleep(10)", &host()).expect("sleep");
+        assert_eq!(r.value, 0);
+    }
+
+    #[test]
+    fn task_sleep_respects_minimum_time() {
+        use std::time::Instant;
+        let e = engine();
+        let start = Instant::now();
+        let r = e.eval("return rhai.task.sleep(100)", &host()).expect("sleep");
+        let elapsed = start.elapsed().as_millis();
+        assert_eq!(r.value, 0);
+        assert!(elapsed >= 90, "sleep should take at least ~90ms, got {elapsed}ms");
+    }
+
+    #[test]
+    fn string_split_comma() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('a,b,c', ','); return #parts",
+            &host(),
+        ).expect("split");
+        assert_eq!(r.value, 3);
+    }
+
+    #[test]
+    fn string_split_no_delimiter() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('hello', ','); return #parts",
+            &host(),
+        ).expect("split");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_empty_delimiter() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('hello', ''); return #parts",
+            &host(),
+        ).expect("split empty delim");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_empty_string() {
+        let e = engine();
+        let r = e.eval(
+            "local parts = string_split('', ','); return #parts",
+            &host(),
+        ).expect("split empty");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn string_split_index_access() {
+        let e = engine();
+        let r = e.eval(
+            "local p = string_split('x,y,z', ','); return p[2] == 'y' and 1 or 0",
+            &host(),
+        ).expect("split index");
+        assert_eq!(r.value, 1);
+    }
+
+    // ── env.names / create_dir_all / remove_dir ────────────────────
+
+    #[test]
+    fn env_names_contains_path() {
+        let e = engine();
+        let r = e.eval(
+            "local names = std.env.names(); for _, n in ipairs(names) do if n == 'PATH' then return 1 end end; return 0",
+            &host(),
+        ).expect("env.names");
+        assert_eq!(r.value, 1, "PATH should be in env.names");
+    }
+
+    #[test]
+    fn env_names_not_empty() {
+        let e = engine();
+        let r = e.eval("return #std.env.names()", &host()).expect("env.names");
+        assert!(r.value > 0, "env.names must not be empty");
+    }
+
+    #[test]
+    fn create_dir_all_recursive() {
+        let dir = TempDir::new().unwrap();
+        let deep = dir.path().join("a").join("b").join("c");
+        let e = engine();
+        e.eval(
+            &format!("std.fs.create_dir_all([[{}]])", deep.display()),
+            &host(),
+        ).expect("create_dir_all");
+        assert!(deep.is_dir());
+    }
+
+    #[test]
+    fn remove_dir_empty() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("empty_dir");
+        std::fs::create_dir(&sub).unwrap();
+        let e = engine();
+        e.eval(
+            &format!("std.fs.remove_dir([[{}]])", sub.display()),
+            &host(),
+        ).expect("remove_dir");
+        assert!(!sub.exists());
+    }
+
+    #[test]
+    fn remove_dir_nonempty_fails() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("nonempty");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("f.txt"), "x").unwrap();
+        let e = engine();
+        let r = e.eval(
+            &format!("local ok, err = pcall(function() std.fs.remove_dir([[{}]]) end); return ok and 0 or 1", sub.display()),
+            &host(),
+        ).expect("remove_dir nonempty");
+        assert_eq!(r.value, 1, "remove_dir should fail on non-empty dir");
     }
 
     // ── fnv1a64 ─────────────────────────────────────────────────────

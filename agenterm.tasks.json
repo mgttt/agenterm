@@ -1258,6 +1258,17 @@
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation"]
+    },
+    {
+      "id": "lua-check",
+      "description": "Lua production task example: lint scripts/lua/ directory for syntax errors",
+      "entry": "scripts/lua/check.lua",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["scripts/lua"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     }
   ]
 }

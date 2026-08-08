@@ -113,6 +113,11 @@ const RESIZE_DEBOUNCE: Duration = Duration::from_millis(60);
 /// Read buffer for the PTY pump thread.
 const READ_BUF: usize = 8192;
 
+/// How long after a click a second one still counts as a double-click.
+/// Matches the common Windows default rather than reading SPI_GETDBLCLKTIME,
+/// which would drag a Win32 dependency into a platform-neutral binary.
+const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(500);
+
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
 
@@ -172,6 +177,85 @@ fn load_config() -> ConConfig {
     config
 }
 
+/// Command-line options, parsed out of `main` so the precedence and
+/// passthrough rules are unit-testable rather than only observable by
+/// launching a window.
+#[derive(Debug, Default, PartialEq)]
+struct ConArgs {
+    no_activate: bool,
+    working_dir: Option<String>,
+    font_size: Option<f64>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    command: Option<Vec<String>>,
+}
+
+/// Parses arguments, returning the message to print on failure.
+fn parse_args(args: &[String]) -> Result<ConArgs, String> {
+    let mut parsed = ConArgs::default();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--no-activate" => parsed.no_activate = true,
+            "--working-dir" => {
+                parsed.working_dir = Some(
+                    rest.next()
+                        .cloned()
+                        .ok_or_else(|| "error: --working-dir requires a path
+".to_owned())?,
+                );
+            }
+            other if other.starts_with("--working-dir=") => {
+                parsed.working_dir = Some(other["--working-dir=".len()..].to_owned());
+            }
+            "--font-size" => parsed.font_size = next_value(&mut rest, "--font-size")?,
+            other if other.starts_with("--font-size=") => {
+                parsed.font_size = Some(parse_value(&other["--font-size=".len()..], "--font-size")?);
+            }
+            "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
+            "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
+            // Everything after -e is the command line, verbatim. Consuming the
+            // remainder is what lets `-e ssh host -p 22` pass `-p 22` through
+            // rather than having this parser reject it as an unknown flag.
+            "-e" | "--command" => {
+                let argv: Vec<String> = rest.cloned().collect();
+                if argv.is_empty() {
+                    return Err("error: -e requires a program to run
+".to_owned());
+                }
+                parsed.command = Some(argv);
+                return Ok(parsed);
+            }
+            unknown => {
+                return Err(format!("error: unknown argument '{unknown}'
+
+{USAGE}"));
+            }
+        }
+    }
+    Ok(parsed)
+}
+
+/// Reads the next argument as `T`, reporting the flag name on failure rather
+/// than silently ignoring a typo — the old parser dropped bad values on the
+/// floor, so `--cols twenty` quietly did nothing.
+fn next_value<'a, T: std::str::FromStr>(
+    rest: &mut impl Iterator<Item = &'a String>,
+    flag: &str,
+) -> Result<Option<T>, String> {
+    let raw = rest
+        .next()
+        .ok_or_else(|| format!("error: {flag} requires a value
+"))?;
+    parse_value(raw, flag).map(Some)
+}
+
+fn parse_value<T: std::str::FromStr>(raw: &str, flag: &str) -> Result<T, String> {
+    raw.parse()
+        .map_err(|_| format!("error: {flag} expects a number, got '{raw}'
+"))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -179,46 +263,28 @@ fn main() {
         std::process::exit(code);
     }
 
-    let mut no_activate = std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
-    let mut working_dir: Option<String> = None;
-    let mut font_size: Option<f64> = None;
-    let mut initial_cols: Option<u16> = None;
-    let mut initial_rows: Option<u16> = None;
-    let mut rest = args.iter();
-    while let Some(arg) = rest.next() {
-        match arg.as_str() {
-            "--no-activate" => no_activate = true,
-            "--working-dir" => {
-                working_dir = rest.next().cloned();
-            }
-            other if other.starts_with("--working-dir=") => {
-                working_dir = Some(other["--working-dir=".len()..].to_owned());
-            }
-            "--font-size" => {
-                font_size = rest.next().and_then(|v| v.parse().ok());
-            }
-            other if other.starts_with("--font-size=") => {
-                font_size = other["--font-size=".len()..].parse().ok();
-            }
-            "--cols" => {
-                initial_cols = rest.next().and_then(|v| v.parse().ok());
-            }
-            "--rows" => {
-                initial_rows = rest.next().and_then(|v| v.parse().ok());
-            }
-            unknown => {
-                let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
-                    "error: unknown argument '{unknown}'\n\n{USAGE}"
-                ));
-                std::process::exit(2);
-            }
+    let parsed = match parse_args(&args) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            let _ = agenterm_platform::process::write_parent_console_stderr(&message);
+            std::process::exit(2);
         }
-    }
+    };
+    let ConArgs {
+        mut no_activate,
+        working_dir,
+        font_size,
+        cols: initial_cols,
+        rows: initial_rows,
+        command,
+    } = parsed;
+    no_activate |= std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
 
     // Load config file: CLI flags override config, config overrides defaults.
     let config = load_config();
 
     let mut app = ConTerminal::new(working_dir.clone());
+    app.command = command;
     // Config values (lowest priority)
     if let Some(fs) = config.font_size {
         app.font_size_logical = fs.clamp(8.0, 36.0);
@@ -259,10 +325,16 @@ fn main() {
 const USAGE: &str = "\
 Usage: agenterm-con [--no-activate] [--working-dir DIR]
                    [--font-size N] [--cols N] [--rows N]
+                   [-e PROGRAM [ARGS...]]
        agenterm-con --version
        agenterm-con --help
 
-A minimal console host (conhost equivalent). No tabs, no server, no Fleet.
+A standalone console host (conhost equivalent). No tabs, no server, no Fleet.
+
+  -e, --command  Run PROGRAM instead of the default shell. Everything after
+                 -e is passed through verbatim, so it must come last:
+                   agenterm-con -e pwsh -NoLogo
+                   agenterm-con --working-dir C:\\src -e cargo test
 
 Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 ~/.config (Unix) with keys: font_size, cols, rows (all optional).
@@ -296,6 +368,9 @@ fn offline_cli_exit(args: &[String]) -> Option<i32> {
 
 struct ConTerminal {
     working_dir: Option<String>,
+
+    /// Program to host, from `-e`. `None` runs the user's default shell.
+    command: Option<Vec<String>>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser<ConCallbacks>,
@@ -361,6 +436,10 @@ struct ConTerminal {
     /// Gates the logical-key fallback, which would otherwise double-type keys
     /// the IME consumed. See `TerminalKeyMode::ime_active`.
     ime_attached: bool,
+
+    /// Time and place of the last left press, plus how many clicks it
+    /// continued, for double/triple-click selection.
+    last_click: Option<(Instant, TerminalPoint, u8)>,
     /// Current scale factor (for pointer hit-test DIP→pixel conversion).
     scale: f64,
 }
@@ -373,6 +452,7 @@ impl ConTerminal {
         drop(tx);
         Self {
             working_dir,
+            command: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
@@ -398,6 +478,7 @@ impl ConTerminal {
             active_button: None,
             ime_preedit: String::new(),
             ime_attached: false,
+            last_click: None,
             scale: 1.0,
         }
     }
@@ -419,18 +500,30 @@ impl ConTerminal {
 
     /// Spawns the shell PTY and the reader thread. Called once from `opened`.
     fn spawn_pty(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
-        let shell = agenterm_platform::runtime::default_terminal_shell();
-        let mut command = ChildCommand::new(shell.clone())
+        // `-e` hosts a chosen program; otherwise fall back to the user's shell.
+        let (program, extra_args) = match self.command.as_ref().and_then(|argv| argv.split_first()) {
+            Some((program, args)) => (program.clone(), args.to_vec()),
+            None => (agenterm_platform::runtime::default_terminal_shell(), Vec::new()),
+        };
+
+        let mut command = ChildCommand::new(program.clone())
             .size(TerminalSize {
                 rows: self.rows,
                 cols: self.cols,
             })
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor");
-        // Platform-neutral: returns Some("-l") on Unix for bare shells,
-        // None on Windows or when the shell already has explicit args.
-        if let Some(login_arg) =
-            agenterm_platform::pty::login_shell_argument(std::path::Path::new(&shell), 0)
+
+        if self.command.is_some() {
+            for argument in extra_args {
+                command = command.arg(argument);
+            }
+        } else if let Some(login_arg) =
+            // Platform-neutral: returns Some("-l") on Unix for bare shells,
+            // None on Windows or when the shell already has explicit args.
+            // Only meaningful for the default-shell path — a program given
+            // via -e must receive exactly the arguments the user wrote.
+            agenterm_platform::pty::login_shell_argument(std::path::Path::new(&program), 0)
         {
             command = command.arg(login_arg);
         }
@@ -439,7 +532,9 @@ impl ConTerminal {
         }
 
         let spawned = command.spawn().map_err(|error| {
-            PixelWindowError::failed("cmd_spawn_failed", format!("{error}"))
+            // Name the program: "failed to spawn" with no subject is the kind
+            // of error message that costs a user ten minutes.
+            PixelWindowError::failed("cmd_spawn_failed", format!("{program}: {error}"))
         })?;
         let (mut master, child) = spawned.into_parts();
 
@@ -560,6 +655,113 @@ impl ConTerminal {
             _ => self.ime_preedit.clear(),
         }
         window.request_redraw();
+    }
+
+    /// Records a left press and returns the click count (1, 2, or 3).
+    ///
+    /// A repeat only counts when it lands on the same cell inside the
+    /// multi-click window; moving to a different cell starts a fresh count, so
+    /// a fast click in two places does not select a word by accident.
+    fn register_click(&mut self, point: TerminalPoint) -> u8 {
+        let now = Instant::now();
+        let count = match self.last_click {
+            Some((at, at_point, count))
+                if at_point == point && now.duration_since(at) <= MULTI_CLICK_WINDOW =>
+            {
+                // Cycle 1 → 2 → 3 → 1 so a fourth click returns to character
+                // selection rather than sticking on whole-line.
+                count % 3 + 1
+            }
+            _ => 1,
+        };
+        self.last_click = Some((now, point, count));
+        count
+    }
+
+    /// Expands to the word around `point`, or `None` if that cell is blank.
+    fn word_at(&self, point: TerminalPoint) -> Option<(TerminalPoint, TerminalPoint)> {
+        let screen = self.parser.screen();
+        let (_, cols) = screen.size();
+        if !self.is_word_cell(point.row, point.col) {
+            return None;
+        }
+        let mut start = point.col;
+        while start > 0 && self.is_word_cell(point.row, start - 1) {
+            start -= 1;
+        }
+        let mut end = point.col;
+        while end + 1 < cols && self.is_word_cell(point.row, end + 1) {
+            end += 1;
+        }
+        Some((
+            TerminalPoint {
+                row: point.row,
+                col: start,
+            },
+            TerminalPoint {
+                row: point.row,
+                col: end,
+            },
+        ))
+    }
+
+    /// Whether a cell participates in a double-click word.
+    ///
+    /// Deliberately more permissive than conhost's space-only rule: `/`, `.`,
+    /// `-`, and `:` stay inside the word so a path or URL selects in one click,
+    /// which is the common case in a terminal.
+    fn is_word_cell(&self, row: u16, col: u16) -> bool {
+        let Some(cell) = self.parser.screen().cell(row, col) else {
+            return false;
+        };
+        if !cell.has_contents() {
+            return false;
+        }
+        cell.contents().chars().next().is_some_and(|character| {
+            !character.is_whitespace()
+                && !matches!(
+                    character,
+                    '(' | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '\''
+                        | '"'
+                        | '`'
+                        | '|'
+                        | ';'
+                        | ','
+                )
+        })
+    }
+
+    /// Expands to the whole *logical* line, following soft wrapping, so a
+    /// triple-click on a long wrapped command selects all of it rather than
+    /// just the visual row the pointer happened to land on.
+    fn line_at(&self, point: TerminalPoint) -> (TerminalPoint, TerminalPoint) {
+        let screen = self.parser.screen();
+        let (rows, cols) = screen.size();
+        let mut start = point.row;
+        while start > 0 && screen.row_wrapped(start - 1) {
+            start -= 1;
+        }
+        let mut end = point.row;
+        while end + 1 < rows && screen.row_wrapped(end) {
+            end += 1;
+        }
+        (
+            TerminalPoint {
+                row: start,
+                col: 0,
+            },
+            TerminalPoint {
+                row: end,
+                col: cols.saturating_sub(1),
+            },
+        )
     }
 
     /// Draws the in-progress composition starting at the cursor cell and
@@ -903,8 +1105,21 @@ impl ConTerminal {
         // Local handling.
         match (button, pressed) {
             (PointerButton::Left, true) => {
-                self.selection = Some((point, point));
-                self.selecting = true;
+                match self.register_click(point) {
+                    1 => {
+                        self.selection = Some((point, point));
+                        self.selecting = true;
+                    }
+                    2 => {
+                        self.selection = self.word_at(point);
+                        self.selecting = false;
+                    }
+                    // Third click and beyond select the whole logical line.
+                    _ => {
+                        self.selection = Some(self.line_at(point));
+                        self.selecting = false;
+                    }
+                }
                 window.request_redraw();
             }
             (PointerButton::Left, false) => {
@@ -1137,21 +1352,44 @@ impl PixelWindowApplication for ConTerminal {
             self.draw_preedit(pixels, fw, fh, cursor)
         };
 
-        // Solid block cursor at the current position. Hide when scrolled back.
+        // Block cursor, drawn as a properly inverted cell rather than an opaque
+        // fill: the character under the cursor stays readable, as it does in
+        // conhost. Hidden while scrolled back, where it would point at a cell
+        // the application is no longer writing to.
         if !cursor_hidden && self.scroll_offset == 0 {
-            let cx = (u32::from(cursor.1) + preedit_cells) * self.cell_w;
+            let cursor_col = u32::from(cursor.1) + preedit_cells;
+            let cx = cursor_col * self.cell_w;
             let cy = u32::from(cursor.0) * self.cell_h;
             if cx < fw && cy < fh {
-                fill_rect(
-                    pixels,
-                    fw,
-                    fh,
-                    cx,
-                    cy,
-                    self.cell_w,
-                    self.cell_h,
-                    self.default_fg.to_xrgb(),
-                );
+                // A wide (CJK) glyph under the cursor must be covered whole,
+                // otherwise the cursor bisects it.
+                let under = (preedit_cells == 0)
+                    .then(|| screen.cell(cursor.0, cursor.1))
+                    .flatten();
+                let span = match under {
+                    Some(cell) if cell.is_wide() => self.cell_w * 2,
+                    _ => self.cell_w,
+                };
+                fill_rect(pixels, fw, fh, cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
+
+                let glyph = under
+                    .filter(|cell| cell.has_contents())
+                    .and_then(|cell| {
+                        font::raster(first_grapheme(cell.contents()), self.font_size_px)
+                    });
+                if let Some(glyph) = glyph {
+                    blit_glyph(
+                        pixels,
+                        fw,
+                        fh,
+                        &glyph,
+                        cx,
+                        cy,
+                        self.default_bg,
+                        span,
+                        self.cell_h,
+                    );
+                }
             }
         }
 
@@ -1380,6 +1618,106 @@ mod tests {
         // ...and scrolling down from the bottom must not underflow.
         app.scroll_by(-10);
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn double_click_selects_a_word_and_keeps_paths_whole() {
+        let mut app = ConTerminal::new(None);
+        app.parser.screen_mut().set_size(4, 40);
+        app.parser.process(b"cd /usr/local/bin (note)");
+
+        // Inside the path: the whole path is one word, because '/', '.', '-'
+        // and ':' are word characters here — more useful than conhost's
+        // space-only rule.
+        let hit = TerminalPoint { row: 0, col: 8 };
+        let (start, end) = app.word_at(hit).expect("word under a path cell");
+        assert_eq!((start.col, end.col), (3, 16));
+
+        // Parentheses are delimiters, so "note" selects without them.
+        let hit = TerminalPoint { row: 0, col: 19 };
+        let (start, end) = app.word_at(hit).expect("word inside parens");
+        assert_eq!((start.col, end.col), (19, 22));
+
+        // A blank cell yields no word rather than an empty selection.
+        assert!(app.word_at(TerminalPoint { row: 0, col: 2 }).is_none());
+    }
+
+    #[test]
+    fn triple_click_follows_soft_wrapping_to_the_whole_logical_line() {
+        let mut app = ConTerminal::new(None);
+        app.parser.screen_mut().set_size(4, 10);
+        // 15 characters over a 10-column grid soft-wraps onto row 1.
+        app.parser.process(b"abcdefghijklmno");
+        assert!(app.parser.screen().row_wrapped(0), "row 0 should be wrapped");
+
+        // Clicking the continuation row still selects from the start of the
+        // logical line, not just the visual row under the pointer.
+        let (start, end) = app.line_at(TerminalPoint { row: 1, col: 2 });
+        assert_eq!((start.row, start.col), (0, 0));
+        assert_eq!((end.row, end.col), (1, 9));
+    }
+
+    #[test]
+    fn click_counting_requires_the_same_cell_within_the_window() {
+        let mut app = ConTerminal::new(None);
+        let here = TerminalPoint { row: 1, col: 1 };
+        let elsewhere = TerminalPoint { row: 5, col: 5 };
+
+        assert_eq!(app.register_click(here), 1);
+        assert_eq!(app.register_click(here), 2);
+        assert_eq!(app.register_click(here), 3);
+        // A fourth click cycles back to character selection.
+        assert_eq!(app.register_click(here), 1);
+
+        // Moving restarts the count, so a fast click in two places cannot
+        // accidentally select a word.
+        assert_eq!(app.register_click(here), 2);
+        assert_eq!(app.register_click(elsewhere), 1);
+    }
+
+    fn argv(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn dash_e_takes_the_rest_of_the_line_verbatim() {
+        // Flags belonging to the hosted program must reach it untouched, not
+        // be parsed (or rejected) by this host.
+        let parsed = parse_args(&argv(&["-e", "ssh", "host", "-p", "22"])).expect("parses");
+        assert_eq!(
+            parsed.command,
+            Some(argv(&["ssh", "host", "-p", "22"]))
+        );
+
+        // Host flags before -e still apply.
+        let parsed =
+            parse_args(&argv(&["--cols", "100", "-e", "pwsh", "-NoLogo"])).expect("parses");
+        assert_eq!(parsed.cols, Some(100));
+        assert_eq!(parsed.command, Some(argv(&["pwsh", "-NoLogo"])));
+    }
+
+    #[test]
+    fn dash_e_without_a_program_is_an_error() {
+        assert!(parse_args(&argv(&["-e"])).is_err());
+    }
+
+    #[test]
+    fn bad_numeric_values_are_reported_rather_than_silently_dropped() {
+        // The previous parser used `.ok()`, so `--cols twenty` was ignored and
+        // the user got a default-sized window with no explanation.
+        let error = parse_args(&argv(&["--cols", "twenty"])).expect_err("should reject");
+        assert!(error.contains("--cols"), "{error}");
+        assert!(error.contains("twenty"), "{error}");
+
+        assert!(parse_args(&argv(&["--font-size"])).is_err());
+        assert!(parse_args(&argv(&["--working-dir"])).is_err());
+    }
+
+    #[test]
+    fn unknown_flags_are_rejected_with_usage() {
+        let error = parse_args(&argv(&["--nope"])).expect_err("should reject");
+        assert!(error.contains("--nope"), "{error}");
+        assert!(error.contains("Usage:"), "{error}");
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.fs.metadata",
     "std.fs.copy",
     "std.fs.create_dir",
+    "std.fs.create_dir_all",
+    "std.fs.remove_dir",
     "std.fs.read_dir",
     "std.fs.remove_file",
     "std.fs.rename",
@@ -36,6 +38,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     // std.env
     "std.env.get",
     "std.env.has",
+    "std.env.names",
     "std.env.current_dir",
     // std.time
     "std.time.now_unix_ms",
@@ -74,7 +77,9 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "rhai.runtime.atomic_write",
     "rhai.runtime.temp_dir",
     "rhai.hash.fnv1a64",
+    "rhai.task.sleep",
     "rh.fail",
+    "string_split",
 ];
 
 fn shipped(path: &str) -> bool {

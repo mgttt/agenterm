@@ -150,14 +150,54 @@ O. Unix multi-instance reachability
 > 动机：cmd.exe 不稳定 + agenterm.exe 自身开发时被锁无法覆盖 → 需要一个
 > **最小可用、不依赖 agenterm server** 的控制台宿主（对标 Windows conhost.exe）。
 > 基于 `crates/agenterm-platform` 薄封装，预留未来作为 Windows server attach 体。
+>
+> **目标升级（2026-08-08，人工指示）**：从「最小可用」改为 **要比系统自带
+> conhost 做得更好**。这不是加花活，而是先把 conhost **已经做到、而我们没做到**
+> 的补齐（见 C5/C6），再谈超越。原 C2 的「非目标：raw mouse / bracketed paste」
+> 是最小可用时代的取舍，**已作废**——本宿主存在的理由就是跑 TUI agent，
+> 而 TUI agent 恰恰需要这两样。
 
 ```text
 C. Console host (agenterm-con.exe)
 ├─ [x] C1 最小 ConPTY 窗：开窗、起 shell、pty 泵、渲染（platform 直调）
 ├─ [x] C2 键盘输入 + 鼠标选择 + 剪贴板（复用 platform 的 input/clipboard 封装）
 ├─ [ ] C3 滚动缓冲区 + 字体/DPI 跟随（复用 platform 的 font/screenshot）
-└─ [ ] C4 server attach 预留：实现与 remote frontend 相同的 IPC 帧协议（仅接线，不接 Fleet）
+├─ [ ] C4 server attach 预留：实现与 remote frontend 相同的 IPC 帧协议（仅接线，不接 Fleet）
+├─ [x] C5 认下应用协商的输入契约（DECCKM / 修饰键 / bracketed paste / 鼠标上报）
+├─ [x] C6 IME 恢复 + 合成串行内渲染（中文可输入）
+├─ [x] C7 块光标可读 + 双击选词 / 三击选逻辑行（conhost 有、我们缺的两项）
+├─ [x] C8 `-e/--command` 托管指定程序 + 参数解析可单测
+├─ [x] C9 CJK 字形回退链（截图发现：中日韩原本渲染成空白格）
+└─ [ ] C10 剩余超越面：光标形状(DECSCUSR)+闪烁、回看搜索、OSC 8 超链接、脏行重绘
 ```
+
+- [x] **C7 光标与选区**（`8d5fc840`）
+  - **可读块光标**：原来在字形层之后用前景色**实心矩形**覆盖光标格，导致
+    **光标下的字符完全看不见**（你看不到自己将要覆盖的字符）。改为真正的反显
+    （填充后用背景色重绘字形），并让宽 CJK 字形整格被覆盖而不是被切一半。
+  - **双击选词**：词类**刻意比 conhost 的「仅空格分隔」更宽**——`/`、`.`、`-`、`:`
+    留在词内，所以路径/URL 一次点中；括号引号是分隔符。
+  - **三击选逻辑行**：走 `row_wrapped` 跟随软换行，长命令整条选中，而不是只选
+    指针所在的那一**视觉**行。
+  - **防误触**：重复点击必须落在同一格且在 500ms 内；第四次回到字符选择。
+
+- [x] **C8 `-e/--command`**（`e7d468d2`）
+  - **用户问题**：只能起默认 shell，没法 `agenterm-con -e pwsh -NoLogo`
+  - `-e` 之后**整行原样透传**，所以 `-e ssh host -p 22` 的 `-p` 到得了 ssh，
+    而不是被本宿主当未知参数拒绝；`-l` 登录 shell 参数只在默认 shell 路径加。
+  - **顺手修了个静默 bug**：原解析对数值参数一律 `.ok()`，`--cols twenty` 被
+    **悄悄忽略**，用户只看到一个默认大小的窗口且没有任何解释。现在报错。
+
+- [x] **C9 CJK 字形回退链**（`4d9852a1`）
+  - **单测抓不到、截图才抓到**：中文 Windows 下 `echo Hello 中文 CJK` 渲染成
+    `Hello ⎵⎵ CJK`——格宽占了，**什么都没画**，普通 cmd 输出有一半是隐形的。
+  - **两个 bug 叠加**：① `load_faces()` 在第一个成功加载的字体文件处 `break`，
+    所谓「回退链」只覆盖单个文件内的 face；② 就算不 break 也没得退——三个平台的
+    候选**全是拉丁等宽字体**，Consolas 没有汉字。
+  - **做法**：平台层新增 `font::fallback_candidates()`（仅供补字形、**永不**当主字体，
+    因为格子度量必须来自等宽字体）。主字体选择仍是「第一个可读文件胜出」，
+    只有覆盖回退是累加的。
+  - **验收**：截图确认 中文字形 / 日本語 / 한국어 均正常渲染
 
 - [ ] **C1 最小 ConPTY 窗**
   - **用户问题**：agenterm 开发/锁住时没有可靠终端
@@ -171,7 +211,8 @@ C. Console host (agenterm-con.exe)
   - **做法**：复用 platform 的 `input` adapter（键盘→ConPTY 写入，鼠标→选择/滚轮）、
     `clipboard` adapter（选中文本 Ctrl+C → Win32 剪贴板 UTF-16）
   - **验收**：文本可选、Ctrl+C/V 工作、滚轮滚动缓冲区
-  - **非目标**：raw mouse 模式（无应用接管需求）、bracketed paste
+  - ~~**非目标**：raw mouse 模式（无应用接管需求）、bracketed paste~~
+    → **已作废，两项均由 C5 落地**（见上方目标升级）
 
 - [ ] **C3 滚动缓冲区 + 字体/DPI**
   - **做法**：复用 platform 的 `font`（字形栅格化）、`screenshot`（区域截图）封装；
@@ -188,6 +229,47 @@ C. Console host (agenterm-con.exe)
   - **验收**：`agenterm-con --attach <name>` 连接成功，server 侧 tab 内容渲染到 cmd 窗
   - **非目标**：本版不发 C4；仅「协议接线预留」，不阻塞 C1–C3
   - **成本**：大（需端到端验证 server↔cmd 帧往返）；优先度低于 W/O
+
+- [x] **C5 认下应用协商的输入契约**（`91e740ec`）
+  - **用户问题**：渲染对了，但**应用要求的输入模式一个都没读**，跑 TUI 时反而不如
+    conhost。四条实证：① `application_cursor()`(DECCKM) 从不读，方向键永远发 CSI，
+    vim/less 在应用光标模式下分不清方向键和字面转义串；② 具名键**完全丢弃修饰键**，
+    Ctrl+←/→ 按词跳转失效——**这条 conhost 有，是净倒退**；③ 从不发 bracketed paste，
+    多行粘贴被 shell 逐行执行；④ 鼠标全被本地选区吃掉，应用即使 `?1002h;?1006h`
+    也收不到点击。
+  - **做法**：编码表**下沉到 `agenterm_platform::terminal_input`**（机制进平台层）。
+    GUI 侧其实早已实现修饰键/bracketed paste/鼠标上报，但都在 `src/` 里是
+    `pub(crate)`，`[[bin]]` 够不着——**这正是本宿主重造且造得更差的原因**。
+    两边收的是同一个 `NormalizedKeyEvent`，共享模块对 GUI 是 drop-in。
+  - **顺带发现**：GUI **同样缺 DECCKM**，且字符键的 Alt→ESC 前缀也没做
+    （这两点 con 反而领先）。所以后续 GUI 迁移是**修 bug**，不只是去重。
+  - **本宿主新增行为**：滚轮按「应用上报 → 备用屏光标键 → 本地回看」三级优先级
+    （所以 less/man 里滚得动）；Shift+PgUp/PgDn 滚视口（对齐 conhost），但备用屏下
+    让位给应用；Shift 强制本地选区压过抓鼠标的应用（xterm 惯例）；拖拽中保持手势
+    归属，press/release 成对。
+  - **安全性**：粘贴先规范化再成帧，**丢弃 ESC** ⇒ 载荷里的 `ESC[201~` 无法提前
+    闭合括号让尾部当按键执行。
+  - **验收**：平台层 18 单测（含 DECCKM 表、修饰键表、粘贴逃逸、鼠标降级）+
+    con 侧 14 单测，均用真实 VT 序列驱动；clippy 干净（除两条既有 blitter 参数数警告）
+  - **未做**：GUI 调用点迁移（属别人热域，留后续）；application keypad(DECKPAM) 全仓皆无
+
+- [x] **C6 IME 恢复 + 合成串行内渲染**
+  - **用户问题**：`b544bb66` 为救键盘**整体关掉了 IME**，等于**中文完全打不了**——
+    对标 conhost 是净倒退。而真正的修复是同提交里的 `window.focus()`。
+  - **另一半真因**：`event()` 的 match **根本没有 `Ime` 分支**，落到 `_ => Continue`，
+    合成好的文本永远进不了 PTY。开着 IME 却把 commit 丢掉 ⇒ 看起来就像 IME 弄坏了键盘。
+  - **做法**：恢复 `with_ime_allowed(true)`，接共享 `agenterm_platform::ime` 状态机；
+    合成串**行内绘制**在光标处（反显+下划线，CJK 正确占两格，块光标后移）；
+    `set_ime_cursor_area` 把候选窗锚到光标格。**这一条 conhost 做不到**——它把合成
+    交给一个和终端网格对不齐的浮动系统窗。
+  - **防重复输入**（这类改动的经典坑，已正面处理）：① preedit 活跃期间不转发喂给
+    合成的按键；② `TerminalKeyMode::ime_active` 抑制 logical-key 回退——该回退是给
+    不上报 `text` 的后端兜底的，但 IME 下 `text: None` 恰恰意味着「键被 IME 吃了、
+    结果会以 commit 单独送来」，回退会让一次击键出来 `aa`。已提交的 `text` 仍然可信，
+    所以仅仅挂着 IME 时普通打字照常。
+  - **提交事故（如实记录）**：本叶代码被并发 agent 的 `1b2abee8`(lua) **误卷入**其提交，
+    代码在 HEAD 完好，但解释以上理由的提交信息未落盘——故在此存档。
+  - **待人工验证**：真实中文输入法下的端到端（合成→候选→上屏），我无法在本机代打
 
 ---
 

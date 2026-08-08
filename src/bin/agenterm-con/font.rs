@@ -160,29 +160,53 @@ impl Renderer {
 /// lifetime, mirroring the product terminal's own font loader.
 fn load_faces() -> Vec<Face> {
     let mut faces = Vec::new();
+
+    // The primary face decides cell metrics, so only the first readable
+    // monospace candidate is taken — mixing advance widths would break the
+    // grid.
     for candidate in agenterm_platform::font::candidates() {
-        let path: PathBuf = candidate
-            .components
-            .iter()
-            .fold(PathBuf::from(std::path::MAIN_SEPARATOR_STR), |p, c| p.join(c));
-        let Ok(data) = fs::read(&path) else {
-            continue;
-        };
-        let leaked: &'static [u8] = Box::leak(data.into_boxed_slice());
-        for index in 0..MAX_COLLECTION_FACES {
-            match FontRef::try_from_slice_and_index(leaked, index) {
-                Ok(font) => faces.push(Face {
-                    name: candidate.name,
-                    font: FontArc::from(font),
-                }),
-                Err(_) => break,
-            }
-        }
-        if !faces.is_empty() {
+        if push_faces(&mut faces, candidate) {
             break;
         }
     }
+
+    // Coverage fallbacks are additive: every one that loads joins the chain,
+    // because `raster_uncached` walks it until a face actually has the glyph.
+    // Stopping at the first (as this function used to, for the primary list)
+    // is what made CJK render as blank cells — Consolas has no Han glyphs and
+    // nothing else was ever consulted.
+    for candidate in agenterm_platform::font::fallback_candidates() {
+        push_faces(&mut faces, candidate);
+    }
+
     faces
+}
+
+/// Appends every face in a candidate file. Returns whether anything loaded.
+fn push_faces(
+    faces: &mut Vec<Face>,
+    candidate: agenterm_platform::font::FontFileCandidate,
+) -> bool {
+    let path: PathBuf = candidate
+        .components
+        .iter()
+        .fold(PathBuf::from(std::path::MAIN_SEPARATOR_STR), |p, c| p.join(c));
+    let Ok(data) = fs::read(&path) else {
+        return false;
+    };
+    let leaked: &'static [u8] = Box::leak(data.into_boxed_slice());
+    let before = faces.len();
+    // Collections (.ttc) hold several faces; index until one fails to parse.
+    for index in 0..MAX_COLLECTION_FACES {
+        match FontRef::try_from_slice_and_index(leaked, index) {
+            Ok(font) => faces.push(Face {
+                name: candidate.name,
+                font: FontArc::from(font),
+            }),
+            Err(_) => break,
+        }
+    }
+    faces.len() > before
 }
 
 fn renderer() -> &'static Renderer {

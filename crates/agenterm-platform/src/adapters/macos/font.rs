@@ -21,6 +21,25 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
     ]
 }
 
+/// Fonts consulted only for glyphs the primary face does not have, so CJK and
+/// emoji do not render as blank cells. Never chosen as the primary face.
+pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
+    vec![
+        FontFileCandidate {
+            name: "PingFang",
+            components: &["System", "Library", "Fonts", "PingFang.ttc"],
+        },
+        FontFileCandidate {
+            name: "Hiragino Sans GB",
+            components: &["System", "Library", "Fonts", "Hiragino Sans GB.ttc"],
+        },
+        FontFileCandidate {
+            name: "Apple Color Emoji",
+            components: &["System", "Library", "Fonts", "Apple Color Emoji.ttc"],
+        },
+    ]
+}
+
 pub(crate) fn probe() -> FontDiscovery {
     let mut available_families = Vec::new();
     for candidate in candidates() {
