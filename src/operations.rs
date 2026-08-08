@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use crate::{
     commands::{canonical_control_command, option_value},
+    frontend::window::{MAX_CLIENT_EXTENT, MIN_CLIENT_HEIGHT, MIN_CLIENT_WIDTH},
     ui_geometry::{TABS_MAX_WIDTH, TABS_MIN_WIDTH},
 };
 
@@ -12,6 +13,15 @@ pub const UI_TABS_HIDE: &str = "ui.tabs.hide";
 pub const UI_TABS_TOGGLE: &str = "ui.tabs.toggle";
 pub const UI_TABS_SET_WIDTH: &str = "ui.tabs.set-width";
 pub const UI_WINDOW_ACTIVATE: &str = "ui.window.activate";
+pub const UI_WINDOW_MAXIMIZE: &str = "ui.window.maximize";
+pub const UI_WINDOW_MINIMIZE: &str = "ui.window.minimize";
+pub const UI_WINDOW_RESTORE: &str = "ui.window.restore";
+pub const UI_WINDOW_RESIZE: &str = "ui.window.resize";
+pub const UI_WINDOW_CLOSE: &str = "ui.window.close";
+pub const UI_FONT_INCREASE: &str = "ui.font.increase";
+pub const UI_FONT_DECREASE: &str = "ui.font.decrease";
+pub const UI_LOCALE_TOGGLE: &str = "ui.locale.toggle";
+pub const TERMINAL_COPY_SELECTION: &str = "terminal.copy-selection";
 pub const TERMINAL_PASTE: &str = "terminal.paste";
 pub const CONTROL_CENTER_OPEN: &str = "control-center.open";
 pub const CONTROL_CENTER_STATUS: &str = "control-center.status";
@@ -344,6 +354,24 @@ const TAB_NOTE_PARAMETERS: &[OperationParameterSpec] = &[
         required: true,
         minimum: Some(0),
         maximum: Some(TAB_NOTE_MAX_BYTES as i64),
+    },
+];
+/// `ui-action window-resize` — client-area size in **device pixels**, validated
+/// by the shared `ClientSize::parse` on both hosts.
+const WINDOW_RESIZE_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "width",
+        value_type: "integer",
+        required: true,
+        minimum: Some(MIN_CLIENT_WIDTH as i64),
+        maximum: Some(MAX_CLIENT_EXTENT as i64),
+    },
+    OperationParameterSpec {
+        name: "height",
+        value_type: "integer",
+        required: true,
+        minimum: Some(MIN_CLIENT_HEIGHT as i64),
+        maximum: Some(MAX_CLIENT_EXTENT as i64),
     },
 ];
 const SESSION_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpec {
@@ -807,6 +835,159 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         available: true,
         since: "0.1.12",
     },
+    // ---- P-catalog: `ui-action` verbs promoted to typed identities ----------
+    //
+    // Every entry below already dispatched on **both** hosts through
+    // `SHARED_UI_ACTIONS` (`src/frontend/ui_action_catalog.rs`); only the typed
+    // identity was missing, so `operations.rs` described a fraction of the real
+    // control plane. See `plan/agent-human-parity-audit.md` § F5 for the
+    // classification rules, including why `UNIX_ONLY_UI_ACTIONS` stays out and
+    // why `events` is empty here (correlation needs the dispatcher to stamp the
+    // operation id, the way `set_tabs_visible` does).
+    OperationSpec {
+        id: UI_WINDOW_MAXIMIZE,
+        script_surface: "fleet.ui.window.maximize",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("window-maximize"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_WINDOW_MINIMIZE,
+        script_surface: "fleet.ui.window.minimize",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("window-minimize"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_WINDOW_RESTORE,
+        script_surface: "fleet.ui.window.restore",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("window-restore"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_WINDOW_RESIZE,
+        script_surface: "fleet.ui.window.resize",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("window-resize"),
+        aliases: &[],
+        parameters: WINDOW_RESIZE_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &[
+            "operation_invalid_arguments",
+            "window_width_invalid",
+            "window_height_invalid",
+            "window_extent_too_large",
+        ],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    // Not destructive: it *requests* a close, which raises the window-close
+    // confirmation modal. `stop-server-and-exit` is the destructive branch.
+    OperationSpec {
+        id: UI_WINDOW_CLOSE,
+        script_surface: "fleet.ui.window.close",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("close-window"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_FONT_INCREASE,
+        script_surface: "fleet.ui.font.increase",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("font-increase"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_FONT_DECREASE,
+        script_surface: "fleet.ui.font.decrease",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("font-decrease"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    OperationSpec {
+        id: UI_LOCALE_TOGGLE,
+        script_surface: "fleet.ui.locale.toggle",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("toggle-locale"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
+    // Pairs with `terminal.paste`: the copy half of the clipboard round trip a
+    // human gets from the terminal context menu.
+    OperationSpec {
+        id: TERMINAL_COPY_SELECTION,
+        script_surface: "fleet.terminal.copy_selection",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("copy-selection"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.16",
+    },
     OperationSpec {
         id: TERMINAL_PASTE,
         script_surface: "fleet.terminal.paste",
@@ -930,6 +1111,15 @@ pub(crate) fn operation_for_args(
                 "tabs-toggle" | "toggle-tabs" => UI_TABS_TOGGLE,
                 "tabs-set-width" => UI_TABS_SET_WIDTH,
                 "window-activate" => UI_WINDOW_ACTIVATE,
+                "window-maximize" => UI_WINDOW_MAXIMIZE,
+                "window-minimize" => UI_WINDOW_MINIMIZE,
+                "window-restore" => UI_WINDOW_RESTORE,
+                "window-resize" => UI_WINDOW_RESIZE,
+                "close-window" => UI_WINDOW_CLOSE,
+                "font-increase" => UI_FONT_INCREASE,
+                "font-decrease" => UI_FONT_DECREASE,
+                "toggle-locale" => UI_LOCALE_TOGGLE,
+                "copy-selection" => TERMINAL_COPY_SELECTION,
                 "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
                 "select-tab" => UI_TAB_SELECT,
@@ -1035,9 +1225,13 @@ pub(crate) fn validate_operation_args(
     } else if (matches!(
         operation.id,
         CONTROL_CENTER_STATUS | CONTROL_CENTER_SNAPSHOT | CONTROL_CENTER_CLOSE
-    ) || operation.command == "ui-action")
+    ) || (operation.command == "ui-action" && operation.parameters.is_empty()))
         && args.len() != 2
     {
+        // Only *nullary* UI actions can be arity-checked here. Parameterised
+        // ones (`--width/--height`, `-t`, `--path`, …) declare their inputs in
+        // the catalog and are validated by the dispatcher that owns them; a
+        // blanket `len != 2` would make them unreachable.
         return Err(operation_error(
             "operation_invalid_arguments",
             operation.id,
@@ -1223,6 +1417,86 @@ mod tests {
         let error =
             validate_operation_args(&args(&["set-tab-note", "-t", "@42", &oversized])).unwrap_err();
         assert!(error.starts_with("operation_invalid_arguments[tabs.set-note]"));
+    }
+
+    /// A typed identity for a verb no host dispatches would be exactly the
+    /// F3-class lie this catalog exists to prevent: an agent reading the map
+    /// would find a door that opens onto nothing. Machine-check it instead.
+    #[test]
+    fn every_typed_ui_action_is_dispatchable_on_both_hosts() {
+        use crate::frontend::ui_action_catalog::SHARED_UI_ACTIONS;
+
+        for operation in OPERATION_CATALOG {
+            if operation.command != "ui-action" {
+                continue;
+            }
+            let action = operation
+                .action
+                .unwrap_or_else(|| panic!("ui-action operation {} declares no verb", operation.id));
+            assert!(
+                SHARED_UI_ACTIONS.contains(&action),
+                "operation {} claims ui-action {action}, which is not in SHARED_UI_ACTIONS",
+                operation.id
+            );
+            for alias in operation.aliases {
+                assert!(
+                    SHARED_UI_ACTIONS.contains(alias),
+                    "operation {} claims ui-action alias {alias}, \
+                     which is not in SHARED_UI_ACTIONS",
+                    operation.id
+                );
+            }
+            let resolved = operation_for_args(&args(&["ui-action", action]))
+                .unwrap_or_else(|error| panic!("{action} did not resolve: {error}"));
+            assert_eq!(
+                resolved.map(|resolved| resolved.id),
+                Some(operation.id),
+                "ui-action {action} does not round-trip to {}",
+                operation.id
+            );
+        }
+    }
+
+    #[test]
+    fn window_font_and_clipboard_chrome_have_stable_identities() {
+        for (action, expected) in [
+            ("window-maximize", UI_WINDOW_MAXIMIZE),
+            ("window-minimize", UI_WINDOW_MINIMIZE),
+            ("window-restore", UI_WINDOW_RESTORE),
+            ("close-window", UI_WINDOW_CLOSE),
+            ("font-increase", UI_FONT_INCREASE),
+            ("font-decrease", UI_FONT_DECREASE),
+            ("toggle-locale", UI_LOCALE_TOGGLE),
+            ("copy-selection", TERMINAL_COPY_SELECTION),
+        ] {
+            let operation = validate_operation_args(&args(&["ui-action", action])).unwrap();
+            assert_eq!(operation.map(|operation| operation.id), Some(expected));
+            assert!(
+                validate_operation_args(&args(&["ui-action", action, "extra"])).is_err(),
+                "nullary UI action {action} must reject extra arguments"
+            );
+        }
+    }
+
+    /// `window-resize` is the first typed UI action that carries options, so it
+    /// also pins that declaring parameters lifts the nullary arity check.
+    #[test]
+    fn parameterised_ui_actions_keep_their_declared_options() {
+        let resize = operation_by_id(UI_WINDOW_RESIZE).unwrap();
+        assert_eq!(resize.parameters, WINDOW_RESIZE_PARAMETERS);
+        let operation = validate_operation_args(&args(&[
+            "ui-action",
+            "window-resize",
+            "--width",
+            "1024",
+            "--height",
+            "768",
+        ]))
+        .unwrap();
+        assert_eq!(
+            operation.map(|operation| operation.id),
+            Some(UI_WINDOW_RESIZE)
+        );
     }
 
     #[test]
