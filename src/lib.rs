@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+pub mod agent_tools;
 mod build_identity;
 mod client;
 mod commands;

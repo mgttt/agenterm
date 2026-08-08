@@ -112,6 +112,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       [--contains text|--dead|--submit-complete]
       [--timeout-ms ms]`
     - `ui-snapshot`, `ui-bootstrap`, `protocol-info`
+    - [x] `agent-tools [--format agenterm|mcp] [--include-unavailable]`
+      emits the LLM tool table an autonomous agent binds to. It is a pure
+      projection of the typed operation catalog
+      ([Agent control plane](PRD_02_07_agent_control_plane.md)), never a
+      hand-written list: every parameter becomes JSON Schema with its declared
+      bounds, every operation carries its class, its declared typed failures,
+      and — for destructive operations — an explicit approval gate the caller
+      must open before invoking. Unavailable operations are excluded unless
+      asked for, so an agent can never select a capability that does not ship.
+      The command answers from the binary alone and never contacts a server
     - [x] `ui-input pointer --x PX --y PX [--button left|right|middle]
       [--action press|release|move] [--count 1|2|3]
       [--mods shift,ctrl,alt,meta]` and

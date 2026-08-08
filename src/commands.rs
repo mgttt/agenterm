@@ -20,6 +20,7 @@ const fn command(id: &'static str, aliases: &'static [&'static str]) -> CommandI
 }
 
 pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
+    command("agent-tools", &[]),
     command("attach-session", &["attach"]),
     command("active-window", &["active-tab"]),
     command("capture-pane", &["capturep"]),
@@ -444,6 +445,14 @@ pub(crate) fn validate_control_command(args: &[String]) -> Result<(), String> {
 
 fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
     let (usage, value_options, flag_options, child_at_first_positional) = match command {
+        // Derived LLM tool table; a pure projection of `OPERATION_CATALOG`,
+        // so it answers without a server and never mutates anything.
+        "agent-tools" => (
+            "agenterm-cli agent-tools [--format agenterm|mcp] [--include-unavailable]",
+            &["--format"][..],
+            &["--include-unavailable"][..],
+            false,
+        ),
         "attach" | "attach-session" => (
             "agenterm-cli attach-session [-t session]",
             &["-t"][..],

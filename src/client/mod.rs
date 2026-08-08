@@ -917,6 +917,36 @@ fn probe_registered_instance(
     )
 }
 
+/// `agenterm-cli agent-tools` — the LLM tool table, derived from
+/// `OPERATION_CATALOG` by [`crate::agent_tools`].
+///
+/// It runs entirely in the client and never opens an IPC connection: the
+/// catalog is a compile-time constant, so the table is a property of the
+/// binary, not of a running server. That is deliberate — an agent must be able
+/// to learn what it may do *before* it has anything to talk to.
+fn run_agent_tools(arguments: &[String]) -> i32 {
+    let include_unavailable = has_option(arguments, "--include-unavailable");
+    let format = option_value(arguments, "--format").unwrap_or("agenterm");
+    let document = match format {
+        "agenterm" => crate::agent_tools::agent_tool_catalog_json(include_unavailable),
+        "mcp" => crate::agent_tools::agent_tool_catalog_mcp_json(include_unavailable),
+        other => {
+            eprintln!("unknown agent-tools format '{other}'; expected agenterm or mcp");
+            return 2;
+        }
+    };
+    match serde_json::to_string_pretty(&document) {
+        Ok(text) => {
+            println!("{text}");
+            0
+        }
+        Err(error) => {
+            eprintln!("failed to render the agent tool table: {error}");
+            1
+        }
+    }
+}
+
 fn run_list_instances(arguments: &[String]) -> i32 {
     let json = arguments.iter().any(|argument| argument == "--json");
     let prune = arguments.iter().any(|argument| argument == "--prune");
@@ -1174,6 +1204,9 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     if command == "protocol-info" && !has_option(&arguments, "--running") {
         println!("{}", protocol_info_json("client_binary"));
         return 0;
+    }
+    if command == "agent-tools" {
+        return run_agent_tools(&arguments);
     }
     if command == "rh-pack" {
         return crate::script_rh_pack::run_rh_pack_cli(&arguments);
@@ -3913,6 +3946,7 @@ Usage:
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state|--tab-editor-state open|closed] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]
   agenterm-cli protocol-info
+  agenterm-cli agent-tools [--format agenterm|mcp] [--include-unavailable]
   agenterm-cli list-panes [-F format]
   agenterm-cli list-sessions | has-session | kill-server | server-kill"
     );
