@@ -22,6 +22,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.fs.remove_dir_all",
     "std.fs.symlink_metadata",
     "std.fs.try_lock_exclusive",
+    "std.fs.exists_case_exact",
     // std.process
     "std.process.command",
     "std.process.status",
@@ -52,6 +53,7 @@ pub const SHIPPED_SURFACES: &[&str] = &[
     "std.json.parse",
     "std.json.parse_file",
     "std.json.stringify",
+    "std.json.stringify_pretty",
     // std.crypto
     "std.crypto.sha256",
     "std.crypto.sha256_file",

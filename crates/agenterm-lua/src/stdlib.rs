@@ -466,6 +466,32 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
         })?,
     )?;
 
+    // std.fs.exists_case_exact(path) → bool
+    fs.set(
+        "exists_case_exact",
+        lua.create_function(|_lua, path: String| {
+            let p = std::path::Path::new(&path);
+            let parent = p.parent().unwrap_or(std::path::Path::new("."));
+            let expected = p.file_name().map(|n| n.to_string_lossy().into_owned());
+            match expected {
+                Some(expected_name) => {
+                    match std::fs::read_dir(parent) {
+                        Ok(entries) => {
+                            for entry in entries.flatten() {
+                                if entry.file_name().to_string_lossy() == expected_name {
+                                    return Ok(entry.file_type().map(|ft| ft.is_file()).unwrap_or(false));
+                                }
+                            }
+                            Ok(false)
+                        }
+                        Err(_) => Ok(false),
+                    }
+                }
+                None => Ok(false),
+            }
+        })?,
+    )?;
+
     Ok(fs)
 }
 
@@ -871,6 +897,17 @@ fn build_json(lua: &Lua) -> Result<Table, mlua::Error> {
             // Use compact (non-pretty) output matching rh's default
             serde_json::to_string(&v)
                 .map_err(|e| mlua::Error::runtime(format!("json_stringify: {e}")))
+        })?,
+    )?;
+
+    // std.json.stringify_pretty(v) → string
+    json.set(
+        "stringify_pretty",
+        lua.create_function(|_lua, val: Value| {
+            let v: serde_json::Value = serde_json::to_value(&val)
+                .map_err(|e| mlua::Error::runtime(format!("json_stringify_pretty: {e}")))?;
+            serde_json::to_string_pretty(&v)
+                .map_err(|e| mlua::Error::runtime(format!("json_stringify_pretty: {e}")))
         })?,
     )?;
 
@@ -1618,6 +1655,69 @@ mod tests {
             &host(),
         ).expect("split method");
         assert_eq!(r.value, 2);
+    }
+
+    // ── stringify_pretty / exists_case_exact ────────────────────────
+
+    #[test]
+    fn stringify_pretty_is_multiline() {
+        let e = engine();
+        let r = e.eval(
+            "local s = std.json.stringify_pretty({x = 1}); return string.find(s, '\\n') ~= nil and 1 or 0",
+            &host(),
+        ).expect("stringify_pretty");
+        assert_eq!(r.value, 1, "stringify_pretty should have newlines");
+    }
+
+    #[test]
+    fn stringify_pretty_contains_key() {
+        let e = engine();
+        let r = e.eval(
+            "local s = std.json.stringify_pretty({y = 'val'}); return string.find(s, '\"y\"') ~= nil and 1 or 0",
+            &host(),
+        ).expect("stringify_pretty key");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn exists_case_exact_true() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("CaseSensitive.txt");
+        std::fs::write(&p, "x").unwrap();
+        let e = engine();
+        let r = e.eval(
+            &format!("return std.fs.exists_case_exact([[{}]]) and 1 or 0", p.display()),
+            &host(),
+        ).expect("exists_case_exact");
+        assert_eq!(r.value, 1);
+    }
+
+    #[test]
+    fn exists_case_exact_false() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("exact_test.txt");
+        std::fs::write(&p, "x").unwrap();
+        let wrong = p.to_string_lossy().replace("exact_test", "EXACT_TEST");
+        let e = engine();
+        let r = e.eval(
+            &format!("return std.fs.exists_case_exact([[{wrong}]]) and 1 or 0"),
+            &host(),
+        ).expect("exists_case_exact false");
+        assert_eq!(r.value, 0, "wrong case should return false");
+    }
+
+    #[test]
+    fn exists_case_exact_dir_detects_case() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("SubDir");
+        std::fs::create_dir(&sub).unwrap();
+        let wrong = sub.to_string_lossy().replace("SubDir", "subdir");
+        let e = engine();
+        let r = e.eval(
+            &format!("return std.fs.exists_case_exact([[{wrong}]]) and 1 or 0"),
+            &host(),
+        ).expect("exists_case_exact dir");
+        assert_eq!(r.value, 0, "wrong case dir should return false");
     }
 
     // ── env.names / create_dir_all / remove_dir ────────────────────

@@ -19,7 +19,7 @@ local function check_dir(path)
     for _, entry in ipairs(entries) do
         if entry.is_file then
             local name = entry.name
-            local parts = string_split(name, ".")
+            local parts = string.split(name, ".")
             local ext = parts[#parts] or ""
             if ext == "lua" then
                 total = total + 1
