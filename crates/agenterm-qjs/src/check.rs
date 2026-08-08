@@ -18,14 +18,28 @@
 //! "qjs execution backend" risk list. `check()` here is intentionally
 //! narrower until that lands.
 
+use std::path::Path;
+
+use rquickjs::loader::ScriptLoader;
 use rquickjs::{CatchResultExt, Context, Module, Runtime};
 
 use crate::error::QjsError;
+use crate::module_resolver::ProjectModuleResolver;
+use crate::module_sniff::wants_module_mode;
 
 /// Parse/compile `source` as an ES module without executing it. `label` is
 /// used only for QuickJS's own error messages (filename in a stack trace),
 /// not for any path resolution — callers own path safety themselves (see
 /// `check_many`, which resolves/validates paths before calling this).
+///
+/// No project root is known here, so no module loader is registered — a
+/// script using `import`/`export` will fail with a "could not load
+/// module" error regardless of whether the imported file exists. Callers
+/// that have a real project root should use
+/// [`check_with_project_validation`] instead, which resolves imports (and,
+/// as a consequence of ES modules' own linking behavior, validates every
+/// file in the import graph — see
+/// `plan/design-qjs-module-imports.md` §4.3).
 pub fn check(source: &str, label: &str) -> Result<(), QjsError> {
     let runtime = Runtime::new().map_err(|err| QjsError::Check(err.to_string()))?;
     let context = Context::full(&runtime).map_err(|err| QjsError::Check(err.to_string()))?;
@@ -41,9 +55,69 @@ pub fn check(source: &str, label: &str) -> Result<(), QjsError> {
     )
 }
 
+/// Same "parse/declare, don't execute" contract as [`check`], but with a
+/// project root: scripts that don't use `import`/`export`
+/// ([`wants_module_mode`] is `false`) behave *exactly* like plain
+/// `check()` — same call, same result, not a reimplementation — so this is
+/// purely additive, never a behavior change for existing non-module
+/// scripts. Scripts that do use `import`/`export` get a real,
+/// root-confined module resolver (`module_resolver.rs`) registered before
+/// `Module::declare`, so `check` on a multi-file project actually resolves
+/// (and, since `Module::declare` eagerly links the whole static import
+/// graph, recursively parse-validates) every file it imports — named
+/// "aligned with rh" deliberately: this is qjs's answer to
+/// `agenterm_rh::check_with_project_validation`, same name, same "does
+/// this project's scripts hang together" contract, different mechanism
+/// (rh hand-walks its own import graph; qjs lets QuickJS's real module
+/// linker do it).
+///
+/// `label` here, unlike plain `check()`, **is** used for path resolution
+/// (it's the base every relative import in `source` resolves against) —
+/// so it must be a real file, and `entry_path`/`project_root` get the same
+/// canonicalize-and-confine treatment `eval_module.rs` applies (same
+/// reasoning: don't trust the caller to have gotten this right, guarantee
+/// it here).
+pub fn check_with_project_validation(
+    source: &str,
+    label: &Path,
+    project_root: &Path,
+) -> Result<(), QjsError> {
+    if !wants_module_mode(source) {
+        return check(source, &label.to_string_lossy());
+    }
+
+    let canonical_root = std::fs::canonicalize(project_root).map_err(|err| {
+        QjsError::Check(format!("qjs_module_root: {}: {err}", project_root.display()))
+    })?;
+    let canonical_label = std::fs::canonicalize(label)
+        .map_err(|err| QjsError::Check(format!("qjs_module_entry: {}: {err}", label.display())))?;
+    if !canonical_label.starts_with(&canonical_root) {
+        return Err(QjsError::Check(format!(
+            "qjs_module_entry_outside_root: {} is not inside {}",
+            canonical_label.display(),
+            canonical_root.display()
+        )));
+    }
+
+    let runtime = Runtime::new().map_err(|err| QjsError::Check(err.to_string()))?;
+    runtime.set_loader(
+        ProjectModuleResolver::new(canonical_root),
+        ScriptLoader::default().with_extension("mjs"),
+    );
+    let context = Context::full(&runtime).map_err(|err| QjsError::Check(err.to_string()))?;
+    let label_str = canonical_label.to_string_lossy().into_owned();
+    context.with(
+        |ctx| match Module::declare(ctx.clone(), label_str.as_str(), source).catch(&ctx) {
+            Ok(_module) => Ok(()),
+            Err(err) => Err(QjsError::Parse(err.to_string())),
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::check;
+    use super::{check, check_with_project_validation};
+    use tempfile::TempDir;
 
     #[test]
     fn accepts_valid_module_source() {
@@ -69,5 +143,71 @@ mod tests {
             "throws.js",
         )
         .expect("declare-only check must not execute the throwing statement");
+    }
+
+    #[test]
+    fn with_project_validation_behaves_identically_for_non_module_scripts() {
+        // No import/export -> must delegate straight to plain check(),
+        // zero behavior change, even with a bogus/nonexistent project
+        // root (which would fail immediately if this path tried to
+        // canonicalize it — proving the delegation happens before any of
+        // that, not just that it happens to produce the same answer).
+        let dir = TempDir::new().expect("tempdir");
+        let label = dir.path().join("does_not_exist_as_a_file.js");
+        check_with_project_validation(
+            "function entry() { return 1; }",
+            &label,
+            std::path::Path::new("/this/project/root/does/not/exist"),
+        )
+        .expect("non-module scripts skip project validation entirely");
+    }
+
+    #[test]
+    fn with_project_validation_recursively_checks_a_real_import_graph() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("leaf.js"), "export const value = 42;").unwrap();
+        let entry_path = dir.path().join("entry.js");
+        std::fs::write(
+            &entry_path,
+            "import { value } from './leaf.js';\nfunction entry() { return value; }",
+        )
+        .unwrap();
+        let source = std::fs::read_to_string(&entry_path).unwrap();
+        check_with_project_validation(&source, &entry_path, dir.path())
+            .expect("valid multi-file import graph must check clean");
+    }
+
+    #[test]
+    fn with_project_validation_catches_a_syntax_error_in_an_imported_file() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("leaf.js"), "export const value = ((( ;").unwrap();
+        let entry_path = dir.path().join("entry.js");
+        std::fs::write(
+            &entry_path,
+            "import { value } from './leaf.js';\nfunction entry() { return value; }",
+        )
+        .unwrap();
+        let source = std::fs::read_to_string(&entry_path).unwrap();
+        let error = check_with_project_validation(&source, &entry_path, dir.path())
+            .expect_err("a syntax error in an imported file must fail check, not just parse ok");
+        assert!(matches!(error, super::QjsError::Parse(_)));
+    }
+
+    #[test]
+    fn with_project_validation_rejects_an_import_that_escapes_the_root() {
+        let outer = TempDir::new().expect("tempdir");
+        std::fs::write(outer.path().join("secret.js"), "export const value = 1;").unwrap();
+        let inner = outer.path().join("project");
+        std::fs::create_dir_all(&inner).unwrap();
+        let entry_path = inner.join("entry.js");
+        std::fs::write(
+            &entry_path,
+            "import { value } from '../secret.js';\nfunction entry() { return value; }",
+        )
+        .unwrap();
+        let source = std::fs::read_to_string(&entry_path).unwrap();
+        let error = check_with_project_validation(&source, &entry_path, &inner)
+            .expect_err("root-escaping import must fail check");
+        assert!(error.to_string().contains("Error resolving module"), "{error}");
     }
 }

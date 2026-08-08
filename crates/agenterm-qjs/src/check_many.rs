@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{check::check, error::QjsError};
+use crate::{check::check_with_project_validation, error::QjsError};
 
 pub const MANIFEST_MAX_BYTES: usize = 64 * 1024;
 pub const FILES_MAX: usize = 256;
@@ -244,7 +244,14 @@ pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) ->
         }
         total_source_bytes = next_total;
         checked_files += 1;
-        if let Err(error) = check(&source, &label) {
+        // `path`/`root` are already canonicalized and confinement-checked
+        // above (this loop's own manifest-path validation) — reuse them
+        // rather than re-deriving, so a script using import/export gets
+        // its import graph checked against the same project root the
+        // manifest itself is scoped to. Non-module scripts (the common
+        // case today) behave identically to the old `check(&source,
+        // &label)` call — see `check_with_project_validation`'s doc.
+        if let Err(error) = check_with_project_validation(&source, &path, &root) {
             failures.push(check_failure(label, &error, ordinal));
         }
     }
@@ -443,6 +450,55 @@ mod tests {
             kind: QJS_CHECK_MANIFEST_KIND.to_owned(),
             files: vec![file.to_owned()],
         }
+    }
+
+    #[test]
+    fn check_many_validates_a_multi_file_import_graph_through_the_manifest() {
+        let project = tempfile::tempdir().expect("project root");
+        let project_path = project.path().to_path_buf();
+        std::fs::write(project.path().join("leaf.js"), "export const value = 42;").unwrap();
+        std::fs::write(
+            project.path().join("entry.js"),
+            "import { value } from './leaf.js';\nfunction entry() { return value; }",
+        )
+        .unwrap();
+
+        let report = run_check_many(
+            manifest_for("entry.js"),
+            CheckManyOptions {
+                project_root: project_path,
+                ..CheckManyOptions::default()
+            },
+        );
+
+        assert!(report.ok, "{report:?}");
+        assert_eq!(report.checked_files, 1);
+        assert!(report.failures.is_empty());
+    }
+
+    #[test]
+    fn check_many_surfaces_a_syntax_error_inside_an_imported_file() {
+        let project = tempfile::tempdir().expect("project root");
+        let project_path = project.path().to_path_buf();
+        std::fs::write(project.path().join("leaf.js"), "export const value = ((( ;").unwrap();
+        std::fs::write(
+            project.path().join("entry.js"),
+            "import { value } from './leaf.js';\nfunction entry() { return value; }",
+        )
+        .unwrap();
+
+        let report = run_check_many(
+            manifest_for("entry.js"),
+            CheckManyOptions {
+                project_root: project_path,
+                ..CheckManyOptions::default()
+            },
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].path, "entry.js");
+        assert_eq!(report.failures[0].code, "qjs_parse");
     }
 
     #[test]

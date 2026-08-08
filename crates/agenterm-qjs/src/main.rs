@@ -20,11 +20,16 @@
 //! `agenterm-lua`'s own `task` subcommand is the same kind of stub, not a
 //! coincidence.
 
-use std::{env, fs, path::PathBuf, process::ExitCode};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use agenterm_qjs::{
-    QJS_VERSION, QjsError, QjsHostFunctions, check, eval_entry, parse_check_many_cli,
-    read_manifest, run_check_many,
+    QJS_VERSION, QjsError, QjsHostFunctions, check, check_with_project_validation,
+    eval_entry, eval_entry_with_host, eval_module_entry_with_host, parse_check_many_cli,
+    read_manifest, run_check_many, wants_module_mode,
 };
 
 fn main() -> ExitCode {
@@ -50,16 +55,33 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
         }
         "check" => {
             let path = require_path(&mut args, "check")?;
+            let project_root = optional_flag_value(&mut args, "--project-root");
             let source = read_source(&path)?;
             let label = path.display().to_string();
-            check(&source, &label)?;
+            // No implicit default here (unlike `eval`/`run` below): plain
+            // `check()` intentionally has no project-root concept (see its
+            // doc comment), so a script using import/export must opt in
+            // with `--project-root` explicitly, same as `check-many`
+            // already requires — consistent with that established
+            // convention rather than inventing a silent default for one
+            // verb and not the other.
+            match project_root {
+                Some(root) => check_with_project_validation(&source, &path, &root)?,
+                None => check(&source, &label)?,
+            }
             println!("qjs check ok: {label}");
         }
         "eval" => {
             let path = require_path(&mut args, "eval")?;
+            let project_root = optional_flag_value(&mut args, "--project-root");
             let source = read_source(&path)?;
             let label = path.display().to_string();
-            let outcome = eval_entry(&source, &label)?;
+            let outcome = if wants_module_mode(&source) {
+                let root = resolve_project_root(project_root, &path);
+                eval_module_entry_with_host(&source, &path, &root, &QjsHostFunctions::default())?
+            } else {
+                eval_entry(&source, &label)?
+            };
             let rendered = render_value(outcome.value.as_ref());
             if !outcome.stdout.is_empty() {
                 print!("{}", outcome.stdout);
@@ -118,8 +140,13 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
     Ok(0)
 }
 
-/// `run <file.js> [-- <args>...]` — evaluate with CLI arguments wired to
-/// `__host.args_len`/`__host.arg`, mirroring `agenterm-lua`'s `cmd_run`.
+/// `run <file.js> [--project-root DIR] [-- <args>...]` — evaluate with CLI
+/// arguments wired to `__host.args_len`/`__host.arg`, mirroring
+/// `agenterm-lua`'s `cmd_run`. `--project-root` (like `eval`'s) only
+/// matters for scripts using `import`/`export`; it's scanned for in
+/// `file_args` only, never in the script's own trailing `-- <args>`, so a
+/// script argument that happens to be the literal string `--project-root`
+/// isn't misread as this command's own flag.
 fn run_run_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
     let collected = args.collect::<Vec<_>>();
     let sep = collected.iter().position(|a| a == "--");
@@ -127,10 +154,12 @@ fn run_run_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsErr
         Some(pos) => (&collected[..pos], &collected[pos + 1..]),
         None => (&collected[..], &[]),
     };
-    let path = file_args
-        .first()
+    let mut file_args_iter = file_args.iter().cloned();
+    let path = file_args_iter
+        .next()
         .map(PathBuf::from)
         .ok_or_else(|| QjsError::Check("usage: agenterm-qjs run <file.js> [-- <args>...]".into()))?;
+    let project_root = optional_flag_value(&mut file_args_iter, "--project-root");
     let source = read_source(&path)?;
     let label = path.display().to_string();
 
@@ -147,7 +176,12 @@ fn run_run_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsErr
             .ok_or_else(|| format!("argument {index} is unavailable"))
     }));
 
-    let outcome = agenterm_qjs::eval_entry_with_host(&source, &label, &host)?;
+    let outcome = if wants_module_mode(&source) {
+        let root = resolve_project_root(project_root, &path);
+        eval_module_entry_with_host(&source, &path, &root, &host)?
+    } else {
+        eval_entry_with_host(&source, &label, &host)?
+    };
     if !outcome.stdout.is_empty() {
         print!("{}", outcome.stdout);
     }
@@ -314,13 +348,42 @@ fn require_flag_value(
         .ok_or_else(|| QjsError::Check(format!("{flag} requires a value")))
 }
 
+/// Like `require_flag_value`, but the flag is optional — `None` if it's
+/// absent, rather than an error. Consumes the rest of the iterator either
+/// way (same as `require_flag_value`), so callers use it as their last
+/// parsing step for a given argument slice.
+fn optional_flag_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Option<PathBuf> {
+    let collected = args.collect::<Vec<_>>();
+    collected
+        .iter()
+        .position(|a| a == flag)
+        .and_then(|pos| collected.get(pos + 1))
+        .map(PathBuf::from)
+}
+
+/// `--project-root`, if given; otherwise the entry file's own parent
+/// directory — a script using `import`/`export` almost always wants its
+/// siblings resolved relative to itself, and requiring `--project-root`
+/// on every single-invocation `eval`/`run` for the common case would be
+/// friction for no real benefit. `check` deliberately does NOT use this
+/// default (see its handler) — it requires `--project-root` explicitly,
+/// matching `check-many`'s existing convention.
+fn resolve_project_root(explicit: Option<PathBuf>, entry_path: &Path) -> PathBuf {
+    explicit.unwrap_or_else(|| {
+        entry_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    })
+}
+
 fn print_usage() {
     println!(
         "agenterm-qjs {QJS_VERSION} — QuickJS script engine, capability-aligned with agenterm-rh\n\n\
 Usage:\n  \
-agenterm-qjs check <file.js>\n  \
-agenterm-qjs eval <file.js>\n  \
-agenterm-qjs run <file.js> [-- <args>...]\n  \
+agenterm-qjs check <file.js> [--project-root DIR]\n  \
+agenterm-qjs eval <file.js> [--project-root DIR]\n  \
+agenterm-qjs run <file.js> [--project-root DIR] [-- <args>...]\n  \
 agenterm-qjs hash <file.js>\n  \
 agenterm-qjs pack build <file.js> --dir <out>\n  \
 agenterm-qjs pack load <dir>\n  \
@@ -330,8 +393,11 @@ agenterm-qjs corpus-scan [--dir <dir>]\n  \
 agenterm-qjs run-smoke <pack-dir>\n  \
 agenterm-qjs task ...  (stub — see plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3)\n  \
 agenterm-qjs version\n\n\
-Not yet implemented: project-level multi-file `import` support in check/eval/\n\
-pack/qualify (rh has one for its own import syntax, see check.rs); see\n\
-plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3/M4."
+Scripts using top-level `import`/`export` are detected automatically and\n\
+routed through a real (root-confined) ES module resolver — see\n\
+plan/design-qjs-module-imports.md. `check`/`eval`/`run`/`check-many` support\n\
+this; `pack`/`qualify` do not yet (their manifest doesn't carry a project\n\
+root across build/load — tracked, not silently dropped, see\n\
+plan-v0.1.16.md \u{a7}1 Rh, QJS-M5c)."
     );
 }

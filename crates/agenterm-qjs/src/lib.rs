@@ -62,7 +62,7 @@ pub mod module_sniff;
 pub mod pack;
 pub mod qualify;
 
-pub use check::check;
+pub use check::{check, check_with_project_validation};
 pub use check_many::{
     CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
     read_manifest, run_check_many,
