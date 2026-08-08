@@ -1,0 +1,409 @@
+//! Machine-readable introspection and control for `agenterm-con`.
+//!
+//! Every other check in this codebase — is a color right, does a cursor
+//! appear where it should — is either a unit test against the pure encoding
+//! layer, or a human (or an agent standing in for one) squinting at a
+//! screenshot. Neither proves the *running* session behaves correctly: the
+//! wiring from a real window event to `ConTerminal`'s internal state has, in
+//! this file's history, been exactly where bugs hid (`fill_rect` painted the
+//! right width at the wrong x for months before anyone wrote a test that
+//! looked at actual pixels instead of trusting the code read correctly).
+//!
+//! This module is what makes it possible to test that wiring — and, just as
+//! importantly, what lets an *agent* (not just a human clicking a mouse)
+//! drive and inspect a session at all:
+//!
+//! - [`ScreenSnapshot`] + [`write_snapshot_atomic`]: a JSON dump of the
+//!   session's visible state, written after each render when `--emit-snapshot
+//!   <path>` is set. A test (or another agent) polls this file instead of
+//!   capturing and OCRing pixels.
+//! - [`ScriptCommand`] + [`parse_script`]: a JSON array of input commands
+//!   read once from `--script <path>` and played back through the exact
+//!   same code paths real keyboard/paste input uses. This is what lets a
+//!   test — or an agent — drive a session without OS-level input injection,
+//!   which is Windows-specific, timing-sensitive, and steals focus.
+//!
+//! Both are strictly opt-in: absent the flags, `agenterm-con` behaves exactly
+//! as it did before this module existed. Zero cost for the human-interactive
+//! path this binary exists for.
+
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+
+use agenterm_platform::input::NamedKey;
+
+// ---------------------------------------------------------------------------
+// Snapshot: introspection
+// ---------------------------------------------------------------------------
+
+/// One cell's worth of cursor state, flattened for JSON rather than nested,
+/// so a consumer can `snapshot.cursor.row` instead of matching an enum.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CursorSnapshot {
+    pub row: u16,
+    pub col: u16,
+    pub shape: &'static str,
+    pub blinking: bool,
+    /// Whether the cursor would currently be painted — false either because
+    /// the application hid it (DECTCEM) or because this frame landed in the
+    /// "off" half of a blink cycle. A test polling for "cursor is visible"
+    /// needs this, not just `hidden`, or it will flake against the blink.
+    pub visible_now: bool,
+}
+
+/// A point in terminal cell coordinates, used for selection endpoints.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct PointSnapshot {
+    pub row: u16,
+    pub col: u16,
+}
+
+/// The full observable state of one session, at one render.
+///
+/// Deliberately text-first (`rows_text`) rather than a full per-cell
+/// attribute dump: the overwhelming majority of what a test or an agent
+/// needs to assert is "did the right text end up on screen," and a plain
+/// `Vec<String>` is trivial to `grep`/`contains` from any language. Per-cell
+/// color/attribute correctness already has dedicated pixel-level unit tests
+/// (`paint_cells`'s own test module) — duplicating that here would test the
+/// same fact twice through a slower, flakier path.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScreenSnapshot {
+    pub cols: u16,
+    pub rows: u16,
+    pub title: String,
+    /// Plain text per visible row, right-trimmed. Index 0 is the top row
+    /// currently in view (which is *not* row 0 of the buffer when scrolled
+    /// back — `scroll_offset` tells you how far).
+    pub rows_text: Vec<String>,
+    pub cursor: CursorSnapshot,
+    pub scroll_offset: usize,
+    pub selection: Option<(PointSnapshot, PointSnapshot)>,
+    /// Non-empty while an IME composition is in progress. A headless/scripted
+    /// session never populates this (there is no real IME to drive it), but
+    /// a real interactive session does, and a human debugging one benefits
+    /// from being able to see it here rather than only on screen.
+    pub ime_preedit: String,
+    /// False once the child process has exited. A test waiting for a
+    /// command to finish should poll this rather than assume a fixed delay.
+    pub child_alive: bool,
+    pub font_size_px: u16,
+}
+
+/// Writes `snapshot` to `path` atomically: serialize to a sibling temp file,
+/// then rename over the destination. Without this, a reader polling the file
+/// (a test, or another agent) can observe a half-written frame and get a
+/// JSON parse error instead of stale-but-valid data — a real flake source
+/// for anything polling a file that's rewritten many times a second.
+pub fn write_snapshot_atomic(path: &Path, snapshot: &ScreenSnapshot) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(snapshot)
+        .map_err(|error| std::io::Error::other(format!("snapshot serialization: {error}")))?;
+    let tmp_path = tmp_sibling(path);
+    {
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(&json)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp_path, path)
+}
+
+/// A temp path in the same directory as `path`, so the later rename is
+/// guaranteed atomic (same filesystem/volume) rather than an OS-dependent
+/// maybe-atomic cross-directory move.
+fn tmp_sibling(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|name| {
+            let mut owned = name.to_os_string();
+            owned.push(".tmp");
+            owned
+        })
+        .unwrap_or_else(|| "snapshot.tmp".into());
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(file_name),
+        _ => PathBuf::from(file_name),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Script: control
+// ---------------------------------------------------------------------------
+
+/// One key a script can send: either a name from the fixed VT-relevant set
+/// (arrows, function keys, Enter, ...) or a single character, so
+/// `{"key": "c", "ctrl": true}` sends Ctrl+C without needing a name for
+/// every letter on the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptKey {
+    Named(NamedKey),
+    Char(char),
+}
+
+/// One command in a `--script` file, already validated — by the time this
+/// type exists, `key` names have been resolved and mutually-exclusive fields
+/// have been checked, so the executor never has to fail mid-script.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScriptCommand {
+    /// Raw text written directly to the PTY, as if the application read it
+    /// from a paste with no bracketing — this is the bulk-typing command,
+    /// not a substitute for `Key` when the point is exercising the real
+    /// keyboard encoder (mode-awareness, modifiers, Alt-as-ESC, ...).
+    Text(String),
+    /// Goes through the same `forward_key` path real keyboard input does,
+    /// including host shortcuts (Ctrl+Shift+C copies, etc.) and the live
+    /// DECCKM/modifier-aware encoder — this is what closes the gap between
+    /// "the encoder is unit-tested" and "a real keystroke in a real session
+    /// produces the right bytes."
+    Key {
+        key: ScriptKey,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    },
+    /// Goes through the same bracketed-paste-aware path Ctrl+V uses.
+    Paste(String),
+    /// Pause before the next command. Does not block the render loop —
+    /// the executor schedules it via the same `about_to_wait` `WaitUntil`
+    /// mechanism the resize debounce and cursor blink use.
+    WaitMs(u64),
+}
+
+/// One entry of the raw JSON array — every field optional so serde can parse
+/// it uniformly, then [`validate`](RawCommand::validate) enforces "exactly
+/// one action" instead of silently picking one when a script author sets two
+/// by mistake.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCommand {
+    text: Option<String>,
+    paste: Option<String>,
+    key: Option<String>,
+    #[serde(default)]
+    ctrl: bool,
+    #[serde(default)]
+    alt: bool,
+    #[serde(default)]
+    shift: bool,
+    wait_ms: Option<u64>,
+}
+
+impl RawCommand {
+    fn validate(self, index: usize) -> Result<ScriptCommand, String> {
+        let present = [
+            self.text.is_some(),
+            self.paste.is_some(),
+            self.key.is_some(),
+            self.wait_ms.is_some(),
+        ]
+        .into_iter()
+        .filter(|value| *value)
+        .count();
+        if present != 1 {
+            return Err(format!(
+                "script command {index}: exactly one of text/paste/key/wait_ms is required, found {present}"
+            ));
+        }
+        if let Some(text) = self.text {
+            return Ok(ScriptCommand::Text(text));
+        }
+        if let Some(text) = self.paste {
+            return Ok(ScriptCommand::Paste(text));
+        }
+        if let Some(name) = self.key {
+            let key = parse_key_name(&name)
+                .ok_or_else(|| format!("script command {index}: unknown key name '{name}'"))?;
+            return Ok(ScriptCommand::Key {
+                key,
+                ctrl: self.ctrl,
+                alt: self.alt,
+                shift: self.shift,
+            });
+        }
+        if let Some(ms) = self.wait_ms {
+            return Ok(ScriptCommand::WaitMs(ms));
+        }
+        unreachable!("validated exactly one field is present above");
+    }
+}
+
+/// Resolves a script's `key` string to a [`ScriptKey`]. Named keys match
+/// case-insensitively so a script author does not need to remember exact
+/// casing; a single character (any Unicode scalar, not just ASCII) is taken
+/// literally so `{"key": "文"}` is a meaningful thing to write even though it
+/// will rarely be useful.
+fn parse_key_name(name: &str) -> Option<ScriptKey> {
+    let named = match name.to_ascii_lowercase().as_str() {
+        "enter" => NamedKey::Enter,
+        "tab" => NamedKey::Tab,
+        "backspace" => NamedKey::Backspace,
+        "escape" | "esc" => NamedKey::Escape,
+        "space" => NamedKey::Space,
+        "arrowup" | "up" => NamedKey::ArrowUp,
+        "arrowdown" | "down" => NamedKey::ArrowDown,
+        "arrowleft" | "left" => NamedKey::ArrowLeft,
+        "arrowright" | "right" => NamedKey::ArrowRight,
+        "home" => NamedKey::Home,
+        "end" => NamedKey::End,
+        "pageup" => NamedKey::PageUp,
+        "pagedown" => NamedKey::PageDown,
+        "delete" | "del" => NamedKey::Delete,
+        "insert" => NamedKey::Insert,
+        "f1" => NamedKey::F1,
+        "f2" => NamedKey::F2,
+        "f3" => NamedKey::F3,
+        "f4" => NamedKey::F4,
+        "f5" => NamedKey::F5,
+        "f6" => NamedKey::F6,
+        "f7" => NamedKey::F7,
+        "f8" => NamedKey::F8,
+        "f9" => NamedKey::F9,
+        "f10" => NamedKey::F10,
+        "f11" => NamedKey::F11,
+        "f12" => NamedKey::F12,
+        _ => {
+            let mut chars = name.chars();
+            return match (chars.next(), chars.next()) {
+                (Some(ch), None) => Some(ScriptKey::Char(ch)),
+                _ => None,
+            };
+        }
+    };
+    Some(ScriptKey::Named(named))
+}
+
+/// Parses a `--script` file's contents: a JSON array of command objects.
+///
+/// Fails loudly and specifically (which command, what was wrong) rather than
+/// skipping bad entries — a script silently missing half its steps is a
+/// worse debugging experience than the process refusing to start.
+pub fn parse_script(bytes: &[u8]) -> Result<Vec<ScriptCommand>, String> {
+    let raw: Vec<RawCommand> = serde_json::from_slice(bytes)
+        .map_err(|error| format!("script is not a JSON array of command objects: {error}"))?;
+    raw.into_iter()
+        .enumerate()
+        .map(|(index, command)| command.validate(index))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_every_command_kind() {
+        let script = br#"[
+            {"text": "echo hi\r"},
+            {"paste": "pasted\ntext"},
+            {"key": "ArrowUp"},
+            {"key": "c", "ctrl": true},
+            {"wait_ms": 250}
+        ]"#;
+        let commands = parse_script(script).expect("valid script");
+        assert_eq!(
+            commands,
+            vec![
+                ScriptCommand::Text("echo hi\r".to_owned()),
+                ScriptCommand::Paste("pasted\ntext".to_owned()),
+                ScriptCommand::Key {
+                    key: ScriptKey::Named(NamedKey::ArrowUp),
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                },
+                ScriptCommand::Key {
+                    key: ScriptKey::Char('c'),
+                    ctrl: true,
+                    alt: false,
+                    shift: false,
+                },
+                ScriptCommand::WaitMs(250),
+            ]
+        );
+    }
+
+    #[test]
+    fn key_names_are_case_insensitive_and_have_shorthands() {
+        assert_eq!(parse_key_name("ArrowUp"), Some(ScriptKey::Named(NamedKey::ArrowUp)));
+        assert_eq!(parse_key_name("arrowup"), Some(ScriptKey::Named(NamedKey::ArrowUp)));
+        assert_eq!(parse_key_name("UP"), Some(ScriptKey::Named(NamedKey::ArrowUp)));
+        assert_eq!(parse_key_name("Esc"), Some(ScriptKey::Named(NamedKey::Escape)));
+        assert_eq!(parse_key_name("a"), Some(ScriptKey::Char('a')));
+        assert_eq!(parse_key_name("中"), Some(ScriptKey::Char('中')));
+        assert_eq!(parse_key_name("notakey"), None);
+        assert_eq!(parse_key_name(""), None);
+        assert_eq!(parse_key_name("ab"), None, "two ASCII chars is not a single key");
+    }
+
+    #[test]
+    fn rejects_a_command_with_two_actions_rather_than_silently_picking_one() {
+        let script = br#"[{"text": "a", "paste": "b"}]"#;
+        let error = parse_script(script).expect_err("must reject ambiguous command");
+        assert!(error.contains("command 0"), "{error}");
+        assert!(error.contains("exactly one"), "{error}");
+    }
+
+    #[test]
+    fn rejects_a_command_with_no_action() {
+        let script = br#"[{"ctrl": true}]"#;
+        let error = parse_script(script).expect_err("must reject empty command");
+        assert!(error.contains("exactly one"), "{error}");
+    }
+
+    #[test]
+    fn rejects_an_unknown_key_name_with_the_offending_name_in_the_message() {
+        let script = br#"[{"key": "SuperDelete"}]"#;
+        let error = parse_script(script).expect_err("must reject unknown key");
+        assert!(error.contains("SuperDelete"), "{error}");
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected_rather_than_silently_ignored() {
+        // A typo like "txet" must not be silently treated as "no action" —
+        // deny_unknown_fields turns it into a loud parse error instead.
+        let script = br#"[{"txet": "typo"}]"#;
+        assert!(parse_script(script).is_err());
+    }
+
+    #[test]
+    fn snapshot_round_trips_through_json_with_stable_field_names() {
+        // Not a schema test in the strict sense — there is no consumer to
+        // pin against yet — but it does prove serialization succeeds and
+        // that a consumer parsing generic JSON (jq, Python, another agent)
+        // finds the fields this module's docs promise.
+        let snapshot = ScreenSnapshot {
+            cols: 80,
+            rows: 24,
+            title: "agenterm-con".to_owned(),
+            rows_text: vec!["hello".to_owned(), String::new()],
+            cursor: CursorSnapshot {
+                row: 0,
+                col: 5,
+                shape: "block",
+                blinking: true,
+                visible_now: true,
+            },
+            scroll_offset: 0,
+            selection: Some((PointSnapshot { row: 0, col: 0 }, PointSnapshot { row: 0, col: 4 })),
+            ime_preedit: String::new(),
+            child_alive: true,
+            font_size_px: 16,
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        assert_eq!(value["cols"], 80);
+        assert_eq!(value["rows_text"][0], "hello");
+        assert_eq!(value["cursor"]["shape"], "block");
+        assert_eq!(value["cursor"]["visible_now"], true);
+        assert_eq!(value["selection"][0]["col"], 0);
+        assert_eq!(value["selection"][1]["col"], 4);
+        assert_eq!(value["child_alive"], true);
+    }
+
+    #[test]
+    fn tmp_sibling_stays_in_the_same_directory_for_an_atomic_rename() {
+        let path = Path::new("/some/dir/snapshot.json");
+        let tmp = tmp_sibling(path);
+        assert_eq!(tmp.parent(), Some(Path::new("/some/dir")));
+        assert_eq!(tmp.file_name().unwrap(), "snapshot.json.tmp");
+    }
+}

@@ -18,16 +18,23 @@
 // keeping the child handle alive for the session lifetime.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "agenterm-con/agent_interface.rs"]
+mod agent_interface;
 #[path = "agenterm-con/font.rs"]
 mod font;
 #[path = "agenterm-con/palette.rs"]
 mod palette;
 
+use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agenterm_platform::input::{KeyPressState, LogicalKey, NamedKey, NormalizedKeyEvent};
+use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey};
+use agenterm_platform::input::{
+    KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
+};
 use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::window_host::{
@@ -196,6 +203,10 @@ struct ConArgs {
     cols: Option<u16>,
     rows: Option<u16>,
     command: Option<Vec<String>>,
+    /// `--emit-snapshot`: see `agent_interface` module docs.
+    snapshot_path: Option<PathBuf>,
+    /// `--script`: see `agent_interface` module docs.
+    script_path: Option<PathBuf>,
 }
 
 /// Parses arguments, returning the message to print on failure.
@@ -222,6 +233,20 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
             }
             "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
             "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
+            "--emit-snapshot" => {
+                parsed.snapshot_path = Some(PathBuf::from(
+                    rest.next()
+                        .cloned()
+                        .ok_or_else(|| "error: --emit-snapshot requires a path\n".to_owned())?,
+                ));
+            }
+            "--script" => {
+                parsed.script_path = Some(PathBuf::from(
+                    rest.next()
+                        .cloned()
+                        .ok_or_else(|| "error: --script requires a path\n".to_owned())?,
+                ));
+            }
             // Everything after -e is the command line, verbatim. Consuming the
             // remainder is what lets `-e ssh host -p 22` pass `-p 22` through
             // rather than having this parser reject it as an unknown flag.
@@ -285,14 +310,38 @@ fn main() {
         cols: initial_cols,
         rows: initial_rows,
         command,
+        snapshot_path,
+        script_path,
     } = parsed;
     no_activate |= std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
+
+    // A bad script must fail before a window ever opens, not silently run
+    // partway then stall — same "loud, specific, fail fast" philosophy as
+    // the rest of this parser.
+    let script = script_path
+        .map(|path| {
+            let bytes = std::fs::read(&path).map_err(|error| {
+                format!("error: could not read --script {}: {error}\n", path.display())
+            })?;
+            agent_interface::parse_script(&bytes)
+                .map_err(|error| format!("error: --script {}: {error}\n", path.display()))
+        })
+        .transpose();
+    let script = match script {
+        Ok(script) => script,
+        Err(message) => {
+            let _ = agenterm_platform::process::write_parent_console_stderr(&message);
+            std::process::exit(2);
+        }
+    };
 
     // Load config file: CLI flags override config, config overrides defaults.
     let config = load_config();
 
     let mut app = ConTerminal::new(working_dir.clone());
     app.command = command;
+    app.snapshot_path = snapshot_path;
+    app.script = script.unwrap_or_default().into();
     // Config values (lowest priority)
     if let Some(fs) = config.font_size {
         app.font_size_logical = fs.clamp(8.0, 36.0);
@@ -333,6 +382,7 @@ fn main() {
 const USAGE: &str = "\
 Usage: agenterm-con [--no-activate] [--working-dir DIR]
                    [--font-size N] [--cols N] [--rows N]
+                   [--emit-snapshot PATH] [--script PATH]
                    [-e PROGRAM [ARGS...]]
        agenterm-con --version
        agenterm-con --help
@@ -343,6 +393,18 @@ A standalone console host (conhost equivalent). No tabs, no server, no Fleet.
                  -e is passed through verbatim, so it must come last:
                    agenterm-con -e pwsh -NoLogo
                    agenterm-con --working-dir C:\\src -e cargo test
+
+  --emit-snapshot PATH
+                 Write a JSON snapshot of screen text/cursor/selection to
+                 PATH after each render (atomic write). For scripts, tests,
+                 and other agents that need to inspect a session without
+                 capturing pixels.
+
+  --script PATH  Read a JSON array of input commands from PATH and play them
+                 back through the real keyboard/paste code paths — text,
+                 paste, key (with ctrl/alt/shift), wait_ms. Lets a test or
+                 another agent drive a session without OS-level input
+                 injection. See src/bin/agenterm-con/agent_interface.rs.
 
 Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 ~/.config (Unix) with keys: font_size, cols, rows (all optional).
@@ -379,6 +441,21 @@ struct ConTerminal {
 
     /// Program to host, from `-e`. `None` runs the user's default shell.
     command: Option<Vec<String>>,
+
+    /// Mirrors whatever the window title was last set to (default or an OSC
+    /// title change), so `--emit-snapshot` can report it without needing to
+    /// steal the one-shot `.take()` the render loop uses to notify the OS
+    /// window.
+    current_title: String,
+
+    /// `--emit-snapshot`: written after each render when set. See
+    /// `agent_interface` module docs.
+    snapshot_path: Option<PathBuf>,
+    /// `--script`: commands not yet executed, in order.
+    script: VecDeque<ScriptCommand>,
+    /// When the next queued `WaitMs` elapses. `None` when nothing is queued
+    /// or the next command is ready to run immediately.
+    script_wait_until: Option<Instant>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser<ConCallbacks>,
@@ -467,6 +544,10 @@ impl ConTerminal {
         Self {
             working_dir,
             command: None,
+            current_title: String::new(),
+            snapshot_path: None,
+            script: VecDeque::new(),
+            script_wait_until: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
@@ -960,15 +1041,141 @@ impl ConTerminal {
         else {
             return;
         };
+        self.paste_text(&text);
+    }
+
+    /// The paste path proper, independent of where the text came from — the
+    /// OS clipboard (`paste_clipboard`) or a `--script` `paste` command. Both
+    /// must go through the same normalization and bracketing, which is the
+    /// point of factoring this out: a scripted test exercises the exact
+    /// logic a real Ctrl+V does, not a lookalike.
+    fn paste_text(&mut self, text: &str) {
         // Normalization drops ESC, so a payload cannot close the bracketed
         // guard early and have its tail executed as keystrokes.
-        let normalized = terminal_input::normalize_terminal_paste(&text);
+        let normalized = terminal_input::normalize_terminal_paste(text);
         if normalized.is_empty() {
             return;
         }
         let bracketed = self.parser.screen().bracketed_paste();
         self.scroll_to_bottom();
         self.write_pty(&terminal_input::terminal_paste_bytes(&normalized, bracketed));
+    }
+
+    /// Runs every `--script` command that is due, pacing `WaitMs` through the
+    /// same `about_to_wait` scheduling the resize debounce and cursor blink
+    /// use rather than blocking the thread — a blocking sleep here would
+    /// freeze rendering and PTY draining for the wait's whole duration.
+    ///
+    /// Returns the instant to next wake for the caller to fold into its own
+    /// `WaitUntil` decision, or `None` when the queue is empty and nothing
+    /// is scheduled.
+    fn drain_script(&mut self, now: Instant) -> Option<Instant> {
+        if let Some(until) = self.script_wait_until {
+            if now < until {
+                return Some(until);
+            }
+            self.script_wait_until = None;
+        }
+        while let Some(command) = self.script.pop_front() {
+            match command {
+                ScriptCommand::Text(text) => {
+                    self.scroll_to_bottom();
+                    self.write_pty(text.as_bytes());
+                }
+                ScriptCommand::Paste(text) => self.paste_text(&text),
+                ScriptCommand::Key { key, ctrl, alt, shift } => {
+                    self.execute_script_key(key, ctrl, alt, shift);
+                }
+                ScriptCommand::WaitMs(ms) => {
+                    let until = now + Duration::from_millis(ms);
+                    self.script_wait_until = Some(until);
+                    return Some(until);
+                }
+            }
+        }
+        None
+    }
+
+    /// Synthesizes a [`NormalizedKeyEvent`] for a script `key` command and
+    /// forwards it through [`ConTerminal::forward_key`] — the exact path a
+    /// real keystroke takes, including host shortcuts and the live
+    /// DECCKM/modifier-aware encoder. A script is a *test* of that wiring,
+    /// not a shortcut around it.
+    fn execute_script_key(&mut self, key: ScriptKey, ctrl: bool, alt: bool, shift: bool) {
+        let modifiers = ModifierState {
+            control: ctrl,
+            alt,
+            shift,
+            meta: false,
+        };
+        let logical = match key {
+            ScriptKey::Named(named) => LogicalKey::Named(named),
+            ScriptKey::Char(ch) => LogicalKey::Character(ch.to_string()),
+        };
+        let text = match key {
+            ScriptKey::Named(_) => None,
+            // Only offered as `text` when unmodified, matching how a real
+            // backend reports a plain character key versus a shortcut.
+            ScriptKey::Char(ch) if !ctrl && !alt => Some(ch.to_string()),
+            ScriptKey::Char(_) => None,
+        };
+        let event = NormalizedKeyEvent {
+            logical,
+            physical: PhysicalKeyCode::Other,
+            text,
+            state: KeyPressState::Pressed,
+            repeat: false,
+            modifiers,
+        };
+        self.forward_key(&event);
+    }
+
+    /// Builds the current [`ScreenSnapshot`] for `--emit-snapshot`.
+    fn build_snapshot(&self) -> ScreenSnapshot {
+        let screen = self.parser.screen();
+        let (rows, cols) = screen.size();
+        let cursor = screen.cursor_position();
+        let shape = match screen.cursor_shape() {
+            vt100::CursorShape::Block => "block",
+            vt100::CursorShape::Underline => "underline",
+            vt100::CursorShape::Bar => "bar",
+        };
+        let visible_now = !screen.hide_cursor()
+            && self.scroll_offset == 0
+            && (!screen.cursor_blinking() || self.blink_visible);
+        ScreenSnapshot {
+            cols,
+            rows,
+            title: self.current_title.clone(),
+            rows_text: screen.rows(0, cols).collect(),
+            cursor: agent_interface::CursorSnapshot {
+                row: cursor.0,
+                col: cursor.1,
+                shape,
+                blinking: screen.cursor_blinking(),
+                visible_now,
+            },
+            scroll_offset: self.scroll_offset,
+            selection: self.selection.map(|(a, b)| {
+                (
+                    agent_interface::PointSnapshot { row: a.row, col: a.col },
+                    agent_interface::PointSnapshot { row: b.row, col: b.col },
+                )
+            }),
+            ime_preedit: self.ime_preedit.clone(),
+            child_alive: !self.child_gone,
+            font_size_px: self.font_size_px,
+        }
+    }
+
+    /// Writes the current snapshot to `--emit-snapshot`'s path, if set.
+    /// Errors are deliberately swallowed: a full disk or a test harness that
+    /// deleted the target directory mid-run must not crash the session it is
+    /// trying to observe.
+    fn write_snapshot_if_requested(&self) {
+        if let Some(path) = &self.snapshot_path {
+            let _ = agent_interface::write_snapshot_atomic(path, &self.build_snapshot());
+        }
     }
 
     /// Current mouse reporting contract negotiated by the running application.
@@ -1166,7 +1373,8 @@ impl PixelWindowApplication for ConTerminal {
         };
         self.recompute_metrics(scale);
         self.scale = scale;
-        window.set_title(&format!("agenterm-con — {}", font::resolved_name()));
+        self.current_title = format!("agenterm-con — {}", font::resolved_name());
+        window.set_title(&self.current_title);
         // Request keyboard focus so winit delivers KeyboardInput events on Windows.
         window.focus();
         let (cols, rows) =
@@ -1290,7 +1498,8 @@ impl PixelWindowApplication for ConTerminal {
 
         // Apply OSC title changes (shell emits \e]0;title\a).
         if let Some(title) = self.parser.callbacks_mut().title.take() {
-            window.set_title(&title);
+            self.current_title = title;
+            window.set_title(&self.current_title);
         }
 
         let fw = frame.width();
@@ -1377,6 +1586,8 @@ impl PixelWindowApplication for ConTerminal {
             }
         }
 
+        self.write_snapshot_if_requested();
+
         Ok(PixelWindowDirective::Continue)
     }
 
@@ -1390,16 +1601,28 @@ impl PixelWindowApplication for ConTerminal {
             return Ok(PixelWindowDirective::Exit);
         }
 
+        // Three independent timers can all have work pending at once (a
+        // resize settling, the cursor mid-blink, a scripted `wait_ms`), and
+        // this callback can only return one deadline. Each contributes to a
+        // shared "wake no later than" floor instead of returning early —
+        // returning early on, say, blink would starve a scripted wait behind
+        // blink's ~530ms cadence, making `wait_ms: 50` in a script actually
+        // take up to 530ms.
+        let mut redraw = false;
+        let mut next_wake: Option<Instant> = None;
+        let mut fold_wake = |deadline: Instant| {
+            next_wake = Some(next_wake.map_or(deadline, |current| current.min(deadline)));
+        };
+
         if let Some((pw, ph, scale)) = self.pending_geometry {
-            if now.duration_since(self.last_geometry_at) >= RESIZE_DEBOUNCE {
+            let deadline = self.last_geometry_at + RESIZE_DEBOUNCE;
+            if now >= deadline {
                 self.apply_resize(pw, ph, scale);
                 self.pending_geometry = None;
-                window.request_redraw();
-                return Ok(PixelWindowDirective::Continue);
+                redraw = true;
+            } else {
+                fold_wake(deadline);
             }
-            return Ok(PixelWindowDirective::WaitUntil(
-                self.last_geometry_at + RESIZE_DEBOUNCE,
-            ));
         }
 
         // A steady cursor needs no timer at all — only pay the periodic
@@ -1408,14 +1631,20 @@ impl PixelWindowApplication for ConTerminal {
             if now.duration_since(self.last_blink_at) >= BLINK_INTERVAL {
                 self.blink_visible = !self.blink_visible;
                 self.last_blink_at = now;
-                window.request_redraw();
+                redraw = true;
             }
-            return Ok(PixelWindowDirective::WaitUntil(
-                self.last_blink_at + BLINK_INTERVAL,
-            ));
+            fold_wake(self.last_blink_at + BLINK_INTERVAL);
         }
 
-        Ok(PixelWindowDirective::Wait)
+        if let Some(deadline) = self.drain_script(now) {
+            fold_wake(deadline);
+        }
+
+        if redraw {
+            window.request_redraw();
+        }
+
+        Ok(next_wake.map_or(PixelWindowDirective::Wait, PixelWindowDirective::WaitUntil))
     }
 }
 
