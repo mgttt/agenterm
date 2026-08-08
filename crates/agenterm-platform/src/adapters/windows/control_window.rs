@@ -26,9 +26,10 @@ use windows_sys::Win32::{
             VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
-            AppendMenuW, CS_DBLCLKS, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW, DefWindowProcW,
-            DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_PASSWORD,
-            ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
+            AppendMenuW, CS_DBLCLKS, CW_USEDEFAULT, CWP_SKIPDISABLED, CWP_SKIPINVISIBLE,
+            CWP_SKIPTRANSPARENT, CheckMenuItem, ChildWindowFromPointEx, CreateWindowExW,
+            DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE,
+            ES_PASSWORD, ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
             GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
             IDC_ARROW, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, ISMEX_NOSEND, InSendMessageEx,
             IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED,
@@ -163,6 +164,29 @@ impl ControlWindowBackend for Backend {
     }
     fn focused_target(&self) -> FocusTarget {
         self.focus_target(unsafe { GetFocus() })
+    }
+    fn control_at(&self, point: PixelPoint) -> Option<ControlId> {
+        // `ChildWindowFromPointEx` is the router Win32 itself consults, so the
+        // answer cannot drift away from where a human click actually lands.
+        // Invisible and disabled children are skipped for the same reason: the
+        // OS skips them too when the mouse comes down.
+        let window = self.window.get();
+        let child = unsafe {
+            ChildWindowFromPointEx(
+                window,
+                POINT {
+                    x: point.x,
+                    y: point.y,
+                },
+                CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT,
+            )
+        };
+        if child.is_null() || child == window {
+            return None;
+        }
+        self.controls
+            .iter()
+            .find_map(|(id, control)| (*control == child).then_some(*id))
     }
     fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError> {
         if size.width == 0 || size.height == 0 {

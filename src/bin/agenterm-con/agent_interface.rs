@@ -244,10 +244,18 @@ pub enum ScriptCommand {
     /// `handle_wheel` — so the same three-tier precedence a real wheel
     /// gesture gets (application report → alternate-screen cursor keys →
     /// local scrollback) applies to a scripted one. Positive `notches`
-    /// scrolls up (back through history), negative scrolls down. Does not
-    /// cover Ctrl+wheel font-size zoom, which lives in the window-event
-    /// handler above this struct's reach, not in `handle_wheel` itself.
-    Wheel { row: u16, col: u16, notches: f32 },
+    /// scrolls up (back through history), negative scrolls down.
+    ///
+    /// `ctrl: true` instead drives the Ctrl+wheel font-size zoom path —
+    /// same sign convention (positive grows the font). This is a distinct
+    /// code path from plain scroll (it lives in the window-event handler,
+    /// not `handle_wheel`), included because a real user report ("zoom past
+    /// a certain size and the process exits") could not be reproduced by
+    /// single-shot unit-test sweeps over `apply_resize`/`font::raster` in
+    /// isolation — only a live session driving *repeated, cumulative*
+    /// zoom steps through the real ConPTY resize path can tell whether
+    /// something about that sequence, not any one fixed size, is at fault.
+    Wheel { row: u16, col: u16, notches: f32, ctrl: bool },
 }
 
 /// One entry of the raw JSON array — every field optional so serde can parse
@@ -359,6 +367,7 @@ impl RawCommand {
                 row: wheel.row,
                 col: wheel.col,
                 notches: wheel.notches,
+                ctrl: self.ctrl,
             });
         }
         unreachable!("validated exactly one field is present above");
@@ -511,7 +520,8 @@ mod tests {
             {"click": {"row": 0, "col": 0, "button": "middle"}, "shift": true},
             {"mouse_move": {"row": 5, "col": 20}},
             {"wheel": {"row": 5, "col": 20, "notches": 3}},
-            {"wheel": {"row": 5, "col": 20, "notches": -1.5}}
+            {"wheel": {"row": 5, "col": 20, "notches": -1.5}},
+            {"wheel": {"row": 5, "col": 20, "notches": 1}, "ctrl": true}
         ]"#;
         let commands = parse_script(script).expect("valid script");
         assert_eq!(
@@ -542,8 +552,9 @@ mod tests {
                     shift: true,
                 },
                 ScriptCommand::MouseMove { row: 5, col: 20 },
-                ScriptCommand::Wheel { row: 5, col: 20, notches: 3.0 },
-                ScriptCommand::Wheel { row: 5, col: 20, notches: -1.5 },
+                ScriptCommand::Wheel { row: 5, col: 20, notches: 3.0, ctrl: false },
+                ScriptCommand::Wheel { row: 5, col: 20, notches: -1.5, ctrl: false },
+                ScriptCommand::Wheel { row: 5, col: 20, notches: 1.0, ctrl: true },
             ]
         );
     }

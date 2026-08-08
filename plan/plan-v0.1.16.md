@@ -214,10 +214,31 @@ C. Console host (agenterm-con.exe)
    再把钳过的结果读回来——顺带补了一条单测
    `scrolling_up_actually_moves_once_real_content_is_off_screen` 钉死这个
    区分度，不依赖真实进程也能挡住这个回归。8 条新单测 + 2 条新黑盒集成测试
-   （click 落点选区、wheel 双向滚动）全绿；`--help` 同步更新。不在本轮范围
-   （仍是已知缺口）：Ctrl+滚轮缩放没有脚本命令（该逻辑目前只挂在窗口事件
-   分派处，不在 `handle_wheel` 里）；拖拽手势（连续 mouse_move 之间保持
+   （click 落点选区、wheel 双向滚动）全绿；`--help` 同步更新。~~不在本轮范围
+   （仍是已知缺口）：Ctrl+滚轮缩放没有脚本命令~~——**2026-08-08 已补**，
+   见下方"Ctrl+滚轮缩放崩溃"条。拖拽手势（连续 mouse_move 之间保持
    按钮归属)只在真实指针事件下验证过，脚本层还没写覆盖拖拽的黑盒测试。
+
+**2026-08-08 用户反馈：Ctrl+滚轮缩放到某个尺寸时进程"自杀退出"（之前一轮
+`3d23dfde` 报过、未复现）**——本轮把 Ctrl+滚轮缩放逻辑拆成 `zoom_font`
+方法并接进 `--script` 的 `wheel` 命令（加 `ctrl: true`），使其第一次可以
+被脚本/测试真正驱动到（此前 `--script` 完全够不到这条路径，`3d23dfde`
+只能做独立、单次的 `apply_resize`/`font::raster` 静态扫描，测不出"一串
+真实、累积的缩放操作打在一个活的 ConPTY 会话上"这种情形）。用这条新能力
+写了个真复现尝试：20 轮"缩到最大→缩到最小"的完整循环、循环内部**不插入
+任何等待**（1600 次连续 `zoom_font` 调用背靠背打出去，刻意模拟快速滚轮
+甩动而非慢慢滚），跑在真实 ConPTY 会话上。
+
+**如实记录结果：没能复现**——无论是走可靠的 Rust `Child`/`try_wait` 进程
+句柄（黑盒测试用的那条路），还是（可信度更低）绕开测试框架、用裸 shell
+脚本后台跑+轮询快照的临时手段（后者一度看到 `child_alive:false` 但进程
+本身没退出——重新用可靠的 Rust 句柄跑同一个场景没能重现，判定是 Git Bash
+`timeout`/后台任务对 Windows GUI 子进程信号投递的已知怪癖，不是真崩溃）。
+已把这条重压力测试留作永久回归覆盖——如果它以后真的抓到崩溃，那就是它
+该干的事，不代表这轮白查。`3d23dfde` 当时唯一对得上的证据是一份
+`agenterm.exe`（主 GUI，不是 `agenterm-con`）的 WER 报告，按当时方向未
+深挖；这条线索仍然开放，值得向用户多要点细节（具体哪个 exe、是否真实
+DPI 缩放变化触发、大概在哪个字号、放大还是缩小方向）才好继续追。
 4. **部分已补**：找到了那个"确定性安装、体积小、行为可预期"的 TUI 依赖——
    `less`（随 Git for Windows 一起装的 `usr\bin\less.exe`，这台机器上是
    `C:\Program Files\Git\usr\bin\less.exe`；开发机装 Git 是近乎普遍的前提，
@@ -559,6 +580,8 @@ lua 雏形来去规避这个风险。
 | **QJS-M5b** | [~] `module_sniff.rs`（`wants_module_mode`：顶层 `import`/`export` 探测，跳注释/三种字符串、排除动态 `import(...)` 和属性访问 `obj.import`、正确识别 `import.meta`——11 单测全绿）+ `eval_module.rs`（`eval_module_entry_with_host`：declare→eval→`Promise::finish`（rquickjs 自带的 drain-until-settled，不是手写 job-queue 循环）→`module.get("entry")`→call，和经典脚本路径共用同一套 call/catch/json_stringify 尾段，`EvalOutcome` 复用不重新定义）。**两处主动收紧、不是事后发现**：entry_path/project_root 在函数入口就 canonicalize，不指望调用方记得（`module_resolver.rs` 设计时留的「调用方必须传 canonical 路径」这条集成契约，本叶直接把它从「靠文档」改成「函数自己保证」）；entry 文件本身也要 `starts_with(project_root)`，和每个 import 用同一套越权检查，不然 import 的越权检查形同虚设——entry 自己指到项目外，import 图再干净也没用。7 个新测试：单文件 module（无 import）跑通、真实多文件 import 跑通、**循环 import 且两个文件互相读对方导出值也算对**（不只是「不崩」，是 `entry()` 真的拿到跨循环的正确值，比 M5a 的「declare 不 hang」测试更进一步）、缺 `export entry` 时 fail-closed、entry 路径越权被拒、import 越权被拒、`print`/`__host` 在 module 作用域一样能用。`cargo test -p agenterm-qjs --lib` 71/71 绿（M5a 的 53 少了？不，是 53+7+11=71，M5a 的 53 本身已含 M4 的 41——逐级累加不是重复计数）、clippy 零警告。仍差：M5c（接进 `check`/CLI `eval`/`run`/`pack`/`qualify`——现在 `eval_module_entry_with_host` 是个能用但没人调用的库函数）/ M5d |
 | **QJS-M5c** | [~] 接进 `check`（新 `check_with_project_validation(source, label, project_root)`，无 import/export 的脚本**逐字节委托给原 `check()`**，不是重新实现——有独立测试证明「委托」是真委托：传一个不存在的 project_root 进去，非-module 脚本照样过，因为根本没走到会失败的那段代码）、`check_many.rs`（原来 `project_root` 只用来做 manifest 文件名越权校验，现在真的传给每个文件的 check，import 图校验和「哪些文件允许被列进 manifest」共用同一个已验证过的 root，不是两条平行逻辑）、CLI `check`/`eval`/`run`（新 `--project-root DIR`；`check` 不给默认值，强制显式，对齐 `check-many` 已有的约定；`eval`/`run` 默认用入口文件自己的父目录，理由：这两个是单文件调用为主的场景，每次都要求显式传参是纯摩擦）。**没做**：`pack`/`qualify`——manifest 现在不记 project_root，build 和 load 是分开的两次调用，M5c 没有在 pack 的 schema 里加字段，所以先诚实标为未做，不是漏做。8 个新测试（check.rs 4 个 + check_many.rs 2 个新增，验证「非 module 脚本零行为变化」「真实多文件图校验通过」「被 import 的文件语法错也能抓到」「越权 import 被拒」）+ CLI 端到端 smoke（真建了一个 `entry.js` + `lib/value.js` 的两文件项目，`check` 不给 `--project-root` 时按设计**必须失败**、给了就过；`eval`/`run` 不给参数也能跑通，因为默认用了入口文件的父目录；越权 import 的 `../../../../etc/passwd.js` 真的被拒；**普通无 import 脚本三个动词全部逐字节验证行为不变**，不是assumed）。`cargo test -p agenterm-qjs --lib` 77/77 绿、`cargo clippy -p agenterm-qjs --lib --all-targets -- -D warnings` 零警告、`cargo check --workspace` 干净。仍差：M5d（还没做的部分：pack/qualify 的多文件支持，以及给这套东西写一个正式的端到端 smoke 脚本存进仓库而不是只在这轮对话里跑过） |
 | **QJS-M5d（部分）** | [~] M5d 两件事里做完了一件：**repo 落地的端到端回归测试**（`crates/agenterm-qjs/tests/module_imports.rs` + `fixtures/module-import-project/`：真实 `entry.js`+`lib/value.js`+`escape-attempt.js` 三个文件躺在仓库里，不是临时目录字符串），风格对齐 `agenterm-rh/tests/public_contract.rs`（调库的公开 API 打真文件，不是 shell 出二进制）。6 个测试：sniff 探测真 fixture、plain `check()` 无 project-root 时按设计失败、`check_with_project_validation` 对真项目全绿、`eval_module_entry_with_host` 真的跑出 42 和对应 `print()` 输出、越权 fixture 在 `eval` 和 `check` 两条入口**都**被拒（不是只测了一条就假设另一条也对）。`cargo test -p agenterm-qjs`（含新 `tests/module_imports.rs` 目标）全绿、`cargo clippy -p agenterm-qjs --all-targets -- -D warnings` 零警告。**`cargo check --workspace` 这次没法用来验收**——共享工作树的 `agenterm-con`（另一个 agent 的在制品）当前编不过（`ScriptCommand` 匹配非穷尽，`git status` 显示该文件本轮未被我改动，是已经躺在共享分支历史里的问题，不是我引入的，也没去碰它去修）；改用 `cargo check -p agenterm-qjs --lib --tests` 单独验证本 crate 干净，作为诚实的替代证据，不是「反正跑不动就不验了」。**没做的另一件**：pack/qualify 的多文件 import 支持仍然没做，manifest schema 改动还没设计，本条不算 M5d 收尾，只是先把能独立交付的一半（回归测试）落地 |
+| **QJS-M5d（收尾）** | [x] M5d 剩下那一半也做完：`pack`/`qualify` 的多文件 import 支持。**先做了一次关键调研再动手，不是假设着设计**——写了一个抛弃式 probe 测试（跑完即删，没进最终代码）实测 `Module::write()` 是否把被 import 文件的字节码也编码进去：改 `leaf.js` 内容从 `1` 改成 `999999`，entry 模块的序列化字节码**长度和内容完全不变**——证明 `Module::write()` 只序列化本模块自身，不含依赖，「单 blob 装下整张 import 图」这条路在 rquickjs 0.12 的公开 API 里走不通，不是本 assistant 技术力不够绕不开，是这条路本来就不存在，据此选择了「pack 目录里塞进整张 graph 的真实源文件副本」这个唯一站得住的设计，写进了 `pack_module.rs` 的模块级文档，留证据不是留断言。新增 `pack_module.rs`：`discover_import_graph`（`RecordingLoader` 包一层 `ScriptLoader`，复用 `Module::declare` 真实链接过程发现整张图，不是另起一套会独立漂移的文本扫描器）+ 独立 schema `agenterm.qjs-module-pack-manifest/v1`（不是塞进 `pack.rs` 现有 `QjsPackManifest` 加可选字段——两种 pack 形状真的不同，一个结构体两种「有时候有意义」的字段是在给未来埋雷）+ `QjsModulePack`（load 只用 pack 目录自己当 project_root，不需要原 `--project-root` 还在）。CLI `pack build`/`qualify` 接上 `--project-root`（module 脚本必须显式给，和 `check` 同一约定）；`pack load`/`run-smoke` 靠 peek `manifest.json` 的 `schema` 字段自动分派到单文件还是多文件 loader，不用用户自己记「这个目录是哪种 pack」。**过程中真的抓到一个自己写的 bug，是手测抓到的不是read code看出来的**：`pack build --dir X --project-root Y` 一开始把 `Y` 悄悄丢了——`require_flag_value(args, "--dir", ...)` 内部 `args.collect()` 会把整个剩余 iterator 耗尽，后面再调 `optional_flag_value(args, "--project-root")` 拿到的是空迭代器，永远返回 `None`，报错文案却是「需要 --project-root」，不是「参数解析出 bug 了」那种更容易发现的错误——手测第一轮 `pack build`/`qualify` 全部失败才揪出来，修法是改成一次性 collect 成 `Vec` 再对同一个 slice 查两次 `find_flag_value`，删掉了现在没人再用的旧 `require_flag_value`，补了 3 个针对这条 bug 本身的单测锁住（不是修完就完事，验证「以后不会再犯」）。修完后**重新跑了完全相同的一遍手测**，包括最有说服力的一步：`pack build` 之后把原始 `entry.js`/`lib/` 整个删掉，`pack load` 仍然正确跑出 42——证明 self-contained 这条设计承诺是真的，不是文档说说而已。18 个新单测（`pack_module.rs` 6 个 + `main.rs` 3 个 flag-parsing 回归测试，另加已有的不变）、`cargo test -p agenterm-qjs --lib` 83/83 绿、`cargo test --bin agenterm-qjs` 3/3 绿、`cargo clippy -p agenterm-qjs --lib --all-targets -- -D warnings` 零警告、`cargo check -p agenterm-qjs --lib --tests --bins` 干净（`cargo check --workspace` 仍卡在 `agenterm-con` 那个不是我引入的问题上，同上一条的做法，不假装它通过了）。**至此 QJS-M5（design-qjs-module-imports.md 全部 4 个分期 M5a–M5d）全部完成**，qjs 现在对 rh 的「project-relative import」能力做到了功能对等（机制不同：qjs 用真 ES module + QuickJS 原生链接器，rh 手写文本扫描器，见设计文档 §5 对照表），仍未做的是文档里从一开始就写明的非目标（动态 `import()`、把 `fleet.js` 迁移成 export 风格）——不是漏做，是设计阶段就定的范围边界 |
+| **QJS-M6（新发现，未做）** | [ ] M5 收尾后**主动回头复核**「qjs 的 `check_with_project_validation` 是不是真的对齐了 rh 同名函数」，没有停在「名字一样、import 图校验也做了」就收手——读了 rh 的 `check_with_project_validation` 实际实现（`crates/agenterm-rh/src/check.rs:31-43`）才发现它其实做**两件事**：① import 图校验（qjs 已对齐）② 对每个 shipped API 引用做静态校验（`api_validate.rs` + `shipped_surfaces.rs`，例如 `std::fs::not_shipped(...)` 语法合法但会被 rh 的 check 拦下）。qjs **完全没做②**——实测（不是读代码猜的）：`agenterm-qjs check` 一个调用 `__host.fleet_call('tabs.totallyNotARealOperation', '{}')` 的脚本，返回 `qjs check ok`，退出码 0。已经在 `check.rs` 模块文档和 `check_with_project_validation` 的函数文档里把这条差距写清楚（之前的旧注释把①②混在一起说「已知缺口」，现在拆开：①已解，②仍开，避免读者以为整条已经对齐）。**这条为什么没有当场动手补**：不是小活——需要（a）一份 qjs 能读的「已发布 fleet/std 操作」目录（`shipped_surfaces.rs` 现在是 rh 内部 Rust 常量数组，不是跨引擎可消费的格式，得先决定要不要导出成 JSON 或专门为 qjs 建一份）、（b）一个扫描 JS 源码里 `__host.fleet_call('字面量字符串', ...)` 调用点的静态扫描器（对齐 rh 自己那套 `qualified_function_calls`/`fleet_method_calls` 文本扫描，但换成 JS 语法）、（c）而且即使做了，**只能校验字符串字面量的 operation id**——`__host.fleet_call(someVariable, ...)` 这种运行时才知道值的调用，静态扫不出来，rh 自己的文本扫描器大概率也有同样的天花板，不是 qjs 独有的短板。本轮判断：与其为了「看起来完整」仓促糊一个只覆盖字面量、不确定和 rh 实际行为对不对得上的校验器，不如先诚实记录，留给下一轮有意识地做决策（要不要做、做到什么颗粒度、目录怎么共享） |
 | **QJS-risks** | [~] 7 条已知风险，2 条已解——「根 workspace C 依赖冲突」（验证 `cargo check --workspace` 干净）；「unrestricted 哲学是否走样」**部分验证**：`__host` 绑定本身不裁剪任何全局对象，`fleet_call`/`arg` 错误路径原样透出宿主错误消息为 JS 异常（`eval::tests::fleet_call_error_surfaces_as_js_exception`），未发现绑定库默认收窄脚本可达面；线程模型风险因这次 GC 崩溃从"理论关注"变成"已验证的真实坑，且已有修复模式"——`Ctx` 不可跨调用捕获，这条经验应写进未来任何 qjs 绑定代码的约定。其余风险仍开放（并行摸索规格对账、无 AOT 性能特征、版本/哈希可复现性、CI 构建耗时）；详见 PRD §「Script engine family」→「Future」→**qjs execution backend** |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、

@@ -15,15 +15,15 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `1db677b1`（duty handoff） |
-| 待审合 | `cursor/script-smoke-aot-pack-2fd5`@`6c507ca4` ahead=2 behind=63（tip 05:05Z） |
+| `origin/main` | tip `1fa3781e`（duty handoff） |
+| 待审合 | 无（`origin/cursor/*` ahead=0；`script-smoke-aot-pack-2fd5` 已消失） |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |
 | CC 远景 | **上层 App** `app.control-center`；与 Base 分打包/分版；见 `design-release-base-vs-apps.md` |
-| auto-dream | **绿**：Automation `f2326638-…`；duty findings=1；nudge=0 |
+| auto-dream | **绿**：Automation `f2326638-…`；duty findings=0；nudge=0；未 apply |
 | `duty.lock` | （无） |
 
 ## 主控指令（未消化则分身不得另起炉灶）
@@ -64,12 +64,12 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-08T08:22Z
+### 舰队值班会话 · 2026-08-08T10:26Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-2aedf6ed-6569-4cfc-ac7d-d50635e25dde`
-- URL: https://cursor.com/agents/bc-2aedf6ed-6569-4cfc-ac7d-d50635e25dde
+- bcId: `bc-c1299cab-1fe0-43e1-946f-20f87ad02447`
+- URL: https://cursor.com/agents/bc-c1299cab-1fe0-43e1-946f-20f87ad02447
 - 分支: `main`
-- tip: `1db677b1`
+- tip: `1fa3781e`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -85,6 +85,8 @@
 
 ## 交接日志
 
+- 2026-08-08T10:26Z · 舰队值班会话(`bc-c1299cab-…`) · duty: noop findings=0 main=2715bfd3；待审合=无（`origin/cursor/*` ahead=0；`script-smoke-aot-pack-2fd5` 已消失）；nudge=0 未 apply；lock 已清
+- 2026-08-08T09:22Z · 舰队值班会话(`bc-6ad8a235-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 behind=65 main=39bda052；script nudge=0；tip~4.3h 已 chat 主控(`bc-43046381` run-f646c27f)；lock 已清
 - 2026-08-08T08:22Z · 舰队值班会话(`bc-2aedf6ed-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 behind=63 main=7141b970；nudge=0 未催主控（tip 05:05Z 仍新鲜 ~3h）；lock 已清
 - 2026-08-08T07:26Z · 舰队值班会话(`bc-7d3f7b67-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 behind=61 main=e569419f；nudge=0 未催主控（tip 05:05Z 仍新鲜 ~2h）；lock 已清
 - 2026-08-08T06:22Z · 舰队值班会话(`bc-572ee7a9-…`) · duty: findings=1 待审合 `cursor/script-smoke-aot-pack-2fd5`@6c507ca4 ahead=2 main=03df35a7；nudge=0 未催主控（tip 05:05Z 仍新鲜 ~1h）；lock 已清
