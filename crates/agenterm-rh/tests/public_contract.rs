@@ -9,7 +9,7 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 45] = [
+const FIXTURE_NAMES: [&str; 48] = [
     "append-sync-probe.rh",
     "atomic-write-probe.rh",
     "break-continue.rh",
@@ -17,12 +17,14 @@ const FIXTURE_NAMES: [&str; 45] = [
     "crypto-sha256-file-probe.rh",
     "direntry-metadata-probe.rh",
     "entry.rh",
+    "env-has-get-probe.rh",
     "fail-dynamic.rh",
     "fleet.rh",
     "for-dyn-range.rh",
     "for-range.rh",
     "for-span-overflow.rh",
     "fs-mutation-probe.rh",
+    "hash-fnv1a64-probe.rh",
     "import-bundle-probe.rh",
     "int-string-concat-probe.rh",
     "json-array-index-assign-probe.rh",
@@ -34,6 +36,7 @@ const FIXTURE_NAMES: [&str; 45] = [
     "json-keys-probe.rh",
     "json-parse-schema.rh",
     "json-path-index-probe.rh",
+    "json-stringify-pretty-probe.rh",
     "json-type-string.rh",
     "map-set-membership.rh",
     "output-fn-arg-probe.rh",

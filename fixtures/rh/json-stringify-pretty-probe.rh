@@ -1,0 +1,8 @@
+// Probe native rh::json::stringify_pretty for structured evidence payloads.
+fn entry() {
+    let text = rh::json::stringify_pretty(#{ ok: 1, kind: "probe" });
+    if text.contains("\n") && text.contains("ok") {
+        return 1;
+    }
+    0
+}

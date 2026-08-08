@@ -1,0 +1,4 @@
+fn entry() {
+    let payload = rh::json::stringify_pretty(#{ ok: 1, kind: "native-pack" });
+    payload.len
+}

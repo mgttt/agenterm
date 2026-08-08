@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 24] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 27] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -169,6 +169,21 @@ const FIXTURES: [(&str, &[&str], &[&str]); 24] = [
         "rh_command_args_json.rh",
         &["rh_command_args(&mut command", "rh_json_string_argv(&arguments)"],
         &["rh_host_eval_int(\"command.args"],
+    ),
+    (
+        "rh_json_stringify_pretty.rh",
+        &["rh_json_stringify_pretty("],
+        &["rh_host_eval_int(\"rh::json::stringify_pretty"],
+    ),
+    (
+        "rh_hash_fnv1a64.rh",
+        &["rh_hash_fnv1a64("],
+        &["rh_host_eval_int(\"rh::hash::fnv1a64"],
+    ),
+    (
+        "rh_env_has_get.rh",
+        &["rh_env_has(", "rh_env_get("],
+        &["rh_host_eval_int(\"std::env::has", "rh_host_eval_int(\"std::env::get"],
     ),
 ];
 
@@ -501,6 +516,33 @@ fn command_args_json_emits_native_argv_coercion() {
     assert_native_or_host_eval(FIXTURES[23].0, FIXTURES[23].1, FIXTURES[23].2);
     let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[23].0))
         .expect("transpile command args json fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn json_stringify_pretty_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[24].0, FIXTURES[24].1, FIXTURES[24].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[24].0))
+        .expect("transpile json stringify_pretty fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn hash_fnv1a64_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[25].0, FIXTURES[25].1, FIXTURES[25].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[25].0))
+        .expect("transpile hash fnv1a64 fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn env_has_get_emits_native_host_calls() {
+    assert_native_or_host_eval(FIXTURES[26].0, FIXTURES[26].1, FIXTURES[26].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[26].0))
+        .expect("transpile env has/get fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
 }

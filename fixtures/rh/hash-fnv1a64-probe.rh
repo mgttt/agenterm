@@ -1,0 +1,5 @@
+// Probe native rh::hash::fnv1a64 over bytes::from_text input.
+fn entry() {
+    let digest = rh::hash::fnv1a64(rh::bytes::from_text("agenterm-rh-probe"));
+    digest.len
+}
