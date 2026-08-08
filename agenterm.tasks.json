@@ -1787,7 +1787,7 @@
     {
       "id": "workbench-smoke",
       "description": "Prove physical inline tab editing, archived Proxy chrome, and compact deep-tree geometry",
-      "entry": "scripts/rhai/workbench-smoke.rhai",
+      "entry": "scripts/rh/workbench-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -1873,7 +1873,7 @@
     {
       "id": "unix-frontend-linux-smoke",
       "description": "Prove the Linux X11 AgenTerm workbench, native activation, renderer-owned PNG, asynchronous clipboard paste, stale cancellation, and cleanup",
-      "entry": "scripts/rhai/unix-frontend-smoke.rhai",
+      "entry": "scripts/rh/unix-frontend-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -1892,7 +1892,7 @@
     {
       "id": "unix-frontend-macos-smoke",
       "description": "Prove the macOS AgenTerm workbench, native activation, renderer-owned PNG, asynchronous clipboard paste, stale cancellation, and cleanup",
-      "entry": "scripts/rhai/unix-frontend-smoke.rhai",
+      "entry": "scripts/rh/unix-frontend-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -2084,7 +2084,7 @@
     {
       "id": "script-smoke",
       "description": "Prove the unrestricted Script Runtime API, binary framing, supervision, Fleet, named tasks, HTTP, filesystem lifecycle, and audit privacy",
-      "entry": "scripts/rhai/script-smoke.rhai",
+      "entry": "scripts/rh/script-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -2107,7 +2107,7 @@
     {
       "id": "remote-ui-smoke",
       "description": "Prove replaceable GUI detach, physical workbench behavior, clipboard, server-fault isolation, and in-place reconnect",
-      "entry": "scripts/rhai/remote-ui-smoke.rhai",
+      "entry": "scripts/rh/remote-ui-smoke.rh",
       "profile": "local",
       "cwd": ".",
       "args": [
@@ -2683,7 +2683,7 @@
     {
       "id": "fresh-clone-rehearsal",
       "description": "Rehearse the exact release candidate from an artifact-free owned clone and retain process-tree evidence",
-      "entry": "scripts/rhai/fresh-clone-rehearsal.rhai",
+      "entry": "scripts/rh/fresh-clone-rehearsal.rh",
       "profile": "local",
       "cwd": ".",
       "args": [

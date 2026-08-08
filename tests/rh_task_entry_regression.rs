@@ -31,9 +31,28 @@ fn transpile_project_entry(entry: &str) -> (String, agenterm_rh::CdylibTranspile
     (source, output)
 }
 
+fn assert_bundled_pack_builds(entry: &str) {
+    let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
+        panic!("read {entry}: {error}");
+    });
+    let dir = agenterm::script_rh_cache::compile_source_to_cache_with_project(
+        &source,
+        Some(&repo()),
+    )
+    .unwrap_or_else(|error| panic!("compile cache {entry}: {error}"));
+    assert!(dir.join("manifest.json").is_file(), "{entry}");
+}
+
 fn assert_native_bundled_pack(entry: &str, rust_needles: &[&str]) {
-    let (source, output) = transpile_project_entry(entry);
+    let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
+        panic!("read {entry}: {error}");
+    });
     assert!(source.contains("fn entry("), "{entry}");
+    let bundled = agenterm_rh::bundle_project_source(&repo(), &source)
+        .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
+    let output = agenterm_rh::transpile_cdylib_with_mode(&bundled).unwrap_or_else(|error| {
+        panic!("transpile bundled {entry}: {error}");
+    });
     assert_eq!(
         output.execution_mode.as_str(),
         "native",
@@ -54,13 +73,76 @@ fn assert_native_bundled_pack(entry: &str, rust_needles: &[&str]) {
         output.rust
     );
 
-    let bundled = agenterm_rh::bundle_project_source(&repo(), &source)
-        .unwrap_or_else(|error| panic!("bundle {entry}: {error}"));
     let pack_dir = tempfile::tempdir().expect("pack dir");
     let pack = agenterm_rh::build_pack_dir(&bundled, pack_dir.path())
         .unwrap_or_else(|error| panic!("build pack {entry}: {error}"));
     assert!(pack.native_path.exists(), "{entry}");
     assert!(pack.manifest_path.exists(), "{entry}");
+}
+
+#[test]
+fn check_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/check.rh");
+}
+
+#[test]
+fn workbench_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/workbench-smoke.rh");
+}
+
+#[test]
+fn control_center_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/control-center-smoke.rh");
+}
+
+#[test]
+fn control_center_macos_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/control-center-macos-smoke.rh");
+}
+
+#[test]
+fn control_center_linux_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/control-center-linux-smoke.rh");
+}
+
+#[test]
+fn unix_frontend_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/unix-frontend-smoke.rh");
+}
+
+#[test]
+fn fleet_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/fleet-smoke.rh");
+}
+
+#[test]
+fn server_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/server-smoke.rh");
+}
+
+#[test]
+fn native_ipc_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/native-ipc-smoke.rh");
+}
+
+#[test]
+fn wake_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/wake-smoke.rh");
+}
+
+#[test]
+fn script_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/script-smoke.rh");
+}
+
+#[test]
+fn remote_ui_smoke_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/remote-ui-smoke.rh");
+}
+
+#[test]
+fn fresh_clone_rehearsal_uses_bundled_pack() {
+    assert_bundled_pack_builds("scripts/rh/fresh-clone-rehearsal.rh");
 }
 
 #[test]

@@ -59,7 +59,7 @@ fn entry() {
         let bad_json = repo + ".lint-selftest-bad.json";
         let bad_utf8 = repo + ".lint-selftest-bad.md";
         let conflict = repo + ".lint-selftest-conflict.md";
-        let bad_rhai = repo + ".lint-selftest-bad.rhai";
+        let bad_rh = repo + ".lint-selftest-bad.rh";
         let selftest_manifest = repo + ".lint-selftest-check-many.json";
         let write_json_code = std::process::command_status(
             "python3",
@@ -94,16 +94,16 @@ fn entry() {
             write_conflict_code == 0,
             "lint_selftest_did_not_reject_malformed_inputs"
         );
-        let write_rhai_code = std::process::command_status(
+        let write_rh_code = std::process::command_status(
             "python3",
             [
                 "-c",
                 "open(sys.argv[1],'w',encoding='utf-8').write('let broken = ;')",
-                bad_rhai
+                bad_rh
             ],
             5000
         );
-        require(write_rhai_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+        require(write_rh_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
 
         let json_code = std::process::command_status(
             "python3",
@@ -147,7 +147,7 @@ fn entry() {
             [
                 "-c",
                 "import json,sys; open(sys.argv[2],'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rhai-check-manifest','files':[sys.argv[1]]}, indent=2)+'\\n')",
-                bad_rhai,
+                bad_rh,
                 selftest_manifest
             ],
             10000
@@ -168,7 +168,7 @@ fn entry() {
                 && std::fs::metadata(program_rh_dist).len > 0 {
             program = program_rh_dist;
         }
-        let rhai_code = std::process::command_stdout_file(
+        let rh_code = std::process::command_stdout_file(
             program,
             [
                 "check-many", "--manifest", selftest_manifest,
@@ -182,14 +182,14 @@ fn entry() {
             #{ current_dir: repo }
         );
         require(
-            rhai_code != 0,
+            rh_code != 0,
             "lint_selftest_did_not_reject_malformed_inputs"
         );
 
         std::fs::try_remove_file(bad_json);
         std::fs::try_remove_file(bad_utf8);
         std::fs::try_remove_file(conflict);
-        std::fs::try_remove_file(bad_rhai);
+        std::fs::try_remove_file(bad_rh);
         std::fs::try_remove_file(selftest_manifest);
     } else {
         if mode == "all" || mode == "static" {
@@ -313,13 +313,13 @@ fn entry() {
                 "python3",
                 [
                     "-c",
-                    "import json,subprocess,sys; repo,out=sys.argv[1],sys.argv[2]; proc=subprocess.run(['git','-C',repo,'ls-files','--','scripts/rhai/*.rhai'], capture_output=True, text=True); proc.returncode and sys.exit(proc.returncode); files=[line.strip() for line in proc.stdout.splitlines() if line.strip()]; (not files) and sys.exit(3); open(out,'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rhai-check-manifest','files':files}, indent=2)+chr(10))",
+                    "import json,subprocess,sys; repo,out=sys.argv[1],sys.argv[2]; proc=subprocess.run(['git','-C',repo,'ls-files','--','scripts/rh/*.rh'], capture_output=True, text=True); proc.returncode and sys.exit(proc.returncode); files=[line.strip() for line in proc.stdout.splitlines() if line.strip()]; (not files) and sys.exit(3); open(out,'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rhai-check-manifest','files':files}, indent=2)+chr(10))",
                     repo,
                     manifest_path
                 ],
                 10000
             );
-            require(manifest_code == 0, "lint_rhai_files_empty");
+            require(manifest_code == 0, "lint_rh_files_empty");
 
             let program = worker;
             let program_rh_target =
@@ -351,7 +351,7 @@ fn entry() {
             );
             if check_code != 0 {
                 let check_output = std::fs::read_to_string(stdout_path);
-                return rh::fail("Rhai lint errors:\n" + check_output);
+                return rh::fail("Rh lint errors:\n" + check_output);
             }
         }
     }

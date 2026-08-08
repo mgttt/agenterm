@@ -62,6 +62,8 @@ fn candidate_runs_one_full_gate_and_seals_six_platform_parts() {
     assert!(CANDIDATE.contains("--project-root . --"));
     assert!(CANDIDATE.contains("path: candidate-output/"));
     assert!(!CANDIDATE.contains(".agenterm-rhai.bin"));
+    assert!(!CANDIDATE.contains("scripts/rhai/check.rhai"));
+    assert!(!CANDIDATE.contains("scripts/rhai/fresh-clone-rehearsal.rhai"));
     assert!(CANDIDATE.contains("name: release-candidate-${{ github.run_id }}"));
     assert!(CANDIDATE.contains("retention-days: 14"));
 }

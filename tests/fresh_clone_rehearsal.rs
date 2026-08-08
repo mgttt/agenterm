@@ -28,7 +28,19 @@ fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
         "PASS: fresh-clone process policy fails closed\n"
     );
 
-    let source = fs::read_to_string(script).expect("read fresh-clone rehearsal");
+    let source = fs::read_to_string(&script).expect("read fresh-clone rehearsal");
+    let manifest_text = fs::read_to_string(&manifest).expect("read manifest");
+    assert!(manifest_text.contains("\"entry\": \"scripts/rh/fresh-clone-rehearsal.rh\""));
+    assert!(
+        !manifest_text.contains("\"entry\": \"scripts/rhai/fresh-clone-rehearsal.rhai\"")
+    );
+    assert!(
+        repo.join("scripts/archive/rhai/fresh-clone-rehearsal.rhai")
+            .is_file()
+    );
+    assert!(
+        !repo.join("scripts/rhai/fresh-clone-rehearsal.rhai").exists()
+    );
     for contract in [
         "AGENTERM_FRESH_CLONE_REHEARSAL_ACTIVE",
         "fresh_clone_recursive_invocation",

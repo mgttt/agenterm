@@ -226,7 +226,7 @@ fn entry() {
     );
 
     let check_source = std::fs::read_to_string(
-        std::path::join(repo, "scripts/rhai/check.rhai").display
+        std::path::join(repo, "scripts/rh/check.rh").display
     );
     require(
         check_source.contains("\"native public catalog clients\"")

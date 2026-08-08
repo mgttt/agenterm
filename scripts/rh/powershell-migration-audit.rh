@@ -416,21 +416,24 @@ fn entry() {
                             && !trimmed_line.starts_with("pwsh ") {
                         allowed = 1;
                     }
-                } else if path == "scripts/rhai/check.rhai" {
+                } else if path == "scripts/rh/check.rh" {
                     if lower_line ==
                             `if name != "powershell.exe" && name != "pwsh.exe" {` {
                         allowed = 1;
                     }
-                } else if path == "scripts/rhai/fresh-clone-rehearsal.rhai" {
+                } else if path == "scripts/rh/fresh-clone-rehearsal.rh" {
                     if lower_line == `"powershell.exe"`
                             || lower_line == `"pwsh.exe"` {
                         allowed = 1;
                     }
-                } else if path == "scripts/rhai/qualification-selftest.rhai" {
+                } else if path == "scripts/rh/qualification-selftest.rh"
+                        || path ==
+                            "scripts/archive/rhai/qualification-selftest.rhai" {
                     if lower_line == `["pwsh.exe:123"],` {
                         allowed = 1;
                     }
-                } else if path == "scripts/rhai/remote-ui-smoke.rhai" {
+                } else if path == "scripts/rh/remote-ui-smoke.rh"
+                        || path == "scripts/archive/rhai/remote-ui-smoke.rhai" {
                     if lower_line ==
                             `"--", "powershell.exe", "-nologo", "-noprofile"`
                             || lower_line ==

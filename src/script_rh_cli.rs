@@ -148,6 +148,6 @@ mod tests {
     #[test]
     fn interpreted_eval_and_rhai_run_are_not_forwarded() {
         assert!(forward_if_rh_path(&["eval".into(), "40 + 2".into()], 1, &["eval"]).is_none());
-        assert!(forward_run_as_eval(&["run".into(), "scripts/rhai/lint.rhai".into()]).is_none());
+        assert!(forward_run_as_eval(&["run".into(), "scripts/rh/lint.rh".into()]).is_none());
     }
 }

@@ -487,7 +487,7 @@ fn entry() {
                     "Internal-only v0.1.7 must have no local v0.1.7 tag.";
             } else {
                 let release_path =
-                    std::path::join(repo, "scripts/rhai/release.rhai").display;
+                    std::path::join(repo, "scripts/rh/release.rh").display;
                 let workflow_path = std::path::join(
                     repo,
                     ".github/workflows/candidate.yml"

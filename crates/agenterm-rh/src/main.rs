@@ -443,7 +443,7 @@ fn public_check_failure(error: &RhError) -> (&str, &str) {
 
 fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
     let mut project_root = PathBuf::from(".");
-    let mut relative_dir = "scripts/rhai".to_owned();
+    let mut relative_dir = "scripts/rh".to_owned();
     let mut tasks_manifest = None::<PathBuf>;
     let mut json = false;
     while let Some(arg) = args.next() {

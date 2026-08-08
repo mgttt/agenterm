@@ -2886,7 +2886,7 @@ fn quality_timing_is_complete_on_success_and_failure_and_renders_markdown() {
     fs::write(
         &fixture_script,
         r#"
-import "scripts/rhai/lib/qualification" as qualification;
+import "scripts/rh/lib/qualification" as qualification;
 
 let repo = args[0];
 let manifest = args[1];
@@ -3324,4 +3324,22 @@ fn clean_locked_artifacts_task_retains_in_use_file_then_retries() {
     );
 
     fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[test]
+fn check_task_is_rh_and_archives_interpreted_source() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
+    assert!(manifest.contains("\"entry\": \"scripts/rh/check.rh\""));
+    assert!(!manifest.contains("\"entry\": \"scripts/rhai/check.rhai\""));
+    assert!(
+        repo.join("scripts/archive/rhai/check.rhai")
+            .is_file()
+    );
+    assert!(!repo.join("scripts/rhai/check.rhai").exists());
+    assert!(
+        fs::read_to_string(repo.join("scripts/rh/check.rh"))
+            .expect("native check task")
+            .contains("native public catalog clients")
+    );
 }

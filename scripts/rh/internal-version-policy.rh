@@ -30,7 +30,7 @@ fn entry() {
         return rh::fail("internal-version-git-tags");
     }
 
-    let release_path = std::path::join(repo, "scripts/rhai/release.rhai").display;
+    let release_path = std::path::join(repo, "scripts/rh/release.rh").display;
     let workflow_path = std::path::join(repo, ".github/workflows/candidate.yml").display;
     let release = std::fs::read_to_string(release_path);
     let workflow = std::fs::read_to_string(workflow_path);

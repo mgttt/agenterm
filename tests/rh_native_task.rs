@@ -103,12 +103,12 @@ fn public_cli_runs_manifest_native_task() {
 }
 
 #[test]
-fn task_corpus_accepts_native_and_compatibility_entries() {
+fn task_corpus_accepts_native_rh_entries() {
     let repo = repo_root();
     let entries =
         agenterm_rh::extract_task_entries(&repo.join("agenterm.tasks.json")).expect("task entries");
-    assert!(entries.iter().any(|entry| entry.ends_with(".rh")));
-    assert!(entries.iter().any(|entry| entry.ends_with(".rhai")));
+    assert!(entries.iter().all(|entry| entry.ends_with(".rh") || entry.ends_with(".lua")));
+    assert!(!entries.iter().any(|entry| entry.ends_with(".rhai")));
     assert!(entries.contains(&"scripts/rh/native-task-probe.rh".to_owned()));
     assert!(entries.contains(&"scripts/rh/verify-docs-site.rh".to_owned()));
 }
@@ -253,7 +253,7 @@ fn native_internal_version_policy_rejects_governed_git_tag() {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&fixture);
-    std::fs::create_dir_all(fixture.join("scripts/rhai")).expect("scripts");
+    std::fs::create_dir_all(fixture.join("scripts/rh")).expect("scripts");
     std::fs::create_dir_all(fixture.join(".github/workflows")).expect("workflows");
     std::fs::write(
         fixture.join("Cargo.toml"),
@@ -261,7 +261,7 @@ fn native_internal_version_policy_rejects_governed_git_tag() {
     )
     .expect("Cargo.toml");
     std::fs::write(
-        fixture.join("scripts/rhai/release.rhai"),
+        fixture.join("scripts/rh/release.rh"),
         "if version != \"0.1.7\" {}\n",
     )
     .expect("release policy");

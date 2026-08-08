@@ -82,7 +82,7 @@ fn check_rejects_eval_only() {
 
 #[test]
 fn check_accepts_import_via_compat() {
-    check("import \"scripts/rhai/lib/build_identity\" as build_identity; fn entry() { 1 }")
+    check("import \"scripts/rh/lib/build_identity\" as build_identity; fn entry() { 1 }")
         .expect("import script");
 }
 

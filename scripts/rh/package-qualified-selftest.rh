@@ -527,8 +527,8 @@ fn entry() {
         "package_selftest_forbidden_action:release.cmd"
     );
     assert_ok(
-        source.contains("scripts/rhai/release.rhai") == 0,
-        "package_selftest_forbidden_action:scripts/rhai/release.rhai"
+        source.contains("scripts/rh/release.rh") == 0,
+        "package_selftest_forbidden_action:scripts/rh/release.rh"
     );
 
     cleanup_fixture(fixture, owned_root);

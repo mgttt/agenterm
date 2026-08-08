@@ -136,7 +136,7 @@ fn should_scan_path(relative: &str) -> bool {
     };
     matches!(
         extension,
-        "rs" | "sh" | "cmd" | "bat" | "yml" | "yaml" | "json" | "rhai" | "md" | "toml"
+        "rs" | "sh" | "cmd" | "bat" | "yml" | "yaml" | "json" | "rhai" | "rh" | "md" | "toml"
     )
 }
 
@@ -149,6 +149,8 @@ fn categorize_path(relative: &str) -> String {
         "install".into()
     } else if relative == "agenterm.tasks.json" {
         "task-manifest".into()
+    } else if relative.starts_with("scripts/rh/") {
+        "rh-script".into()
     } else if relative.starts_with("scripts/rhai/") {
         "rhai-script".into()
     } else if relative.starts_with("src/") {

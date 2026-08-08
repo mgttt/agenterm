@@ -146,8 +146,8 @@
 | M42f7e | codegen 34：`Command` builder + `Command.output`/`Output`（success/exit_code/stdout_text/stderr_text/require_success）；timeout 用 INT ms（不引 Duration）；fixture `process-output-probe.rh` | [x] |
 | M42f7f | codegen 35：`Command.start`/`Child`（id/state/kill/wait_with_output）；fixture `child-lifecycle-probe.rh` | [x] |
 | M42f7g | INT-only `scripts/rh/lib/test_harness.rh` + `harness-cleanup-selftest` native+pack；entry 切线 + 归档；回归 | [x] |
-| M42f8 | **硬切换收口（无兼容）**：Rhai 准备归档；不保留 `.rhai` 运行面。Phase A 清零 manifest/工作流/测试中的 `.rhai` 入口并全部改 `.rh`；Phase B 删除或归档 `scripts/rhai/**` 与 `agenterm-rhai` 业务路径，痕迹清扫（AGENTS/PRD/tests/workflows）；Phase C 移除主库 Rhai `Engine`/`script_rh_host` compat 与 `rh_host_run_script` 整脚本回退。compat-delegating 只是迁移期诊断，不是产品兼容承诺 | [ ] |
-| M42f8a | 剩余 lib：`qualification`/`release_candidate`/`bootstrap_timing`/`script_smoke_helpers` → `scripts/rh/lib/*.rh` | [~] |
+| M42f8 | **硬切换收口（无兼容）**：Rhai 准备归档；不保留 `.rhai` 运行面。Phase A 清零 manifest/工作流/测试中的 `.rhai` 入口并全部改 `.rh`；Phase B 删除或归档 `scripts/rhai/**` 与 `agenterm-rhai` 业务路径，痕迹清扫（AGENTS/PRD/tests/workflows）；Phase C 移除主库 Rhai `Engine`/`script_rh_host` compat 与 `rh_host_run_script` 整脚本回退。compat-delegating 只是迁移期诊断，不是产品兼容承诺 | [~] |
+| M42f8a | 剩余 lib：`qualification`/`release_candidate`/`bootstrap_timing`/`script_smoke_helpers` → `scripts/rh/lib/*.rh` | [x] |
 | M42f8b | orch：`build`/`check`/`release`/`fresh-clone-rehearsal` → `.rh` + entry 切线 + 归档 | [~] |
 | M42f8c | selftest：`qualification-selftest`/`diagnostic-bundle-selftest`/`harness-cleanup-selftest` flip | [~] |
 | M42f8d | 全量 `*-smoke` → `.rh` + entry 切线 + 归档（依赖 M42f7e/f + test_harness） | [~] |

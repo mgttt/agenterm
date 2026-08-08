@@ -1067,7 +1067,7 @@ fn assert_tasks_and_http(
     print("STEP bounded loopback HTTP, async task, cancellation, and privacy");
     let fixture_path = std::path::join(
         repo,
-        "scripts/rhai/script-http-fixture.rhai"
+        "scripts/rh/script-http-fixture.rh"
     ).display;
     let ready_path = std::path::join(
         runtime_dir,
@@ -2721,7 +2721,7 @@ fn run_fleet_journey(
             script,
             std::path::join(
                 repo,
-                "scripts/rhai/script-http-fixture.rhai"
+                "scripts/rh/script-http-fixture.rh"
             ).display,
             repo,
             ready_path,

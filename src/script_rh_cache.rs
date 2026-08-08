@@ -34,8 +34,8 @@ pub fn compile_source_to_cache_with_project(
     source: &str,
     project_root: Option<&Path>,
 ) -> Result<PathBuf, RhError> {
-    let source = effective_source(source, project_root)?;
-    let key = cache_key(&source);
+    let bundled = effective_source(source, project_root)?;
+    let key = cache_key(&bundled);
     if let Some((cached_key, path)) = SOURCE_CACHE.lock().expect("lock").clone()
         && cached_key == key
         && path.is_dir()
@@ -51,7 +51,26 @@ pub fn compile_source_to_cache_with_project(
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    agenterm_rh::build_pack_dir(&source, &dir)?;
+    if let Err(error) = agenterm_rh::build_pack_dir(&bundled, &dir) {
+        if bundled != source
+            && project_root.is_some()
+            && source.contains("import ")
+        {
+            let fallback_key = cache_key(source);
+            let fallback_dir =
+                std::env::temp_dir().join(format!("agenterm-rh-src-{fallback_key}"));
+            if fallback_dir.is_dir() && RhPack::load(&fallback_dir).is_ok() {
+                *SOURCE_CACHE.lock().expect("lock") =
+                    Some((fallback_key, fallback_dir.clone()));
+                return Ok(fallback_dir);
+            }
+            let _ = std::fs::remove_dir_all(&fallback_dir);
+            agenterm_rh::build_pack_dir(source, &fallback_dir)?;
+            *SOURCE_CACHE.lock().expect("lock") = Some((fallback_key, fallback_dir.clone()));
+            return Ok(fallback_dir);
+        }
+        return Err(error);
+    }
     *SOURCE_CACHE.lock().expect("lock") = Some((key, dir.clone()));
     Ok(dir)
 }

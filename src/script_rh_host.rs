@@ -1160,7 +1160,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("agenterm-rh-host-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let source = r#"import "scripts/rhai/lib/build_identity" as build_identity;
+        let source = r#"import "scripts/rh/lib/build_identity" as build_identity;
 fn entry() { 42 }"#;
         agenterm_rh::build_pack_dir(source, &dir).expect("build");
         let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));

@@ -1,4 +1,4 @@
-//! Scan production `.rhai`/`.rh` scripts for rh subset compatibility (report-only).
+//! Scan production `.rh` scripts for rh subset compatibility (report-only).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -42,7 +42,7 @@ impl Default for CorpusScanOptions {
     fn default() -> Self {
         Self {
             project_root: PathBuf::from("."),
-            relative_dir: "scripts/rhai".to_owned(),
+            relative_dir: "scripts/rh".to_owned(),
             tasks_manifest: None,
         }
     }
@@ -74,9 +74,12 @@ pub fn extract_task_entries(manifest_path: &Path) -> Result<Vec<String>, RhError
     }
     let mut entries = HashSet::new();
     for task in manifest.tasks {
-        if !task.entry.ends_with(".rhai") && !task.entry.ends_with(".rh") {
+        if !task.entry.ends_with(".rhai")
+            && !task.entry.ends_with(".rh")
+            && !task.entry.ends_with(".lua")
+        {
             return Err(RhError::Parse(format!(
-                "task entry must be a .rhai or .rh path: {}",
+                "task entry must be a .rhai, .rh, or .lua path: {}",
                 task.entry
             )));
         }
@@ -110,7 +113,7 @@ pub fn scan_rhai_directory(options: CorpusScanOptions) -> Result<CorpusScanRepor
         )));
     }
     let mut relative_paths = Vec::new();
-    collect_rhai_files(&dir, &options.project_root, &mut relative_paths)?;
+    collect_script_files(&dir, &options.project_root, &mut relative_paths)?;
     relative_paths.sort();
     if relative_paths.len() > SCAN_FILES_MAX {
         return Err(RhError::Parse(format!(
@@ -120,15 +123,16 @@ pub fn scan_rhai_directory(options: CorpusScanOptions) -> Result<CorpusScanRepor
     scan_relative_files(&options.project_root, &relative_paths)
 }
 
-fn collect_rhai_files(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), RhError> {
+fn collect_script_files(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), RhError> {
     for entry in std::fs::read_dir(dir).map_err(|err| RhError::Parse(err.to_string()))? {
         let entry = entry.map_err(|err| RhError::Parse(err.to_string()))?;
         let path = entry.path();
         if path.is_dir() {
-            collect_rhai_files(&path, root, out)?;
+            collect_script_files(&path, root, out)?;
             continue;
         }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("rhai") {
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if extension != Some("rh") && extension != Some("rhai") {
             continue;
         }
         let relative = path
@@ -265,21 +269,20 @@ mod tests {
     }
 
     #[test]
-    fn scripts_rhai_scan_produces_report() {
+    fn scripts_rh_scan_produces_report() {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let report = scan_rhai_directory(CorpusScanOptions {
             project_root: repo.clone(),
-            relative_dir: "scripts/rhai".to_owned(),
+            relative_dir: "scripts/rh".to_owned(),
             ..CorpusScanOptions::default()
         })
         .expect("scan");
-        // Live `scripts/rhai/` shrinks as tasks cut over to Native `.rh` and
-        // archives move under `scripts/archive/rhai/`. Keep a floor that still
-        // covers remaining orchestrators/smokes without freezing a peak count.
-        assert!(report.scanned >= 30, "scanned {}", report.scanned);
+        // Live `scripts/rh/` is the operational script tree; legacy `.rhai` lives
+        // under `scripts/archive/rhai/` until fully removed.
+        assert!(report.scanned >= 70, "scanned {}", report.scanned);
         assert_eq!(
             report.passed, report.scanned,
-            "compat check should pass scripts/rhai"
+            "compat check should pass scripts/rh"
         );
         assert_eq!(report.failed, 0);
     }
