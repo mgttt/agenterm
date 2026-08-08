@@ -22,6 +22,7 @@
 | [`goal-crate-platform.md`](goal-crate-platform.md) | **/goal** 可执行：platform crate 跨平台封装收口（边界 SSOT + 机制 gap + catalog 闸） |
 | [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) | 机制封装漏点表 + 跨平台任务执行句式（G1 breakaway 已收） |
 | [`design-rh-aot.md`](design-rh-aot.md) | **rh 并行 AOT 轨**（check / transpile / backend 切换） |
+| [`design-dynamic-core-experiment.md`](design-dynamic-core-experiment.md) | **研究轨**（非产品范围）：动态核 1 层 vs 2 层的判决性实验，实现在 `research/dynamic-core/` |
 
 ## 已归档（勿当任务单）
 
