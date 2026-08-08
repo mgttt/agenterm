@@ -1,0 +1,11 @@
+fn child_stdout(child) {
+    let worker = child;
+    worker.stdout
+}
+
+fn entry() {
+    let command = std::process::command("tool");
+    let child = command.start();
+    child_stdout(child);
+    0
+}

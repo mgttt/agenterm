@@ -1,0 +1,11 @@
+fn set_stdin_text(command, text) {
+    let worker = command;
+    let payload = "" + text;
+    worker.stdin_text(payload);
+}
+
+fn entry() {
+    let command = std::process::command("tool");
+    set_stdin_text(command, "hello\n");
+    0
+}

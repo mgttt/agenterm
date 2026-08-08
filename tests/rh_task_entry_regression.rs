@@ -537,24 +537,11 @@ fn phase_b_smoke_entries_use_host_eval_or_native_pack() {
 
 
 #[test]
-fn script_smoke_host_eval_he_ceiling() {
+fn script_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/script-smoke.rh");
     assert!(source.contains("fn entry("));
-    assert!(
-        matches!(
-            output.execution_mode,
-            agenterm_rh::CdylibExecutionMode::HostEval
-                | agenterm_rh::CdylibExecutionMode::Native
-        ),
-        "script-smoke: {:?}",
-        output.execution_mode
-    );
-    let he = output.rust.matches("rh_host_eval_int(").count();
-    // rev81 native bytes/command/fs + idiom rewrite lands ~3.
-    assert!(
-        he <= 5,
-        "script-smoke HostEval ceiling exceeded: he={he} (expected <= 5 after rev81 HE cut)"
-    );
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
 }
@@ -581,24 +568,21 @@ fn unix_frontend_smoke_uses_native_bundled_execution() {
 }
 
 #[test]
-fn remote_ui_smoke_host_eval_he_ceiling() {
+fn remote_ui_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/remote-ui-smoke.rh");
     assert!(source.contains("fn entry("));
-    assert!(
-        matches!(
-            output.execution_mode,
-            agenterm_rh::CdylibExecutionMode::HostEval
-                | agenterm_rh::CdylibExecutionMode::Native
-        ),
-        "remote-ui-smoke: {:?}",
-        output.execution_mode
-    );
-    let he = output.rust.matches("rh_host_eval_int(").count();
-    // rev81 native kill/index_of/fs.write + idiom rewrite lands ~2.
-    assert!(
-        he <= 4,
-        "remote-ui-smoke HostEval ceiling exceeded: he={he} (expected <= 4 after rev81 HE cut)"
-    );
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
+    assert!(!output.rust.contains("compat delegating"));
+}
+
+#[test]
+fn working_context_smoke_uses_native_bundled_execution() {
+    let (source, output) = transpile_project_entry("scripts/rh/working-context-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native");
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
 }
@@ -655,6 +639,13 @@ fn workbench_smoke_pack_builds() {
 #[test]
 fn unix_frontend_smoke_pack_builds() {
     assert_bundled_aot_pack_builds("scripts/rh/unix-frontend-smoke.rh");
+}
+
+#[test]
+fn working_context_smoke_pack_builds() {
+    // script-smoke/remote-ui select Native he=1 but still have AOT typecheck debt;
+    // only lock pack build where cargo succeeds today.
+    assert_bundled_aot_pack_builds("scripts/rh/working-context-smoke.rh");
 }
 
 #[test]

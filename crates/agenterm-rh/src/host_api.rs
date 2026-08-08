@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 81;
+pub const RH_CODEGEN_REVISION: u32 = 82;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -939,6 +939,7 @@ pub fn emit_host_runtime(out: &mut String) {
              timeout_ms: INT,\n\
              capture_limit: usize,\n\
              current_dir: Option<String>,\n\
+             stdin_text: Option<String>,\n\
              stdout_file: Option<String>,\n\
              stderr_file: Option<String>,\n\
          }\n\n\
@@ -1005,6 +1006,7 @@ pub fn emit_host_runtime(out: &mut String) {
                  timeout_ms: 2_000,\n\
                  capture_limit: 64 * 1024,\n\
                  current_dir: None,\n\
+                 stdin_text: None,\n\
                  stdout_file: None,\n\
                  stderr_file: None,\n\
              }\n\
@@ -1039,6 +1041,17 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_current_dir(command: &mut RhCommand, path: &str) {\n\
              command.current_dir = Some(path.to_owned());\n\
          }\n\n\
+         fn rh_command_stdin_text(command: &mut RhCommand, text: &str) {\n\
+             command.stdin_text = Some(text.to_owned());\n\
+         }\n\n\
+         fn rh_command_write_stdin(child: &mut std::process::Child, stdin_text: &Option<String>) {\n\
+             if let Some(text) = stdin_text {\n\
+                 if let Some(mut stdin) = child.stdin.take() {\n\
+                     use std::io::Write;\n\
+                     let _ = stdin.write_all(text.as_bytes());\n\
+                 }\n\
+             }\n\
+         }\n\n\
          fn rh_command_stdout_file(command: &mut RhCommand, path: &str) {\n\
              command.stdout_file = Some(path.to_owned());\n\
          }\n\n\
@@ -1057,7 +1070,11 @@ pub fn emit_host_runtime(out: &mut String) {
              if let Some(dir) = &command.current_dir {\n\
                  process.current_dir(dir);\n\
              }\n\
-             process.stdin(std::process::Stdio::null());\n\
+             if command.stdin_text.is_some() {\n\
+                 process.stdin(std::process::Stdio::piped());\n\
+             } else {\n\
+                 process.stdin(std::process::Stdio::null());\n\
+             }\n\
              if let Some(path) = &command.stdout_file {\n\
                  match std::fs::File::create(path) {\n\
                      Ok(file) => { process.stdout(std::process::Stdio::from(file)); }\n\
@@ -1164,9 +1181,13 @@ pub fn emit_host_runtime(out: &mut String) {
              let timeout =\n\
                  std::time::Duration::from_millis(command.timeout_ms.max(1).max(0) as u64);\n\
              let capture_limit = command.capture_limit;\n\
+             let stdin_text = command.stdin_text.clone();\n\
              let mut process = rh_command_build(command);\n\
              match process.spawn() {\n\
-                 Ok(child) => rh_finish_process_output(child, timeout, capture_limit),\n\
+                 Ok(mut child) => {\n\
+                     rh_command_write_stdin(&mut child, &stdin_text);\n\
+                     rh_finish_process_output(child, timeout, capture_limit)\n\
+                 }\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
                      RhOutput {\n\
@@ -1179,9 +1200,13 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
          }\n\n\
          fn rh_command_start(command: &mut RhCommand) -> RhChild {\n\
+             let stdin_text = command.stdin_text.clone();\n\
              let mut process = rh_command_build(command);\n\
              match process.spawn() {\n\
-                 Ok(child) => RhChild::new(child.id() as INT, Some(child), command.capture_limit),\n\
+                 Ok(mut child) => {\n\
+                     rh_command_write_stdin(&mut child, &stdin_text);\n\
+                     RhChild::new(child.id() as INT, Some(child), command.capture_limit)\n\
+                 }\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
                      RhChild::exited(0, command.capture_limit)\n\
@@ -1223,6 +1248,32 @@ pub fn emit_host_runtime(out: &mut String) {
              let pid = child.inner.borrow().pid;\n\
              rh_host_json_call(\"process.platform_facts\", &serde_json::json!({ \"pid\": pid }))\n\
          }\n\n\
+        fn rh_child_stdout(child: &mut RhChild) -> RhStream {\n\
+            let pipe = child\n\
+                .inner\n\
+                .borrow_mut()\n\
+                .child\n\
+                .as_mut()\n\
+                .and_then(|process| process.stdout.take());\n\
+            let (sender, receiver) = std::sync::mpsc::channel();\n\
+            if let Some(mut pipe) = pipe {\n\
+                std::thread::spawn(move || {\n\
+                    use std::io::Read as _;\n\
+                    let mut buffer = [0_u8; 8192];\n\
+                    loop {\n\
+                        match pipe.read(&mut buffer) {\n\
+                            Ok(0) | Err(_) => break,\n\
+                            Ok(count) => {\n\
+                                if sender.send(buffer[..count].to_vec()).is_err() {\n\
+                                    break;\n\
+                                }\n\
+                            }\n\
+                        }\n\
+                    }\n\
+                });\n\
+            }\n\
+            RhStream { receiver }\n\
+        }\n\n\
         fn rh_child_stderr(child: &mut RhChild) -> RhStream {\n\
             let pipe = child\n\
                 .inner\n\

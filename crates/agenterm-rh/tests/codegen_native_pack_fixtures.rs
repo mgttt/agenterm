@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 21] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 24] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -155,6 +155,21 @@ const FIXTURES: [(&str, &[&str], &[&str]); 21] = [
         ],
         &["rh_host_eval_int(\"framed.append"],
     ),
+    (
+        "rh_command_stdin_text.rh",
+        &["rh_command_stdin_text(&mut worker", "String::from(\"hello\\n\")"],
+        &["rh_host_eval_int(\"worker.stdin_text"],
+    ),
+    (
+        "rh_child_stdout.rh",
+        &["rh_child_stdout(&mut worker)"],
+        &["rh_host_eval_int(\"worker.stdout"],
+    ),
+    (
+        "rh_command_args_json.rh",
+        &["rh_command_args(&mut command", "rh_json_string_argv(&arguments)"],
+        &["rh_host_eval_int(\"command.args"],
+    ),
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -207,8 +222,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_eighty_one() {
-    assert_eq!(RH_CODEGEN_REVISION, 81);
+fn codegen_revision_is_eighty_two() {
+    assert_eq!(RH_CODEGEN_REVISION, 82);
 }
 
 #[test]
@@ -459,6 +474,33 @@ fn bytes_append_emits_native_bytes_mutation() {
     assert_native_or_host_eval(FIXTURES[20].0, FIXTURES[20].1, FIXTURES[20].2);
     let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[20].0))
         .expect("transpile bytes append fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn command_stdin_text_emits_native_command_mutation() {
+    assert_native_or_host_eval(FIXTURES[21].0, FIXTURES[21].1, FIXTURES[21].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[21].0))
+        .expect("transpile command stdin_text fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn child_stdout_emits_native_stream_access() {
+    assert_native_or_host_eval(FIXTURES[22].0, FIXTURES[22].1, FIXTURES[22].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[22].0))
+        .expect("transpile child stdout fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn command_args_json_emits_native_argv_coercion() {
+    assert_native_or_host_eval(FIXTURES[23].0, FIXTURES[23].1, FIXTURES[23].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[23].0))
+        .expect("transpile command args json fixture");
     assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
 }

@@ -41,7 +41,7 @@ docs / policy guards — see [`rhai-trace-scrub-notes.md`](rhai-trace-scrub-note
 ## Sequenced leaves
 
 1. **Wave 1 — dual alias window:** ✅ shipped at codegen **rev80** — Engine registers `rh` + legacy `rhai`; `host_api_module` / AOT matchers accept both; catalog publishes `rh.*` aliases (`rhai.*` marked Legacy); fixture `rh_host_api_json_task.rh`.
-2. **Wave 2 — native emit gaps:** ✅ major cut at codegen **rev81** — native `bytes::{from_array,from_text,append}`, `std::process::kill`, `std::fs::write`, `String::index_of`, `command.arg`, Json marker props; script-smoke he≈3 / remote-ui he≈2 (remainder: `stdin_text`/`stdout`, `command.args(Json)`).
+2. **Wave 2 — native emit gaps:** ✅ closed through codegen **rev82** — also `command.stdin_text`, `child.stdout`, `command.args(Json)`; **script-smoke / remote-ui / working-context are Native he=1** with AOT pack locks.
 3. **Wave 3 — script mass-rename:** ✅ live `scripts/rh/**` has **0** `rhai::` call sites; fixtures mostly `rh::` with intentional dual-alias legacy fixture retained.
 4. **Wave 4 — Phase C archive:** drop `rhai` Engine module, eval/run-script Rhai paths, then `agenterm-rhai` PE; scrub residual branding in code/tests/AGENTS/PRD.
 
@@ -59,6 +59,6 @@ docs / policy guards — see [`rhai-trace-scrub-notes.md`](rhai-trace-scrub-note
 ## Evidence per wave
 
 - Wave 1: ✅ rev80 dual-alias; catalog + `agenterm-rh` tests green.
-- Wave 2: ✅ rev81 native emit + idiom cuts; HE ceilings script-smoke ≤5, remote-ui ≤4; new crate fixtures Native he=1.
+- Wave 2: ✅ rev82; script-smoke/remote-ui/working-context Native he=1; working-context AOT pack builds; script-smoke/remote-ui still have AOT typecheck debt (mode Native but cargo fails).
 - Wave 3: ✅ live `scripts/rh` `rhai::`=0.
 - Wave 4: zero live `rhai::` / `agenterm-rhai` operator paths outside archive + intentional historical docs.
