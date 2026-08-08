@@ -1,7 +1,11 @@
 # Q3 — Lowering cost: how big is the minimal usable IR→native lowerer, and where does it go?
 
 Spec + pinned criteria + verdict: [`plan/design-lowering-cost-experiment.md`](../../../plan/design-lowering-cost-experiment.md).
+**Full results, 口径 labels, execution status and reproduce commands: [`RESULTS.md`](./RESULTS.md).**
 Clean-room; no prior implementation was consulted. Parallel to and independent of Q1 (`../ir/`).
+
+> **Numbering note:** this file and the spec use the early label "Q3"; the question board
+> in [`../README.md`](../README.md) calls this experiment **Q2**. Same experiment.
 
 ## What this is
 
@@ -26,12 +30,23 @@ The lowered payloads reproduce Q0's three semantics exactly: `pure_compute` (exi
 
 | # | criterion | Linux (unpadded) | Windows (PE-aligned) |
 |---|---|--:|--:|
-| ① | **X = minimal usable lowerer** | **3003 B** (flat-safe; in-kernel jump-table version ~2777) | 3003 (ELF flat) |
-| ② | shared / ISA-specific split | 162 shared / **139 x86-specific** lines (46% per-ISA) | same |
-| ③ | total delivery (run rhp) | in-kernel **6360** vs out-of-kernel **7816** | 7680 vs 9216 |
-| ④ | TCB | in-kernel ~6.2–6.4 KB vs out-of-kernel **~2.93 KB** (frozen) | 7680 vs ~3.96 KB |
+| ① | **X = minimal usable lowerer** | **3003 B** (flat-safe; in-kernel jump-table version ~2777) | 3003 (ELF flat — *no independent Windows measurement; the Linux number is reused*) |
+| ② | shared / ISA-specific split | 162 shared / **139 x86-specific** lines (46% per-ISA; **non-blank non-comment** — command in `RESULTS.md` ②) | same |
+| ③ | total delivery (run rhp) | in-kernel **6360** vs out-of-kernel **7816** | 7680 vs 9216 (PE 512-aligned) |
+| ④ | TCB | in-kernel ~6.2–6.4 KB vs out-of-kernel **~2932 B** (frozen) | 7680 vs ~3958 B |
 
-Minimal kernel baseline (no lowerer) ≈ 2.93 KB (L) / ~4 KB (W). **X ≈ the whole kernel.**
+Minimal kernel baseline (no lowerer) ≈ 2932 B (L) / 3958–4096 B (W). **X ≈ the whole kernel** —
+but that comparison is **cross-口径**: X is a flat-blob subtraction (no ELF header / entry /
+`mem*` intrinsics / primitive table), the kernel baseline is a whole stripped binary (all of
+those included). Direction is conservative, but never quote it without the caveat.
+See [`RESULTS.md`](./RESULTS.md) ④ and [`../COMPARABILITY.md`](../COMPARABILITY.md) §2 U7.
+
+> **Execution status — read before quoting a number.** The **six Windows PE executables were
+> really run** (163 / `a49d2cbecc13994f` / `exit=07`+7, both packagings). **X = 3003 B is a
+> Linux/ELF-flat byte measurement of an artifact that was never executed** (no WSL here; the
+> `mx_*_flat.bin` measurement blobs are not runnable products by construction), and so are the
+> entire Linux columns of ③④. The route that executed is the Windows PE one (7680 / 9216), whose bytes
+> are 512-aligned and therefore cannot be read as real code deltas.
 
 **Verdict:** a real no-free-lunch tradeoff. ③ favors **in-kernel** (~1.5 KB smaller total,
 constant); ④ favors **out-of-kernel** (half the frozen TCB). X≈kernel-size makes it real
