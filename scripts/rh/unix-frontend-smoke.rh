@@ -10,7 +10,7 @@
 import "scripts/rh/lib/test_harness" as test_harness;
 
 fn json_null() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn trimmed(value) {
@@ -50,7 +50,7 @@ fn unsupported(platform, code, message) {
         },
         evidence_emitted: []
     };
-    print("SKIP " + rhai::json::stringify(skip_payload));
+    print("SKIP " + rh::json::stringify(skip_payload));
 }
 
 fn normalized_text(value) {
@@ -123,7 +123,7 @@ fn json_cli(context, cli, arguments) {
         context, cli, arguments, 0, []
     );
     let payload = "" + response.stdout;
-    rhai::json::parse(payload)
+    rh::json::parse(payload)
 }
 
 fn text_cli(context, cli, arguments) {
@@ -139,7 +139,7 @@ fn wait_for_server(context, cli, gui) {
             context, cli, ["ui-snapshot"], 0, []
         );
         if probe.success != 0 {
-            return rhai::json::parse(probe.stdout);
+            return rh::json::parse(probe.stdout);
         }
         if gui.state == "exited" {
             let output = gui.wait_with_output(
@@ -147,7 +147,7 @@ fn wait_for_server(context, cli, gui) {
             );
             throw "unix_frontend_gui_early_exit:" + output.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "unix_frontend_server_timeout";
 }
@@ -163,7 +163,7 @@ fn wait_for_window(gui) {
         if gui.state == "exited" {
             throw "unix_frontend_window_early_exit";
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_window_timeout";
 }
@@ -244,7 +244,7 @@ fn wait_x11_window(context, title, child) {
         if child.state == "exited" {
             throw "unix_frontend_x11_window_owner_exited";
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "unix_frontend_x11_window_timeout:" + title;
 }
@@ -262,7 +262,7 @@ fn wait_x11_active(context, id, code) {
         if active_x11_window(context) == id {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code;
 }
@@ -300,7 +300,7 @@ fn activate_finder_witness(context) {
         if frontmost_macos(context) == out {
             return out;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_macos_witness_focus_timeout";
 }
@@ -339,7 +339,7 @@ fn wait_macos_agenterm_active(context) {
         if macos_frontmost_contains(context, "agenterm") {
             return frontmost_macos(context);
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_macos_activation_timeout";
 }
@@ -358,14 +358,14 @@ fn wait_native_focus(context, cli, platform, native_window_id) {
             return snapshot;
         }
         last = snapshot;
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_native_focus_event_timeout";
 }
 
 fn set_native_clipboard(context, platform, text) {
     let payload_path = clipboard_payload_path(context);
-    rhai::runtime::atomic_write(payload_path, text);
+    rh::runtime::atomic_write(payload_path, text);
     if platform == "linux" {
         let command = std::process::command("xclip");
         command.args([
@@ -420,7 +420,7 @@ fn wait_linux_clipboard_owner(context, expected, owner) {
         if output.success != 0 && observed == expected {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_xclip_owner_readiness_timeout";
 }
@@ -433,7 +433,7 @@ fn wait_file(path, gui, code) {
         if gui.state == "exited" {
             throw code + "_gui_exited";
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code;
 }
@@ -451,7 +451,7 @@ fn wait_stale_failure(context, cli) {
             return snapshot;
         }
         last = snapshot;
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_stale_paste_failure_timeout";
 }
@@ -465,7 +465,7 @@ fn wait_terminal_paste_success(context, cli) {
             if snapshot.feedback.error != json_null() {
                 let paste_error = snapshot.feedback.error;
                 throw "unix_frontend_native_paste_failed:" +
-                    rhai::json::stringify(paste_error);
+                    rh::json::stringify(paste_error);
             }
             if snapshot.feedback.message != json_null()
                     && text_starts_with(snapshot.feedback.message, "Pasted ") {
@@ -473,7 +473,7 @@ fn wait_terminal_paste_success(context, cli) {
             }
         }
         last = snapshot;
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw "unix_frontend_native_paste_timeout";
 }
@@ -485,7 +485,7 @@ fn wait_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(20));
+        rh::task::sleep(std::time::Duration::from_millis(20));
     }
     throw code;
 }
@@ -497,7 +497,7 @@ fn retain_failure_snapshot(context, cli) {
     );
     let fail_stdout = "" + output.stdout;
     let fail_stderr = "" + output.stderr;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         std::path::join(
             context.failure_directory, "ui-snapshot.txt"
         ).display,
@@ -622,7 +622,7 @@ fn entry() {
         "  exit 0\n" +
         "fi\n" +
         "exec \"" + clipboard_reader + "\" \"$@\"\n";
-    rhai::runtime::atomic_write(wrapper_path, wrapper_source);
+    rh::runtime::atomic_write(wrapper_path, wrapper_source);
     chmod_executable(context, wrapper_path);
 
     let stale_marker = "AGENTERM_STALE_PASTE_" + context.run_id;
@@ -677,7 +677,7 @@ fn entry() {
                 && initial_surface == "terminal"
                 && initial.focus.window_focused == 0,
             "unix_frontend_initial_snapshot_contract:" +
-                rhai::json::stringify(initial)
+                rh::json::stringify(initial)
         );
         if platform == "linux" {
             test_harness::require(
@@ -726,7 +726,7 @@ fn entry() {
                 focused = snapshot;
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(20));
+            rh::task::sleep(std::time::Duration::from_millis(20));
         }
         test_harness::require(
             focused != json_null(),
@@ -751,7 +751,7 @@ fn entry() {
             context, cli_exe, ["screenshot", "-o", screenshot_path]
         );
         let after_capture = json_cli(context, cli_exe, ["ui-snapshot"]);
-        let rendered = rhai::image::inspect_png(screenshot_path);
+        let rendered = rh::image::inspect_png(screenshot_path);
         let screenshot_bytes = std::fs::metadata(screenshot_path).len;
         let renderer_evidence = #{
             before: before_capture.event_position,
@@ -782,7 +782,7 @@ fn entry() {
                 && rendered.luminance > 1
                 && rendered.luminance < 255,
             "unix_frontend_renderer_evidence:" +
-                rhai::json::stringify(renderer_evidence)
+                rh::json::stringify(renderer_evidence)
         );
         test_harness::emit_evidence(
             context,
@@ -805,7 +805,7 @@ fn entry() {
         let clipboard_text = "echo " + paste_marker;
         if platform == "linux" {
             let payload_path = clipboard_payload_path(context);
-            rhai::runtime::atomic_write(payload_path, clipboard_text);
+            rh::runtime::atomic_write(payload_path, clipboard_text);
             let clipboard_command = std::process::command("xclip");
             clipboard_command.args([
                 "-selection", "clipboard", "-loops", "2", "-silent",
@@ -891,13 +891,13 @@ fn entry() {
             "unix_frontend_peer_id_invalid:" + peer
         );
         json_cli(context, cli_exe, ["ui-action", "select-tab", "-t", active_tab]);
-        rhai::runtime::atomic_write(mode_path, "enabled\n");
+        rh::runtime::atomic_write(mode_path, "enabled\n");
         json_cli(context, cli_exe, ["ui-action", "terminal-paste"]);
         wait_file(
             entered_path, gui, "unix_frontend_clipboard_barrier_timeout"
         );
         json_cli(context, cli_exe, ["ui-action", "select-tab", "-t", peer]);
-        rhai::runtime::atomic_write(release_path, "released\n");
+        rh::runtime::atomic_write(release_path, "released\n");
         let stale = wait_stale_failure(context, cli_exe);
         let stale_error = stale.feedback.error;
         test_harness::require(
@@ -906,7 +906,7 @@ fn entry() {
                 && ("" + stale_error.category) == "precondition"
                 && stale_error.retryable != 0,
             "unix_frontend_stale_failure_contract:" +
-                rhai::json::stringify(stale_error)
+                rh::json::stringify(stale_error)
         );
         let tab_a = active_tab;
         let capture_a = text_cli(
@@ -958,7 +958,7 @@ fn entry() {
         try {
             retain_failure_snapshot(context, cli_exe);
         } catch (diagnostic_error) {
-            rhai::runtime::atomic_write(
+            rh::runtime::atomic_write(
                 std::path::join(
                     context.failure_directory, "snapshot-error.txt"
                 ).display,

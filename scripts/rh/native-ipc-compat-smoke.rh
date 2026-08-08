@@ -168,7 +168,7 @@ fn acquire_release(context, catalog, release, asset, facts) {
         "native_ipc_compat_archive_size:" + release.version
     );
     test_harness::require(
-        rhai::crypto::sha256_file(archive) == asset.sha256,
+        rh::crypto::sha256_file(archive) == asset.sha256,
         "native_ipc_compat_archive_hash:" + release.version
     );
     let tar = "tar";
@@ -274,18 +274,18 @@ fn verify_head(context, repo, server, cli, metadata_path) {
         std::fs::exists(metadata_path),
         "native_ipc_compat_head_metadata_missing"
     );
-    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata = rh::json::parse_file(metadata_path);
     test_harness::require(
         metadata.schema_version == 2
             && metadata.git_commit == git_head(context, repo),
         "native_ipc_compat_head_source_identity"
     );
     test_harness::require(
-        rhai::crypto::sha256_file(server) == executable_hash(metadata, server),
+        rh::crypto::sha256_file(server) == executable_hash(metadata, server),
         "native_ipc_compat_head_server_hash"
     );
     test_harness::require(
-        rhai::crypto::sha256_file(cli) == executable_hash(metadata, cli),
+        rh::crypto::sha256_file(cli) == executable_hash(metadata, cli),
         "native_ipc_compat_head_cli_hash"
     );
 }
@@ -410,7 +410,7 @@ fn invoke_json(
         legacy_address
     );
     let text = "" + output.stdout + output.stderr;
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn wait_protocol(
@@ -457,7 +457,7 @@ fn wait_protocol(
         );
         if output.success {
             let text = output.stdout_text() + output.stderr_text();
-            return rhai::json::parse(text);
+            return rh::json::parse(text);
         }
         if server.state == "exited" {
             let ended = server.wait_with_output(
@@ -466,7 +466,7 @@ fn wait_protocol(
             throw "native_ipc_compat_server_early_exit:" +
                 ended.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "native_ipc_compat_server_ready_timeout";
     // Unreachable: keep return kind Json (bare `throw` otherwise infers String).
@@ -480,7 +480,7 @@ fn wait_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
     // Unreachable: keep return kind Output for `.success` at call sites.
@@ -588,7 +588,7 @@ if head_metadata == "" {
 } else {
     head_metadata = std::path::absolute(head_metadata).display;
 }
-let catalog = rhai::json::parse_file(
+let catalog = rh::json::parse_file(
     std::path::absolute(catalog_path).display
 );
 test_harness::require(

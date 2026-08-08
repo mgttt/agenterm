@@ -79,7 +79,7 @@ fn entry() {
             "preflight_benchmark_report_missing:" + iteration_tag
         );
         let preflight_text = std::fs::read_to_string(run_report);
-        let preflight = rhai::json::parse(preflight_text);
+        let preflight = rh::json::parse(preflight_text);
         let passed = preflight.passed;
         if passed == 0 || exit_code != 0 {
             all_passed = 0;
@@ -137,9 +137,9 @@ fn entry() {
         excludes_network_and_interactive_auth: true,
         runs: runs
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output_path,
-        rhai::json::stringify_pretty(benchmark) + "\n"
+        rh::json::stringify_pretty(benchmark) + "\n"
     );
     print(
         "PREFLIGHT BENCHMARK iterations=" + iterations +

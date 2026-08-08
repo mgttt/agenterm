@@ -74,7 +74,7 @@ fn selftest_sha256(path) {
         std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
         "qualification_selftest_input_missing:" + path
     );
-    rhai::crypto::sha256_file(path)
+    rh::crypto::sha256_file(path)
 }
 
 fn selftest_git_head(repo) {
@@ -110,7 +110,7 @@ fn remove_owned_scratch(root, path) {
 
 fn selftest_new_context(manifest_path, stress_included) {
     let path = std::path::absolute(manifest_path).display;
-    let manifest = rhai::json::parse_file(path);
+    let manifest = rh::json::parse_file(path);
     #{
         manifest: manifest,
         manifest_path: path,
@@ -119,8 +119,8 @@ fn selftest_new_context(manifest_path, stress_included) {
         process_observation: #{
             owned_commands: 0,
             process_samples: 0,
-            automation_processes: rhai::json::parse("[]"),
-            terminal_compatibility_payloads: rhai::json::parse("[]")
+            automation_processes: rh::json::parse("[]"),
+            terminal_compatibility_payloads: rh::json::parse("[]")
         }
     }
 }
@@ -223,7 +223,7 @@ fn would_reject_provenance_artifact_hash(
     metadata_path,
     artifact_manifest_path
 ) {
-    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata = rh::json::parse_file(metadata_path);
     let artifact_hash = selftest_sha256(artifact_manifest_path);
     if ("" + metadata.artifact_manifest_sha256) != artifact_hash {
         return 1;
@@ -289,8 +289,8 @@ fn entry() {
         process_observation: #{
             owned_commands: 1,
             process_samples: 1,
-            automation_processes: rhai::json::parse("[]"),
-            terminal_compatibility_payloads: rhai::json::parse("[]")
+            automation_processes: rh::json::parse("[]"),
+            terminal_compatibility_payloads: rh::json::parse("[]")
         }
     };
     assert_ok(
@@ -305,8 +305,8 @@ fn entry() {
         process_observation: #{
             owned_commands: 2,
             process_samples: 2,
-            automation_processes: rhai::json::parse("[\"pwsh.exe:123\"]"),
-            terminal_compatibility_payloads: rhai::json::parse("[]")
+            automation_processes: rh::json::parse("[\"pwsh.exe:123\"]"),
+            terminal_compatibility_payloads: rh::json::parse("[]")
         }
     };
     expect_rejection(
@@ -390,7 +390,7 @@ fn entry() {
     let cli_result = #{ success: 0, stdout: "", stderr: "" };
 
     if failure == "" {
-        let metadata = rhai::json::parse_file(
+        let metadata = rh::json::parse_file(
             std::path::join(repo, "dist/agenterm.json").display
         );
         metadata.git_commit = selftest_git_head(repo);
@@ -419,9 +419,9 @@ fn entry() {
             scratch,
             "mismatched-agenterm.json"
         ).display;
-        rhai::runtime::atomic_write(
+        rh::runtime::atomic_write(
             metadata_path,
-            rhai::json::stringify_pretty(metadata) + "\n"
+            rh::json::stringify_pretty(metadata) + "\n"
         );
         expect_rejection(
             "qualification_artifact_manifest_hash",
@@ -467,7 +467,7 @@ fn entry() {
     }
 
     if failure == "" {
-        let bundle = rhai::json::parse_file(
+        let bundle = rh::json::parse_file(
             harness_context.manifest_path
         );
         let pane_capture = "" + bundle.privacy.pane_capture;

@@ -1,0 +1,7 @@
+fn entry() {
+    if args.len != 2 {
+        return rh::fail("expected: PATH CONTENT");
+    }
+    rh::runtime::atomic_write(args[0], args[1]);
+    1
+}

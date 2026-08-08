@@ -19,7 +19,7 @@ fn append_request_log(path, record) {
     };
     std::fs::write(
         path,
-        existing + rhai::json::stringify(record) + "\n"
+        existing + rh::json::stringify(record) + "\n"
     );
 }
 
@@ -68,7 +68,7 @@ fn serve_request(stream, log_path, handled) {
     stream.set_read_timeout(std::time::Duration::from_secs(2));
     stream.set_write_timeout(std::time::Duration::from_secs(2));
 
-    let request = rhai::bytes::from_text("");
+    let request = rh::bytes::from_text("");
     let header_end = -1;
     let body_length = 0;
     let tls = 0;
@@ -150,7 +150,7 @@ fn serve_request(stream, log_path, handled) {
             201,
             "Created",
             ["X-Test: one", "X-Test: two"],
-            rhai::bytes::from_text("hello")
+            rh::bytes::from_text("hello")
         );
     } else if path == "/echo" {
         write_response(
@@ -166,7 +166,7 @@ fn serve_request(stream, log_path, handled) {
             200,
             "OK",
             [],
-            rhai::bytes::from_text("abcdefgh")
+            rh::bytes::from_text("abcdefgh")
         );
     } else if path == "/async" {
         write_response(
@@ -174,25 +174,25 @@ fn serve_request(stream, log_path, handled) {
             200,
             "OK",
             [],
-            rhai::bytes::from_text("async-ok")
+            rh::bytes::from_text("async-ok")
         );
     } else if path == "/slow" {
-        rhai::task::sleep(std::time::Duration::from_millis(300));
+        rh::task::sleep(std::time::Duration::from_millis(300));
         write_response(
             stream,
             200,
             "OK",
             [],
-            rhai::bytes::from_text("too-late")
+            rh::bytes::from_text("too-late")
         );
     } else if path == "/cancel" {
-        rhai::task::sleep(std::time::Duration::from_millis(500));
+        rh::task::sleep(std::time::Duration::from_millis(500));
         write_response(
             stream,
             200,
             "OK",
             [],
-            rhai::bytes::from_text("cancel-late")
+            rh::bytes::from_text("cancel-late")
         );
     } else if path == "/malformed" {
         stream.write_all("NOT-HTTP\r\nContent-Length: 0\r\n\r\n");
@@ -205,7 +205,7 @@ fn serve_request(stream, log_path, handled) {
             404,
             "Not Found",
             [],
-            rhai::bytes::from_text("")
+            rh::bytes::from_text("")
         );
     }
     1
@@ -231,9 +231,9 @@ fn entry() {
     let address = listener.local_addr;
     let address_parts = address.split(":");
     let port = address_parts[address_parts.len - 1].parse_int();
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         ready_path,
-        rhai::json::stringify(#{
+        rh::json::stringify(#{
             schema_version: 1,
             url: "http://127.0.0.1:" + port,
             tls_url: "https://127.0.0.1:" + port,

@@ -178,13 +178,13 @@ fn append_command_record(
             512
         )
     };
-    rhai::runtime::append_sync(
+    rh::runtime::append_sync(
         context.command_journal_path,
-        rhai::json::stringify(record) + "\n"
+        rh::json::stringify(record) + "\n"
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.command_log_path,
-        rhai::json::stringify_pretty([record]) + "\n"
+        rh::json::stringify_pretty([record]) + "\n"
     );
     0
 }
@@ -203,12 +203,12 @@ fn finalize_command_log(context) {
         let line = source_line;
         line.trim();
         if line != "" {
-            records.push(rhai::json::parse(line));
+            records.push(rh::json::parse(line));
         }
     }
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.command_log_path,
-        rhai::json::stringify(records) + "\n"
+        rh::json::stringify(records) + "\n"
     );
     std::fs::remove_file(context.command_journal_path);
     0
@@ -295,7 +295,7 @@ fn emit_evidence(context, declared, id) {
             return 0;
         }
     }
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.evidence_path,
         existing + id_text + "\n"
     );
@@ -324,7 +324,7 @@ fn scrub_retained_text(context, redactions) {
                 let source = std::fs::read_to_string(entry_path);
                 let safe = redact_text(source, redactions);
                 if safe != source {
-                    rhai::runtime::atomic_write(entry_path, safe);
+                    rh::runtime::atomic_write(entry_path, safe);
                 }
             }
         }
@@ -397,13 +397,13 @@ fn complete_impl(
             pane_capture: "disabled for this suite"
         }
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.cleanup_path,
-        rhai::json::stringify_pretty(cleanup) + "\n"
+        rh::json::stringify_pretty(cleanup) + "\n"
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.manifest_path,
-        rhai::json::stringify_pretty(manifest) + "\n"
+        rh::json::stringify_pretty(manifest) + "\n"
     );
     if succeeded == 0 && announce_failure != 0 {
         print("FAILURE BUNDLE " + context.run_directory);

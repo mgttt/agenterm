@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, RH_CODEGEN_REVISION, check, transpile_cdylib_with_mode};
 
-const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
+const FIXTURES: [(&str, &[&str], &[&str]); 21] = [
     (
         "rh_empty_map_fn_return.rh",
         &["rh_json_set_path_key(&mut env"],
@@ -79,7 +79,10 @@ const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
             "rh_clipboard_get_text()",
             "rh_clipboard_set_text(&String::from(\"native-clipboard-probe\"))",
         ],
-        &["rh_host_eval_int(\"rhai::clipboard::"],
+        &[
+            "rh_host_eval_int(\"rh::clipboard::",
+            "rh_host_eval_int(\"rhai::clipboard::",
+        ],
     ),
     (
         "rh_host_api_json_task.rh",
@@ -88,9 +91,69 @@ const FIXTURES: [(&str, &[&str], &[&str]); 11] = [
             "std::thread::sleep(std::time::Duration::from_millis(",
         ],
         &[
+            "rh_host_eval_int(\"rh::json::",
             "rh_host_eval_int(\"rhai::json::",
+            "rh_host_eval_int(\"rh::task::",
             "rh_host_eval_int(\"rhai::task::",
         ],
+    ),
+    (
+        "rh_runtime_atomic_write.rh",
+        &["rh_atomic_write("],
+        &["rh_host_eval_int(\"rh::runtime::atomic_write"],
+    ),
+    (
+        "rh_crypto_sha256_file.rh",
+        &["rh_sha256_file("],
+        &["rh_host_eval_int(\"rh::crypto::sha256_file"],
+    ),
+    (
+        "rh_legacy_rhai_json_parse.rh",
+        &["rh_json_parse("],
+        &["rh_host_eval_int(\"rhai::json::"],
+    ),
+    (
+        "rh_bytes_from_array.rh",
+        &["rh_bytes_from_array(&[])", "rh_bytes_from_array(&[0, 65, 255])"],
+        &["rh_host_eval_int(\"rh::bytes::from_array"],
+    ),
+    (
+        "rh_process_kill.rh",
+        &["rh_process_kill(4242)"],
+        &["rh_host_eval_int(\"std::process::kill"],
+    ),
+    (
+        "rh_command_arg.rh",
+        &["rh_command_arg(&mut command", "String::from(\"--probe\")"],
+        &["rh_host_eval_int(\"command.arg"],
+    ),
+    (
+        "rh_string_index_of.rh",
+        &["rh_string_index_of(&haystack"],
+        &["rh_host_eval_int(\"haystack.index_of"],
+    ),
+    (
+        "rh_std_fs_write.rh",
+        &["rh_std_fs_write(&rh_arg(0)"],
+        &["rh_host_eval_int(\"std::fs::write"],
+    ),
+    (
+        "rh_json_marker_run_properties.rh",
+        &[
+            "rh_json_get_path(&marker_run, &[\"text\"])",
+            "rh_json_get_path(&marker_run, &[\"row\"])",
+            "rh_json_get_path(&marker_run, &[\"column\"])",
+        ],
+        &["rh_host_eval_int(\"marker_run."],
+    ),
+    (
+        "rh_bytes_append.rh",
+        &[
+            "rh_bytes_from_array(&[])",
+            "rh_bytes_append(&mut framed",
+            "rh_bytes_from_text(",
+        ],
+        &["rh_host_eval_int(\"framed.append"],
     ),
 ];
 
@@ -144,8 +207,8 @@ fn assert_native_or_host_eval(name: &str, needles: &[&str], anti_needles: &[&str
 }
 
 #[test]
-fn codegen_revision_is_eighty() {
-    assert_eq!(RH_CODEGEN_REVISION, 80);
+fn codegen_revision_is_eighty_one() {
+    assert_eq!(RH_CODEGEN_REVISION, 81);
 }
 
 #[test]
@@ -278,4 +341,124 @@ fn rh_host_api_json_task_emits_native_json_and_sleep() {
         output.rust
     );
     assert!(output.rust.contains("rh_json_parse("));
+}
+
+#[test]
+fn runtime_atomic_write_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[11].0, FIXTURES[11].1, FIXTURES[11].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[11].0))
+        .expect("transpile runtime atomic_write fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn crypto_sha256_file_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[12].0, FIXTURES[12].1, FIXTURES[12].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[12].0))
+        .expect("transpile crypto sha256_file fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn legacy_rhai_json_parse_stays_native_via_dual_alias() {
+    assert_native_or_host_eval(FIXTURES[13].0, FIXTURES[13].1, FIXTURES[13].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[13].0))
+        .expect("transpile legacy rhai::json::parse fixture");
+    assert_eq!(
+        output.execution_mode,
+        CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn bytes_from_array_emits_native_bytes_constructors() {
+    assert_native_or_host_eval(FIXTURES[14].0, FIXTURES[14].1, FIXTURES[14].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[14].0))
+        .expect("transpile bytes from_array fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn process_kill_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[15].0, FIXTURES[15].1, FIXTURES[15].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[15].0))
+        .expect("transpile process kill fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn command_arg_emits_native_single_arg_append() {
+    assert_native_or_host_eval(FIXTURES[16].0, FIXTURES[16].1, FIXTURES[16].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[16].0))
+        .expect("transpile command arg fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn string_index_of_emits_native_find_helper() {
+    assert_native_or_host_eval(FIXTURES[17].0, FIXTURES[17].1, FIXTURES[17].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[17].0))
+        .expect("transpile string index_of fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn std_fs_write_emits_native_host_call() {
+    assert_native_or_host_eval(FIXTURES[18].0, FIXTURES[18].1, FIXTURES[18].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[18].0))
+        .expect("transpile std fs write fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn json_marker_run_properties_emit_native_path_reads() {
+    assert_native_or_host_eval(FIXTURES[19].0, FIXTURES[19].1, FIXTURES[19].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[19].0))
+        .expect("transpile json marker_run properties fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+}
+
+#[test]
+fn bytes_append_emits_native_bytes_mutation() {
+    assert_native_or_host_eval(FIXTURES[20].0, FIXTURES[20].1, FIXTURES[20].2);
+    let output = transpile_cdylib_with_mode(&read_fixture(FIXTURES[20].0))
+        .expect("transpile bytes append fixture");
+    assert_eq!(output.execution_mode, CdylibExecutionMode::Native, "{}", output.rust);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
 }

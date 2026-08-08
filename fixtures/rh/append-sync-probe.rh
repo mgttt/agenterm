@@ -6,8 +6,8 @@ fn entry() {
 
     let path = args[0];
     let doc = #{ answer: 42 };
-    let text = rhai::json::stringify(doc);
-    rhai::runtime::append_sync(path, text);
+    let text = rh::json::stringify(doc);
+    rh::runtime::append_sync(path, text);
     let tail = text.sub_string(1, 3);
     tail.len
 }

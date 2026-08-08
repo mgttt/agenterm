@@ -5,11 +5,11 @@ fn active_tab_from_snapshot(snapshot) {
             return tab;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn entry() {
-    let snapshot = rhai::json::parse("{\"tabs\":[{\"active\":1,\"id\":\"t1\"}]}");
+    let snapshot = rh::json::parse("{\"tabs\":[{\"active\":1,\"id\":\"t1\"}]}");
     let tab = active_tab_from_snapshot(snapshot);
     if tab.active != 1 {
         return 1;

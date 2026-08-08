@@ -35,7 +35,7 @@ fn entry() {
         score += 100000;
     }
 
-    let doc = rhai::json::parse_file(json_path);
+    let doc = rh::json::parse_file(json_path);
     if doc.schema_version == 1 {
         score += 1000000;
     }

@@ -34,7 +34,7 @@ fn remote_ui_declared_evidence() {
 }
 
 fn json_null() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn trimmed(value) {
@@ -59,7 +59,7 @@ fn output_stderr_text(output) {
 }
 
 fn remote_ui_write(path, content) {
-    std::fs::write(path, content);
+    rh::runtime::atomic_write(path, content);
 }
 
 fn remote_ui_kill(pid) {
@@ -68,7 +68,7 @@ fn remote_ui_kill(pid) {
 
 fn crypto_sha256_path(path_value) {
     let path = std::path::absolute("" + path_value).display;
-    rhai::crypto::sha256_file(path)
+    rh::crypto::sha256_file(path)
 }
 
 fn configured_gui_command(
@@ -110,7 +110,8 @@ fn json_cli(context, cli, arguments) {
         0,
         []
     );
-    rhai::json::parse(trimmed(response.stdout))
+    let stdout_text = trimmed(response.stdout);
+    parse_json_text(stdout_text)
 }
 
 fn text_cli(context, cli, arguments) {
@@ -161,7 +162,7 @@ fn wait_for_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
 }
@@ -178,7 +179,7 @@ fn wait_for_window(child, code) {
             );
             throw code + ":" + output_stderr_text(output);
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
     0
@@ -194,7 +195,7 @@ fn wait_for_lease(context, cli, child, attempts, code) {
             []
         );
         if output.success != 0 {
-            let lease = rhai::json::parse(output.stdout);
+            let lease = rh::json::parse(output.stdout);
             if lease.attached != 0 && lease.client_pid == child.id {
                 wait_for_window(child, code + "_window");
                 return lease;
@@ -206,7 +207,7 @@ fn wait_for_lease(context, cli, child, attempts, code) {
             );
             throw code + ":" + output_stderr_text(result);
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw code;
 }
@@ -240,12 +241,12 @@ fn wait_projection(context, cli, projection) {
             []
         );
         if output.success != 0 {
-            let snapshot = rhai::json::parse(output.stdout);
+            let snapshot = rh::json::parse(output.stdout);
             if snapshot.projection == projection {
                 return snapshot;
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_projection_timeout:" + projection;
 }
@@ -256,7 +257,7 @@ fn wait_observed(context, cli, sequence) {
         if lease.observed_sequence >= sequence {
             return lease;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_observed_sequence_timeout";
 }
@@ -267,7 +268,7 @@ fn wait_workspace_toolbar(context, cli, code) {
         if snapshot.layout.toolbar != json_null() {
             return snapshot;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     let snapshot = json_cli(context, cli, ["ui-snapshot"]);
     throw code
@@ -280,7 +281,7 @@ fn wait_locale(context, cli, locale_id) {
         if snapshot.locale.id == locale_id {
             return snapshot;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_locale_timeout:" + locale_id;
 }
@@ -296,7 +297,7 @@ fn wait_effective_font_size(context, cli, size, overridden) {
                 return snapshot;
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_effective_font_timeout:" + size;
 }
@@ -310,7 +311,7 @@ fn wait_terminal_resize_settled(context, cli) {
                 && terminal.cols == terminal.desired_cols {
             return snapshot;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_terminal_resize_settle_timeout";
 }
@@ -331,7 +332,7 @@ fn wait_terminal_selection(
                 return snapshot;
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
 }
@@ -354,7 +355,7 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
         if activity != json_null() && activity.sequence > required_sequence {
             return activity;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_render_activity_sample_timeout";
 }
@@ -453,7 +454,7 @@ fn find_tab(snapshot, id) {
             return tab;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn double_click_tab_text(context, cli, gui_child, id) {
@@ -469,20 +470,17 @@ fn double_click_tab_text(context, cli, gui_child, id) {
     );
 }
 
-fn find_last_run(screen, marker) {
-    let found = json_null();
-    for run in screen.runs {
-        if run.text.contains(marker) {
-            found = run;
-        }
-    }
-    found
-}
-
 fn marker_text_offset(text, needle) {
     let haystack = "" + text;
     let fragment = "" + needle;
-    haystack.index_of(fragment)
+    let index = 0;
+    while index + fragment.len <= haystack.len {
+        if haystack.sub_string(index, fragment.len) == fragment {
+            return index;
+        }
+        index += 1;
+    }
+    throw "remote_ui_marker_offset_missing";
 }
 
 fn process_present(id) {
@@ -504,7 +502,7 @@ fn wait_process_gone(id, code) {
         if !process_present(id) {
             return;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
 }
@@ -518,7 +516,7 @@ fn wait_file_text(path, expected, code) {
                 return observed;
             }
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     if std::fs::exists(path) {
         throw code + ":observed=" + std::fs::read_to_string(path);
@@ -536,7 +534,7 @@ fn wait_pane_input_bytes(context, cli, tab_id, minimum, code) {
         if observed_bytes >= minimum {
             return;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
 }
@@ -566,7 +564,7 @@ fn tab_text_geometry(context, cli, id) {
                 && text.height > 0 {
             return text;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw "remote_ui_tab_text_geometry_missing";
     // Unreachable: keep return kind Json.
@@ -578,7 +576,7 @@ fn tab_text_geometry(context, cli, id) {
 
 fn parse_json_text(text) {
     let payload = "" + text;
-    rhai::json::parse(payload)
+    rh::json::parse(payload)
 }
 
 fn screenshot(context, cli, path) {
@@ -607,7 +605,7 @@ fn wait_screenshot_changed(context, cli, path, baseline_path, code) {
         if crypto_sha256_path(path) != baseline_hash {
             return;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
 }
@@ -641,7 +639,7 @@ fn assert_instance_directory_empty(context) {
         if instance_directory_empty(context) != 0 {
             return;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_ui_instance_registration_leaked";
 }
@@ -1216,7 +1214,7 @@ try {
                 && new_modal.modal.https_proxy_configured {
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     test_harness::require(
         new_modal.modal.initial_command_configured
@@ -1349,7 +1347,7 @@ try {
     );
     if std::fs::exists(context.settings_path) {
         let cancelled_settings =
-            rhai::json::parse_file(context.settings_path);
+            rh::json::parse_file(context.settings_path);
         test_harness::require(
             cancelled_settings.color_theme != "light",
             "remote_ui_settings_cancel_persisted_preview"
@@ -1362,7 +1360,7 @@ try {
     settings_light.click();
     settings_apply.click();
     let applied_settings =
-        rhai::json::parse_file(context.settings_path);
+        rh::json::parse_file(context.settings_path);
     test_harness::require(
         applied_settings.color_theme == "light"
             && applied_settings.terminal_font_family == "Consolas"
@@ -1375,7 +1373,7 @@ try {
     settings_dark.click();
     settings_cancel.click();
     let cancelled_dark =
-        rhai::json::parse_file(context.settings_path);
+        rh::json::parse_file(context.settings_path);
     test_harness::require(
         cancelled_dark.color_theme == "light",
         "remote_ui_settings_cancel_rollback_invalid"
@@ -1481,7 +1479,7 @@ try {
     );
     for attempt in 0..20 {
         json_cli(context, cli, ["ui-snapshot"]);
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     let render_after_idle = sample_render_activity(
         context,
@@ -1791,7 +1789,7 @@ try {
             osc_confirmed = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(osc_confirmed, "remote_ui_valid_osc7_not_observed");
 
@@ -1879,7 +1877,7 @@ try {
         ]
     );
     let resized_settings =
-        rhai::json::parse_file(context.settings_path);
+        rh::json::parse_file(context.settings_path);
     let resized_bootstrap = json_cli(
         context,
         cli,
@@ -2077,7 +2075,7 @@ try {
             hierarchy_confirmed = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(hierarchy_confirmed, "remote_ui_hierarchy_shape_invalid");
     if requested_screenshot != "" {
@@ -2123,7 +2121,7 @@ try {
             promotion_confirmed = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(promotion_confirmed, "remote_ui_hierarchy_child_not_promoted");
     wait_observed(
@@ -2233,7 +2231,7 @@ try {
             sidebar_ready = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     test_harness::require(
         sidebar_ready && replacement_gui.state == "running",
@@ -2283,7 +2281,7 @@ try {
         if sidebar_scrolled.layout.sidebar.scrollbar.offset > 0 {
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     test_harness::require(
         sidebar_scrolled.layout.sidebar.scrollbar.offset > 0,
@@ -2346,7 +2344,7 @@ try {
     );
     for attempt in 0..10 {
         json_cli(context, cli, ["ui-snapshot"]);
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     let render_after_output = sample_render_activity(
         context,
@@ -2577,7 +2575,7 @@ try {
             alternate_active = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(alternate_active, "remote_ui_raw_application_not_active");
 
@@ -2608,7 +2606,7 @@ try {
     let clipboard_restore_text = "";
     let clipboard_restore_needed = 0;
     try {
-        clipboard_restore_text = rhai::clipboard::get_text();
+        clipboard_restore_text = rh::clipboard::get_text();
         clipboard_restore_needed = 1;
     } catch (clipboard_error) {
     }
@@ -2634,18 +2632,21 @@ try {
         ["ui-bootstrap"]
     );
     let selection_tab = find_tab(selection_bootstrap, tab_id);
-    let marker_run = find_last_run(
-        selection_tab.screen,
-        copy_marker
-    );
+    let marker_run = json_null();
+    for run in selection_tab.screen.runs {
+        if run.text.contains(copy_marker) {
+            marker_run = run;
+        }
+    }
     test_harness::require(
         marker_run != json_null(),
         "remote_ui_selection_marker_run_missing"
     );
-    let marker_text = marker_run.text;
-    let marker_row_value = 0 + marker_run.row;
+    let marker_text = "" + marker_run.text;
+    let marker_row_value = 0 + (0 + marker_run.row);
     let marker_column =
-        0 + marker_run.column + marker_text_offset(marker_text, copy_marker);
+        0 + (0 + marker_run.column)
+            + marker_text_offset(marker_text, copy_marker);
     let selection_rect = replacement_gui.window_client_rect();
     let terminal_left = 360;
     let terminal_width = selection_rect.right - terminal_left - 12;
@@ -2752,12 +2753,12 @@ try {
     );
     copy_input_before_text = trimmed(copy_input_before_text);
     let copy_input_before = parse_int_text(copy_input_before_text);
-    rhai::clipboard::set_text("REMOTE_COPY_SENTINEL");
+    rh::clipboard::set_text("REMOTE_COPY_SENTINEL");
     test_harness::require(
         replacement_gui.window_message(0x8002, 0x43, 1) == 1,
         "remote_ui_terminal_ctrl_c_not_consumed"
     );
-    let copied = rhai::clipboard::get_text();
+    let copied = rh::clipboard::get_text();
     copied = trimmed(copied);
     let copy_input_after_text = text_cli(
         context,
@@ -2771,9 +2772,9 @@ try {
             && copy_input_after == copy_input_before,
         "remote_ui_terminal_copy_invalid:" + copied
     );
-    rhai::clipboard::set_text("REMOTE_MENU_COPY_SENTINEL");
+    rh::clipboard::set_text("REMOTE_MENU_COPY_SENTINEL");
     replacement_gui.window_message(0x0112, 0x1F00, 0);
-    let menu_copied = rhai::clipboard::get_text();
+    let menu_copied = rh::clipboard::get_text();
     menu_copied = trimmed(menu_copied);
     test_harness::require(
         menu_copied == copy_marker,
@@ -2787,7 +2788,7 @@ try {
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let paste_marker = "REMOTE_PASTE_" + context.run_id;
     let paste_text = "echo " + paste_marker;
-    rhai::clipboard::set_text(paste_text);
+    rh::clipboard::set_text(paste_text);
     let paste_input_before_text = text_cli(
         context,
         cli,
@@ -2913,7 +2914,7 @@ try {
             bracketed_mode_on = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     test_harness::require(bracketed_mode_on, "remote_ui_bracketed_paste_mode_missing");
     // The bootstrap above is the SERVER's view. The GUI frames a paste from
@@ -2938,7 +2939,7 @@ try {
             "--timeout-ms", "30000"
         ]
     );
-    rhai::clipboard::set_text(bracketed_payload);
+    rh::clipboard::set_text(bracketed_payload);
     let bracketed_input_before_text = text_cli(
         context,
         cli,
@@ -2970,7 +2971,7 @@ try {
                 bracketed_delivered = 1;
                 break;
             }
-            rhai::task::sleep(std::time::Duration::from_millis(25));
+            rh::task::sleep(std::time::Duration::from_millis(25));
         }
         if bracketed_delivered {
             break;
@@ -3010,7 +3011,7 @@ try {
             offline_observed = 1;
             break;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(10));
+        rh::task::sleep(std::time::Duration::from_millis(10));
     }
     test_harness::require(
         offline_observed,
@@ -3159,7 +3160,7 @@ try {
 
 if clipboard_restore_needed != 0 {
     try {
-        rhai::clipboard::set_text(clipboard_restore_text);
+        rh::clipboard::set_text(clipboard_restore_text);
     } catch (clipboard_restore_error) {
         if failure == "" {
             failure =

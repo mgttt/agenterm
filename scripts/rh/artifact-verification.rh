@@ -30,11 +30,11 @@ fn entry() {
         std::path::join(repo, "scripts/artifacts.json").display;
     artifact_manifest::validate(manifest_path);
     let manifest_text = std::fs::read_to_string(manifest_path);
-    let manifest = rhai::json::parse(manifest_text);
+    let manifest = rh::json::parse(manifest_text);
 
     let metadata_path = std::path::join(dist, "agenterm.json").display;
     let metadata =
-        rhai::json::parse(std::fs::read_to_string(metadata_path));
+        rh::json::parse(std::fs::read_to_string(metadata_path));
     require(
         metadata.schema_version == 2,
         "artifact_metadata_schema"
@@ -95,7 +95,7 @@ fn entry() {
                 metadata_matches = 1;
                 require(
                     ("" + meta_entry.sha256)
-                        == rhai::crypto::sha256_file(path),
+                        == rh::crypto::sha256_file(path),
                     "artifact_metadata_hash:" + artifact_name
                 );
             }
@@ -161,12 +161,12 @@ fn entry() {
     let cargo_lock_path = std::path::join(repo, "Cargo.lock").display;
     require(
         ("" + metadata.cargo_lock_sha256)
-            == rhai::crypto::sha256_file(cargo_lock_path),
+            == rh::crypto::sha256_file(cargo_lock_path),
         "artifact_metadata_cargo_lock"
     );
     require(
         ("" + metadata.artifact_manifest_sha256)
-            == rhai::crypto::sha256_file(manifest_path),
+            == rh::crypto::sha256_file(manifest_path),
         "artifact_metadata_manifest"
     );
     require(
@@ -329,7 +329,7 @@ fn entry() {
     );
     require(cc_cap_code == 0, "artifact_control_center_capabilities");
     let control_center_capabilities =
-        rhai::json::parse(std::fs::read_to_string(stdout_path));
+        rh::json::parse(std::fs::read_to_string(stdout_path));
     require(
         control_center_capabilities.schema_version == 1
             && ("" + control_center_capabilities.executable)
@@ -357,7 +357,7 @@ fn entry() {
     );
     require(cc_snapshot_code == 0, "artifact_control_center_snapshot");
     let control_center_snapshot =
-        rhai::json::parse(std::fs::read_to_string(stdout_path));
+        rh::json::parse(std::fs::read_to_string(stdout_path));
     require(
         control_center_snapshot.schema_version == 1
             && ("" + control_center_snapshot.executable)
@@ -376,7 +376,7 @@ fn entry() {
     );
     require(mcp_cap_code == 0, "artifact_mcp_capabilities");
     let mcp_capabilities =
-        rhai::json::parse(std::fs::read_to_string(stdout_path));
+        rh::json::parse(std::fs::read_to_string(stdout_path));
     let mcp_tools = mcp_capabilities.tools;
     let mcp_tool0 = mcp_tools[0];
     let mcp_tool_name = "" + mcp_tool0.name;

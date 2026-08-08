@@ -88,7 +88,7 @@ fn sha256(path) {
         std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
         "qualification_input_missing:" + path
     );
-    rhai::crypto::sha256_file(path)
+    rh::crypto::sha256_file(path)
 }
 
 fn read_manifest(path) {
@@ -96,7 +96,7 @@ fn read_manifest(path) {
         std::fs::exists(path) != 0 && std::fs::metadata(path).is_file != 0,
         "qualification_manifest_missing:" + path
     );
-    let manifest = rhai::json::parse_file(path);
+    let manifest = rh::json::parse_file(path);
     q_require(
         0 + manifest.schema_version == 1
             && 0 + manifest.receipt_schema_version == 1,
@@ -313,7 +313,7 @@ fn new_timing(
     let lane_text = "" + lane;
     let profile_text = "" + profile;
     // Native Json param evidence for workload (map field alone is not enough).
-    let _workload_proof = rhai::json::stringify(workload);
+    let _workload_proof = rh::json::stringify(workload);
     let _first_gate_id = "" + gate_ids[0];
     q_require(
         timing_lane_allowed(lane_text) != 0,
@@ -368,9 +368,9 @@ fn new_timing(
         },
         workload: #{
             identity: workload_identity,
-            fingerprint: rhai::hash::fnv1a64(
-                rhai::bytes::from_text(
-                    rhai::json::stringify(workload_identity)
+            fingerprint: rh::hash::fnv1a64(
+                rh::bytes::from_text(
+                    rh::json::stringify(workload_identity)
                 )
             )
         },
@@ -471,9 +471,9 @@ fn timing_finish(timing, status) {
     std::fs::create_dir_all(
         std::path::parent(output_path).display
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output_path,
-        rhai::json::stringify_pretty(timing) + "\n"
+        rh::json::stringify_pretty(timing) + "\n"
     );
     timing.output_path = output_path;
     timing.started_at_unix_ms = started_at_unix_ms;
@@ -534,7 +534,7 @@ fn provenance(
         head.len == 40,
         "qualification_git_head_invalid"
     );
-    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata = rh::json::parse_file(metadata_path);
     q_require(
         0 + metadata.schema_version == 2,
         "qualification_metadata_schema"
@@ -561,7 +561,7 @@ fn provenance(
         "" + metadata.artifact_manifest_sha256 == artifact_hash,
         "qualification_artifact_manifest_hash"
     );
-    let artifact_spec = rhai::json::parse_file(
+    let artifact_spec = rh::json::parse_file(
         artifact_manifest_path
     );
     q_require(
@@ -661,9 +661,9 @@ fn write_receipt(context, repo, output_path) {
     std::fs::create_dir_all(
         std::path::parent(path).display
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         path,
-        rhai::json::stringify_pretty(receipt) + "\n"
+        rh::json::stringify_pretty(receipt) + "\n"
     );
     path
 }

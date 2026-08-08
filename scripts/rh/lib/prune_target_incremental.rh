@@ -278,7 +278,7 @@ fn validate_root_manifest(path, invocation, target, incremental) {
             || !text.contains("\"identity_algorithm\":\"full-tree-metadata-v1\"") {
         return 0;
     }
-    let document = rhai::json::parse(text);
+    let document = rh::json::parse(text);
     if document.kind != "agenterm-incremental-touch-manifest"
             || document.schema_version != 1
             || document.invocation_id != invocation
@@ -541,7 +541,7 @@ fn write_manifest_skip_stats(
         skipped_root_working_or_lock + "\n" +
         skipped_root_shape + "\n" +
         skipped_root_remove_failure;
-    rhai::runtime::atomic_write(path, text);
+    rh::runtime::atomic_write(path, text);
 }
 
 fn read_manifest_stat(path, line_index) {
@@ -724,7 +724,7 @@ fn write_session_stats(
         skipped_active_lock + "\n" +
         skipped_young + "\n" +
         skipped_remove_failure;
-    rhai::runtime::atomic_write(path, text);
+    rh::runtime::atomic_write(path, text);
 }
 
 fn prune_finalized_sessions(

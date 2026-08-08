@@ -75,22 +75,22 @@ fn entry() {
     std::fs::create_dir_all(fixture_qualification);
     let gitignore_path =
         std::path::join(fixture, ".gitignore").display;
-    rhai::runtime::atomic_write(gitignore_path, "/dist/\n/target/\n");
+    rh::runtime::atomic_write(gitignore_path, "/dist/\n/target/\n");
     let cargo_path =
         std::path::join(fixture, "Cargo.lock").display;
-    rhai::runtime::atomic_write(cargo_path, "fixture lock\n");
+    rh::runtime::atomic_write(cargo_path, "fixture lock\n");
     let license_apache_path =
         std::path::join(fixture, "LICENSE-APACHE").display;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         license_apache_path,
         "fixture LICENSE-APACHE\n"
     );
     let license_mit_path =
         std::path::join(fixture, "LICENSE-MIT").display;
-    rhai::runtime::atomic_write(license_mit_path, "fixture LICENSE-MIT\n");
+    rh::runtime::atomic_write(license_mit_path, "fixture LICENSE-MIT\n");
     let notices_path =
         std::path::join(fixture, "THIRD_PARTY_NOTICES.md").display;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         notices_path,
         "fixture THIRD_PARTY_NOTICES.md\n"
     );
@@ -176,7 +176,7 @@ fn entry() {
     std::fs::try_remove_file(head_stdout_path);
 
     let artifact_path = artifacts_destination;
-    let artifact_spec = rhai::json::parse_file(artifact_path);
+    let artifact_spec = rh::json::parse_file(artifact_path);
     let executable_records = [];
     let first_executable_name = "";
     for artifact in artifact_spec.executables {
@@ -185,12 +185,12 @@ fn entry() {
             first_executable_name = "" + artifact.name;
         }
         let path = std::path::join(fixture_dist, artifact_name).display;
-        rhai::runtime::atomic_write(
+        rh::runtime::atomic_write(
             path,
             "fixture " + artifact_name + "\n"
         );
         let size = file_size(path, "package_selftest_executable");
-        let file_hash = rhai::crypto::sha256_file(path);
+        let file_hash = rh::crypto::sha256_file(path);
         executable_records.push(#{
             name: artifact_name,
             role: artifact.role,
@@ -198,20 +198,20 @@ fn entry() {
             sha256: file_hash
         });
     }
-    let cargo_hash = rhai::crypto::sha256_file(cargo_path);
-    let artifact_hash = rhai::crypto::sha256_file(artifact_path);
+    let cargo_hash = rh::crypto::sha256_file(cargo_path);
+    let artifact_hash = rh::crypto::sha256_file(artifact_path);
     let sbom_path = std::path::join(
         fixture_dist,
         "agenterm-sbom.spdx.json"
     ).display;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         sbom_path,
         "fixture deterministic SPDX inventory\n"
     );
-    let sbom_hash = rhai::crypto::sha256_file(sbom_path);
+    let sbom_hash = rh::crypto::sha256_file(sbom_path);
     let gate_path = gates_destination;
-    let gate_hash = rhai::crypto::sha256_file(gate_path);
-    let gate_spec = rhai::json::parse_file(gate_path);
+    let gate_hash = rh::crypto::sha256_file(gate_path);
+    let gate_spec = rh::json::parse_file(gate_path);
     let agenterm_json_path =
         std::path::join(fixture_dist, "agenterm.json").display;
     let metadata = #{
@@ -224,9 +224,9 @@ fn entry() {
         artifact_manifest_sha256: artifact_hash,
         executables: executable_records
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         agenterm_json_path,
-        rhai::json::stringify_pretty(metadata) + "\n"
+        rh::json::stringify_pretty(metadata) + "\n"
     );
     let receipt_executables = [];
     for record in executable_records {
@@ -259,9 +259,9 @@ fn entry() {
         fixture_qualification,
         "receipt.json"
     ).display;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         receipt_path,
-        rhai::json::stringify_pretty(receipt) + "\n"
+        rh::json::stringify_pretty(receipt) + "\n"
     );
 
     let output_relative =
@@ -277,13 +277,13 @@ fn entry() {
     let run_directory = std::fs::read_to_string(sidecar_path);
     run_directory.trim();
     let result_path = run_directory + "/dry-run-result.json";
-    let result = rhai::json::parse(
+    let result = rh::json::parse(
         std::fs::read_to_string(result_path)
     );
     let archive_name = "" + result.archive;
     let archive = run_directory + "/" + archive_name;
     let archive_exists = std::fs::exists(archive);
-    let archive_hash = rhai::crypto::sha256_file(archive);
+    let archive_hash = rh::crypto::sha256_file(archive);
     let result_hash = "" + result.archive_sha256;
     assert_ok(
         result.dry_run == 1
@@ -345,7 +345,7 @@ fn entry() {
     release_directory.trim();
     let release_result_path =
         release_directory + "/release-result.json";
-    let release_result = rhai::json::parse(
+    let release_result = rh::json::parse(
         std::fs::read_to_string(release_result_path)
     );
     let release_archive_name = "" + release_result.archive;
@@ -353,12 +353,12 @@ fn entry() {
         release_directory + "/" + release_archive_name;
     let release_manifest_path =
         release_directory + "/package-manifest.json";
-    let release_manifest = rhai::json::parse(
+    let release_manifest = rh::json::parse(
         std::fs::read_to_string(release_manifest_path)
     );
     let release_archive_exists = std::fs::exists(release_archive);
     let release_archive_hash =
-        rhai::crypto::sha256_file(release_archive);
+        rh::crypto::sha256_file(release_archive);
     let release_result_hash = "" + release_result.archive_sha256;
     assert_ok(
         release_result.dry_run == 0
@@ -387,9 +387,9 @@ fn entry() {
         },
         gates: gates
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         receipt_path,
-        rhai::json::stringify_pretty(rejected_cargo_receipt) + "\n"
+        rh::json::stringify_pretty(rejected_cargo_receipt) + "\n"
     );
     let reject_cargo_code = package_qualified::build_package(
         fixture,
@@ -418,9 +418,9 @@ fn entry() {
         },
         gates: gates
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         receipt_path,
-        rhai::json::stringify_pretty(rejected_manifest_receipt) + "\n"
+        rh::json::stringify_pretty(rejected_manifest_receipt) + "\n"
     );
     let reject_manifest_code = package_qualified::build_package(
         fixture,
@@ -431,15 +431,15 @@ fn entry() {
         reject_manifest_code != 0,
         "package_selftest_expected_rejection:package_receipt_artifact_manifest_hash"
     );
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         receipt_path,
-        rhai::json::stringify_pretty(receipt) + "\n"
+        rh::json::stringify_pretty(receipt) + "\n"
     );
 
     let first_name = first_executable_name;
     let first_path = std::path::join(fixture_dist, first_name).display;
     let first_bytes = std::fs::read_to_string(first_path);
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         first_path,
         first_bytes + "tampered\n"
     );
@@ -470,9 +470,9 @@ fn entry() {
         },
         gates: gates
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         receipt_path,
-        rhai::json::stringify_pretty(rejected_head_receipt) + "\n"
+        rh::json::stringify_pretty(rejected_head_receipt) + "\n"
     );
     let reject_head_code = package_qualified::build_package(
         fixture,

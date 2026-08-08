@@ -16,7 +16,7 @@ fn entry() {
         "quality_timing_summary_missing"
     );
     let text = std::fs::read_to_string(path);
-    let report = rhai::json::parse(text);
+    let report = rh::json::parse(text);
 
     require(report.schema_version == 2, "quality_timing_summary_schema");
     require(report.kind == "agenterm-quality-timing", "quality_timing_summary_schema");
@@ -264,7 +264,7 @@ fn entry() {
                 );
                 previous = std::fs::read_to_string(summary_path);
             }
-            rhai::runtime::atomic_write(summary_path, previous + markdown + "\n");
+            rh::runtime::atomic_write(summary_path, previous + markdown + "\n");
         } else {
             print(markdown);
         }

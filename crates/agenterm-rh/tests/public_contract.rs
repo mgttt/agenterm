@@ -9,10 +9,12 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 43] = [
+const FIXTURE_NAMES: [&str; 45] = [
     "append-sync-probe.rh",
+    "atomic-write-probe.rh",
     "break-continue.rh",
     "child-lifecycle-probe.rh",
+    "crypto-sha256-file-probe.rh",
     "direntry-metadata-probe.rh",
     "entry.rh",
     "fail-dynamic.rh",
@@ -102,8 +104,8 @@ fn assert_compile_code(error: RhError, expected_code: &str) {
 }
 
 #[test]
-fn public_codegen_revision_is_eighty() {
-    assert_eq!(RH_CODEGEN_REVISION, 80);
+fn public_codegen_revision_is_eighty_one() {
+    assert_eq!(RH_CODEGEN_REVISION, 81);
 }
 
 #[test]

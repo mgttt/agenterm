@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 10;
-pub const RH_CODEGEN_REVISION: u32 = 80;
+pub const RH_CODEGEN_REVISION: u32 = 81;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -451,6 +451,49 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_process_id() -> INT {\n\
              std::process::id() as INT\n\
          }\n\n\
+         fn rh_process_kill(pid: INT) -> INT {\n\
+             if pid <= 0 {\n\
+                 return rh_fail(\"process_kill_invalid_pid\");\n\
+             }\n\
+             #[cfg(unix)]\n\
+             {\n\
+                 extern \"C\" {\n\
+                     fn kill(pid: i32, sig: i32) -> i32;\n\
+                 }\n\
+                 const SIGTERM: i32 = 15;\n\
+                 let pid = match i32::try_from(pid) {\n\
+                     Ok(value) if value > 0 => value,\n\
+                     _ => return rh_fail(\"process_kill_invalid_pid\"),\n\
+                 };\n\
+                 if unsafe { kill(pid, SIGTERM) } == 0 {\n\
+                     0\n\
+                 } else {\n\
+                     rh_fail(\"process_kill\")\n\
+                 }\n\
+             }\n\
+             #[cfg(windows)]\n\
+             {\n\
+                 match std::process::Command::new(\"taskkill\")\n\
+                     .args([\"/PID\", &pid.to_string(), \"/F\"])\n\
+                     .status()\n\
+                 {\n\
+                     Ok(status) if status.success() => 0,\n\
+                     _ => rh_fail(\"process_kill\"),\n\
+                 }\n\
+             }\n\
+             #[cfg(not(any(unix, windows)))]\n\
+             {\n\
+                 let result = rh_host_json_call(\n\
+                     \"process.kill\",\n\
+                     &serde_json::json!({ \"pid\": pid }),\n\
+                 );\n\
+                 if result.get(\"ok\").and_then(serde_json::Value::as_bool) == Some(true) {\n\
+                     0\n\
+                 } else {\n\
+                     rh_fail(\"process_kill\")\n\
+                 }\n\
+             }\n\
+         }\n\n\
          fn rh_system_time_now_unix_millis() -> INT {\n\
              match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {\n\
                  Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
@@ -611,6 +654,12 @@ pub fn emit_host_runtime(out: &mut String) {
                      let _ = rh_fail(&format!(\"runtime_append_sync: {path}: {error}\"));\n\
                      0\n\
                  }\n\
+             }\n\
+         }\n\n\
+         fn rh_string_index_of(haystack: &str, needle: &str) -> INT {\n\
+             match haystack.find(needle) {\n\
+                 Some(index) => index as INT,\n\
+                 None => -1,\n\
              }\n\
          }\n\n\
          fn rh_string_sub_string(value: &str, start: INT, len: Option<INT>) -> String {\n\
@@ -788,6 +837,15 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
+         fn rh_std_fs_write(path: &str, contents: &str) -> INT {\n\
+             match std::fs::write(path, contents.as_bytes()) {\n\
+                 Ok(()) => 0,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_write: {error}\"));\n\
+                     0\n\
+                 }\n\
+             }\n\
+         }\n\n\
          fn rh_remove_file(path: &str) -> INT {\n\
              match std::fs::remove_file(path) {\n\
                  Ok(()) => 0,\n\
@@ -956,6 +1014,9 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_command_args(command: &mut RhCommand, args: &[String]) {\n\
              command.args.extend(args.iter().cloned());\n\
+         }\n\n\
+         fn rh_command_arg(command: &mut RhCommand, arg: &str) {\n\
+             command.args.push(arg.to_owned());\n\
          }\n\n\
          fn rh_command_env(command: &mut RhCommand, name: &str, value: &str) {\n\
              command.env.push((name.to_owned(), value.to_owned()));\n\
@@ -1199,6 +1260,19 @@ pub fn emit_host_runtime(out: &mut String) {
         }\n\n\
         fn rh_bytes_len(bytes: &RhBytes) -> INT {\n\
             bytes.bytes.len() as INT\n\
+        }\n\n\
+        fn rh_bytes_from_text(text: &str) -> RhBytes {\n\
+            RhBytes {\n\
+                bytes: text.as_bytes().to_vec(),\n\
+            }\n\
+        }\n\n\
+        fn rh_bytes_from_array(values: &[u8]) -> RhBytes {\n\
+            RhBytes {\n\
+                bytes: values.to_vec(),\n\
+            }\n\
+        }\n\n\
+        fn rh_bytes_append(target: &mut RhBytes, other: &RhBytes) {\n\
+            target.bytes.extend_from_slice(&other.bytes);\n\
         }\n\n\
         fn rh_child_window_key(child: &mut RhChild, key: &str) -> INT {\n\
             let pid = child.inner.borrow().pid;\n\

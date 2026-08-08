@@ -31,7 +31,7 @@ fn wrap_timing_new(
     gate_ids
 ) {
     // stringify is native Json evidence; bare `.keys()` falls through to HostEval.
-    let _workload_proof = rhai::json::stringify(workload);
+    let _workload_proof = rh::json::stringify(workload);
     let gate_id_list = copy_string_list(gate_ids);
     let timing = qualification::new_timing(
         repo,
@@ -152,7 +152,7 @@ fn map_sequence(value) {
 fn map_environment(value) {
     let environment = value.environment;
     // stringify is native Json evidence; bare `.keys()` falls through to HostEval.
-    let _environment_proof = rhai::json::stringify(environment);
+    let _environment_proof = rh::json::stringify(environment);
     environment
 }
 
@@ -394,7 +394,7 @@ fn spec(program, arguments, timeout_ms, environment, allow_powershell) {
     // freeze `arguments` as String before call-site StringList upgrades apply.
     let _first_argument = "" + arguments[0];
     // stringify is native Json evidence; bare `.keys()` falls through to HostEval.
-    let _environment_proof = rhai::json::stringify(environment);
+    let _environment_proof = rh::json::stringify(environment);
     #{
         program: program_text,
         arguments: arguments,
@@ -405,7 +405,7 @@ fn spec(program, arguments, timeout_ms, environment, allow_powershell) {
 }
 
 fn empty_environment() {
-    rhai::json::parse("{}")
+    rh::json::parse("{}")
 }
 
 fn execute(command_spec, repo, scratch, sequence) {
@@ -907,7 +907,7 @@ fn task(worker, manifest, id, timeout_ms, extra, environment, allow_powershell) 
     let manifest_path = "" + manifest;
     let task_id = "" + id;
     // JSON string-array extras (see empty_task_extra / *_task_extra helpers).
-    let _extra_proof = rhai::json::stringify(extra);
+    let _extra_proof = rh::json::stringify(extra);
     let arguments = [
         "task", "run", task_id,
         "--manifest", manifest_path
@@ -1161,10 +1161,10 @@ fn freeze_identity(worker, manifest, repo, scratch, sequence) {
 
 fn slowest_fill(_results, _gate_ids, _ids, _durations) {
     // Typed no-op: all four args are JSON values at the call site.
-    let _results_proof = rhai::json::stringify(_results);
-    let _gate_ids_proof = rhai::json::stringify(_gate_ids);
-    let _ids_proof = rhai::json::stringify(_ids);
-    let _durations_proof = rhai::json::stringify(_durations);
+    let _results_proof = rh::json::stringify(_results);
+    let _gate_ids_proof = rh::json::stringify(_gate_ids);
+    let _ids_proof = rh::json::stringify(_ids);
+    let _durations_proof = rh::json::stringify(_durations);
     0
 }
 
@@ -1471,7 +1471,7 @@ let smoke_included = 1;
 if skip_smoke != 0 {
     smoke_included = 0;
 }
-let gate_manifest = rhai::json::parse_file(
+let gate_manifest = rh::json::parse_file(
     std::path::join(
         repo,
         "scripts/qualification-gates.json"

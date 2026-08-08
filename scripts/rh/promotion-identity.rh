@@ -67,7 +67,7 @@ fn entry() {
         "promotion_identity_source_sha"
     );
 
-    let manifest = rhai::json::parse_file(manifest_path);
+    let manifest = rh::json::parse_file(manifest_path);
     let run_id = 0 + manifest.run.id;
     assert_ok(
         manifest.schema_version == 1
@@ -94,7 +94,7 @@ fn entry() {
         "promotion_identity_macos_channel"
     );
 
-    let manifest_sha256 = rhai::crypto::sha256_file(manifest_path);
+    let manifest_sha256 = rh::crypto::sha256_file(manifest_path);
     let marker =
         "<!-- agenterm-promotion:v1 candidate_run_id=" + candidate_run_id +
         " source_sha=" + source_sha +
@@ -118,8 +118,8 @@ fn entry() {
     }
 
     let body_digest_path = output + ".body.tmp";
-    rhai::runtime::atomic_write(body_digest_path, body);
-    let body_sha256 = rhai::crypto::sha256_file(body_digest_path);
+    rh::runtime::atomic_write(body_digest_path, body);
+    let body_sha256 = rh::crypto::sha256_file(body_digest_path);
     std::fs::try_remove_file(body_digest_path);
     let identity = #{
         schema_version: 1,
@@ -134,9 +134,9 @@ fn entry() {
         manifest_sha256: manifest_sha256,
         mac_channel: mac_channel
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output,
-        rhai::json::stringify_pretty(identity) + "\n"
+        rh::json::stringify_pretty(identity) + "\n"
     );
     0
 }

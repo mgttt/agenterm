@@ -1,0 +1,5 @@
+fn entry() {
+    let empty = rh::bytes::from_array([]);
+    let payload = rh::bytes::from_array([0, 65, 255]);
+    empty.len + payload.len
+}

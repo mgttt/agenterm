@@ -29,7 +29,7 @@ fn command_text(context, cli, arguments) {
 fn command_json(context, cli, arguments) {
     let output = command(context, cli, arguments, 0);
     let text = "" + output.stdout + output.stderr;
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn wait_for_server(context, cli, server) {
@@ -43,7 +43,7 @@ fn wait_for_server(context, cli, server) {
         );
         if probe.success != 0 {
             let text = "" + probe.stdout;
-            return rhai::json::parse(text);
+            return rh::json::parse(text);
         }
         if server.state == "exited" {
             let output = server.wait_with_output(
@@ -51,13 +51,13 @@ fn wait_for_server(context, cli, server) {
             );
             throw "remote_upgrade_server_early_exit:" + output.stderr;
             // Unreachable: keep return kind Json (bare throw can infer String).
-            return rhai::json::parse("{}");
+            return rh::json::parse("{}");
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_upgrade_server_ready_timeout";
     // Unreachable: keep return kind Json.
-    rhai::json::parse("{}")
+    rh::json::parse("{}")
 }
 
 fn wait_for_exit(child, timeout_attempts, code) {
@@ -67,7 +67,7 @@ fn wait_for_exit(child, timeout_attempts, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
     // Unreachable: keep return kind Output (bare throw infers String).
@@ -93,7 +93,7 @@ fn start_upgrade_ui(context, cli, executable, label) {
         // native-emitted and nested .platform_facts paths mis-infer Child as Json.
         if lease_probe.success != 0 {
             let lease_text = "" + lease_probe.stdout;
-            let lease = rhai::json::parse(lease_text);
+            let lease = rh::json::parse(lease_text);
             let client_pid = 0 + lease.client_pid;
             if lease.attached != 0 && client_pid == gui.id {
                 return gui;
@@ -105,7 +105,7 @@ fn start_upgrade_ui(context, cli, executable, label) {
             );
             throw label + "_gui_early_exit:" + output.stderr;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw label + "_gui_lease_timeout";
     // Unreachable: keep return kind Child (bare throw infers String).
@@ -155,7 +155,7 @@ fn stop_upgrade_ui_keeping_server(context, cli, gui) {
         if lease.attached == 0 {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "remote_upgrade_lease_detach_timeout";
     0
@@ -187,8 +187,8 @@ fn entry() {
         );
     }
     test_harness::require(
-        rhai::crypto::sha256_file(prior_gui_exe)
-            != rhai::crypto::sha256_file(next_gui_exe),
+        rh::crypto::sha256_file(prior_gui_exe)
+            != rh::crypto::sha256_file(next_gui_exe),
         "remote_upgrade_requires_distinct_gui_bytes"
     );
 
@@ -247,7 +247,7 @@ fn entry() {
             ["ui-lease", "status"]
         );
         let prior_build = prior_lease.client_build;
-        let prior_identity = rhai::json::stringify(prior_build);
+        let prior_identity = rh::json::stringify(prior_build);
         test_harness::require(
             prior_identity != ""
                 && prior_build.protocol_version == 1,
@@ -334,7 +334,7 @@ fn entry() {
             ["ui-lease", "status"]
         );
         let next_build = next_lease.client_build;
-        let next_identity = rhai::json::stringify(next_build);
+        let next_identity = rh::json::stringify(next_build);
         let next_pid = 0 + next.id;
         test_harness::require(
             next_identity != prior_identity
@@ -402,7 +402,7 @@ fn entry() {
             ["ui-lease", "status"]
         );
         let rollback_build = rollback_lease.client_build;
-        let rollback_identity = rhai::json::stringify(rollback_build);
+        let rollback_identity = rh::json::stringify(rollback_build);
         test_harness::require(
             rollback_identity == prior_identity,
             "remote_upgrade_rollback_identity"

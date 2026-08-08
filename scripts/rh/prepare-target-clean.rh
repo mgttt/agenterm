@@ -85,7 +85,7 @@ fn entry() {
         );
     } else {
         // atomic_write returns 0 on success and typed failure (fail-on-error).
-        rhai::runtime::atomic_write(tag, content);
+        rh::runtime::atomic_write(tag, content);
     }
 
     print("Prepared Cargo cache tag for exact repo target: " + target);

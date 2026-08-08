@@ -83,8 +83,8 @@ fn assert_bounded_bundle(path, suite, marker_kind) {
             || !std::fs::exists(cleanup_path) {
         return "diagnostic_bundle_required_file:" + suite;
     }
-    let manifest = rhai::json::parse_file(manifest_path);
-    let cleanup = rhai::json::parse_file(cleanup_path);
+    let manifest = rh::json::parse_file(manifest_path);
+    let cleanup = rh::json::parse_file(cleanup_path);
     let marker =
         "INTERNAL_FAILURE_BUNDLE_PROBE:" + marker_kind + ":" +
         manifest.run_id;
@@ -159,7 +159,7 @@ fn assert_bounded_bundle(path, suite, marker_kind) {
     }
     if suite == "script" {
         let commands_text = std::fs::read_to_string(command_log);
-        let commands = rhai::json::parse(commands_text);
+        let commands = rh::json::parse(commands_text);
         let successful_worker = 0;
         let observed_evals = [];
         for command in commands {
@@ -177,7 +177,7 @@ fn assert_bounded_bundle(path, suite, marker_kind) {
         }
         if successful_worker == 0 {
             return "diagnostic_script_success_not_retained:" +
-                rhai::json::stringify(observed_evals);
+                rh::json::stringify(observed_evals);
         }
         let retained =
             manifest.failure + "\n" + commands_text;

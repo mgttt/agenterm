@@ -15,7 +15,7 @@ fn catch_text(error) {
 }
 
 fn null_json() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn json_is_present(value) {
@@ -70,7 +70,7 @@ fn active_tab_id(snapshot) {
 fn parse_json_text(text) {
     let result = "" + text;
     result.trim();
-    rhai::json::parse(result)
+    rh::json::parse(result)
 }
 
 fn start_gap_client(harness, cli, gap_target, worker, iteration) {
@@ -296,7 +296,7 @@ fn json(ctx, cli, arguments) {
     let output = invoke(ctx, cli, arguments, 0);
     let result = "" + output.stdout + output.stderr;
     result.trim();
-    rhai::json::parse(result)
+    rh::json::parse(result)
 }
 
 fn json_without_address(ctx, cli, arguments) {
@@ -317,7 +317,7 @@ fn json_without_address(ctx, cli, arguments) {
     );
     let result = merge_output(output);
     result.trim();
-    rhai::json::parse(result)
+    rh::json::parse(result)
 }
 
 fn find_address_index(values, address) {
@@ -400,7 +400,7 @@ fn wait_process_gone(pid, code) {
         if process_present(pid) == 0 {
             return 0;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(50));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
     throw code + ":" + pid;
     0
@@ -453,7 +453,7 @@ fn complete_waiter_child(child) {
         "fleet_event_waiter_failed:" + merged_output
     );
     merged_output.trim();
-    rhai::json::parse(merged_output)
+    rh::json::parse(merged_output)
 }
 
 fn cleanup_server(ctx, cli, server_address) {
@@ -622,9 +622,9 @@ try {
         "2147483647.json"
     ).display;
     let dead_pid = 2147483647;
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         dead_record,
-        rhai::json::stringify_pretty(#{
+        rh::json::stringify_pretty(#{
             schema_version: 1,
             pid: dead_pid,
             address: "127.0.0.1:59999",
@@ -691,7 +691,7 @@ try {
         cli,
         compatibility_arguments
     );
-    let compatibility = rhai::json::parse(compatibility_output.stdout);
+    let compatibility = rh::json::parse(compatibility_output.stdout);
     let split_unsupported = 0;
     for item in compatibility.explicitly_unsupported {
         if item.name == "split-window" {
@@ -1009,7 +1009,7 @@ try {
     );
     let next_note = "fleet-event-" + std::process::id();
     let note_tab_suffix = note_tab_id.sub_string(1);
-    let numeric_tab_id = rhai::json::parse(note_tab_suffix);
+    let numeric_tab_id = rh::json::parse(note_tab_suffix);
     text(
         harness,
         cli,

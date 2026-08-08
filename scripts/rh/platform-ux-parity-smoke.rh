@@ -718,9 +718,9 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
         },
         result: matrix_result
     };
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         report_path_json,
-        rhai::json::stringify_pretty(json_payload) + "\n"
+        rh::json::stringify_pretty(json_payload) + "\n"
     );
 
     let csv_rows = [
@@ -756,7 +756,7 @@ fn write_matrix_reports(context, platform, evidence_states, emit_matrix) {
         csv_body += csv_rows[row_index];
         row_index = row_index + 1;
     }
-    rhai::runtime::atomic_write(report_path_csv, csv_body + "\n");
+    rh::runtime::atomic_write(report_path_csv, csv_body + "\n");
 }
 
 fn absolute(value) {
@@ -871,7 +871,7 @@ fn emit_phase_evidence(context, evidence_id) {
             return 0;
         }
     }
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         context.evidence_path,
         existing + id_text + "\n"
     );

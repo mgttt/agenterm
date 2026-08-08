@@ -86,7 +86,7 @@ fn platform_executables(repo, os_name, target_arch_name) {
     let arch_label = "" + target_arch_name;
     let manifest_path =
         std::path::join(repo, "scripts/artifacts.json").display;
-    let manifest = rhai::json::parse_file(manifest_path);
+    let manifest = rh::json::parse_file(manifest_path);
     let executables = [];
     let found = 0;
     for platform in manifest.platforms {
@@ -124,7 +124,7 @@ fn entry() {
     let repo_arg = args[0];
     let repo = repo_dir(repo_arg);
     let bootstrap = bootstrap_facts();
-    print("AgenTerm bootstrap timing: " + rhai::json::stringify(bootstrap));
+    print("AgenTerm bootstrap timing: " + rh::json::stringify(bootstrap));
     // Stage optimized PE by default. Debug PE stays under target/debug unless the
     // caller explicitly asks for "dev" (still may stage to dist for rare debug
     // black-box cases).

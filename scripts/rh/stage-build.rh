@@ -49,7 +49,7 @@ fn entry() {
         std::path::join(repo, "scripts/artifacts.json").display;
     artifact_manifest::validate(artifact_manifest_path);
     let text = std::fs::read_to_string(artifact_manifest_path);
-    let manifest = rhai::json::parse(text);
+    let manifest = rh::json::parse(text);
 
     let _locked = artifact_files::clean_locked(
         destination_directory,

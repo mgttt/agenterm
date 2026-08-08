@@ -12,7 +12,7 @@ fn catch_text(error) {
 }
 
 fn null_json() {
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn json_is_present(value) {
@@ -53,14 +53,14 @@ fn failure_json(context, cli, arguments) {
     let output = invoke(context, cli, arguments, 1);
     let result = "" + output.stdout + output.stderr;
     result.trim();
-    rhai::json::parse(result)
+    rh::json::parse(result)
 }
 
 fn json(context, cli, arguments) {
     let output = invoke(context, cli, arguments, 0);
     let result = "" + output.stdout + output.stderr;
     result.trim();
-    rhai::json::parse(result)
+    rh::json::parse(result)
 }
 
 fn wait_sidebar_snapshot(context, cli, configured_width) {
@@ -73,7 +73,7 @@ fn wait_sidebar_snapshot(context, cli, configured_width) {
         {
             return snapshot;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "cli_smoke_sidebar_width_timeout";
     json(context, cli, ["ui-snapshot"])
@@ -123,7 +123,7 @@ fn tab_by_name(tab_entries, name) {
             }
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn tab_by_id(tab_entries, id) {
@@ -133,7 +133,7 @@ fn tab_by_id(tab_entries, id) {
             return tab;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn event_by_kind(events, kind) {
@@ -143,7 +143,7 @@ fn event_by_kind(events, kind) {
             return event;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn event_for_tab(events, kind, tab_id) {
@@ -155,7 +155,7 @@ fn event_for_tab(events, kind, tab_id) {
             return event;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn operation_by_id(catalog_operations, id) {
@@ -165,21 +165,21 @@ fn operation_by_id(catalog_operations, id) {
             return operation;
         }
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn first_window(windows) {
     for window in windows {
         return window;
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn first_parameter(parameters) {
     for parameter in parameters {
         return parameter;
     }
-    rhai::json::parse("null")
+    rh::json::parse("null")
 }
 
 fn stable_tab_id(value) {
@@ -224,11 +224,11 @@ fn wait_for_gui_lease(context, cli, gui) {
             );
             if lease_probe.success != 0 {
                 let lease_text = "" + lease_probe.stdout;
-                let lease = rhai::json::parse(lease_text);
+                let lease = rh::json::parse(lease_text);
                 let client_pid = 0 + lease.client_pid;
                 if lease.attached != 0 && client_pid == gui.id {
                     let probe_text = "" + probe.stdout;
-                    let snapshot = rhai::json::parse(probe_text);
+                    let snapshot = rh::json::parse(probe_text);
                     test_harness::require(
                         snapshot.client_pid == gui.id,
                         "cli_smoke_gui_lease_owner"
@@ -244,7 +244,7 @@ fn wait_for_gui_lease(context, cli, gui) {
             let stderr_text = output.stderr_text();
             throw "cli_smoke_gui_early_exit:" + stderr_text;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "cli_smoke_gui_ready_timeout";
     0
@@ -610,7 +610,7 @@ try {
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     };
     let hello_client_id = "cli-smoke-" + context.run_id;
-    let hello_build_json = rhai::json::stringify(hello_build);
+    let hello_build_json = rh::json::stringify(hello_build);
     let hello_args = [
         "ui-hello", "--minimum", "1", "--maximum", "1",
         "--client-id", hello_client_id,

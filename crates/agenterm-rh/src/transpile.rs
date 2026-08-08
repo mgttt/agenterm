@@ -2831,6 +2831,7 @@ fn emit_stmt(
         }
         Stmt::Expr(expr) if ctx.cdylib && emit_string_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_command_mut_stmt(out, expr, ctx)? => {}
+        Stmt::Expr(expr) if ctx.cdylib && emit_bytes_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_child_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_window_control_mut_stmt(out, expr, ctx)? => {}
         Stmt::Expr(expr) if ctx.cdylib && emit_string_list_push_stmt(out, expr, ctx)? => {}
@@ -3166,6 +3167,16 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             Some(kind) => kind,
             None => ValueKind::Int,
         },
+        _ if bytes_from_array_items(expr).is_some() || bytes_from_text_arg(expr).is_some() => {
+            ValueKind::Bytes
+        }
+        _ if std_process_kill_arg(expr).is_some() => ValueKind::Int,
+        _ if std_fs_write_args(expr).is_some() => ValueKind::Int,
+        _ if parse_string_method_call(expr, ctx)
+            .is_some_and(|(_, call)| call.name == "index_of" && call.args.len() == 1) =>
+        {
+            ValueKind::Int
+        }
         _ if json_parse_arg(expr).is_some() => ValueKind::Json,
         _ if json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty()) => {
             ValueKind::Json
@@ -3999,6 +4010,42 @@ fn bytes_from_text_arg(expr: &Expr) -> Option<&Expr> {
     Some(&call.args[0])
 }
 
+fn bytes_from_array_items(expr: &Expr) -> Option<&[Expr]> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if !is_host_api_call(call, "bytes", "from_array", 1) {
+        return None;
+    }
+    let Expr::Array(items, ..) = &call.args[0] else {
+        return None;
+    };
+    if !items
+        .iter()
+        .all(|item| matches!(item, Expr::IntegerConstant(value, ..) if (0..=255).contains(value)))
+    {
+        return None;
+    }
+    Some(items.as_slice())
+}
+
+fn std_process_kill_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if call.namespace.to_string() != "std::process"
+        || call.name != "kill"
+        || call.args.len() != 1
+    {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn std_fs_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    std_fs_two_arg(expr, "write")
+}
+
 fn runtime_atomic_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
@@ -4794,6 +4841,14 @@ fn emit_command_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             out.push_str(");\n        0\n    }");
             Ok(true)
         }
+        "arg" if call.args.len() == 1 => {
+            out.push_str("{\n        rh_command_arg(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
         "env" if call.args.len() == 2 => {
             out.push_str("{\n        rh_command_env(&mut ");
             out.push_str(binding);
@@ -5035,16 +5090,6 @@ fn emit_stream_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resul
     }
 }
 
-fn emit_bytes_method(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
-    let Some(binding) = bytes_to_text_call(expr, ctx) else {
-        return Ok(false);
-    };
-    out.push_str("rh_bytes_to_text(&");
-    out.push_str(binding);
-    out.push(')');
-    Ok(true)
-}
-
 fn emit_bytes_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
     let Some((binding, property)) = bytes_property_binding(expr, ctx) else {
         return Ok(false);
@@ -5053,6 +5098,95 @@ fn emit_bytes_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
     out.push_str("rh_bytes_len(&");
     out.push_str(binding);
     out.push(')');
+    Ok(true)
+}
+
+fn emit_bytes_from_array(
+    out: &mut String,
+    items: &[Expr],
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    out.push_str("rh_bytes_from_array(&[");
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        emit_expr(out, item, ctx)?;
+    }
+    out.push_str("])");
+    Ok(())
+}
+
+fn emit_bytes_from_text(
+    out: &mut String,
+    text: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    out.push_str("rh_bytes_from_text(&");
+    emit_stringish(out, text, ctx)?;
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_bytes_value(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    if let Some(items) = bytes_from_array_items(expr) {
+        emit_bytes_from_array(out, items, ctx)?;
+        return Ok(true);
+    }
+    if let Some(text) = bytes_from_text_arg(expr) {
+        return emit_bytes_from_text(out, text, ctx);
+    }
+    if let Expr::Variable(ident, ..) = expr
+        && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Bytes)
+    {
+        out.push_str(ident.1.as_str());
+        out.push_str(".clone()");
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn emit_bytes_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    if let Some(binding) = bytes_to_text_call(expr, ctx) {
+        out.push_str("rh_bytes_to_text(&");
+        out.push_str(binding);
+        out.push(')');
+        return Ok(true);
+    }
+    let Some((binding, call)) = bytes_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    if call.name != "append" || call.args.len() != 1 {
+        return Ok(false);
+    }
+    let mut other = String::new();
+    if !emit_bytes_value(&mut other, &call.args[0], ctx)? {
+        return Ok(false);
+    }
+    out.push_str("{\n        rh_bytes_append(&mut ");
+    out.push_str(binding);
+    out.push_str(", &");
+    out.push_str(&other);
+    out.push_str(");\n        0\n    }");
+    Ok(true)
+}
+
+fn emit_bytes_mut_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, call)) = bytes_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    if call.name != "append" || call.args.len() != 1 {
+        return Ok(false);
+    }
+    let mut other = String::new();
+    if !emit_bytes_value(&mut other, &call.args[0], ctx)? {
+        return Ok(false);
+    }
+    out.push_str("    rh_bytes_append(&mut ");
+    out.push_str(binding);
+    out.push_str(", &");
+    out.push_str(&other);
+    out.push_str(");\n");
     Ok(true)
 }
 
@@ -5085,6 +5219,14 @@ fn emit_command_mut_stmt(
             if !emit_command_string_args(out, arguments, ctx)? {
                 return Ok(false);
             }
+            out.push_str(");\n");
+            Ok(true)
+        }
+        "arg" if call.args.len() == 1 => {
+            out.push_str("    rh_command_arg(&mut ");
+            out.push_str(binding);
+            out.push_str(", &");
+            emit_stringish(out, &call.args[0], ctx)?;
             out.push_str(");\n");
             Ok(true)
         }
@@ -7648,6 +7790,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some((path, contents)) = std_fs_write_args(expr)
+            && emit_std_fs_write(out, path, contents, ctx)?
+        {
+            return Ok(());
+        }
         if let Some((src, dst)) = std_fs_copy_args(expr)
             && emit_std_fs_copy(out, src, dst, ctx)?
         {
@@ -7833,6 +7980,12 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("rh_process_id()");
             return Ok(());
         }
+        if let Some(pid) = std_process_kill_arg(expr) {
+            out.push_str("{\n        rh_process_kill(");
+            emit_intish(out, pid, ctx)?;
+            out.push_str(");\n        0\n    }");
+            return Ok(());
+        }
         if std_process_list(expr) {
             out.push_str("rh_host_json_call(\"process.list\", &serde_json::json!({}))");
             return Ok(());
@@ -7907,6 +8060,15 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some((path, text)) = runtime_append_sync_args(expr)
             && emit_runtime_append_sync(out, path, text, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(items) = bytes_from_array_items(expr) {
+            emit_bytes_from_array(out, items, ctx)?;
+            return Ok(());
+        }
+        if let Some(text) = bytes_from_text_arg(expr)
+            && emit_bytes_from_text(out, text, ctx)?
         {
             return Ok(());
         }
@@ -9439,7 +9601,7 @@ fn emit_string_predicate(
     let Some((receiver, call)) = parse_string_method_call(expr, ctx) else {
         return Ok(false);
     };
-    if !matches!(call.name.as_str(), "contains" | "starts_with" | "ends_with")
+    if !matches!(call.name.as_str(), "contains" | "starts_with" | "ends_with" | "index_of")
         || call.args.len() != 1
     {
         return Ok(false);
@@ -9447,6 +9609,14 @@ fn emit_string_predicate(
     let mut needle = String::new();
     if !emit_string_needle(&mut needle, &call.args[0], ctx)? {
         return Ok(false);
+    }
+    if call.name == "index_of" {
+        out.push_str("rh_string_index_of(&");
+        emit_string_receiver(out, receiver);
+        out.push_str(", &");
+        out.push_str(&needle);
+        out.push(')');
+        return Ok(true);
     }
     out.push('(');
     emit_string_receiver(out, receiver);
@@ -9781,6 +9951,24 @@ fn emit_std_fs_try_remove_file(
     }
     out.push_str("rh_try_remove_file(");
     out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_write(
+    out: &mut String,
+    path: &Expr,
+    contents: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_std_fs_write(");
+    out.push_str(&path_expr);
+    out.push_str(", &");
+    emit_stringish(out, contents, ctx)?;
     out.push(')');
     Ok(true)
 }

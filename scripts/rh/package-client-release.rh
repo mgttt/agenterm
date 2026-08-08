@@ -111,7 +111,7 @@ fn entry() {
 
     let artifact_manifest_path =
         std::path::join(repo, "scripts/artifacts.json").display;
-    let artifact_manifest = rhai::json::parse_file(artifact_manifest_path);
+    let artifact_manifest = rh::json::parse_file(artifact_manifest_path);
     require(
         artifact_manifest.schema_version == 2,
         "package_client_manifest_schema"
@@ -371,7 +371,7 @@ fn entry() {
         );
         require(tar_code == 0, "package_client_tar");
     }
-    let archive_hash = rhai::crypto::sha256_file(archive);
+    let archive_hash = rh::crypto::sha256_file(archive);
     let source_commit = "";
     if std::env::has("AGENTERM_CANDIDATE_SOURCE_SHA") {
         let value = std::env::get("AGENTERM_CANDIDATE_SOURCE_SHA");
@@ -425,10 +425,10 @@ fn entry() {
     let cargo_lock_path =
         std::path::join(repo, "Cargo.lock").display;
     let artifact_manifest_sha256 =
-        rhai::crypto::sha256_file(artifact_manifest_path);
+        rh::crypto::sha256_file(artifact_manifest_path);
     let cargo_lock_sha256 =
-        rhai::crypto::sha256_file(cargo_lock_path);
-    let sbom_sha256 = rhai::crypto::sha256_file(sbom_source);
+        rh::crypto::sha256_file(cargo_lock_path);
+    let sbom_sha256 = rh::crypto::sha256_file(sbom_source);
     let package_manifest = #{
         schema_version: 1,
         product: "AgenTerm",
@@ -449,12 +449,12 @@ fn entry() {
         build_log: build_log
     };
     let provenance_path = archive + ".provenance.json";
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         provenance_path,
-        rhai::json::stringify_pretty(package_manifest) + "\n"
+        rh::json::stringify_pretty(package_manifest) + "\n"
     );
     let checksum_path = archive + ".sha256";
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         checksum_path,
         archive_hash + "  " + archive_name + "\n"
     );

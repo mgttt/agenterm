@@ -69,7 +69,7 @@ fn entry() {
     }
     let receipt_text = std::fs::read_to_string(stdout_path);
     std::fs::try_remove_file(stdout_path);
-    let receipt = rhai::json::parse(receipt_text);
+    let receipt = rh::json::parse(receipt_text);
 
     require(receipt.schema == "agenterm-net/result/v1", "agenterm_net_schema");
     require(

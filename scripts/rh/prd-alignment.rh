@@ -105,7 +105,7 @@ fn entry() {
         );
     }
 
-    let contract = rhai::json::parse_file(contract_path);
+    let contract = rh::json::parse_file(contract_path);
     require(contract.schema_version == 3, "prd_alignment_contract_schema");
     let capabilities = contract.capabilities;
     require(capabilities.len > 0, "prd_alignment_capabilities_empty");
@@ -225,7 +225,7 @@ fn entry() {
 
     let gates_path =
         std::path::join(repo, "scripts/qualification-gates.json").display;
-    let gate_manifest = rhai::json::parse_file(gates_path);
+    let gate_manifest = rh::json::parse_file(gates_path);
     let registered_evidence = #{};
     let evidence_suites = #{};
     evidence_suites["cli-smoke"] = true;
@@ -255,7 +255,7 @@ fn entry() {
     }
     let host_native_path =
         std::path::join(repo, "scripts/host-native-evidence-gates.json").display;
-    let host_native_manifest = rhai::json::parse_file(host_native_path);
+    let host_native_manifest = rh::json::parse_file(host_native_path);
     require(
         host_native_manifest.schema_version == 1,
         "prd_alignment_host_native_schema"
@@ -533,7 +533,7 @@ fn entry() {
         }
     }
     require(protocol_code == 0, "prd_alignment_protocol");
-    let protocol = rhai::json::parse(std::fs::read_to_string(stdout_path));
+    let protocol = rh::json::parse(std::fs::read_to_string(stdout_path));
     require(
         protocol.command_catalog.schema_version == 1,
         "prd_alignment_command_catalog_schema"
@@ -645,7 +645,7 @@ fn entry() {
             protocol_capabilities.keys().len +
             ":actual=" + protocol_features.keys().len
     );
-    let protocol_features_text = rhai::json::stringify_pretty(protocol_features);
+    let protocol_features_text = rh::json::stringify_pretty(protocol_features);
     for feature in protocol_capabilities.keys() {
         let feature_key = "" + feature;
         let needle_spaced = "\"" + feature_key + "\": true";
@@ -721,7 +721,7 @@ fn entry() {
         }
     }
     require(mux_code == 0, "prd_alignment_mux_compatibility");
-    let mux_compatibility = rhai::json::parse(std::fs::read_to_string(stdout_path));
+    let mux_compatibility = rh::json::parse(std::fs::read_to_string(stdout_path));
     let mux_list_code = 0;
     if use_arg_cli == 1 {
         let cli_arg = std::path::absolute(args[1]).display;

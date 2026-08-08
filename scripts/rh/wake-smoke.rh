@@ -99,7 +99,7 @@ fn command_json(
     );
     let text = "" + output.stdout + output.stderr;
     text.trim();
-    rhai::json::parse(text)
+    rh::json::parse(text)
 }
 
 fn wait_for_server(
@@ -142,7 +142,7 @@ fn wait_for_server(
             );
             throw "wake_smoke_server_early_exit:" + output.stderr_text();
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "wake_smoke_server_ready_timeout";
     0
@@ -155,7 +155,7 @@ fn wait_for_exit(child, code) {
                 std::time::Duration::from_secs(2)
             );
         }
-        rhai::task::sleep(std::time::Duration::from_millis(25));
+        rh::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code;
 }
@@ -309,7 +309,7 @@ fn entry() {
             );
             let snapshot_text = output_combined_text(output);
             snapshot_text.trim();
-            let snapshot = rhai::json::parse(snapshot_text);
+            let snapshot = rh::json::parse(snapshot_text);
             test_harness::require(
                 snapshot.schema_version >= 1
                     && (
@@ -349,8 +349,8 @@ fn entry() {
         let args_json_text =
             "[\"set-tab-note\",\"-t\",\"" + tab_id +
                 "\",\"expired-mutation-must-not-commit\"]";
-        let fingerprint = rhai::hash::fnv1a64(
-            rhai::bytes::from_text(args_json_text)
+        let fingerprint = rh::hash::fnv1a64(
+            rh::bytes::from_text(args_json_text)
         );
         let request_id = "wake-expired-" + context.run_id;
         let request_text =
@@ -379,7 +379,7 @@ fn entry() {
         test_harness::require(tcp_code == 0, "wake_smoke_expired_tcp_failed");
         let response_text = std::fs::read_to_string(response_path);
         response_text.trim();
-        let expired = rhai::json::parse(response_text);
+        let expired = rh::json::parse(response_text);
         test_harness::require(
             expired.ok == 0
                 && expired.receipt.outcome == "no_op"

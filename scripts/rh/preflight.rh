@@ -605,7 +605,7 @@ fn entry() {
     let manifest_path =
         std::path::join(repo, "scripts/artifacts.json").display;
     let manifest_text = std::fs::read_to_string(manifest_path);
-    let manifest = rhai::json::parse(manifest_text);
+    let manifest = rh::json::parse(manifest_text);
     if manifest.schema_version != 2 {
         artifact_passed = 0;
     }
@@ -665,7 +665,7 @@ fn entry() {
     let gate_manifest_detail = "gate-manifest";
     let gate_manifest_path =
         std::path::join(repo, "scripts/qualification-gates.json").display;
-    let gate_manifest = rhai::json::parse(
+    let gate_manifest = rh::json::parse(
         std::fs::read_to_string(gate_manifest_path)
     );
     if gate_manifest.schema_version != 1 {
@@ -797,9 +797,9 @@ fn entry() {
         gates: gates
     };
     std::fs::create_dir_all(output_parent);
-    rhai::runtime::atomic_write(
+    rh::runtime::atomic_write(
         output,
-        rhai::json::stringify_pretty(report) + "\n"
+        rh::json::stringify_pretty(report) + "\n"
     );
 
     if quiet == 0 {

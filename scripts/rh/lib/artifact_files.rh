@@ -25,7 +25,7 @@ fn clean_locked(directory_value, manifest_path) {
     artifact_manifest::validate(manifest_path);
     let manifest_path = std::path::absolute(manifest_path).display;
     let text = std::fs::read_to_string(manifest_path);
-    let manifest = rhai::json::parse(text);
+    let manifest = rh::json::parse(text);
     let directory = std::path::absolute(directory_value).display;
     if !std::fs::exists(directory) {
         return 0;

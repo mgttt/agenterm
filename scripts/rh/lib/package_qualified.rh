@@ -66,7 +66,7 @@ fn build_package_mode(
         std::path::join(repo, receipt_value).display;
     let output_root =
         std::path::join(repo, output_value).display;
-    let receipt = rhai::json::parse_file(receipt_path);
+    let receipt = rh::json::parse_file(receipt_path);
     require(
         receipt.schema_version == 1
             && receipt.product == "AgenTerm"
@@ -112,7 +112,7 @@ fn build_package_mode(
             && std::fs::metadata(cargo_lock_path).is_file,
         "package_input_missing:" + cargo_lock_path
     );
-    let cargo_hash = rhai::crypto::sha256_file(cargo_lock_path);
+    let cargo_hash = rh::crypto::sha256_file(cargo_lock_path);
     require(
         receipt.provenance.cargo_lock_sha256 == cargo_hash,
         "package_receipt_cargo_lock_hash"
@@ -124,7 +124,7 @@ fn build_package_mode(
             && std::fs::metadata(artifact_manifest_path).is_file,
         "package_input_missing:" + artifact_manifest_path
     );
-    let artifact_hash = rhai::crypto::sha256_file(artifact_manifest_path);
+    let artifact_hash = rh::crypto::sha256_file(artifact_manifest_path);
     require(
         receipt.provenance.artifact_manifest_sha256 == artifact_hash,
         "package_receipt_artifact_manifest_hash"
@@ -137,7 +137,7 @@ fn build_package_mode(
         std::fs::exists(sbom_path) && std::fs::metadata(sbom_path).is_file,
         "package_input_missing:" + sbom_path
     );
-    let sbom_hash = rhai::crypto::sha256_file(sbom_path);
+    let sbom_hash = rh::crypto::sha256_file(sbom_path);
     require(
         receipt.provenance.sbom_sha256 == sbom_hash,
         "package_receipt_sbom_hash"
@@ -151,12 +151,12 @@ fn build_package_mode(
             && std::fs::metadata(gate_manifest_path).is_file,
         "package_input_missing:" + gate_manifest_path
     );
-    let gate_hash = rhai::crypto::sha256_file(gate_manifest_path);
+    let gate_hash = rh::crypto::sha256_file(gate_manifest_path);
     require(
         receipt.gate_manifest.sha256 == gate_hash,
         "package_receipt_gate_manifest_hash"
     );
-    let gate_manifest = rhai::json::parse_file(gate_manifest_path);
+    let gate_manifest = rh::json::parse_file(gate_manifest_path);
     let required_gate_names = [];
     for gate in gate_manifest.required_gates {
         let gate_id = "" + gate.id;
@@ -173,7 +173,7 @@ fn build_package_mode(
     );
 
     let artifact_spec =
-        rhai::json::parse_file(artifact_manifest_path);
+        rh::json::parse_file(artifact_manifest_path);
     let artifact_names = [];
     for executable in artifact_spec.executables {
         let executable_name = "" + executable.name;
@@ -204,7 +204,7 @@ fn build_package_mode(
 
     let metadata_path =
         std::path::join(repo, "dist/agenterm.json").display;
-    let metadata = rhai::json::parse_file(metadata_path);
+    let metadata = rh::json::parse_file(metadata_path);
     require(
         metadata.schema_version == 2
             && metadata.git_commit == head
@@ -232,7 +232,7 @@ fn build_package_mode(
             std::fs::exists(source) && std::fs::metadata(source).is_file,
             "package_input_missing:" + source
         );
-        let hash = rhai::crypto::sha256_file(source);
+        let hash = rh::crypto::sha256_file(source);
         let receipt_hash = "";
         let receipt_count = 0;
         for executable in receipt.provenance.executables {
@@ -291,37 +291,37 @@ fn build_package_mode(
     );
     payload.push(#{
         name: "agenterm.json",
-        sha256: rhai::crypto::sha256_file(metadata_path),
+        sha256: rh::crypto::sha256_file(metadata_path),
         path: metadata_path
     });
     payload.push(#{
         name: "artifacts.json",
-        sha256: rhai::crypto::sha256_file(artifact_manifest_path),
+        sha256: rh::crypto::sha256_file(artifact_manifest_path),
         path: artifact_manifest_path
     });
     payload.push(#{
         name: "qualification-receipt.json",
-        sha256: rhai::crypto::sha256_file(receipt_path),
+        sha256: rh::crypto::sha256_file(receipt_path),
         path: receipt_path
     });
     payload.push(#{
         name: "agenterm-sbom.spdx.json",
-        sha256: rhai::crypto::sha256_file(sbom_path),
+        sha256: rh::crypto::sha256_file(sbom_path),
         path: sbom_path
     });
     payload.push(#{
         name: "LICENSE-APACHE",
-        sha256: rhai::crypto::sha256_file(license_apache_path),
+        sha256: rh::crypto::sha256_file(license_apache_path),
         path: license_apache_path
     });
     payload.push(#{
         name: "LICENSE-MIT",
-        sha256: rhai::crypto::sha256_file(license_mit_path),
+        sha256: rh::crypto::sha256_file(license_mit_path),
         path: license_mit_path
     });
     payload.push(#{
         name: "THIRD_PARTY_NOTICES.md",
-        sha256: rhai::crypto::sha256_file(notices_path),
+        sha256: rh::crypto::sha256_file(notices_path),
         path: notices_path
     });
 
@@ -342,14 +342,14 @@ fn build_package_mode(
         let destination =
             std::path::join(staging, entry_name).display;
         std::fs::copy(entry_path, destination);
-        let destination_hash = rhai::crypto::sha256_file(destination);
+        let destination_hash = rh::crypto::sha256_file(destination);
         require(
             destination_hash == entry_hash,
             "package_payload_changed:" + entry_name
         );
         members.push(entry_name);
     }
-    let receipt_file_hash = rhai::crypto::sha256_file(receipt_path);
+    let receipt_file_hash = rh::crypto::sha256_file(receipt_path);
     let package_manifest = #{
         schema_version: 1,
         dry_run: dry_run,
@@ -367,8 +367,8 @@ fn build_package_mode(
         "package-manifest.json"
     ).display;
     let manifest_json =
-        rhai::json::stringify_pretty(package_manifest) + "\n";
-    rhai::runtime::atomic_write(staged_manifest, manifest_json);
+        rh::json::stringify_pretty(package_manifest) + "\n";
+    rh::runtime::atomic_write(staged_manifest, manifest_json);
     members.push("package-manifest.json");
 
     let archive_suffix = "";
@@ -397,7 +397,7 @@ fn build_package_mode(
         "package-manifest.json"
     ).display;
     std::fs::copy(staged_manifest, external_manifest);
-    let archive_hash = rhai::crypto::sha256_file(archive);
+    let archive_hash = rh::crypto::sha256_file(archive);
     let result = #{
         schema_version: 1,
         dry_run: dry_run,
@@ -414,8 +414,8 @@ fn build_package_mode(
     }
     let result_path = run_directory + "/" + result_name;
     let result_json =
-        rhai::json::stringify_pretty(result) + "\n";
-    rhai::runtime::atomic_write(result_path, result_json);
+        rh::json::stringify_pretty(result) + "\n";
+    rh::runtime::atomic_write(result_path, result_json);
     if std::fs::exists(staging) {
         let cleanup_stdout =
             staging + ".package-qualified.cleanup.stdout.tmp";
@@ -434,7 +434,7 @@ fn build_package_mode(
         require(cleanup_code == 0, "package_staging_cleanup:" + staging);
     }
     let latest_run_path = output_root + "/.latest-package-run";
-    rhai::runtime::atomic_write(latest_run_path, run_directory + "\n");
+    rh::runtime::atomic_write(latest_run_path, run_directory + "\n");
     0
 }
 

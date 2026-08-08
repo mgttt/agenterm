@@ -87,9 +87,9 @@ fn facts(repo_value, profile) {
         "build_identity_artifact_manifest_missing"
     );
 
-    let cargo_lock_sha256 = rhai::crypto::sha256_file(cargo_lock);
+    let cargo_lock_sha256 = rh::crypto::sha256_file(cargo_lock);
     let artifact_manifest_sha256 =
-        rhai::crypto::sha256_file(artifact_manifest);
+        rh::crypto::sha256_file(artifact_manifest);
     require(
         is_lower_hex(cargo_lock_sha256, 64),
         "build_identity_cargo_lock_hash_invalid"
@@ -193,7 +193,7 @@ fn write(repo_value, profile, output_path_value) {
     let identity = facts(repo_value, profile);
     let batch = batch_environment(identity);
     let output_path = std::path::absolute(output_path_value).display;
-    rhai::runtime::atomic_write(output_path, batch);
+    rh::runtime::atomic_write(output_path, batch);
 
     let dirty_label = "false";
     if identity.dirty {
