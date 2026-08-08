@@ -56,6 +56,7 @@ pub mod error;
 pub mod eval;
 pub mod host;
 pub mod manifest;
+pub mod module_resolver;
 pub mod pack;
 pub mod qualify;
 
@@ -70,6 +71,7 @@ pub use error::QjsError;
 pub use eval::{EvalOutcome, eval_entry, eval_entry_with_host};
 pub use host::QjsHostFunctions;
 pub use manifest::QjsPackManifest;
+pub use module_resolver::ProjectModuleResolver;
 pub use pack::{QjsPack, build_pack_dir, is_pack_dir};
 pub use qualify::{QjsQualificationReceipt, qualify_pack_dir};
 
