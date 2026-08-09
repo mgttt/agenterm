@@ -1725,8 +1725,10 @@ mod tests {
     #[test]
     fn env_names_contains_path() {
         let e = engine();
+        // Case-insensitive: the OS-level name is `Path` on Windows and
+        // `PATH` on unix — this asserts presence, not the platform's casing.
         let r = e.eval(
-            "local names = std.env.names(); for _, n in ipairs(names) do if n == 'PATH' then return 1 end end; return 0",
+            "local names = std.env.names(); for _, n in ipairs(names) do if string.upper(n) == 'PATH' then return 1 end end; return 0",
             &host(),
         ).expect("env.names");
         assert_eq!(r.value, 1, "PATH should be in env.names");
