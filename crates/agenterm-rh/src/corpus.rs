@@ -285,8 +285,11 @@ mod tests {
         // Live `scripts/rh/` is the operational script tree; legacy `.rhai` lives
         // under `scripts/archive/rhai/` until fully removed.
         assert!(report.scanned >= 70, "scanned {}", report.scanned);
-        // script-http-fixture.rh uses raw TCP streams outside the native subset.
-        let known_compat = 1;
+        // Every operational script transpiles native now —
+        // script-http-fixture.rh (raw TCP) joined the native subset, and the
+        // old `known_compat = 1` allowance only kept passing because a
+        // parse-broken startup-smoke.rh happened to stand in for it.
+        let known_compat = 0;
         assert_eq!(
             report.passed + known_compat,
             report.scanned,

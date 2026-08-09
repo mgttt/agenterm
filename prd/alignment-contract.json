@@ -104,6 +104,14 @@
       "evidence_ids": ["ux.theme-render-parity"]
     },
     {
+      "id": "control.named-buffer-paste",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "named buffer commands",
+      "evidence_ids": ["cli.named-buffer-paste"]
+    },
+    {
       "id": "control.stable-create-id",
       "kind": "behavior",
       "status": "shipped",

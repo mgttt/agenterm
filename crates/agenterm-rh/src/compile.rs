@@ -47,6 +47,13 @@ pub fn compile_native_for_target(
     .map_err(|err| RhError::Compile(err.to_string()))?;
 
     let mut command = cargo_command();
+    // Cross-compiling a pack to windows-msvc from a unix host has no
+    // link.exe; cargo-xwin supplies the MSVC CRT/SDK and lld-link (the CI
+    // cross lanes already build the client set through it). Route the pack
+    // build through the same driver there; native hosts keep plain cargo.
+    if !cfg!(windows) && target.is_some_and(|triple| triple.ends_with("-pc-windows-msvc")) {
+        command.arg("xwin");
+    }
     command
         .arg("build")
         .arg("--release")

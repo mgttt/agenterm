@@ -108,7 +108,7 @@ fn find_less_exe() -> Option<PathBuf> {
                 return Some(path);
             }
         }
-        return None;
+        None
     }
 
     #[cfg(windows)]

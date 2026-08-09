@@ -116,6 +116,7 @@
       "id": "cli-smoke",
       "evidence": [
         "cli.backspace-del-one",
+        "cli.named-buffer-paste",
         "cli.remain-on-exit",
         "cli.stable-create-id",
         "cli.observable-events",

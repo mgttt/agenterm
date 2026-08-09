@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 84;
+pub const RH_CODEGEN_REVISION: u32 = 85;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -739,8 +739,13 @@ pub fn emit_host_runtime(out: &mut String) {
          struct RhCommand {\n\
              program: String,\n\
              args: Vec<String>,\n\
-             env: Vec<(String, String)>,\n\
-             env_remove: Vec<String>,\n\
+             // Ordered env program: `Some` sets, `None` removes. A single\n\
+             // sequential list mirrors the interpreter's last-write-wins\n\
+             // map (ScriptCommand.environment) -- split set/remove\n\
+             // containers replayed remove-first re-set variables that a\n\
+             // script removed and never set again (native-ipc-smoke's\n\
+             // AGENTERM_SETTINGS_PATH hygiene).\n\
+             env: Vec<(String, Option<String>)>,\n\
              timeout_ms: INT,\n\
              capture_limit: usize,\n\
              current_dir: Option<String>,\n\
@@ -808,7 +813,6 @@ pub fn emit_host_runtime(out: &mut String) {
                  program: program.to_owned(),\n\
                  args: Vec::new(),\n\
                  env: Vec::new(),\n\
-                 env_remove: Vec::new(),\n\
                  timeout_ms: 2_000,\n\
                  capture_limit: 64 * 1024,\n\
                  current_dir: None,\n\
@@ -828,10 +832,10 @@ pub fn emit_host_runtime(out: &mut String) {
              command.args.push(arg.to_owned());\n\
          }\n\n\
          fn rh_command_env(command: &mut RhCommand, name: &str, value: &str) {\n\
-             command.env.push((name.to_owned(), value.to_owned()));\n\
+             command.env.push((name.to_owned(), Some(value.to_owned())));\n\
          }\n\n\
          fn rh_command_env_remove(command: &mut RhCommand, name: &str) {\n\
-             command.env_remove.push(name.to_owned());\n\
+             command.env.push((name.to_owned(), None));\n\
          }\n\n\
          fn rh_command_timeout_ms(command: &mut RhCommand, timeout_ms: INT) {\n\
              if timeout_ms > 0 {\n\
@@ -871,11 +875,11 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_build(command: &RhCommand) -> std::process::Command {\n\
              let mut process = std::process::Command::new(&command.program);\n\
              process.args(&command.args);\n\
-             for name in &command.env_remove {\n\
-                 process.env_remove(name);\n\
-             }\n\
              for (name, value) in &command.env {\n\
-                 process.env(name, value);\n\
+                 match value {\n\
+                     Some(value) => { process.env(name, value); }\n\
+                     None => { process.env_remove(name); }\n\
+                 }\n\
              }\n\
              if let Some(dir) = &command.current_dir {\n\
                  process.current_dir(dir);\n\
