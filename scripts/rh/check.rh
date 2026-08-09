@@ -270,7 +270,10 @@ fn smoke_timeout_ms(id) {
 fn evidence_list_spec(worker_program, suite_path, repo) {
     let suite = "" + suite_path;
     let repo_path = "" + repo;
-    let arguments = ["run"];
+    // Hosted-engine argv: the standalone agenterm-rh binary retired with
+    // the engine-binary wave, so every worker is agenterm(.exe) and the
+    // verbs live under the `rh` subcommand (same shape bootstrap.cmd uses).
+    let arguments = ["rh", "run"];
     arguments.push(suite);
     arguments.push("--profile");
     arguments.push("local");
@@ -303,7 +306,7 @@ fn cmd_build_bat_spec(repo, profile, timeout_ms, environment) {
 fn task_check_spec(worker, manifest) {
     let worker_path = "" + worker;
     let manifest_path = "" + manifest;
-    let arguments = ["task", "check"];
+    let arguments = ["rh", "task", "check"];
     arguments.push("--manifest");
     arguments.push(manifest_path);
     let _arg_count = 0 + arguments.len;
@@ -942,7 +945,7 @@ fn task(worker, manifest, id, timeout_ms, extra, environment, allow_powershell) 
     // JSON string-array extras (see empty_task_extra / *_task_extra helpers).
     let _extra_proof = rh::json::stringify(extra);
     let arguments = [
-        "task", "run", task_id,
+        "rh", "task", "run", task_id,
         "--manifest", manifest_path
     ];
     if extra.len > 0 {
@@ -964,7 +967,7 @@ fn direct_task(worker, repo, id, timeout_ms, arguments, environment, allow_power
         repo_path,
         "scripts/rh/" + task_id + ".rh"
     ).display;
-    let command_arguments = ["run"];
+    let command_arguments = ["rh", "run"];
     command_arguments.push("" + script_path);
     command_arguments.push("--profile");
     command_arguments.push("local");
