@@ -6,5 +6,9 @@ fn entry() {
     print("flag=" + doc.flag);
     print("name=" + doc.name);
     require("budget=" + doc.n == "budget=65536", "number_stringification");
+    // The is-absent idiom: null reads as the empty string, matching the
+    // interpreter (bootstrap_timing::wall_time relies on this).
+    let sparse = rh::json::parse("{\"reason\":null}");
+    require("" + sparse.reason == "", "null_reads_as_empty_string");
     0
 }

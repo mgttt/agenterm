@@ -111,6 +111,17 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
   输出与退出码逐字节不变;crate 测试 common 47 / qjs 93 / sql 19 全绿。
 - 同日并行 lane 的 `82019aa9` 开始退役独立引擎 exe——与本文档 P1/P2 的
   "引擎搭载策略收敛到主 PE + 编译期门控"同向,后续按其波次推进后再评估 feature 门。
+- 2026-08-09(下半日,frontend 路线):`8e0766ba` 快照键集护栏;`6836dbca`
+  ServerContextMenuRects 命名字段(消元组反转);`246e9c4f` F7 关闭
+  (ControlWindow::control_selection + 共享 UTF-16→字符换算);`63ad5498`
+  SidebarViewport(滚动模型半区,行命中半区留队列)。
+- 2026-08-09(rh 语言/工具链):`027f8dd8` stderr_inherit 三层落地(build 实时输出);
+  `867dbab1` prune 双修(PathBuf::from 变量克隆 + Windows POSIX 锁探测诚实跳过,
+  build.bat dev 本机首次全绿);`457457bc` JSON 标量串化对齐解释器(语言层关闭
+  `0 +` 强转 bug 类);`a088b99f` json==json 真 Value 等值(null 安全);后续一刀
+  null→"" 判空成语对齐。CI 修复弧:`c3863f5c` nativecore 跨平台 fail-closed、
+  `557b3f37`/`14592129` clippy 门、`3bbb05a7` 灰度全量处置、`64a05e6a` 门 deadline
+  容纳冷 AOT 编译。
 
 ### 队列(按价值排序)
 1. **P5 frontend 三面重复测绘**:已完成 → `plan/design-frontend-shared-core.md`。

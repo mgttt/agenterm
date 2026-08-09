@@ -1,6 +1,6 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 12;
+pub const RH_HOST_API_VERSION: u32 = 13;
 pub const RH_CODEGEN_REVISION: u32 = 83;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
@@ -1683,6 +1683,11 @@ pub fn emit_host_runtime(out: &mut String) {
                  serde_json::Value::String(text) => Some(text.clone()),\n\
                  serde_json::Value::Number(number) => Some(number.to_string()),\n\
                  serde_json::Value::Bool(flag) => Some(flag.to_string()),\n\
+                 // Null reads as the empty string: `(\"\" + doc.field) == \"\"`\n\
+                 // is the established is-absent idiom across the gate\n\
+                 // scripts (bootstrap_timing::wall_time, control-center\n\
+                 // smoke), written against the interpreter behavior.\n\
+                 serde_json::Value::Null => Some(String::new()),\n\
                  _ => None,\n\
              }\n\
          }\n\n\
