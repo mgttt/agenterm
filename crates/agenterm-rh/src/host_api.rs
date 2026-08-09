@@ -949,6 +949,7 @@ pub fn emit_host_runtime(out: &mut String) {
              timeout: std::time::Duration,\n\
              capture_limit: usize,\n\
              program: &str,\n\
+             args_preview: &str,\n\
          ) -> RhOutput {\n\
              let stdout_pipe = child.stdout.take();\n\
              let stderr_pipe = child.stderr.take();\n\
@@ -961,9 +962,11 @@ pub fn emit_host_runtime(out: &mut String) {
                              let _ = child.kill();\n\
                              let _ = child.wait();\n\
                              // Name the culprit: a bare label made CI\n\
-                             // timeouts undiagnosable.\n\
+                             // timeouts undiagnosable. Args identify which\n\
+                             // task a staged worker copy was running.\n\
                              let _ = rh_fail(&format!(\n\
-                                 \"process_timeout: {program} after {}ms\",\n\
+                                 \"process_timeout: {program} {:?} after {}ms\",\n\
+                                 args_preview,\n\
                                  timeout.as_millis()\n\
                              ));\n\
                              return RhOutput {\n\
@@ -1012,7 +1015,20 @@ pub fn emit_host_runtime(out: &mut String) {
              match process.spawn() {\n\
                  Ok(mut child) => {\n\
                      rh_command_write_stdin(&mut child, &stdin_text);\n\
-                     rh_finish_process_output(child, timeout, capture_limit, &command.program)\n\
+                     let args_preview = command\n\
+                         .args\n\
+                         .iter()\n\
+                         .take(8)\n\
+                         .cloned()\n\
+                         .collect::<Vec<_>>()\n\
+                         .join(\" \");\n\
+                     rh_finish_process_output(\n\
+                         child,\n\
+                         timeout,\n\
+                         capture_limit,\n\
+                         &command.program,\n\
+                         &args_preview,\n\
+                     )\n\
                  }\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
@@ -1363,7 +1379,7 @@ pub fn emit_host_runtime(out: &mut String) {
                      stderr: String::new(),\n\
                  };\n\
              };\n\
-             rh_finish_process_output(process, timeout, capture_limit, \"child\")\n\
+             rh_finish_process_output(process, timeout, capture_limit, \"child\", \"\")\n\
          }\n\n\
          fn rh_utility(operation: u32, input: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_UTILITY_CALL }) else {\n\

@@ -611,18 +611,15 @@ fn reserve_loopback_address() {
 }
 
 fn resolve_script_executable(executable_directory) {
-    let rh_candidate = std::path::join(
+    // The standalone agenterm-rh binary retired; the rh engine lives in
+    // the main PE and is reached via the `rh` subcommand (the eval spawn
+    // below passes it).
+    let hosted_candidate = std::path::join(
         executable_directory,
-        "agenterm-rh.exe"
+        "agenterm.exe"
     ).display;
-    if std::fs::exists(rh_candidate) {
-        return rh_candidate;
-    }
-    let rhai_candidate = std::path::join(
-        executable_directory,
-    ).display;
-    if std::fs::exists(rhai_candidate) {
-        return rhai_candidate;
+    if std::fs::exists(hosted_candidate) {
+        return hosted_candidate;
     }
     throw "control_center_smoke_script_missing";
 }
@@ -644,7 +641,7 @@ fn incompatible_sibling(
         "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
         "catch (error) { if error.to_string().contains(" +
         "\"net_accept_timeout\") == 0 { throw error; } } }";
-    let eval_args = ["eval"];
+    let eval_args = ["rh", "eval"];
     eval_args.push(source);
     eval_args.push("--timeout-ms");
     eval_args.push("30000");

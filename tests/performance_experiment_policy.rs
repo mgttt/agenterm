@@ -30,10 +30,12 @@ fn experiment_uses_three_equal_samples_and_one_configured_trial_switch() {
     assert!(WORKFLOW.contains("'windows-latest'"));
     assert!(!WORKFLOW.contains("runs-on: ${{ inputs."));
     assert!(!WORKFLOW.contains("continue-on-error: ${{"));
-    assert!(WORKFLOW.contains("Build isolated Rh experiment driver"));
-    assert!(WORKFLOW.contains("agenterm-rh.exe"));
-    assert!(WORKFLOW.contains("task run performance-samples --manifest agenterm.tasks.json"));
-    assert!(WORKFLOW.contains("task run performance-summary"));
+    // The driver is the main PE hosting the rh engine (`agenterm rh task
+    // run ...`); the standalone agenterm-rh binary retired.
+    assert!(WORKFLOW.contains("Build Rh experiment driver"));
+    assert!(WORKFLOW.contains("agenterm.exe\" rh task run"));
+    assert!(WORKFLOW.contains("rh task run performance-samples --manifest agenterm.tasks.json"));
+    assert!(WORKFLOW.contains("rh task run performance-summary"));
     let compatibility_cli = ["agenterm", "rhai"].join("-");
     assert!(!WORKFLOW.contains(&compatibility_cli));
     assert!(!WORKFLOW.contains("shell: pwsh"));
