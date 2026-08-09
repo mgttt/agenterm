@@ -73,7 +73,8 @@ fn session_lock(unit: &Path, timestamp: &str, random: &str) -> PathBuf {
 
 fn run_prune(root: &Path) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .args(["task", "run", "prune-target-incremental", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -92,7 +93,8 @@ fn run_prune(root: &Path) -> Output {
 
 fn run_prune_with_manifest(root: &Path, manifest: &Path, invocation: &str) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .args(["task", "run", "prune-target-incremental", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -275,6 +277,16 @@ fn both_executables_dispatch_incremental_wrapper_mode() {
         .output()
         .expect("run direct compiler probe");
 
+    // NOT migrated to CARGO_BIN_EXE_agenterm (see file-level finding in the
+    // migration report): this exercises `agenterm-rh` acting AS the
+    // `RUSTC_WRAPPER` itself (`current_exe()` must equal the `RUSTC_WRAPPER`
+    // env var, and cargo's real protocol invokes that single path with no
+    // injectable prefix args) — `agenterm.exe` has no top-level rustc-wrapper
+    // detection outside its `__agenterm-internal-engine` dispatch branch, so
+    // pointing this at the main PE would either require prefix args cargo
+    // can't supply in production, or would silently test a shape unrelated
+    // to real `RUSTC_WRAPPER` usage. Left on the standalone bin pending a
+    // source-side fix to `src/bin/agenterm.rs`.
     for executable in [Path::new(env!("CARGO_BIN_EXE_agenterm-rh"))] {
         let wrapped = Command::new(executable)
             .env(

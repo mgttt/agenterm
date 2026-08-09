@@ -1,10 +1,13 @@
 # AgenTerm Script Runtime Specification (Rhai-era archive)
 
 > **Operational note (2026-08):** Live repository automation runs native `.rh`
-> tasks under `scripts/rh/` through **`agenterm-rh`** (task/worker/check-many
+> tasks under `scripts/rh/` through **`agenterm rh`** (task/worker/check-many
 > front door). Legacy Rhai sources live under `scripts/archive/rhai/`. The
 > **`agenterm-rhai`** compatibility shim was **retired** in Wave 4.5;
 > `run`/`eval`/`repl` on `.rhai` sources is no longer available.
+> The standalone `agenterm-rh.exe` / `agenterm-lua.exe` / `agenterm-qjs.exe` /
+> `agenterm-sql.exe` binaries were retired in favor of `agenterm rh|lua|qjs|sql`
+> subcommands (2026-08-09).
 > For current capability status see
 > [PRD_02_10](../prd/PRD_02_10_rhai_scripting.md).
 
@@ -65,7 +68,7 @@ agenterm-rh
 │  [shipped; stable; designed 2026-08-07]
 │
 agenterm-rhai (compatibility shim)
-│  Rhai-era CLI retained for `.rhai`, `repl`, and Windows `agenterm-cli script …`
+│  Rhai-era CLI retained for `.rhai`, `repl`, and Windows `agenterm cli script …`
 │  forwarding — not the live `scripts/rh/` tree owner.
 │  [shipped v0.1.9 product slice; stable; designed 2026-07-28]
 │
@@ -598,8 +601,8 @@ The initial comparison set was reviewed on 2026-07-29 against
 Those versions identify research inputs only. Updating a comparison never
 renames or changes a stable AgenTerm Rhai interface.
 
-`agenterm-rh api --tree` renders a compact Rust/Node.js/Bun index from the
-same entries returned by `agenterm-rh api --json`. The compatibility
+`agenterm rh api --tree` renders a compact Rust/Node.js/Bun index from the
+same entries returned by `agenterm rh api --json`. The compatibility
 `agenterm-rhai` shim exposes the same catalog surface. Long-form prose may add
 examples and rationale, but exact callable identity, status, signatures,
 availability, limits, and comparisons come from the machine catalog.
@@ -1309,11 +1312,13 @@ The named task manifest is `agenterm.tasks.json`. It describes local task
 execution and is not a package manifest. `task list`, `task show`, and
 `task check` MUST NOT execute user code. Invalid tasks remain discoverable with
 a degraded reason.
-The live task/worker front door is `agenterm-rh` / `agenterm-rh.exe`; named
-tasks in `agenterm.tasks.json` resolve `.rh` entries under `scripts/rh/`.
+The live task/worker front door is `agenterm rh` (the standalone
+`agenterm-rh` / `agenterm-rh.exe` binaries were retired in favor of this
+subcommand, 2026-08-09); named tasks in `agenterm.tasks.json` resolve `.rh`
+entries under `scripts/rh/`.
 The shipped `agenterm-rhai.exe` binary remains a compatibility shim for
 `.rhai` sources, `run`/`eval`/`repl`/`check`/`api`, and Windows
-`agenterm-cli.exe script ...` forwarding to the same parser, catalog,
+`agenterm cli script ...` forwarding to the same parser, catalog,
 supervisor, and runtime.
 The reserved `--worker` and `--framed-worker` modes are internal host protocol
 entry points, not alternate user APIs.
@@ -1624,7 +1629,7 @@ print(#{
 ## 19.1 Persistent REPL contract
 
 `agenterm-rhai repl [OPTIONS] [--] [ARGS...]` (compatibility shim; live tasks
-use `agenterm-rh`) MUST create one explicit
+use `agenterm rh`) MUST create one explicit
 foreground session. It MUST NOT implement persistence by repeatedly invoking
 the one-shot `eval` command.
 
@@ -1694,7 +1699,7 @@ A capability becomes `shipped` only when:
 1. its catalog entry includes stable identity, surface, status, stability,
    design date, availability, schemas, and semantic differences;
 2. deterministic logic and error behavior have unit coverage;
-3. the public `agenterm-cli script` path has black-box coverage;
+3. the public `agenterm cli script` path has black-box coverage;
 4. success, typed failure, timeout, cancellation, and limits have evidence;
 5. no child, worker, task, stream, pipe, or temporary resource is orphaned;
 6. secret sentinels do not enter output, audit, or diagnostics;

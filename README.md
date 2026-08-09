@@ -56,12 +56,14 @@ client, and a deliberately bounded tmux/RMUX frontend.
   clipboard.
 - Snapshot-positioned bounded event reads and waits expose explicit restart,
   gap, and timeout results.
-- `agenterm-rh` / `agenterm-rh.exe` is the task and worker CLI for repository
-  automation (`scripts/rh/*.rh`), observable Fleet tools, and versioned named
-  tasks without linking the scripting engine into the GUI. Archived Rhai sources
+- `agenterm rh` is the task and worker subcommand for repository automation
+  (`scripts/rh/*.rh`), observable Fleet tools, and versioned named tasks
+  without linking the scripting engine into the GUI. Archived Rhai sources
   live under `scripts/archive/rhai/`; the former `agenterm-rhai` shim was
-  removed in Phase C Wave 4.5.
-- `agenterm-cli mcp` is the on-demand read-only MCP surface (no separate
+  removed in Phase C Wave 4.5. The standalone `agenterm-rh`/`agenterm-lua`/
+  `agenterm-qjs`/`agenterm-sql` binaries were retired in favor of
+  `agenterm rh|lua|qjs|sql` subcommands (2026-08-09).
+- `agenterm cli mcp` is the on-demand read-only MCP surface (no separate
   `agenterm-mcp` PE). Its first v0.1.10 slice serves four metadata-only Fleet
   resources and one bounded `agenterm_wait` tool over stdio; it exposes no
   mutation tool or network listener.
@@ -70,7 +72,7 @@ client, and a deliberately bounded tmux/RMUX frontend.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
 - Tab-scoped environment and proxy values apply only to the child process and
   are not written to the persistent workspace.
-- `agenterm-cli mux` provides the supported tmux/RMUX session/window surface
+- `agenterm cli mux` provides the supported tmux/RMUX session/window surface
   (no separate `agenterm-mux` PE); unsupported operations fail explicitly.
 - Whole-window and per-pane PNG screenshots support visual feedback testing.
 - PTY process management uses `rmux-pty`.
@@ -159,18 +161,22 @@ stays in `target/debug/` (`cargo build` or `.\build.bat dev`). Use
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch
 cache while preserving the incremental development `target/`. All modes
-produce four ignored executables plus
+produce three ignored executables plus
 build metadata under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; `agenterm server` starts the headless
-  authority as a separate process of the same PE.
+  authority as a separate process of the same PE. `agenterm rh|lua|qjs|sql`
+  are argv-transparent subcommand aliases for the four script engines (native
+  `.rh` task/worker CLI: live automation under `scripts/rh/`; archived Rhai
+  under `scripts/archive/rhai/`) — the standalone `agenterm-rh.exe` /
+  `agenterm-lua.exe` / `agenterm-qjs.exe` / `agenterm-sql.exe` binaries were
+  retired in favor of these subcommands (2026-08-09).
 - `dist/agenterm-cc.exe` — isolated Control Center projection; informational
   commands include `--help`, `--version`, `capabilities --json`, and
   `snapshot --json`.
-- `dist/agenterm-cli.exe` — full native observation and automation client,
-  including `mux` (tmux/RMUX) and `mcp` (stdio sidecar) subcommands.
-- `dist/agenterm-rh` — native `.rh` task/worker CLI (live automation under
-  `scripts/rh/`; archived Rhai under `scripts/archive/rhai/`).
+- `dist/agenterm.com` — minimal Windows Console-subsystem forwarder. Windows
+  command resolution selects it for extensionless `agenterm cli` and
+  `agenterm tui`, while all behavior remains implemented by `agenterm.exe`.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
@@ -188,7 +194,7 @@ not interrupt the foreground application. `.\check.cmd --release` omits the
 The machine-readable platform contract is available without starting a server:
 
 ```powershell
-.\dist\agenterm-cli.exe protocol-info
+.\dist\agenterm cli protocol-info
 ```
 
 Its `platform` block reports the native adapter, contract revision, and typed
@@ -199,7 +205,7 @@ relabeled as available.
 ### Linux GUI
 
 Native Linux `agenterm` and `agenterm-cc` use winit. Control clients
-(`agenterm-cli`, `agenterm-rh`) do not need display libraries.
+(`agenterm cli`, `agenterm rh`) do not need display libraries.
 
 **Release tarballs** ship a small `lib/` directory plus `agenterm` and
 `agenterm-cc` launchers that set `LD_LIBRARY_PATH` before starting their hidden
@@ -239,37 +245,37 @@ grid and render consistently with Unicode sequences and truecolor output.
 ## Examples
 
 ```powershell
-$r = ".\dist\agenterm-cli.exe"
+$r = ".\dist\agenterm"
 
-& $r new-window -d -n build
-& $r set-composer -t build "cargo check"
-& $r send-composer -t build
-& $r wait-pane -t build --contains "Finished" --timeout-ms 30000
-& $r capture-pane -p -t build
-& $r scroll-pane -t build page-up
-& $r screenshot-pane -t build -o build.png
+& $r cli new-window -d -n build
+& $r cli set-composer -t build "cargo check"
+& $r cli send-composer -t build
+& $r cli wait-pane -t build --contains "Finished" --timeout-ms 30000
+& $r cli capture-pane -p -t build
+& $r cli scroll-pane -t build page-up
+& $r cli screenshot-pane -t build -o build.png
 
 # Discover and run the bounded scripting surface.
-& $r script api --json
-& $r script eval "40 + 2"
-& $r script eval "fleet.ui.snapshot().event_position.sequence" --profile observe
+& $r cli script api --json
+& $r cli script eval "40 + 2"
+& $r cli script eval "fleet.ui.snapshot().event_position.sequence" --profile observe
 
 # Discover every registered server, then target one explicitly.
-& $r server-list
-& $r --address 127.0.0.1:48915 ui-snapshot
+& $r cli server-list
+& $r cli --address 127.0.0.1:48915 ui-snapshot
 
 # Proxy flags are temporarily inert; configure proxy variables in the shell.
-& $r new-agent -n reviewer -- --full-auto
+& $r cli new-agent -n reviewer -- --full-auto
 
 # Explicit opt-in convenience for Codex's unsafe bypass mode; omitted by default.
-& $r new-agent -n scratch --yolo
+& $r cli new-agent -n scratch --yolo
 
 # Inspect the honest mux compatibility matrix.
-.\dist\agenterm-cli.exe mux compatibility --json
+.\dist\agenterm cli mux compatibility --json
 ```
 
 IPC listens and connects only on numeric loopback addresses (`127.0.0.0/8` or
-`::1`), including explicit `agenterm-cli mux --address` overrides.
+`::1`), including explicit `agenterm cli mux --address` overrides.
 
 ## Release
 
@@ -301,3 +307,11 @@ authentication.
 - [Product tree and requirements](PRD.md)
 - [Coding-agent guide](AGENTS.md)
 - [Build and install a local macOS app](docs/macos-local-build.md)
+
+## Placeholder TUI
+
+Run `agenterm tui` to open the initial terminal interface. It currently shows
+an intentionally small placeholder workspace; press `q` or Enter to return.
+On interactive `cmd.exe`, run `agenterm tui`; `agenterm.com` keeps the shell
+waiting so it does not compete with the TUI for console input. Explicit
+`agenterm.exe tui` retains the Windows GUI-subsystem waiting limitation.

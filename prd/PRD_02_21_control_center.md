@@ -122,7 +122,7 @@ Control Center is the product name; the executable family uses
 - [~] a missing, incompatible, or failed `agenterm-cc` reports a non-blocking
   typed result. It does not show a modal dialog, start another Fleet authority,
   or make the terminal workspace unavailable. Missing-binary launch is
-  black-box covered by an isolated copy of `agenterm-cli` with no sibling
+  black-box covered by an isolated copy of `agenterm cli` with no sibling
   Control Center: the request fails boundedly with
   `control_center_unavailable`, creates no registry, and starts no server.
   A live incompatible registry now fails closed with
@@ -520,3 +520,31 @@ future promotion gates.
   server
 - [ ] no second PTY, workspace, event-journal, workflow-run, install, Agent
   permission, or credential authority
+
+## Hyper-Control Agent（超控智能体）
+
+> 设计 SSOT：`plan/design-cc-hyper-control-agent.md`（v7 · 2026-08-09）
+
+超控智能体是 Control Center 的默认首屏（view ID `hyper_control`），定位为
+**Pipeline 驱动的日常工作组织者**——不是 workflow 编排引擎，不是 session 管理器。
+
+- [ ] 核心概念
+  - [ ] **Pipeline**：轻量工作模板，定义步骤序列（手动/半自动/全自动）。
+    「review PR」是一个 Pipeline——看 diff → 跑测试 → 写评论 → 提交。
+  - [ ] **Task**：Pipeline 的一次实例。关联具体 tab、记录步骤进度和上下文。
+    「review PR #42」是一个 Task——步骤 2/4，上次测试失败。
+  - [ ] **规则引擎**：监听 Fleet 事件（tab 创建/关闭、进程退出、输出匹配），
+    自动推进步骤、触发通知。90% 的自驱行为走规则引擎，零 token 消耗。
+  - [ ] **LLM 节制调用**：仅在高价值节点介入（意图理解、失败分析、日报生成），
+    每次调用有 token 预算和用户可见标记。
+- [ ] 架构边界
+  - [ ] 超控智能体的 UI 属于 CC 进程（`hyper_control` view），崩溃不影响 PTY。
+  - [ ] Pipeline 定义和 Task 数据存储为 JSON 文件（`~/.local/share/agenterm/tasks/`），
+    不依赖 server。
+  - [ ] 规则引擎可下沉为通用 agenterm rh provider 或 server 侧事件匹配层，
+    不作为 CC 独有逻辑。
+  - [ ] LLM 调用统一走 LLM gateway（`agenterm-llm-gateway`），CC 不直接调 API。
+- [ ] 分阶段
+  - [ ] Phase 0：view ID 登记 + 规则引擎基础 + 手动 Task 管理（零 LLM）
+  - [ ] Phase A：Pipeline 模板 + 半自动步骤 + LLM 节制接入
+  - [ ] Phase B：自学习 Pipeline + LLM 日报/分析

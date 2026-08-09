@@ -13,22 +13,23 @@
       "release_budget_bytes": 4194304
     },
     {
+      "name": "agenterm.com",
+      "role": "cui-forwarder",
+      "pe_subsystem": 3,
+      "documentation_role": "synchronous CUI and TUI forwarder to agenterm.exe",
+      "offline_probe": [
+        "cli",
+        "--version"
+      ],
+      "release_budget_bytes": 65536
+    },
+    {
       "name": "agenterm-cc.exe",
       "role": "control-center-gui",
       "pe_subsystem": 2,
       "documentation_role": "isolated Control Center projection",
       "offline_probe": [
         "--version"
-      ],
-      "release_budget_bytes": 4194304
-    },
-    {
-      "name": "agenterm-rh.exe",
-      "role": "rh-dev-cli",
-      "pe_subsystem": 3,
-      "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-      "offline_probe": [
-        "version"
       ],
       "release_budget_bytes": 4194304
     }
@@ -51,22 +52,23 @@
           "release_budget_bytes": 4194304
         },
         {
+          "name": "agenterm.com",
+          "role": "cui-forwarder",
+          "pe_subsystem": 3,
+          "documentation_role": "synchronous CUI and TUI forwarder to agenterm.exe",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 65536
+        },
+        {
           "name": "agenterm-cc.exe",
           "role": "control-center-gui",
           "pe_subsystem": 2,
           "documentation_role": "isolated Control Center projection",
           "offline_probe": [
             "--version"
-          ],
-          "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-rh.exe",
-          "role": "rh-dev-cli",
-          "pe_subsystem": 3,
-          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-          "offline_probe": [
-            "version"
           ],
           "release_budget_bytes": 4194304
         }
@@ -89,6 +91,17 @@
           "release_budget_bytes": 4194304
         },
         {
+          "name": "agenterm.com",
+          "role": "cui-forwarder",
+          "pe_subsystem": 3,
+          "documentation_role": "synchronous CUI and TUI forwarder to agenterm.exe",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 65536
+        },
+        {
           "name": "agenterm-cc.exe",
           "role": "control-center-gui",
           "pe_subsystem": 2,
@@ -97,16 +110,6 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-rh.exe",
-          "role": "rh-dev-cli",
-          "pe_subsystem": 3,
-          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-          "offline_probe": [
-            "version"
-          ],
-          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -131,15 +134,6 @@
           "documentation_role": "isolated Control Center projection",
           "offline_probe": [
             "--version"
-          ],
-          "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-rh",
-          "role": "rh-dev-cli",
-          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-          "offline_probe": [
-            "version"
           ],
           "release_budget_bytes": 4194304
         }
@@ -168,15 +162,6 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-rh",
-          "role": "rh-dev-cli",
-          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-          "offline_probe": [
-            "version"
-          ],
-          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -203,15 +188,6 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-rh",
-          "role": "rh-dev-cli",
-          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-          "offline_probe": [
-            "version"
-          ],
-          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -236,15 +212,6 @@
           "documentation_role": "isolated Control Center projection",
           "offline_probe": [
             "--version"
-          ],
-          "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-rh",
-          "role": "rh-dev-cli",
-          "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
-          "offline_probe": [
-            "version"
           ],
           "release_budget_bytes": 4194304
         }

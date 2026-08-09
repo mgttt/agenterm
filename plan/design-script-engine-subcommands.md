@@ -3,6 +3,13 @@
 > 2026-08-09。用户指示：「准备安排把几种后端（rh,lua,qjs,sql）做成 agenterm 的子命令」。
 > 本文档是执行前设计；分期见 §5。与 [`archive/design-agenterm-cli-merge.md`](archive/design-agenterm-cli-merge.md)
 > 同族——复用同一套 GUI-子系统控制台接管机制，不重复发明。
+>
+> **后续决策更新（2026-08-09，同日）：** SUB-M1～M4（commit `234b2f87`）已落地
+> 子命令别名。用户随后决定**废弃**四个独立 exe（`agenterm-rh.exe` /
+> `agenterm-lua.exe` / `agenterm-qjs.exe` / `agenterm-sql.exe`）——这推翻了
+> §6「不废弃独立 bin」非目标；根 `Cargo.toml` 的四个 `[[bin]]` 条目在后续
+> wave 中删除，CI/打包/安装脚本/文档全部改指向 `agenterm {rh,lua,qjs,sql}`
+> 子命令形式。§0～§5 的机制设计和分期记录本身保持不变（历史准确）。
 
 ---
 

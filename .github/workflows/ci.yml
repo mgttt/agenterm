@@ -203,8 +203,8 @@ jobs:
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
-          dist/agenterm-rh.exe task run startup-smoke --manifest agenterm.tasks.json
-          dist/agenterm-rh.exe task run cli-smoke --manifest agenterm.tasks.json
+          dist/agenterm.exe rh task run startup-smoke --manifest agenterm.tasks.json
+          dist/agenterm.exe rh task run cli-smoke --manifest agenterm.tasks.json
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -223,10 +223,10 @@ jobs:
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
-          dist/agenterm-rh.exe task run remote-ui-smoke --manifest agenterm.tasks.json
-          dist/agenterm-rh.exe task run fleet-smoke --manifest agenterm.tasks.json
-          dist/agenterm-rh.exe task run script-smoke --manifest agenterm.tasks.json
-          dist/agenterm-rh.exe task run rh-aot-smoke --manifest agenterm.tasks.json
+          dist/agenterm.exe rh task run remote-ui-smoke --manifest agenterm.tasks.json
+          dist/agenterm.exe rh task run fleet-smoke --manifest agenterm.tasks.json
+          dist/agenterm.exe rh task run script-smoke --manifest agenterm.tasks.json
+          dist/agenterm.exe rh task run rh-aot-smoke --manifest agenterm.tasks.json
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -238,7 +238,7 @@ jobs:
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
-          dist/agenterm-rh.exe task run native-ipc-smoke \
+          dist/agenterm.exe rh task run native-ipc-smoke \
             --manifest agenterm.tasks.json -- --ci-main-dev
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
@@ -252,7 +252,7 @@ jobs:
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
-          dist/agenterm-rh.exe task run native-ipc-compat-smoke \
+          dist/agenterm.exe rh task run native-ipc-compat-smoke \
             --manifest agenterm.tasks.json
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
@@ -263,10 +263,10 @@ jobs:
         shell: cmd
         run: |
           @if not exist target\qualification\timing.json exit /b 0
-          @if exist dist\agenterm-rh.exe (
-            dist\agenterm-rh.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          @if exist dist\agenterm.exe (
+            dist\agenterm.exe rh task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
           ) else (
-            target\debug\agenterm-rh.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+            target\debug\agenterm.exe rh task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
           )
       - name: Report cache hit profile
         if: always()
@@ -423,12 +423,12 @@ jobs:
         id: native-ipc-compat
         run: |
           start_ms=$(date +%s%3N)
-          target/x86_64-unknown-linux-gnu/debug/agenterm-rh task run \
+          target/x86_64-unknown-linux-gnu/debug/agenterm rh task run \
             write-build-metadata --manifest agenterm.tasks.json -- \
             . target/x86_64-unknown-linux-gnu/debug/agenterm.json \
             scripts/artifacts.json \
             target/x86_64-unknown-linux-gnu/debug dev linux x86_64
-          target/x86_64-unknown-linux-gnu/debug/agenterm-rh task run \
+          target/x86_64-unknown-linux-gnu/debug/agenterm rh task run \
             native-ipc-compat-smoke --manifest agenterm.tasks.json -- \
             --head-server target/x86_64-unknown-linux-gnu/debug/agenterm \
             --head-cli target/x86_64-unknown-linux-gnu/debug/agenterm \
@@ -525,7 +525,7 @@ jobs:
         continue-on-error: true
         run: |
           test ! -f target/qualification/timing.json ||
-            target/x86_64-unknown-linux-gnu/debug/agenterm-rh task run timing-summary \
+            target/x86_64-unknown-linux-gnu/debug/agenterm rh task run timing-summary \
               --manifest agenterm.tasks.json -- \
               target/qualification/timing.json
       - name: Upload Linux quality timing
@@ -794,11 +794,11 @@ jobs:
             exit 0
           fi
           binary_dir="target/${{ matrix.target }}/debug"
-          "$binary_dir/agenterm-rh" task run write-build-metadata \
+          "$binary_dir/agenterm" rh task run write-build-metadata \
             --manifest agenterm.tasks.json -- \
             . "$binary_dir/agenterm.json" scripts/artifacts.json \
             "$binary_dir" dev macos "${{ matrix.arch }}"
-          "$binary_dir/agenterm-rh" task run native-ipc-compat-smoke \
+          "$binary_dir/agenterm" rh task run native-ipc-compat-smoke \
             --manifest agenterm.tasks.json -- \
             --head-server "$binary_dir/agenterm" \
             --head-cli "$binary_dir/agenterm" \
@@ -821,7 +821,7 @@ jobs:
           fi
           binary_dir="target/${{ matrix.target }}/debug"
           set +e
-          control_center_output=$("$binary_dir/agenterm-rh" task run control-center-macos-smoke \
+          control_center_output=$("$binary_dir/agenterm" rh task run control-center-macos-smoke \
             --manifest agenterm.tasks.json -- \
             --control-center "$binary_dir/agenterm-cc" \
             --server "$binary_dir/agenterm" \
@@ -853,7 +853,7 @@ jobs:
           fi
           binary_dir="target/${{ matrix.target }}/debug"
           set +e
-          journey_output=$("$binary_dir/agenterm-rh" task run unix-frontend-macos-smoke \
+          journey_output=$("$binary_dir/agenterm" rh task run unix-frontend-macos-smoke \
             --manifest agenterm.tasks.json -- \
             "$binary_dir/agenterm" "$binary_dir/agenterm" --platform macos 2>&1)
           journey_status=$?

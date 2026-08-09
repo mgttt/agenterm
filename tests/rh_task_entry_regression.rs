@@ -697,7 +697,8 @@ fn readme_examples_uses_native_bundled_execution() {
 
 #[test]
 fn validate_artifact_manifest_task_run_fails_with_wrong_args() {
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo())
         .args([
             "task",

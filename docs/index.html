@@ -963,7 +963,7 @@
           <p class="eyebrow" data-i18n="automationEyebrow">Public control plane</p>
           <h2 data-i18n="automationTitle">Observe, act, then verify.</h2>
           <p data-i18n-html="automationLead">
-            <code>agenterm-cli.exe</code> exposes the same fleet through typed
+            <code>agenterm cli</code> exposes the same fleet through typed
             loopback IPC. Stable tab IDs, structured snapshots, event
             positions, deterministic waits, and PNG evidence make automation
             inspectable.
@@ -976,17 +976,17 @@
             <li data-i18n-html="automation5">Inspect the native adapter and typed platform capability status through <code>protocol-info</code></li>
           </ul>
         </div>
-        <pre aria-label="AgenTerm command line example" data-i18n-aria-label="cliLabel"><span class="prompt">PS&gt;</span> .\agenterm-cli.exe list-tab-tree
-<span class="prompt">PS&gt;</span> .\agenterm-cli.exe new-agent -n reviewer
-<span class="prompt">PS&gt;</span> .\agenterm-cli.exe wait-pane `
+        <pre aria-label="AgenTerm command line example" data-i18n-aria-label="cliLabel"><span class="prompt">PS&gt;</span> .\agenterm cli list-tab-tree
+<span class="prompt">PS&gt;</span> .\agenterm cli new-agent -n reviewer
+<span class="prompt">PS&gt;</span> .\agenterm cli wait-pane `
       -t @2 --contains "Finished" --timeout-ms 30000
-<span class="prompt">PS&gt;</span> .\agenterm-cli.exe screenshot-pane `
+<span class="prompt">PS&gt;</span> .\agenterm cli screenshot-pane `
       -t @2 -o reviewer.png
 
 <span class="comment"># Discover the live contract</span>
-<span class="prompt">PS&gt;</span> .\agenterm-cli.exe list-commands
-<span class="prompt">PS&gt;</span> .\agenterm-cli.exe protocol-info
-<span class="prompt">PS&gt;</span> .\agenterm-cli.exe ui-snapshot</pre>
+<span class="prompt">PS&gt;</span> .\agenterm cli list-commands
+<span class="prompt">PS&gt;</span> .\agenterm cli protocol-info
+<span class="prompt">PS&gt;</span> .\agenterm cli ui-snapshot</pre>
       </div>
     </section>
 
@@ -1027,7 +1027,7 @@
         </div>
         <pre class="stack-block" aria-label="Architecture stack" data-i18n-aria-label="stackLabel"><span class="hl">agenterm server</span>  tree · PTY · journal · persistence · no HWND
     ↑ typed IPC · snapshots · waits · receipts
-<span class="hl">clients</span>        agenterm (GUI) · agenterm-cc (Control Center) · agenterm-cli · agenterm-rh
+<span class="hl">clients</span>        agenterm (GUI) · agenterm-cc (Control Center) · agenterm cli · agenterm rh
 <span class="hl">promise</span>        unsupported ops fail explicitly — no false success</pre>
       </div>
     </section>
@@ -1076,7 +1076,7 @@
           </a>
           <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-rh-runtime.md#historical-rhai-contract">
             <strong data-i18n="scriptTitle">Script runtime specification →</strong>
-            <span data-i18n="scriptBody">Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm-rh`.</span>
+            <span data-i18n="scriptBody">Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm rh`.</span>
           </a>
           <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md">
             <strong data-i18n="macPreviewTitle">macOS preview safety →</strong>
@@ -1129,7 +1129,7 @@
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "Copy", installCopied: "Copied",
           installNoteMacos: "No <code>sudo</code>. Verifies SHA-256 and provenance, links commands into <code>~/.local/bin</code>, and creates <code>~/Applications/AgenTerm.app</code>. The installer falls back to the labeled unsigned developer preview only when the signed macOS asset returns HTTP 404 or 410; every other download error fails closed. A signed release requires provenance with <code>channel=release</code>, <code>signed=true</code>, and <code>notarized=true</code>, plus local Apple Developer ID signature verification for every executable, so signed-release trust is inferred from both provenance and local verification. <code>AGENTERM_ALLOW_UNSIGNED_PREVIEW</code> remains a compatibility acknowledgment: it does not force the preview, skip verification, or hide the trust warning. Read the <a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.md\">safety notes</a> before installing.",
-          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code>, <code>agenterm-cli</code>, and <code>agenterm-rh</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
+          installNoteLinux: "No <code>sudo</code>. Verifies SHA-256, installs versioned payloads under <code>~/.local/share/agenterm</code>, and links <code>agenterm</code> into <code>~/.local/bin</code>. Add that directory to <code>PATH</code> if needed.",
           installNoteWindows: "Download the portable zip for your CPU architecture, extract it anywhere, and run <code>agenterm.exe</code>. All four client binaries plus build metadata ship in the same folder — no installer, no admin rights.",
           downloadWindowsCta: "Download for Windows",
           specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specOpen: "<strong>Open</strong> MIT / Apache-2.0", specLoopback: "Loopback IPC only", specSbom: "SBOM + provenance", specServer: "Headless server authority",
@@ -1169,7 +1169,7 @@
           persona3Title: "Creators", persona3Body: "Draft, render, and publish pipelines with long-form Composer input.",
           persona4Title: "Office workers", persona4Body: "Today's task tree, report drafts, and helpers—without losing context when something stops.",
           automationEyebrow: "Public control plane", automationTitle: "Observe, act, then verify.",
-          automationLead: "<code>agenterm-cli</code> exposes the same fleet through typed local IPC. Stable tab IDs, structured snapshots, event positions, deterministic waits, and PNG evidence make automation inspectable.",
+          automationLead: "<code>agenterm cli</code> exposes the same fleet through typed local IPC. Stable tab IDs, structured snapshots, event positions, deterministic waits, and PNG evidence make automation inspectable.",
           automation1: "Create, select, rename, nest, capture, and drive tabs", automation2: "Wait for output or UI state without fixed sleeps", automation3: "Target an explicit local AgenTerm server", automation4: "Use a documented single-pane tmux/RMUX subset through <code>agenterm-mux</code>", automation5: "Inspect the native adapter and typed platform capability status through <code>protocol-info</code>",
           cliLabel: "AgenTerm command line example",
           compareTitle: "Not another tabbed terminal.", compareLead: "Tabby, ConEmu, Warp, and OS terminals optimize single sessions or chat-in-buffer. AgenTerm optimizes fleet durability and verifiable control.",
@@ -1183,7 +1183,7 @@
           readmeTitle: "README →", readmeBody: "Current highlights, install commands, CLI examples, and release workflow.",
           productTitle: "Product tree →", productBody: "Canonical requirements, current status, invariants, and links to owning modules.",
           visionTitle: "Product vision →", visionBody: "Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.",
-          scriptTitle: "Script runtime specification →", scriptBody: "Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm-rh`.",
+          scriptTitle: "Script runtime specification →", scriptBody: "Historical Rhai contract (archived sources); live automation uses native `.rh` via `agenterm rh`.",
           macPreviewTitle: "macOS preview safety →", macPreviewBody: "Verification and per-app Gatekeeper instructions for the unsigned developer preview.",
           macLocalTitle: "Local macOS build →", macLocalBody: "Build source, install a real application bundle, and keep the correct Dock item.",
           footerTagline: "AgenTerm · Windows, macOS & Linux · MIT OR Apache-2.0",
@@ -1211,7 +1211,7 @@
           installTabMacos: "macOS", installTabLinux: "Linux", installTabWindows: "Windows",
           installCopy: "複製", installCopied: "已複製",
           installNoteMacos: "無需 <code>sudo</code>。驗證 SHA-256 與 provenance、將命令連結至 <code>~/.local/bin</code>，並建立 <code>~/Applications/AgenTerm.app</code>。只有已簽署的 macOS 資產返回 HTTP 404 或 410 時，安裝程式才會回退至標示清楚的未簽署開發者預覽版；其他下載錯誤一律 fail-closed。已簽署發行版要求 provenance 為 <code>channel=release</code>、<code>signed=true</code>、<code>notarized=true</code>，並在本機逐一驗證每個執行檔的 Apple Developer ID 簽章，因此已簽署發行版的信任結論是由 provenance 與本機校驗共同推斷。<code>AGENTERM_ALLOW_UNSIGNED_PREVIEW</code> 仍只是相容性確認，不會強制選擇預覽版、略過校驗或隱藏信任警告。安裝前請先閱讀<a href=\"https://github.com/mgttt/agenterm/blob/main/docs/macos-unsigned-preview.zh-Hant.md\">安全說明</a>。",
-          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code>、<code>agenterm-cli</code> 與 <code>agenterm-rh</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
+          installNoteLinux: "無需 <code>sudo</code>。驗證 SHA-256、將版本化內容安裝至 <code>~/.local/share/agenterm</code>，並將 <code>agenterm</code> 連結至 <code>~/.local/bin</code>。若尚未在 <code>PATH</code> 中，請自行加入。",
           installNoteWindows: "下載對應 CPU 架構的便攜 zip，解壓至任意位置後執行 <code>agenterm.exe</code>。同一資料夾內含全部四個用戶端二進位與建置中繼資料——無需安裝程式、無需管理員權限。",
           downloadWindowsCta: "下載 Windows 版",
           specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specOpen: "<strong>開源</strong> MIT / Apache-2.0", specLoopback: "僅 loopback IPC", specSbom: "SBOM + provenance", specServer: "無頭 server 權威",
@@ -1251,7 +1251,7 @@
           persona3Title: "創作者", persona3Body: "草稿、渲染與發布管線，長文 Composer 輸入。",
           persona4Title: "辦公族", persona4Body: "今日任務樹、報告草稿與助手——事情停下來也不丟上下文。",
           automationEyebrow: "公開控制平面", automationTitle: "觀察、操作，然後驗證。",
-          automationLead: "<code>agenterm-cli</code> 透過具型別的本機 IPC 公開同一支艦隊。穩定分頁 ID、結構化快照、事件位置、確定性等待與 PNG 證據，讓自動化過程可以檢查。",
+          automationLead: "<code>agenterm cli</code> 透過具型別的本機 IPC 公開同一支艦隊。穩定分頁 ID、結構化快照、事件位置、確定性等待與 PNG 證據，讓自動化過程可以檢查。",
           automation1: "建立、選取、重新命名、巢狀組織、擷取並操控分頁", automation2: "等待輸出或 UI 狀態，不依賴固定睡眠", automation3: "明確指定本機 AgenTerm server", automation4: "透過 <code>agenterm-mux</code> 使用已有文件的單窗格 tmux/RMUX 子集", automation5: "透過 <code>protocol-info</code> 檢查原生介面卡與具型別的平台能力狀態",
           cliLabel: "AgenTerm 命令列範例",
           compareTitle: "不是又一個分頁終端機。", compareLead: "Tabby、ConEmu、Warp 與系統終端機優化單一會話或緩衝區內聊天。AgenTerm 優化艦隊耐久與可驗證控制。",
@@ -1265,7 +1265,7 @@
           readmeTitle: "README →", readmeBody: "目前重點、安裝命令、CLI 範例與發行流程。",
           productTitle: "產品樹 →", productBody: "正式需求、目前狀態、不變條件，以及各負責模組的連結。",
           visionTitle: "產品願景 →", visionBody: "思維樹、靈感採集與長期方向——與版本執行計劃分開。",
-          scriptTitle: "Script Runtime 規格 →", scriptBody: "歷史 Rhai 契約（來源已歸檔）；現行自動化以 `agenterm-rh` 執行原生 `.rh`。",
+          scriptTitle: "Script Runtime 規格 →", scriptBody: "歷史 Rhai 契約（來源已歸檔）；現行自動化以 `agenterm rh` 執行原生 `.rh`。",
           macPreviewTitle: "macOS 預覽版安全指南 →", macPreviewBody: "未簽署開發者預覽版的檔案驗證與個別 App Gatekeeper 操作說明。",
           macLocalTitle: "本機 macOS 建置 →", macLocalBody: "從原始碼建置、安裝真正的 App bundle，並保留正確的 Dock 項目。",
           footerTagline: "AgenTerm · Windows、macOS 與 Linux · MIT OR Apache-2.0",

@@ -1,6 +1,15 @@
-//! Resolve and forward dev-facing commands to `agenterm-rh`.
+//! Resolve and forward dev-facing commands to the in-process rh engine.
+//!
+//! The standalone `agenterm-rh` binary is retired: `agenterm-rh` used to be
+//! searched for as a file next to the current executable (or under
+//! `dist`/`target/debug`); now the rh engine lives inside the main
+//! `agenterm` PE itself, reached by prefixing its own path with
+//! `RH_ENGINE_ARGS` (the `__agenterm-internal-engine rh` marker — see
+//! `src/bin/agenterm.rs`'s `INTERNAL_ENGINE_SUBCOMMAND` dispatch, and
+//! `worker_supervisor::SCRIPT_WORKER_ENGINE_ARGS` for the sibling constant
+//! used by the hosted-worker spawn paths).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 
 const RH_DEV_COMMANDS: &[&str] = &[
@@ -17,35 +26,18 @@ const RH_DEV_COMMANDS: &[&str] = &[
     "caller-inventory",
 ];
 
-fn non_empty_file(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
-}
+/// Argv prefix that routes a `Command::new(<main agenterm PE>)` invocation
+/// into the in-process rh engine. Duplicated from
+/// `worker_supervisor::SCRIPT_WORKER_ENGINE_ARGS` rather than imported, to
+/// keep this leaf module free of a `worker_supervisor` dependency; both must
+/// stay in sync with `src/bin/agenterm.rs`'s `__agenterm-internal-engine`
+/// dispatch.
+const RH_ENGINE_ARGS: [&str; 2] = ["__agenterm-internal-engine", "rh"];
 
-pub fn resolve_adjacent_rh_cli() -> Option<PathBuf> {
-    let current = std::env::current_exe().ok()?;
-    let parent = current.parent()?;
-    let candidate = parent.join(crate::platform::filesystem::executable_name("agenterm-rh"));
-    non_empty_file(&candidate).then_some(candidate)
-}
-
+/// The rh engine now always lives inside the currently running main
+/// `agenterm` PE — there is no separate `agenterm-rh` file to locate.
 pub fn resolve_rh_cli() -> Option<PathBuf> {
-    if let Some(adjacent) = resolve_adjacent_rh_cli() {
-        return Some(adjacent);
-    }
-    let repo = std::env::var("AGENTERM_PROJECT_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())?;
-    let name = crate::platform::filesystem::executable_name("agenterm-rh");
-    for candidate in [
-        repo.join("dist").join(&name),
-        repo.join("target/debug").join(&name),
-    ] {
-        if non_empty_file(&candidate) {
-            return Some(candidate);
-        }
-    }
-    None
+    std::env::current_exe().ok()
 }
 
 pub fn try_forward_version_flags(arguments: &[String]) -> Option<std::io::Result<ExitStatus>> {
@@ -59,6 +51,7 @@ pub fn try_forward_version_flags(arguments: &[String]) -> Option<std::io::Result
     let rh = resolve_rh_cli()?;
     Some(
         Command::new(rh)
+            .args(RH_ENGINE_ARGS)
             .arg("version")
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -82,6 +75,7 @@ pub fn try_forward_dev_cli(arguments: &[String]) -> Option<std::io::Result<ExitS
     }?;
     Some(
         Command::new(rh)
+            .args(RH_ENGINE_ARGS)
             .args(forwarded)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -91,7 +85,7 @@ pub fn try_forward_dev_cli(arguments: &[String]) -> Option<std::io::Result<ExitS
 }
 
 pub fn check_many_requires_rh_error() -> String {
-    "check-many requires agenterm-rh; build with: cargo build --bin agenterm-rh".into()
+    "check-many requires the rh script engine; build with: cargo build --bin agenterm".into()
 }
 
 fn forward_if_rh_path(
@@ -120,16 +114,15 @@ fn forward_run_as_eval(arguments: &[String]) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{forward_if_rh_path, forward_run_as_eval, resolve_adjacent_rh_cli, resolve_rh_cli};
+    use super::{forward_if_rh_path, forward_run_as_eval, resolve_rh_cli};
 
     #[test]
-    fn adjacent_rh_cli_resolves_next_to_current_exe() {
-        assert!(resolve_adjacent_rh_cli().is_some());
-    }
-
-    #[test]
-    fn resolve_rh_cli_falls_back_to_target_debug() {
-        assert!(resolve_rh_cli().is_some());
+    fn resolve_rh_cli_is_the_running_main_pe() {
+        assert_eq!(
+            resolve_rh_cli(),
+            std::env::current_exe().ok(),
+            "the rh engine now lives inside the currently running main agenterm PE"
+        );
     }
 
     #[test]

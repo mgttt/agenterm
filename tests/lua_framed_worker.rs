@@ -1,19 +1,12 @@
-//! Black-box framed-worker test for agenterm-lua.
-//! Spawns `agenterm-lua --framed-worker`, sends `ScriptInvocation` frames,
-//! and validates `ScriptResult` responses.
+//! Black-box framed-worker test for the lua script engine.
+//! Spawns `agenterm __agenterm-internal-engine lua --framed-worker`
+//! (the standalone `agenterm-lua` binary is retired; this is the internal
+//! dispatch path the main `agenterm` PE uses in-process/via re-exec), sends
+//! `ScriptInvocation` frames, and validates `ScriptResult` responses.
 
 use serde_json::Value;
 use std::io::Write;
 use std::process::{Command, Stdio};
-
-fn lua_binary() -> String {
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
-    format!("target/{profile}/agenterm-lua.exe")
-}
 
 fn send_invocation(
     mut child: std::process::Child,
@@ -33,12 +26,8 @@ fn send_invocation(
 }
 
 fn spawn_lua() -> Result<std::process::Child, String> {
-    let binary = lua_binary();
-    assert!(
-        std::path::Path::new(&binary).exists(),
-        "agenterm-lua binary not found at {binary}. Run `cargo build --bin agenterm-lua` first."
-    );
-    Command::new(&binary)
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "lua"])
         .arg("--framed-worker")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

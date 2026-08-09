@@ -2,54 +2,8 @@
 
 use std::{ffi::OsString, path::PathBuf};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ScriptWorkerExecutableRole {
-    Primary,
-    CompatibilityFallback,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ScriptWorkerExecutableCandidate {
-    pub(crate) name: String,
-    pub(crate) role: ScriptWorkerExecutableRole,
-}
-
-impl ScriptWorkerExecutableCandidate {
-    pub(crate) fn is_compatibility_fallback(&self) -> bool {
-        self.role == ScriptWorkerExecutableRole::CompatibilityFallback
-    }
-}
-
 pub(crate) fn terminal_default_font_size() -> u16 {
     crate::platform::terminal_default_font_size()
-}
-
-pub(crate) fn script_worker_executable_names() -> Vec<ScriptWorkerExecutableCandidate> {
-    let mut candidates = Vec::with_capacity(2);
-    push_worker_names(
-        &mut candidates,
-        crate::platform::script_worker_default_executable_name(),
-        ScriptWorkerExecutableRole::Primary,
-    );
-    candidates
-}
-
-fn push_worker_names(
-    candidates: &mut Vec<ScriptWorkerExecutableCandidate>,
-    base_name: &str,
-    role: ScriptWorkerExecutableRole,
-) {
-    let native = crate::platform::filesystem::executable_name(base_name);
-    candidates.push(ScriptWorkerExecutableCandidate {
-        name: native.clone(),
-        role: role.clone(),
-    });
-    if !native.ends_with(".exe") {
-        candidates.push(ScriptWorkerExecutableCandidate {
-            name: format!("{base_name}.exe"),
-            role,
-        });
-    }
 }
 
 pub(crate) fn control_center_executable_name() -> String {
@@ -81,20 +35,6 @@ pub(crate) fn instance_registry_dir(override_path: Option<OsString>) -> PathBuf 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn script_worker_candidates_list_primary_worker_only() {
-        let candidates = script_worker_executable_names();
-        assert!(
-            candidates
-                .iter()
-                .all(|candidate| candidate.role == ScriptWorkerExecutableRole::Primary)
-        );
-        assert_eq!(
-            candidates[0].name,
-            crate::platform::filesystem::executable_name("agenterm-rh")
-        );
-    }
 
     #[test]
     fn explicit_instance_registry_path_has_priority() {

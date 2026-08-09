@@ -16,7 +16,62 @@ const INTERNAL_ENGINE_SUBCOMMAND: &str = "__agenterm-internal-engine";
 const ENGINE_SUBCOMMANDS: &[&str] = &["rh", "lua", "qjs", "sql"];
 
 fn main() -> std::process::ExitCode {
-    let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    // Cargo's `RUSTC_WRAPPER` contract accepts exactly one executable path —
+    // no extra argv (cargo invokes `$RUSTC_WRAPPER rustc <rustc's own
+    // argv>`) — so retiring the standalone `agenterm-rh.exe` requires this
+    // main PE itself to be able to answer as the configured wrapper.
+    // Detection is purely environment-based
+    // (`AGENTERM_INTERNAL_RUSTC_WRAPPER` + `RUSTC_WRAPPER` process identity,
+    // see `agenterm::incremental_wrapper::is_incremental_rustc_wrapper_process`),
+    // never argv-shape-based, so it composes with zero risk of colliding
+    // with `cli`/`tui`/`server`/the engine subcommands below: cargo's own
+    // invocation passes rustc's argv (typically starting with a path to
+    // `rustc`), never any of this dispatcher's tokens. This has to run
+    // before every other branch — including before argv is even collected
+    // as `String` (`env::args()` panics on the first non-UTF-8 argument,
+    // which would fire before the wrapper probe ever got a chance to run;
+    // `script_rh_cli_main::run_main`'s doc comment established this same
+    // `_os`-first, convert-after-the-check ordering for the identical
+    // reason).
+    let os_args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if agenterm::incremental_wrapper::is_incremental_rustc_wrapper_process(&os_args) {
+        agenterm::incremental_wrapper::run_incremental_rustc_wrapper(os_args);
+    }
+    // `--internal-incremental-finalize` is invoked directly (not through
+    // cargo/`RUSTC_WRAPPER`) by the build script, using the same stable
+    // wrapper executable — see `finalize_incremental_manifest`'s callers.
+    // `is_incremental_rustc_wrapper_process` above deliberately excludes
+    // this shape so the two paths stay disjoint.
+    if os_args
+        .first()
+        .is_some_and(|argument| argument == "--internal-incremental-finalize")
+    {
+        let arguments = os_args[1..]
+            .iter()
+            .cloned()
+            .map(|argument| {
+                argument
+                    .into_string()
+                    .unwrap_or_else(|invalid| panic!("invalid utf-8 sequence in argument: {invalid:?}"))
+            })
+            .collect::<Vec<_>>();
+        return match agenterm::incremental_wrapper::finalize_incremental_manifest(&arguments) {
+            Ok(code) => std::process::ExitCode::from(code),
+            Err(error) => {
+                eprintln!("{error:#}");
+                std::process::ExitCode::from(2)
+            }
+        };
+    }
+
+    let mut args = os_args
+        .into_iter()
+        .map(|argument| {
+            argument
+                .into_string()
+                .unwrap_or_else(|invalid| panic!("invalid utf-8 sequence in argument: {invalid:?}"))
+        })
+        .collect::<Vec<_>>();
 
     // The public GUI-subsystem process attaches to the caller's console, then
     // starts the same PE with explicitly duplicated stdio handles. The child

@@ -6,6 +6,15 @@ Runtime contract (historical Rhai): [AgenTerm Script Runtime specification](../d
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
+> **2026-08-09 decision:** the standalone `agenterm-rh.exe` / `agenterm-lua.exe`
+> / `agenterm-qjs.exe` / `agenterm-sql.exe` binaries described throughout the
+> commit-by-commit history below (including the `[[bin]]`-in-root-package
+> shape) are **retired** (commit `234b2f87`). All four engines now ship as
+> argv-transparent subcommands of the main `agenterm` PE
+> (`agenterm rh|lua|qjs|sql <args>`) — the historical narrative below still
+> correctly records how each engine got there, but no release build produces
+> a separate `agenterm-{rh,lua,qjs,sql}` executable anymore.
+
 ## Script engine family
 
 This PRD's scope grew from one embedded language to a **family of script
@@ -169,15 +178,19 @@ this parity test.
 
 ## Shipped baseline
 
-- [x] `agenterm-rh.exe` is the sole task and supervised worker front door:
+- [x] `agenterm rh` is the sole task and supervised worker front door:
   one-shot and persistent supervisors resolve it and default the execution
   backend to `rh`. It directly hosts named tasks plus private
   `--worker`/`--framed-worker` modes through the shared library.
   The formerly shipped `agenterm-rhai.exe` compatibility shim, Rhai REPL, and
-  `agenterm-cli script repl` forwarding were **removed** in Phase C Wave 4.5;
+  `agenterm cli script repl` forwarding were **removed** in Phase C Wave 4.5;
   archived `.rhai` sources remain under `scripts/archive/rhai/` only.
   The existing one-shot supervisor routes retain their single worker topology.
   All expose the same catalog, parser, supervisor, and runtime.
+  **2026-08-09:** the standalone `agenterm-rh.exe` / `agenterm-lua.exe` /
+  `agenterm-qjs.exe` / `agenterm-sql.exe` binaries (commit `234b2f87`) are
+  retired; all four engines are now argv-transparent subcommands of the main
+  `agenterm` PE (`agenterm rh|lua|qjs|sql <args>`).
 - [x] rh-generated native packs use an AgenTerm-owned `i64` entry ABI and their
   generated Cargo manifest no longer depends on the Rhai crate. Native subset
   packs and compatibility-delegating pack stubs therefore contain no embedded
@@ -189,7 +202,7 @@ this parity test.
   typed host-error path, and older v2/v3 packs remain loadable. Dynamic path
   expressions and other `std::` APIs remain explicit migration work.
 - [x] named-task manifests and corpus checks accept `.rh` entries. The public
-  `agenterm-rh task run` path owns a native task probe whose transpiled Rust is
+  `agenterm rh task run` path owns a native task probe whose transpiled Rust is
   qualified to contain neither whole-script `rh_host_run_script` nor localized
   `rh_host_eval_int`; production task migration must satisfy the same gate
   before its `.rhai` entry is archived.
@@ -217,7 +230,8 @@ this parity test.
   active `.rhai` to a zero-fallback `.rh` entry; its interpreted implementation
   is retained only under `scripts/archive/rhai/` for migration archaeology.
 - [x] Candidate and Promotion execute all active scripting steps through the
-  packaged   `agenterm-rh` front door. Workflow policy tests reject any restored legacy
+  packaged `agenterm rh` front door (formerly the standalone `agenterm-rh`
+  binary, retired 2026-08-09). Workflow policy tests reject any restored legacy
   `agenterm-rhai` executable reference (removed Wave 4.5); `.rhai` source paths remain explicit
   interpreter-migration debt rather than executable-entry ownership.
 - [x] host API v9 exposes native bounded `std::process::command_status` without
@@ -831,7 +845,7 @@ Migration ledger:
 | Qualified package boundary self-test | `scripts/rh/package-qualified-selftest.rh` plus the shared package module | `scripts/package-qualified-selftest.ps1` | current migration change | old and Rhai self-tests pass; named task and Windows public integration prove exact ZIP members and reject Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with exact owned-fixture cleanup | deleted; ordinary qualification invokes the named rh task |
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
 | Semantic UX geometry, interaction, restart, and no-activate journey | `scripts/rh/remote-ui-smoke.rh`, `scripts/rh/startup-smoke.rh`, and `scripts/rh/working-context-smoke.rh` plus typed foreground-window observation (archived Rhai under `scripts/archive/rhai/`) | `tests/ux_smoke.ps1` | native `.rh` cutover | the three named rh journeys emit all nineteen declared UX/parity evidence IDs and prove semantic minimize/maximize/resize, locale, modal wait, hierarchy cycle rejection and child promotion, adaptive Tabs, physical focus/scroll/selection/clipboard, Settings isolation, safe CWD quoting and OSC 7, close/detach, exact no-activate observation, and persistent tab metadata across restart | deleted; qualification owns the behavior through the three existing journeys without launching a duplicate GUI fleet |
-| Cross-platform UX parity orchestration and evidence matrix | `scripts/rh/platform-ux-parity-smoke.rh` plus the shared native harness (archived Rhai under `scripts/archive/rhai/`) | `scripts/archive/rhai/platform-ux-parity-smoke.rhai` | native `.rh` cutover (codegen rev 58) | bundled validation and pack build prove Native execution with he_count=1 while preserving startup, wake, platform branch execution, partial evidence attribution, failure-root classification, and JSON/CSV matrix production | all three Windows/Linux/macOS task entries are native `.rh` and invoke `agenterm-rh`; the old Rhai source is archived |
+| Cross-platform UX parity orchestration and evidence matrix | `scripts/rh/platform-ux-parity-smoke.rh` plus the shared native harness (archived Rhai under `scripts/archive/rhai/`) | `scripts/archive/rhai/platform-ux-parity-smoke.rhai` | native `.rh` cutover (codegen rev 58) | bundled validation and pack build prove Native execution with he_count=1 while preserving startup, wake, platform branch execution, partial evidence attribution, failure-root classification, and JSON/CSV matrix production | all three Windows/Linux/macOS task entries are native `.rh` and invoke `agenterm rh`; the old Rhai source is archived |
 | Fast repository lint | `scripts/rh/lint.rh` plus thin `lint.cmd` bootstrap | `lint.ps1` | current migration change | public task and wrapper pass JSON parsing, strict UTF-8/NUL/conflict-marker hygiene, production rh checks, malformed JSON/UTF-8/conflict/rh self-tests, and Rust rustfmt/Clippy mode; the bounded `check-many` manifest path runs each source in a fresh Engine with typed per-file diagnostics while avoiding one Script process per file (67 production files: 5,398 ms to 2,097 ms on the 2026-07-31 Windows baseline); process inspection confirms no PowerShell child | deleted; check calls the same rh task and the batch file owns only Script worker bootstrap and argument forwarding |
 | Integrated quality-gate orchestration | `scripts/rh/check.rh` (Native pack, he_count=1) plus `scripts/rh/artifact-verification.rh` and thin `check.cmd` bootstrap; archived Rhai under `scripts/archive/rhai/` | `check.ps1` | native `.rh` cutover | `check.cmd --quick` and `--skip-smoke` pass through the public named task; the latter completes library tests plus integration groups, staged six-artifact verification, declaration discovery, diagnostics, timing, and fail-closed qualification bookkeeping without PowerShell | deleted; CI and release workflow call the same batch bootstrap and native `.rh` task |
 | Qualification result and receipt production | `scripts/rh/check.rh` plus `scripts/rh/lib/qualification.rh` (Native pack path) | `scripts/qualification.ps1` | native `.rh` cutover | the named check task validates exact required gates and executable evidence declarations, rejects failed/skipped or missing-stress results, binds artifact metadata to source state, and writes the receipt only for a complete stress-inclusive run | deleted; quality orchestration imports the shared native `.rh` module directly |
@@ -895,7 +909,7 @@ Migration ledger:
   Every repository-owned `.cmd` or `.bat` must therefore either be replaced by
   a named rh task or have an equivalent checked-in `.sh` entry for Linux/macOS.
   Matching names alone are insufficient: the cross-platform audit and CI must
-  execute the Unix entry through the native `agenterm-rh` task host and verify
+  execute the Unix entry through the native `agenterm rh` task host and verify
   argument, exit-status, side-effect, and evidence parity.
 - [x] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and
@@ -927,7 +941,7 @@ Migration ledger:
 
 ## Public black-box acceptance
 
-- [x] tests invoke only released `agenterm-cli script` commands and compare the
+- [x] tests invoke only released `agenterm cli script` commands and compare the
   offline catalog with actual runtime behavior.
 - [ ] isolated temporary roots cover Unicode and long paths, metadata,
   directory operations, atomic replacement, interruption, access failure, and

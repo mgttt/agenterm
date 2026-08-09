@@ -1,5 +1,8 @@
 //! Black-box tests for the public Script Runtime CLI on Unix hosts.
-//! Primary surface: `agenterm-rh` and `.rh`.
+//! Primary surface: the rh engine and `.rh`, run through the main `agenterm`
+//! PE's `__agenterm-internal-engine rh` dispatch (the standalone
+//! `agenterm-rh` binary is retired; on Unix this call is in-process, no
+//! re-exec).
 //! Uses `Command::output()` so exit codes are read from `ExitStatus`, not shell pipes.
 
 #[cfg(unix)]
@@ -14,17 +17,14 @@ mod unix {
         Path::new(env!("CARGO_MANIFEST_DIR"))
     }
 
-    fn rh_bin() -> &'static str {
-        env!("CARGO_BIN_EXE_agenterm-rh")
-    }
-
     fn run_rh(args: &[&str]) -> std::process::Output {
         let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
-        Command::new(rh_bin())
+        Command::new(env!("CARGO_BIN_EXE_agenterm"))
+            .args(["__agenterm-internal-engine", "rh"])
             .current_dir(repo_root())
             .args(args)
             .output()
-            .expect("spawn agenterm-rh")
+            .expect("spawn agenterm rh")
     }
 
     fn format_output(output: &std::process::Output) -> String {

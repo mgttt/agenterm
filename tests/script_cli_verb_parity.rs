@@ -1,22 +1,25 @@
-//! Cross-engine **CLI-level** verb parity for the four script-engine binaries
-//! (`agenterm-rh`, `agenterm-lua`, `agenterm-qjs`, `agenterm-sql` — all
-//! `[[bin]]` entries of the root `agenterm` package, see root `Cargo.toml`).
+//! Cross-engine **CLI-level** verb parity for the four script engines (rh,
+//! lua, qjs, sql). The standalone `agenterm-{rh,lua,qjs,sql}` `[[bin]]`
+//! binaries are retired; every engine is now reached exclusively through the
+//! root `agenterm` PE (`crates/agenterm-{rh,lua,qjs,sql}` remain as library
+//! crates, just no longer packaged as their own executables) — see
+//! `src/bin/agenterm.rs`'s `dispatch_engine` and
+//! `plan/design-script-engine-subcommands.md`.
 //!
 //! The capability-alignment contract (`plan/plan-v0.1.16.md` §1 Rh: "CLI
 //! 动词对齐 ... 同样的 typed JSON 输出、退出码") has lib-level parity coverage
 //! already (`tests/script_engine_parity.rs` drives each engine's
 //! `check_many::{read_manifest, run_check_many}` directly), but nothing
-//! before this file actually spawned the four real binaries and compared
-//! their *observable* CLI behavior — argv shape, stdout, and exit code.
+//! before this file actually spawned the real binary and compared
+//! its *observable* CLI behavior — argv shape, stdout, and exit code.
 //! This file closes that gap. It does **not** duplicate the lib-level
 //! `CheckManyReport` field-by-field assertions from `script_engine_parity.rs`
 //! — it treats each engine as an opaque child process and asserts only what
 //! a caller of the CLI can see: exit status and stdout/stderr substrings.
 //!
-//! `env!("CARGO_BIN_EXE_agenterm-*")` is used throughout (never
-//! `cargo build` or a hand-rolled `target/` path) — because all four are
-//! `[[bin]]`s of *this* package, Cargo builds them automatically before
-//! running this integration test binary.
+//! `env!("CARGO_BIN_EXE_agenterm")` is used throughout (never `cargo build`
+//! or a hand-rolled `target/` path) — Cargo builds the one binary
+//! automatically before running this integration test binary.
 //!
 //! # Verb × engine availability map
 //!
@@ -102,29 +105,34 @@
 //!
 //! # Invocation axis (SUB-M4, `plan/design-script-engine-subcommands.md` §4)
 //!
-//! Every scenario above additionally runs each engine through BOTH
-//! [`Invocation`]s: the standalone `agenterm-<engine>` binary (as before),
-//! and the new `agenterm <engine> <args>` alias added in SUB-M3
-//! (`src/bin/agenterm.rs`'s `dispatch_engine`, reached either directly
-//! in-process on Unix or through the same duplicated-handle console-worker
-//! re-exec the `cli`/`tui` subcommands already use on Windows). Each
-//! scenario's own assertions run once per invocation, and
+//! Now that the standalone `agenterm-<engine>` binaries are retired, both
+//! axis members are just the two ways `agenterm.rs`'s own dispatch reaches
+//! `dispatch_engine`: [`Invocation::Internal`] spawns `agenterm
+//! __agenterm-internal-engine <engine> <args>` directly (the worker-mode
+//! marker `main()` forwards to in `INTERNAL_ENGINE_SUBCOMMAND`), and
+//! [`Invocation::Subcommand`] spawns the public `agenterm <engine> <args>`
+//! alias, which on Windows re-execs through the same duplicated-handle
+//! console-worker the `cli`/`tui` subcommands use before landing on the same
+//! internal marker, and on Unix calls the engine's entry point in-process
+//! with no re-exec at all. Keeping both members (rather than collapsing to a
+//! single public-only axis) is nearly free here — the axis machinery already
+//! iterates `Invocation::ALL` and diffs the two outputs — and it still
+//! catches the one thing that's genuinely different between them on
+//! Windows: whether the console-worker re-exec hop changes observable
+//! behavior. Each scenario's own assertions run once per invocation, and
 //! [`assert_parity_across_invocations`] additionally asserts the exit code
-//! and stdout are byte-for-byte identical across the two — the alias must
-//! be genuinely transparent, not just "close enough".
+//! and stdout are byte-for-byte identical across the two — the public alias
+//! must be genuinely transparent over the internal marker, not just "close
+//! enough".
 
 use std::path::Path;
 use std::process::{Command, Output};
 
-const RH_BIN: &str = env!("CARGO_BIN_EXE_agenterm-rh");
-const LUA_BIN: &str = env!("CARGO_BIN_EXE_agenterm-lua");
-const QJS_BIN: &str = env!("CARGO_BIN_EXE_agenterm-qjs");
-const SQL_BIN: &str = env!("CARGO_BIN_EXE_agenterm-sql");
-/// The root `agenterm` binary — SUB-M4's added invocation axis
-/// (`plan/design-script-engine-subcommands.md` §4) spawns this with an
-/// engine token prepended (`agenterm <token> <args...>`) as the alternative
-/// to spawning `RH_BIN`/`LUA_BIN`/`QJS_BIN`/`SQL_BIN` directly, and asserts
-/// the two paths agree byte-for-byte.
+/// The root `agenterm` binary — the only executable this file spawns now
+/// that the standalone per-engine binaries are retired. Both
+/// [`Invocation`] members spawn this, differing only in which prefix argv
+/// they add before the engine's own args, and
+/// [`assert_parity_across_invocations`] asserts the two agree byte-for-byte.
 const AGENTERM_BIN: &str = env!("CARGO_BIN_EXE_agenterm");
 
 /// One engine's fixed CLI facts. Fixtures (`valid_source`/`broken_source`)
@@ -133,7 +141,6 @@ const AGENTERM_BIN: &str = env!("CARGO_BIN_EXE_agenterm");
 /// per-engine sources, not reinvented here.
 struct Engine {
     name: &'static str,
-    bin: &'static str,
     ext: &'static str,
     kind: &'static str,
     valid_source: &'static str,
@@ -149,7 +156,6 @@ struct Engine {
 
 const RH: Engine = Engine {
     name: "rh",
-    bin: RH_BIN,
     ext: "rh",
     kind: "agenterm-rh-check-manifest",
     valid_source: "40 + 2",
@@ -161,7 +167,6 @@ const RH: Engine = Engine {
 
 const LUA: Engine = Engine {
     name: "lua",
-    bin: LUA_BIN,
     ext: "lua",
     kind: "agenterm-lua-check-manifest",
     valid_source: "return 42",
@@ -173,7 +178,6 @@ const LUA: Engine = Engine {
 
 const QJS: Engine = Engine {
     name: "qjs",
-    bin: QJS_BIN,
     ext: "js",
     kind: "agenterm-qjs-check-manifest",
     valid_source: "function entry() { return 42; }",
@@ -190,7 +194,6 @@ const QJS: Engine = Engine {
 
 const SQL: Engine = Engine {
     name: "sql",
-    bin: SQL_BIN,
     ext: "sql",
     kind: "agenterm-sql-check-manifest",
     valid_source: "SELECT 1;",
@@ -208,38 +211,41 @@ fn engines() -> [Engine; 4] {
 }
 
 /// SUB-M4's invocation axis (`plan/design-script-engine-subcommands.md`
-/// §4): every scenario runs each engine both as the standalone
-/// `agenterm-<engine>` binary and as `agenterm <engine> <args>` — the alias
-/// path added in SUB-M3 (`src/bin/agenterm.rs`'s `dispatch_engine`). On
-/// Windows the alias path re-execs through the same duplicated-handle
-/// console worker the `cli`/`tui` subcommands use (§1); on Unix it calls
-/// the engine's entry point in-process. Either way the two invocations must
-/// be indistinguishable to a caller capturing stdout/stderr/exit code.
+/// §4), now that the standalone `agenterm-<engine>` binaries are retired:
+/// every scenario runs each engine both through the internal marker
+/// directly and through the public `agenterm <engine> <args>` alias — the
+/// two paths `src/bin/agenterm.rs`'s `main()` can reach `dispatch_engine`
+/// from. On Windows the [`Invocation::Subcommand`] path re-execs through
+/// the same duplicated-handle console worker the `cli`/`tui` subcommands
+/// use (§1), landing on the same internal marker `main()` handles for
+/// [`Invocation::Internal`]; on Unix both call the engine's entry point
+/// in-process with no re-exec. Either way the two invocations must be
+/// indistinguishable to a caller capturing stdout/stderr/exit code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Invocation {
-    Standalone,
+    /// `agenterm __agenterm-internal-engine <engine> <args>` — the marker
+    /// `main()`'s `INTERNAL_ENGINE_SUBCOMMAND` branch dispatches in-process,
+    /// with fully-piped stdio and no extra re-exec hop on any platform.
+    Internal,
+    /// `agenterm <engine> <args>` — the public alias.
     Subcommand,
 }
 
 impl Invocation {
-    const ALL: [Invocation; 2] = [Invocation::Standalone, Invocation::Subcommand];
+    const ALL: [Invocation; 2] = [Invocation::Internal, Invocation::Subcommand];
 
     /// Resolves this invocation for `engine` into the executable to spawn
-    /// and the full argv to pass it (the standalone binary's own `args`
-    /// unchanged, or `agenterm <engine.name> <args>` for the subcommand
-    /// alias).
+    /// (always the main `agenterm` PE) and the full argv to pass it:
+    /// `__agenterm-internal-engine <engine.name> <args>` for the internal
+    /// marker, or `<engine.name> <args>` for the public subcommand alias.
     fn command(self, engine: &Engine, args: &[&str]) -> (&'static str, Vec<String>) {
-        match self {
-            Invocation::Standalone => {
-                (engine.bin, args.iter().map(|arg| arg.to_string()).collect())
-            }
-            Invocation::Subcommand => {
-                let mut full = Vec::with_capacity(args.len() + 1);
-                full.push(engine.name.to_string());
-                full.extend(args.iter().map(|arg| arg.to_string()));
-                (AGENTERM_BIN, full)
-            }
+        let mut full = Vec::with_capacity(args.len() + 2);
+        if self == Invocation::Internal {
+            full.push("__agenterm-internal-engine".to_string());
         }
+        full.push(engine.name.to_string());
+        full.extend(args.iter().map(|arg| arg.to_string()));
+        (AGENTERM_BIN, full)
     }
 }
 

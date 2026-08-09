@@ -204,9 +204,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   unknown, and missing-value options fail before startup, and a running
   older server that rejects the internal handoff produces nonzero stderr
   guidance rather than a false-success launcher exit
-- [x] `agenterm cli`: native AgenTerm observation and automation client on the
-  **same single Windows-subsystem PE** — no console-subsystem launcher, no
-  `agenterm.com`, no wrapper script. `agenterm.exe cli <command>` snapshots its
+- [x] `agenterm cli`: native AgenTerm observation and automation client remains
+  implemented by the Windows-subsystem `agenterm.exe`. The minimal
+  Console-subsystem `agenterm.com` transparently forwards arguments and stdio,
+  waits, and propagates the exit code so extensionless `agenterm cli` / `tui`
+  has normal shell ownership. Its Windows implementation has no Rust standard
+  library, heap, or business dependencies: a raw Win32 entry resolves the
+  sibling executable, preserves the original argument tail, inherits handles,
+  waits, and exits with the child status. Every staged profile enforces its
+  64 KiB maximum, preventing a debug-runtime regression from entering `dist/`.
+  `agenterm.exe cli <command>` snapshots its
   std handles, attaches the caller's console
   (`AttachConsole(ATTACH_PARENT_PROCESS)`), restores any caller pipe/file
   redirection the attach displaced, duplicates the real stdin/stdout/stderr
@@ -238,19 +245,23 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   contracts, and its absence, crash, renderer failure or upgrade never ends a
   server, PTY or terminal GUI. Detailed product scope belongs to
   [Control Center](PRD_02_21_control_center.md).
-- [x] `agenterm-rh.exe`: general-purpose local rh runtime with one-shot
+- [x] `agenterm rh`: general-purpose local rh runtime with one-shot
   run/eval/check/task entry points through native AOT and the shared worker
   library. Each one-shot invocation owns a fresh supervised worker. The formerly
   shipped legacy `agenterm-rhai.exe` Rhai shim (removed Wave 4.5), persistent REPL, and `agenterm cli script repl`
   forwarding were **removed** in Phase C Wave 4.5; archived `.rhai` sources
-  live under `scripts/archive/rhai/`. Linux/macOS callers invoke `agenterm-rh`
+  live under `scripts/archive/rhai/`. Linux/macOS callers invoke `agenterm rh`
   directly. Existing one-shot commands retain their single-worker supervisor.
   Both paths reuse one runtime library, API graph, local scheduler, standard
   library, modules, named tasks, and typed Fleet APIs without becoming a
   persistent daemon or an Agent permission layer. The worker, framed-protocol,
   and execute implementation is owned by the shared `agenterm` library;
-  `agenterm-rh` retains the CLI dispatch surface plus its incremental-build
+  `agenterm rh` retains the CLI dispatch surface plus its incremental-build
   wrapper rather than a second worker implementation.
+  **2026-08-09 decision:** the standalone `agenterm-rh.exe` / `agenterm-lua.exe`
+  / `agenterm-qjs.exe` / `agenterm-sql.exe` binaries are **retired**; all four
+  script engines are now argv-transparent subcommands of the main `agenterm`
+  PE (`agenterm rh|lua|qjs|sql <args>`), not separate release executables.
 - [x] v0.1.12 executable-name decision (historical): formerly retained
   historical `agenterm-rhai.exe` / `agenterm-rhai` as the canonical name for the same
   unrestricted Rhai runtime (shim removed Wave 4.5). Renaming is deferred until

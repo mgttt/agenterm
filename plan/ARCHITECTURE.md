@@ -86,12 +86,17 @@ src/platform/adapters/       主机实现（物理目录）
 
 | 二进制 | 路径 | 角色 |
 |--------|------|------|
-| `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；子命令 `server` = 无窗权威（另进程同 PE） |
-| `agenterm-cli` | `src/bin/agenterm-cli.rs` | 控制平面 CLI；子命令 `mux` / `mcp`（无独立 PE） |
+| `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；`server` = 无窗权威；`cli` = 共享控制平面入口 |
+| `agenterm-com` | `src/bin/agenterm-com.rs` | 极简 Windows Console-subsystem 转发器；交付名 `agenterm.com`，同步等待 `agenterm.exe` |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
 | `agenterm-rhai` | `src/bin/agenterm-rhai.rs` | 本地 Rhai 运行时（无权限策略） |
-| `agenterm-rh` | `crates/agenterm-rh/src/main.rs` | pack **rh** 子集校验 / transpile / AOT（并行轨） |
 | `agenterm-con` | `src/bin/agenterm-con.rs` | 最小控制台宿主（conhost 等价物；单窗 ConPTY/PTY，无 server/Fleet；平台 pixel-window 直调） |
+
+**2026-08-09：** `agenterm-rh` / `agenterm-lua` / `agenterm-qjs` / `agenterm-sql`
+四个独立 `[[bin]]` 已退役（commit `234b2f87`），改为主 `agenterm` PE 的
+argv 透传子命令：`agenterm rh|lua|qjs|sql <args>`（rh 实现仍在
+`crates/agenterm-rh`，qjs/lua/sql 同理各自 crate；只是不再各自产出独立
+release 可执行文件）。
 
 **rh 切换：** 宿主经 [`src/script_backend.rs`](../src/script_backend.rs) 选择 backend；详见 [`plan/design-rh-aot.md`](design-rh-aot.md)。
 

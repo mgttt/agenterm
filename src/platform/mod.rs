@@ -32,9 +32,8 @@ pub(crate) use policy::host::{
 };
 pub(crate) use policy::paths::{
     default_audit_path, default_workspace_path, instance_registry_directory_root,
-    ipc_default_workspace_path, ipc_default_workspace_path_for,
-    script_worker_default_executable_name, settings_root_path, terminal_default_font_size,
-    workspace_instance_scope,
+    ipc_default_workspace_path, ipc_default_workspace_path_for, settings_root_path,
+    terminal_default_font_size, workspace_instance_scope,
 };
 pub(crate) use policy::runtime::hosted_script_worker_available;
 #[allow(unused_imports)]

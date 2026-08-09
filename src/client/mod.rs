@@ -9,6 +9,13 @@ use std::{
 
 use anyhow::{Context as _, Result};
 
+macro_rules! cli_println {
+    ($($arg:tt)*) => { println!($($arg)*) };
+}
+macro_rules! cli_eprintln {
+    ($($arg:tt)*) => { eprintln!($($arg)*) };
+}
+
 use crate::script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
     ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
@@ -132,7 +139,7 @@ struct CliControlOptions {
     receipt_json: bool,
 }
 
-/// Fleet mux and MCP frontends hosted only under `agenterm-cli` (no separate PE).
+/// Fleet mux and MCP frontends hosted only under `agenterm cli` (no separate PE).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HostedSubcommand {
     Mux,
@@ -142,7 +149,7 @@ pub(crate) enum HostedSubcommand {
 /// Resolves the leading argument to a hosted frontend, if any.
 ///
 /// Only an exact bare word counts. A leading `-` is always an option for the
-/// CLI itself, and `agenterm-cli mux` must not be reachable by accident from
+/// CLI itself, and `agenterm cli mux` must not be reachable by accident from
 /// something like a `--endpoint mux` value, which is why this looks at the
 /// first argument only and does not scan.
 pub(crate) fn hosted_subcommand(first: Option<&str>) -> Option<HostedSubcommand> {
@@ -154,7 +161,14 @@ pub(crate) fn hosted_subcommand(first: Option<&str>) -> Option<HostedSubcommand>
 }
 
 pub fn run_cli_entry() -> i32 {
-    let mut arguments: Vec<String> = env::args().skip(1).collect();
+    run_cli_entry_with_args(env::args().skip(1).collect())
+}
+
+/// Same as `run_cli_entry` but with an explicit argument list.
+///
+/// This is the entry point used by `agenterm cli <args>` so the GUI PE can
+/// strip its own subcommand name and forward the remainder.
+pub fn run_cli_entry_with_args(mut arguments: Vec<String>) -> i32 {
     // `mux` and `mcp` are exclusive CLI subcommands (standalone agenterm-mux /
     // agenterm-mcp PEs removed). Each strips its name and delegates to the
     // shared library entry. Checked before CLI option parsing so frontend flag
@@ -176,58 +190,58 @@ pub fn run_cli_entry() -> i32 {
         match arguments.first().map(String::as_str) {
             Some("--address") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-cli --address requires HOST:PORT");
+                    cli_eprintln!("agenterm cli --address requires HOST:PORT");
                     return 2;
                 }
                 arguments.remove(0);
                 let address = arguments.remove(0);
                 if let Err(error) = parse_loopback_ipc_address(&address) {
-                    eprintln!("{error:#}");
+                    cli_eprintln!("{error:#}");
                     return 2;
                 }
                 if selectors.address.replace(address).is_some() {
-                    eprintln!("agenterm-cli --address may be specified only once");
+                    cli_eprintln!("agenterm cli --address may be specified only once");
                     return 2;
                 }
             }
             Some("--endpoint") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-cli --endpoint requires a typed endpoint");
+                    cli_eprintln!("agenterm cli --endpoint requires a typed endpoint");
                     return 2;
                 }
                 arguments.remove(0);
                 if selectors.endpoint.replace(arguments.remove(0)).is_some() {
-                    eprintln!("agenterm-cli --endpoint may be specified only once");
+                    cli_eprintln!("agenterm cli --endpoint may be specified only once");
                     return 2;
                 }
             }
             Some("--instance") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-cli --instance requires a name");
+                    cli_eprintln!("agenterm cli --instance requires a name");
                     return 2;
                 }
                 arguments.remove(0);
                 if selectors.instance.replace(arguments.remove(0)).is_some() {
-                    eprintln!("agenterm-cli --instance may be specified only once");
+                    cli_eprintln!("agenterm cli --instance may be specified only once");
                     return 2;
                 }
             }
             Some("--request-id") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-cli --request-id requires an ID");
+                    cli_eprintln!("agenterm cli --request-id requires an ID");
                     return 2;
                 }
                 arguments.remove(0);
                 let value = arguments.remove(0);
                 if let Err(error) = RequestId::new(value.clone()) {
-                    eprintln!("{error}");
+                    cli_eprintln!("{error}");
                     return 2;
                 }
                 control_options.request_id = Some(value);
             }
             Some("--deadline-ms") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-cli --deadline-ms requires milliseconds");
+                    cli_eprintln!("agenterm cli --deadline-ms requires milliseconds");
                     return 2;
                 }
                 arguments.remove(0);
@@ -237,7 +251,7 @@ pub fn run_cli_entry() -> i32 {
                         control_options.deadline_ms = Some(value);
                     }
                     _ => {
-                        eprintln!("agenterm-cli --deadline-ms must be from 1 to 60000");
+                        cli_eprintln!("agenterm cli --deadline-ms must be from 1 to 60000");
                         return 2;
                     }
                 }
@@ -250,14 +264,14 @@ pub fn run_cli_entry() -> i32 {
         }
     }
     if let Err(error) = set_ipc_selectors(selectors) {
-        eprintln!("{error:#}");
+        cli_eprintln!("{error:#}");
         return 2;
     }
     if arguments
         .first()
         .is_some_and(|arg| arg == "-V" || arg == "--version")
     {
-        println!("agenterm-cli {}", env!("CARGO_PKG_VERSION"));
+        cli_println!("agenterm cli {}", env!("CARGO_PKG_VERSION"));
         return 0;
     }
     if arguments.is_empty()
@@ -272,7 +286,7 @@ pub fn run_cli_entry() -> i32 {
         .first()
         .is_some_and(|argument| argument.starts_with('-'))
     {
-        eprintln!(
+        cli_eprintln!(
             "unknown global option '{}'. Use --endpoint ENDPOINT, --address HOST:PORT, or \
              --instance NAME before the command.",
             arguments[0]
@@ -293,7 +307,7 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
     }
     arguments.insert(0, "script".to_owned());
     if let Err(error) = validate_control_command(&arguments) {
-        eprintln!("{error}");
+        cli_eprintln!("{error}");
         return 2;
     }
     run_script_command_direct(&arguments)
@@ -325,14 +339,14 @@ fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Err(0),
         Err(error) => {
-            eprintln!("script_stdout: failed to write output: {error}");
+            cli_eprintln!("script_stdout: failed to write output: {error}");
             Err(1)
         }
     }
 }
 
 fn run_script_repl(_arguments: &[String]) -> i32 {
-    eprintln!(
+    cli_eprintln!(
         "script repl was removed with the Rhai interpreter; \
          use agenterm-rh for check, eval, and run on .rh sources"
     );
@@ -346,7 +360,7 @@ pub fn run_mux_entry() -> i32 {
 /// Runs the mux frontend over an explicit argument list.
 ///
 /// Taking the arguments instead of reading `env::args` is what lets
-/// `agenterm-cli mux …` host this surface in-process: the subcommand strips its
+/// `agenterm cli mux …` host this surface in-process: the subcommand strips its
 /// own name and hands the remainder here, so both entry points execute the same
 /// code and cannot drift.
 pub fn run_mux_entry_with_args(arguments: Vec<String>) -> i32 {
@@ -376,52 +390,52 @@ pub fn run_mux_entry_with_args(arguments: Vec<String>) -> i32 {
         match arguments.first().map(String::as_str) {
             Some("--address") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-mux --address requires HOST:PORT");
+                    cli_eprintln!("agenterm-mux --address requires HOST:PORT");
                     return 2;
                 }
                 arguments.remove(0);
                 let candidate = arguments.remove(0);
                 if let Err(error) = parse_loopback_ipc_address(&candidate) {
-                    eprintln!("{error:#}");
+                    cli_eprintln!("{error:#}");
                     return 2;
                 }
                 if selectors.address.replace(candidate).is_some() {
-                    eprintln!("agenterm-mux --address may be specified only once");
+                    cli_eprintln!("agenterm-mux --address may be specified only once");
                     return 2;
                 }
             }
             Some("--endpoint") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-mux --endpoint requires a typed endpoint");
+                    cli_eprintln!("agenterm-mux --endpoint requires a typed endpoint");
                     return 2;
                 }
                 arguments.remove(0);
                 if selectors.endpoint.replace(arguments.remove(0)).is_some() {
-                    eprintln!("agenterm-mux --endpoint may be specified only once");
+                    cli_eprintln!("agenterm-mux --endpoint may be specified only once");
                     return 2;
                 }
             }
             Some("--instance") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-mux --instance requires a name");
+                    cli_eprintln!("agenterm-mux --instance requires a name");
                     return 2;
                 }
                 arguments.remove(0);
                 if selectors.instance.replace(arguments.remove(0)).is_some() {
-                    eprintln!("agenterm-mux --instance may be specified only once");
+                    cli_eprintln!("agenterm-mux --instance may be specified only once");
                     return 2;
                 }
             }
             Some("--session") => {
                 if arguments.len() < 2 {
-                    eprintln!("agenterm-mux --session requires a session name");
+                    cli_eprintln!("agenterm-mux --session requires a session name");
                     return 2;
                 }
                 arguments.remove(0);
                 session = Some(arguments.remove(0));
             }
             Some("-L" | "-S") => {
-                eprintln!(
+                cli_eprintln!(
                     "agenterm-mux does not support tmux socket selection; use --address HOST:PORT"
                 );
                 return 2;
@@ -430,7 +444,7 @@ pub fn run_mux_entry_with_args(arguments: Vec<String>) -> i32 {
         }
     }
     let Some(command) = arguments.first().cloned() else {
-        eprintln!("agenterm-mux requires a command");
+        cli_eprintln!("agenterm-mux requires a command");
         return 2;
     };
 
@@ -441,19 +455,19 @@ pub fn run_mux_entry_with_args(arguments: Vec<String>) -> i32 {
     if command == "agenterm" {
         arguments.remove(0);
         if arguments.is_empty() {
-            eprintln!("agenterm-mux agenterm requires a native AgenTerm command");
+            cli_eprintln!("agenterm-mux agenterm requires a native AgenTerm command");
             return 2;
         }
     } else {
         let Some(specification) = mux_command(&command) else {
-            eprintln!(
+            cli_eprintln!(
                 "{command} is not in the agenterm-mux compatibility surface; \
                  use `agenterm-mux agenterm {command} ...` for native AgenTerm extensions"
             );
             return 2;
         };
         if let MuxStatus::Unsupported(reason) = specification.status {
-            eprintln!("{command} is unsupported: {reason}");
+            cli_eprintln!("{command} is unsupported: {reason}");
             return 1;
         }
         if matches!(command.as_str(), "list-commands" | "lscm") {
@@ -472,7 +486,7 @@ pub fn run_mux_entry_with_args(arguments: Vec<String>) -> i32 {
         arguments.extend(["-t".to_owned(), session]);
     }
     if let Err(error) = set_ipc_selectors(selectors) {
-        eprintln!("{error:#}");
+        cli_eprintln!("{error:#}");
         return 2;
     }
     run_cli(arguments, CliControlOptions::default())
@@ -917,7 +931,7 @@ fn probe_registered_instance(
     )
 }
 
-/// `agenterm-cli agent-tools` — the LLM tool table, derived from
+/// `agenterm cli agent-tools` — the LLM tool table, derived from
 /// `OPERATION_CATALOG` by [`crate::agent_tools`].
 ///
 /// It runs entirely in the client and never opens an IPC connection: the
@@ -931,17 +945,17 @@ fn run_agent_tools(arguments: &[String]) -> i32 {
         "agenterm" => crate::agent_tools::agent_tool_catalog_json(include_unavailable),
         "mcp" => crate::agent_tools::agent_tool_catalog_mcp_json(include_unavailable),
         other => {
-            eprintln!("unknown agent-tools format '{other}'; expected agenterm or mcp");
+            cli_eprintln!("unknown agent-tools format '{other}'; expected agenterm or mcp");
             return 2;
         }
     };
     match serde_json::to_string_pretty(&document) {
         Ok(text) => {
-            println!("{text}");
+            cli_println!("{text}");
             0
         }
         Err(error) => {
-            eprintln!("failed to render the agent tool table: {error}");
+            cli_eprintln!("failed to render the agent tool table: {error}");
             1
         }
     }
@@ -953,7 +967,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     let instances = match discover_instances() {
         Ok(instances) => instances,
         Err(error) => {
-            eprintln!("failed to discover AgenTerm instances: {error:#}");
+            cli_eprintln!("failed to discover AgenTerm instances: {error:#}");
             return 1;
         }
     };
@@ -1092,7 +1106,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             serde_json::to_string_pretty(&views).unwrap_or_else(|_| "[]".to_owned())
         );
     } else if views.is_empty() {
-        println!("No registered AgenTerm instances.");
+        cli_println!("No registered AgenTerm instances.");
     } else {
         println!(
             "PID\tINSTANCE\tTRANSPORT\tENDPOINT\tV1-CLIENT\tVERSION\tSTATUS\tUPGRADE\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE"
@@ -1136,12 +1150,12 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     if control_command_requests_help(&arguments) {
         let command = arguments.first().map(String::as_str).unwrap_or_default();
         if let Some(usage) = control_command_usage(command) {
-            println!("Usage: {usage}");
+            cli_println!("Usage: {usage}");
             return 0;
         }
     }
     if let Err(error) = validate_control_command(&arguments) {
-        eprintln!("{error}");
+        cli_eprintln!("{error}");
         return 2;
     }
     if arguments
@@ -1156,7 +1170,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             arguments.remove(position);
             let mut content = String::new();
             if let Err(error) = std::io::stdin().read_to_string(&mut content) {
-                eprintln!("failed to read composer content from stdin: {error}");
+                cli_eprintln!("failed to read composer content from stdin: {error}");
                 return 1;
             }
             Some(content)
@@ -1166,7 +1180,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             .position(|argument| argument == "--file")
         {
             if position + 1 >= arguments.len() {
-                eprintln!("set-composer --file requires a path");
+                cli_eprintln!("set-composer --file requires a path");
                 return 1;
             }
             let path = arguments.remove(position + 1);
@@ -1174,7 +1188,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             match std::fs::read_to_string(&path) {
                 Ok(content) => Some(content),
                 Err(error) => {
-                    eprintln!("failed to read composer file {path}: {error}");
+                    cli_eprintln!("failed to read composer file {path}: {error}");
                     return 1;
                 }
             }
@@ -1193,7 +1207,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         }
     }
     if let Err(error) = validate_operation_args(&arguments) {
-        eprintln!("{error}");
+        cli_eprintln!("{error}");
         return 2;
     }
     let command = arguments.first().map(String::as_str).unwrap_or_default();
@@ -1202,7 +1216,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         return 0;
     }
     if command == "protocol-info" && !has_option(&arguments, "--running") {
-        println!("{}", protocol_info_json("client_binary"));
+        cli_println!("{}", protocol_info_json("client_binary"));
         return 0;
     }
     if command == "agent-tools" {
@@ -1243,7 +1257,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     ) {
         Ok(control) => control,
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             return 2;
         }
     };
@@ -1270,7 +1284,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         && may_start_server
         && let Err(error) = start_server_process()
     {
-        eprintln!("{error:#}");
+        cli_eprintln!("{error:#}");
     }
     if response.is_err() && may_start_server {
         let deadline = Instant::now() + IPC_AUTOSTART_TIMEOUT;
@@ -1297,7 +1311,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
                         return 0;
                     }
                     None => {
-                        eprintln!("AgenTerm server did not return a control receipt");
+                        cli_eprintln!("AgenTerm server did not return a control receipt");
                         return 1;
                     }
                 }
@@ -1318,7 +1332,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
                         serde_json::to_string_pretty(&receipt).unwrap_or_default()
                     );
                 } else {
-                    eprintln!(
+                    cli_eprintln!(
                         "{}",
                         serde_json::json!({
                             "error": response.error,
@@ -1329,12 +1343,12 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
                     );
                 }
             } else {
-                eprintln!("{}", response.error);
+                cli_eprintln!("{}", response.error);
             }
             1
         }
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             1
         }
     }
@@ -1359,8 +1373,8 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
         return run_script_repl(arguments);
     }
     if !crate::platform::services::script_host::hosted_worker_available() {
-        eprintln!(
-            "agenterm-cli script hosting is not yet available on this platform; \
+        cli_eprintln!(
+            "agenterm cli script hosting is not yet available on this platform; \
              invoke agenterm-rh directly"
         );
         return 2;
@@ -1378,21 +1392,24 @@ fn run_script_check_many_hosted(arguments: &[String]) -> i32 {
     let worker = match script_worker_executable() {
         Ok(worker) => worker,
         Err(error) => {
-            eprintln!("{error}");
+            cli_eprintln!("{error}");
             return 2;
         }
     };
     let mut command = std::process::Command::new(&worker.path);
-    command.args(arguments.iter().skip(1)).env(
-        "AGENTERM_SCRIPT_BACKEND",
-        std::env::var_os("AGENTERM_SCRIPT_BACKEND").unwrap_or_else(|| "rh".into()),
-    );
+    command
+        .args(crate::worker_supervisor::SCRIPT_WORKER_ENGINE_ARGS)
+        .args(arguments.iter().skip(1))
+        .env(
+            "AGENTERM_SCRIPT_BACKEND",
+            std::env::var_os("AGENTERM_SCRIPT_BACKEND").unwrap_or_else(|| "rh".into()),
+        );
     match command.status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(error) => {
-            eprintln!(
+            cli_eprintln!(
                 "host_worker_spawn: could not start {}: {error}",
-                worker.name
+                worker.path.display()
             );
             1
         }
@@ -1418,58 +1435,23 @@ struct ScriptExecutionContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedScriptWorker {
     path: PathBuf,
-    name: String,
 }
 
+/// The script worker is now the main `agenterm` PE itself, routed into its
+/// in-process rh/lua/qjs/sql engine host via
+/// `worker_supervisor::SCRIPT_WORKER_ENGINE_ARGS` — there is no longer a
+/// separate `agenterm-rh` binary to search an install directory for (that
+/// standalone bin is retired; see `src/bin/agenterm.rs`'s
+/// `__agenterm-internal-engine` dispatch). `current_exe()` is therefore
+/// always the right answer: this CLI code only ever runs from inside that
+/// same PE (directly on Unix, or re-exec'd through the
+/// `__agenterm-internal-cli` worker on Windows — see
+/// `run_console_worker`/`INTERNAL_CLI_SUBCOMMAND`).
 fn script_worker_executable() -> Result<ResolvedScriptWorker, String> {
-    let current = std::env::current_exe().map_err(|error| {
-        format!(
-            "host_worker_missing: could not locate current executable: {error}; attempted \
-             adjacent executables: {}",
-            script_worker_attempted_names()
-        )
+    let path = std::env::current_exe().map_err(|error| {
+        format!("host_worker_missing: could not locate current executable: {error}")
     })?;
-    resolve_script_worker_executable(&current, Path::is_file)
-}
-
-fn script_worker_attempted_names() -> String {
-    crate::platform::paths::script_worker_executable_names()
-        .into_iter()
-        .map(|candidate| candidate.name)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn resolve_script_worker_executable(
-    current: &Path,
-    is_file: impl Fn(&Path) -> bool,
-) -> Result<ResolvedScriptWorker, String> {
-    let candidates = crate::platform::paths::script_worker_executable_names();
-    let attempted = candidates
-        .iter()
-        .map(|candidate| candidate.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let parent = current.parent().ok_or_else(|| {
-        format!(
-            "host_worker_missing: no script worker directory; attempted adjacent executables: \
-             {attempted}"
-        )
-    })?;
-    for candidate in candidates {
-        let path = parent.join(&candidate.name);
-        if is_file(&path) {
-            return Ok(ResolvedScriptWorker {
-                path,
-                name: candidate.name,
-            });
-        }
-    }
-    Err(format!(
-        "host_worker_missing: no script worker is installed next to {}; \
-         attempted adjacent executables: {attempted}; scripting is an optional component",
-        current.display(),
-    ))
+    Ok(ResolvedScriptWorker { path })
 }
 
 fn run_script_command_with_context(
@@ -1477,7 +1459,7 @@ fn run_script_command_with_context(
     context: Option<ScriptExecutionContext>,
 ) -> i32 {
     let Some(operation_name) = arguments.get(1).map(String::as_str) else {
-        eprintln!("script requires api, check, eval, run, or task");
+        cli_eprintln!("script requires api, check, eval, run, or task");
         return 2;
     };
     let operation = match operation_name {
@@ -1486,7 +1468,7 @@ fn run_script_command_with_context(
         "eval" => ScriptOperation::Eval,
         "run" => ScriptOperation::Run,
         other => {
-            eprintln!("unknown script operation: {other}");
+            cli_eprintln!("unknown script operation: {other}");
             return 2;
         }
     };
@@ -1494,13 +1476,13 @@ fn run_script_command_with_context(
         match parse_script_api_view(arguments) {
             Ok(view) => Some(view),
             Err(error) => {
-                eprintln!("{error}");
+                cli_eprintln!("{error}");
                 return 2;
             }
         }
     } else {
         if has_option(arguments, "--status") {
-            eprintln!("script --status is available only for script api");
+            cli_eprintln!("script --status is available only for script api");
             return 2;
         }
         None
@@ -1509,7 +1491,7 @@ fn run_script_command_with_context(
     let profile = match requested_profile {
         "pure" | "observe" | "local" => ScriptProfile::Local,
         other => {
-            eprintln!("unknown script profile: {other}");
+            cli_eprintln!("unknown script profile: {other}");
             return 2;
         }
     };
@@ -1521,7 +1503,7 @@ fn run_script_command_with_context(
                 budgets.wall_time_ms = value;
             }
             _ => {
-                eprintln!("script --timeout-ms must be from 1 to 3600000");
+                cli_eprintln!("script --timeout-ms must be from 1 to 3600000");
                 return 2;
             }
         }
@@ -1532,7 +1514,7 @@ fn run_script_command_with_context(
                 budgets.operations = value;
             }
             _ => {
-                eprintln!("script --max-operations must be from 1 to 100000000");
+                cli_eprintln!("script --max-operations must be from 1 to 100000000");
                 return 2;
             }
         }
@@ -1543,7 +1525,7 @@ fn run_script_command_with_context(
                 budgets.output_bytes = value;
             }
             _ => {
-                eprintln!("script --max-output-bytes must be from 1 to 1048576");
+                cli_eprintln!("script --max-output-bytes must be from 1 to 1048576");
                 return 2;
             }
         }
@@ -1554,7 +1536,7 @@ fn run_script_command_with_context(
                 budgets.collection_items = value;
             }
             _ => {
-                eprintln!("script --max-collection-items must be from 1 to 100000");
+                cli_eprintln!("script --max-collection-items must be from 1 to 100000");
                 return 2;
             }
         }
@@ -1565,7 +1547,7 @@ fn run_script_command_with_context(
                 budgets.string_bytes = value;
             }
             _ => {
-                eprintln!("script --max-string-bytes must be from 1 to 8388608");
+                cli_eprintln!("script --max-string-bytes must be from 1 to 8388608");
                 return 2;
             }
         }
@@ -1576,21 +1558,21 @@ fn run_script_command_with_context(
         ScriptOperation::Api => ("api".to_owned(), String::new()),
         ScriptOperation::Eval => {
             let Some(expression) = operand else {
-                eprintln!("script eval requires an expression");
+                cli_eprintln!("script eval requires an expression");
                 return 2;
             };
             ("eval".to_owned(), expression.to_owned())
         }
         ScriptOperation::Check | ScriptOperation::Run => {
             let Some(path) = operand else {
-                eprintln!("script {operation_name} requires a file path or -");
+                cli_eprintln!("script {operation_name} requires a file path or -");
                 return 2;
             };
             if path == "-" {
                 match read_script_source(std::io::stdin().lock(), budgets.source_bytes) {
                     Ok(source) => ("stdin".to_owned(), source),
                     Err((code, error)) => {
-                        eprintln!("failed to read script from stdin: {error}");
+                        cli_eprintln!("failed to read script from stdin: {error}");
                         return code;
                     }
                 }
@@ -1598,14 +1580,14 @@ fn run_script_command_with_context(
                 let canonical = match std::fs::canonicalize(path) {
                     Ok(path) => path,
                     Err(error) => {
-                        eprintln!("failed to resolve script {path}: {error}");
+                        cli_eprintln!("failed to resolve script {path}: {error}");
                         return 1;
                     }
                 };
                 if std::fs::metadata(&canonical)
                     .is_ok_and(|metadata| metadata.len() > budgets.source_bytes as u64)
                 {
-                    eprintln!(
+                    cli_eprintln!(
                         "script source exceeds the {} byte limit",
                         budgets.source_bytes
                     );
@@ -1614,14 +1596,14 @@ fn run_script_command_with_context(
                 let file = match std::fs::File::open(&canonical) {
                     Ok(file) => file,
                     Err(error) => {
-                        eprintln!("failed to read script {path}: {error}");
+                        cli_eprintln!("failed to read script {path}: {error}");
                         return 1;
                     }
                 };
                 match read_script_source(file, budgets.source_bytes) {
                     Ok(source) => (canonical.display().to_string(), source),
                     Err((code, error)) => {
-                        eprintln!("failed to read script {path}: {error}");
+                        cli_eprintln!("failed to read script {path}: {error}");
                         return code;
                     }
                 }
@@ -1629,7 +1611,7 @@ fn run_script_command_with_context(
         }
     };
     if source.len() > budgets.source_bytes {
-        eprintln!(
+        cli_eprintln!(
             "script source exceeds the {} byte limit",
             budgets.source_bytes
         );
@@ -1640,7 +1622,7 @@ fn run_script_command_with_context(
         None => match direct_script_context(arguments, &source_label) {
             Ok(context) => context,
             Err(error) => {
-                eprintln!("{error}");
+                cli_eprintln!("{error}");
                 return 2;
             }
         },
@@ -1703,7 +1685,7 @@ fn run_script_command_with_context(
             if let Err(audit_error) = audit_sink.append(&audit_invocation, &outcome) {
                 return report_audit_error(audit_error);
             }
-            eprintln!("host_temp_create: invocation temporary root is unavailable: {error}");
+            cli_eprintln!("host_temp_create: invocation temporary root is unavailable: {error}");
             return 1;
         }
     };
@@ -1736,7 +1718,7 @@ fn run_script_command_with_context(
             if let Err(error) = audit_sink.append(&audit_invocation, &outcome) {
                 return report_audit_error(error);
             }
-            eprintln!("{message}");
+            cli_eprintln!("{message}");
             return 2;
         }
     };
@@ -1785,10 +1767,10 @@ fn run_script_command_with_context(
         if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
             return report_audit_error(error);
         }
-        eprintln!(
+        cli_eprintln!(
             "{} returned a mismatched protocol result \
              (envelope/API/invocation/operation/profile identity)",
-            executable.name
+            executable.path.display()
         );
         return 1;
     }
@@ -1810,9 +1792,9 @@ fn run_script_command_with_context(
         if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
             return report_audit_error(error);
         }
-        eprintln!(
+        cli_eprintln!(
             "{} returned an inconsistent result envelope",
-            executable.name
+            executable.path.display()
         );
         return 1;
     }
@@ -1830,9 +1812,9 @@ fn run_script_command_with_context(
             if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(error);
             }
-            eprintln!(
+            cli_eprintln!(
                 "{} returned an API result without a catalog",
-                executable.name
+                executable.path.display()
             );
             return 1;
         };
@@ -1849,9 +1831,9 @@ fn run_script_command_with_context(
             if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(audit_error);
             }
-            eprintln!(
+            cli_eprintln!(
                 "{} returned an invalid API catalog: {error}",
-                executable.name
+                executable.path.display()
             );
             return 1;
         }
@@ -1881,9 +1863,9 @@ fn run_script_command_with_context(
                         output.push('\n');
                     }
                     Err(error) => {
-                        eprintln!(
+                        cli_eprintln!(
                             "{} returned an invalid API catalog: {error}",
-                            executable.name
+                            executable.path.display()
                         );
                         return 1;
                     }
@@ -1902,7 +1884,7 @@ fn run_script_command_with_context(
         }
         Some(output)
     } else if let Some(failure) = &result.failure {
-        eprintln!(
+        cli_eprintln!(
             "{}",
             serde_json::json!({
                 "code": failure.code,
@@ -1983,20 +1965,20 @@ fn canonical_script_directory(base: &Path, value: &str, code: &str) -> Result<Pa
 
 fn run_script_task_command(arguments: &[String]) -> i32 {
     let Some(action) = arguments.get(2).map(String::as_str) else {
-        eprintln!("script task requires list, show, check, or run");
+        cli_eprintln!("script task requires list, show, check, or run");
         return 2;
     };
     let manifest = match script_task_manifest(arguments) {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("{error}");
+            cli_eprintln!("{error}");
             return 2;
         }
     };
     let catalog = match load_task_catalog(&manifest) {
         Ok(catalog) => catalog,
         Err(error) => {
-            eprintln!("{error}");
+            cli_eprintln!("{error}");
             return 2;
         }
     };
@@ -2005,7 +1987,7 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
             .map_or_else(|code| code, |()| 0),
         "show" => {
             let Some(id) = arguments.get(3).filter(|value| !value.starts_with('-')) else {
-                eprintln!("script task show requires a task ID");
+                cli_eprintln!("script task show requires a task ID");
                 return 2;
             };
             let matches = catalog
@@ -2014,7 +1996,7 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                 .filter(|task| task.id == *id)
                 .collect::<Vec<_>>();
             if matches.is_empty() {
-                eprintln!("task_not_found: {id}");
+                cli_eprintln!("task_not_found: {id}");
                 return 2;
             }
             if has_option(arguments, "--json") {
@@ -2077,7 +2059,7 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                     }),
             };
             if let Err(error) = result {
-                eprintln!("{error}");
+                cli_eprintln!("{error}");
                 return 2;
             }
             if has_option(arguments, "--json") {
@@ -2093,20 +2075,20 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
         }
         "run" => {
             let Some(id) = arguments.get(3).filter(|value| !value.starts_with('-')) else {
-                eprintln!("script task run requires a task ID");
+                cli_eprintln!("script task run requires a task ID");
                 return 2;
             };
             let task = match resolve_task(&catalog, id) {
                 Ok(task) => task,
                 Err(error) => {
-                    eprintln!("{error}");
+                    cli_eprintln!("{error}");
                     return 2;
                 }
             };
             run_resolved_script_task(arguments, task)
         }
         other => {
-            eprintln!("unknown script task operation: {other}");
+            cli_eprintln!("unknown script task operation: {other}");
             2
         }
     }
@@ -2238,7 +2220,7 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
         .cloned()
         .collect::<Vec<_>>();
     if !missing.is_empty() {
-        eprintln!(
+        cli_eprintln!(
             "task_environment_missing: {} requires {}",
             task.id,
             missing.join(", ")
@@ -2269,14 +2251,14 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
                 Some(value) => match value.parse::<u64>() {
                     Ok(value) if value > 0 && value <= declared => value,
                     Ok(value) => {
-                        eprintln!(
+                        cli_eprintln!(
                             "task_budget_exceeded: {} {} requested {}, declared {}",
                             task.id, option, value, declared
                         );
                         return 2;
                     }
                     Err(error) => {
-                        eprintln!("task_budget_invalid: {} {}: {}", task.id, option, error);
+                        cli_eprintln!("task_budget_invalid: {} {}: {}", task.id, option, error);
                         return 2;
                     }
                 },
@@ -2356,7 +2338,7 @@ fn report_supervisor_error(error: SupervisorError) -> i32 {
         SupervisorError::Transport(message) => ("host_worker_transport", message, "host", 1),
         SupervisorError::Protocol(message) => ("host_worker_protocol", message, "host", 1),
     };
-    eprintln!(
+    cli_eprintln!(
         "{}",
         serde_json::json!({
             "code": code,
@@ -3293,7 +3275,7 @@ fn audit_outcome_for_supervisor_error(error: &SupervisorError, started: Instant)
 }
 
 fn report_audit_error(message: String) -> i32 {
-    eprintln!(
+    cli_eprintln!(
         "{}",
         serde_json::json!({
             "code": "host_audit_write",
@@ -3353,24 +3335,24 @@ fn script_operand(arguments: &[String]) -> Option<&str> {
 
 fn run_wait_events(arguments: &[String]) -> i32 {
     let Some(epoch) = option_value(arguments, "--epoch") else {
-        eprintln!("wait-events requires --epoch");
+        cli_eprintln!("wait-events requires --epoch");
         return 2;
     };
     let Some(mut after) =
         option_value(arguments, "--after").and_then(|value| value.parse::<u64>().ok())
     else {
-        eprintln!("wait-events requires a numeric --after sequence");
+        cli_eprintln!("wait-events requires a numeric --after sequence");
         return 2;
     };
     let Some(kind) = option_value(arguments, "--kind") else {
-        eprintln!("wait-events requires --kind");
+        cli_eprintln!("wait-events requires --kind");
         return 2;
     };
     let tab_id = option_value(arguments, "--tab")
         .map(|value| value.trim_start_matches('@'))
         .and_then(|value| value.parse::<u64>().ok());
     if option_value(arguments, "--tab").is_some() && tab_id.is_none() {
-        eprintln!("wait-events --tab must be a stable @ID");
+        cli_eprintln!("wait-events --tab must be a stable @ID");
         return 2;
     }
     let timeout_ms = option_value(arguments, "--timeout-ms")
@@ -3391,16 +3373,16 @@ fn run_wait_events(arguments: &[String]) -> i32 {
         let response = match response {
             Ok(response) if response.ok => response,
             Ok(response) => {
-                eprintln!("{}", response.error);
+                cli_eprintln!("{}", response.error);
                 return 1;
             }
             Err(error) => {
-                eprintln!("{error:#}");
+                cli_eprintln!("{error:#}");
                 return 1;
             }
         };
         let Ok(batch) = serde_json::from_str::<serde_json::Value>(&response.output) else {
-            eprintln!("wait-events received an invalid event batch");
+            cli_eprintln!("wait-events received an invalid event batch");
             return 1;
         };
         if let Some(events) = batch["events"].as_array() {
@@ -3421,7 +3403,7 @@ fn run_wait_events(arguments: &[String]) -> i32 {
             }
         }
         if Instant::now() >= deadline {
-            eprintln!(
+            cli_eprintln!(
                 "{}",
                 serde_json::json!({
                     "code": "event_wait_timeout",
@@ -3479,7 +3461,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         Some(value) => match value.parse::<u64>() {
             Ok(value) => value,
             Err(_) => {
-                eprintln!("wait-ui --timeout-ms must be a non-negative integer");
+                cli_eprintln!("wait-ui --timeout-ms must be a non-negative integer");
                 return 2;
             }
         },
@@ -3502,7 +3484,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         match option_value(arguments, "--terminal-grid-changed-from").map(parse_terminal_grid) {
             Some(Some(value)) => Some(value),
             Some(None) => {
-                eprintln!(
+                cli_eprintln!(
                     "wait-ui --terminal-grid-changed-from requires positive ROWSxCOLS dimensions"
                 );
                 return 2;
@@ -3511,21 +3493,21 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         };
     let requested_target = option_value(arguments, "-t");
     if expected_proxy_state.is_some() && requested_target.is_none() {
-        eprintln!("wait-ui --proxy-state requires -t target");
+        cli_eprintln!("wait-ui --proxy-state requires -t target");
         return 2;
     }
     if expected_tab_editor_state.is_some() && requested_target.is_none() {
-        eprintln!("wait-ui --tab-editor-state requires -t target");
+        cli_eprintln!("wait-ui --tab-editor-state requires -t target");
         return 2;
     }
     if expected_tab_editor_state.is_some_and(|state| !matches!(state, "open" | "closed")) {
-        eprintln!("wait-ui --tab-editor-state must be open or closed");
+        cli_eprintln!("wait-ui --tab-editor-state must be open or closed");
         return 2;
     }
     if expected_modal_kind.is_some_and(|kind| matches!(kind, "none" | "closed"))
         && requested_modal_target.is_some()
     {
-        eprintln!("wait-ui --modal-target cannot be combined with --modal-kind none or closed");
+        cli_eprintln!("wait-ui --modal-target cannot be combined with --modal-kind none or closed");
         return 2;
     }
     if requested_active.is_none()
@@ -3540,7 +3522,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         && requested_modal_target.is_none()
         && expected_tab_editor_state.is_none()
     {
-        eprintln!(
+        cli_eprintln!(
             "wait-ui requires an active, focus, tab-state, proxy-state, window-state, client-size, \
              terminal-grid change, modal-kind, modal-target, or tab-editor-state condition"
         );
@@ -3549,14 +3531,14 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
     let expected_active = match requested_active.map(resolve_stable_wait_target).transpose() {
         Ok(value) => value,
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             return 1;
         }
     };
     let target = match requested_target.map(resolve_stable_wait_target).transpose() {
         Ok(value) => value,
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             return 1;
         }
     };
@@ -3566,14 +3548,14 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
     {
         Ok(value) => value,
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             return 1;
         }
     };
     let (baseline_output, baseline_snapshot) = match fetch_ui_wait_snapshot() {
         Ok(value) => value,
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             return 1;
         }
     };
@@ -3583,7 +3565,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         .unwrap_or_default()
         .to_owned();
     if baseline_epoch.is_empty() {
-        eprintln!("wait-ui baseline did not contain a server epoch");
+        cli_eprintln!("wait-ui baseline did not contain a server epoch");
         return 1;
     }
     let mut pending_snapshot = Some((baseline_output, baseline_snapshot));
@@ -3598,7 +3580,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     .as_str()
                     .unwrap_or_default();
                 if current_epoch != baseline_epoch {
-                    eprintln!(
+                    cli_eprintln!(
                         "{}",
                         serde_json::json!({
                             "code": "server_restart",
@@ -3689,7 +3671,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     && modal_matches
                     && tab_editor_matches
                 {
-                    println!("{output}");
+                    cli_println!("{output}");
                     return 0;
                 }
                 let resolved_target_closed = target.as_deref().is_some_and(|resolved| {
@@ -3698,7 +3680,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     })
                 });
                 if resolved_target_closed {
-                    eprintln!(
+                    cli_eprintln!(
                         "{}",
                         serde_json::json!({
                             "code": "ui_wait_target_closed",
@@ -3710,7 +3692,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     return 1;
                 }
                 if std::time::Instant::now() >= deadline {
-                    eprintln!(
+                    cli_eprintln!(
                         "{}",
                         serde_json::json!({
                             "code": "ui_wait_timeout",
@@ -3738,7 +3720,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
             Err(error) => {
                 let last_transport_error = format!("{error:#}");
                 if std::time::Instant::now() >= deadline {
-                    eprintln!(
+                    cli_eprintln!(
                         "{}",
                         serde_json::json!({
                             "code": "ui_wait_transport_timeout",
@@ -3776,7 +3758,7 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
         .any(|argument| argument == "--submit-complete");
     let wait_finalized = arguments.iter().any(|argument| argument == "--finalized");
     if contains.is_none() && !wait_dead && !wait_submit && !wait_finalized {
-        eprintln!(
+        cli_eprintln!(
             "usage: wait-pane [-t target] \
              (--contains text | --dead | --submit-complete | --finalized) \
              [--timeout-ms ms]"
@@ -3796,11 +3778,11 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
             response.output.trim().to_owned()
         }
         Ok(response) => {
-            eprintln!("{}", response.error);
+            cli_eprintln!("{}", response.error);
             return 1;
         }
         Err(error) => {
-            eprintln!("{error:#}");
+            cli_eprintln!("{error:#}");
             return 1;
         }
     };
@@ -3845,7 +3827,7 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
             return 0;
         }
         if std::time::Instant::now() >= deadline {
-            eprintln!(
+            cli_eprintln!(
                 "{}",
                 serde_json::json!({
                     "code": "pane_wait_timeout",
@@ -3878,77 +3860,77 @@ fn print_help() {
 AgenTerm CLI - control the native tabbed terminal
 
 Usage:
-  agenterm-cli [--endpoint ENDPOINT|--address HOST:PORT|--instance NAME] [--request-id ID] [--deadline-ms MS]
+  agenterm cli [--endpoint ENDPOINT|--address HOST:PORT|--instance NAME] [--request-id ID] [--deadline-ms MS]
                 [--receipt-json] command [args...]
-  agenterm-cli mux COMMAND [ARGS...]     (hosts the agenterm-mux frontend)
-  agenterm-cli mcp COMMAND [ARGS...]     (hosts the agenterm-mcp sidecar)
-  agenterm-cli list-instances [--json] [--prune]
-  agenterm-cli server-list [--json] [--prune]
-  agenterm-cli control-center open|status|snapshot|close [--no-activate]
-  agenterm-cli new-session [-s name]
-  agenterm-cli new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
-  agenterm-cli new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
-  agenterm-cli list-windows [-F format]
-  agenterm-cli list-tab-tree [-F format]
-  agenterm-cli select-window -t target
-  agenterm-cli rename-window [-t target] name
-  agenterm-cli kill-window -t target
-  agenterm-cli send-keys [-t target] [-l|--native] key...
-  agenterm-cli set-buffer [-b name] [--] data...
-  agenterm-cli load-buffer [-b name] path
-  agenterm-cli show-buffer [-b name]
-  agenterm-cli list-buffers
-  agenterm-cli delete-buffer [-b name]
-  agenterm-cli paste-buffer [-b name] [-t target]
-  agenterm-cli scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
-  agenterm-cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
-  agenterm-cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]
-  agenterm-cli capture-pane -p [-t target]
-  agenterm-cli capture-pane --raw-escaped [-t target]
-  agenterm-cli dump-cells [-t target] [-r row]
-  agenterm-cli active-window [-F format]
-  agenterm-cli inspect [-t target]
-  agenterm-cli screenshot [-o file.png]
-  agenterm-cli screenshot-pane [-t target] [-o file.png]
-  agenterm-cli show-composer [-t target]
-  agenterm-cli set-composer [-t target] text
-  agenterm-cli set-composer [-t target] --stdin|--file path
-  agenterm-cli send-composer [-t target]
-  agenterm-cli set-tab-note [-t target] text
-  agenterm-cli show-tab-note [-t target]
-  agenterm-cli set-tab-parent -t child --parent parent|root
-  agenterm-cli show-tab-parent [-t target]
-  agenterm-cli save-workspace
-  agenterm-cli workspace-info
-  agenterm-cli shutdown
-  agenterm-cli get-settings
-  agenterm-cli set-setting terminal.font-family FAMILY
-  agenterm-cli set-setting terminal.font-size 8..36
-  agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json]
-  agenterm-cli script check|run FILE|- [--project-root DIR] [--cwd DIR]
-  agenterm-cli script eval EXPRESSION [--cwd DIR]
-  agenterm-cli script task list|show|check|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
-  agenterm-cli send-mouse [-t target] -x col -y row [--button left|middle|right|wheel-up|wheel-down] [--action press|release|move] [--protocol default|utf8|sgr]
-  agenterm-cli ui-input pointer --x PX --y PX [--button left|middle|right] [--action press|release|move] [--count 1..3] [--mods shift,ctrl,alt,meta]
-  agenterm-cli ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels] [--mods ...]
-  agenterm-cli ui-input key --key NAME [--mods shift,ctrl,alt,meta]
-  agenterm-cli ui-snapshot
-  agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
-  agenterm-cli ui-bootstrap
-  agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|window-activate|terminal-paste|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-instance-picker|instance-picker-next|instance-picker-prev|instance-picker-select|instance-picker-confirm|instance-picker-cancel|open-instance
-  agenterm-cli ui-action tabs-set-width --width 180..480
-  agenterm-cli ui-action open-instance-picker [--mode attach|open-another]
-  agenterm-cli ui-action instance-picker-select --name NAME|--pid N
-  agenterm-cli ui-action open-instance --name NAME
-  agenterm-cli ui-action select-server-tab --name NAME
-  agenterm-cli focus terminal|composer|tabs [-t target]
-  agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
-  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state|--tab-editor-state open|closed] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]
-  agenterm-cli protocol-info
-  agenterm-cli agent-tools [--format agenterm|mcp] [--include-unavailable]
-  agenterm-cli list-panes [-F format]
-  agenterm-cli list-sessions | has-session | kill-server | server-kill"
+  agenterm cli mux COMMAND [ARGS...]     (hosts the agenterm-mux frontend)
+  agenterm cli mcp COMMAND [ARGS...]     (hosts the agenterm-mcp sidecar)
+  agenterm cli list-instances [--json] [--prune]
+  agenterm cli server-list [--json] [--prune]
+  agenterm cli control-center open|status|snapshot|close [--no-activate]
+  agenterm cli new-session [-s name]
+  agenterm cli new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
+  agenterm cli new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
+  agenterm cli list-windows [-F format]
+  agenterm cli list-tab-tree [-F format]
+  agenterm cli select-window -t target
+  agenterm cli rename-window [-t target] name
+  agenterm cli kill-window -t target
+  agenterm cli send-keys [-t target] [-l|--native] key...
+  agenterm cli set-buffer [-b name] [--] data...
+  agenterm cli load-buffer [-b name] path
+  agenterm cli show-buffer [-b name]
+  agenterm cli list-buffers
+  agenterm cli delete-buffer [-b name]
+  agenterm cli paste-buffer [-b name] [-t target]
+  agenterm cli scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
+  agenterm cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
+  agenterm cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]
+  agenterm cli capture-pane -p [-t target]
+  agenterm cli capture-pane --raw-escaped [-t target]
+  agenterm cli dump-cells [-t target] [-r row]
+  agenterm cli active-window [-F format]
+  agenterm cli inspect [-t target]
+  agenterm cli screenshot [-o file.png]
+  agenterm cli screenshot-pane [-t target] [-o file.png]
+  agenterm cli show-composer [-t target]
+  agenterm cli set-composer [-t target] text
+  agenterm cli set-composer [-t target] --stdin|--file path
+  agenterm cli send-composer [-t target]
+  agenterm cli set-tab-note [-t target] text
+  agenterm cli show-tab-note [-t target]
+  agenterm cli set-tab-parent -t child --parent parent|root
+  agenterm cli show-tab-parent [-t target]
+  agenterm cli save-workspace
+  agenterm cli workspace-info
+  agenterm cli shutdown
+  agenterm cli get-settings
+  agenterm cli set-setting terminal.font-family FAMILY
+  agenterm cli set-setting terminal.font-size 8..36
+  agenterm cli script api [MODULE] [--status shipped|planned|all] [--tree|--json]
+  agenterm cli script check|run FILE|- [--project-root DIR] [--cwd DIR]
+  agenterm cli script eval EXPRESSION [--cwd DIR]
+  agenterm cli script task list|show|check|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
+  agenterm cli send-mouse [-t target] -x col -y row [--button left|middle|right|wheel-up|wheel-down] [--action press|release|move] [--protocol default|utf8|sgr]
+  agenterm cli ui-input pointer --x PX --y PX [--button left|middle|right] [--action press|release|move] [--count 1..3] [--mods shift,ctrl,alt,meta]
+  agenterm cli ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels] [--mods ...]
+  agenterm cli ui-input key --key NAME [--mods shift,ctrl,alt,meta]
+  agenterm cli ui-snapshot
+  agenterm cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
+  agenterm cli ui-bootstrap
+  agenterm cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]
+  agenterm cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|window-activate|terminal-paste|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-instance-picker|instance-picker-next|instance-picker-prev|instance-picker-select|instance-picker-confirm|instance-picker-cancel|open-instance
+  agenterm cli ui-action tabs-set-width --width 180..480
+  agenterm cli ui-action open-instance-picker [--mode attach|open-another]
+  agenterm cli ui-action instance-picker-select --name NAME|--pid N
+  agenterm cli ui-action open-instance --name NAME
+  agenterm cli ui-action select-server-tab --name NAME
+  agenterm cli focus terminal|composer|tabs [-t target]
+  agenterm cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
+  agenterm cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state|--tab-editor-state open|closed] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]
+  agenterm cli protocol-info
+  agenterm cli agent-tools [--format agenterm|mcp] [--include-unavailable]
+  agenterm cli list-panes [-F format]
+  agenterm cli list-sessions | has-session | kill-server | server-kill"
     );
 }
 
@@ -3971,9 +3953,9 @@ AgenTerm commands are available only through the `agenterm` namespace."
 fn print_mux_commands() {
     for command in MUX_COMMANDS {
         match command.status {
-            MuxStatus::Supported => println!("{}", command.name),
+            MuxStatus::Supported => cli_println!("{}", command.name),
             MuxStatus::Unsupported(reason) => {
-                println!("{} (unsupported: {reason})", command.name);
+                cli_println!("{} (unsupported: {reason})", command.name);
             }
         }
     }
@@ -4108,9 +4090,9 @@ fn print_mux_compatibility(json: bool) {
             .unwrap_or_default()
         );
     } else {
-        println!("agenterm-mux {}", env!("CARGO_PKG_VERSION"));
-        println!("sessions=workspaces windows=tabs panes=single-pane-tabs");
-        println!("supported: {}", supported.join(", "));
+        cli_println!("agenterm-mux {}", env!("CARGO_PKG_VERSION"));
+        cli_println!("sessions=workspaces windows=tabs panes=single-pane-tabs");
+        cli_println!("supported: {}", supported.join(", "));
         for entry in unsupported {
             println!(
                 "unsupported: {} ({})",
@@ -4118,7 +4100,7 @@ fn print_mux_compatibility(json: bool) {
                 entry["reason"].as_str().unwrap_or_default()
             );
         }
-        println!("native AgenTerm extensions: agenterm-mux agenterm COMMAND ...");
+        cli_println!("native AgenTerm extensions: agenterm-mux agenterm COMMAND ...");
     }
 }
 
@@ -4126,9 +4108,8 @@ fn print_mux_compatibility(json: bool) {
 mod tests {
     use super::{
         HostedSubcommand, hosted_subcommand, normalize_script_source, parse_loopback_ipc_address,
-        parse_terminal_grid, resolve_script_worker_executable, run_wait_ui,
+        parse_terminal_grid, run_wait_ui, script_worker_executable,
     };
-    use std::path::Path;
 
     #[test]
     fn mux_and_mcp_are_hosted_as_bare_subcommands() {
@@ -4189,30 +4170,15 @@ mod tests {
     }
 
     #[test]
-    fn script_worker_resolution_prefers_adjacent_rh_executable() {
-        let candidates = crate::platform::paths::script_worker_executable_names();
-        let primary = candidates
-            .first()
-            .expect("primary worker candidate")
-            .name
-            .clone();
-        let current = Path::new("/bundle/agenterm-cli.exe");
-
-        let selected_primary =
-            resolve_script_worker_executable(current, |path| path.ends_with(&primary))
-                .expect("primary worker");
-        assert_eq!(selected_primary.name, primary);
-    }
-
-    #[test]
-    fn missing_script_worker_diagnostic_lists_every_attempted_name() {
-        let error = resolve_script_worker_executable(Path::new("/bundle/agenterm-cli.exe"), |_| {
-            false
-        })
-        .expect_err("missing worker");
-
-        for candidate in crate::platform::paths::script_worker_executable_names() {
-            assert!(error.contains(&candidate.name), "{error}");
-        }
+    fn script_worker_resolves_to_the_running_main_pe() {
+        // The standalone `agenterm-rh` binary is retired; the script worker
+        // is now always the currently running main `agenterm` PE itself,
+        // routed to its in-process rh engine via
+        // `worker_supervisor::SCRIPT_WORKER_ENGINE_ARGS`.
+        let worker = script_worker_executable().expect("current executable resolves");
+        assert_eq!(
+            worker.path,
+            std::env::current_exe().expect("current test executable")
+        );
     }
 }

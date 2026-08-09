@@ -18,7 +18,7 @@ Those adapters must terminate at this gateway, not bypass it.
   - [ ] implementation begins only after Observable Fleet, the stable
     unrestricted Rhai API/runtime contract, MCP typed tools, credential
     isolation, and audit contracts pass their gates; the gateway cannot add a
-    permission profile to `agenterm-rh`
+    permission profile to `agenterm rh`
   - [ ] run as an optional loopback-authenticated sidecar, separate from the
     lightweight specialized-model worker and from GUI startup
   - [ ] keep provider credentials in an OS credential store, outside

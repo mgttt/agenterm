@@ -1,4 +1,14 @@
-//! Fast black-box coverage for the standalone `agenterm-rh` public CLI.
+//! Fast black-box coverage for the rh public CLI, invoked through a
+//! hard-linked, isolated copy of the main `agenterm` PE
+//! (`__agenterm-internal-engine rh <args>`).
+//!
+//! Historically this hard-linked the standalone `agenterm-rh` binary; that
+//! binary is retired (`agenterm rh`/`__agenterm-internal-engine rh` are now
+//! the only entry points), so this hard-links `CARGO_BIN_EXE_agenterm`
+//! instead and always prepends the internal-engine marker + `rh` token. The
+//! file name/scenario names still say "standalone" — kept this round so a
+//! concurrent packaging/CI migration isn't confused by a rename; rename to
+//! something like `rh_cli_contract.rs` in a later cleanup pass.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -29,9 +39,9 @@ impl StandaloneCli {
         ));
         fs::create_dir(&root).expect("create standalone CLI directory");
 
-        let executable = root.join(binary_name("agenterm-rh"));
-        fs::hard_link(env!("CARGO_BIN_EXE_agenterm-rh"), &executable)
-            .expect("hard-link standalone agenterm-rh");
+        let executable = root.join(binary_name("agenterm"));
+        fs::hard_link(env!("CARGO_BIN_EXE_agenterm"), &executable)
+            .expect("hard-link isolated agenterm PE");
 
         for stale_name in [root.join("agenterm-rhai"), root.join("agenterm-rhai.exe")] {
             assert!(
@@ -63,10 +73,11 @@ impl StandaloneCli {
         S: AsRef<OsStr>,
     {
         Command::new(&self.executable)
+            .args(["__agenterm-internal-engine", "rh"])
             .current_dir(&self.root)
             .args(arguments)
             .output()
-            .expect("run standalone agenterm-rh")
+            .expect("run isolated agenterm rh")
     }
 }
 

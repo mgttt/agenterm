@@ -81,7 +81,8 @@ fn write_timing(path: &Path, total_wall_ms: u64, fingerprint: &str) {
 fn summarize(root: &Path, cache: &str, samples: &[PathBuf; 3]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .args(["task", "run", "performance-summary", "--manifest"])
         .arg(manifest)

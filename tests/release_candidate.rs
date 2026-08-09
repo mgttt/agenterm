@@ -209,8 +209,9 @@ fn fixture(name: &str) -> Fixture {
 
 fn run_build_releases_index(arguments: &[&Path]) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm"));
     command
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .args(["task", "run", "build-releases-index", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -221,7 +222,8 @@ fn run_build_releases_index(arguments: &[&Path]) -> Output {
 
 fn aggregate(fixture: &Fixture) -> Output {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .arg("run")
         .arg(repo.join("scripts/rh/candidate-aggregate.rh"))
@@ -239,7 +241,8 @@ fn aggregate(fixture: &Fixture) -> Output {
 fn verify(fixture: &Fixture, now: u64) -> Output {
     let now = now.to_string();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .arg("run")
         .arg(repo.join("scripts/rh/candidate-verify.rh"))
@@ -275,7 +278,8 @@ fn exact_sha_candidate_happy_path_is_self_describing_and_verifiable() {
 
     let help = {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-        Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        Command::new(env!("CARGO_BIN_EXE_agenterm"))
+            .args(["__agenterm-internal-engine", "rh"])
             .current_dir(repo)
             .arg("run")
             .arg(repo.join("scripts/rh/candidate-verify.rh"))
@@ -290,7 +294,8 @@ fn exact_sha_candidate_happy_path_is_self_describing_and_verifiable() {
     assert!(output_text(&help).contains("usage: candidate-verify"));
     let help = {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-        Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+        Command::new(env!("CARGO_BIN_EXE_agenterm"))
+            .args(["__agenterm-internal-engine", "rh"])
             .current_dir(repo)
             .arg("run")
             .arg(repo.join("scripts/rh/candidate-aggregate.rh"))

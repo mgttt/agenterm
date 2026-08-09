@@ -96,6 +96,7 @@ impl PersistentWorkerClient {
         let permit = try_acquire_permit()?;
         let mut command = Command::new(executable);
         command
+            .args(super::SCRIPT_WORKER_ENGINE_ARGS)
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1222,6 +1223,14 @@ mod tests {
         SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptOperation, ScriptProfile,
     };
 
+    /// Resolves the main `agenterm` PE — `PersistentWorkerClient::spawn` now
+    /// always prefixes `Command::new(executable)` with
+    /// `SCRIPT_WORKER_ENGINE_ARGS` (`__agenterm-internal-engine rh`), so the
+    /// executable itself must be the main PE, not the retired standalone
+    /// `agenterm-rh` binary. `AGENTERM_TEST_SCRIPT_WORKER` still overrides
+    /// this outright when set — its semantics are unchanged, only what it
+    /// must now point at has (a main-PE-shaped binary, not a standalone rh
+    /// exe).
     fn worker_executable() -> std::path::PathBuf {
         if let Some(path) = std::env::var_os("AGENTERM_TEST_SCRIPT_WORKER") {
             return path.into();
@@ -1232,10 +1241,10 @@ mod tests {
             .parent()
             .and_then(Path::parent)
             .expect("target profile directory")
-            .join(format!("agenterm-rh{suffix}"));
+            .join(format!("agenterm{suffix}"));
         assert!(
             target.is_file(),
-            "build agenterm-rh first or set AGENTERM_TEST_SCRIPT_WORKER: {}",
+            "build agenterm first or set AGENTERM_TEST_SCRIPT_WORKER: {}",
             target.display()
         );
         target

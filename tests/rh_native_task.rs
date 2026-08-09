@@ -92,7 +92,8 @@ fn execution_mode_is_native_only() {
 #[test]
 fn public_cli_runs_manifest_native_task() {
     let repo = repo_root();
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(&repo)
         .args(["task", "run", "rh-native-task-probe", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
@@ -159,7 +160,8 @@ fn verify_docs_site_is_native_and_archives_interpreted_source() {
 fn public_cli_runs_native_docs_task_and_preserves_failure() {
     let repo = repo_root();
     let manifest = repo.join("agenterm.tasks.json");
-    let success = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let success = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(&repo)
         .args(["task", "run", "verify-docs-site", "--manifest"])
         .arg(&manifest)
@@ -181,7 +183,8 @@ fn public_cli_runs_native_docs_task_and_preserves_failure() {
             .is_some_and(|stdout| stdout.contains("PASS: bilingual docs site"))
     );
 
-    let failure = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let failure = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(&repo)
         .args(["task", "run", "verify-docs-site", "--manifest"])
         .arg(&manifest)
@@ -234,7 +237,8 @@ fn internal_version_policy_is_native_and_archives_interpreted_source() {
 #[test]
 fn public_cli_runs_native_internal_version_policy() {
     let repo = repo_root();
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(&repo)
         .args([
             "task",
@@ -333,7 +337,8 @@ fn native_internal_version_policy_rejects_governed_git_tag() {
         serde_json::to_vec_pretty(&manifest).expect("encode task manifest"),
     )
     .expect("write task manifest");
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(&repo)
         .args(["task", "run", "internal-version-policy", "--manifest"])
         .arg(&test_manifest)

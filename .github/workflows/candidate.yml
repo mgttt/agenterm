@@ -207,11 +207,11 @@ jobs:
             echo "No timing.json; skip quality timing summary." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [[ -x dist/agenterm-rh.exe ]]; then
-            dist/agenterm-rh.exe task run timing-summary \
+          if [[ -x dist/agenterm.exe ]]; then
+            dist/agenterm.exe rh task run timing-summary \
               --manifest agenterm.tasks.json -- target/qualification/timing.json
           else
-            target/debug/agenterm-rh.exe task run timing-summary \
+            target/debug/agenterm.exe rh task run timing-summary \
               --manifest agenterm.tasks.json -- target/qualification/timing.json
           fi
           # Surface bootstrap reuse for R1 acceptance without opening the artifact.
@@ -246,7 +246,7 @@ jobs:
         if: matrix.platform_id == 'windows-x86_64'
         shell: cmd
         run: >-
-          dist\agenterm-rh.exe task run package-release-qualified
+          dist\agenterm.exe rh task run package-release-qualified
           --manifest agenterm.tasks.json
 
       - name: Install Windows ARM64 cross-build tooling
@@ -498,7 +498,7 @@ jobs:
           if result.get("status") != "Accepted":
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
-          target/aarch64-apple-darwin/release/agenterm-rh \
+          target/aarch64-apple-darwin/release/agenterm rh \
             run scripts/rh/finalize-macos-provenance.rh -- \
             "$ARCHIVE" "$ARCHIVE.provenance.json"
 
@@ -565,7 +565,7 @@ jobs:
           if result.get("status") != "Accepted":
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
-          target/x86_64-apple-darwin/release/agenterm-rh \
+          target/x86_64-apple-darwin/release/agenterm rh \
             run scripts/rh/finalize-macos-provenance.rh -- \
             "$ARCHIVE" "$ARCHIVE.provenance.json"
 
@@ -694,7 +694,7 @@ jobs:
           test -n "$archive"
           mkdir -p "$RUNNER_TEMP/agenterm-candidate-tool"
           tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-candidate-tool"
-          chmod +x "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh"
+          chmod +x "$RUNNER_TEMP/agenterm-candidate-tool/agenterm"
 
       - name: Seal exact candidate bundle
         run: |
@@ -703,7 +703,7 @@ jobs:
           test -f candidate-input/qualification-receipt.json
           mkdir -p candidate-output/payload
           cp candidate-input/* candidate-output/payload/
-          "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh" \
+          "$RUNNER_TEMP/agenterm-candidate-tool/agenterm" rh \
             run scripts/rh/candidate-aggregate.rh --project-root . -- \
             . candidate-metadata.json candidate-output/payload \
             "candidate-output/agenterm-$version-candidate-manifest.json"

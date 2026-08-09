@@ -49,11 +49,12 @@ fn binary_name(stem: &str) -> String {
 
 fn run_rh(arguments: &[&str]) -> std::process::Output {
     let repo = repo_root();
-    Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(&repo)
         .args(arguments)
         .output()
-        .expect("run agenterm-rh")
+        .expect("run agenterm rh")
 }
 
 #[test]
@@ -87,10 +88,12 @@ fn rh_is_the_task_front_door_without_compat_binary() {
 fn isolated_rh_task_list_does_not_require_adjacent_rhai() {
     let repo = repo_root();
     let isolated = TestDirectory::new("missing-compat");
-    let isolated_rh = isolated.path().join(binary_name("agenterm-rh"));
-    fs::copy(env!("CARGO_BIN_EXE_agenterm-rh"), &isolated_rh).expect("copy isolated rh CLI");
+    let isolated_agenterm = isolated.path().join(binary_name("agenterm"));
+    fs::copy(env!("CARGO_BIN_EXE_agenterm"), &isolated_agenterm)
+        .expect("copy isolated agenterm PE");
     let manifest = repo.join("agenterm.tasks.json");
-    let output = Command::new(isolated_rh)
+    let output = Command::new(isolated_agenterm)
+        .args(["__agenterm-internal-engine", "rh"])
         .current_dir(isolated.path())
         .args([
             "task",
@@ -100,7 +103,7 @@ fn isolated_rh_task_list_does_not_require_adjacent_rhai() {
             "--json",
         ])
         .output()
-        .expect("run isolated agenterm-rh");
+        .expect("run isolated agenterm rh");
     assert!(
         output.status.success(),
         "stdout={}\nstderr={}",
@@ -136,7 +139,8 @@ fn worker_invocation(id: &str) -> ScriptInvocation {
 
 #[test]
 fn rh_legacy_worker_mode_uses_shared_runtime() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .arg("--worker")
         .env("AGENTERM_SCRIPT_BACKEND", "rh")
         .stdin(Stdio::piped())
@@ -170,7 +174,8 @@ fn rh_legacy_worker_mode_uses_shared_runtime() {
 
 #[test]
 fn rh_framed_worker_mode_uses_shared_runtime() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-rh"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["__agenterm-internal-engine", "rh"])
         .arg("--framed-worker")
         .env("AGENTERM_SCRIPT_BACKEND", "rh")
         .stdin(Stdio::piped())

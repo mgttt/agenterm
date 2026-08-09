@@ -21,6 +21,18 @@ use platform::ConcurrencyPermit;
 #[allow(dead_code)] // Foreground REPL integration is the next dependent leaf.
 pub(crate) mod persistent;
 
+/// Argv prefix that routes a `Command::new(<main agenterm PE>)` invocation
+/// into the in-process rh/lua/qjs/sql multi-engine worker host
+/// (`script_rh_cli_main::run_main`'s `--worker`/`--framed-worker` handling),
+/// instead of spawning the retired standalone `agenterm-rh` binary. The
+/// worker itself picks its actual script engine (rh/lua/qjs/sql) at runtime
+/// from `AGENTERM_SCRIPT_BACKEND` (see `configure_script_backend` below) —
+/// "rh" here is only the fixed entry-point token consumed by
+/// `src/bin/agenterm.rs`'s `__agenterm-internal-engine` dispatch, not a
+/// commitment to the rh engine. See `src/bin/agenterm.rs`'s
+/// `INTERNAL_ENGINE_SUBCOMMAND` and `ENGINE_SUBCOMMANDS`.
+pub(crate) const SCRIPT_WORKER_ENGINE_ARGS: [&str; 2] = ["__agenterm-internal-engine", "rh"];
+
 pub(crate) const PROCESS_CONCURRENCY_LIMIT: usize = 2;
 pub(crate) const GLOBAL_CONCURRENCY_LIMIT: usize = 8;
 pub(crate) static PROCESS_ACTIVE: AtomicUsize = AtomicUsize::new(0);
@@ -67,6 +79,7 @@ impl WorkerSupervisor {
         let _permit = try_acquire_permit()?;
         let mut command = Command::new(executable);
         command
+            .args(SCRIPT_WORKER_ENGINE_ARGS)
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
