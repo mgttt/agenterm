@@ -66,7 +66,7 @@ fn pack_loads_verifies_and_runs_a_real_fleet_call() {
     };
     let outcome = agenterm_dynacore::eval_core::run(&verified, &bridge);
 
-    assert_eq!(outcome.result, 1, "FleetCall dest is 1 on Ok");
+    assert_eq!(outcome.result(), Some(1), "FleetCall dest is 1 on Ok");
     assert_eq!(outcome.calls.len(), 1);
     assert_eq!(outcome.calls[0].operation_id, "demo.echo");
     assert_eq!(outcome.calls[0].params_json, "{\"n\":3}");
@@ -193,7 +193,7 @@ fn two_different_hash_packs_coexist_independently() {
         panic!("pack_a must never call fleet_call")
     };
     let outcome_a = agenterm_dynacore::eval_core::run(&verified_a, &never_called);
-    assert_eq!(outcome_a.result, 3);
+    assert_eq!(outcome_a.result(), Some(3));
     assert!(outcome_a.calls.is_empty());
 
     let bridge_b = |operation_id: &str, _: &str| -> Result<String, String> {
@@ -201,11 +201,52 @@ fn two_different_hash_packs_coexist_independently() {
         Ok("{}".to_string())
     };
     let outcome_b = agenterm_dynacore::eval_core::run(&verified_b, &bridge_b);
-    assert_eq!(outcome_b.result, 1);
+    assert_eq!(outcome_b.result(), Some(1));
     assert_eq!(outcome_b.calls.len(), 1);
 
     // Reloading a's bytes from the store independently still reproduces a's
     // own content (not b's) — the store did not conflate the two hashes.
     let reloaded_a = pack::load(&store, &manifest_a).expect("reload a");
     assert_eq!(reloaded_a, loaded_a);
+}
+
+/// v1.1 safety acceptance: a well-formed, catalog-valid pack whose control
+/// flow never falls out of a loop (a real bug, not a malicious payload — this
+/// is exactly the class of pack `verify()` cannot and should not reject,
+/// since a back-edge is perfectly well-formed IR) does not hang the host
+/// thread — `eval_core::run` aborts it with `Termination::StepLimitExceeded`
+/// well inside a test-suite-sane wall-clock budget.
+#[test]
+fn a_pack_that_never_falls_out_of_its_loop_is_aborted_not_hung() {
+    let mut b = Builder::new();
+    let call = b.fleet_call("demo.noop", "{}");
+    let _ = call; // executed once per iteration before the back-edge
+    b.term(Term::Br(0)); // block 0 branches to itself forever
+    let module = b.finish("runaway_pack", 0);
+
+    let catalog = demo_catalog();
+    let verified = verify::verify(&module, &catalog).expect("a self-loop calling a real operation is still well-formed");
+
+    let calls: std::cell::RefCell<u32> = std::cell::RefCell::new(0);
+    let bridge = |_: &str, _: &str| -> Result<String, String> {
+        *calls.borrow_mut() += 1;
+        Ok("{}".to_string())
+    };
+
+    let started = std::time::Instant::now();
+    let outcome = agenterm_dynacore::eval_core::run_with_step_limit(&verified, &bridge, 10_000);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the step limit must abort promptly, not just eventually terminate"
+    );
+    assert_eq!(
+        outcome.termination,
+        agenterm_dynacore::eval_core::Termination::StepLimitExceeded
+    );
+    assert_eq!(outcome.result(), None);
+    assert_eq!(
+        *calls.borrow(),
+        10_000,
+        "calls made before the cutoff are real and reported, not discarded"
+    );
 }
