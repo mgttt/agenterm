@@ -383,7 +383,7 @@ fn pack_manifest_schema(dir: &Path) -> Result<String, QjsError> {
 /// "`--dir` with nothing after it" — the latter is a hard error, and the
 /// shared body preserves that.
 fn run_corpus_scan_command(args: &[String]) -> Result<u8, QjsError> {
-    agenterm_script_common::cli::run_corpus_scan_command(args, |dir| crate::scan_directory(dir))
+    agenterm_script_common::cli::run_corpus_scan_command(args, crate::scan_directory)
         .map_err(QjsError::Usage)
 }
 
