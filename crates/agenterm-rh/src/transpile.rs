@@ -803,7 +803,18 @@ fn infer_stmt_scope(stmt: &Stmt, ctx: &mut EmitCtx) {
         Stmt::Assignment(boxed, ..) => {
             let (_, bin) = boxed.as_ref();
             if let Expr::Variable(ident, ..) = &bin.lhs {
-                let kind = infer_binding_kind(&bin.rhs, ctx);
+                let mut kind = infer_binding_kind(&bin.rhs, ctx);
+                // An Int-seeded binding stays Int across a json-path
+                // reassignment (`let n = 0; n = gate.duration_ms;`): the
+                // declaration already emitted an i64 slot and the assign
+                // coerces, so flipping the scope kind to Json poisons every
+                // later string/int emit of that binding (timing-summary's
+                // generated pack failed rustc exactly there).
+                if kind == ValueKind::Json
+                    && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Int)
+                {
+                    kind = ValueKind::Int;
+                }
                 *ctx = ctx.clone().with_binding(ident.1.as_str(), kind);
             }
         }
@@ -2687,7 +2698,14 @@ fn emit_stmt(
                         ),
                         ValueKind::Int | ValueKind::Bool
                     )
-                );
+                )
+                // The reverse also holds for Int seeds: the assignment above
+                // was EMITTED through the intish lane (the Rust slot stays
+                // i64), so rebinding to Json poisons later string/int emits
+                // (`let n = 0; n = gate.duration_ms; "" + n` — the
+                // timing-summary pack's rustc E0308).
+                || (matches!(old, Some(ValueKind::Int | ValueKind::Bool))
+                    && new_kind == ValueKind::Json);
                 if !clobber {
                     *ctx = ctx.clone().with_binding(ident.1.as_str(), new_kind);
                 }
@@ -3531,6 +3549,27 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             .is_some_and(|(_, property)| property == "stdout" || property == "stderr") =>
         {
             ValueKind::Bytes
+        }
+        // Arithmetic over host reads is INT: the Bool catch-all below turned
+        // `let native_pid = 0 + row.pid;` into a Bool-kind binding, and a
+        // later `#{ pid: native_pid }` map literal then serialized
+        // `"pid": true` — a corrupted registration record that discovery
+        // silently dropped (native-ipc-smoke's owner-unknown fixture).
+        // String concats never reach this arm (string_concat_args above).
+        Expr::FnCall(call, ..)
+            if call.args.len() == 2
+                && matches!(
+                    call.op_token.as_ref(),
+                    Some(
+                        Token::Plus
+                            | Token::Minus
+                            | Token::Multiply
+                            | Token::Divide
+                            | Token::Modulo
+                    )
+                ) =>
+        {
+            ValueKind::Int
         }
         _ if uses_host_surface(expr) => ValueKind::Bool,
         _ => ValueKind::Int,
@@ -11401,6 +11440,31 @@ mod tests {
         assert!(
             !rust.contains("&[\"len\"]"),
             "len must not become a json path key: {rust}"
+        );
+    }
+
+    /// `0 + row.pid` is an INT coercion; the host-surface Bool catch-all
+    /// must not capture it, or `#{ pid: native_pid }` serializes
+    /// `"pid": true` and corrupts written records (native-ipc-smoke's
+    /// owner-unknown registration fixture).
+    #[test]
+    fn int_coerced_host_read_embeds_as_number_in_map_literal() {
+        let rust = transpile_cdylib(
+            "fn entry() {\n\
+                 let doc = rh::json::parse(\"{\\\"pid\\\": 42}\");\n\
+                 let native_pid = 0 + doc.pid;\n\
+                 let record = rh::json::stringify(#{ pid: native_pid });\n\
+                 record.len\n\
+             }",
+        )
+        .expect("transpile");
+        assert!(
+            rust.contains("serde_json::json!(native_pid)"),
+            "int-coerced host read must embed as a number: {rust}"
+        );
+        assert!(
+            !rust.contains("serde_json::Value::Bool(native_pid != 0)"),
+            "must not degrade to bool: {rust}"
         );
     }
 
