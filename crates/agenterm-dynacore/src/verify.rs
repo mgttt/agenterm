@@ -222,7 +222,16 @@ fn json_type_matches(value_type: &str, value: &serde_json::Value) -> bool {
     match value_type {
         "string" | "stable_tab_id" | "session_name" => value.is_string(),
         "bool" | "boolean" => value.is_boolean(),
-        "uint32" | "uint64" => value.is_u64(),
+        // "uint32" promises a 32-bit width, not just "unsigned" -- unlike
+        // "uint64" a value that is a JSON u64 but exceeds u32::MAX does not
+        // satisfy it, even when the operation declares no explicit
+        // `maximum` (found auditing this file: every real `uint32` catalog
+        // param happens to declare an explicit `maximum` where the bound
+        // matters, so this was previously unobserved rather than exploited;
+        // still a genuine produce-time gap worth closing at zero behavior
+        // cost for any value that was already in range).
+        "uint32" => value.as_u64().is_some_and(|n| n <= u64::from(u32::MAX)),
+        "uint64" => value.is_u64(),
         "integer" | "int32" | "int64" => value.is_i64() || value.is_u64(),
         "number" => value.is_number(),
         _ => true,

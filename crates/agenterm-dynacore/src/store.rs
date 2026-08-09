@@ -73,3 +73,100 @@ impl Store {
         Some(bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for commit `7892f228` (fixed 2026-08-09): the
+    /// FNV-1a/64 prime constant was `0x0000_0001_0000_01b3` — one hex group
+    /// too far right — instead of the canonical `0x100000001b3`
+    /// (`0x0000_0100_0000_01b3` when padded to 16 digits). The bug was
+    /// invisible to every round-trip test that ever existed (put/get only
+    /// need self-consistency, both go through this one function), so the
+    /// only thing that can catch a regression here is comparing against
+    /// PUBLISHED, independently-known FNV-1a/64 test vectors — not anything
+    /// derived from this crate's own code. These three are the standard
+    /// reference vectors (offset basis for "", then "a" and "foobar", the
+    /// same triple commonly used to sanity-check FNV-1a/64 implementations).
+    /// With the old buggy constant, `fnv1a64(b"a")` was `0x1162bb908601ec8c`
+    /// and `fnv1a64(b"foobar")` was `0x3fefab5ef73967e8` — both wrong; this
+    /// test would have failed against the pre-fix code.
+    #[test]
+    fn fnv1a64_matches_published_reference_vectors() {
+        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325, "empty input is exactly the offset basis");
+        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
+        assert_eq!(hash_hex(b"foobar"), "85944171f73967e8");
+    }
+
+    #[test]
+    fn put_then_get_round_trips_the_exact_bytes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        let bytes = b"dynacore store round trip".to_vec();
+
+        let hash = store.put(&bytes).expect("put");
+        assert_eq!(hash, hash_hex(&bytes), "put must return the content's own hash");
+
+        let fetched = store.get(&hash).expect("get must find what put just wrote");
+        assert_eq!(fetched, bytes);
+    }
+
+    #[test]
+    fn put_is_idempotent_for_identical_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        let bytes = b"same content twice".to_vec();
+
+        let hash1 = store.put(&bytes).expect("first put");
+        let hash2 = store.put(&bytes).expect("second put of identical bytes");
+        assert_eq!(hash1, hash2);
+        assert_eq!(store.get(&hash1).expect("get"), bytes);
+    }
+
+    /// `get` must never hand back bytes whose recomputed hash disagrees with
+    /// the hash the caller asked for — this is the store's only integrity
+    /// guarantee (`Store::get`'s own doc). Simulates on-disk corruption by
+    /// writing different bytes directly under the hash's blob path (a real
+    /// `put` would never produce this state; this test reaches past the
+    /// public API on purpose to prove `get` still refuses to serve it).
+    #[test]
+    fn get_rejects_a_blob_whose_content_does_not_match_its_claimed_hash() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        let original = b"original content".to_vec();
+        let hash = store.put(&original).expect("put");
+
+        // Corrupt the blob on disk in place, keeping the same filename (same
+        // claimed hash) but different content -- exactly what bit rot or a
+        // truncated/partial write would look like.
+        let blob_path = dir.path().join("store").join(format!("{hash}.bin"));
+        std::fs::write(&blob_path, b"tampered content, different bytes").expect("overwrite blob on disk");
+
+        assert_eq!(
+            store.get(&hash),
+            None,
+            "a hash/content mismatch must be rejected, never returned as if it were valid"
+        );
+    }
+
+    #[test]
+    fn get_returns_none_for_a_hash_that_was_never_put() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        assert_eq!(store.get("0000000000000000"), None);
+        assert_eq!(store.get("not-even-hex-shaped"), None);
+    }
+
+    #[test]
+    fn distinct_content_produces_distinct_hashes_and_distinct_blobs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open store");
+        let hash_a = store.put(b"content a").expect("put a");
+        let hash_b = store.put(b"content b").expect("put b");
+        assert_ne!(hash_a, hash_b);
+        assert_eq!(store.get(&hash_a).expect("get a"), b"content a");
+        assert_eq!(store.get(&hash_b).expect("get b"), b"content b");
+    }
+}

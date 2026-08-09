@@ -42,7 +42,7 @@ pub enum Op {
 pub enum Inst {
     /// dest = op
     Set(Val, Op),
-    /// dest = fleet_call(externs[id].operation_id, externs[id].params_json).
+    /// dest = fleet_call(externs\[id\].operation_id, externs\[id\].params_json).
     /// dest is 1 on `Ok`, 0 on `Err` — directly usable by `Term::BrCond` so a
     /// pack can branch on whether the host call it just made succeeded.
     FleetCall(Val, u32),

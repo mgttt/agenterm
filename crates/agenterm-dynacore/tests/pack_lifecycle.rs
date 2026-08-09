@@ -250,3 +250,53 @@ fn a_pack_that_never_falls_out_of_its_loop_is_aborted_not_hung() {
         "calls made before the cutoff are real and reported, not discarded"
     );
 }
+
+/// `pack.rs`'s own doc on `load`: "This does NOT verify well-formedness ...
+/// Fetch `manifest.hash` from `store` and deserialize it back into a
+/// `Module`". A store blob that has been tampered with on disk (corrupted,
+/// bit-rotted, or partially overwritten) after a legitimate `pack()` must be
+/// rejected by `pack::load` with an `Err`, never handed back silently as if
+/// it were the original content and never panic while doing so — the full
+/// pipeline's own integrity guarantee, not just `store::get`'s in isolation.
+#[test]
+fn tampered_store_blob_is_rejected_by_pack_load_not_silently_returned() {
+    let (dir, store) = open_temp_store();
+    let catalog = demo_catalog();
+
+    let mut b = Builder::new();
+    let v = b.fleet_call("demo.noop", "{}");
+    b.term(Term::Exit(v));
+    let module = b.finish("will_be_tampered", 0);
+    let manifest = pack::pack(&store, &module).expect("pack");
+
+    // Sanity: untampered, this pack loads and verifies fine.
+    let loaded = pack::load(&store, &manifest).expect("untampered load must succeed");
+    verify::verify(&loaded, &catalog).expect("untampered pack is well-formed");
+
+    // Corrupt the on-disk blob in place, at the SAME path the manifest's
+    // hash resolves to (this is what a partial write, disk corruption, or a
+    // hostile actor with filesystem write access would look like — not
+    // something `pack::pack`/`Store::put` can themselves ever produce).
+    let blob_path = dir.path().join("store").join(format!("{}.bin", manifest.hash));
+    std::fs::write(&blob_path, b"not the original module bytes at all").expect("simulate on-disk tampering");
+
+    let result = pack::load(&store, &manifest);
+    assert!(
+        result.is_err(),
+        "pack::load must reject a tampered blob, not hand back garbage or the stale untampered value"
+    );
+}
+
+/// A hash that was never packed into this store at all (not tampering — the
+/// blob is simply absent) must also be a clean `Err`, not a panic.
+#[test]
+fn loading_a_hash_that_was_never_packed_is_a_clean_error() {
+    let (_dir, store) = open_temp_store();
+    let manifest = pack::PackManifest {
+        schema_version: pack::PACK_SCHEMA_VERSION,
+        hash: "ffffffffffffffff".to_string(),
+        operation_ids: vec![],
+    };
+    let result = pack::load(&store, &manifest);
+    assert!(result.is_err(), "loading a hash never written to this store must fail cleanly");
+}

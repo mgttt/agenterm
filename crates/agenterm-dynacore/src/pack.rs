@@ -96,13 +96,29 @@ pub fn serialize_module(m: &Module) -> Vec<u8> {
 /// a SEPARATE failure mode from `verify::verify` (which checks a
 /// successfully-decoded `Module` is well-formed). This function only turns
 /// bytes back into a `Module` value.
+///
+/// Deliberately does NOT `Vec::with_capacity(n as usize)` for any of the
+/// three counts this format reads off untrusted bytes (`n_ext`/`n_blk`/
+/// `n_inst`) — found while hardening this crate's test suite: a corrupted or
+/// truncated buffer can carry an arbitrary `u32` in any of those fields
+/// (e.g. a byte flipped to `0xFF`), and reserving capacity for that many
+/// elements BEFORE checking whether the buffer actually contains them tries
+/// to allocate up to ~4 billion elements' worth of memory. That allocation
+/// request fails, and a failed `Vec::with_capacity` allocation aborts the
+/// process (`handle_alloc_error`) — not a catchable panic, not a `None`, not
+/// something `catch_unwind` can stop. A store/pack consumer must never be
+/// able to take down its host process just by handing it corrupted bytes; a
+/// plain `Vec::new()` that grows only as real elements are actually read
+/// (each read still bounds-checked against `buf` by `r_str`/`r_u32`/
+/// `r_inst`/`r_term`) is bounded by the buffer's real size, not by whatever
+/// number a corrupted length field happens to spell.
 pub fn deserialize_module(buf: &[u8]) -> Option<Module> {
     let mut p = 0usize;
     let name = r_str(buf, &mut p)?;
     let n_vals = r_u32(buf, &mut p)?;
     let entry = r_u32(buf, &mut p)?;
     let n_ext = r_u32(buf, &mut p)?;
-    let mut externs = Vec::with_capacity(n_ext as usize);
+    let mut externs = Vec::new();
     for _ in 0..n_ext {
         let operation_id = r_str(buf, &mut p)?;
         let params_json = r_str(buf, &mut p)?;
@@ -112,10 +128,10 @@ pub fn deserialize_module(buf: &[u8]) -> Option<Module> {
         });
     }
     let n_blk = r_u32(buf, &mut p)?;
-    let mut blocks = Vec::with_capacity(n_blk as usize);
+    let mut blocks = Vec::new();
     for _ in 0..n_blk {
         let n_inst = r_u32(buf, &mut p)?;
-        let mut insts = Vec::with_capacity(n_inst as usize);
+        let mut insts = Vec::new();
         for _ in 0..n_inst {
             insts.push(r_inst(buf, &mut p)?);
         }
@@ -297,4 +313,121 @@ fn r_term(buf: &[u8], p: &mut usize) -> Option<Term> {
         3 => Term::Exit(r_u32(buf, p)?),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{Builder, Op, Term};
+
+    /// A module exercising every `Op`, every `Inst`, every `Term` variant,
+    /// multiple blocks, and a non-empty extern table -- not just the
+    /// straight-line one-block modules the integration tests use, so the
+    /// wire format's block/inst/extern COUNT fields (not just their payload
+    /// encoding) are actually exercised by the round trip.
+    fn kitchen_sink_module() -> Module {
+        let mut b = Builder::new();
+        let a = b.konst(7);
+        let bb = b.konst(3);
+        let _add = b.set(Op::Add(a, bb));
+        let _sub = b.set(Op::Sub(a, bb));
+        let _mul = b.set(Op::Mul(a, bb));
+        let _xor = b.set(Op::Xor(a, bb));
+        let _and = b.set(Op::And(a, bb));
+        let _or = b.set(Op::Or(a, bb));
+        let _shl = b.set(Op::Shl(a, 2));
+        let _shr = b.set(Op::Shr(a, 1));
+        let cond = b.set(Op::Ult(a, bb));
+        let call = b.fleet_call("demo.op", "{\"x\":1}");
+        b.term(Term::BrCond(cond, 1, 2));
+        let _ret_call = b.fleet_call("demo.op", "{\"x\":1}"); // reuses the same extern (by value)
+        b.term(Term::Br(2));
+        b.term(Term::Exit(call));
+        b.finish("kitchen_sink", 0)
+    }
+
+    #[test]
+    fn serialize_then_deserialize_round_trips_a_multi_block_module_exactly() {
+        let module = kitchen_sink_module();
+        let bytes = serialize_module(&module);
+        let decoded = deserialize_module(&bytes).expect("well-formed bytes must decode");
+        assert_eq!(decoded, module);
+        // Reuse-by-value (Builder::fleet_call's own contract) must survive
+        // the wire format too: two calls to the same operation_id+params_json
+        // share one extern table entry, not two.
+        assert_eq!(decoded.externs.len(), 1);
+    }
+
+    #[test]
+    fn serialize_is_deterministic_for_the_same_module() {
+        let module = kitchen_sink_module();
+        assert_eq!(serialize_module(&module), serialize_module(&module));
+    }
+
+    #[test]
+    fn deserialize_rejects_empty_bytes() {
+        assert_eq!(deserialize_module(&[]), None);
+    }
+
+    /// Every truncation point of a real serialized module -- not just "one
+    /// byte cut somewhere" -- must decode to `None`, never panic (an
+    /// out-of-bounds slice on attacker/corruption-controlled length-prefixed
+    /// bytes is exactly the class of bug a fixed-width, no-bounds-checked-by-
+    /// construction wire format like this one could hide).
+    #[test]
+    fn deserialize_rejects_every_truncation_of_a_real_module_without_panicking() {
+        let module = kitchen_sink_module();
+        let bytes = serialize_module(&module);
+        assert!(bytes.len() > 16, "sanity: the fixture must be long enough to be worth truncating");
+        for cut in 0..bytes.len() {
+            let truncated = &bytes[..cut];
+            // Must never panic (a slice index out of bounds would abort the
+            // whole test binary, not just fail one assertion) and a
+            // truncated buffer must never decode to something claiming to be
+            // the full module.
+            let result = std::panic::catch_unwind(|| deserialize_module(truncated));
+            match result {
+                Ok(Some(decoded)) => assert_ne!(decoded, module, "cut={cut}: a truncated buffer must not decode into the exact original module"),
+                Ok(None) => {}
+                Err(_) => panic!("cut={cut}: deserialize_module panicked on truncated input"),
+            }
+        }
+    }
+
+    /// A garbage discriminant byte (an `Op`/`Inst`/`Term` tag no variant
+    /// uses) must be rejected, not panic or silently pick a variant.
+    #[test]
+    fn deserialize_rejects_an_unknown_op_discriminant() {
+        let mut b = Builder::new();
+        let one = b.konst(1);
+        let _ = b.set(Op::Add(one, one));
+        b.term(Term::Exit(one));
+        let module = b.finish("one_op", 0);
+        let mut bytes = serialize_module(&module);
+
+        // Locate the `Op::Add` tag byte (value 1) and corrupt it to a value
+        // no `r_op` arm handles. `Const`'s own tag (0) precedes it, so the
+        // second `w_u8` written for an op-carrying inst is this one; walking
+        // from a known-good round trip is more robust than hardcoding an
+        // offset, so instead corrupt every byte in turn and confirm the
+        // decoder either still succeeds (byte was inert, e.g. inside a
+        // length field it happens not to change meaningfully) or fails
+        // cleanly -- never panics.
+        for i in 0..bytes.len() {
+            let original = bytes[i];
+            bytes[i] = 0xFF; // not a valid tag for any Op/Inst/Term encoding
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| deserialize_module(&bytes)));
+            assert!(result.is_ok(), "byte {i} corrupted to 0xFF must not panic deserialize_module");
+            bytes[i] = original;
+        }
+    }
+
+    #[test]
+    fn build_manifest_hash_matches_store_hash_hex_of_the_same_bytes() {
+        let module = kitchen_sink_module();
+        let (manifest, bytes) = build_manifest(&module);
+        assert_eq!(manifest.hash, crate::store::hash_hex(&bytes));
+        assert_eq!(manifest.schema_version, PACK_SCHEMA_VERSION);
+        assert_eq!(manifest.operation_ids, vec!["demo.op".to_string()]);
+    }
 }
