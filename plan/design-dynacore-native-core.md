@@ -3,14 +3,14 @@
 | 字段 | 值 |
 |------|-----|
 | **日期** | 2026-08-09 |
-| **状态** | §1–§7 全部已实现并已推送——`agenterm-nativecore` 进了根 workspace，`try_execute_nativecore_pack_invocation` 接进了 `execute_inner`，CLI 入口（`examples/nativecore_run.rs`）也有了，2 个产品路径真机黑盒测试 + crate 自身 14 个测试全绿。**用户判断（2026-08-09）：七个 intent 的实际用途目前很薄（只对"没装 rustc 的机器"和"未来的硬化平台"两个场景有意义，都不是今天 agenterm 的主战场），继续往这个方向堆产品化工作（更多 intent/更多 CLI/PRD 收录）价值不够，本轮起冻结——代码保留（已测试、opt-in、未配置时零成本，不删不退），但不再主动扩它。精力转回研究：见 §8 Q23** |
+| **状态** | **归档（2026-08-09）。** §1–§9 全部已实现并已推送（`agenterm-nativecore` 进了根 workspace、接了产品、有 CLI、有 README、38 个真机测试全绿、含 §9 的签名注册表）。用户最终判断（2026-08-09）：这条crate 的名字（`agenterm-nativecore`）不该继续跟 `agenterm-dynacore` 抢"到底谁是 dynacore"这件事——反复的命名混淆本身造成的沟通损耗，已经超过继续投入的价值。**代码保留、不删、不退（已测试、opt-in、未配置时零成本），但不再作为"dynacore"这个名字的候选，也不再主动投入**。「dynacore」这个名字和后续投入，从这次起归 `crates/agenterm-dynacore`（logic pack）——见 [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md)。本文件保留作历史记录 |
 | **前置** | [`research/dynamic-core/SYNTHESIS.md`](../research/dynamic-core/SYNTHESIS.md)（Q0–Q22）；
   [`research/dynamic-core/assembled/`](../research/dynamic-core/assembled/)（Q22，本设计复活它砍掉的那一半） |
-| **纠正** | [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) 描述的东西**不是这个**——
-  那个只调 `fleet.*`，是一种二进制形态的脚本，正确名字是「logic pack」，不该叫 dynacore。
-  用户明确指出这个混淆（2026-08-09），本文件是修正后的、真正的 dynacore |
-| **临时 crate 名** | `agenterm-nativecore`——`agenterm-dynacore` 这个名字现在被 logic pack 那个
-  crate 占着，等它改名（后续清理任务，不阻塞本设计）后再把这个 crate 转正改回 `agenterm-dynacore` |
+| **早前的判断，已被"状态"行推翻** | 本文件曾经记录"这才是真身，该拿到 dynacore 这个名字，logic pack
+  该改名让位"——这个技术判断没有错，但**执行代价（反复的命名混淆本身消耗的沟通成本）被用户判定
+  为不值得继续背**，见上面"状态"行（2026-08-09）。`crates/agenterm-dynacore` 保留原名，
+  不再计划把这个 crate 改名过去 |
+| **crate 名，不再变** | `agenterm-nativecore`——见"状态"行，这个名字定了，不会再改成 `agenterm-dynacore` |
 
 ---
 
@@ -145,13 +145,12 @@ nativecore pack 够到的是**跟 rh/lua/qjs 今天已经有的同一份"无限�
 **不是权限门**（不判断"这个操作允不允许做"）。接入时不要顺手加一层"nativecore 需要
 额外授权"的逻辑——那会制造一个跟 rh/lua/qjs 不一致的新姿态，不是这次要做的事。
 
-### 7.4 命名清理，明确记录、不阻塞本轮
+### 7.4（作废，见文件头"状态"行，2026-08-09）
 
-`agenterm-dynacore` 这个名字现在被 logic pack 占着，`agenterm-nativecore` 才是真身。
-这是历史遗留、需要修的错误命名，但**这一轮不做**——logic pack 已经在产品主流程里
-被多个文件引用（`script_worker.rs`/`script_backend.rs`/`lib.rs`），且这个 checkout
-同时有别的会话在改邻近文件，此刻改名风险大于收益。**留档，等两条并发工作都消停
-再做一次干净的改名 + 引用替换**。
+本节曾计划"改名清理：把 dynacore 这个名字从 logic pack 转正给这个 crate"。
+这个计划被推翻了——不是因为技术上做不到，是因为反复的命名混淆本身的沟通代价，
+用户判定不值得再背。`agenterm-dynacore` 保留原名，此 crate 永久叫
+`agenterm-nativecore`，不会再改名。本节原文保留在 git 历史里，不在这里重复。
 
 ## 8. v1 冻结，转研究：Q23
 
@@ -278,6 +277,6 @@ ISA/struct-by-value/运行时发现——**继续不做**，见 §6，不受本�
 
 ---
 
-*产品设计文档。命名冲突（`agenterm-dynacore` 暂被占用）待 logic pack 改名后一并清理，
-见 §7.4。v1 已冻结产品化，见 §8；§9 为 Q23 验证过的签名注册表方向单独解冻，
-范围严格限定在 §9.1–§9.3，不代表 v1 冻结整体解除。*
+*产品设计文档，本文件描述的 crate（`agenterm-nativecore`）已归档（2026-08-09，见文件头
+"状态"行）——保留作历史记录，不再是当前投入方向。「dynacore」这个名字和后续投入见
+[`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md)。*

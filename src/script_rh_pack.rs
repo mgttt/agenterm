@@ -132,7 +132,7 @@ pub fn run_rh_pack_cli(args: &[String]) -> i32 {
         position += 1;
     }
     let Some(path) = path else {
-        eprintln!("usage: agenterm-cli rh-pack --path PATH [--json]");
+        eprintln!("usage: agenterm cli rh-pack --path PATH [--json]");
         return 2;
     };
     match print_rh_pack(Path::new(path.as_str()), json) {

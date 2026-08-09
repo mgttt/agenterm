@@ -227,7 +227,7 @@ The migration is complete only when all of the following are true:
   geometry so semantic evidence cannot claim content different from the
   visible GUI
 
-`agenterm-cli protocol-info` exposes the current adapter kind, contract
+`agenterm cli protocol-info` exposes the current adapter kind, contract
 revision, and all eight typed capability statuses. Client-side and
 `--running` server responses use the same schema, so automation can distinguish
 Available, Unsupported, and Failed without reading source or assuming parity.
@@ -749,7 +749,7 @@ integrated validation recorded below):
   instance-scoped path from `platform::paths`; the workspace domain no longer
   branches on LOCALAPPDATA, XDG, or server-scope conventions.
 - [x] Windows-hosted `cargo fmt`, warnings-denied Clippy, focused facade/unit
-  tests, `agenterm-cli --help`, both static boundary gates, and the same-host
+  tests, `agenterm cli --help`, both static boundary gates, and the same-host
   three-adapter contract test pass for the integrated revision-4 tree. Final
   Quick/build/public-smoke receipts are recorded only after the closing serial
   validation run.
@@ -833,7 +833,7 @@ Contract-revision-2 local evidence (2026-07-31):
 - [x] Windows GDI font adapter tests pass **15/15** for the Windows platform
   slice; an incremental six-executable build and public no-activate startup
   smoke pass with a **570 ms** first native window
-- [x] public `agenterm-cli protocol-info` reports the current contract revision and all
+- [x] public `agenterm cli protocol-info` reports the current contract revision and all
   eight Windows capability statuses; IME preedit and undeclared shell
   integration are explicit Unsupported results rather than false availability
 

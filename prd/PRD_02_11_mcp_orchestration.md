@@ -1,4 +1,4 @@
-# MCP and agentic orchestration (`agenterm-cli mcp`)
+# MCP and agentic orchestration (`agenterm cli mcp`)
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
@@ -59,7 +59,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
       approval surface, or startup work in this read-only delivery
   - Executable and discovery
-    - [x] `agenterm-cli mcp --help`, `agenterm-cli mcp --version`, and
+    - [x] `agenterm cli mcp --help`, `agenterm cli mcp --version`, and
       `capabilities --json` work without starting a GUI or model runtime;
       capability output declares protocol/schema versions, transport,
       resources, tools, limits, and unavailable later-stage roles
@@ -67,7 +67,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         implemented, unit-tested, included in the artifact manifest and
         cross-platform build lists, and deliberately mark protocol methods,
         resources and `agenterm_wait` with shipped method/tool availability
-    - [x] `agenterm-cli mcp serve --stdio` is the only first-delivery MCP
+    - [x] `agenterm cli mcp serve --stdio` is the only first-delivery MCP
       transport; initialization negotiates a supported protocol version and
       publishes stable server identity without opening a network listener
       - [x] the executable reads one bounded UTF-8 JSON-RPC message per line,
@@ -95,12 +95,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       epoch, and snapshot sequence so a client can establish a verifiable
       event baseline
       - [x] the MCP adapter invokes the existing typed IPC request path
-        directly rather than launching or parsing `agenterm-cli`; all four
+        directly rather than launching or parsing `agenterm cli`; all four
         resources return versioned JSON text content
       - [x] a live read against the existing 48815 server returned the same
         event epoch/sequence and five stable tabs as its public snapshot
       - [x] an isolated public-executable fixture sends the same typed
-        `ui-snapshot` through `agenterm-cli.exe` and `agenterm-cli mcp`, then
+        `ui-snapshot` through `agenterm cli` and `agenterm cli mcp`, then
         compares server identity, epoch/sequence, workspace/window facts and
         every published tab field while rejecting title, CWD, proxy and
         Composer sentinels

@@ -12,6 +12,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   bootstrap worker executes outside Cargo output, so the Windows cleanup cannot
   be blocked by an in-target executable; dev and `release-fast` retain their
   incremental targets.
+- [~] build self-hosting now converges on the main `agenterm rh` entry rather
+  than the retired standalone `agenterm-rh` bin. Thin matched Windows and Unix
+  stage-0 aliases reuse a hash-validated last-known-good main executable from
+  outside Cargo output; source edits do not invalidate that recovery copy, and
+  a failed product build cannot replace it. A clean clone or ephemeral CI host
+  seeds the cache once with `cargo build --bin agenterm`. A successful native
+  build must pass `agenterm rh version` before Rh-owned promotion. Integrated
+  Windows plus Linux/macOS fresh-cache and failed-build retention evidence is
+  still required before this item becomes shipped.
 - [~] native Windows development builds now emit a strict versioned
   whole-root incremental manifest through the stable bootstrap worker used as
   `RUSTC_WRAPPER`, and consume it only after all seven artifacts stage. The

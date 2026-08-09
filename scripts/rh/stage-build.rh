@@ -75,6 +75,19 @@ fn entry() {
             destination_directory,
             artifact.name
         );
+        // The CUI trampoline is deliberately runtime-free in every profile.
+        // Enforce its budget during staging, not only at the release gate, so
+        // a debug/runtime regression cannot silently return to dist/.
+        if artifact.name == "agenterm.com" {
+            let staged_path =
+                std::path::join(destination_directory, artifact.name).display;
+            let staged_bytes = std::fs::metadata(staged_path).len;
+            require(
+                staged_bytes <= artifact.release_budget_bytes,
+                "stage_build_agenterm_com_budget:actual=" + staged_bytes +
+                    ":budget=" + artifact.release_budget_bytes
+            );
+        }
     }
 
     let output_manifest =

@@ -803,7 +803,7 @@ fn entry() {
     ).display;
     let cli_executable = std::path::join(
         executable_directory,
-        "agenterm-cli.exe"
+        "agenterm.exe"
     ).display;
     let script_executable = resolve_script_executable(executable_directory);
     let gui_executable = std::path::join(
@@ -875,9 +875,14 @@ fn entry() {
         std::fs::create_dir_all(missing_cc_directory);
         let isolated_cli = std::path::join(
             missing_cc_directory,
-            "agenterm-cli.exe"
+            "agenterm.exe"
+        ).display;
+        let isolated_host = std::path::join(
+            missing_cc_directory,
+            "agenterm.exe"
         ).display;
         std::fs::copy(cli_executable, isolated_cli);
+        std::fs::copy(server_executable, isolated_host);
         let missing_cc = cli(
             context,
             isolated_cli,

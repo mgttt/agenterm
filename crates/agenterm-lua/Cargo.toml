@@ -20,4 +20,5 @@ tempfile = "3"
 libc = "0.2"
 
 [dev-dependencies]
+agenterm-script-common = { path = "../agenterm-script-common", features = ["test-support"] }
 tempfile = "3"

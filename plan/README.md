@@ -27,8 +27,8 @@
 | [`design-neutral-ir-experiment.md`](design-neutral-ir-experiment.md) | **研究轨**：中立 IR 能否把 ABI/布局推迟给降级（同 ISA 双 ABI 隔离）；承接上条 §7 |
 | [`design-os-interface-as-data-experiment.md`](design-os-interface-as-data-experiment.md) | **研究轨**：Q7 —— OS 接口内容能否从每目标手写代码变成数据表（固定编组器）；承接 Q1 泄漏 L1–L5 → **已判决：有边界可达**；实现在 `research/dynamic-core/tables/` |
 | [`reference-cross-target-execution.md`](reference-cross-target-execution.md) | **研究轨参考**（常驻，非任务单）：跨目标执行技术空间综述 —— 中立 IR 失败史与根因、二进制翻译、验证型字节码、OS 轴、装载机制；含「与动态核架构的对照」 |
-| [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) | **产品设计——命名待改**：这是「logic pack」（fleet_call-only 的二进制形态脚本），不是 dynacore 本身，见下条的纠正 |
-| [`design-dynacore-native-core.md`](design-dynacore-native-core.md) | **产品设计（dynacore 真身）**：不靠编译器、不靠可执行内存的原生 API 解释执行——复活 Q22 砍掉的七个原生 intent，带上 F1 教训的验证纪律；临时 crate 名 `agenterm-nativecore` |
+| [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) | **产品设计——`agenterm-dynacore`，名字定了不再改**：fleet_call-only 的二进制形态脚本。曾经有过"这个该改名让位"的判断，已被用户明确推翻（2026-08-09，反复的命名混淆代价 > 改名收益）——这是「dynacore」这个名字往后唯一的所指，后续投入方向 |
+| [`design-dynacore-native-core.md`](design-dynacore-native-core.md) | **已归档（2026-08-09）**：不靠编译器、不靠可执行内存的原生 API 解释器，`crate agenterm-nativecore`，功能完整、38 测试全绿，但不再是「dynacore」这个名字的候选，也不再主动投入——保留作历史记录 |
 
 ## 已归档（勿当任务单）
 

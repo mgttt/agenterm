@@ -83,8 +83,8 @@ fn gui_console_summary(address: &str) -> String {
     format!(
         "Launcher PID: {}\n\
          Configured server address: {address}\n\n\
-         List running server PID and port: agenterm-cli.exe server-list\n\
-         More CLI commands: agenterm-cli.exe -h",
+         List running server PID and port: agenterm cli server-list\n\
+         More CLI commands: agenterm cli -h",
         std::process::id()
     )
 }

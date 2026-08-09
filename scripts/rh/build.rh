@@ -50,6 +50,57 @@ fn cleanup_incremental_state(path) {
     0
 }
 
+fn promote_bootstrap_worker(repo, candidate, cache_name) {
+    if !std::env::has("AGENTERM_BOOTSTRAP_CACHE_WORKER")
+            || !std::env::has("AGENTERM_BOOTSTRAP_CACHE_STAMP")
+            || !std::env::has("AGENTERM_BOOTSTRAP_FINGERPRINT") {
+        return 0;
+    }
+    require(direct_file(candidate) != 0, "build_bootstrap_candidate_missing");
+    let self_check = std::process::command_status(
+        candidate,
+        ["rh", "version"],
+        30000,
+        #{ current_dir: repo }
+    );
+    require(self_check == 0, "build_bootstrap_candidate_self_check");
+
+    let cache_worker = std::path::absolute(
+        std::env::get("AGENTERM_BOOTSTRAP_CACHE_WORKER")
+    ).display;
+    let cache_stamp = std::path::absolute(
+        std::env::get("AGENTERM_BOOTSTRAP_CACHE_STAMP")
+    ).display;
+    let nonce = "" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis;
+    let worker_temp = cache_worker + ".next-" + nonce;
+    let stamp_temp = cache_stamp + ".next-" + nonce;
+    let hash_output = cache_stamp + ".hash-" + nonce;
+    std::fs::copy(candidate, worker_temp);
+    let hash_code = std::process::command_stdout_file(
+        "git",
+        ["hash-object", "--", worker_temp],
+        10000,
+        hash_output,
+        #{ current_dir: repo }
+    );
+    require(hash_code == 0, "build_bootstrap_candidate_hash");
+    let worker_hash = std::fs::read_to_string(hash_output);
+    worker_hash.trim();
+    std::fs::try_remove_file(hash_output);
+    std::fs::write(
+        stamp_temp,
+        "2 " + std::env::get("AGENTERM_BOOTSTRAP_FINGERPRINT") + " " +
+            worker_hash + "\n"
+    );
+    let cache_directory = std::path::parent(cache_worker).display;
+    let _parked = artifact_files::unlock_output(cache_directory, cache_name);
+    std::fs::rename(worker_temp, cache_worker);
+    std::fs::rename(stamp_temp, cache_stamp);
+    print("AgenTerm bootstrap worker: promoted last-known-good agenterm");
+    0
+}
+
 fn target_arch(target) {
     // Bind before map literal — native packs reject if-expr as JSON values.
     if target.starts_with("aarch64") {
@@ -110,6 +161,9 @@ fn platform_executables(repo, os_name, target_arch_name) {
 }
 
 fn cargo_binary(name) {
+    if name == "agenterm.com" {
+        return "agenterm-com";
+    }
     if name.ends_with(".exe") {
         return name.sub_string(0, name.len - 4);
     }
@@ -396,6 +450,12 @@ fn entry() {
     }
     cargo_args.push(action);
     cargo_args.push("--locked");
+    // Cargo normally writes compiler diagnostics to stderr. A Windows GUI-
+    // subsystem bootstrap host cannot promise a live inherited stderr, while
+    // this task already owns a bounded stdout file. JSON diagnostics keep
+    // failures observable through that owned channel on every host.
+    cargo_args.push("--message-format");
+    cargo_args.push("json-render-diagnostics");
     if profile == "release" {
         cargo_args.push("--release");
     } else if profile == "release-fast" {
@@ -444,6 +504,18 @@ fn entry() {
     }
     std::fs::try_remove_file(stdout_path);
 
+    if action == "build" && external_target == 0 && cross_client == 0 {
+        let bootstrap_name = "agenterm";
+        if os_name == "windows" {
+            bootstrap_name = "agenterm.exe";
+        }
+        promote_bootstrap_worker(
+            repo,
+            std::path::join(profile_directory, bootstrap_name).display,
+            bootstrap_name
+        );
+    }
+
     if action == "clippy" {
         if target != "" {
             print(
@@ -478,7 +550,7 @@ fn entry() {
     let stage_code = std::process::command_status(
         worker,
         [
-            "task", "run", "stage-build",
+            "rh", "task", "run", "stage-build",
             "--manifest", task_manifest,
             "--", repo, profile_directory, dist, profile
         ],
@@ -520,7 +592,7 @@ fn entry() {
         repo = repo_dir(repo_arg);
         task_manifest = std::path::join(repo, "agenterm.tasks.json").display;
         let prune_arguments = [
-            "task", "run", "prune-target-incremental",
+            "rh", "task", "run", "prune-target-incremental",
             "--manifest", task_manifest,
             "--", repo, cargo_output
         ];
@@ -564,7 +636,7 @@ fn entry() {
         let report_code = std::process::command_stdout_file(
             worker,
             [
-                "task", "run", "target-report",
+                "rh", "task", "run", "target-report",
                 "--manifest", task_manifest,
                 "--", cargo_output
             ],
@@ -589,7 +661,7 @@ fn entry() {
         let prepare_code = std::process::command_stdout_file(
             worker,
             [
-                "task", "run", "prepare-target-clean",
+                "rh", "task", "run", "prepare-target-clean",
                 "--manifest", task_manifest,
                 "--", repo, cargo_output
             ],
@@ -631,7 +703,7 @@ fn entry() {
         let dev_report_code = std::process::command_stdout_file(
             worker,
             [
-                "task", "run", "target-report",
+                "rh", "task", "run", "target-report",
                 "--manifest", task_manifest,
                 "--", development_target
             ],
@@ -655,7 +727,7 @@ fn entry() {
         let dev_prepare_code = std::process::command_stdout_file(
             worker,
             [
-                "task", "run", "prepare-target-clean",
+                "rh", "task", "run", "prepare-target-clean",
                 "--manifest", task_manifest,
                 "--", repo, development_target
             ],

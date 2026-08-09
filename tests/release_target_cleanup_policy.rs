@@ -37,26 +37,28 @@ fn bootstrap_exposes_one_stable_cross_platform_rustc_wrapper_path() {
 fn bootstrap_builds_caches_and_executes_only_the_rh_worker() {
     assert!(
         BOOTSTRAP.contains(
-            "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\\debug\\agenterm-rh.exe"
+            "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\\debug\\agenterm.exe"
         )
     );
     assert!(BOOTSTRAP.contains(
-        "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\agenterm-rh.exe"
+        "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\agenterm.exe"
     ));
-    assert!(BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rh"));
+    assert!(BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm"));
+    assert!(!BOOTSTRAP.contains("--bin agenterm-rh"));
     assert!(!BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rhai"));
     assert!(!BOOTSTRAP.contains("agenterm-rhai.exe"));
-    assert!(BOOTSTRAP.contains("\"%AGENTERM_BOOTSTRAP_WORKER%\" task run"));
+    assert!(BOOTSTRAP.contains("\"%AGENTERM_BOOTSTRAP_WORKER%\" rh task run"));
     assert!(!BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_RH_CLI"));
     assert!(!BOOTSTRAP.contains("AGENTERM_RHAI_COMPAT_CLI"));
 
-    assert!(UNIX_BOOTSTRAP.contains("SOURCE=\"$TARGET_ROOT/debug/agenterm-rh\""));
-    assert!(UNIX_BOOTSTRAP.contains("CACHE_WORKER=\"$CACHE_DIR/agenterm-rh\""));
-    assert!(UNIX_BOOTSTRAP.contains("WORKER=\"$BOOTSTRAP_DIR/agenterm-rh\""));
-    assert!(UNIX_BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rh"));
+    assert!(UNIX_BOOTSTRAP.contains("SOURCE=\"$TARGET_ROOT/debug/agenterm\""));
+    assert!(UNIX_BOOTSTRAP.contains("CACHE_WORKER=\"$CACHE_DIR/agenterm\""));
+    assert!(UNIX_BOOTSTRAP.contains("WORKER=\"$BOOTSTRAP_DIR/agenterm\""));
+    assert!(UNIX_BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm"));
+    assert!(!UNIX_BOOTSTRAP.contains("--bin agenterm-rh"));
     assert!(!UNIX_BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rhai"));
     assert!(!UNIX_BOOTSTRAP.contains("agenterm-rhai\""));
-    assert!(UNIX_BOOTSTRAP.contains("\"$WORKER\" task run"));
+    assert!(UNIX_BOOTSTRAP.contains("\"$WORKER\" rh task run"));
     assert!(!UNIX_BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_RH_CLI"));
     assert!(!UNIX_BOOTSTRAP.contains("AGENTERM_RHAI_COMPAT_CLI"));
 }

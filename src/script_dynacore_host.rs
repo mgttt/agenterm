@@ -77,7 +77,7 @@ pub fn run_pack_with_step_limit(vm: &VerifiedModule, bridge: &DynacoreFleetBridg
     agenterm_dynacore::eval_core::run_with_step_limit(vm, bridge.as_ref(), max_steps)
 }
 
-/// A runnable, non-trivial demo pack (`agenterm-cli dynacore-run --demo`):
+/// A runnable, non-trivial demo pack (`agenterm cli dynacore-run --demo`):
 /// two `fleet.tabs.list` calls with a real `BrCond` between them, branching
 /// on whether the FIRST call's `FleetCall` dest word came back `1` (Ok) or
 /// `0` (Err) — the one branch predicate this crate's IR can express today

@@ -23,8 +23,8 @@ fn entry() {
             "prd_alignment_input_missing"
         );
     } else {
-        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
-        let cli_default_exe = cli_default + ".exe";
+        let cli_default = std::path::join(repo, "dist/agenterm").display;
+        let cli_default_exe = std::path::join(repo, "dist/agenterm.com").display;
         require(
             std::fs::exists(cli_default) != 0
                 || std::fs::exists(cli_default_exe) != 0,
@@ -356,7 +356,7 @@ fn entry() {
         if std::fs::exists(cli_arg) == 0 {
             catalog_code = std::process::command_stdout_file(
                 cli_arg_exe,
-                ["list-commands"],
+                ["cli", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
@@ -364,19 +364,19 @@ fn entry() {
         } else {
             catalog_code = std::process::command_stdout_file(
                 cli_arg,
-                ["list-commands"],
+                ["cli", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
             );
         }
     } else {
-        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
-        let cli_default_exe = cli_default + ".exe";
+        let cli_default = std::path::join(repo, "dist/agenterm").display;
+        let cli_default_exe = std::path::join(repo, "dist/agenterm.com").display;
         if std::fs::exists(cli_default) == 0 {
             catalog_code = std::process::command_stdout_file(
                 cli_default_exe,
-                ["list-commands"],
+                ["cli", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
@@ -384,7 +384,7 @@ fn entry() {
         } else {
             catalog_code = std::process::command_stdout_file(
                 cli_default,
-                ["list-commands"],
+                ["cli", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
@@ -497,7 +497,7 @@ fn entry() {
         if std::fs::exists(cli_arg) == 0 {
             protocol_code = std::process::command_stdout_file(
                 cli_arg_exe,
-                ["protocol-info"],
+                ["cli", "protocol-info"],
                 10000,
                 stdout_path,
                 repo_options
@@ -505,19 +505,19 @@ fn entry() {
         } else {
             protocol_code = std::process::command_stdout_file(
                 cli_arg,
-                ["protocol-info"],
+                ["cli", "protocol-info"],
                 10000,
                 stdout_path,
                 repo_options
             );
         }
     } else {
-        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
-        let cli_default_exe = cli_default + ".exe";
+        let cli_default = std::path::join(repo, "dist/agenterm").display;
+        let cli_default_exe = std::path::join(repo, "dist/agenterm.com").display;
         if std::fs::exists(cli_default) == 0 {
             protocol_code = std::process::command_stdout_file(
                 cli_default_exe,
-                ["protocol-info"],
+                ["cli", "protocol-info"],
                 10000,
                 stdout_path,
                 repo_options
@@ -525,7 +525,7 @@ fn entry() {
         } else {
             protocol_code = std::process::command_stdout_file(
                 cli_default,
-                ["protocol-info"],
+                ["cli", "protocol-info"],
                 10000,
                 stdout_path,
                 repo_options
@@ -685,7 +685,7 @@ fn entry() {
         if std::fs::exists(cli_arg) == 0 {
             mux_code = std::process::command_stdout_file(
                 cli_arg_exe,
-                ["mux", "compatibility", "--json"],
+                ["cli", "mux", "compatibility", "--json"],
                 10000,
                 stdout_path,
                 repo_options
@@ -693,19 +693,19 @@ fn entry() {
         } else {
             mux_code = std::process::command_stdout_file(
                 cli_arg,
-                ["mux", "compatibility", "--json"],
+                ["cli", "mux", "compatibility", "--json"],
                 10000,
                 stdout_path,
                 repo_options
             );
         }
     } else {
-        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
-        let cli_default_exe = cli_default + ".exe";
+        let cli_default = std::path::join(repo, "dist/agenterm").display;
+        let cli_default_exe = std::path::join(repo, "dist/agenterm.com").display;
         if std::fs::exists(cli_default) == 0 {
             mux_code = std::process::command_stdout_file(
                 cli_default_exe,
-                ["mux", "compatibility", "--json"],
+                ["cli", "mux", "compatibility", "--json"],
                 10000,
                 stdout_path,
                 repo_options
@@ -713,7 +713,7 @@ fn entry() {
         } else {
             mux_code = std::process::command_stdout_file(
                 cli_default,
-                ["mux", "compatibility", "--json"],
+                ["cli", "mux", "compatibility", "--json"],
                 10000,
                 stdout_path,
                 repo_options
@@ -729,7 +729,7 @@ fn entry() {
         if std::fs::exists(cli_arg) == 0 {
             mux_list_code = std::process::command_stdout_file(
                 cli_arg_exe,
-                ["mux", "list-commands"],
+                ["cli", "mux", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
@@ -737,19 +737,19 @@ fn entry() {
         } else {
             mux_list_code = std::process::command_stdout_file(
                 cli_arg,
-                ["mux", "list-commands"],
+                ["cli", "mux", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
             );
         }
     } else {
-        let cli_default = std::path::join(repo, "dist/agenterm-cli").display;
-        let cli_default_exe = cli_default + ".exe";
+        let cli_default = std::path::join(repo, "dist/agenterm").display;
+        let cli_default_exe = std::path::join(repo, "dist/agenterm.com").display;
         if std::fs::exists(cli_default) == 0 {
             mux_list_code = std::process::command_stdout_file(
                 cli_default_exe,
-                ["mux", "list-commands"],
+                ["cli", "mux", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options
@@ -757,7 +757,7 @@ fn entry() {
         } else {
             mux_list_code = std::process::command_stdout_file(
                 cli_default,
-                ["mux", "list-commands"],
+                ["cli", "mux", "list-commands"],
                 10000,
                 stdout_path,
                 repo_options

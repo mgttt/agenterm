@@ -1355,7 +1355,7 @@ pub(crate) fn dispatch_shared_command(
             let request = UiHelloRequest {
                 schema_version: UI_HELLO_SCHEMA_VERSION,
                 client_id: option_value(args, "--client-id")
-                    .unwrap_or("agenterm-cli")
+                    .unwrap_or("agenterm cli")
                     .to_owned(),
                 protocol_range: UiProtocolRange { minimum, maximum },
                 client_build,

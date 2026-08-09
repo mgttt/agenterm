@@ -19,45 +19,43 @@ pub fn scan_directory(dir: &Path) -> Result<CorpusScanReport, String> {
 
 #[cfg(test)]
 mod tests {
+    use agenterm_script_common::test_support::CorpusScanContract;
+
     use super::*;
-    use tempfile::TempDir;
+
+    // The scenarios live in script-common's test_support (they're the
+    // shared contract of every engine's corpus-scan wrapper); this block
+    // supplies only what's lua-specific: the extension and sources. The
+    // recursion scenario is new coverage here — qjs/sql always had it, lua's
+    // hand-copied block predated it.
+    const CONTRACT: CorpusScanContract<'_> = CorpusScanContract {
+        good_a: ("a.lua", "return 42"),
+        good_b: ("b.lua", "return 0"),
+        bad: ("bad.lua", "return !!"),
+    };
 
     #[test]
     fn scan_empty_dir() {
-        let dir = TempDir::new().unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 0);
-        assert_eq!(report.failures, 0);
+        CONTRACT.assert_empty_dir(&scan_directory);
     }
 
     #[test]
     fn scan_all_green() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("a.lua"), "return 42").unwrap();
-        std::fs::write(dir.path().join("b.lua"), "return 0").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 2);
-        assert_eq!(report.failures, 0);
+        CONTRACT.assert_all_green(&scan_directory);
     }
 
     #[test]
     fn scan_with_syntax_error() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("ok.lua"), "return 1").unwrap();
-        std::fs::write(dir.path().join("bad.lua"), "return !!").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 2);
-        assert_eq!(report.failures, 1);
-        assert!(report.failed_files[0].path.contains("bad.lua"));
+        CONTRACT.assert_syntax_error_reported(&scan_directory);
     }
 
     #[test]
     fn scan_ignores_non_lua() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("script.lua"), "return 0").unwrap();
-        std::fs::write(dir.path().join("readme.txt"), "hello").unwrap();
-        std::fs::write(dir.path().join("main.rs"), "fn main(){}").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 1);
+        CONTRACT.assert_ignores_foreign_files(&scan_directory);
+    }
+
+    #[test]
+    fn scan_recurses_into_subdirectories() {
+        CONTRACT.assert_recurses_into_subdirectories(&scan_directory);
     }
 }

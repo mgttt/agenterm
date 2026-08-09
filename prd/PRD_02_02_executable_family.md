@@ -262,6 +262,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   / `agenterm-qjs.exe` / `agenterm-sql.exe` binaries are **retired**; all four
   script engines are now argv-transparent subcommands of the main `agenterm`
   PE (`agenterm rh|lua|qjs|sql <args>`), not separate release executables.
+  The same rule applies to repository self-hosting: bootstrap caches a verified
+  copy of the main `agenterm` and invokes its `rh` subcommand. No retired script
+  engine bin is rebuilt under an internal or release-only role.
 - [x] v0.1.12 executable-name decision (historical): formerly retained
   historical `agenterm-rhai.exe` / `agenterm-rhai` as the canonical name for the same
   unrestricted Rhai runtime (shim removed Wave 4.5). Renaming is deferred until

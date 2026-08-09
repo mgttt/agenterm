@@ -183,45 +183,9 @@ fn entry() {
         std::path::join(dist, "agenterm-cc.exe").display;
     let metadata_version = "" + metadata.version;
 
-    let rh_dev_matched = 0;
-    for artifact in manifest.executables {
-        if ("" + artifact.role) != "rh-dev-cli" {
-            continue;
-        }
-        require(rh_dev_matched == 0, "artifact_role_duplicate:rh-dev-cli");
-        rh_dev_matched = 1;
-        require(
-            artifact.offline_probe.len == 1
-                && ("" + artifact.offline_probe[0]) == "version",
-            "artifact_version_probe_missing:rh-dev-cli"
-        );
-        let artifact_name = "" + artifact.name;
-        let path = std::path::join(dist, artifact_name).display;
-        require(
-            std::fs::metadata(path).is_file
-                && std::fs::metadata(path).len > 0,
-            "artifact_version_file_invalid:" + artifact_name
-        );
-        let exit_code = std::process::command_stdout_file(
-            path,
-            ["version"],
-            30000,
-            stdout_path,
-            probe_options
-        );
-        require(exit_code == 0, "artifact_rh_version:exit=" + exit_code);
-        let text = std::fs::read_to_string(stdout_path);
-        text.trim();
-        require(
-            text == "agenterm-rh " + metadata_version,
-            "artifact_rh_version_mismatch"
-        );
-    }
-    require(rh_dev_matched == 1, "artifact_role_missing:rh-dev-cli");
-
     let cli_version_code = std::process::command_stdout_file(
         cli,
-        ["--version"],
+        ["cli", "--version"],
         30000,
         stdout_path,
         probe_options
@@ -230,14 +194,14 @@ fn entry() {
     let cli_version = std::fs::read_to_string(stdout_path);
     cli_version.trim();
     require(
-        cli_version == "agenterm-cli " + metadata_version,
+        cli_version == "agenterm cli " + metadata_version,
         "artifact_cli_version_mismatch"
     );
 
     // mux/mcp are CLI subcommands only (standalone PEs removed).
     let mux_version_code = std::process::command_stdout_file(
         cli,
-        ["mux", "--version"],
+        ["cli", "mux", "--version"],
         30000,
         stdout_path,
         probe_options
@@ -253,7 +217,7 @@ fn entry() {
 
     let mcp_version_code = std::process::command_stdout_file(
         cli,
-        ["mcp", "--version"],
+        ["cli", "mcp", "--version"],
         30000,
         stdout_path,
         probe_options
@@ -330,7 +294,7 @@ fn entry() {
 
     let mcp_cap_code = std::process::command_stdout_file(
         cli,
-        ["mcp", "capabilities", "--json"],
+        ["cli", "mcp", "capabilities", "--json"],
         30000,
         stdout_path,
         probe_options

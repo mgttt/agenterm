@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "message": "AgenTerm daily check：目录与终端",
-  "child_program": "D:\\path\\to\\agenterm-cli.exe",
-  "child_a_args": ["--version"],
-  "child_b_args": ["list-commands"],
+  "child_program": "agenterm",
+  "child_a_args": ["cli", "--version"],
+  "child_b_args": ["cli", "list-commands"],
   "loopback_url": "http://127.0.0.1:PORT/status",
   "tab_id": "@1",
-  "result_path": "D:\\path\\to\\daily-check-result.json"
+  "result_path": "~/daily-check-result.json"
 }

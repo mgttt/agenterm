@@ -49,8 +49,8 @@ fn expected_guidance(pid, address) {
     let configured_address = "" + address;
     "Launcher PID: " + pid +
         "\nConfigured server address: " + configured_address +
-        "\n\nList running server PID and port: agenterm-cli.exe server-list" +
-        "\nMore CLI commands: agenterm-cli.exe -h"
+        "\n\nList running server PID and port: agenterm cli server-list" +
+        "\nMore CLI commands: agenterm cli -h"
 }
 
 fn append_stream_text(base, chunk) {
@@ -203,7 +203,7 @@ fn entry() {
 
         let initial_guidance = read_until(
             gui.stderr,
-            "More CLI commands: agenterm-cli.exe -h",
+            "More CLI commands: agenterm cli -h",
             5000
         );
         let initial_guidance_text = "" + initial_guidance;
@@ -286,9 +286,9 @@ fn entry() {
             guidance_output.success == 0
                 && guidance_output.stdout_text() == ""
                 && guidance_stderr.contains("No CLI command was executed")
-                && guidance_stderr.contains("agenterm-cli.exe list-windows")
-                && guidance_stderr.contains("agenterm-cli.exe server-list")
-                && guidance_stderr.contains("agenterm-cli.exe -h"),
+                && guidance_stderr.contains("agenterm cli list-windows")
+                && guidance_stderr.contains("agenterm cli server-list")
+                && guidance_stderr.contains("agenterm cli -h"),
             "startup_cli_guidance:" + guidance_stderr
         );
 
@@ -316,7 +316,7 @@ fn entry() {
                 && argument_stderr.contains(
                     "agenterm.exe --address requires HOST:PORT"
                 )
-                && argument_stderr.contains("agenterm-cli.exe -h"),
+                && argument_stderr.contains("agenterm cli -h"),
             "startup_argument_error:" + argument_stderr
         );
 

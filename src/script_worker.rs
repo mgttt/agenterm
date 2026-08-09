@@ -1434,6 +1434,13 @@ mod dynacore_in_process_broker_tests {
         settings: PathBuf,
         instances: PathBuf,
         server: Option<Child>,
+        // OS-enforced backstop for the manual kill in `Drop` below — see
+        // `tests/dynacore_live_server.rs`'s `Harness` for why: Rust `Drop`
+        // never runs if this test binary is force-killed from the outside,
+        // which otherwise orphans `agenterm.exe server`. This kill-on-close
+        // containment handle is closed by the OS during process teardown
+        // regardless of how that teardown happens.
+        _server_tree_guard: Option<crate::platform::process::ProcessTreeGuard>,
     }
 
     impl Harness {
@@ -1461,21 +1468,25 @@ mod dynacore_in_process_broker_tests {
                 address,
                 root,
                 server: None,
+                _server_tree_guard: None,
             };
-            harness.server = Some(
-                Command::new(locate_agenterm_server_exe())
-                    .args(["server", "--address", &harness.address])
-                    .env("AGENTERM_IPC_ADDRESS", &harness.address)
-                    .env("AGENTERM_WORKSPACE_PATH", &harness.workspace)
-                    .env("AGENTERM_SETTINGS_PATH", &harness.settings)
-                    .env("AGENTERM_INSTANCE_DIR", &harness.instances)
-                    .env("AGENTERM_NO_ACTIVATE", "1")
-                    .env("AGENTERM_HEADLESS_VIEWPORT", "1400x900")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .expect("start isolated headless server"),
+            let server = Command::new(locate_agenterm_server_exe())
+                .args(["server", "--address", &harness.address])
+                .env("AGENTERM_IPC_ADDRESS", &harness.address)
+                .env("AGENTERM_WORKSPACE_PATH", &harness.workspace)
+                .env("AGENTERM_SETTINGS_PATH", &harness.settings)
+                .env("AGENTERM_INSTANCE_DIR", &harness.instances)
+                .env("AGENTERM_NO_ACTIVATE", "1")
+                .env("AGENTERM_HEADLESS_VIEWPORT", "1400x900")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start isolated headless server");
+            harness._server_tree_guard = Some(
+                crate::platform::process::ProcessTreeGuard::attach(&server)
+                    .expect("attach kill-on-close containment to isolated server"),
             );
+            harness.server = Some(server);
             harness.wait_ready();
             harness
         }

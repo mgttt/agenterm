@@ -64,8 +64,28 @@ fn authority_argv(program, arguments) {
     let name = std::path::PathBuf::from(program).file_name;
     let name_text = "" + name;
     let argv = [];
+    let cli_role = 0;
+    let selector_value = 0;
+    for argument in arguments {
+        let argument_text = "" + argument;
+        if selector_value != 0 {
+            selector_value = 0;
+        } else if argument_text == "--instance"
+                || argument_text == "--address"
+                || argument_text == "--endpoint" {
+            selector_value = 1;
+        } else if !argument_text.starts_with("-") {
+            cli_role = 1;
+        }
+    }
     if name_text == "agenterm" || name_text == "agenterm.exe" {
-        argv.push("server");
+        if cli_role != 0 {
+            argv.push("cli");
+        } else {
+            argv.push("server");
+        }
+    } else if name_text == "agenterm.exe" {
+        argv.push("cli");
     }
     let arg_idx = 0;
     while arg_idx < arguments.len {

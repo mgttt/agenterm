@@ -9,13 +9,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] size-optimized release profile and enforced 4 MiB GUI plus 2 MiB
   per-control-CLI budgets
 - [x] GUI `agenterm.exe` has no startup console flash
-- [x] console `agenterm-cli.exe` preserves CLI output and exit codes
+- [x] console `agenterm cli` preserves CLI output and exit codes
 - [x] startup regression requires a main window within one second locally;
   `startup.first-window-async-ready` is emitted only after the native-window
   budget and the separately awaited asynchronous terminal-ready state pass
 - [x] version-tagged GitHub Release automation for all five EXEs, metadata,
   and ZIP
-- [x] release automation publishes `agenterm-cli` (including mux/mcp surfaces) after acceptance
+- [x] release automation publishes `agenterm cli` (including mux/mcp surfaces) after acceptance
   gate
 - [x] the public static documentation landing page provides reviewed English
   and Traditional Chinese product copy, explicit language selection,

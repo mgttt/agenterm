@@ -16,20 +16,8 @@ name = "agenterm"
 path = "src/bin/agenterm.rs"
 
 [[bin]]
-name = "agenterm-rh"
-path = "crates/agenterm-rh/src/main.rs"
-
-[[bin]]
-name = "agenterm-lua"
-path = "crates/agenterm-lua/src/main.rs"
-
-[[bin]]
-name = "agenterm-qjs"
-path = "crates/agenterm-qjs/src/main.rs"
-
-[[bin]]
-name = "agenterm-sql"
-path = "crates/agenterm-sql/src/main.rs"
+name = "agenterm-com"
+path = "src/bin/agenterm-com.rs"
 
 [[bin]]
 name = "agenterm-cc"
@@ -80,6 +68,7 @@ rhai = { version = "1.22", default-features = false, features = ["std", "serde",
 [profile.dev]
 debug = 1
 incremental = true
+panic = "abort"
 
 # `cargo test` links 31 integration binaries, each pulling in the whole crate.
 # Carrying dev's debug info through all of them is what drives peak memory on

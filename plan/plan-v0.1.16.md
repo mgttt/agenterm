@@ -641,8 +641,7 @@ panic 位置同上。
 
 - [x] **CLI1 Windows 同 PE 转发机制（AttachConsole + DuplicateHandle）**
   - **用户问题**：Windows-subsystem `agenterm.exe` 启动时 std 槽位为空，
-    `println!`/`Stdio::inherit` 不可信；且绝不引入 `agenterm.com`、脚本或
-    其他包装器——只有一个 PE。
+    `println!`/`Stdio::inherit` 不可信；GUI PE 内仍必须使用显式句柄。
   - **机制**（`src/bin/agenterm.rs` + 平台 `console.rs`）：`agenterm.exe cli`
     先快照 attach 前的 std 句柄（调用方管道/文件重定向），
     `AttachConsole(ATTACH_PARENT_PROCESS)` 后恢复被顶掉的重定向、无效槽位
@@ -655,9 +654,9 @@ panic 位置同上。
     拥有；平台层只管控制台、句柄和进程机制。
   - **安全失败**：转发启动失败返回准确非零码并写父控制台 stderr；普通
     `agenterm.exe` GUI 启动不分配控制台、不闪窗。**已知边界**：交互式
-    shell 对 GUI-subsystem PE 不同步等待（PowerShell 在输出被管道/捕获时
-    等待；`cmd /c` 与批处理总是等待），裸交互调用的输出可能在提示符
-    返回后打印。
+    shell 对 GUI-subsystem PE 不同步等待；公开的无扩展名命令由极简 CUI
+    `agenterm.com` 同步转发，因此不会提前返回或与 TUI 竞争 stdin。显式
+    `agenterm.exe` 调用仍保留这一 Windows 原生边界。
 - [x] **CLI2 Windows 公共黑盒（2026-08-09 真机全过）**
   - `tests/agenterm_cli_forwarding.rs`（5 项）：显式 `.exe` 转发 stdout、
     stderr 与 exit code、MCP 双向 stdin/stdout、cmd 管道、PowerShell 调用。
@@ -669,10 +668,11 @@ panic 位置同上。
     残留进程。
 - [x] **CLI3 删除独立 `agenterm-cli` PE**
   - Cargo bin 与 `src/bin/agenterm-cli.rs` 已删除；Windows artifact manifest
-    只交付 `agenterm.exe`、`agenterm-cc.exe`、`agenterm-rh.exe`。
+    交付 `agenterm.exe`、极简 `agenterm.com`、`agenterm-cc.exe`、
+    `agenterm-rh.exe`。
   - 安装、CI、rh smoke、README、PRD、skills 和发布验证改用 `agenterm cli`；
-    staging 显式清除遗留 `agenterm-cli.exe`；dist 中 `.com` 时代过期
-    manifest/二进制已删，源码树 `agenterm.com` 字面量为零。
+    staging 显式清除遗留 `agenterm-cli.exe`；`agenterm.com` 只负责把
+    参数、stdio 和退出码透明转发给同目录 `agenterm.exe`。
   - **非目标**：不引入 `AllocConsole`，不把 mux/MCP 重新拆成独立 PE，不改变
     IPC 或 CLI 命令语义。
 

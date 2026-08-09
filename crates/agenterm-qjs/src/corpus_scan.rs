@@ -20,54 +20,41 @@ pub fn scan_directory(dir: &Path) -> Result<CorpusScanReport, String> {
 
 #[cfg(test)]
 mod tests {
+    use agenterm_script_common::test_support::CorpusScanContract;
+
     use super::*;
-    use tempfile::TempDir;
+
+    // The scenarios live in script-common's test_support (they're the
+    // shared contract of every engine's corpus-scan wrapper); this block
+    // supplies only what's qjs-specific: the extensions and sources.
+    const CONTRACT: CorpusScanContract<'_> = CorpusScanContract {
+        good_a: ("a.js", "function entry() { return 42; }"),
+        good_b: ("b.mjs", "function entry() { return 0; }"),
+        bad: ("bad.js", "this is not valid js ((("),
+    };
 
     #[test]
     fn scan_empty_dir() {
-        let dir = TempDir::new().unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 0);
-        assert_eq!(report.failures, 0);
+        CONTRACT.assert_empty_dir(&scan_directory);
     }
 
     #[test]
     fn scan_all_green() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("a.js"), "function entry() { return 42; }").unwrap();
-        std::fs::write(dir.path().join("b.mjs"), "function entry() { return 0; }").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 2);
-        assert_eq!(report.failures, 0);
+        CONTRACT.assert_all_green(&scan_directory);
     }
 
     #[test]
     fn scan_with_syntax_error() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("ok.js"), "function entry() { return 1; }").unwrap();
-        std::fs::write(dir.path().join("bad.js"), "this is not valid js (((").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 2);
-        assert_eq!(report.failures, 1);
-        assert!(report.failed_files[0].path.contains("bad.js"));
+        CONTRACT.assert_syntax_error_reported(&scan_directory);
     }
 
     #[test]
     fn scan_ignores_non_js() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("script.js"), "function entry() { return 0; }").unwrap();
-        std::fs::write(dir.path().join("readme.txt"), "hello").unwrap();
-        std::fs::write(dir.path().join("main.rs"), "fn main(){}").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 1);
+        CONTRACT.assert_ignores_foreign_files(&scan_directory);
     }
 
     #[test]
     fn scan_recurses_into_subdirectories() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("lib")).unwrap();
-        std::fs::write(dir.path().join("lib/leaf.js"), "function entry() { return 1; }").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 1);
+        CONTRACT.assert_recurses_into_subdirectories(&scan_directory);
     }
 }

@@ -252,7 +252,7 @@ fn entry() {
 
         print("STEP concurrent IPC replies and PTY output both make progress");
         for index in 0..24 {
-            let client_command = test_harness::configured_command(
+            let client_command = test_harness::configured_cli_command(
                 context,
                 cli,
                 ["--address", context.address, "ui-snapshot"]

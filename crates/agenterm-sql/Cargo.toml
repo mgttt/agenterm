@@ -22,5 +22,16 @@ agenterm-script-common = { path = "../agenterm-script-common" }
 sqlparser = "0.62"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# M1 execution engine (plan/design-sql-execution-target.md §0/§2.1/§5): a
+# private, in-process, ephemeral SQLite database per `execute()` call. This
+# is a REAL (non-dev) dependency — `eval.rs`'s `execute_entry` needs it at
+# runtime, not just under `#[cfg(test)]`. `bundled` compiles the SQLite C
+# amalgamation via `cc` and statically links it — no system SQLite
+# dependency, same "vendored C dependency" shape `agenterm-lua`'s `mlua`
+# (`vendored` LuaJIT) already established as precedent in this workspace
+# (design doc §3.2/risk 2).
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[dev-dependencies]
+agenterm-script-common = { path = "../agenterm-script-common", features = ["test-support"] }
 tempfile = "3.25"
-walkdir = "2"

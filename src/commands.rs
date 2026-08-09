@@ -394,7 +394,7 @@ pub(crate) fn validate_control_command(args: &[String]) -> Result<(), String> {
     };
     let Some(specification) = control_command_spec(command) else {
         return Err(format!(
-            "unknown AgenTerm command '{command}'; run `agenterm-cli list-commands`"
+            "unknown AgenTerm command '{command}'; run `agenterm cli list-commands`"
         ));
     };
     let mut position = 1;
@@ -448,108 +448,108 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         // Derived LLM tool table; a pure projection of `OPERATION_CATALOG`,
         // so it answers without a server and never mutates anything.
         "agent-tools" => (
-            "agenterm-cli agent-tools [--format agenterm|mcp] [--include-unavailable]",
+            "agenterm cli agent-tools [--format agenterm|mcp] [--include-unavailable]",
             &["--format"][..],
             &["--include-unavailable"][..],
             false,
         ),
         "attach" | "attach-session" => (
-            "agenterm-cli attach-session [-t session]",
+            "agenterm cli attach-session [-t session]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "active-window" | "active-tab" => (
-            "agenterm-cli active-window [-F format]",
+            "agenterm cli active-window [-F format]",
             &["-F"][..],
             &[][..],
             false,
         ),
         "capture-pane" | "capturep" => (
-            "agenterm-cli capture-pane (-p|--raw-escaped) [-t target] \
+            "agenterm cli capture-pane (-p|--raw-escaped) [-t target] \
              [--max-bytes N --json]",
             &["-t", "--max-bytes"][..],
             &["-p", "--raw-escaped", "--json"][..],
             false,
         ),
         "control-center" => (
-            "agenterm-cli control-center open|status|snapshot|close [--no-activate]",
+            "agenterm cli control-center open|status|snapshot|close [--no-activate]",
             &[][..],
             &["--no-activate"][..],
             false,
         ),
         "display-message" | "display" => (
-            "agenterm-cli display-message [-p] [-t target] [format]",
+            "agenterm cli display-message [-p] [-t target] [format]",
             &["-t"][..],
             &["-p"][..],
             false,
         ),
         "dump-cells" => (
-            "agenterm-cli dump-cells [-t target] [-r row]",
+            "agenterm cli dump-cells [-t target] [-r row]",
             &["-t", "-r"][..],
             &[][..],
             false,
         ),
-        "get-settings" => ("agenterm-cli get-settings", &[][..], &[][..], false),
+        "get-settings" => ("agenterm cli get-settings", &[][..], &[][..], false),
         "has-session" | "has" => (
-            "agenterm-cli has-session [-t session]",
+            "agenterm cli has-session [-t session]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "inspect" | "pane-snapshot" => (
-            "agenterm-cli inspect [-t target]",
+            "agenterm cli inspect [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "focus" => (
-            "agenterm-cli focus terminal|composer|sidebar [-t target]",
+            "agenterm cli focus terminal|composer|sidebar [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
-        "kill-server" => ("agenterm-cli kill-server", &[][..], &[][..], false),
+        "kill-server" => ("agenterm cli kill-server", &[][..], &[][..], false),
         "kill-session" => (
-            "agenterm-cli kill-session [-t session]",
+            "agenterm cli kill-session [-t session]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "kill-window" | "killw" => (
-            "agenterm-cli kill-window -t target",
+            "agenterm cli kill-window -t target",
             &["-t"][..],
             &[][..],
             false,
         ),
         "list-tab-tree" => (
-            "agenterm-cli list-tab-tree [-F format]",
+            "agenterm cli list-tab-tree [-F format]",
             &["-F"][..],
             &[][..],
             false,
         ),
-        "list-commands" | "lscm" => ("agenterm-cli list-commands", &[][..], &[][..], false),
+        "list-commands" | "lscm" => ("agenterm cli list-commands", &[][..], &[][..], false),
         "list-instances" => (
-            "agenterm-cli list-instances [--json] [--prune]",
+            "agenterm cli list-instances [--json] [--prune]",
             &[][..],
             &["--json", "--prune"][..],
             false,
         ),
         "list-panes" | "lsp" => (
-            "agenterm-cli list-panes [-a] [-t target] [-F format]",
+            "agenterm cli list-panes [-a] [-t target] [-F format]",
             &["-t", "-F"][..],
             &["-a"][..],
             false,
         ),
-        "list-sessions" | "ls" => ("agenterm-cli list-sessions", &[][..], &[][..], false),
+        "list-sessions" | "ls" => ("agenterm cli list-sessions", &[][..], &[][..], false),
         "list-windows" | "lsw" => (
-            "agenterm-cli list-windows [-F format]",
+            "agenterm cli list-windows [-F format]",
             &["-F"][..],
             &[][..],
             false,
         ),
         "new-session" | "new" => (
-            "agenterm-cli new-session [-s name] [-- command [args...]]",
+            "agenterm cli new-session [-s name] [-- command [args...]]",
             &[
                 "-n",
                 "-s",
@@ -567,7 +567,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             true,
         ),
         "new-window" | "neww" => (
-            "agenterm-cli new-window [-d] [-n name] [--parent target] \
+            "agenterm cli new-window [-d] [-n name] [--parent target] \
              [-F format] [-e NAME=VALUE] [-- command [args...]]",
             &[
                 "-n",
@@ -586,7 +586,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             true,
         ),
         "new-agent" => (
-            "agenterm-cli new-agent [-d] [-n name] [--parent target] [--program exe] \
+            "agenterm cli new-agent [-d] [-n name] [--parent target] [--program exe] \
              [--proxy URL] [--yolo] [-- agent args...]",
             &[
                 "-n",
@@ -604,47 +604,47 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &["-d", "-A", "-P", "-E", "--yolo"][..],
             false,
         ),
-        "next-window" | "next" => ("agenterm-cli next-window", &[][..], &[][..], false),
-        "previous-window" | "prev" => ("agenterm-cli previous-window", &[][..], &[][..], false),
+        "next-window" | "next" => ("agenterm cli next-window", &[][..], &[][..], false),
+        "previous-window" | "prev" => ("agenterm cli previous-window", &[][..], &[][..], false),
         "protocol-info" => (
-            "agenterm-cli protocol-info [--running]",
+            "agenterm cli protocol-info [--running]",
             &[][..],
             &["--running"][..],
             false,
         ),
         "rh-pack" => (
-            "agenterm-cli rh-pack --path PATH [--json]",
+            "agenterm cli rh-pack --path PATH [--json]",
             &["--path"][..],
             &["--json"][..],
             false,
         ),
         "rename-session" | "rename" => (
-            "agenterm-cli rename-session new-name",
+            "agenterm cli rename-session new-name",
             &[][..],
             &[][..],
             false,
         ),
         "rename-window" | "renamew" => (
-            "agenterm-cli rename-window [-t target] new-name",
+            "agenterm cli rename-window [-t target] new-name",
             &["-t"][..],
             &[][..],
             false,
         ),
         "screenshot" => (
-            "agenterm-cli screenshot [-o file.png]",
+            "agenterm cli screenshot [-o file.png]",
             &["-o"][..],
             &[][..],
             false,
         ),
         "screenshot-pane" | "screenshot-tab" => (
-            "agenterm-cli screenshot-pane [-t target] [-o file.png]",
+            "agenterm cli screenshot-pane [-t target] [-o file.png]",
             &["-t", "-o"][..],
             &[][..],
             false,
         ),
-        "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
+        "save-workspace" => ("agenterm cli save-workspace", &[][..], &[][..], false),
         "script" => (
-            "agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json] | \
+            "agenterm cli script api [MODULE] [--status shipped|planned|all] [--tree|--json] | \
              check FILE|- [--project-root DIR] | eval EXPRESSION | \
              check-many --manifest FILE [--project-root DIR] | \
              repl [--fail-fast] [--json] | run FILE|- \
@@ -668,58 +668,58 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "read-events" => (
-            "agenterm-cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]",
+            "agenterm cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]",
             &["--epoch", "--after", "--limit"][..],
             &[][..],
             false,
         ),
         "scroll-pane" => (
-            "agenterm-cli scroll-pane [-t target] \
+            "agenterm cli scroll-pane [-t target] \
              up|down|page-up|page-down|top|bottom [rows]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "select-window" | "selectw" => (
-            "agenterm-cli select-window (-t target|-n|-p)",
+            "agenterm cli select-window (-t target|-n|-p)",
             &["-t"][..],
             &["-n", "-p"][..],
             false,
         ),
         "send-keys" | "send" => (
-            "agenterm-cli send-keys [-t target] [-l|--native] key...\n\
+            "agenterm cli send-keys [-t target] [-l|--native] key...\n\
              PowerShell: quote targets as -t '@2' (unquoted @N is a splat).",
             &["-t"][..],
             &["-l", "--native", "-R", "-X"][..],
             false,
         ),
         "set-buffer" | "setb" => (
-            "agenterm-cli set-buffer [-b name] [--] data...",
+            "agenterm cli set-buffer [-b name] [--] data...",
             &["-b"][..],
             &[][..],
             false,
         ),
         "load-buffer" | "loadb" => (
-            "agenterm-cli load-buffer [-b name] path",
+            "agenterm cli load-buffer [-b name] path",
             &["-b"][..],
             &[][..],
             false,
         ),
         "show-buffer" | "showb" => (
-            "agenterm-cli show-buffer [-b name]",
+            "agenterm cli show-buffer [-b name]",
             &["-b"][..],
             &[][..],
             false,
         ),
-        "list-buffers" | "lsb" => ("agenterm-cli list-buffers", &[][..], &[][..], false),
+        "list-buffers" | "lsb" => ("agenterm cli list-buffers", &[][..], &[][..], false),
         "delete-buffer" | "deleteb" => (
-            "agenterm-cli delete-buffer [-b name]",
+            "agenterm cli delete-buffer [-b name]",
             &["-b"][..],
             &[][..],
             false,
         ),
         "paste-buffer" | "pasteb" => (
-            "agenterm-cli paste-buffer [-b name] [-t target]\n\
+            "agenterm cli paste-buffer [-b name] [-t target]\n\
              Injects buffer bytes into the target pane PTY (not an agent mailbox).\n\
              Empty buffers fail; UTF-8 text is normalized and respects bracketed-paste.\n\
              Collab/status → note/handoff; shell typing → send-keys/paste-buffer \
@@ -729,78 +729,78 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "save-buffer" | "saveb" => (
-            "agenterm-cli save-buffer is unsupported: use show-buffer or load-buffer",
+            "agenterm cli save-buffer is unsupported: use show-buffer or load-buffer",
             &[][..],
             &[][..],
             false,
         ),
         "send-composer" => (
-            "agenterm-cli send-composer [-t target]",
+            "agenterm cli send-composer [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "send-mouse" => (
-            "agenterm-cli send-mouse [-t target] -x col -y row \
+            "agenterm cli send-mouse [-t target] -x col -y row \
              [--button button] [--action action] [--protocol protocol]",
             &["-t", "-x", "-y", "--button", "--action", "--protocol"][..],
             &[][..],
             false,
         ),
-        "server-kill" => ("agenterm-cli server-kill", &[][..], &[][..], false),
+        "server-kill" => ("agenterm cli server-kill", &[][..], &[][..], false),
         "server-list" => (
-            "agenterm-cli server-list [--json] [--prune]",
+            "agenterm cli server-list [--json] [--prune]",
             &[][..],
             &["--json", "--prune"][..],
             false,
         ),
         "set-setting" => (
-            "agenterm-cli set-setting key value",
+            "agenterm cli set-setting key value",
             &[][..],
             &[][..],
             false,
         ),
         "set-composer" => (
-            "agenterm-cli set-composer [-t target] (text|--stdin|--file path)",
+            "agenterm cli set-composer [-t target] (text|--stdin|--file path)",
             &["-t", "--file"][..],
             &["--stdin"][..],
             false,
         ),
         "set-tab-parent" => (
-            "agenterm-cli set-tab-parent -t child --parent parent|root",
+            "agenterm cli set-tab-parent -t child --parent parent|root",
             &["-t", "--parent"][..],
             &[][..],
             false,
         ),
         "set-tab-note" => (
-            "agenterm-cli set-tab-note [-t target] text",
+            "agenterm cli set-tab-note [-t target] text",
             &["-t"][..],
             &[][..],
             false,
         ),
         "show-composer" => (
-            "agenterm-cli show-composer [-t target]",
+            "agenterm cli show-composer [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
-        "show-options" | "show" => ("agenterm-cli show-options", &[][..], &[][..], false),
+        "show-options" | "show" => ("agenterm cli show-options", &[][..], &[][..], false),
         "show-tab-parent" => (
-            "agenterm-cli show-tab-parent [-t target]",
+            "agenterm cli show-tab-parent [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "show-tab-note" => (
-            "agenterm-cli show-tab-note [-t target]",
+            "agenterm cli show-tab-note [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
-        "shutdown" => ("agenterm-cli shutdown", &[][..], &[][..], false),
-        "start-server" => ("agenterm-cli start-server", &[][..], &[][..], false),
+        "shutdown" => ("agenterm cli shutdown", &[][..], &[][..], false),
+        "start-server" => ("agenterm cli start-server", &[][..], &[][..], false),
         "ui-action" => (
-            "agenterm-cli ui-action ACTION [-t target] [--path PATH] \
+            "agenterm cli ui-action ACTION [-t target] [--path PATH] \
              [--mode empty|append|replace|attach|open-another] [--name NAME] [--pid N] \
              [--stdin] [--width PX --height PX]",
             &[
@@ -817,9 +817,9 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &["--stdin"][..],
             false,
         ),
-        "ui-bootstrap" => ("agenterm-cli ui-bootstrap", &[][..], &[][..], false),
+        "ui-bootstrap" => ("agenterm cli ui-bootstrap", &[][..], &[][..], false),
         "ui-input" => (
-            "agenterm-cli ui-input pointer --x PX --y PX \
+            "agenterm cli ui-input pointer --x PX --y PX \
              [--button left|right|middle] [--action press|release|move] \
              [--count 1|2|3] [--mods shift,ctrl,alt,meta] | \
              ui-input wheel --x PX --y PX --delta-y N [--units lines|pixels] | \
@@ -839,14 +839,14 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-client-state" => (
-            "agenterm-cli ui-client-state publish --lease-id ID \
+            "agenterm cli ui-client-state publish --lease-id ID \
              --client-pid PID --snapshot-json JSON",
             &["--lease-id", "--client-pid", "--snapshot-json"][..],
             &[][..],
             false,
         ),
         "ui-client-command" => (
-            "agenterm-cli ui-client-command poll|apply|complete|result \
+            "agenterm cli ui-client-command poll|apply|complete|result \
              [--lease-id ID --client-pid PID] [--command-id ID] \
              [--response-json JSON]",
             &[
@@ -860,13 +860,13 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-deltas" => (
-            "agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]",
+            "agenterm cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]",
             &["--epoch", "--after", "--limit"][..],
             &[][..],
             false,
         ),
         "ui-hello" => (
-            "agenterm-cli ui-hello --minimum VERSION --maximum VERSION \
+            "agenterm cli ui-hello --minimum VERSION --maximum VERSION \
              [--client-id ID] [--client-build-json JSON]",
             &[
                 "--minimum",
@@ -878,7 +878,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-interact" => (
-            "agenterm-cli ui-interact (select|input|resize) \
+            "agenterm cli ui-interact (select|input|resize) \
              --lease-id ID --client-pid PID -t @ID \
              [--hex HEX|--rows ROWS --columns COLUMNS]",
             &[
@@ -893,7 +893,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-lease" => (
-            "agenterm-cli ui-lease \
+            "agenterm cli ui-lease \
              (attach --client-id ID --client-pid PID|heartbeat|\
              acknowledge --sequence N|detach|status) \
              [--lease-id ID --client-pid PID] [--client-build-json JSON]",
@@ -907,23 +907,23 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &[][..],
             false,
         ),
-        "ui-snapshot" => ("agenterm-cli ui-snapshot", &[][..], &[][..], false),
+        "ui-snapshot" => ("agenterm cli ui-snapshot", &[][..], &[][..], false),
         "wait-pane" | "expect-pane" => (
-            "agenterm-cli wait-pane [-t target] \
+            "agenterm cli wait-pane [-t target] \
              (--contains text|--dead|--submit-complete|--finalized) [--timeout-ms ms]",
             &["-t", "--contains", "--timeout-ms"][..],
             &["--dead", "--submit-complete", "--finalized"][..],
             false,
         ),
         "wait-events" => (
-            "agenterm-cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND \
+            "agenterm cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND \
              [--tab @ID] [--timeout-ms MS]",
             &["--epoch", "--after", "--kind", "--tab", "--timeout-ms"][..],
             &[][..],
             false,
         ),
         "wait-ui" => (
-            "agenterm-cli wait-ui [--active @id] [--focus surface] \
+            "agenterm cli wait-ui [--active @id] [--focus surface] \
              [-t target --tab-state state] [--window-state state] \
              [-t target --proxy-state state] \
              [--client-width PX --client-height PX] \
@@ -949,7 +949,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &[][..],
             false,
         ),
-        "workspace-info" => ("agenterm-cli workspace-info", &[][..], &[][..], false),
+        "workspace-info" => ("agenterm cli workspace-info", &[][..], &[][..], false),
         _ => return None,
     };
     Some(ControlCommandSpec {

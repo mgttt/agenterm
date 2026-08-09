@@ -144,6 +144,16 @@ fn configured_command(context, program, arguments) {
     command
 }
 
+fn configured_cli_command(context, program, arguments) {
+    let command_arguments = ["cli"];
+    let argument_index = 0;
+    while argument_index < arguments.len {
+        command_arguments.push("" + arguments[argument_index]);
+        argument_index += 1;
+    }
+    configured_command(context, program, command_arguments)
+}
+
 fn append_command_record(
     context,
     arguments,
@@ -222,7 +232,7 @@ fn run_cli(context, cli, arguments, expected_failure, redactions) {
         command_arguments.push("" + arguments[arg_idx]);
         arg_idx = arg_idx + 1;
     }
-    let command = configured_command(
+    let command = configured_cli_command(
         context,
         cli,
         command_arguments

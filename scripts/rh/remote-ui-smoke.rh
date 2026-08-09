@@ -116,7 +116,7 @@ fn optional_cli(context, cli, arguments) {
 }
 
 fn discard_cli(context, cli, action, target, output_name) {
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         context,
         cli,
         ["--address", context.address, action, target]

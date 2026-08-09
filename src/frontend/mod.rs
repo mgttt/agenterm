@@ -37,13 +37,13 @@ pub(crate) mod window_close;
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\
 Usage: agenterm.exe [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\n\
 Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help\n\n\
-This binary is the GUI launcher. For command operations use agenterm-cli.exe.";
+This binary is the GUI launcher. For command operations use agenterm cli.";
 pub(crate) const UNIX_GUI_USAGE: &str = "\
 Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\
 Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help";
 
-pub(crate) const WINDOWS_GUI_CLI_NAME: &str = "agenterm-cli.exe";
-pub(crate) const UNIX_GUI_CLI_NAME: &str = "agenterm-cli";
+pub(crate) const WINDOWS_GUI_CLI_NAME: &str = "agenterm cli";
+pub(crate) const UNIX_GUI_CLI_NAME: &str = "agenterm cli";
 pub(crate) const GUI_CLI_GUIDANCE_MARKER: &str = "gui-cli-guidance";
 
 pub(crate) fn gui_help_result(arguments: &[String], usage: &str) -> Option<GuiLaunchResult> {
@@ -69,7 +69,7 @@ pub(crate) fn gui_launch_argument_error(
     let mut rendered = format!("AgenTerm GUI argument error: {message}");
     if include_server_hint {
         rendered.push_str(
-            "\nNo GUI server was started by this invocation.\nMore CLI commands: agenterm-cli.exe -h",
+            "\nNo GUI server was started by this invocation.\nMore CLI commands: agenterm cli -h",
         );
     }
     if !usage.is_empty() {
@@ -562,7 +562,7 @@ mod tests {
         assert!(rendered.contains("AgenTerm GUI argument error: bad argument"));
         assert!(rendered.contains("No GUI server was started by this invocation."));
         assert!(rendered.contains("Usage: agenterm [--no-activate]"));
-        assert!(rendered.contains("More CLI commands: agenterm-cli.exe -h"));
+        assert!(rendered.contains("More CLI commands: agenterm cli -h"));
     }
 }
 

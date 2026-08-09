@@ -32,17 +32,18 @@ case "$(uname -s):$(uname -m)" in
 esac
 
 TARGET_ROOT=${CARGO_TARGET_DIR:-target}
-CACHE_DIR="$TARGET_ROOT/bootstrap-worker-cache/$AGENTERM_HOST_OS-$AGENTERM_HOST_ARCH"
-CACHE_WORKER="$CACHE_DIR/agenterm-rh"
+CACHE_ROOT=${AGENTERM_BOOTSTRAP_CACHE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/agenterm/build-cache}
+CACHE_DIR="$CACHE_ROOT/$AGENTERM_HOST_OS-$AGENTERM_HOST_ARCH"
+CACHE_WORKER="$CACHE_DIR/agenterm"
 CACHE_STAMP="$CACHE_DIR/worker.stamp"
 IDENTITY_FILE="$CACHE_DIR/identity-$$.txt"
 POST_IDENTITY_FILE="$CACHE_DIR/post-identity-$$.txt"
 UNTRACKED_FILE="$CACHE_DIR/untracked-$$.txt"
 CACHE_TEMP="$CACHE_DIR/worker-$$.tmp"
 STAMP_TEMP="$CACHE_DIR/stamp-$$.tmp"
-SOURCE="$TARGET_ROOT/debug/agenterm-rh"
-BOOTSTRAP_DIR="$TARGET_ROOT/task-bootstrap-$$"
-WORKER="$BOOTSTRAP_DIR/agenterm-rh"
+SOURCE="$TARGET_ROOT/debug/agenterm"
+BOOTSTRAP_DIR="$CACHE_DIR/task-$$"
+WORKER="$BOOTSTRAP_DIR/agenterm"
 
 cleanup() {
     rm -f -- "$WORKER" "$IDENTITY_FILE" "$POST_IDENTITY_FILE" \
@@ -54,7 +55,7 @@ trap cleanup EXIT HUP INT TERM
 write_identity() {
     output=$1
     {
-        printf '%s\n' 'bootstrap_worker_build_schema=2'
+        printf '%s\n' 'bootstrap_worker_build_schema=3'
         rustc -Vv
         cargo -Vv
         printf '%s\n' 'tracked-index'
@@ -88,8 +89,7 @@ if [ -f "$CACHE_WORKER" ] && [ ! -L "$CACHE_WORKER" ] && \
     actual_hash=$(git hash-object -- "$CACHE_WORKER")
     stamp_content=$(cat "$CACHE_STAMP")
     if [ "$stamp_content" = "1 $stamp_fingerprint $stamp_hash" ] && \
-            [ "$stamp_schema" = 1 ] && \
-            [ "$stamp_fingerprint" = "$AGENTERM_BOOTSTRAP_FINGERPRINT" ] && \
+            [ "$stamp_schema" = 2 ] && \
             [ "$stamp_hash" = "$actual_hash" ] && [ -z "$stamp_extra" ]; then
         CACHE_VALID=true
         cache_hash=$stamp_hash
@@ -102,7 +102,7 @@ if [ "$CACHE_VALID" = true ]; then
     AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable
 else
     AGENTERM_BOOTSTRAP_CARGO_START_MS=$(clock_ms)
-    cargo build --quiet --locked --bin agenterm-rh
+    cargo build --quiet --locked --bin agenterm
     AGENTERM_BOOTSTRAP_CARGO_END_MS=$(clock_ms)
     AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=$((
         AGENTERM_BOOTSTRAP_CARGO_END_MS - AGENTERM_BOOTSTRAP_CARGO_START_MS
@@ -116,7 +116,8 @@ else
     cp -- "$SOURCE" "$CACHE_TEMP"
     chmod +x "$CACHE_TEMP"
     cache_hash=$(git hash-object -- "$CACHE_TEMP")
-    printf '1 %s %s\n' "$AGENTERM_BOOTSTRAP_FINGERPRINT" "$cache_hash" > "$STAMP_TEMP"
+    "$CACHE_TEMP" rh version >/dev/null
+    printf '2 %s %s\n' "$AGENTERM_BOOTSTRAP_FINGERPRINT" "$cache_hash" > "$STAMP_TEMP"
     mv -f -- "$CACHE_TEMP" "$CACHE_WORKER"
     mv -f -- "$STAMP_TEMP" "$CACHE_STAMP"
     AGENTERM_BOOTSTRAP_WORKER_STATE=rebuilt
@@ -140,6 +141,7 @@ AGENTERM_BOOTSTRAP_WORKER_COPY_MS=$((
 ))
 AGENTERM_BOOTSTRAP_WORKER="$WORKER"
 AGENTERM_BOOTSTRAP_CACHE_WORKER="$CACHE_WORKER"
+AGENTERM_BOOTSTRAP_CACHE_STAMP="$CACHE_STAMP"
 AGENTERM_BOOTSTRAP_PLATFORM=unix
 AGENTERM_BOOTSTRAP_SETUP_END_MS=$(clock_ms)
 AGENTERM_BOOTSTRAP_SETUP_MS=$((
@@ -155,6 +157,7 @@ fi
 AGENTERM_BOOTSTRAP_TIMING_SCHEMA=1
 export AGENTERM_SCRIPT_BACKEND=rh
 export AGENTERM_BOOTSTRAP_WORKER AGENTERM_BOOTSTRAP_CACHE_WORKER
+export AGENTERM_BOOTSTRAP_CACHE_STAMP
 export AGENTERM_BOOTSTRAP_PLATFORM
 export AGENTERM_HOST_OS AGENTERM_HOST_ARCH
 export AGENTERM_BOOTSTRAP_TIMING_SCHEMA AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS
@@ -163,14 +166,9 @@ export AGENTERM_BOOTSTRAP_WORKER_COPY_MS AGENTERM_BOOTSTRAP_OTHER_SETUP_MS
 export AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE AGENTERM_BOOTSTRAP_WORKER_STATE
 export AGENTERM_BOOTSTRAP_FINGERPRINT
 
-"$WORKER" task run "$AGENTERM_BOOTSTRAP_TASK" \
+"$WORKER" rh task run "$AGENTERM_BOOTSTRAP_TASK" \
     --manifest "$REPO/agenterm.tasks.json" \
     -- "$@"
 AGENTERM_BOOTSTRAP_STATUS=$?
-
-# Cargo never reclaims orphaned incremental crate-unit directories, so they
-# grow without bound (this repo reached 12 GB). Prune after the task, and
-# preserve the task's exit status — cleanup must never change a build result.
-sh "$REPO/scripts/prune-incremental.sh" || true
 
 exit "$AGENTERM_BOOTSTRAP_STATUS"

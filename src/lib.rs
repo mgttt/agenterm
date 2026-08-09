@@ -57,6 +57,7 @@ mod terminal_cursor;
 mod terminal_lifecycle;
 mod terminal_observation;
 mod theme;
+pub mod tui;
 pub mod ui_bridge;
 mod ui_client;
 mod ui_clipboard;

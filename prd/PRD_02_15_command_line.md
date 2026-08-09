@@ -1,4 +1,4 @@
-# Command line (`agenterm-cli.exe`)
+# Command line (`agenterm cli`)
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 

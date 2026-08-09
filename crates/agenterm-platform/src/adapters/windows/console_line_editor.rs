@@ -11,7 +11,8 @@ use windows_sys::Win32::{
     System::Console::{
         ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
         ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, INPUT_RECORD, KEY_EVENT,
-        PeekConsoleInputW, ReadConsoleInputW, STD_ERROR_HANDLE, STD_INPUT_HANDLE, SetConsoleMode,
+        PeekConsoleInputW, ReadConsoleInputW, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+        STD_OUTPUT_HANDLE, SetConsoleMode,
     },
     UI::Input::KeyboardAndMouse::{
         VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP,
@@ -56,6 +57,8 @@ pub(crate) struct Editor {
     original_input_mode: u32,
     error_handle: HANDLE,
     original_error_mode: u32,
+    output_handle: HANDLE,
+    original_output_mode: u32,
     /// Remaining repeats of `pending_key` from a coalesced `INPUT_RECORD`.
     ///
     /// The console can report a held key as one record with `wRepeatCount`
@@ -71,14 +74,18 @@ impl Editor {
     pub(crate) fn enter() -> Result<Self, ConsoleLineEditorError> {
         let input_handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
         let error_handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+        let output_handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
         let mut input_mode = 0_u32;
         let mut error_mode = 0_u32;
+        let mut output_mode = 0_u32;
         if unsafe { GetConsoleMode(input_handle, &mut input_mode) } == 0 {
             return Err(ConsoleLineEditorError::unsupported(
                 "stdin-is-not-a-console",
             ));
         }
         let console_has_error_mode = unsafe { GetConsoleMode(error_handle, &mut error_mode) } != 0;
+        let console_has_output_mode =
+            unsafe { GetConsoleMode(output_handle, &mut output_mode) } != 0;
         let editor_mode =
             input_mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT) | ENABLE_PROCESSED_INPUT;
         if unsafe { SetConsoleMode(input_handle, editor_mode) } == 0 {
@@ -92,6 +99,8 @@ impl Editor {
             original_input_mode: input_mode,
             error_handle,
             original_error_mode: error_mode,
+            output_handle,
+            original_output_mode: output_mode,
             pending_key: None,
             pending_repeat: 0,
         };
@@ -102,6 +111,14 @@ impl Editor {
                 SetConsoleMode(
                     error_handle,
                     error_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+                )
+            };
+        }
+        if console_has_output_mode {
+            let _ = unsafe {
+                SetConsoleMode(
+                    output_handle,
+                    output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING,
                 )
             };
         }
@@ -161,6 +178,9 @@ impl Drop for Editor {
         if self.original_error_mode != 0 {
             let _ = unsafe { SetConsoleMode(self.error_handle, self.original_error_mode) };
         }
+        if self.original_output_mode != 0 {
+            let _ = unsafe { SetConsoleMode(self.output_handle, self.original_output_mode) };
+        }
     }
 }
 
@@ -180,6 +200,8 @@ mod tests {
             original_input_mode: 0,
             error_handle: std::ptr::null_mut(),
             original_error_mode: 0,
+            output_handle: std::ptr::null_mut(),
+            original_output_mode: 0,
             pending_key: Some(ConsoleKey::Right),
             pending_repeat: 2,
         };

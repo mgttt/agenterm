@@ -285,7 +285,7 @@ AgenTerm — Local Agent Fleet Work OS
 │   Surface: invariants users feel · PRD: Executable family, Delivery
 │
 ├─ [AUTO] Automate & interoperate
-│   ├─ agenterm-cli — observe, act, wait, verify
+│   ├─ agenterm cli — observe, act, wait, verify
 │   ├─ agenterm-rh — unrestricted local runtime, tasks, catalog
 │   ├─ agenterm-mux — bounded tmux/RMUX compatibility
 │   ├─ agenterm-mcp — agent bridge (read-first, then governed tools)
@@ -498,14 +498,14 @@ Unified OPC operator story:
 ## Headless and server-side ambition
 
 Product-owner intent: eventually **replace pm2 + tmux/RMUX** as the stable
-long-running application manager on servers, with `agenterm-cli mux` as the
+long-running application manager on servers, with `agenterm cli mux` as the
 compatibility and migration frontend — not a second hidden fleet.
 
 | Target tool | What users hire it for | AgenTerm counter-promise | Gap before promotion |
 |-------------|------------------------|--------------------------|----------------------|
 | **pm2** | Keep Node/worker processes alive, logs, restart policy | Headless server keeps PTY fleet alive; tree + events + script tasks | Restart policy, cluster, log aggregation APIs — **not** product truth yet |
 | **tmux** | Multiplex terminals; session survives SSH drop | Server survives GUI detach/close; mux speaks tmux-like CLI | Split panes, full matrix, remote attach over network |
-| **RMUX** | Rust-native tmux + agent ergonomics | Native extensions namespace, typed waits, agenterm-cli richness | RMUX UI/parser parity items still `[ ]` in compatibility PRD |
+| **RMUX** | Rust-native tmux + agent ergonomics | Native extensions namespace, typed waits, agenterm cli richness | RMUX UI/parser parity items still `[ ]` in compatibility PRD |
 
 Architecture already aligned:
 
@@ -630,7 +630,7 @@ INT, DUR, AUTO, ORCH, EXT, INF, REACH.
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
 | B1 | [promoted] | Typed loopback IPC, stable tab IDs, snapshots, waits | — | Agent control plane |
-| B2 | [promoted] | Bounded tmux/RMUX subset via `agenterm-cli mux` | — | tmux/RMUX compatibility, Fleet multiplexer |
+| B2 | [promoted] | Bounded tmux/RMUX subset via `agenterm cli mux` | — | tmux/RMUX compatibility, Fleet multiplexer |
 | B3 | [explore] | Remote/network transport for non-loopback clients | auth, subscription | Agent control plane, Observable Fleet |
 | B4 | [explore] | Stable event subscriptions for push and automation | Observable Fleet minimum | Observable Fleet, MCP orchestration |
 | B5 | [idea] | Cross-tab broadcast input and synchronized panes | typed op completeness | Agent control plane |

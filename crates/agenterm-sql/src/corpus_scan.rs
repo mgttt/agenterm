@@ -21,54 +21,41 @@ pub fn scan_directory(dir: &Path) -> Result<CorpusScanReport, String> {
 
 #[cfg(test)]
 mod tests {
+    use agenterm_script_common::test_support::CorpusScanContract;
+
     use super::*;
-    use tempfile::TempDir;
+
+    // The scenarios live in script-common's test_support (they're the
+    // shared contract of every engine's corpus-scan wrapper); this block
+    // supplies only what's sql-specific: the extension and sources.
+    const CONTRACT: CorpusScanContract<'_> = CorpusScanContract {
+        good_a: ("a.sql", "SELECT 1;"),
+        good_b: ("b.sql", "SELECT 2;"),
+        bad: ("bad.sql", "SELEC 1 FORM;"),
+    };
 
     #[test]
     fn scan_empty_dir() {
-        let dir = TempDir::new().unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 0);
-        assert_eq!(report.failures, 0);
+        CONTRACT.assert_empty_dir(&scan_directory);
     }
 
     #[test]
     fn scan_all_green() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("a.sql"), "SELECT 1;").unwrap();
-        std::fs::write(dir.path().join("b.sql"), "SELECT 2;").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 2);
-        assert_eq!(report.failures, 0);
+        CONTRACT.assert_all_green(&scan_directory);
     }
 
     #[test]
     fn scan_with_syntax_error() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("ok.sql"), "SELECT 1;").unwrap();
-        std::fs::write(dir.path().join("bad.sql"), "SELEC 1 FORM;").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 2);
-        assert_eq!(report.failures, 1);
-        assert!(report.failed_files[0].path.contains("bad.sql"));
+        CONTRACT.assert_syntax_error_reported(&scan_directory);
     }
 
     #[test]
     fn scan_ignores_non_sql() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("script.sql"), "SELECT 1;").unwrap();
-        std::fs::write(dir.path().join("readme.txt"), "hello").unwrap();
-        std::fs::write(dir.path().join("main.rs"), "fn main(){}").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 1);
+        CONTRACT.assert_ignores_foreign_files(&scan_directory);
     }
 
     #[test]
     fn scan_recurses_into_subdirectories() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("lib")).unwrap();
-        std::fs::write(dir.path().join("lib/leaf.sql"), "SELECT 1;").unwrap();
-        let report = scan_directory(dir.path()).expect("scan");
-        assert_eq!(report.total_scripts, 1);
+        CONTRACT.assert_recurses_into_subdirectories(&scan_directory);
     }
 }

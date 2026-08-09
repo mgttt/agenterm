@@ -116,9 +116,10 @@ fn environment(identity) {
     if identity.dirty {
         dirty_label = "true";
     }
-    require(identity.schema_version == 1, "build_identity_schema_version");
+    let schema_version = 0 + identity.schema_version;
+    require(schema_version == 1, "build_identity_schema_version");
     #{
-        AGENTERM_BUILD_IDENTITY_VERSION: "" + identity.schema_version,
+        AGENTERM_BUILD_IDENTITY_VERSION: "" + schema_version,
         AGENTERM_BUILD_GIT_COMMIT: identity.commit,
         AGENTERM_BUILD_GIT_DIRTY: dirty_label,
         AGENTERM_BUILD_CARGO_LOCK_SHA256: identity.cargo_lock_sha256,

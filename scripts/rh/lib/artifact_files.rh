@@ -16,7 +16,7 @@ fn clean_locked(directory_value, manifest_path_value) {
         // Any parked AgenTerm executable: `<stem>.locked-<millis>.exe`.
         let locked_exe = name.starts_with("agenterm")
             && name.contains(".locked-")
-            && name.ends_with(".exe");
+            && (name.ends_with(".exe") || name.ends_with(".com"));
         if entry.is_file && locked_exe {
             std::fs::try_remove_file(entry.path.display);
             removed += 1;
@@ -107,6 +107,7 @@ fn stage(source_directory_value, destination_directory_value, name_value) {
     let name = "" + name_value;
     require(
         name == "agenterm.exe"
+            || name == "agenterm.com"
             || name == "agenterm-cc.exe"
             || name == "agenterm-rh.exe",
         "stage_artifact_name_invalid:" + name
@@ -119,6 +120,9 @@ fn stage(source_directory_value, destination_directory_value, name_value) {
     std::fs::create_dir_all(destination_directory);
 
     let source_name = name;
+    if name == "agenterm.com" {
+        source_name = "agenterm-com.exe";
+    }
     let source = std::path::join(source_directory, source_name).display;
     let destination = std::path::join(destination_directory, name).display;
     require(std::fs::exists(source), "stage_artifact_source_missing:" + source);

@@ -9,14 +9,14 @@ pushd "%AGENTERM_BOOTSTRAP_REPO%"
 
 set "AGENTERM_BOOTSTRAP_TARGET=target"
 if defined CARGO_TARGET_DIR set "AGENTERM_BOOTSTRAP_TARGET=%CARGO_TARGET_DIR%"
-set "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\debug\agenterm-rh.exe"
+set "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\debug\agenterm.exe"
 rem A staged release reclaims repository Cargo targets. Keep this content-
 rem validated worker outside Cargo output so Windows never holds an in-target
 rem executable open while release cleanup runs.
 if not defined AGENTERM_BOOTSTRAP_CACHE_ROOT set "AGENTERM_BOOTSTRAP_CACHE_ROOT=%LOCALAPPDATA%\AgenTerm\build-cache"
 if "%AGENTERM_BOOTSTRAP_CACHE_ROOT%"=="\AgenTerm\build-cache" set "AGENTERM_BOOTSTRAP_CACHE_ROOT=%TEMP%\AgenTerm-build-cache"
 set "AGENTERM_BOOTSTRAP_CACHE_DIR=%AGENTERM_BOOTSTRAP_CACHE_ROOT%\windows-%PROCESSOR_ARCHITECTURE%"
-set "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\agenterm-rh.exe"
+set "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\agenterm.exe"
 set "AGENTERM_BOOTSTRAP_CACHE_STAMP=%AGENTERM_BOOTSTRAP_CACHE_DIR%\worker.stamp"
 set "AGENTERM_BOOTSTRAP_IDENTITY=%AGENTERM_BOOTSTRAP_CACHE_DIR%\identity-%RANDOM%-%RANDOM%.txt"
 set "AGENTERM_BOOTSTRAP_POST_IDENTITY=%AGENTERM_BOOTSTRAP_CACHE_DIR%\post-identity-%RANDOM%-%RANDOM%.txt"
@@ -33,13 +33,8 @@ if not defined AGENTERM_BOOTSTRAP_FINGERPRINT goto :failed
 call :validate_cache
 if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
-cargo build --quiet --locked --bin agenterm-rh
+cargo build --quiet --locked --bin agenterm
 if errorlevel 1 goto :failed
-rem Build agenterm-lua in parallel when Lua backend is requested.
-if /i "%AGENTERM_SCRIPT_BACKEND%"=="lua" (
-    cargo build --quiet --locked --bin agenterm-lua
-    if errorlevel 1 goto :failed
-)
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_CARGO_START_CS% %AGENTERM_BOOTSTRAP_CARGO_END_CS% AGENTERM_BOOTSTRAP_CARGO_CS
 set /a AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=AGENTERM_BOOTSTRAP_CARGO_CS*10
@@ -51,7 +46,9 @@ copy /y "%AGENTERM_BOOTSTRAP_SOURCE%" "%AGENTERM_BOOTSTRAP_CACHE_TEMP%" >nul
 if errorlevel 1 goto :failed
 for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_CACHE_TEMP%"') do set "AGENTERM_BOOTSTRAP_CACHE_HASH=%%H"
 if not defined AGENTERM_BOOTSTRAP_CACHE_HASH goto :failed
-> "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" echo 1 %AGENTERM_BOOTSTRAP_FINGERPRINT% %AGENTERM_BOOTSTRAP_CACHE_HASH%
+"%AGENTERM_BOOTSTRAP_CACHE_TEMP%" rh version >nul
+if errorlevel 1 goto :failed
+> "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" echo 2 %AGENTERM_BOOTSTRAP_FINGERPRINT% %AGENTERM_BOOTSTRAP_CACHE_HASH%
 move /y "%AGENTERM_BOOTSTRAP_CACHE_TEMP%" "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" >nul
 if errorlevel 1 goto :failed
 move /y "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" "%AGENTERM_BOOTSTRAP_CACHE_STAMP%" >nul
@@ -69,26 +66,25 @@ set "AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable"
 set "AGENTERM_BOOTSTRAP_DIR=%AGENTERM_BOOTSTRAP_CACHE_DIR%\task-%RANDOM%-%RANDOM%"
 call :clock_cs AGENTERM_BOOTSTRAP_COPY_START_CS
 mkdir "%AGENTERM_BOOTSTRAP_DIR%" >nul 2>nul
-copy /y "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rh.exe" >nul
+copy /y "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm.exe" >nul
 if errorlevel 1 goto :failed
-for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_DIR%\agenterm-rh.exe"') do set "AGENTERM_BOOTSTRAP_INVOKED_HASH=%%H"
+for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_DIR%\agenterm.exe"') do set "AGENTERM_BOOTSTRAP_INVOKED_HASH=%%H"
 if not "%AGENTERM_BOOTSTRAP_INVOKED_HASH%"=="%AGENTERM_BOOTSTRAP_CACHE_HASH%" goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_COPY_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_COPY_START_CS% %AGENTERM_BOOTSTRAP_COPY_END_CS% AGENTERM_BOOTSTRAP_COPY_CS
 set /a AGENTERM_BOOTSTRAP_WORKER_COPY_MS=AGENTERM_BOOTSTRAP_COPY_CS*10
-set "AGENTERM_BOOTSTRAP_WORKER=%AGENTERM_BOOTSTRAP_DIR%\agenterm-rh.exe"
+set "AGENTERM_BOOTSTRAP_WORKER=%AGENTERM_BOOTSTRAP_DIR%\agenterm.exe"
 call :clock_cs AGENTERM_BOOTSTRAP_SETUP_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_START_CS% %AGENTERM_BOOTSTRAP_SETUP_END_CS% AGENTERM_BOOTSTRAP_SETUP_CS
 set /a AGENTERM_BOOTSTRAP_SETUP_MS=AGENTERM_BOOTSTRAP_SETUP_CS*10
 set /a AGENTERM_BOOTSTRAP_OTHER_SETUP_MS=AGENTERM_BOOTSTRAP_SETUP_MS-AGENTERM_BOOTSTRAP_CARGO_BUILD_MS-AGENTERM_BOOTSTRAP_WORKER_COPY_MS
 if %AGENTERM_BOOTSTRAP_OTHER_SETUP_MS% LSS 0 set "AGENTERM_BOOTSTRAP_OTHER_SETUP_MS=0"
 set "AGENTERM_SCRIPT_BACKEND=rh"
-rem Set AGENTERM_SCRIPT_BACKEND=lua to use agenterm-lua as the stage-0 worker.
-rem When lua is selected, agenterm-lua.exe is built and cached alongside agenterm-rh.exe.
 set "AGENTERM_BOOTSTRAP_TIMING_SCHEMA=1"
 set "AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS=10"
+set "AGENTERM_BOOTSTRAP_CACHE_STAMP=%AGENTERM_BOOTSTRAP_CACHE_STAMP%"
 
-"%AGENTERM_BOOTSTRAP_WORKER%" task run "%AGENTERM_BOOTSTRAP_TASK%" --manifest "%AGENTERM_BOOTSTRAP_REPO%\agenterm.tasks.json" -- %*
+"%AGENTERM_BOOTSTRAP_WORKER%" rh task run "%AGENTERM_BOOTSTRAP_TASK%" --manifest "%AGENTERM_BOOTSTRAP_REPO%\agenterm.tasks.json" -- %*
 if errorlevel 1 goto :failed
 call :cleanup
 popd
@@ -115,14 +111,10 @@ if defined AGENTERM_BOOTSTRAP_POST_IDENTITY del /q "%AGENTERM_BOOTSTRAP_POST_IDE
 if defined AGENTERM_BOOTSTRAP_UNTRACKED del /q "%AGENTERM_BOOTSTRAP_UNTRACKED%" >nul 2>nul
 if defined AGENTERM_BOOTSTRAP_CACHE_TEMP del /q "%AGENTERM_BOOTSTRAP_CACHE_TEMP%" >nul 2>nul
 if defined AGENTERM_BOOTSTRAP_STAMP_TEMP del /q "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" >nul 2>nul
-rem Cargo never reclaims orphaned incremental crate-unit directories, so they
-rem grow without bound (this repo reached 12 GB). Runs on both the success and
-rem failure paths; the script always exits 0 so a build result never changes.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%AGENTERM_BOOTSTRAP_REPO%\scripts\prune-incremental.ps1" >nul 2>nul
 exit /b 0
 
 :write_identity
-> "%~1" echo bootstrap_worker_build_schema=2
+> "%~1" echo bootstrap_worker_build_schema=3
 >> "%~1" rustc -Vv
 if errorlevel 1 exit /b 1
 >> "%~1" cargo -Vv
@@ -153,8 +145,7 @@ set "AGENTERM_BOOTSTRAP_STAMP_EXTRA="
 set "AGENTERM_BOOTSTRAP_STAMP_RECORDS=0"
 for /f "usebackq tokens=1-4" %%A in ("%AGENTERM_BOOTSTRAP_CACHE_STAMP%") do call :read_stamp "%%A" "%%B" "%%C" "%%D"
 if not "%AGENTERM_BOOTSTRAP_STAMP_RECORDS%"=="1" exit /b 0
-if not "%AGENTERM_BOOTSTRAP_STAMP_SCHEMA%"=="1" exit /b 0
-if not "%AGENTERM_BOOTSTRAP_STAMP_FINGERPRINT%"=="%AGENTERM_BOOTSTRAP_FINGERPRINT%" exit /b 0
+if not "%AGENTERM_BOOTSTRAP_STAMP_SCHEMA%"=="2" exit /b 0
 if defined AGENTERM_BOOTSTRAP_STAMP_EXTRA exit /b 0
 set "AGENTERM_BOOTSTRAP_ACTUAL_CACHE_HASH="
 for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_CACHE_WORKER%"') do set "AGENTERM_BOOTSTRAP_ACTUAL_CACHE_HASH=%%H"

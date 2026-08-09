@@ -991,7 +991,7 @@ fn quick_prd_alignment_spec(
     if unix_bootstrap != 0 {
         let quick_native_bin = std::path::join(
             quick_native_bin_root,
-            "agenterm-cli"
+            "agenterm"
         ).display;
         return direct_task(
             bootstrap_worker,

@@ -623,7 +623,7 @@ fn entry() {
         let expected = [
             "agenterm.exe",
             "agenterm-cc.exe",
-            "agenterm-cli.exe",
+            "agenterm.exe",
         ];
         let names = #{};
         for artifact_entry in manifest.executables {

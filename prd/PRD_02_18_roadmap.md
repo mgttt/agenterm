@@ -72,7 +72,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       execution and typed Fleet observation; this described its shipped API
       breadth, not a permission boundary. Named script/module loading, Bash
       runtime, and MCP binaries remained outside the release
-    - [x] `agenterm-cli ui-action` remains the compatibility entry while
+    - [x] `agenterm cli ui-action` remains the compatibility entry while
       operations gain stable typed IDs internally; new top-level aliases
       are added only when they improve human discovery without duplicating
       semantics
@@ -313,7 +313,7 @@ track remains planned, but every declared dependency must still pass.
 - [~] M0 cross-version boundaries and baselines: typed control operations,
   sidecar protocol boundaries, binary size/startup, compatibility corpus, and
   artifact provenance remain prerequisites consumed by later tracks
-- [x] M1 fleet CLI: ship `agenterm-cli mux` from the existing supported
+- [x] M1 fleet CLI: ship `agenterm cli mux` from the existing supported
   tmux/RMUX command surface and generated compatibility matrix
 - [ ] M2 shell gate: prototype `agenterm-bash.exe`, select and license the
   real Bash runtime strategy, then pass clean-machine terminal tests
@@ -407,7 +407,7 @@ track remains planned, but every declared dependency must still pass.
     of build, quality, black-box, qualification, packaging, and approved
     release semantics; platform entry points only bootstrap and forward
     arguments/exit status
-  - [x] ship `agenterm-cli mcp` as an on-demand stdio sidecar pinned to one
+  - [x] ship `agenterm cli mcp` as an on-demand stdio sidecar pinned to one
     stable MCP protocol revision; offline discovery declares exact methods,
     resources, tools, limits, schemas, and unavailable future roles
   - [x] expose only metadata-safe instance, workspace, tab, and causal Fleet
@@ -619,7 +619,7 @@ track remains planned, but every declared dependency must still pass.
     labeled public preview channel that requires one explicit acknowledgement
     and never installs silently; once `ENABLE_SIGNED_MACOS_RELEASE` is true the
     same clients prefer the signed and notarized artifact with no copy change
-  - [ ] `agenterm-cli update` owns check / apply / rollback / retention over
+  - [ ] `agenterm cli update` owns check / apply / rollback / retention over
     the same verification path as first install; delta updates are an explicit
     non-goal, and applying an update to a running server keeps the existing
     keep-server session semantics while making the disk-versus-live version

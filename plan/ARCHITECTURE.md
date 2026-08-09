@@ -89,7 +89,6 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；`server` = 无窗权威；`cli` = 共享控制平面入口 |
 | `agenterm-com` | `src/bin/agenterm-com.rs` | 极简 Windows Console-subsystem 转发器；交付名 `agenterm.com`，同步等待 `agenterm.exe` |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
-| `agenterm-rhai` | `src/bin/agenterm-rhai.rs` | 本地 Rhai 运行时（无权限策略） |
 | `agenterm-con` | `src/bin/agenterm-con.rs` | 最小控制台宿主（conhost 等价物；单窗 ConPTY/PTY，无 server/Fleet；平台 pixel-window 直调） |
 
 **2026-08-09：** `agenterm-rh` / `agenterm-lua` / `agenterm-qjs` / `agenterm-sql`
@@ -97,6 +96,12 @@ src/platform/adapters/       主机实现（物理目录）
 argv 透传子命令：`agenterm rh|lua|qjs|sql <args>`（rh 实现仍在
 `crates/agenterm-rh`，qjs/lua/sql 同理各自 crate；只是不再各自产出独立
 release 可执行文件）。
+
+**构建自举：** `build.bat` / `build.sh` 仅定位或首次构建主 `agenterm`，
+再以 `agenterm rh task run ...` 进入 `scripts/rh/` 的唯一构建政策。最近一次
+通过 `agenterm rh version` 自检的主程序保存在 Cargo output 之外；源码变化
+不会先使该 LKG 失效，失败构建也不会替换它。clean clone 与无缓存 CI 只在
+stage-0 执行一次 `cargo build --bin agenterm`，不恢复独立 `agenterm-rh` bin。
 
 **rh 切换：** 宿主经 [`src/script_backend.rs`](../src/script_backend.rs) 选择 backend；详见 [`plan/design-rh-aot.md`](design-rh-aot.md)。
 

@@ -13,8 +13,8 @@ fn entry() {
         repo = std::path::absolute(args[0]).display;
     }
 
-    // MCP is hosted only under agenterm-cli (agenterm-mcp PE removed).
-    let candidate = std::path::join(repo, "dist/agenterm-cli.exe").display;
+    // MCP is hosted only under `agenterm cli` (agenterm-mcp PE removed).
+    let candidate = std::path::join(repo, "dist/agenterm.com").display;
     require(
         std::fs::exists(candidate) && std::fs::metadata(candidate).is_file,
         "mcp_candidate_missing:" + candidate

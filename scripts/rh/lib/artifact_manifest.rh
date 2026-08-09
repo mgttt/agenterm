@@ -1,7 +1,7 @@
 // Shared validation for the canonical local Windows executable contract.
 
 fn is_artifact_name(name) {
-    if name == "agenterm.exe" {
+    if name == "agenterm.exe" || name == "agenterm.com" {
         return true;
     }
     if !name.starts_with("agenterm-") || !name.ends_with(".exe") {

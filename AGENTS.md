@@ -311,8 +311,8 @@ checks may skip the bounded-journal saturation load. A candidate-bound
 qualification receipt requires `check.cmd --release --include-stress`; packaging
 must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
-`agenterm-cc.exe`, plus 512 KiB for `agenterm.exe` (the synchronous launcher for `agenterm cli`; `mux`/`mcp`
-subcommands; no separate mux/mcp PE); investigate dependency or feature growth
+`agenterm-cc.exe`, plus 512 KiB for `agenterm.com` (the synchronous CUI/TUI
+forwarder); investigate dependency or feature growth
 instead of raising them casually.
 
 ## Runtime control and observation
@@ -394,13 +394,15 @@ behavior.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
   downloadable binaries are published only by exact-Candidate Promotion.
-- Keep `agenterm.exe` as a Windows-subsystem GUI; there is exactly one PE and
-  no console-subsystem launcher, wrapper, or `agenterm.com`. **`agenterm cli
-  <command>`** runs on the same PE: the process attaches the caller's console
+- Keep `agenterm.exe` as a Windows-subsystem GUI and keep `agenterm.com` as a
+  minimal Console-subsystem forwarder with no business logic. Extensionless
+  **`agenterm cli <command>`** / **`agenterm tui`** resolves to `.com`, which
+  inherits stdio, synchronously invokes the sibling `agenterm.exe`, and
+  propagates its exit code. The GUI PE then attaches the caller's console
   (`AttachConsole(ATTACH_PARENT_PROCESS)`), duplicates the real
   stdin/stdout/stderr via `GetStdHandle` + `DuplicateHandle`, and spawns
   itself as a hidden `__agenterm-internal-cli` worker with those explicit
-  handles, waiting and forwarding the exit code. Explorer and plain
+  handles, waiting and forwarding the exit code. Explorer and explicit
   `agenterm.exe` launches remain no-flash GUI entry points. The CLI
   includes **`agenterm cli mux`** / **`agenterm cli mcp`**; the standalone
   `agenterm-cli`, `agenterm-mux`, and `agenterm-mcp` PEs are removed.
@@ -505,7 +507,7 @@ test target is linted. On Linux, `cargo fmt --check` runs natively.
   Windows and runs the test exes under Wine. Do not treat any pass count as an
   expected value — the suite grows; read the command's own output.
   Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
-- Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm.exe cli --help`.
+- Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm-com.exe cli --help`.
   Launching `agenterm.exe` on `DISPLAY=:1` starts a working IPC server:
   `server-list`, `ui-snapshot`, `new-window`, `inspect`, `save-workspace`, etc.
   all round-trip.

@@ -6,7 +6,7 @@
 // or:
 //   REPO CLI_EXE [--skip-event-load|--event-load]
 //
-// Mux surface is `agenterm-cli mux …` (no separate agenterm-mux PE).
+// Mux surface is `agenterm cli mux ...` (no separate agenterm-mux PE).
 
 import "scripts/rh/lib/test_harness" as test_harness;
 
@@ -82,7 +82,7 @@ fn start_gap_client(harness, cli, gap_target, worker, iteration) {
     let arguments = [
         "set-tab-note", "-t", gap_target_text, gap_note
     ];
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         harness,
         cli,
         arguments
@@ -190,7 +190,7 @@ fn text_contains_address(text, address) {
     text.contains(address)
 }
 
-// Build argv for the mux frontend: agenterm-cli mux <args…>
+// Build argv for the mux frontend: agenterm cli mux <args...>
 fn mux_argv(parts) {
     let argv = [];
     argv.push("mux");
@@ -228,7 +228,7 @@ fn run_program(
     remove_address,
     workspace
 ) {
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         ctx,
         program,
         arguments
@@ -300,7 +300,7 @@ fn json(ctx, cli, arguments) {
 }
 
 fn json_without_address(ctx, cli, arguments) {
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         ctx,
         cli,
         arguments
@@ -429,7 +429,7 @@ fn start_waiter(ctx, cli, epoch, after, kind, timeout_ms) {
         "--kind", kind_text,
         "--timeout-ms", timeout_text
     ];
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         ctx,
         cli,
         arguments
@@ -459,7 +459,7 @@ fn complete_waiter_child(child) {
 fn cleanup_server(ctx, cli, server_address) {
     let address_text = "" + server_address;
     let kill_arguments = ["--address", address_text, "kill-server"];
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         ctx,
         cli,
         kill_arguments
@@ -575,7 +575,7 @@ try {
             let primary_name = pieces[0];
             let primary_help = text(harness, cli, [primary_name, "--help"]);
             let primary_help_ok =
-                primary_help.starts_with("Usage: agenterm-cli ");
+                primary_help.starts_with("Usage: agenterm cli ");
             test_harness::require(
                 primary_help_ok != 0,
                 "fleet_command_help:" + primary_name
@@ -589,7 +589,7 @@ try {
                 let alias = alias_raw.sub_string(0, alias_raw.len - 1);
                 let alias_help = text(harness, cli, [alias, "--help"]);
                 let alias_help_ok =
-                    alias_help.starts_with("Usage: agenterm-cli ");
+                    alias_help.starts_with("Usage: agenterm cli ");
                 test_harness::require(
                     alias_help_ok != 0,
                     "fleet_command_help:" + alias

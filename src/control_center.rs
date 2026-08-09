@@ -1096,7 +1096,7 @@ fn parse_control_center_cli(args: &[String], endpoint: &str) -> Result<ControlCe
     validate_context_value("server endpoint", endpoint).map_err(|error| error.to_string())?;
     let Some(subcommand) = args.get(1).map(String::as_str) else {
         return Err(
-            "control-center requires open, status, snapshot, or close\nUsage: agenterm-cli control-center open|status|snapshot|close [--no-activate]".to_owned(),
+            "control-center requires open, status, snapshot, or close\nUsage: agenterm cli control-center open|status|snapshot|close [--no-activate]".to_owned(),
         );
     };
     match (subcommand, &args[2..]) {
@@ -1110,7 +1110,7 @@ fn parse_control_center_cli(args: &[String], endpoint: &str) -> Result<ControlCe
         ("close", []) => Ok(ControlCenterCli::Close),
         ("snapshot", []) => Ok(ControlCenterCli::Snapshot),
         _ => Err(
-            "invalid control-center arguments\nUsage: agenterm-cli control-center open|status|snapshot|close [--no-activate]"
+            "invalid control-center arguments\nUsage: agenterm cli control-center open|status|snapshot|close [--no-activate]"
                 .to_owned(),
         ),
     }

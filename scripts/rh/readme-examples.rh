@@ -100,10 +100,10 @@ fn entry() {
 
         let stdout_path =
             std::path::join(repo, ".readme-examples.stdout.tmp").display;
-        let cli_path = std::path::join(artifact_root, "agenterm-cli.exe").display;
+        let cli_path = std::path::join(artifact_root, "agenterm.exe").display;
         let cli_code = std::process::command_stdout_file(
             cli_path,
-            ["list-commands"],
+            ["cli", "list-commands"],
             10000,
             stdout_path,
             no_activate
@@ -137,21 +137,22 @@ fn entry() {
                     fields.push(field);
                 }
             }
-            require(fields.len >= 3, "README contains an invalid agenterm-cli example");
-            let command_index = 2;
-            let maybe_address = fields[2];
+            require(fields.len >= 4, "README contains an invalid agenterm cli example");
+            require(fields[2] == "cli", "README CLI example is missing the cli subcommand");
+            let command_index = 3;
+            let maybe_address = fields[3];
             if maybe_address == "--address" {
-                command_index = 4;
+                command_index = 5;
             }
             require(
                 fields.len > command_index,
-                "README contains an incomplete agenterm-cli example"
+                "README contains an incomplete agenterm cli example"
             );
             let command_name = fields[command_index];
             command_name.replace("\"", "");
             require(
                 cli_names.contains(command_name),
-                "README references unknown agenterm-cli command '" + command_name + "'"
+                "README references unknown agenterm cli command '" + command_name + "'"
             );
         }
 

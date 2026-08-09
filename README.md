@@ -134,7 +134,6 @@ curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
 ## Build and run
 
 ```powershell
-cd D:\dev\agenterm
 .\build.bat
 .\dist\agenterm.exe
 ```
@@ -163,6 +162,13 @@ stages the finished artifacts in `dist/`, and then clears only that scratch
 cache while preserving the incremental development `target/`. All modes
 produce three ignored executables plus
 build metadata under `dist/`:
+
+The thin `build.bat` / `build.sh` stage-0 reuses a content-validated,
+last-known-good copy of the main `agenterm` outside Cargo output and runs the
+real build as `agenterm rh task run build`. A clean machine or CI runner seeds
+that cache once with `cargo build --bin agenterm`; failed product builds never
+replace the working copy. There is no standalone `agenterm-rh` bootstrap or
+second shell-owned build policy.
 
 - `dist/agenterm.exe` — GUI application; `agenterm server` starts the headless
   authority as a separate process of the same PE. `agenterm rh|lua|qjs|sql`
