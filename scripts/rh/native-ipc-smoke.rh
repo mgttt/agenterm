@@ -373,8 +373,10 @@ fn find_by_endpoint(rows, wanted_endpoint, code) {
         }
     }
     // Dump what server-list actually returned: a bare code left the
-    // missing-row shape undiagnosable from CI logs.
-    throw code + ":rows=" + bounded_diagnostic(rh::json::stringify(rows));
+    // missing-row shape undiagnosable from CI logs. Uncapped on purpose --
+    // the harness already bounds failure payloads, and 512 chars cut the
+    // dump before the second row.
+    throw code + ":rows=" + rh::json::stringify(rows);
 }
 
 fn find_by_nonce(rows, wanted_nonce, code) {
@@ -384,7 +386,7 @@ fn find_by_nonce(rows, wanted_nonce, code) {
             return normalize_row(row);
         }
     }
-    throw code + ":rows=" + bounded_diagnostic(rh::json::stringify(rows));
+    throw code + ":rows=" + rh::json::stringify(rows);
 }
 
 fn registration_by_endpoint(directory, wanted_endpoint, code) {
