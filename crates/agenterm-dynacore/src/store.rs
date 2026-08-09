@@ -20,7 +20,14 @@ pub fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
         h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0001_0000_01b3);
+        // The canonical FNV-1a/64 prime is 0x100000001b3, which grouped in
+        // 4-hex-digit chunks is 0x0000_0100_0000_01b3 -- NOT
+        // 0x0000_0001_0000_01b3 (an extra zero group; caught while building
+        // `agenterm-nativecore`'s own copy of this file, see its history for
+        // the reproduction). Harmless for content addressing (put/get only
+        // ever need internal self-consistency, and both use this same
+        // function), but this was not really FNV-1a/64 until now.
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
 }
