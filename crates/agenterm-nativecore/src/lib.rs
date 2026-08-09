@@ -16,12 +16,20 @@
 //! `eval_core`) is `#[cfg(windows)]`-gated at the FFI boundary; `ir`,
 //! `verify`, `pack`, and `store` are host-independent and compile/test on
 //! any target, but this crate is only ever RUN for real on Windows.
+//!
+//! **v2 (design doc §9):** `registry` adds a second, additional call path —
+//! a small, human-reviewed, compiled-in table of native symbols a pack may
+//! reference BY NAME (not one of the seven compile-time `Intent`s in `ir`).
+//! `verify` and `seam` grow a parallel registry-backed check/dispatch
+//! alongside (not instead of) the seven-intent path; see `registry`'s own
+//! header for the exact scope and what this deliberately does not do.
 
 pub mod declare;
 pub mod eval_core;
 pub mod ir;
 pub mod pack;
 pub mod payloads;
+pub mod registry;
 pub mod seam;
 pub mod step_table;
 pub mod store;

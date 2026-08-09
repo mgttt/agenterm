@@ -11,11 +11,16 @@ better tool whenever both are available — see
 [`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md) §0–§1
 for the measured, not-guessed, constraints that motivate the split).
 
-**Status: v1, feature-frozen.** All of the design doc's §5/§7 acceptance criteria are met
-and the code is in production use (opt-in, zero cost when unconfigured), but as of §8 the
-design doc records a deliberate decision to stop adding scope to this crate and put research
-effort elsewhere (see "What this crate does NOT do" below). This README documents what
-exists today; it is not a roadmap.
+**Status: v1, feature-frozen, plus one scoped v2 addition.** All of the design doc's §5/§7
+acceptance criteria are met and the code is in production use (opt-in, zero cost when
+unconfigured); as of §8 the design doc records a deliberate decision to stop adding
+*intents* to this crate and put research effort elsewhere (see "What this crate does NOT
+do" below — that freeze still holds for the seven-intent path). §9 opened exactly one,
+narrow exception on top of that freeze: a **signature-registry-backed call path** (see
+"v2: registry-backed calls" below) that lets a pack reach a hand-reviewed *symbol* without
+adding a new `Intent`. This is not a re-opening of v1's scope — no new `Intent`, no new
+CLI surface, no product wiring — see §9.3 for the exact boundary. This README documents
+what exists today; it is not a roadmap.
 
 ## What it does
 
@@ -120,18 +125,68 @@ suite and a good source of further real examples — every test in it either dri
 exact pipeline against a real Win32 API or constructs a deliberately malformed `Module` and
 asserts `verify()` rejects it before any native call happens.
 
+## v2: registry-backed calls (design doc §9)
+
+`research/dynamic-core/runtime-intent/RESULTS.md` (Q23) measured a real gap in the seven-intent
+design: adding an eighth native call meant editing `ir.rs`/`verify.rs`/`seam.rs` and
+recompiling `agenterm.exe`, yet what that recompile actually *bought* was never a machine
+check — `Intent::contract_arity()` is a human-read-the-docs constant, same as any other. Q23's
+verdict was a decisive split: the *internal-arity* half of that machine check moves cleanly to
+pack-load time (**if and only if the contract is derived from the pack's own call recipe, never
+declared as a second, disagreeable field**); the *real-ABI* half cannot, because Windows x64
+exports carry no queryable signature metadata — closing it needs an independent, human-reviewed
+assertion, the same thing recompilation was quietly buying all along.
+
+This crate now ships that assertion as data instead of as a match arm: `src/registry.rs`'s
+`SIGNATURE_REGISTRY`, a small, compiled-in, human-authored table of
+`(symbol, module, real arity)` rows — currently three genuine kernel32 exports
+(`MulDiv`, `lstrlenA`, `GetTickCount`), none of which is among the seven intents above. A pack
+can reference one of these BY NAME (`Builder::call_reg`/`Inst::CallReg`, and the parallel
+`Module::registry_externs` table), without adding a new compile-time `Intent` variant, without
+touching `ir.rs`'s `Intent` enum, and without disturbing the seven-intent path in any way — the
+two paths are fully separate: separate IR variant, separate `IrFault` variants, separate
+dispatcher in `seam.rs` (`do_registry_call`, a generic `LoadLibraryA`/`GetProcAddress` +
+transmute-dispatch trampoline over the integer/pointer word subset, 0..=4 args).
+
+The contract-arity discipline is the same "derive, not declare" rule Q23 found necessary:
+`verify()` never trusts a registry extern's own declared `nargs` as the real contract — it
+looks the `(module, symbol)` pair up in `SIGNATURE_REGISTRY` and derives the contract from
+THAT. Not found → rejected outright (`IrFault::SymbolNotInRegistry`, with an error message that
+says plainly the symbol is not in the signature registry and cannot be called this way — a pack
+cannot get an unreviewed symbol admitted no matter what arity it asserts for it). Found, but the
+extern's declared `nargs` disagrees with the registry's arity → also rejected
+(`IrFault::RegistryArityMismatch`), even if the declaration is perfectly self-consistent with
+the rest of the IR — self-consistency was never the property that mattered (this is exactly the
+F1-class hole Q23 named S4). `tests/registry_intents.rs` reproduces Q23's S1–S5 findings for
+real, inside this crate, against real kernel32 exports.
+
+**This is a mechanism proof, not a distribution/signing pipeline** — `registry.rs`'s table is
+compiled in, human-reviewed via ordinary code review, and not runtime-updatable; extending it to
+a new symbol is a human decision (design doc §9.3 explicitly defers hot-reload, remote
+distribution, and signing to a future round, if ever). It also does not touch product wiring:
+`execute_inner` and the rest of `agenterm`'s command surface are unaware this path exists, same
+as the seven-intent path.
+
 ## What this crate does NOT do (v1 scope)
 
 Per [`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md) §6,
 this is deliberate scope, not a backlog:
 
-- No intents beyond the seven listed above — adding an eighth is explicitly out of scope for
-  v1 (see the design doc's own open question, §8's Q23, on whether/how that could ever be
-  done without recompiling `agenterm.exe`).
-- No cross-ISA support (x86_64/Windows only).
-- No struct-by-value calls beyond register width.
-- No runtime intent discovery — packs are content-addressed and hash-pinned at build time,
-  never resolved by name at load time.
+- No EIGHTH compile-time `Intent` — still true; the seven listed above are the entire
+  `Intent` enum and stay that way. The v2 registry-backed path above (§9) answers the design
+  doc's own open question (§8's Q23) about extending native-call reach WITHOUT a ninth
+  `Intent`/recompile, but it is a genuinely separate, additive path — it does not add an
+  eighth `Intent` variant, and the seven-intent path's own scope (below) is unaffected by it.
+- No cross-ISA support (x86_64/Windows only) — applies to both paths.
+- No struct-by-value calls beyond register width — applies to both paths; the registry path
+  is further bounded to 0..=4 integer/pointer-width args (design doc §9.3).
+- No runtime intent discovery for the seven-intent path — packs are content-addressed and
+  hash-pinned at build time, never resolved by name at load time. (The registry path's whole
+  point is resolving a NAME at load/dispatch time — that is deliberately scoped to a small,
+  human-reviewed table, §9's "human review" step, not general runtime discovery of arbitrary
+  symbols.)
+- No registry hot-reload, remote distribution, or signing pipeline (design doc §9.3) — the
+  registry is compiled into this crate and reviewed the same way any other source change is.
 
 ## Relationship to `agenterm-dynacore`
 

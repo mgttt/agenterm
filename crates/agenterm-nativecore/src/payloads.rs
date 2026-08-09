@@ -202,6 +202,7 @@ pub fn bad_ir_demo() -> Module {
         entry: 0,
         rodata: vec![],
         externs: vec![],
+        registry_externs: vec![],
     }
 }
 

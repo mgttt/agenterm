@@ -35,6 +35,21 @@
 //! value-range tracking beyond what's needed to catch out-of-range indices,
 //! no dataflow — a single structural walk plus (new) one contract-arity
 //! lookup per declared extern.
+//!
+//! ## The v2 registry check (design doc §9, Q23-derived)
+//! A SECOND, additional pass, alongside (not replacing) the F1 pass above:
+//! for every `Module::registry_externs` entry, look the symbol up in
+//! `crate::registry::SIGNATURE_REGISTRY`. Not found → `IrFault::
+//! SymbolNotInRegistry` (a pack cannot get an unreviewed symbol admitted no
+//! matter what it declares). Found → the entry's `arity` is the contract,
+//! and it is cross-checked against the extern's declared `nargs` exactly
+//! the way `IntentArityMismatch` cross-checks `contract_arity()` — same
+//! "derive, not declare" discipline, reproduced for a registry-backed call
+//! instead of a compile-time `Intent` (`research/dynamic-core/runtime-intent/
+//! RESULTS.md` S3/S4). A separate IR-internal check (`RegArityMismatch`,
+//! during the block walk below) additionally catches a `CallReg` site whose
+//! `args.len()` disagrees with its OWN extern's declared `nargs` — the
+//! registry-path analogue of `ArityMismatch`.
 
 #![allow(dead_code)]
 
@@ -70,7 +85,76 @@ pub enum IrFault {
     /// declaration is reused by every call site that names it (`Builder`'s
     /// dedup) — every one of them would panic identically at the seam.
     IntentArityMismatch { id: u32, intent: Intent, declared: usize, contract: usize },
+    /// **v2 registry fix.** A `CallReg`'s registry extern names a
+    /// `(module, symbol)` pair that is not present in
+    /// `crate::registry::SIGNATURE_REGISTRY`. Rejected outright — there is
+    /// no fallback trust, and this is deliberately a DIFFERENT variant from
+    /// `IntentArityMismatch`/`RegistryArityMismatch` below (design doc §9.2
+    /// criterion 4: this is "unknown symbol", not "wrong arity for a known
+    /// one" — conflating them would let a caller mistake this for a
+    /// different failure). See this fault's `Display` impl for the exact
+    /// wording the design doc requires.
+    SymbolNotInRegistry { id: u32, module: String, symbol: String },
+    /// **v2 registry fix.** A registry extern's declared `nargs` disagrees
+    /// with the arity DERIVED from `crate::registry::lookup` for its
+    /// `(module, symbol)` — the registry-backed analogue of
+    /// `IntentArityMismatch`. The ground truth is always the REGISTRY entry,
+    /// never anything this IR itself declares (Q23 S3/S4's "derive, not
+    /// declare"; see this file's header).
+    RegistryArityMismatch { id: u32, module: String, symbol: String, declared: usize, contract: usize },
+    /// A `CallReg` names a registry-extern id that is not in
+    /// `Module::registry_externs` — the registry-path analogue of
+    /// `ExternIdOutOfRange`.
+    RegExternIdOutOfRange { block: usize, id: u32 },
+    /// A `CallReg`'s arg count != the declared `nargs` for that registry
+    /// extern — the registry-path analogue of `ArityMismatch` (IR-internal
+    /// self-consistency; can still pass while `RegistryArityMismatch` above
+    /// fires, exactly mirroring how `ArityMismatch`/`IntentArityMismatch`
+    /// relate for the seven-intent path).
+    RegArityMismatch { block: usize, id: u32, got: usize, want: usize },
 }
+
+impl std::fmt::Display for IrFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IrFault::NoBlocks => write!(f, "module has no blocks"),
+            IrFault::EntryOutOfRange { entry } => write!(f, "entry block {entry} is out of range"),
+            IrFault::ValOutOfRange { block, val } => write!(f, "block {block}: val {val} is out of range"),
+            IrFault::BlockTargetOutOfRange { block, target } => {
+                write!(f, "block {block}: branch target {target} is out of range")
+            }
+            IrFault::ExternIdOutOfRange { block, id } => write!(f, "block {block}: extern id {id} is out of range"),
+            IrFault::ArityMismatch { block, id, got, want } => write!(
+                f,
+                "block {block}: extern {id} called with {got} args, but its own declaration says {want}"
+            ),
+            IrFault::RodataOffsetOutOfRange { block, off } => {
+                write!(f, "block {block}: rodata offset {off} is out of range")
+            }
+            IrFault::IntentArityMismatch { id, intent, declared, contract } => write!(
+                f,
+                "extern {id} ({intent:?}) declares nargs={declared}, but the intent's real native-call contract requires {contract}"
+            ),
+            IrFault::SymbolNotInRegistry { id, module, symbol } => write!(
+                f,
+                "registry extern {id} ({symbol} in {module}) is not in the signature registry, cannot be called this way"
+            ),
+            IrFault::RegistryArityMismatch { id, module, symbol, declared, contract } => write!(
+                f,
+                "registry extern {id} ({symbol} in {module}) declares nargs={declared}, but the signature registry's real contract requires {contract}"
+            ),
+            IrFault::RegExternIdOutOfRange { block, id } => {
+                write!(f, "block {block}: registry extern id {id} is out of range")
+            }
+            IrFault::RegArityMismatch { block, id, got, want } => write!(
+                f,
+                "block {block}: registry extern {id} called with {got} args, but its own declaration says {want}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for IrFault {}
 
 /// A module that has PASSED structural verification. Its inner `&Module` is
 /// PRIVATE, and the ONLY constructor is `verify` — the un-forgettable
@@ -100,6 +184,25 @@ pub fn verify(m: &Module) -> Result<VerifiedModule<'_>, IrFault> {
                 intent: e.intent,
                 declared: e.nargs,
                 contract,
+            });
+        }
+    }
+
+    // --- v2 registry fix: same "before any block is walked" produce-time
+    // discipline, for registry-backed externs. The registry is the ONLY
+    // source of truth for the contract here -- `e.nargs` is checked AGAINST
+    // it, never trusted as it (see this file's header). ---
+    for (id, e) in m.registry_externs.iter().enumerate() {
+        let Some(entry) = crate::registry::lookup(&e.module, &e.symbol) else {
+            return Err(IrFault::SymbolNotInRegistry { id: id as u32, module: e.module.clone(), symbol: e.symbol.clone() });
+        };
+        if e.nargs != entry.arity {
+            return Err(IrFault::RegistryArityMismatch {
+                id: id as u32,
+                module: e.module.clone(),
+                symbol: e.symbol.clone(),
+                declared: e.nargs,
+                contract: entry.arity,
             });
         }
     }
@@ -138,6 +241,19 @@ pub fn verify(m: &Module) -> Result<VerifiedModule<'_>, IrFault> {
                     let want = m.externs[*id as usize].nargs;
                     if args.len() != want {
                         return Err(IrFault::ArityMismatch { block: b, id: *id, got: args.len(), want });
+                    }
+                    for v in args {
+                        chk(*v, b, nv)?;
+                    }
+                }
+                Inst::CallReg(d, id, args) => {
+                    chk(*d, b, nv)?;
+                    if *id as usize >= m.registry_externs.len() {
+                        return Err(IrFault::RegExternIdOutOfRange { block: b, id: *id });
+                    }
+                    let want = m.registry_externs[*id as usize].nargs;
+                    if args.len() != want {
+                        return Err(IrFault::RegArityMismatch { block: b, id: *id, got: args.len(), want });
                     }
                     for v in args {
                         chk(*v, b, nv)?;

@@ -24,6 +24,15 @@
 //! this crate cross-checks EVERY extern's declared `nargs` against
 //! `contract_arity()`, closing that gap at produce time (see `verify.rs`'s
 //! header and the `IntentArityMismatch` fault).
+//!
+//! **v2 addition (`plan/design-dynacore-native-core.md` §9, Q23-derived):**
+//! `RegExternDecl` + `Inst::CallReg` — a SECOND, additional way for a pack to
+//! name a native call, by a registry symbol NAME instead of one of the seven
+//! compile-time `Intent` variants above. This does not touch `Intent`,
+//! `ExternDecl`, or `Inst::Call` at all — the seven-intent path is unchanged
+//! byte-for-byte. See `crate::registry` for the signature table and
+//! `verify.rs` for the "derive, not declare" contract check this path gets
+//! (its own, separate fault variants).
 
 #![allow(dead_code)]
 
@@ -71,6 +80,13 @@ pub enum Inst {
     /// dest = call extern#id(args...)  (semantic-signature call; ABI is the
     /// seam's problem, not the IR's — see `seam.rs`)
     Call(Val, u32, Vec<Val>),
+    /// dest = call registry_extern#id(args...) — v2 (design doc §9): the
+    /// SAME shape as `Call` above, but `id` indexes `Module::registry_externs`
+    /// (a symbol NAME + declared arity) instead of `Module::externs` (a
+    /// compile-time `Intent`). Kept as a genuinely separate variant, not a
+    /// generalization of `Call`, so the seven-intent path's `Inst::Call`
+    /// match arms are untouched everywhere they're handled.
+    CallReg(Val, u32, Vec<Val>),
 }
 
 /// A block terminator.
@@ -155,6 +171,23 @@ pub struct ExternDecl {
     pub nargs: usize,
 }
 
+/// A registry-backed extern declaration — v2 (design doc §9). References a
+/// native symbol by NAME (resolved at verify/dispatch time through
+/// `crate::registry`) instead of a compile-time `Intent` variant. `nargs`
+/// here is the IR's OWN self-declared arity (same role `ExternDecl.nargs`
+/// plays for the seven-intent path) — `verify.rs` cross-checks it against
+/// `crate::registry::lookup(module, symbol)`'s arity, which is the ONLY
+/// source of truth for this symbol's real contract. A pack cannot make this
+/// field authoritative just by being internally consistent with it (Q23
+/// S3/S4's "derive, not declare" finding, reproduced for this path — see
+/// `verify.rs`'s header).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RegExternDecl {
+    pub symbol: String,
+    pub module: String,
+    pub nargs: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
     pub name: String,
@@ -163,6 +196,9 @@ pub struct Module {
     pub entry: u32,
     pub rodata: Vec<u8>,
     pub externs: Vec<ExternDecl>,
+    /// v2 (design doc §9) — SEPARATE from `externs` above; empty for every
+    /// module that only uses the seven compile-time intents.
+    pub registry_externs: Vec<RegExternDecl>,
 }
 
 /// Small builder to keep payloads readable (Q1/Q22-style).
@@ -172,6 +208,7 @@ pub struct Builder {
     cur: Vec<Inst>,
     rodata: Vec<u8>,
     externs: Vec<ExternDecl>,
+    registry_externs: Vec<RegExternDecl>,
 }
 
 impl Default for Builder {
@@ -188,6 +225,7 @@ impl Builder {
             cur: Vec::new(),
             rodata: Vec::new(),
             externs: Vec::new(),
+            registry_externs: Vec::new(),
         }
     }
     pub fn v(&mut self) -> Val {
@@ -243,6 +281,37 @@ impl Builder {
         self.externs.push(ExternDecl { intent, nargs });
         (self.externs.len() - 1) as u32
     }
+    /// Declare (or reuse an identical existing) registry extern and emit a
+    /// registry-backed call — v2 (design doc §9), the registry-path analogue
+    /// of `call` above. `nargs` is honestly derived from `args.len()` here,
+    /// same discipline as `call` — but unlike the seven-intent path, THIS
+    /// declared value is never trusted as the real contract by `verify()`;
+    /// see `RegExternDecl`'s doc comment.
+    pub fn call_reg(&mut self, module: impl Into<String>, symbol: impl Into<String>, args: Vec<Val>) -> Val {
+        let id = self.decl_reg(module.into(), symbol.into(), args.len());
+        let d = self.v();
+        self.cur.push(Inst::CallReg(d, id, args));
+        d
+    }
+    /// Like `call_reg`, but deliberately lets a test declare an `nargs` that
+    /// disagrees with `args.len()` — needed to construct the
+    /// deliberately-malformed registry-backed IR the acceptance tests need
+    /// (same role `call_raw_arity` plays for the seven-intent path).
+    pub fn call_reg_raw_arity(&mut self, module: impl Into<String>, symbol: impl Into<String>, args: Vec<Val>, declared_nargs: usize) -> Val {
+        let id = self.decl_reg(module.into(), symbol.into(), declared_nargs);
+        let d = self.v();
+        self.cur.push(Inst::CallReg(d, id, args));
+        d
+    }
+    fn decl_reg(&mut self, module: String, symbol: String, nargs: usize) -> u32 {
+        for (i, e) in self.registry_externs.iter().enumerate() {
+            if e.module == module && e.symbol == symbol && e.nargs == nargs {
+                return i as u32;
+            }
+        }
+        self.registry_externs.push(RegExternDecl { symbol, module, nargs });
+        (self.registry_externs.len() - 1) as u32
+    }
     /// append raw bytes to rodata, return their starting offset
     pub fn rodata(&mut self, bytes: &[u8]) -> u32 {
         let off = self.rodata.len() as u32;
@@ -262,6 +331,7 @@ impl Builder {
             entry,
             rodata: self.rodata,
             externs: self.externs,
+            registry_externs: self.registry_externs,
         }
     }
 }

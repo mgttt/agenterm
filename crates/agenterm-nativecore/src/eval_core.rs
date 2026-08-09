@@ -19,7 +19,7 @@
 //! the right, cheap chokepoint here too).
 
 use crate::ir::*;
-use crate::seam::do_intent;
+use crate::seam::{do_intent, do_registry_call};
 use crate::verify::VerifiedModule;
 
 /// One native `Intent` call this run made, in program order — useful for
@@ -28,6 +28,19 @@ use crate::verify::VerifiedModule;
 #[derive(Clone, Debug)]
 pub struct NativeCallRecord {
     pub intent: Intent,
+    pub args: Vec<u64>,
+    pub result: u64,
+}
+
+/// One registry-backed call this run made, in program order — v2 (design
+/// doc §9), the `Inst::CallReg` analogue of `NativeCallRecord`. Kept as a
+/// SEPARATE record type (not folded into `NativeCallRecord`) because
+/// `Intent` is a closed, compile-time enum and a registry call's callee is a
+/// runtime symbol name, not an `Intent` variant.
+#[derive(Clone, Debug)]
+pub struct RegistryCallRecord {
+    pub module: String,
+    pub symbol: String,
     pub args: Vec<u64>,
     pub result: u64,
 }
@@ -49,6 +62,9 @@ pub enum Termination {
 pub struct RunOutcome {
     pub termination: Termination,
     pub calls: Vec<NativeCallRecord>,
+    /// v2 (design doc §9) — SEPARATE from `calls` above; empty for every run
+    /// of a module that only uses the seven compile-time intents.
+    pub registry_calls: Vec<RegistryCallRecord>,
 }
 
 impl RunOutcome {
@@ -92,6 +108,7 @@ pub fn run_with_step_limit(vm: &VerifiedModule, max_steps: u64) -> RunOutcome {
     // the neutral "data base" that Op::Rodata offsets into.
     let rodata_base = m.rodata.as_ptr() as u64;
     let mut calls = Vec::new();
+    let mut registry_calls = Vec::new();
 
     let mut bi = m.entry as usize;
     let mut steps: u64 = 0;
@@ -103,7 +120,7 @@ pub fn run_with_step_limit(vm: &VerifiedModule, max_steps: u64) -> RunOutcome {
         // re-enters here.
         steps += 1;
         if max_steps != 0 && steps > max_steps {
-            return RunOutcome { termination: Termination::StepLimitExceeded, calls };
+            return RunOutcome { termination: Termination::StepLimitExceeded, calls, registry_calls };
         }
         let blk = &m.blocks[bi];
         for inst in &blk.insts {
@@ -125,6 +142,22 @@ pub fn run_with_step_limit(vm: &VerifiedModule, max_steps: u64) -> RunOutcome {
                     vals[*d as usize] = result;
                     calls.push(NativeCallRecord { intent, args: arg_words, result });
                 }
+                Inst::CallReg(d, id, args) => {
+                    let reg_extern = &m.registry_externs[*id as usize];
+                    let arg_words: Vec<u64> = args.iter().map(|v| vals[*v as usize]).collect();
+                    // verify() already proved arg_words.len() matches both
+                    // this registry extern's declared nargs AND the
+                    // registry-DERIVED contract for its symbol (v2, design
+                    // doc §9) -- do_registry_call never re-checks arity.
+                    let result = do_registry_call(&reg_extern.module, &reg_extern.symbol, &arg_words);
+                    vals[*d as usize] = result;
+                    registry_calls.push(RegistryCallRecord {
+                        module: reg_extern.module.clone(),
+                        symbol: reg_extern.symbol.clone(),
+                        args: arg_words,
+                        result,
+                    });
+                }
             }
         }
         match &blk.term {
@@ -133,7 +166,7 @@ pub fn run_with_step_limit(vm: &VerifiedModule, max_steps: u64) -> RunOutcome {
                 bi = if vals[*c as usize] != 0 { *nz } else { *z } as usize;
             }
             Term::Ret(v) | Term::Exit(v) => {
-                return RunOutcome { termination: Termination::Exited(vals[*v as usize]), calls };
+                return RunOutcome { termination: Termination::Exited(vals[*v as usize]), calls, registry_calls };
             }
         }
     }

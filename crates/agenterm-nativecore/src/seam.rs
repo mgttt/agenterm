@@ -14,6 +14,12 @@
 //! separately-baked copy — the design doc's F1-adjacent instruction ("这类
 //! 结构体布局用 Q13 的'烤了就验'模式，不是裸烤") applies to the actual seam
 //! binding, not only to a test fixture off to the side.
+//!
+//! **v2 addition (design doc §9):** a THIRD mechanism, `do_registry_call`
+//! near the bottom of this file, alongside (not replacing) `Single`/`Linear`
+//! above — a generic transmute-dispatch trampoline over a symbol resolved by
+//! name at dispatch time (`LoadLibraryA`/`GetProcAddress`) instead of a
+//! compile-time `REACH` table entry. See that section's own header.
 
 #![allow(dead_code)]
 
@@ -343,3 +349,91 @@ static FILEWRITE_STEPS: [Step; 3] = [
     },
 ];
 static FILEWRITE_TABLE: StepTable = StepTable { steps: &FILEWRITE_STEPS };
+
+// ============================================================================
+// Registry-backed dispatch — v2 (design doc §9). A SEPARATE path from the
+// seven-intent REACH table above: the callee is a symbol NAME resolved at
+// DISPATCH time via LoadLibraryA/GetProcAddress, not a compile-time function
+// pointer baked into REACH — the entire point of this path is that the
+// interpreter never had compile-time knowledge of the symbol (design doc
+// §9: "WITHOUT it being one of the seven compile-time Intent variants").
+// Reproduces the mechanism `research/dynamic-core/runtime-intent/main.rs`
+// (Q23) prototyped — see that file's `resolve`/`call_n` for the shape this
+// borrows — adapted to this crate's real types/conventions (a genuine ④
+// primitive: transmute-dispatch over a resolved symbol, zero codegen, zero
+// executable-memory requests).
+// ============================================================================
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn LoadLibraryA(name: *const u8) -> *mut u8;
+    fn GetProcAddress(module: *mut u8, name: *const u8) -> *const ();
+}
+
+/// Resolve `symbol` in `module` via the real Win32 loader. `None` on any
+/// resolution failure (module not found, symbol not exported). By the time
+/// this runs, `verify()` has already proved `(module, symbol)` is in
+/// `crate::registry::SIGNATURE_REGISTRY` — a `None` here means the registry
+/// itself named something that does not actually exist on this machine, not
+/// a pack-supplied lie; `do_registry_call` treats it as a hard error.
+#[cfg(windows)]
+unsafe fn resolve_registry_symbol(module: &str, symbol: &str) -> Option<*const ()> {
+    let module_c = format!("{module}\0");
+    let symbol_c = format!("{symbol}\0");
+    unsafe {
+        let m = LoadLibraryA(module_c.as_ptr());
+        if m.is_null() {
+            return None;
+        }
+        let p = GetProcAddress(m, symbol_c.as_ptr());
+        if p.is_null() { None } else { Some(p) }
+    }
+}
+
+/// Invoke `f` with `args` using the Windows x64 (`extern "system"`) calling
+/// convention. A generic ④-primitive trampoline over the integer/pointer
+/// word subset only — design doc §9.3's explicit range, 0..=4 args — same
+/// technique and bound as Q23's `call_n`. `args.len()` reaching here is
+/// guaranteed by `verify()` (never re-checked by this function itself).
+#[cfg(windows)]
+unsafe fn call_registry_trampoline(f: *const (), args: &[i64]) -> i64 {
+    unsafe {
+        match args.len() {
+            0 => std::mem::transmute::<*const (), extern "system" fn() -> i64>(f)(),
+            1 => std::mem::transmute::<*const (), extern "system" fn(i64) -> i64>(f)(args[0]),
+            2 => std::mem::transmute::<*const (), extern "system" fn(i64, i64) -> i64>(f)(args[0], args[1]),
+            3 => std::mem::transmute::<*const (), extern "system" fn(i64, i64, i64) -> i64>(f)(args[0], args[1], args[2]),
+            4 => std::mem::transmute::<*const (), extern "system" fn(i64, i64, i64, i64) -> i64>(f)(args[0], args[1], args[2], args[3]),
+            n => panic!("registry call trampoline arity {n} out of range (design doc §9.3: 0..=4)"),
+        }
+    }
+}
+
+/// THE registry-backed dispatcher — `eval_core::run`'s only entry point for
+/// `Inst::CallReg`, analogous to `do_intent` above but resolving its callee
+/// at DISPATCH time instead of through the fixed `REACH` table. `args.len()`
+/// is guaranteed by `verify()` to equal the registry-DERIVED arity for
+/// `symbol` (see `verify.rs`'s registry-contract pass) — this function never
+/// re-checks or re-trusts anything the pack declared.
+///
+/// The three seeded registry entries (`registry.rs`) all document a 32-bit
+/// return value; the raw return's low 32 bits, sign-extended, is what
+/// callers get here — the same normalization
+/// `research/dynamic-core/runtime-intent/main.rs` used and documented ("these
+/// three demo APIs return a 32-bit int; take the low half"). A future
+/// registry entry with a different return width would need this widened —
+/// not needed for the three entries here (design doc §9.3 scope: this is a
+/// mechanism proof over the three named symbols, not general FFI).
+pub fn do_registry_call(module: &str, symbol: &str, args: &[u64]) -> u64 {
+    let native_args: Vec<i64> = args.iter().map(|&a| a as i64).collect();
+    let f = unsafe { resolve_registry_symbol(module, symbol) }.unwrap_or_else(|| {
+        panic!(
+            "registry symbol {symbol} in {module} failed to resolve at dispatch time \
+             (verify() already proved it is in SIGNATURE_REGISTRY; this means the symbol \
+             is not actually present on this machine)"
+        )
+    });
+    let raw = unsafe { call_registry_trampoline(f, &native_args) };
+    ((raw as i32) as i64) as u64
+}

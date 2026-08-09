@@ -190,7 +190,7 @@ fn bad_ir_extern_id_out_of_range_is_rejected_before_execution() {
 
 #[test]
 fn structural_fault_no_blocks_is_rejected() {
-    let m = Module { name: "no_blocks".into(), n_vals: 0, blocks: vec![], entry: 0, rodata: vec![], externs: vec![] };
+    let m = Module { name: "no_blocks".into(), n_vals: 0, blocks: vec![], entry: 0, rodata: vec![], externs: vec![], registry_externs: vec![] };
     assert_eq!(expect_rejected(&m), IrFault::NoBlocks);
 }
 
@@ -203,6 +203,7 @@ fn structural_fault_entry_out_of_range_is_rejected() {
         entry: 5,
         rodata: vec![],
         externs: vec![],
+        registry_externs: vec![],
     };
     assert_eq!(expect_rejected(&m), IrFault::EntryOutOfRange { entry: 5 });
 }
@@ -216,6 +217,7 @@ fn structural_fault_val_out_of_range_is_rejected() {
         entry: 0,
         rodata: vec![],
         externs: vec![],
+        registry_externs: vec![],
     };
     assert_eq!(expect_rejected(&m), IrFault::ValOutOfRange { block: 0, val: 7 });
 }

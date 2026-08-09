@@ -14,7 +14,7 @@
 //! content hash a loader holds before ever touching pack bytes) without
 //! sharing code — the two crates' manifests describe different IRs.
 
-use crate::ir::{Block, ExternDecl, Inst, Intent, Module, Op, Term};
+use crate::ir::{Block, ExternDecl, Inst, Intent, Module, Op, RegExternDecl, Term};
 use crate::store::{Store, hash_hex};
 
 pub const PACK_SCHEMA_VERSION: u32 = 1;
@@ -69,6 +69,16 @@ pub fn serialize_module(m: &Module) -> Vec<u8> {
         out.push(intent_tag(e.intent));
         w_u32(&mut out, e.nargs as u32);
     }
+    // v2 (design doc §9): registry-backed externs, SEPARATE from the
+    // seven-intent externs above -- empty for any module that only uses the
+    // seven compile-time intents, so this section is a pure no-op addition
+    // to the wire format for every pre-existing pack shape.
+    w_u32(&mut out, m.registry_externs.len() as u32);
+    for e in &m.registry_externs {
+        w_str(&mut out, &e.symbol);
+        w_str(&mut out, &e.module);
+        w_u32(&mut out, e.nargs as u32);
+    }
     w_u32(&mut out, m.blocks.len() as u32);
     for b in &m.blocks {
         w_u32(&mut out, b.insts.len() as u32);
@@ -99,6 +109,14 @@ pub fn deserialize_module(buf: &[u8]) -> Option<Module> {
         let nargs = r_u32(buf, &mut p)? as usize;
         externs.push(ExternDecl { intent, nargs });
     }
+    let n_reg = r_u32(buf, &mut p)?;
+    let mut registry_externs = Vec::with_capacity(n_reg as usize);
+    for _ in 0..n_reg {
+        let symbol = r_str(buf, &mut p)?;
+        let module = r_str(buf, &mut p)?;
+        let nargs = r_u32(buf, &mut p)? as usize;
+        registry_externs.push(RegExternDecl { symbol, module, nargs });
+    }
     let n_blk = r_u32(buf, &mut p)?;
     let mut blocks = Vec::with_capacity(n_blk as usize);
     for _ in 0..n_blk {
@@ -110,7 +128,7 @@ pub fn deserialize_module(buf: &[u8]) -> Option<Module> {
         let term = r_term(buf, &mut p)?;
         blocks.push(Block { insts, term });
     }
-    Some(Module { name, n_vals, blocks, entry, rodata, externs })
+    Some(Module { name, n_vals, blocks, entry, rodata, externs, registry_externs })
 }
 
 fn w_u8(out: &mut Vec<u8>, v: u8) {
@@ -288,6 +306,15 @@ fn w_inst(out: &mut Vec<u8>, inst: &Inst) {
                 w_u32(out, *a);
             }
         }
+        Inst::CallReg(d, id, args) => {
+            w_u8(out, 4);
+            w_u32(out, *d);
+            w_u32(out, *id);
+            w_u32(out, args.len() as u32);
+            for a in args {
+                w_u32(out, *a);
+            }
+        }
     }
 }
 fn r_inst(buf: &[u8], p: &mut usize) -> Option<Inst> {
@@ -306,6 +333,16 @@ fn r_inst(buf: &[u8], p: &mut usize) -> Option<Inst> {
                 args.push(r_u32(buf, p)?);
             }
             Inst::Call(d, id, args)
+        }
+        4 => {
+            let d = r_u32(buf, p)?;
+            let id = r_u32(buf, p)?;
+            let n = r_u32(buf, p)?;
+            let mut args = Vec::with_capacity(n as usize);
+            for _ in 0..n {
+                args.push(r_u32(buf, p)?);
+            }
+            Inst::CallReg(d, id, args)
         }
         _ => return None,
     })
@@ -369,6 +406,25 @@ mod tests {
         let _ = b.call(Intent::FileWrite, vec![path, buf, len]);
         b.term(Term::Exit(code));
         let module = b.finish("roundtrip", 0);
+
+        let bytes = serialize_module(&module);
+        let decoded = deserialize_module(&bytes).expect("deserialize must succeed on bytes we just wrote");
+        assert_eq!(decoded, module);
+    }
+
+    /// v2 (design doc §9): `registry_externs`/`Inst::CallReg` round-trip
+    /// through the same wire format, independent of and alongside the
+    /// seven-intent round trip above.
+    #[test]
+    fn round_trips_registry_backed_calls() {
+        let mut b = Builder::new();
+        let a = b.konst(7);
+        let bb = b.konst(11);
+        let c = b.konst(5);
+        let d = b.call_reg("kernel32.dll", "MulDiv", vec![a, bb, c]);
+        b.term(Term::Exit(d));
+        let module = b.finish("registry_roundtrip", 0);
+        assert_eq!(module.registry_externs.len(), 1);
 
         let bytes = serialize_module(&module);
         let decoded = deserialize_module(&bytes).expect("deserialize must succeed on bytes we just wrote");
