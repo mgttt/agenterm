@@ -107,6 +107,22 @@ pub const REACH: &[Wrapper] = &[
     w_wait,            // 7
     w_get_exit_code,   // 8
 ];
+
+/// Non-Windows: the seven intents bind Win32 APIs by design (see the crate
+/// doc — "binds seven intents directly to real Win32 APIs"). There is no
+/// unix backend; every slot fails closed at dispatch time with an explicit
+/// panic instead of failing to COMPILE every non-Windows consumer of the
+/// workspace, which is what an unconditionally `cfg(windows)` `REACH` did
+/// (all linux/aarch64 CI lanes red on E0425).
+#[cfg(not(windows))]
+unsafe fn w_unavailable(_a: &[i64]) -> i64 {
+    panic!(
+        "agenterm-nativecore intent dispatch reached on a non-Windows host: \
+         the REACH table binds Win32 APIs and has no backend here (fail closed)"
+    )
+}
+#[cfg(not(windows))]
+pub const REACH: &[Wrapper] = &[w_unavailable as Wrapper; 9];
 const R_ALLOC: usize = 0;
 const R_CREATEFILE: usize = 1;
 const R_READFILE: usize = 2;
@@ -408,6 +424,25 @@ unsafe fn call_registry_trampoline(f: *const (), args: &[i64]) -> i64 {
             n => panic!("registry call trampoline arity {n} out of range (design doc §9.3: 0..=4)"),
         }
     }
+}
+
+/// Non-Windows: registry-backed dispatch resolves through the Win32 loader
+/// (`LoadLibraryA`/`GetProcAddress`) by design; there is no unix analog in
+/// this crate. Fail closed at dispatch with the honest reason — same policy
+/// as the non-Windows `REACH` table above.
+#[cfg(not(windows))]
+unsafe fn resolve_registry_symbol(_module: &str, _symbol: &str) -> Option<*const ()> {
+    panic!(
+        "agenterm-nativecore registry dispatch reached on a non-Windows host: \
+         symbol resolution binds the Win32 loader and has no backend here (fail closed)"
+    )
+}
+
+#[cfg(not(windows))]
+unsafe fn call_registry_trampoline(_f: *const (), _args: &[i64]) -> i64 {
+    // Unreachable behind the panicking resolver; present so
+    // `do_registry_call` compiles identically on every host.
+    panic!("agenterm-nativecore registry trampoline has no non-Windows backend (fail closed)")
 }
 
 /// THE registry-backed dispatcher — `eval_core::run`'s only entry point for
