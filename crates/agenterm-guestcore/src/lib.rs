@@ -27,6 +27,7 @@ pub mod abi_linux_x86_64;
 pub mod cpu;
 pub mod decode;
 pub mod decode_x86_64;
+pub mod elf;
 pub mod fault;
 pub mod intent_map;
 pub mod mem;
@@ -54,6 +55,19 @@ pub struct GuestImage {
     pub base: u64,
     /// Guest-image-relative offset of the first instruction.
     pub entry: usize,
+    /// Preset initial `rsp` for images that already have a fully prepared
+    /// System-V-shaped stack frame written into `buf` (real ELF loads --
+    /// see `elf.rs::load_elf`'s `setup_stack`). `None` (the hand-crafted-
+    /// program path, `GuestImage::new`) makes `run_guest` fall back to its
+    /// own generic "near the top of the image, 16-byte aligned, no
+    /// argv/envp/auxv" placement -- unchanged from before this field
+    /// existed.
+    pub initial_rsp: Option<u64>,
+    /// `Some` when `buf`'s backing memory is a real `VirtualAlloc` mapping
+    /// (`elf::load_elf`) rather than the normal Rust global-allocator `Vec`
+    /// (`GuestImage::new`) -- see this type's `Drop` impl below for why that
+    /// distinction matters.
+    mapped_region: Option<mem::MappedRegion>,
 }
 
 impl GuestImage {
@@ -64,7 +78,17 @@ impl GuestImage {
         let mut buf = vec![0u8; code_and_data.len() + stack_bytes];
         buf[..code_and_data.len()].copy_from_slice(code_and_data);
         let base = buf.as_ptr() as u64;
-        GuestImage { buf, base, entry }
+        GuestImage { buf, base, entry, initial_rsp: None, mapped_region: None }
+    }
+
+    /// Build a `GuestImage` around a `Vec<u8>` that is secretly a real
+    /// `VirtualAlloc` mapping (`region`) instead of a normal heap
+    /// allocation -- `elf::load_elf`'s constructor. Not `pub`: the
+    /// raw-parts invariant this requires (`buf`'s pointer/len/capacity came
+    /// from `region` itself, see `elf.rs`) is only something `elf.rs`, in
+    /// the same crate, can uphold.
+    pub(crate) fn from_mapped(buf: Vec<u8>, base: u64, entry: usize, initial_rsp: u64, region: mem::MappedRegion) -> GuestImage {
+        GuestImage { buf, base, entry, initial_rsp: Some(initial_rsp), mapped_region: Some(region) }
     }
 
     /// Host address of image-relative offset `off` -- the same "guest
@@ -89,6 +113,26 @@ impl GuestImage {
     }
 }
 
+impl Drop for GuestImage {
+    fn drop(&mut self) {
+        if self.mapped_region.is_some() {
+            // `buf`'s backing memory belongs to `mapped_region` -- a real
+            // `VirtualAlloc` mapping, whose own `Drop` (running right after
+            // this function returns, as part of the compiler-generated
+            // field-drop glue for this struct) does the real `VirtualFree`.
+            // Take `buf` out and `mem::forget` it here so its own destructor
+            // never runs: `Vec<u8>`'s normal `Drop` would call the global
+            // heap allocator's `dealloc` on this pointer, which was never
+            // allocated by that allocator -- undefined behavior / heap
+            // corruption, not a no-op.
+            let taken = std::mem::take(&mut self.buf);
+            std::mem::forget(taken);
+        }
+        // else: `buf` is a normal heap `Vec` (`GuestImage::new`'s path) --
+        // left untouched here, so its own `Drop` runs normally right after.
+    }
+}
+
 /// Run a guest program to completion. Loops `decode_x86_64::step`; on
 /// `StepOutcome::Syscall`, normalizes the current register file through
 /// `abi_linux_x86_64::normalize` and dispatches it through
@@ -99,10 +143,13 @@ impl GuestImage {
 /// both modes exist).
 pub fn run_guest(image: &GuestImage, exit_mode: ExitMode) -> Result<i32, GuestFault> {
     let mut cpu = Cpu::new(image.entry);
-    // Initial stack pointer: near the top of the image, 16-byte aligned,
-    // with a little slack so a `call`'s implicit push never runs off the
-    // buffer's end on the very first stack write.
-    cpu.set64(RSP, (image.base + image.buf.len() as u64 - 32) & !0xF);
+    // Initial stack pointer: `image.initial_rsp` if the image already came
+    // with a fully prepared stack frame (real ELF loads -- `elf.rs`);
+    // otherwise the original generic placement -- near the top of the
+    // image, 16-byte aligned, with a little slack so a `call`'s implicit
+    // push never runs off the buffer's end on the very first stack write.
+    let rsp = image.initial_rsp.unwrap_or_else(|| (image.base + image.buf.len() as u64 - 32) & !0xF);
+    cpu.set64(RSP, rsp);
     let mut fds = FdTable::new();
 
     loop {

@@ -2,15 +2,19 @@
 
 Phase 1 of [`plan/design-dynacore-emulated-guest-core.md`](../../plan/design-dynacore-emulated-guest-core.md)
 (§2 "Phase 1"): a real x86_64 machine-code interpreter, running on Windows,
-that decodes real x86_64 opcodes from a byte array and translates a useful
-subset of the Linux x86_64 syscall ABI to real Win32 calls via
-`agenterm_nativecore::seam::do_intent`. This is **not** a custom IR, not
-FleetCall, not a bytecode format -- the guest bytes are genuine x86_64
-machine code (hand-encoded for this round's test programs; nothing on this
-box could assemble a `.s` file directly, see "How the test programs were
-built" below). No JIT, no codegen, no executable memory is ever requested;
-guest bytes are read as data and switched on, never executed by the host
-CPU.
+that decodes real x86_64 opcodes and translates a useful subset of the Linux
+x86_64 syscall ABI to real Win32 calls via `agenterm_nativecore::seam::do_intent`.
+This is **not** a custom IR, not FleetCall, not a bytecode format -- the
+guest bytes are genuine x86_64 machine code, sourced two ways: hand-encoded
+for the crate's original verification programs (nothing on this box could
+assemble a `.s` file directly, see "How the test programs were built"
+below), and, since the ELF-loading round (`src/elf.rs`, see "ELF loading"
+below), a real ELF64 loader that runs the real output of a real Rust
+cross-compilation toolchain (`x86_64-unknown-linux-musl`) -- a genuinely
+compiled static x86_64 Linux binary this crate did not author or hand-tune.
+No JIT, no codegen, no executable memory is ever requested; guest bytes are
+read as data and switched on, never executed by the host CPU, regardless of
+which of those two sources they came from.
 
 Same-ISA only (x86_64 guest on x86_64 host) -- this round deliberately does
 not attempt aarch64 decoding (Phase 2, not built yet).
@@ -231,6 +235,187 @@ Run everything: `cargo test -p agenterm-guestcore -- --nocapture` (the
 `--nocapture` surfaces each program's real captured stdout/exit status via
 `eprintln!` inside the test). Run a program directly:
 `cargo run -p agenterm-guestcore --example verify_loop_cond`.
+
+## ELF loading (`src/elf.rs`)
+
+Phase 1's `GuestImage::new` (above) takes a raw, hand-encoded byte buffer
+with no container format at all -- every test/example program until this
+section fed the interpreter bytes starting at offset 0, with no ELF header,
+no program headers, no proper entry-point resolution. That means no
+genuinely compiled program (from any real toolchain) could be run through
+this crate. `src/elf.rs` closes that gap: a real ELF64 loader that parses a
+genuinely compiled static (non-PIE) x86_64 Linux executable and populates a
+`GuestImage` + initial `Cpu` state (entry point, real memory image, stack)
+so the interpreter loop above runs it completely unchanged -- `elf.rs`'s
+only job is populating that initial state, never touching
+`decode_x86_64`/`abi_linux_x86_64`/`intent_map`.
+
+### What's supported
+
+- **`ET_EXEC` (static, non-PIE) only.** Verifies `\x7fELF` magic,
+  `ELFCLASS64`, `ELFDATA2LSB` (little-endian), `EM_X86_64`, and `e_type ==
+  ET_EXEC`. Any ELF with a `PT_INTERP` segment (wants a dynamic linker) is
+  rejected outright (`ElfLoadError::HasInterp`) -- this loader implements no
+  dynamic-linking/relocation machinery at all.
+- **`PT_LOAD` segments** are read for `p_offset`/`p_vaddr`/`p_filesz`/
+  `p_memsz`/`p_flags`; `e_entry` resolves the entry point.
+- **Real direct mapping at the segment's real vaddr** -- the same
+  `MAP_FIXED`-style technique `ape-vm`'s README documents for static
+  non-PIE ELF (`guest vaddr == host address`), reached here via
+  `mem.rs::alloc_fixed`'s explicit-`lpAddress` `VirtualAlloc` (Windows has
+  no literal `MAP_FIXED`). One `VirtualAlloc` call spans the whole
+  `[min_vaddr, max_vaddr)` range across all `PT_LOAD` segments (page-aligned)
+  plus the appended stack -- not one call per segment like `ape-vm`'s literal
+  per-`PT_LOAD` mapping -- because this crate's interpreter fetches guest
+  bytes from a single contiguous buffer (`cpu.rip` is a plain offset into
+  it, see `cpu.rs`); real linkers already pack `PT_LOAD` segments
+  contiguously in vaddr space (only page-alignment padding between them), so
+  this is equivalent. For `ET_EXEC` this span is pinned to land at EXACTLY
+  the lowest segment's page-aligned vaddr -- if Windows can't hand back that
+  exact address (already in use, or not a 64KiB-granularity multiple so it
+  gets silently rounded), that is an honest `ElfLoadError::FixedMapFailed`,
+  never a silent rebase (which would break every absolute-address immediate
+  a non-PIE binary contains).
+- **The whole mapped region is `PAGE_READWRITE`, never `PAGE_EXECUTE_*`**,
+  even for the `PF_X`-flagged text segment -- consistent with this crate's
+  own "never request executable host memory for guest bytes" discipline
+  (above): guest bytes are only ever fetched as interpreter DATA, never
+  executed by the host CPU, regardless of what the ELF's own permission bits
+  say.
+- **BSS** (`p_memsz - p_filesz`) is zeroed explicitly (belt-and-suspenders
+  on top of `VirtualAlloc(MEM_COMMIT)` already handing back zeroed pages).
+- **A minimal `argc`/`argv`/`envp`/`auxv` stack** is built and `rsp` is
+  pointed at it: real `argv` strings + a `NULL` terminator, an EMPTY `envp`
+  (just its `NULL` terminator), and an auxv vector containing ONLY the
+  `AT_NULL` terminator pair -- not the full System V ABI auxv (`AT_PHDR`/
+  `AT_PHENT`/`AT_PHNUM`/`AT_ENTRY`/`AT_BASE`/`AT_RANDOM`/`AT_PAGESZ`/etc; see
+  "Not supported" below for exactly which real programs that breaks).
+
+### Not supported
+
+- **`ET_DYN` (PIE) / dynamic linking.** `ape-vm`'s README documents the PIE
+  technique (`load_base = m - min_vaddr` via a relocatable one-shot mapping,
+  full auxv so the guest's own runtime applies its `R_*_RELATIVE`
+  relocations) -- not attempted this round (explicit stretch goal, not
+  blocking). `parse_elf64` still parses a `PT_DYNAMIC`/`ET_DYN` file's
+  headers correctly (nothing ELF-specific stops it), `load_elf` just refuses
+  to place it in memory (`ElfLoadError::UnsupportedType`).
+- **Relocations.** Not walked at all, under any circumstance -- correct for
+  `ET_EXEC` (addresses are already absolute at link time by construction),
+  named plainly so nobody assumes partial `ET_DYN` support exists.
+- **Full System V ABI auxv.** Only `AT_NULL` is present. A real program
+  whose startup calls `getauxval` for anything else -- glibc's TLS/stack-
+  canary setup does, at minimum, and so does a `std`-linked Rust binary's
+  runtime init even against musl (`arch_prctl`, `sigaltstack`,
+  `rt_sigaction`, `set_tid_address`, `rseq` -- none of which
+  `abi_linux_x86_64.rs`/`intent_map.rs` translate either, see the syscall
+  table above) -- will not run correctly through this loader. This is the
+  concrete, evidence-based reason the real verification program below is a
+  `#![no_std] #![no_main]` raw-`_start` program that never touches argv/
+  envp/auxv or any of those syscalls, not a `std`-using binary: a `std`
+  binary's startup was checked against the syscall/opcode tables above and
+  needs substantially more than is implemented (`arch_prctl` alone is a hard
+  requirement of musl's/glibc's `_start` before `main` is ever reached), and
+  building that out is future work, not something silently declared "not
+  this round" without evidence.
+- **`e_shoff`/section headers.** Never read -- a real Linux loader doesn't
+  need them either (`PT_LOAD` + `e_entry` is everything execution requires);
+  irrelevant to this loader's job.
+
+### Real compiled-binary verification
+
+The actual verification bar for this round, stronger than every
+`verify_*.rs` example above (which all feed the interpreter hand-encoded
+bytes): compile a GENUINE program with this box's `x86_64-unknown-linux-musl`
+Rust cross-compilation target (a real, separate LLVM-backed compiler
+producing real machine code this crate does not control the exact
+instruction selection of) and run the real resulting `ET_EXEC` binary
+through `elf::load_elf` end to end.
+
+Test program (`#![no_std] #![no_main]`, a raw `_start` doing exactly two
+direct Linux syscalls -- see "Not supported" above for exactly why this
+shape, not a `std` binary):
+
+```rust
+#![no_std]
+#![no_main]
+use core::arch::asm;
+use core::panic::PanicInfo;
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! { loop {} }
+
+const MSG: &[u8] = b"hello from real elf\n";
+
+#[no_mangle]
+pub extern "C" fn _start() -> ! {
+    unsafe {
+        asm!("syscall", in("rax") 1u64, in("rdi") 1u64,
+             in("rsi") MSG.as_ptr(), in("rdx") MSG.len() as u64,
+             out("rcx") _, out("r11") _, options(nostack));
+        asm!("syscall", in("rax") 60u64, in("rdi") 42u64, options(noreturn));
+    }
+}
+```
+
+Built with (`x86_64-pc-windows-msvc` host has no `cc`/`gcc`/`clang` at all,
+so linking uses `rust-lld.exe` -- bundled with rustc via `llvm-tools-preview`
+-- directly, through a small local shim that strips the self-contained
+`crt1.o`/`crti.o`/`crtbegin.o`/`crtend.o`/`crtn.o` objects rustc's `ld.lld`
+linker-flavor otherwise always adds regardless of `-nostartfiles`, which only
+has meaning to an actual `cc` frontend; this shim is a local build-only tool,
+not part of the crate or its build):
+
+```sh
+rustc --target x86_64-unknown-linux-musl -O \
+  -C panic=abort -C relocation-model=static \
+  -C linker-flavor=ld.lld -C linker=<path-to-shim> \
+  -C link-args=-nostartfiles \
+  tiny.rs -o tiny
+```
+
+`-C relocation-model=static` forces `ET_EXEC` (non-PIE) rather than the
+`ET_DYN` this Rust target's default linker settings would otherwise produce.
+Confirmed statically linked (`file tiny` -> `ELF 64-bit LSB executable,
+x86-64, version 1 (SYSV), statically linked, not stripped`) and no dynamic
+linker needed, by this crate's own `elf::parse_elf64` reporting `has_interp
+== false` (no `PT_INTERP` segment) against the real compiled output, in
+`tests/verify.rs::verify_d_real_compiled_elf_binary_parses_and_runs` -- the
+ELF loader verifying its own input is real, not a claim taken on faith.
+
+Run through the real loader (`examples/verify_elf_compiled.rs`, spawned as a
+real child process the same way `verify_loop_cond` etc. are, since its
+`exit` really calls `ExitProcess`):
+
+```
+cargo run -p agenterm-guestcore --example verify_elf_compiled -- <path-to-tiny>
+```
+
+**Real result, captured verbatim:**
+
+```
+hello from real elf
+error: process didn't exit successfully: `...verify_elf_compiled.exe '...\tiny'` (exit code: 42)
+```
+
+(the `error: process didn't exit successfully` line is `cargo run`'s own
+framing of a non-zero exit code, not a failure -- exit code 42 is exactly
+what the source above requests). The compiled binary is committed as a
+base64 fixture (`tests/fixtures/tiny_musl_elf.b64`, same precedent as
+`ape-vm`'s own `nano_bubblesort.elf.b64`) and
+`tests/verify.rs::verify_d_real_compiled_elf_binary_parses_and_runs` asserts
+on this exact real stdout/exit-code pair every `cargo test` run, so this
+result is reproducible without needing the musl cross-compilation toolchain
+installed on every future run.
+
+**Honest limitation, stated plainly:** there is no native Linux machine
+available on this Windows host to cross-check the real interpreter's output
+against a real native run of the same binary. Correctness is verified by
+inspection against the source above (the program writes exactly the 21
+bytes `"hello from real elf\n"` to fd 1, then exits with code 42, which is
+exactly what the captured real output shows) -- this is weaker than a
+byte-for-byte native comparison, and is named as a gap rather than glossed
+over.
 
 ## Scope boundaries (from the dispatch instructions)
 

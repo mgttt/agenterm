@@ -30,6 +30,10 @@ path = "examples/verify_file_roundtrip.rs"
 name = "verify_mmap_write"
 path = "examples/verify_mmap_write.rs"
 
+[[example]]
+name = "verify_elf_compiled"
+path = "examples/verify_elf_compiled.rs"
+
 [dependencies]
 agenterm-nativecore = { path = "../agenterm-nativecore" }
 
