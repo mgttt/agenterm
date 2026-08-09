@@ -56,6 +56,12 @@
   `SqlEngineBackend` 挂 `#[cfg(feature = "engine-sql")]`;
 - 或干脆只保留 `agenterm-sql` sidecar bin,产品 PE 不再链接。
 执行能力落地那天再默认打开,符合"脚手架不进产品"的一致口径。
+可行性注:`SqlEngineBackend::enabled()` 的**运行时门已存在且默认关**(须
+`AGENTERM_SCRIPT_BACKEND=sql` 显式启用)——P1 只是把既有语义上移到编译期,默认行为
+不变。改动面:root Cargo.toml(optional dep + feature + bin required-features)、
+src/bin/agenterm.rs 的 sql 分支、script_engine.rs / script_backend.rs / script_worker.rs
+的 Sql 变体,及 3 个 parity 测试。这些文件当前有并行 lane 的未提交改动,实现宜在其
+落地后进行,避免冲突。
 
 ### P2 引擎门控成为一等机制(策略对齐 roadmap)
 路线图(plan-v0.1.16.md §1)本来就是分平台的:rh(Linux 主力)、lua(Windows)、
