@@ -82,10 +82,15 @@ fn entry() {
             let staged_path =
                 std::path::join(destination_directory, artifact.name).display;
             let staged_bytes = std::fs::metadata(staged_path).len;
+            // Coerce the JSON integer via int add before string concat —
+            // require() evaluates its message eagerly, and `"" + json_int`
+            // raises json_string_path (see candidate-verify.rh's matching
+            // note), which made this require fail on every run.
+            let budget_bytes = 0 + artifact.release_budget_bytes;
             require(
-                staged_bytes <= artifact.release_budget_bytes,
+                staged_bytes <= budget_bytes,
                 "stage_build_agenterm_com_budget:actual=" + staged_bytes +
-                    ":budget=" + artifact.release_budget_bytes
+                    ":budget=" + budget_bytes
             );
         }
     }

@@ -78,11 +78,15 @@ fn entry() {
         require(std::fs::exists(path), "artifact_missing:" + artifact_name);
         if release == 1 {
             let actual_bytes = std::fs::metadata(path).len;
+            // Int-add coercion before string concat: require() evaluates its
+            // message eagerly, and `"" + json_int` raises json_string_path
+            // (candidate-verify.rh's matching note), failing every release run.
+            let budget_bytes = 0 + artifact.release_budget_bytes;
             require(
-                actual_bytes <= artifact.release_budget_bytes,
+                actual_bytes <= budget_bytes,
                 "artifact_release_budget:" + artifact_name +
                     ":actual=" + actual_bytes +
-                    ":budget=" + artifact.release_budget_bytes
+                    ":budget=" + budget_bytes
             );
         }
         let metadata_matches = 0;
