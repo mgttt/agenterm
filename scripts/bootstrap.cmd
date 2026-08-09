@@ -36,7 +36,9 @@ if not defined AGENTERM_BOOTSTRAP_FINGERPRINT goto :failed
 call :validate_cache
 if defined AGENTERM_BOOTSTRAP_CACHE_VALID if not defined AGENTERM_BOOTSTRAP_CACHE_STALE goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
-cargo build --quiet --locked --bin agenterm
+rem No --quiet: on a worker rebuild this is minutes of work — cargo's own
+rem stderr progress is the only sign the build is alive.
+cargo build --locked --bin agenterm
 if errorlevel 1 if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_fallback
 if errorlevel 1 goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS

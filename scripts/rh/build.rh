@@ -490,13 +490,16 @@ fn entry() {
     }
 
     let stdout_path = repo + ".build.stdout.tmp";
-    let stderr_path = repo + ".build.stderr.tmp";
     let cargo_command = std::process::command("cargo");
     cargo_command.args(cargo_args);
     cargo_command.current_dir(repo);
     cargo_command.timeout(std::time::Duration::from_millis(3600000));
     cargo_command.stdout_file(stdout_path);
-    cargo_command.stderr_file(stderr_path);
+    // cargo reports all progress and diagnostics on stderr; stream it to the
+    // caller's console live instead of replaying a capture after minutes of
+    // silence (the "build shows nothing" complaint). stdout stays captured —
+    // it is quiet during builds and some callers parse it.
+    cargo_command.stderr_inherit();
     let environment_text = rh::json::stringify(environment);
     if environment_text.contains("\"AGENTERM_BUILD_IDENTITY_VERSION\":") != 0 {
         cargo_command.env("AGENTERM_BUILD_IDENTITY_VERSION", "" + environment.AGENTERM_BUILD_IDENTITY_VERSION);
@@ -528,16 +531,13 @@ fn entry() {
         if cargo_failure_stdout != "" {
             print(cargo_failure_stdout);
         }
-        let cargo_failure_stderr = std::fs::read_to_string(stderr_path);
-        cargo_failure_stderr.trim();
-        if cargo_failure_stderr != "" {
-            print(cargo_failure_stderr);
-        }
         std::fs::try_remove_file(stdout_path);
-        std::fs::try_remove_file(stderr_path);
+        // stderr streamed live above (stderr_inherit), so the failure label
+        // carries only the exit code — the diagnostics are already on the
+        // caller's console, not in a capture.
         require(
             cargo_code == 0,
-            "build_cargo:exit=" + cargo_code + ":" + cargo_failure_stderr
+            "build_cargo:exit=" + cargo_code + ":stderr_streamed_above"
         );
     }
     let cargo_stdout = std::fs::read_to_string(stdout_path);
@@ -546,7 +546,6 @@ fn entry() {
         print(cargo_stdout);
     }
     std::fs::try_remove_file(stdout_path);
-    std::fs::try_remove_file(stderr_path);
 
     if action == "build" && external_target == 0 && cross_client == 0 {
         let bootstrap_name = "agenterm";

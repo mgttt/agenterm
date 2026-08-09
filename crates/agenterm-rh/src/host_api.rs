@@ -747,6 +747,7 @@ pub fn emit_host_runtime(out: &mut String) {
              stdin_text: Option<String>,\n\
              stdout_file: Option<String>,\n\
              stderr_file: Option<String>,\n\
+             stderr_inherit: bool,\n\
          }\n\n\
          #[derive(Clone)]\n\
          struct RhOutput {\n\
@@ -814,6 +815,7 @@ pub fn emit_host_runtime(out: &mut String) {
                  stdin_text: None,\n\
                  stdout_file: None,\n\
                  stderr_file: None,\n\
+                 stderr_inherit: false,\n\
              }\n\
          }\n\n\
          fn rh_command_new_owned(program: String) -> RhCommand {\n\
@@ -863,6 +865,9 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_stderr_file(command: &mut RhCommand, path: &str) {\n\
              command.stderr_file = Some(path.to_owned());\n\
          }\n\n\
+         fn rh_command_stderr_inherit(command: &mut RhCommand) {\n\
+             command.stderr_inherit = true;\n\
+         }\n\n\
          fn rh_command_build(command: &RhCommand) -> std::process::Command {\n\
              let mut process = std::process::Command::new(&command.program);\n\
              process.args(&command.args);\n\
@@ -891,7 +896,13 @@ pub fn emit_host_runtime(out: &mut String) {
              } else {\n\
                  process.stdout(std::process::Stdio::piped());\n\
              }\n\
-             if let Some(path) = &command.stderr_file {\n\
+             if command.stderr_inherit {\n\
+                 // Live streaming: the child writes the caller's own stderr\n\
+                 // (valid through the GUI-subsystem console-worker chain\n\
+                 // because the worker attaches the caller's console and owns\n\
+                 // real std handles). Nothing is captured on this path.\n\
+                 process.stderr(std::process::Stdio::inherit());\n\
+             } else if let Some(path) = &command.stderr_file {\n\
                  match std::fs::File::create(path) {\n\
                      Ok(file) => { process.stderr(std::process::Stdio::from(file)); }\n\
                      Err(error) => {\n\

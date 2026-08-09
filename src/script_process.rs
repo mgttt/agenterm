@@ -50,6 +50,7 @@ pub struct ScriptCommand {
     stdin: Vec<u8>,
     stdout_file: Option<PathBuf>,
     stderr_file: Option<PathBuf>,
+    stderr_inherit: bool,
     timeout: Duration,
     capture_bytes: usize,
 }
@@ -151,6 +152,7 @@ fn register_types(engine: &mut Engine) {
     engine.register_fn("stdin_bytes", command_stdin_bytes);
     engine.register_fn("stdout_file", command_stdout_file);
     engine.register_fn("stderr_file", command_stderr_file);
+    engine.register_fn("stderr_inherit", command_stderr_inherit);
     engine.register_fn(
         "timeout",
         |command: &mut ScriptCommand, value: ScriptDuration| {
@@ -487,6 +489,7 @@ fn process_command(program: &str) -> Result<ScriptCommand, Box<EvalAltResult>> {
         stdin: Vec::new(),
         stdout_file: None,
         stderr_file: None,
+        stderr_inherit: false,
         timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
         capture_bytes: DEFAULT_CAPTURE_BYTES,
     })
@@ -580,6 +583,14 @@ fn command_stderr_file(command: &mut ScriptCommand, path: &str) -> Result<(), Bo
     }
     command.stderr_file = Some(PathBuf::from(path));
     Ok(())
+}
+
+/// Stream the child's stderr straight to the caller's stderr instead of
+/// capturing it — the live-progress channel for long externals (cargo
+/// writes all progress there). Nothing is captured on this path, so
+/// failure handling must not expect recorded stderr text.
+fn command_stderr_inherit(command: &mut ScriptCommand) {
+    command.stderr_inherit = true;
 }
 
 fn command_capture_limit(
@@ -689,7 +700,12 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     } else {
         process.stdout(Stdio::piped());
     }
-    if let Some(path) = command.stderr_file.as_ref() {
+    if command.stderr_inherit {
+        // Live streaming (see `command_stderr_inherit`): valid through the
+        // GUI-subsystem console-worker chain because the worker attaches
+        // the caller's console and owns real std handles.
+        process.stderr(Stdio::inherit());
+    } else if let Some(path) = command.stderr_file.as_ref() {
         let file =
             std::fs::File::create(path).map_err(|error| format!("process_stderr_file: {error}"))?;
         process.stderr(Stdio::from(file));
@@ -737,7 +753,7 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
             return Err(error);
         }
     };
-    let stderr = if command.stderr_file.is_some() {
+    let stderr = if command.stderr_file.is_some() || command.stderr_inherit {
         from_reader(std::io::empty(), "bytes", 0)
     } else {
         from_process_stderr(

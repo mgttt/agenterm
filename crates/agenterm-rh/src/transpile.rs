@@ -1217,8 +1217,8 @@ fn command_surface_param_upgrade(
     if let Expr::MethodCall(call, ..) = rhs {
         return match call.name.as_str() {
             "stdin_text" | "stdin_bytes" | "arg" | "args" | "env" | "env_remove" | "timeout"
-            | "capture_limit" | "current_dir" | "stdout_file" | "stderr_file" | "output"
-            | "start" => Some((param_index, ValueKind::Command)),
+            | "capture_limit" | "current_dir" | "stdout_file" | "stderr_file"
+            | "stderr_inherit" | "output" | "start" => Some((param_index, ValueKind::Command)),
             _ => None,
         };
     }
@@ -1608,6 +1608,7 @@ fn is_command_member_name(name: &str) -> bool {
             | "current_dir"
             | "stdout_file"
             | "stderr_file"
+            | "stderr_inherit"
             | "output"
             | "start"
     )
@@ -5208,6 +5209,12 @@ fn emit_command_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Resu
             out.push_str(binding);
             out.push_str(", &");
             emit_stringish(out, &call.args[0], ctx)?;
+            out.push_str(");\n        0\n    }");
+            Ok(true)
+        }
+        "stderr_inherit" if call.args.is_empty() => {
+            out.push_str("{\n        rh_command_stderr_inherit(&mut ");
+            out.push_str(binding);
             out.push_str(");\n        0\n    }");
             Ok(true)
         }
