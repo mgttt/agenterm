@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::{
     cell::RefCell,
     env,
-    io::{BufRead, Read, Write},
+    io::{Read, Write},
     thread,
     time::{Duration, Instant, SystemTime},
 };

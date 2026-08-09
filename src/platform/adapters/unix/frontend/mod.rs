@@ -48,8 +48,8 @@ use crate::{
     protocol::IpcResponse,
     pty::TerminalSize,
     settings::{
-        AppConfig, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, TerminalAppearanceOverride,
-        config_path, load_config, save_config,
+        AppConfig, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, config_path, load_config,
+        save_config,
     },
     terminal_runtime::{TerminalLaunch, TerminalTab},
     theme::{AppearancePreset, decode_window_icon_png, window_title_for_preset},

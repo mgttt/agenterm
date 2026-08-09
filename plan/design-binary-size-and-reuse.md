@@ -152,19 +152,24 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
    加 `#[expect(dead_code, reason)]` 注明意图,否则按死代码删。
 4. 长线:清零后在 CI 把 dead_code 升级为 deny,防再堆积。
 
-### 5.3 清单(2026-08-09 首采,13 项)
-| 位置 | 符号 | 疑似来源 | 状态 |
-|---|---|---|---|
-| crates/agenterm-rh/transpile.rs:134 | `emit_scope_json_expr` | rh AOT lane | `#[expect(dead_code)]` 表态(CI clippy 红提前终结冷却;仍无人接线则到期删除) |
-| src/client/mod.rs:5 | `use BufRead` | retirement 波次残留 | 冷却中 |
-| src/platform/adapters/unix/frontend/mod.rs:51 | `TerminalAppearanceOverride` | frontend lane | 冷却中 |
-| src/platform/mod.rs:50 | `ConsoleKey`/`LineBuffer`/`LineHistory` | console-line-editor 在制 | 冷却中 |
-| src/platform/mod.rs:64 | `enter_console_line_editor` | 同上 | 冷却中 |
-| src/script_rh_host.rs:10 | `RhHostEntryValue::{Unit,Value}` | rh host lane | 冷却中 |
-| src/script_lua_run.rs:75 | `current_run_context` | lua lane | 冷却中 |
-| src/script_worker.rs:854–870 | `script_error`/`child_error`/`cancelled_error`/`fleet_error`/`classify_runtime_error` ×5 | retirement 波次孤儿 | 冷却中 |
-| src/frontend/server_strip_ui.rs:37 | `StripRect::width` | frontend lane | 冷却中 |
-| scripts/rh/artifact-verification.rh:185 | 探测 `dist\agenterm-cli.exe`(该 PE 已删除) | release 验证门失效合同 | **待修**(release 通道必炸) |
+### 5.3 清单(2026-08-09 首采 13 项;同日 CI clippy 红触发全量处置)
+处置原则的首次全量执行:CI `-D warnings` 蔓延到主 crate 后冷却期即时终结。
+删除 = 无消费者且无在制迹象;`#[expect(dead_code, reason)]` = 疑似在制接线,
+注明到期删除条件。
+
+| 位置 | 符号 | 处置 |
+|---|---|---|
+| crates/agenterm-rh/transpile.rs:134 | `emit_scope_json_expr` | `#[expect]`(AOT 可能在接线) |
+| src/client/mod.rs:5 | `use BufRead` | 删除 |
+| src/platform/adapters/unix/frontend/mod.rs:51 | `TerminalAppearanceOverride` | 删除 |
+| src/platform/mod.rs:50 | `ConsoleKey`/`LineBuffer`/`LineHistory` 导入 | 删除(facade 收窄为 `ConsoleLineEditor`) |
+| src/platform/mod.rs:64 | `enter_console_line_editor` | `#[expect]`(console-line-editor 产品接线在制) |
+| src/script_rh_host.rs:10 | `RhHostEntryValue::{Unit,Value}` | `#[expect]`(typed entry-value 通道待接) |
+| src/script_lua_run.rs:75 | `current_run_context` | `#[expect]`(lua 消费者未接) |
+| src/script_worker.rs | `classify_runtime_error` 死链(含 4 个构造器与其专属测试) | **删除**——retirement 孤儿,hosted 引擎已走类型化失败;token 表在 git 历史 |
+| src/frontend/server_strip_ui.rs:37 | `StripRect::width` | `#[cfg_attr(not(test), expect)]`(仅测试消费) |
+| src/script_rh_host.rs:229(顺带) | `host_process_request` 复杂返回元组 | 命名为 `type ProcessRequest`(clippy type_complexity) |
+| scripts/rh/artifact-verification.rh:185 | 探测已删除的 `dist\agenterm-cli.exe` | **待修**(release 通道必炸,归 artifact 合同 lane) |
 
 首采当日的 release-fast 归因快照(size-attribution.rh 产出,strip=none):
 .text 8.13MiB — agenterm 22.4%、C 代码(LuaJIT+QuickJS+SQLite)19.8%、sqlparser

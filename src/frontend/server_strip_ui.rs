@@ -34,6 +34,10 @@ pub(crate) struct StripRect {
 }
 
 impl StripRect {
+    // Production callers work in host pixel-rect types after the
+    // ServerContextMenuRects::map conversion; only unit tests assert raw
+    // strip geometry through this accessor today.
+    #[cfg_attr(not(test), expect(dead_code, reason = "test-only geometry accessor"))]
     pub(crate) const fn width(self) -> i32 {
         self.right - self.left
     }

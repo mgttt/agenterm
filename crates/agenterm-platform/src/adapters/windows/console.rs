@@ -64,7 +64,7 @@ impl ConsoleGuard {
     fn attach_parent_impl(ignore_control_events: bool) -> io::Result<Self> {
         let lock = LOCK
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "console attach lock poisoned"))?;
+            .map_err(|_| io::Error::other("console attach lock poisoned"))?;
         // Capture the std slots before `AttachConsole`: a valid pre-attach
         // handle is a caller redirection (pipe or file) that must survive
         // the attach, which may repoint the slots at console handles.
@@ -106,7 +106,7 @@ impl ConsoleGuard {
     pub(crate) fn attach_process(process_id: u32) -> io::Result<Self> {
         let lock = LOCK
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "console attach lock poisoned"))?;
+            .map_err(|_| io::Error::other("console attach lock poisoned"))?;
         // SAFETY: `AttachConsole` validates the non-zero process id.
         let attached = unsafe { AttachConsole(process_id) };
         if attached == 0 {

@@ -7,7 +7,13 @@ pub type FleetBridgeFn = Box<dyn Fn(&str, &str) -> Result<String, String> + Send
 
 #[derive(Debug)]
 pub(crate) enum RhHostEntryValue {
+    // Constructed-by-nobody today: the typed entry-value channel is staged
+    // ahead of its AOT-pack consumer. Graybox inventory
+    // plan/design-binary-size-and-reuse.md §5.3 holds the delete-by
+    // condition; wiring either variant removes its attribute.
+    #[expect(dead_code, reason = "typed entry-value channel staged for AOT wiring")]
     Unit,
+    #[expect(dead_code, reason = "typed entry-value channel staged for AOT wiring")]
     Value(serde_json::Value),
 }
 
@@ -224,18 +230,18 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
     }
 }
 
-fn host_process_request(
-    request: &str,
-) -> Result<
-    (
-        String,
-        Vec<String>,
-        u64,
-        Option<String>,
-        crate::script_process::ProcessHostOptions,
-    ),
+/// Parsed process-launch request: `(program, args, timeout_ms, stdin,
+/// options)` — named so the signature stays readable at the call sites and
+/// the clippy type-complexity gate stays quiet.
+type ProcessRequest = (
     String,
-> {
+    Vec<String>,
+    u64,
+    Option<String>,
+    crate::script_process::ProcessHostOptions,
+);
+
+fn host_process_request(request: &str) -> Result<ProcessRequest, String> {
     let request: serde_json::Value =
         serde_json::from_str(request).map_err(|error| format!("process_request_json: {error}"))?;
     let program = request["program"]

@@ -20,7 +20,6 @@ use crate::script_protocol::{
     ScriptFrameTracker, ScriptInvocation, ScriptOperation, ScriptResult, encode_script_frame,
     read_script_frame, write_encoded_script_frame,
 };
-use rhai::EvalAltResult;
 
 type PendingBroker = Option<(String, mpsc::SyncSender<ScriptBrokerResponse>)>;
 type SharedFrameOutput = Arc<Mutex<Box<dyn Write + Send>>>;
@@ -851,89 +850,12 @@ fn limit_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFai
     failure(code, message, ScriptFailureCategory::Limit)
 }
 
-fn script_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
-    failure(code, message, ScriptFailureCategory::Script)
-}
-
-fn child_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
-    failure(code, message, ScriptFailureCategory::Child)
-}
-
-fn cancelled_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
-    failure(code, message, ScriptFailureCategory::Cancelled)
-}
-
-fn fleet_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
-    failure(code, message, ScriptFailureCategory::Fleet)
-}
-
-fn classify_runtime_error(error: &EvalAltResult, message: String) -> ScriptFailure {
-    if let Some(fields) = crate::script_error::runtime_error_fields(error) {
-        return match fields.class.as_str() {
-            "configuration" => configuration_error(fields.code, fields.safe_message),
-            "limit" => limit_error(fields.code, fields.safe_message),
-            "child" => child_error(fields.code, fields.safe_message),
-            "cancelled" => cancelled_error(fields.code, fields.safe_message),
-            "fleet" => fleet_error(fields.code, fields.safe_message),
-            "protocol" => protocol_error(fields.code, fields.safe_message),
-            "host" => failure(
-                fields.code,
-                fields.safe_message,
-                ScriptFailureCategory::Host,
-            ),
-            _ => script_error(fields.code, fields.safe_message),
-        };
-    }
-    let classified = message
-        .split(|character: char| {
-            !character.is_ascii_alphanumeric() && character != '_' && character != '-'
-        })
-        .find_map(|token| {
-            if matches!(
-                token,
-                "process_spawn"
-                    | "child_nonzero"
-                    | "process_stdout_unavailable"
-                    | "process_stderr_unavailable"
-                    | "process_stdin_write"
-                    | "process_child_state_poisoned"
-                    | "process_child_missing"
-                    | "process_child_completed"
-                    | "process_try_wait"
-                    | "process_kill"
-                    | "process_timeout"
-                    | "process_stdout_not_utf8"
-                    | "process_stderr_not_utf8"
-            ) {
-                Some((ScriptFailureCategory::Child, token.to_owned()))
-            } else if matches!(
-                token,
-                "fleet_catalog_encode"
-                    | "fleet_receipt_invalid"
-                    | "fleet_result_decode"
-                    | "broker_host_error"
-                    | "broker_invalid_receipt"
-                    | "broker_invalid_response"
-                    | "broker_post_state_missing"
-                    | "broker_receipt_missing"
-                    | "broker_transport"
-                    | "broker_response_timeout"
-                    | "server_restart"
-                    | "journal_gap"
-                    | "future_sequence"
-                    | "event_wait_timeout"
-            ) {
-                Some((ScriptFailureCategory::Fleet, token.to_owned()))
-            } else {
-                None
-            }
-        });
-    match classified {
-        Some((ScriptFailureCategory::Child, code)) => child_error(code, message),
-        Some((ScriptFailureCategory::Fleet, code)) => fleet_error(code, message),
-        _ => script_error("script_runtime", message),
-    }
-}
+// The rhai-runtime error classifier that used to live here
+// (classify_runtime_error + its script/child/cancelled/fleet constructors)
+// left with the engine-binary retirement: hosted engines surface typed
+// failures directly, so nothing constructed those categories from a raw
+// EvalAltResult anymore (the whole chain was CI-dead). git history has the
+// token tables if a future path needs them.
 
 fn protocol_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
     failure(code, message, ScriptFailureCategory::Protocol)
@@ -1145,28 +1067,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn runtime_failures_preserve_child_and_fleet_exit_classes() {
-        let child_error: Box<EvalAltResult> = "process_spawn: executable missing (line 1)".into();
-        let child = classify_runtime_error(&child_error, child_error.to_string());
-        assert_eq!(child.code, "process_spawn");
-        assert_eq!(child.category, ScriptFailureCategory::Child);
-
-        let fleet_error: Box<EvalAltResult> = "server_restart: epoch changed (line 1)".into();
-        let fleet = classify_runtime_error(&fleet_error, fleet_error.to_string());
-        assert_eq!(fleet.code, "server_restart");
-        assert_eq!(fleet.category, ScriptFailureCategory::Fleet);
-
-        let script_error_value: Box<EvalAltResult> = "user failure (line 1)".into();
-        let script = classify_runtime_error(&script_error_value, script_error_value.to_string());
-        assert_eq!(script.code, "script_runtime");
-        assert_eq!(script.category, ScriptFailureCategory::Script);
-
-        let user_error: Box<EvalAltResult> = "user operation failed (line 1)".into();
-        let classified = classify_runtime_error(&user_error, user_error.to_string());
-        assert_eq!(classified.code, "script_runtime");
-        assert_eq!(classified.category, ScriptFailureCategory::Script);
-    }
+    // `runtime_failures_preserve_child_and_fleet_exit_classes` left with
+    // classify_runtime_error (see the note at the former definition site):
+    // it pinned a classifier no production path calls since the
+    // engine-binary retirement — a test keeping dead code alive.
 
     #[test]
     fn source_byte_limit_is_typed() {

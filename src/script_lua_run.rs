@@ -72,6 +72,10 @@ pub fn with_run_context<T>(context: LuaRunContext, run: impl FnOnce() -> T) -> T
     })
 }
 
+// Unreferenced accessor staged ahead of its consumer (the lua task/host
+// wiring). Graybox inventory plan/design-binary-size-and-reuse.md §5.3
+// holds the delete-by condition.
+#[expect(dead_code, reason = "lua run-context consumer not wired yet")]
 pub(crate) fn current_run_context() -> Option<LuaRunContext> {
     RUN_CONTEXT.with(|slot| slot.borrow().clone())
 }
