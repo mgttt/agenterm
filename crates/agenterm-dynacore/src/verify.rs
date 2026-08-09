@@ -194,9 +194,25 @@ fn check_param_value(param: &OperationParamSchema, value: &serde_json::Value) ->
             param.value_type
         ));
     }
-    if let Some(n) = value.as_i64() {
+    // Bug found auditing this file for capability-boundary probes
+    // (`tests/capability_boundaries.rs`, Q3): the previous check used
+    // `value.as_i64()`, which is `None` for any JSON `Number` serde_json
+    // classifies as a float (any literal with a `.`/exponent, even one that
+    // is mathematically a whole number like `100.0`) — so `minimum`/
+    // `maximum` were SILENTLY SKIPPED for float-shaped values on any
+    // `value_type` that accepts numbers at all (`"number"` in particular;
+    // `"integer"`/`"uint32"`/`"uint64"` already reject float shapes via
+    // `json_type_matches` before reaching here). `as_f64()` covers every
+    // `Number` variant (integer or float) uniformly, so the bound is
+    // enforced regardless of which JSON number syntax produced the value.
+    // No real catalog `"number"` param declares `minimum`/`maximum` today
+    // (audited `src/operations.rs` while finding this), so this was
+    // unobserved rather than exploited — same posture as the `uint32` fix
+    // this file already carries a note about, and zero behavior change for
+    // any value that was already in range.
+    if let Some(n) = value.as_f64() {
         if let Some(minimum) = param.minimum
-            && n < minimum
+            && n < minimum as f64
         {
             return Err(format!(
                 "param {:?} = {n} is below declared minimum {minimum}",
@@ -204,7 +220,7 @@ fn check_param_value(param: &OperationParamSchema, value: &serde_json::Value) ->
             ));
         }
         if let Some(maximum) = param.maximum
-            && n > maximum
+            && n > maximum as f64
         {
             return Err(format!(
                 "param {:?} = {n} is above declared maximum {maximum}",
