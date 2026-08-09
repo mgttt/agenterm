@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | **日期** | 2026-08-09 |
-| **状态** | §1–§7 全部已实现并已推送——`agenterm-nativecore` 进了根 workspace，`try_execute_nativecore_pack_invocation` 接进了 `execute_inner`，2 个产品路径真机黑盒测试（真 `spawn_echo` 子进程、真契约拒绝）+ crate 自身 14 个测试全绿。§7.4 的改名清理仍未做，明确保留 |
+| **状态** | §1–§7 全部已实现并已推送——`agenterm-nativecore` 进了根 workspace，`try_execute_nativecore_pack_invocation` 接进了 `execute_inner`，CLI 入口（`examples/nativecore_run.rs`）也有了，2 个产品路径真机黑盒测试 + crate 自身 14 个测试全绿。**用户判断（2026-08-09）：七个 intent 的实际用途目前很薄（只对"没装 rustc 的机器"和"未来的硬化平台"两个场景有意义，都不是今天 agenterm 的主战场），继续往这个方向堆产品化工作（更多 intent/更多 CLI/PRD 收录）价值不够，本轮起冻结——代码保留（已测试、opt-in、未配置时零成本，不删不退），但不再主动扩它。精力转回研究：见 §8 Q23** |
 | **前置** | [`research/dynamic-core/SYNTHESIS.md`](../research/dynamic-core/SYNTHESIS.md)（Q0–Q22）；
   [`research/dynamic-core/assembled/`](../research/dynamic-core/assembled/)（Q22，本设计复活它砍掉的那一半） |
 | **纠正** | [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) 描述的东西**不是这个**——
@@ -153,7 +153,43 @@ nativecore pack 够到的是**跟 rh/lua/qjs 今天已经有的同一份"无限�
 同时有别的会话在改邻近文件，此刻改名风险大于收益。**留档，等两条并发工作都消停
 再做一次干净的改名 + 引用替换**。
 
+## 8. v1 冻结，转研究：Q23
+
+§5/§7 的验收标准全部达成，但产品化到这一步后暴露了一个没被之前任何一问覆盖的
+真实缺口：**七个 intent 是编译期写死的**——加第八个，要改 Rust、重新编译、重新
+发行 `agenterm.exe`。这跟`[[project_agenterm_self_evolution_north_star]]`（agenterm
+要能让大模型自己反馈式自进化）根本对不上——一个"动态执行原生二进制码"的核，如果
+扩展它自己的能力面还是得靠人先手动改代码再发版本，它跟 rh 的 AOT pack 在"动态"这
+个维度上其实没有本质差别，只是慢、覆盖窄。
+
+**用户判断（2026-08-09）**：当前七个 intent 的实际产品价值薄（§1 的两个差异化点——
+不需要编译器、硬化平台免疫——都还没被 agenterm 今天的真实部署场景吃到），继续在
+这个方向堆产品化工作不值——**v1 到此冻结**：代码保留（已测试、opt-in、未配置时
+零成本，不删不退），不再主动加 intent/扩 CLI/收录 PRD。精力转回研究，而不是继续
+产品化。
+
+**Q23（下一问，未派出）**：native intent 能不能在 pack 加载时声明（而不是编译期
+写死），同时保住 F1 那类"验证器核对真实调用契约"的强度和 Q13 的 bake-and-detect
+布局自检——也就是说，一个 agent 能不能在不重新编译 `agenterm.exe` 的前提下，教会
+dynacore 一个它原来不认识的 Win32 API？
+
+这问题目前是开放的，故意不在本文件里预判方向（避免重蹈 Q0 判决树先射箭后画靶的
+错——见 SKILL.md 的教训）。候选方向至少有三条，留给 Q23 自己测量，不在这里先定：
+1. **签名描述语言**：pack 里带一段结构化的调用签名描述（参数个数/宽度/调用约定），
+   `verify()` 在加载时依据这段描述生成契约，而不是依赖 `Intent::contract_arity()`
+   这种编译期硬编码的 match——五原语里的"declare"本来就是干这个的，只是 v1 只把它
+   用在了 `STARTUPINFOA` 这类布局自检上，没有用在"这个符号本身能不能被安全调用"上。
+2. **符号解析层**：加一层 Q14 那种行为式验证，在运行时真正探测一个新符号是否可达、
+   签名是否与声明一致，而不是完全信任 pack 作者的声明——这是 declare 原语"发布 vs
+   询问"两半里，v1 只做了"发布"（bake-and-detect 检查已知布局），没做"询问"（
+   对未知符号做运行时行为验证）。
+3. **维持编译期白名单，但把"扩白名单"这件事做便宜**——如果 1/2 两条量出来代价
+   太高（比如安全性没法在运行时验证到 F1 级别的确定性），那就承认"能力面扩展
+   仍需要人审查+重新编译"，把研究结论写成"为什么这是对的取舍"，而不是硬做一个
+   看起来动态、实际不安全的东西。这本身就是一个合法的判决结果，不是失败。
+
 ---
 
 *产品设计文档。命名冲突（`agenterm-dynacore` 暂被占用）待 logic pack 改名后一并清理，
-见 §7.4。*
+见 §7.4。v1 已冻结产品化，见 §8——后续工作是 Q23 研究，不是继续给 nativecore
+加功能。*
