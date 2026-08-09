@@ -895,8 +895,10 @@ mod tests {
                 Err(format!("unknown_op: {op_id}"))
             }
         });
-        let mut options = ScriptInvocationOptions::default();
-        options.arguments = Some(serde_json::json!(["first", "second"]));
+        let options = ScriptInvocationOptions {
+            arguments: Some(serde_json::json!(["first", "second"])),
+            ..Default::default()
+        };
 
         let result = engine
             .execute(

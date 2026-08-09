@@ -400,6 +400,7 @@ fn registration_by_endpoint(directory, wanted_endpoint, code) {
                 return #{
                     path: entry_path,
                     record_pid: 0 + record.pid,
+                    record_address: "" + record.address,
                     record_endpoint: "" + record.endpoint,
                     record_logical_instance: "" + record.logical_instance,
                     record_server_scope_id: "" + record.server_scope_id,
@@ -1279,6 +1280,10 @@ fn entry() {
         native_pid + "-" + pid_reuse_nonce + ".json"
     ).display;
     let reuse_pid = native_registration.record_pid;
+    // `address` is a REQUIRED InstanceRecord field (no serde default); a
+    // fixture without it fails deserialization and discovery silently
+    // drops the record.
+    let reuse_address = native_registration.record_address;
     let reuse_endpoint = native_registration.record_endpoint;
     let reuse_instance = native_registration.record_logical_instance;
     let reuse_scope = native_registration.record_server_scope_id;
@@ -1292,6 +1297,7 @@ fn entry() {
         rh::json::stringify_pretty(#{
             schema_version: 2,
             pid: reuse_pid,
+            address: reuse_address,
             endpoint: reuse_endpoint,
             logical_instance: reuse_instance,
             server_scope_id: reuse_scope,

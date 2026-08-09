@@ -5,8 +5,11 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "== build agenterm-rh binary =="
-cargo build --locked --bin agenterm-rh
+# The standalone agenterm-rh binary retired with the engine-binary wave;
+# the rh engine lives inside the main PE (`agenterm rh ...`), which the
+# integration tests below spawn.
+echo "== build agenterm (hosted rh engine) =="
+cargo build --locked --bin agenterm
 
 echo "== agenterm-rh crate =="
 cargo test -p agenterm-rh --locked

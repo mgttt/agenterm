@@ -9,8 +9,6 @@ use crate::{
     transpile::{cc_line_count, transpile_cdylib},
 };
 
-const GENERATED_CRATE: &str = "rh_pack_generated";
-
 pub struct CompileOutput {
     pub native_path: PathBuf,
     pub manifest_path: PathBuf,
@@ -29,17 +27,34 @@ pub fn compile_native_for_target(
 ) -> Result<CompileOutput, RhError> {
     let rust = transpile_cdylib(source)?;
     let source_hash = hash_bytes(source.as_bytes());
+    // Per-source crate name: with the shared target dir below, a fixed name
+    // would make concurrent builds clobber one artifact path (and a copy
+    // could race another build's rename). Hash-keyed names give every source
+    // its own artifact AND let cargo skip the whole build when the same
+    // source compiles again.
+    let crate_name = format!("rh_pack_{}", &source_hash[..16]);
 
     let scratch = tempfile::tempdir().map_err(|err| RhError::Compile(err.to_string()))?;
     let crate_root = scratch.path().join("crate");
     std::fs::create_dir_all(crate_root.join("src"))
         .map_err(|err| RhError::Compile(err.to_string()))?;
-    std::fs::write(crate_root.join("Cargo.toml"), generated_cargo_toml())
-        .map_err(|err| RhError::Compile(err.to_string()))?;
+    std::fs::write(
+        crate_root.join("Cargo.toml"),
+        generated_cargo_toml(&crate_name),
+    )
+    .map_err(|err| RhError::Compile(err.to_string()))?;
     std::fs::write(crate_root.join("src/lib.rs"), rust)
         .map_err(|err| RhError::Compile(err.to_string()))?;
 
-    let target_dir = scratch.path().join("target");
+    // Stable shared target dir: every pack build used to recompile the
+    // full dependency set (serde etc.) in its own scratch target, so a
+    // cold CI runner paid ~30s per script and the biggest suites blew
+    // their walls. Sharing amortizes deps to one compile per machine per
+    // codegen revision; cargo's own locking handles concurrent builds.
+    let target_dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-pack-target-cg{}",
+        crate::host_api::RH_CODEGEN_REVISION
+    ));
     std::fs::write(
         crate_root.join("rust-toolchain.toml"),
         "[toolchain]\nchannel = \"1.97.0\"\n",
@@ -82,8 +97,8 @@ pub fn compile_native_for_target(
     // Windows MSVC emits `{crate}.dll`; Unix (and some GNU toolchains) use
     // the `lib` prefix. Accept either so host packs are portable.
     let artifact_candidates = [
-        release_dir.join(format!("lib{GENERATED_CRATE}.{extension}")),
-        release_dir.join(format!("{GENERATED_CRATE}.{extension}")),
+        release_dir.join(format!("lib{crate_name}.{extension}")),
+        release_dir.join(format!("{crate_name}.{extension}")),
     ];
     let artifact = artifact_candidates
         .iter()
@@ -171,10 +186,10 @@ fn cargo_command() -> Command {
     command
 }
 
-fn generated_cargo_toml() -> String {
+fn generated_cargo_toml(crate_name: &str) -> String {
     format!(
         "[package]\n\
-         name = \"{GENERATED_CRATE}\"\n\
+         name = \"{crate_name}\"\n\
          version = \"0.0.0\"\n\
          edition = \"2021\"\n\
          publish = false\n\n\
@@ -213,7 +228,7 @@ mod tests {
 
     #[test]
     fn generated_native_pack_has_no_rhai_runtime_dependency() {
-        let manifest = generated_cargo_toml();
+        let manifest = generated_cargo_toml("rh_pack_test");
         assert!(manifest.contains("serde_json = \"1\""));
         assert!(manifest.contains("sha2 = \"0.10\""));
         assert!(!manifest.contains("rhai"));
