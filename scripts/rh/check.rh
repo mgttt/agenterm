@@ -281,7 +281,10 @@ fn evidence_list_spec(worker_program, suite_path, repo) {
     arguments.push("--");
     arguments.push("--list-evidence");
     let _arg_count = 0 + arguments.len;
-    spec(worker_program, arguments, 15000, empty_environment(), 0)
+    // The wall must absorb one cold AOT pack compile (~30s on CI, where the
+    // cache is always cold) before the suite even starts listing — 15s was
+    // a warm-cache assumption and the standing windows-gate process_timeout.
+    spec(worker_program, arguments, 120000, empty_environment(), 0)
 }
 
 fn cmd_build_bat_spec(repo, profile, timeout_ms, environment) {
@@ -304,7 +307,8 @@ fn task_check_spec(worker, manifest) {
     arguments.push("--manifest");
     arguments.push(manifest_path);
     let _arg_count = 0 + arguments.len;
-    spec(worker_path, arguments, 30000, empty_environment(), 0)
+    // Same cold-AOT allowance as evidence_list_spec above.
+    spec(worker_path, arguments, 120000, empty_environment(), 0)
 }
 
 fn cargo_fmt_all_check_spec(environment) {
