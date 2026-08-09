@@ -2589,13 +2589,20 @@ impl UnixApp {
         self.visible_tree_rows().len()
     }
 
+    fn sidebar_viewport(&self) -> crate::ui_geometry::SidebarViewport {
+        crate::ui_geometry::SidebarViewport {
+            row_count: self.sidebar_row_count(),
+            capacity: self.sidebar_row_capacity(),
+            requested_offset: self.sidebar_scroll_offset,
+        }
+    }
+
     fn sidebar_max_offset(&self) -> usize {
-        self.sidebar_row_count()
-            .saturating_sub(self.sidebar_row_capacity())
+        self.sidebar_viewport().max_offset()
     }
 
     fn sidebar_offset(&self) -> usize {
-        self.sidebar_scroll_offset.min(self.sidebar_max_offset())
+        self.sidebar_viewport().offset()
     }
 
     fn sidebar_scrollbar_state(
@@ -2604,18 +2611,7 @@ impl UnixApp {
         if !self.config.tabs_visible {
             return None;
         }
-        let layout = self.layout();
-        let track = sidebar_scrollbar_track(layout.sidebar_tree);
-        let maximum = self.sidebar_max_offset();
-        let offset = self.sidebar_offset();
-        let geometry = sidebar_scrollbar_geometry(
-            track,
-            offset,
-            maximum,
-            self.sidebar_row_capacity(),
-            self.sidebar_row_count(),
-        );
-        Some((geometry, offset, maximum))
+        Some(self.sidebar_viewport().scrollbar(self.layout().sidebar_tree))
     }
 
     fn sidebar_viewport_rows(&self) -> Vec<SidebarTabRow> {

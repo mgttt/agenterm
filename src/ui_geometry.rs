@@ -887,6 +887,45 @@ pub(crate) fn tree_connector_segments(
     segments
 }
 
+/// Sidebar scroll model shared by both frontend hosts. Three facts — total
+/// row count, viewport capacity, and the host's requested scroll offset —
+/// determine the clamped offset, the scroll maximum, and the scrollbar
+/// geometry. Both hosts carried byte-identical private method chains for
+/// this arithmetic (`sidebar_max_offset`/`sidebar_offset`/
+/// `sidebar_scrollbar_state`, design-frontend-shared-core.md §1 #4); the
+/// hosts now supply only the three inputs.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SidebarViewport {
+    pub(crate) row_count: usize,
+    pub(crate) capacity: usize,
+    pub(crate) requested_offset: usize,
+}
+
+impl SidebarViewport {
+    pub(crate) fn max_offset(self) -> usize {
+        self.row_count.saturating_sub(self.capacity)
+    }
+
+    pub(crate) fn offset(self) -> usize {
+        self.requested_offset.min(self.max_offset())
+    }
+
+    /// Scrollbar geometry over `sidebar_tree`, plus the clamped offset and
+    /// maximum — the exact `(geometry, offset, maximum)` triple both hosts'
+    /// `sidebar_scrollbar_state` used to assemble by hand.
+    pub(crate) fn scrollbar(
+        self,
+        sidebar_tree: PixelRect,
+    ) -> (TerminalScrollbarGeometry, usize, usize) {
+        let track = sidebar_scrollbar_track(sidebar_tree);
+        let maximum = self.max_offset();
+        let offset = self.offset();
+        let geometry =
+            sidebar_scrollbar_geometry(track, offset, maximum, self.capacity, self.row_count);
+        (geometry, offset, maximum)
+    }
+}
+
 pub(crate) fn sidebar_scrollbar_geometry(
     track: PixelRect,
     offset: usize,
@@ -1934,6 +1973,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sidebar_viewport_clamps_offset_and_reports_scroll_maximum() {
+        let viewport = SidebarViewport {
+            row_count: 12,
+            capacity: 5,
+            requested_offset: 99,
+        };
+        assert_eq!(viewport.max_offset(), 7);
+        assert_eq!(viewport.offset(), 7, "requested offset clamps to maximum");
+
+        let fits = SidebarViewport {
+            row_count: 3,
+            capacity: 5,
+            requested_offset: 2,
+        };
+        assert_eq!(fits.max_offset(), 0);
+        assert_eq!(fits.offset(), 0, "no scrolling when everything fits");
+
+        let sidebar_tree = sidebar_tree_for_configured_width(TABS_DEFAULT_WIDTH);
+        let (geometry, offset, maximum) = viewport.scrollbar(sidebar_tree);
+        assert_eq!(offset, 7);
+        assert_eq!(maximum, 7);
+        assert_eq!(geometry.track, sidebar_scrollbar_track(sidebar_tree));
     }
 
     #[test]
