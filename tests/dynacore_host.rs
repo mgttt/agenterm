@@ -65,7 +65,7 @@ fn pack_round_trips_a_real_fleet_tabs_list_call() {
 
     let outcome = script_dynacore_host::run_pack(&verified, &bridge);
 
-    assert_eq!(outcome.result, 1, "FleetCall dest word is 1 on Ok");
+    assert_eq!(outcome.result(), Some(1), "FleetCall dest word is 1 on Ok");
     assert_eq!(outcome.calls.len(), 1);
     assert_eq!(outcome.calls[0].operation_id, operation_id);
     assert_eq!(outcome.calls[0].params_json, "{}");
@@ -187,7 +187,7 @@ fn two_different_hash_packs_coexist_independently_against_real_catalog() {
         Ok("{}".to_string())
     });
     let outcome_a = script_dynacore_host::run_pack(&verified_a, &bridge_a);
-    assert_eq!(outcome_a.result, 1);
+    assert_eq!(outcome_a.result(), Some(1));
     assert_eq!(*calls_a.lock().unwrap(), 1);
 
     let calls_b: Arc<std::sync::Mutex<u32>> = Arc::new(std::sync::Mutex::new(0));
@@ -197,7 +197,11 @@ fn two_different_hash_packs_coexist_independently_against_real_catalog() {
         Ok("{}".to_string())
     });
     let outcome_b = script_dynacore_host::run_pack(&verified_b, &bridge_b);
-    assert_eq!(outcome_b.result, 3, "pack_b's final value is the arithmetic sum, unaffected by pack_a's run");
+    assert_eq!(
+        outcome_b.result(),
+        Some(3),
+        "pack_b's final value is the arithmetic sum, unaffected by pack_a's run"
+    );
     assert_eq!(*calls_b.lock().unwrap(), 1, "pack_b made its own single call, not pack_a's");
 
     // Reloading each hash independently still reproduces its own content.
@@ -205,4 +209,46 @@ fn two_different_hash_packs_coexist_independently_against_real_catalog() {
     let reloaded_b = script_dynacore_host::load_and_verify_pack(&store, &manifest_b).expect("reload b");
     assert_eq!(reloaded_a, loaded_a);
     assert_eq!(reloaded_b, loaded_b);
+}
+
+/// v1.1 safety acceptance: a well-formed pack that calls a REAL catalog
+/// operation (`tabs.list`) inside a loop that never falls out is aborted with
+/// `Termination::StepLimitExceeded`, not left to hang the host thread — the
+/// product gap task 1 closes, exercised here through the exact host binding
+/// (`script_dynacore_host`) a real embedder uses, not just the crate-internal
+/// unit test's synthetic catalog.
+#[test]
+fn step_limit_aborts_a_looping_real_operation_pack_instead_of_hanging_the_host_thread() {
+    let operation_id = tabs_list_operation_id();
+    let mut b = Builder::new();
+    let call = b.fleet_call(operation_id, "{}");
+    let _ = call;
+    b.term(Term::Br(0)); // block 0 branches to itself forever
+    let module = b.finish("runaway_real_pack", 0);
+
+    let verified = script_dynacore_host::verify_pack(&module).expect("a self-loop calling tabs.list is well-formed");
+
+    let calls: Arc<std::sync::Mutex<u32>> = Arc::new(std::sync::Mutex::new(0));
+    let calls_for_bridge = Arc::clone(&calls);
+    let bridge: DynacoreFleetBridgeFn = Arc::new(move |_: &str, _: &str| {
+        *calls_for_bridge.lock().unwrap() += 1;
+        Ok("{\"tabs\":[]}".to_string())
+    });
+
+    let started = std::time::Instant::now();
+    let outcome = script_dynacore_host::run_pack_with_step_limit(&verified, &bridge, 5_000);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the step limit must abort promptly, not just eventually terminate"
+    );
+    assert_eq!(
+        outcome.termination,
+        agenterm_dynacore::eval_core::Termination::StepLimitExceeded
+    );
+    assert_eq!(outcome.result(), None, "a step-limited run has no Exit/Ret word");
+    assert_eq!(
+        *calls.lock().unwrap(),
+        5_000,
+        "the 5,000 real fleet calls made before the cutoff are reported, not discarded"
+    );
 }
