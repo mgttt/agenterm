@@ -10,7 +10,7 @@
         "cli",
         "--version"
       ],
-      "release_budget_bytes": 4194304
+      "release_budget_bytes": 10485760
     },
     {
       "name": "agenterm.com",
@@ -49,7 +49,7 @@
             "cli",
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 10485760
         },
         {
           "name": "agenterm.com",
@@ -88,7 +88,7 @@
             "cli",
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 10485760
         },
         {
           "name": "agenterm.com",
@@ -126,7 +126,7 @@
             "cli",
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 10485760
         },
         {
           "name": "agenterm-cc",
@@ -152,7 +152,7 @@
             "cli",
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 10485760
         },
         {
           "name": "agenterm-cc",
@@ -178,7 +178,7 @@
             "cli",
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 10485760
         },
         {
           "name": "agenterm-cc",
@@ -204,7 +204,7 @@
             "cli",
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 10485760
         },
         {
           "name": "agenterm-cc",
@@ -219,3 +219,4 @@
     }
   ]
 }
+

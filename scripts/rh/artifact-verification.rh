@@ -182,7 +182,10 @@ fn entry() {
         "artifact_release_dirty"
     );
 
-    let cli = std::path::join(dist, "agenterm-cli.exe").display;
+    // The standalone agenterm-cli.exe retired with the CLI merge; every CLI
+    // probe goes through the shipped GUI PE's `cli` forwarder (the probe
+    // argv below already carried the `cli` prefix for exactly this shape).
+    let cli = std::path::join(dist, "agenterm.exe").display;
     let control_center =
         std::path::join(dist, "agenterm-cc.exe").display;
     let metadata_version = "" + metadata.version;
