@@ -155,7 +155,7 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
 ### 5.3 清单(2026-08-09 首采,13 项)
 | 位置 | 符号 | 疑似来源 | 状态 |
 |---|---|---|---|
-| crates/agenterm-rh/transpile.rs:134 | `emit_scope_json_expr` | rh AOT lane | 冷却中 |
+| crates/agenterm-rh/transpile.rs:134 | `emit_scope_json_expr` | rh AOT lane | `#[expect(dead_code)]` 表态(CI clippy 红提前终结冷却;仍无人接线则到期删除) |
 | src/client/mod.rs:5 | `use BufRead` | retirement 波次残留 | 冷却中 |
 | src/platform/adapters/unix/frontend/mod.rs:51 | `TerminalAppearanceOverride` | frontend lane | 冷却中 |
 | src/platform/mod.rs:50 | `ConsoleKey`/`LineBuffer`/`LineHistory` | console-line-editor 在制 | 冷却中 |

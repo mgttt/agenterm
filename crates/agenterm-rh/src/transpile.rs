@@ -131,6 +131,13 @@ impl EmitCtx {
         if self.cdylib { "0" } else { "Dynamic::UNIT" }
     }
 
+    // Unreferenced today (CI's dead-code gate proved it): kept under an
+    // explicit expectation instead of deleted because it is a complete,
+    // typed scope→JSON emitter that the AOT lane may be mid-wiring. Listed
+    // in plan/design-binary-size-and-reuse.md §5.3 — if it is still
+    // unreferenced when that inventory's cooling window closes, delete it
+    // (git history is the archive); wiring it up removes this attribute.
+    #[expect(dead_code, reason = "graybox inventory §5.3: possible in-progress AOT wiring")]
     fn emit_scope_json_expr(&self, out: &mut String) {
         if self.scope.is_empty() {
             out.push_str("\"{}\"");
@@ -1236,25 +1243,23 @@ fn collect_param_kind_upgrades_in_stmt(
             collect_param_kind_upgrades_in_expr(&boxed.1, def, local_fn_sigs, aliases, upgrades);
         }
         Stmt::Assignment(boxed, ..) => {
-            if let Expr::Index(index_box, ..) = &boxed.1.lhs {
-                if let Expr::Variable(ident, ..) = &index_box.lhs {
-                    if let Some(param_index) = def
-                        .params
-                        .iter()
-                        .position(|param| param.as_str() == ident.1.as_str())
-                    {
-                        let probe = EmitCtx::new(true);
-                        let kind = if ident.1.as_str() == "args"
-                            || matches!(boxed.1.rhs, Expr::StringConstant(..))
-                            || is_explicit_string_expr(&boxed.1.rhs, &probe)
-                        {
-                            ValueKind::StringList
-                        } else {
-                            ValueKind::Json
-                        };
-                        upgrades.push((param_index, kind));
-                    }
-                }
+            if let Expr::Index(index_box, ..) = &boxed.1.lhs
+                && let Expr::Variable(ident, ..) = &index_box.lhs
+                && let Some(param_index) = def
+                    .params
+                    .iter()
+                    .position(|param| param.as_str() == ident.1.as_str())
+            {
+                let probe = EmitCtx::new(true);
+                let kind = if ident.1.as_str() == "args"
+                    || matches!(boxed.1.rhs, Expr::StringConstant(..))
+                    || is_explicit_string_expr(&boxed.1.rhs, &probe)
+                {
+                    ValueKind::StringList
+                } else {
+                    ValueKind::Json
+                };
+                upgrades.push((param_index, kind));
             }
             collect_param_kind_upgrades_in_expr(&boxed.1.lhs, def, local_fn_sigs, aliases, upgrades);
             collect_param_kind_upgrades_in_expr(&boxed.1.rhs, def, local_fn_sigs, aliases, upgrades);
@@ -2001,7 +2006,7 @@ fn expr_uses_json_param(expr: &Expr, param: &str) -> bool {
                     Expr::Index(index_box, ..)
                         if matches!(&index_box.lhs, Expr::Property(..)) =>
                     {
-                        return true;
+                        true
                     }
                     // `param.len` is shared by strings/arrays — not JSON-only.
                     Expr::Property(property, ..) if property.2.as_str() == "len" => false,
@@ -11043,7 +11048,7 @@ fn comparison_binary(
                 out.push_str(list);
                 out.push_str(" == vec![");
                 emit_stringish(out, rhs, ctx)?;
-                out.push_str("]");
+                out.push(']');
             } else if op == "!=" {
                 out.push('!');
                 out.push('(');
