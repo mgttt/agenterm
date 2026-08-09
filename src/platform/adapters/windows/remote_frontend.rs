@@ -2510,6 +2510,22 @@ impl RemoteWindowState {
             .window
             .pointer_capture_owned()
             .context("query native pointer capture ownership")?;
+        // Composer draft/caret facts for the top-level `composer` object
+        // below. The native EDIT reports UTF-16 offsets over `\r\n` text;
+        // both are normalized to char indices over the `\n` draft so the
+        // numbers mean the same thing they mean on the Unix host.
+        let composer_raw = self.control_text(self.edit);
+        let (selection_start, selection_end) =
+            self.window.control_selection(self.edit).unwrap_or((0, 0));
+        let composer_anchor = crate::frontend::text_selection::utf16_edit_offset_to_char_index(
+            &composer_raw,
+            selection_start,
+        );
+        let composer_caret = crate::frontend::text_selection::utf16_edit_offset_to_char_index(
+            &composer_raw,
+            selection_end,
+        );
+        let composer_draft = composer_raw.replace("\r\n", "\n");
         let visible_rows = remote_tree_rows(&source.tabs);
         let tabs = source
             .tabs
@@ -2917,6 +2933,30 @@ impl RemoteWindowState {
                 "target": self.pending_terminal_paste
                     .as_ref()
                     .map(|pending| pending.tab_id.as_str()),
+            },
+            // Composer draft/caret state, mirroring the Unix snapshot's
+            // top-level `composer` object (parity gap F7). The draft lives
+            // in a native EDIT control: offsets arrive as UTF-16 code units
+            // over `\r\n` text and are mapped to char indices over the
+            // `\n`-normalized draft. EM_GETSEL cannot report selection
+            // *direction*, so `anchor`/`caret` are the ordered range ends —
+            // a backwards drag reads identically to a forwards one.
+            "composer": {
+                "draft_length": composer_draft.chars().count(),
+                "focused": self.window.focused_target() == FocusTarget::Control(self.edit),
+                "caret": composer_caret,
+                "anchor": composer_anchor,
+                "selection": (composer_anchor != composer_caret).then(|| {
+                    serde_json::json!({
+                        "start": composer_anchor,
+                        "end": composer_caret,
+                        "text": composer_draft
+                            .chars()
+                            .skip(composer_anchor)
+                            .take(composer_caret - composer_anchor)
+                            .collect::<String>(),
+                    })
+                }),
             },
             "system_menu": {
                 "toggle_tabs": {

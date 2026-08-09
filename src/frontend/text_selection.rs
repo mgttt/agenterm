@@ -210,6 +210,31 @@ pub(crate) fn line_bounds(text: &str, offset: usize) -> (usize, usize) {
 /// Mirrors the terminal grid's convention (and xterm's): the selection grows
 /// from whichever endpoint is further from the new position, so shift-clicking
 /// past either edge extends rather than inverting the selection.
+/// Maps a native edit control's UTF-16 code-unit offset to a char index in
+/// the CRLF-normalized (`\r\n` → `\n`) view of `raw_text`.
+///
+/// Multiline Win32 EDIT controls store and report offsets against `\r\n`
+/// line breaks, while the product's draft semantics (and the Unix
+/// `TextCursor`) count chars over `\n` text. `\r` chars therefore consume
+/// UTF-16 units without advancing the returned index; offsets past the end
+/// clamp to the normalized length. Surrogate pairs (one char, two UTF-16
+/// units) are counted as a single char, matching `chars().count()`.
+pub(crate) fn utf16_edit_offset_to_char_index(raw_text: &str, utf16_offset: u32) -> usize {
+    let target = utf16_offset as usize;
+    let mut consumed_utf16 = 0usize;
+    let mut char_index = 0usize;
+    for character in raw_text.chars() {
+        if consumed_utf16 >= target {
+            break;
+        }
+        consumed_utf16 += character.len_utf16();
+        if character != '\r' {
+            char_index += 1;
+        }
+    }
+    char_index
+}
+
 pub(crate) fn shift_extend_anchor(cursor: TextCursor, target: usize) -> usize {
     if !cursor.has_selection() {
         return cursor.anchor();
@@ -227,6 +252,25 @@ pub(crate) fn shift_extend_anchor(cursor: TextCursor, target: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf16_edit_offsets_skip_cr_and_count_surrogate_pairs_once() {
+        // "ab\r\ncd" — EDIT reports offsets over the raw \r\n text.
+        let raw = "ab\r\ncd";
+        assert_eq!(utf16_edit_offset_to_char_index(raw, 0), 0);
+        assert_eq!(utf16_edit_offset_to_char_index(raw, 2), 2); // after 'b'
+        // Offset 3 = after '\r': no char consumed for it.
+        assert_eq!(utf16_edit_offset_to_char_index(raw, 3), 2);
+        assert_eq!(utf16_edit_offset_to_char_index(raw, 4), 3); // after '\n'
+        assert_eq!(utf16_edit_offset_to_char_index(raw, 6), 5); // end
+        // Clamp past the end.
+        assert_eq!(utf16_edit_offset_to_char_index(raw, 99), 5);
+        // '😀' is one char but two UTF-16 units.
+        let emoji = "a😀b";
+        assert_eq!(utf16_edit_offset_to_char_index(emoji, 1), 1);
+        assert_eq!(utf16_edit_offset_to_char_index(emoji, 3), 2); // after the pair
+        assert_eq!(utf16_edit_offset_to_char_index(emoji, 4), 3);
+    }
 
     #[test]
     fn caret_has_no_selection_and_reports_its_offset() {

@@ -276,6 +276,25 @@ impl ControlWindowBackend for Backend {
         }
         Ok(())
     }
+    fn control_selection(&self, id: ControlId) -> Result<(u32, u32), ControlWindowError> {
+        // EM_GETSEL reports the ordered selection range in UTF-16 code
+        // units; a collapsed selection has start == end at the caret. The
+        // native EDIT control does not expose selection *direction*, so
+        // callers cannot distinguish an anchor-first from a caret-first
+        // range — the contract is (start, end), nothing more.
+        const EM_GETSEL: u32 = 0x00B0;
+        let mut start: u32 = 0;
+        let mut end: u32 = 0;
+        unsafe {
+            SendMessageW(
+                self.control(id)?,
+                EM_GETSEL,
+                &mut start as *mut u32 as usize,
+                &mut end as *mut u32 as isize,
+            );
+        }
+        Ok((start, end))
+    }
     fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {
         unsafe {
             SendMessageW(self.control(id)?, WM_COPY, 0, 0);

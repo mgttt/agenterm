@@ -313,6 +313,7 @@ pub(crate) trait ControlWindowBackend {
     fn set_control_text(&self, id: ControlId, text: &str) -> Result<(), ControlWindowError>;
     fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError>;
     fn set_control_max_length(&self, id: ControlId, chars: u32) -> Result<(), ControlWindowError>;
+    fn control_selection(&self, id: ControlId) -> Result<(u32, u32), ControlWindowError>;
     fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn paste_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn select_all_control_text(&self, id: ControlId) -> Result<(), ControlWindowError>;
@@ -427,6 +428,13 @@ impl ControlWindow {
         chars: u32,
     ) -> Result<(), ControlWindowError> {
         self.0.set_control_max_length(id, chars)
+    }
+    /// Reports the native text control's ordered selection range in UTF-16
+    /// code units; a collapsed selection has `start == end` at the caret.
+    /// Native edit controls do not expose selection direction, so this is
+    /// `(start, end)` with `start <= end`, never anchor/focus.
+    pub fn control_selection(&self, id: ControlId) -> Result<(u32, u32), ControlWindowError> {
+        self.0.control_selection(id)
     }
     /// Copies the current native text-control selection to the platform clipboard.
     pub fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {

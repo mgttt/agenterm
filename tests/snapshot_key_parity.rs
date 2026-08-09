@@ -55,18 +55,14 @@ const WINDOWS_ONLY_SNAPSHOT_KEYS: &[&str] = &[
     "time",
 ];
 
-/// Keys today emitted only by the Unix embedded frontend. `caret`,
-/// `anchor`, `draft_length` are the open F7 parity gap (windows should
-/// gain them, not unix lose them); the rest are embedded-window/session
-/// facts the remote client has no analog for yet.
+/// Keys today emitted only by the Unix embedded frontend:
+/// embedded-window/session facts the remote client has no analog for yet.
+/// (`caret`/`anchor`/`draft_length`/`focused` left this list when the
+/// windows host gained the top-level `composer` object — F7 closed.)
 const UNIX_ONLY_SNAPSHOT_KEYS: &[&str] = &[
     "active_window_id",
     "add",
-    "anchor",
     "as_window",
-    "caret",
-    "draft_length",
-    "focused",
     "menu",
     "session",
     "tab_count",

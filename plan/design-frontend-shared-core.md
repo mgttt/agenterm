@@ -68,12 +68,13 @@
 1. **元组契约反转**(潜伏漂移):server 上下文菜单几何,Win 侧构造
    `(frame, close, as_window)` 而 Unix 返回 `(frame, as_window, close)`;当前净行为
    恰好一致,但任何一侧重排即静默错位。合并到 server_strip_ui.rs 的命名字段结构即消除。
-2. **F7**(已在 parity-audit 挂账):Win 快照缺 `caret`/`anchor`/`draft_length`。
-   实际 scope(2026-08-09 勘察):Win composer 是原生 EDIT 控件,文本在控件里
-   (`control_text(self.edit)`),选区必须新增 ControlWindow 契约方法
-   `control_selection`(EM_GETSEL)+ Windows adapter 实现 + 测试替身;返回的是
-   UTF-16 code-unit 偏移,须换算为字符索引才与 Unix `TextCursor` 语义对齐,
-   且要先核查多行 EDIT 的 CRLF 与服务器草稿 `\n` 的往返一致性。独立成刀。
+2. **F7 —— 已关闭(2026-08-09)**:ControlWindow 契约新增 `control_selection`
+   (EM_GETSEL,序化 UTF-16 区间);共享 `text_selection::utf16_edit_offset_to_char_index`
+   做 UTF-16→字符索引换算(CRLF 感知、代理对按单字符计,14 项单测);Win 快照补齐
+   顶层 `composer` 对象(draft_length/focused/caret/anchor/selection),
+   snapshot_key_parity 的 UNIX_ONLY allowlist 依活性检查删去 4 条。
+   已知语义边界:原生 EDIT 不暴露选区方向,anchor/caret 为序化端点——反向拖拽
+   与正向读数相同;若未来要方向,需改用 RichEdit 或跟踪键鼠序列。
 3. **shift 扩选 Win 缺失**(见 #2)。
 4. **settings modal 几何漂移**(见 #3)。
 
