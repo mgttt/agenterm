@@ -3,18 +3,11 @@ name = "agenterm-nativecore"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
-description = "dynacore (真身) v1: neutral IR with raw-memory ops, produce-time verification gate (incl. per-intent native-call-contract checks), content-addressed pack store, and an interpreter binding seven intents directly to real Win32 APIs -- no compiler in the loop, no executable memory ever requested. Standalone crate, deliberately NOT a root-workspace member (see plan/design-dynacore-native-core.md §5.1) -- this round only proves the mechanism, integration is a later round."
+description = "dynacore (真身) v1: neutral IR with raw-memory ops, produce-time verification gate (incl. per-intent native-call-contract checks), content-addressed pack store, and an interpreter binding seven intents directly to real Win32 APIs -- no compiler in the loop, no executable memory ever requested. Joined the root workspace as an `agenterm` dependency in the product-integration round (see plan/design-dynacore-native-core.md §7)."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mgttt/agenterm"
 publish = false
 autobins = false
-
-# Deliberately its own workspace root (empty table below) so this crate compiles
-# and tests completely independently of the repo-root workspace and its
-# `agenterm-dynacore` (logic pack) member -- per the design doc's §5 acceptance
-# criterion 1 ("不进根 workspace 的产品依赖图") and the task's hard rule against
-# touching crates/agenterm-dynacore/** or the root Cargo.toml's `members` list.
-[workspace]
 
 [lib]
 name = "agenterm_nativecore"

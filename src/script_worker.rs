@@ -670,6 +670,24 @@ fn execute_inner(
         Err(error) => return Err(configuration_error("dynacore_backend", error)),
     }
 
+    // nativecore pack: opt-in via AGENTERM_NATIVECORE_PACK_STORE +
+    // AGENTERM_NATIVECORE_PACK_HASH, independent of the dynacore pack pair
+    // above and of AGENTERM_SCRIPT_BACKEND — only fires when a caller has
+    // explicitly pointed at a nativecore pack store+hash, so it cannot
+    // change behavior for any existing invocation that doesn't set those
+    // two env vars.
+    //
+    // No `fleet_bridge` to pass through here (unlike the dynacore branch
+    // above): nativecore intents call `seam.rs::do_intent` directly onto
+    // real Win32 APIs, not through a fleet broker — see
+    // `script_backend::try_execute_nativecore_pack_invocation`'s doc and
+    // `plan/design-dynacore-native-core.md` §7.1.
+    match crate::script_backend::try_execute_nativecore_pack_invocation(invocation.operation) {
+        Ok(Some(result)) => return Ok((result.stdout, result.value)),
+        Ok(None) => {}
+        Err(error) => return Err(configuration_error("nativecore_backend", error)),
+    }
+
     // rh backend: no `#[cfg(not(test))]` gate — rh's `execute_inner` unit
     // tests (below) rely on this branch actually running.
     if crate::script_engine::RhEngineBackend.enabled() {

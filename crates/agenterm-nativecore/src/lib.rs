@@ -6,10 +6,10 @@
 //! (`verify.rs`'s F1 fix) and a bake-and-detect layout self-check
 //! (`declare.rs`, Q13's pattern) added from day one.
 //!
-//! Deliberately NOT a member of the root workspace and NOT depended on by
-//! the `agenterm` product crate (see `Cargo.toml`'s `[workspace]` table and
-//! the design doc §5 acceptance criterion 1) — this crate proves the
-//! mechanism stands on its own; wiring it into the product is a later round.
+//! Joined the root workspace and the `agenterm` product crate's dependency
+//! graph in the product-integration round (design doc §7) — see
+//! `src/script_nativecore_pack.rs`/`src/script_backend.rs`'s
+//! `try_execute_nativecore_pack_invocation` for the product entry points.
 //!
 //! x86_64/Windows only (design doc §3). Most of this crate's real
 //! functionality (`declare`, `seam`, and the native-call parts of

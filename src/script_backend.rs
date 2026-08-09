@@ -300,6 +300,75 @@ pub fn try_execute_dynacore_pack_invocation(
     }
 }
 
+/// nativecore invocation result — same "own small type, not
+/// `ScriptEngineBackend`'s result shape" reasoning as `DynacoreInvocationResult`
+/// (see that type's doc); the two are not unified because nativecore packs
+/// have no fleet-call surface to report through.
+pub struct NativecoreInvocationResult {
+    pub stdout: String,
+    pub value: Option<serde_json::Value>,
+}
+
+/// Runs a cached nativecore pack
+/// (`crate::script_nativecore_pack::cached_nativecore_pack`, configured via
+/// `AGENTERM_NATIVECORE_PACK_STORE`/`AGENTERM_NATIVECORE_PACK_HASH`) if one is
+/// configured. Mirrors `try_execute_dynacore_pack_invocation`'s shape, minus
+/// a fleet bridge parameter: nativecore intents call `seam.rs::do_intent`
+/// directly onto real Win32 APIs (`plan/design-dynacore-native-core.md` §7.1
+/// — "没有 bridge 要穿过去"), so there is no broker to plumb through and no
+/// `Run`/`Eval`-without-a-bridge error case to report. `Ok(None)` means "no
+/// pack configured, fall through to the dynacore/rh/lua/qjs/sql chain",
+/// `Ok(Some(_))` is a completed run, `Err` covers a verification failure or a
+/// step-limit abort.
+///
+/// nativecore packs are binary content-addressed artifacts, not
+/// human-authored text source — this deliberately does NOT go through the
+/// `ScriptEngineBackend` trait, for the same reason
+/// `try_execute_dynacore_pack_invocation` does not (see that function's
+/// doc). `script_worker.rs::execute_inner` calls this directly, before
+/// dispatching to any `ScriptEngineBackend`.
+pub fn try_execute_nativecore_pack_invocation(
+    operation: ScriptOperation,
+) -> Result<Option<NativecoreInvocationResult>, String> {
+    let Some(pack) = crate::script_nativecore_pack::cached_nativecore_pack() else {
+        return Ok(None);
+    };
+    // Re-verifying here (cheap — see agenterm-nativecore's verify.rs doc:
+    // "produce-time, no execution, one pass") is what actually produces the
+    // `VerifiedModule` this call needs: `VerifiedModule<'a>` borrows the
+    // `Module` it verifies, so the OnceLock-cached pack can only hold the
+    // owned `Module` (load-time verification in `load_nativecore_pack`
+    // already proved it well-formed once; this is not a new, unproven gate).
+    let verified = agenterm_nativecore::verify::verify(&pack.module)
+        .map_err(|fault| format!("nativecore pack failed verification: {fault:?}"))?;
+
+    match operation {
+        // Mirrors try_execute_dynacore_pack_invocation's own Api arm:
+        // unreachable in practice (execute_inner short-circuits
+        // ScriptOperation::Api before any backend dispatch), kept only so
+        // this match stays exhaustive.
+        ScriptOperation::Api => Ok(None),
+        ScriptOperation::Check => Ok(Some(NativecoreInvocationResult {
+            stdout: String::new(),
+            value: None,
+        })),
+        ScriptOperation::Run | ScriptOperation::Eval => {
+            let outcome = agenterm_nativecore::eval_core::run(&verified);
+            match outcome.termination {
+                agenterm_nativecore::eval_core::Termination::Exited(value) => {
+                    Ok(Some(NativecoreInvocationResult {
+                        stdout: String::new(),
+                        value: Some(serde_json::Value::from(value)),
+                    }))
+                }
+                agenterm_nativecore::eval_core::Termination::StepLimitExceeded => Err(
+                    "nativecore pack exceeded its step limit before finishing".to_owned(),
+                ),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
