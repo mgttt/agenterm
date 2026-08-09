@@ -222,7 +222,7 @@ enum Invocation {
 }
 
 impl Invocation {
-    const ALL: [Invocation; 1] = [Invocation::Standalone];
+    const ALL: [Invocation; 2] = [Invocation::Standalone, Invocation::Subcommand];
 
     /// Resolves this invocation for `engine` into the executable to spawn
     /// and the full argv to pass it (the standalone binary's own `args`
@@ -298,28 +298,41 @@ fn stderr_lossy(output: &Output) -> std::borrow::Cow<'_, str> {
 /// testing what it claims to test.
 fn normalize_duration_ms(mut output: Output) -> Output {
     if let Ok(text) = std::str::from_utf8(&output.stdout) {
-        let mut normalized = text.to_owned();
-        for (needle, replacement_is_numeric) in
-            [("\"duration_ms\": ", true), ("\"invocation_id\": \"", false)]
-        {
-            while let Some(start) = normalized.find(needle) {
-                let value_start = start + needle.len();
-                let value_end = if replacement_is_numeric {
-                    normalized[value_start..]
-                        .find(|c: char| !c.is_ascii_digit())
-                        .map_or(normalized.len(), |offset| value_start + offset)
-                } else {
-                    normalized[value_start..]
-                        .find('"')
-                        .map_or(normalized.len(), |offset| value_start + offset)
-                };
-                let replacement = if replacement_is_numeric { "0" } else { "REDACTED" };
-                normalized.replace_range(value_start..value_end, replacement);
-            }
-        }
-        output.stdout = normalized.into_bytes();
+        let after_duration = redact_json_field(text, "\"duration_ms\": ", |rest| {
+            rest.find(|c: char| !c.is_ascii_digit())
+        });
+        let after_invocation_id =
+            redact_json_field(&after_duration, "\"invocation_id\": \"", |rest| rest.find('"'));
+        output.stdout = after_invocation_id.into_bytes();
     }
     output
+}
+
+/// Single left-to-right pass replacing every value that follows `needle` in
+/// `text` with `REDACTED`(-shaped) content, where `find_value_end` locates
+/// the end of that value within the remaining slice. Builds a new string by
+/// always slicing from a strictly-advancing cursor (`rest`, which shrinks by
+/// at least `needle.len()` each iteration) rather than repeatedly
+/// `str::find`-ing the whole buffer from position 0 — the earlier version of
+/// this test did exactly that and looped forever the moment a redacted
+/// numeric value ("0") was itself a stable digit run that the same needle +
+/// digit-scan would keep "finding" and no-op-replacing on every pass.
+fn redact_json_field(
+    text: &str,
+    needle: &str,
+    find_value_end: impl Fn(&str) -> Option<usize>,
+) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(offset) = rest.find(needle) {
+        let value_start = offset + needle.len();
+        result.push_str(&rest[..value_start]);
+        let value_end = find_value_end(&rest[value_start..]).map_or(rest.len(), |o| value_start + o);
+        result.push_str("REDACTED");
+        rest = &rest[value_end..];
+    }
+    result.push_str(rest);
+    result
 }
 
 /// Runs `scenario` once per [`Invocation`] for `engine` and, on top of
