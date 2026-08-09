@@ -83,6 +83,17 @@ fn entry() {
             let executable_role = "" + executable.role;
             let path =
                 std::path::join(binary_directory, executable_name).display;
+            // `agenterm.com` only exists after staging renames it; a raw
+            // cargo target dir (cross lanes probe it directly) carries the
+            // bin name `agenterm-com.exe` instead. Accept the source name
+            // exactly like artifact_files::stage maps it.
+            if std::fs::exists(path) == 0 && executable_name == "agenterm.com" {
+                let cargo_path =
+                    std::path::join(binary_directory, "agenterm-com.exe").display;
+                if std::fs::exists(cargo_path) {
+                    path = cargo_path;
+                }
+            }
             require(
                 std::fs::exists(path),
                 "client_smoke_missing:" + executable_name

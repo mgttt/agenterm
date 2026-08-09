@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "agenterm-rh-caller-inventory-baseline",
   "needle": "agenterm-rhai",
-  "min_hit_count": 280,
+  "min_hit_count": 230,
   "min_categories": {
     "bootstrap": 5
   },

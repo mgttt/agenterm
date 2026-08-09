@@ -65,7 +65,7 @@ fn entry() {
             "python3",
             [
                 "-c",
-                "open(sys.argv[1],'w',encoding='utf-8').write('{\\\"missing\\\":')",
+                "import sys; open(sys.argv[1],'w',encoding='utf-8').write('{\\\"missing\\\":')",
                 bad_json
             ],
             5000
@@ -75,7 +75,7 @@ fn entry() {
             "python3",
             [
                 "-c",
-                "open(sys.argv[1],'wb').write(bytes([255,254,253]))",
+                "import sys; open(sys.argv[1],'wb').write(bytes([255,254,253]))",
                 bad_utf8
             ],
             5000
@@ -85,7 +85,7 @@ fn entry() {
             "python3",
             [
                 "-c",
-                "open(sys.argv[1],'w',encoding='utf-8').write('<<<<<<< ours\\n=======\\n>>>>>>> theirs\\n')",
+                "import sys; open(sys.argv[1],'w',encoding='utf-8').write('<<<<<<< ours\\n=======\\n>>>>>>> theirs\\n')",
                 conflict
             ],
             5000
@@ -98,7 +98,7 @@ fn entry() {
             "python3",
             [
                 "-c",
-                "open(sys.argv[1],'w',encoding='utf-8').write('let broken = ;')",
+                "import sys; open(sys.argv[1],'w',encoding='utf-8').write('let broken = ;')",
                 bad_rh
             ],
             5000
@@ -120,7 +120,7 @@ fn entry() {
             "python3",
             [
                 "-c",
-                "open(sys.argv[1], encoding='utf-8').read()",
+                "import sys; open(sys.argv[1], encoding='utf-8').read()",
                 bad_utf8
             ],
             5000

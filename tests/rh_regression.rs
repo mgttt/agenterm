@@ -3,8 +3,8 @@
 use agenterm_rh::{RH_HOST_API_VERSION, check, transpile_cdylib};
 
 #[test]
-fn rh_host_api_version_is_ten() {
-    assert_eq!(RH_HOST_API_VERSION, 10);
+fn rh_host_api_version_is_thirteen() {
+    assert_eq!(RH_HOST_API_VERSION, 13);
 }
 
 #[test]
@@ -128,7 +128,10 @@ fn cdylib_transpile_emits_host_runtime_and_entry() {
     let rust = transpile_cdylib(source).expect("transpile");
     assert!(rust.contains("rh_entry"));
     assert!(rust.contains("rh_host_api_version"));
-    assert!(rust.contains("rh_register_host_v10"));
+    // The registration symbol froze at v11; newer host API revisions are
+    // negotiated at runtime via `rh_host_api_version` instead of renaming
+    // the export (see load.rs).
+    assert!(rust.contains("rh_register_host_v11"));
 }
 
 #[test]
@@ -156,7 +159,7 @@ fn json_schema_fixture_transpiles_without_interpreter_fallback() {
             .contains("rh_json_int_path(&document, &[\"schema_version\"])")
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 }
 
 #[test]
@@ -185,7 +188,7 @@ fn json_array_fixture_executes_natively_without_interpreter() {
             .contains("rh_json_int_path(&executable, &[\"release_budget_bytes\"])")
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let dir = std::env::temp_dir().join(format!("agenterm-rh-json-array-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -230,7 +233,7 @@ fn json_type_string_fixture_executes_natively_without_interpreter() {
     assert!(output.rust.contains("rh_json_as_str(&name)"));
     assert!(output.rust.contains("format!(\"{}{}\""));
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let dir = std::env::temp_dir().join(format!(
         "agenterm-rh-json-type-string-{}",
@@ -355,7 +358,7 @@ fn string_validate_fixture_executes_natively_without_interpreter() {
     assert!(output.rust.contains("for character in role.chars()"));
     assert!(output.rust.contains("character.to_string()"));
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let dir = std::env::temp_dir().join(format!(
         "agenterm-rh-string-validate-{}",
@@ -394,7 +397,7 @@ fn fail_dynamic_fixture_executes_natively_without_interpreter() {
         output.rust
     );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let dir = std::env::temp_dir().join(format!("agenterm-rh-fail-dynamic-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -422,7 +425,7 @@ fn map_set_membership_fixture_executes_natively_without_interpreter() {
     assert!(output.rust.contains(".insert("), "{}", output.rust);
     assert!(output.rust.contains(".contains("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let dir = std::env::temp_dir().join(format!(
         "agenterm-rh-map-set-membership-{}",
@@ -456,7 +459,7 @@ fn path_metadata_probe_fixture_executes_natively_without_interpreter() {
     assert!(output.rust.contains(".is_symlink"), "{}", output.rust);
     assert!(output.rust.contains(".is_reparse_point"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let previous = std::env::current_dir().expect("current dir");
@@ -497,7 +500,7 @@ fn import_bundle_probe_fixture_executes_natively_without_interpreter() {
     );
     assert!(!output.rust.contains("helper::"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let bundled =
         agenterm_rh::bundle_project_source(&repo, source).expect("bundle import-bundle-probe");
@@ -532,7 +535,7 @@ fn string_fn_bundle_fixture_executes_natively_without_interpreter() {
     assert!(output.rust.contains("rh_print(&"), "{}", output.rust);
     assert!(output.rust.contains("rh_json_as_str(&"), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1);
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
     let bundled =
         agenterm_rh::bundle_project_source(&repo, source).expect("bundle string-fn-bundle");

@@ -17,7 +17,16 @@ fn crate_fixture(name: &str) -> String {
         .unwrap_or_else(|error| panic!("read crate fixture {name}: {error}"))
 }
 
-fn assert_native_fixture(name: &str, needles: &[&str], anti_needles: &[&str]) {
+/// `expected_host_evals` locks how many expressions still escape to the
+/// host-eval fallback. Rev 84 emits `.len` comparisons natively
+/// (`rh_json_array_len`), so most probes are now fully native (0); a probe
+/// that still carries exactly one deliberate escape locks 1.
+fn assert_native_fixture(
+    name: &str,
+    needles: &[&str],
+    anti_needles: &[&str],
+    expected_host_evals: usize,
+) {
     let source = if name.starts_with("rh_") {
         crate_fixture(name)
     } else {
@@ -53,15 +62,15 @@ fn assert_native_fixture(name: &str, needles: &[&str], anti_needles: &[&str]) {
     );
     assert_eq!(
         output.rust.matches("rh_host_eval_int(").count(),
-        1,
+        expected_host_evals,
         "{name}: {}",
         output.rust
     );
 }
 
 #[test]
-fn codegen_revision_is_eighty_two() {
-    assert_eq!(RH_CODEGEN_REVISION, 82);
+fn codegen_revision_is_eighty_four() {
+    assert_eq!(RH_CODEGEN_REVISION, 84);
 }
 
 #[test]
@@ -74,6 +83,7 @@ fn set_map_value_assign_fixture_emits_native_map_key_writes() {
             "rh_json_set_path_key(&mut owned_ids",
         ],
         &["HashSet::<String>::new()"],
+        0,
     );
 }
 
@@ -83,6 +93,7 @@ fn json_param_index_assign_fixture_emits_native_map_key_writes() {
         "json-param-index-assign-probe.rh",
         &["rh_json_set_path_key(&mut states, &[], "],
         &[],
+        0,
     );
 
     let dir = std::env::temp_dir().join(format!(
@@ -102,6 +113,7 @@ fn json_array_index_assign_fixture_emits_native_index_writes() {
         "json-array-index-assign-probe.rh",
         &["rh_json_set_path_index(&mut safe, &[], "],
         &["rh_json_set_path_key(&mut safe"],
+        0,
     );
 }
 
@@ -111,6 +123,7 @@ fn json_array_index_map_return_fixture_emits_index_not_key_path() {
         "json-array-index-map-return-probe.rh",
         &["rh_json_array_get(&matches, "],
         &["rh_json_get_path_key(&matches"],
+        0,
     );
 
     let dir = std::env::temp_dir().join(format!(
@@ -131,6 +144,7 @@ fn set_map_loop_assign_fixture_emits_native_map_key_reads_in_loop() {
         "set-map-loop-assign-probe.rh",
         &["names.insert(rh_json_as_str(&name))"],
         &[],
+        0,
     );
 
     let dir = std::env::temp_dir().join(format!(
@@ -202,7 +216,7 @@ fn snapshot_tabs_index_return_fixture_emits_path_index_not_string_index() {
     );
     assert_eq!(
         output.rust.matches("rh_host_eval_int(").count(),
-        1,
+        0,
         "{}",
         output.rust
     );
@@ -228,6 +242,7 @@ fn working_context_dot_chain_fixture_stays_native_without_extra_host_eval() {
             "rh_json_string_path(&proxy, &[\"source\"])",
         ],
         &[],
+        0,
     );
 }
 
@@ -240,6 +255,7 @@ fn tab_active_map_key_vs_dot_fixture_emits_native_key_and_field_reads() {
             "rh_json_get_path_key(&tab, &[], &String::from(\"active\"))",
         ],
         &[],
+        0,
     );
 }
 
@@ -252,5 +268,6 @@ fn clipboard_get_set_text_fixture_emits_native_host_json_calls() {
             "rh_clipboard_set_text(&String::from(\"native-clipboard-probe\"))",
         ],
         &["rh_host_eval_int(\"rhai::clipboard::"],
+        0,
     );
 }

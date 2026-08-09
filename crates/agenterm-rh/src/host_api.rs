@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 83;
+pub const RH_CODEGEN_REVISION: u32 = 84;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -1612,9 +1612,14 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
          }\n\n\
          fn rh_json_array_len(value: &serde_json::Value, path: &[&str]) -> INT {\n\
-             match rh_json_path(value, path).and_then(serde_json::Value::as_array) {\n\
-                 Some(items) => items.len() as INT,\n\
-                 None => {\n\
+             // `.len` mirrors the interpreter: array length for arrays,\n\
+             // char count for JSON strings (native-ipc-smoke checks\n\
+             // `scope_id.len == 39` on a json-sourced string). Everything\n\
+             // else stays fail-closed.\n\
+             match rh_json_path(value, path) {\n\
+                 Some(serde_json::Value::Array(items)) => items.len() as INT,\n\
+                 Some(serde_json::Value::String(text)) => text.chars().count() as INT,\n\
+                 _ => {\n\
                      let _ = rh_fail(&format!(\"json_array_path: {}\", path.join(\".\")));\n\
                      0\n\
                  }\n\

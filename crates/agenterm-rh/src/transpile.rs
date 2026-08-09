@@ -11049,6 +11049,16 @@ fn is_json_null_compare_value(expr: &Expr, ctx: &EmitCtx) -> bool {
 /// whose inferred return kind is Json (the bundled `alias__null_json()`
 /// helper shape the qualification gate compares against).
 fn is_json_equality_operand(expr: &Expr, ctx: &EmitCtx) -> bool {
+    // `doc.items.len` parses as a json path ending in `len`, but it is an
+    // INT surface, not a json value — routing `a.len == b.len` through
+    // serde_json equality emitted `rh_json_get_path(.., ["len"])`, which
+    // fails closed at runtime (prd-alignment's module-count compare).
+    if json_array_len_path(expr, ctx).is_some()
+        || json_object_keys_len_path(expr, ctx).is_some()
+        || set_keys_len_path(expr, ctx).is_some()
+    {
+        return false;
+    }
     if let Expr::FnCall(call, ..) = expr
         && call.namespace.is_empty()
         && call.args.is_empty()
@@ -11367,6 +11377,30 @@ mod tests {
         assert!(
             rust.contains("target_argument.clone()"),
             "PathBuf::from(variable) must clone the passthrough: {rust}"
+        );
+    }
+
+    /// `a.len == b.len` on json arrays is an INT compare of lengths; the
+    /// json-to-json equality lane must not capture it and turn `len` into
+    /// a path key (prd-alignment died at runtime on `json_path: len`).
+    #[test]
+    fn json_len_compare_emits_array_len_not_path_lookup() {
+        let rust = transpile_cdylib(
+            "fn entry() {\n\
+                 let actual = [];\n\
+                 let linked = [];\n\
+                 if actual.len == linked.len { return 1; }\n\
+                 0\n\
+             }",
+        )
+        .expect("transpile");
+        assert!(
+            rust.contains("rh_json_array_len"),
+            "len compare should use rh_json_array_len: {rust}"
+        );
+        assert!(
+            !rust.contains("&[\"len\"]"),
+            "len must not become a json path key: {rust}"
         );
     }
 

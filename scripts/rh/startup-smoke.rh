@@ -327,11 +327,11 @@ fn entry() {
             let executable_name = "" + process.executable_name;
             let executable = executable_name.to_lower();
             if executable == "agenterm-rh"
-                    || executable == "agenterm-rh.exe"
-            test_harness::require(
+                    || executable == "agenterm-rh.exe" {
+                test_harness::require(
                     worker_ids_before.contains(process.id) != 0,
                     "startup_nested_script_worker:" + process.id
-            );
+                );
             }
             process_after_index = process_after_index + 1;
         }
