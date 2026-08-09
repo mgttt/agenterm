@@ -25,7 +25,7 @@ pub use agenterm_script_common::check_many::{
 
 use crate::{check::check, error::SqlError};
 
-const SQL_CHECK_MANIFEST_KIND: &str = "agenterm-sql-check-manifest";
+pub(crate) const SQL_CHECK_MANIFEST_KIND: &str = "agenterm-sql-check-manifest";
 
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, SqlError> {
     // Unreadable manifest, malformed JSON, wrong `kind` — usage/configuration,

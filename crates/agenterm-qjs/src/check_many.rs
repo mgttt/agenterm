@@ -20,7 +20,7 @@ pub use agenterm_script_common::check_many::{
 
 use crate::{check::check_with_project_validation, error::QjsError};
 
-const QJS_CHECK_MANIFEST_KIND: &str = "agenterm-qjs-check-manifest";
+pub(crate) const QJS_CHECK_MANIFEST_KIND: &str = "agenterm-qjs-check-manifest";
 
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, QjsError> {
     // Unreadable manifest, malformed JSON, wrong `kind` — all

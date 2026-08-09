@@ -81,6 +81,91 @@ where
         .ok_or_else(|| format!("missing value after {option}"))
 }
 
+// ── whole-command bodies shared by qjs/sql ──────────────────────────────
+//
+// Same story as `parse_check_many_cli` above, one layer up: qjs's and sql's
+// `run_check_many_command`/`run_corpus_scan_command` were byte-identical —
+// argv handling, report rendering, exit-code selection — differing only in
+// the error enum each wrapped the message into, and every error path in
+// both bodies classified as usage-level. So the shared implementation
+// speaks `String` and each engine wraps once at the call site
+// (`map_err(QjsError::Usage)` / `map_err(SqlError::Usage)`), which is
+// provably the same classification those bodies already applied everywhere.
+// lua's variants are NOT thin-wrappable yet: its check-many human output
+// and its corpus-scan `--dir`-with-no-value behavior (falls back to CWD
+// instead of erroring) genuinely diverge — pinned by
+// `tests/script_cli_verb_parity.rs`; aligning lua is that lane's call, not
+// a refactor's side effect.
+
+use crate::check_many::{CheckManyManifest, CheckManyReport};
+use crate::corpus_scan::CorpusScanReport;
+
+/// `check-many --manifest <file> [...]` — parse argv, read the manifest via
+/// the engine-supplied reader (which owns the engine's manifest `kind`
+/// check), run the engine-supplied driver, render the report (JSON or the
+/// shared human form), and return the report's own exit code.
+pub fn run_check_many_command(
+    args: &[String],
+    read_manifest: impl FnOnce(&PathBuf) -> Result<CheckManyManifest, String>,
+    run: impl FnOnce(CheckManyManifest, crate::check_many::CheckManyOptions) -> CheckManyReport,
+) -> Result<u8, String> {
+    let parsed = parse_check_many_cli(args.iter().cloned())?;
+    let manifest = read_manifest(&parsed.manifest_path)?;
+    let report = run(manifest, parsed.options);
+    if parsed.json {
+        let encoded = serde_json::to_string_pretty(&report).map_err(|err| err.to_string())?;
+        println!("{encoded}");
+    } else if report.ok {
+        println!("OK ({} files)", report.checked_files);
+    } else {
+        for failure in &report.failures {
+            eprintln!(
+                "{}: {}",
+                failure.path,
+                serde_json::json!({
+                    "code": failure.code,
+                    "message": failure.message,
+                    "invocation_id": failure.invocation_id,
+                    "exit_class": failure.exit_class,
+                })
+            );
+        }
+    }
+    Ok(report.exit_code())
+}
+
+/// `corpus-scan [--dir <dir>]` — resolve the scan root (explicit `--dir`,
+/// else CWD; a dangling `--dir` with no value is a hard error, not a CWD
+/// fallback), scan via the engine-supplied scanner, render, and pick the
+/// exit code (0 all green, 1 any failure).
+pub fn run_corpus_scan_command(
+    args: &[String],
+    scan_directory: impl FnOnce(&std::path::Path) -> Result<CorpusScanReport, String>,
+) -> Result<u8, String> {
+    let dir = if has_flag(args, "--dir") {
+        // `usage` is unreachable here: `has_flag` already guarantees the
+        // flag is present, so the only way `require_flag_value` can fail
+        // is the "no value follows" branch.
+        PathBuf::from(require_flag_value(args, "--dir", "unreachable")?)
+    } else {
+        std::env::current_dir().map_err(|err| format!("corpus_scan_cwd: {err}"))?
+    };
+    let report = scan_directory(&dir).map_err(|err| format!("corpus_scan: {err}"))?;
+    if report.failures == 0 {
+        println!("corpus-scan: {} scripts ok", report.total_scripts);
+        Ok(0)
+    } else {
+        eprintln!(
+            "corpus-scan: {} scripts checked, {} failures",
+            report.total_scripts, report.failures
+        );
+        for failed in &report.failed_files {
+            eprintln!("  {} — {}", failed.path, failed.message);
+        }
+        Ok(1)
+    }
+}
+
 // ── slice-based flag/positional helpers ─────────────────────────────────
 //
 // `agenterm-lua`'s and `agenterm-qjs`'s `main.rs` each hand-rolled a small

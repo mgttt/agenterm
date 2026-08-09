@@ -47,10 +47,7 @@
 
 use std::{fs, path::PathBuf};
 
-use crate::{
-    SQL_VERSION, SqlError, check, has_flag, parse_check_many_cli, positional, read_manifest,
-    require_flag_value, run_check_many,
-};
+use crate::{SQL_VERSION, SqlError, check, positional, run_check_many};
 
 /// Run the `agenterm-sql` CLI over `args` (argv **excluding** argv\[0\],
 /// matching the former `main()`'s `env::args().skip(1)`) and return the
@@ -134,62 +131,31 @@ fn not_implemented_stub(command: &str) -> u8 {
 }
 
 fn run_check_many_command(args: &[String]) -> Result<u8, SqlError> {
-    let parsed = parse_check_many_cli(args.iter().cloned())?;
-    let manifest = read_manifest(&parsed.manifest_path)?;
-    let report = run_check_many(manifest, parsed.options);
-    if parsed.json {
-        let encoded = serde_json::to_string_pretty(&report)
-            .map_err(|err| SqlError::Usage(err.to_string()))?;
-        println!("{encoded}");
-    } else if report.ok {
-        println!("OK ({} files)", report.checked_files);
-    } else {
-        for failure in &report.failures {
-            eprintln!(
-                "{}: {}",
-                failure.path,
-                serde_json::json!({
-                    "code": failure.code,
-                    "message": failure.message,
-                    "invocation_id": failure.invocation_id,
-                    "exit_class": failure.exit_class,
-                })
-            );
-        }
-    }
-    Ok(report.exit_code())
+    // The whole command body — argv, manifest, rendering, exit code — is
+    // the shared qjs/sql implementation; every error path in it is
+    // usage-level (see `agenterm_script_common::cli`'s doc), so one
+    // `map_err(SqlError::Usage)` reproduces the exact former
+    // classification. The manifest reader closure owns sql's `kind` check,
+    // same as `read_manifest` (this crate's typed wrapper) does.
+    agenterm_script_common::cli::run_check_many_command(
+        args,
+        |path| {
+            agenterm_script_common::check_many::read_manifest(
+                path,
+                &[crate::check_many::SQL_CHECK_MANIFEST_KIND],
+            )
+        },
+        run_check_many,
+    )
+    .map_err(SqlError::Usage)
 }
 
 /// `corpus-scan [--dir <dir>]` — scan a directory for `.sql` files and check
-/// syntax, mirroring `agenterm-qjs`'s `run_corpus_scan_command`. Uses
-/// `has_flag` + `require_flag_value` (not the absent/no-value-collapsing
-/// `find_flag_value`) so "no `--dir`" and "`--dir` with nothing after it"
-/// are distinguishable — the latter is a hard error, matching qjs.
+/// syntax. Command body shared with qjs ("no `--dir`" falls back to CWD; a
+/// dangling `--dir` with no value is a hard error).
 fn run_corpus_scan_command(args: &[String]) -> Result<u8, SqlError> {
-    let dir = if has_flag(args, "--dir") {
-        // `usage` is unreachable here: `has_flag` already guarantees the
-        // flag is present, so the only way `require_flag_value` can fail
-        // is the "no value follows" branch.
-        PathBuf::from(require_flag_value(args, "--dir", "unreachable").map_err(SqlError::Usage)?)
-    } else {
-        std::env::current_dir()
-            .map_err(|err| SqlError::Usage(format!("corpus_scan_cwd: {err}")))?
-    };
-    let report = crate::scan_directory(&dir)
-        .map_err(|err| SqlError::Usage(format!("corpus_scan: {err}")))?;
-    if report.failures == 0 {
-        println!("corpus-scan: {} scripts ok", report.total_scripts);
-        Ok(0)
-    } else {
-        eprintln!(
-            "corpus-scan: {} scripts checked, {} failures",
-            report.total_scripts, report.failures
-        );
-        for failed in &report.failed_files {
-            eprintln!("  {} — {}", failed.path, failed.message);
-        }
-        Ok(1)
-    }
+    agenterm_script_common::cli::run_corpus_scan_command(args, |dir| crate::scan_directory(dir))
+        .map_err(SqlError::Usage)
 }
 
 fn read_source(path: &PathBuf) -> Result<String, SqlError> {
