@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | **日期** | 2026-08-09 |
-| **状态** | §1–§6 已实现（`agenterm-nativecore`，25 个测试真机通过，独立编译）；本次追加 §7 产品接入 |
+| **状态** | §1–§7 全部已实现并已推送——`agenterm-nativecore` 进了根 workspace，`try_execute_nativecore_pack_invocation` 接进了 `execute_inner`，2 个产品路径真机黑盒测试（真 `spawn_echo` 子进程、真契约拒绝）+ crate 自身 14 个测试全绿。§7.4 的改名清理仍未做，明确保留 |
 | **前置** | [`research/dynamic-core/SYNTHESIS.md`](../research/dynamic-core/SYNTHESIS.md)（Q0–Q22）；
   [`research/dynamic-core/assembled/`](../research/dynamic-core/assembled/)（Q22，本设计复活它砍掉的那一半） |
 | **纠正** | [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) 描述的东西**不是这个**——
