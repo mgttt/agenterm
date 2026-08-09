@@ -179,13 +179,6 @@ impl UnixAppWindowHandle for PixelWindowHandle<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct TerminalDoubleClick {
-    tab_id: u64,
-    point: TerminalPoint,
-    expires_at: Instant,
-}
-
 /// Inputs that invalidate the persistent terminal layer beyond per-row grid
 /// damage. A geometry or selection difference forces a full layer repaint; a
 /// cursor difference repaints only the previous and current cursor rows.
@@ -294,12 +287,6 @@ impl RenderBuffers {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct RecentTerminalClick {
-    tab_id: u64,
-    point: TerminalPoint,
-    at: Instant,
-}
 
 #[derive(Clone, Copy, Debug)]
 struct RecentSidebarTextClick {
@@ -716,8 +703,7 @@ struct UnixApp {
     terminal_selection_gesture: Option<SelectionGesture>,
     terminal_selection_pointer: Option<(i32, i32)>,
     terminal_selection_autoscroll: Option<AutoScrollStep>,
-    terminal_double_click: Option<TerminalDoubleClick>,
-    recent_terminal_click: Option<RecentTerminalClick>,
+    terminal_click_chain: crate::frontend::selection::ClickChain<u64, TerminalPoint>,
     recent_sidebar_text_click: Option<RecentSidebarTextClick>,
     sidebar_geometry_generation: u64,
     close_confirmation: CloseConfirmation,
@@ -828,8 +814,7 @@ impl UnixApp {
             terminal_selection_gesture: None,
             terminal_selection_pointer: None,
             terminal_selection_autoscroll: None,
-            terminal_double_click: None,
-            recent_terminal_click: None,
+            terminal_click_chain: Default::default(),
             recent_sidebar_text_click: None,
             sidebar_geometry_generation: 0,
             close_confirmation: CloseConfirmation::new(),
@@ -3488,8 +3473,7 @@ impl UnixApp {
         {
             let anchor = shift_extend_anchor(selection, point);
             if self.set_completed_terminal_selection(tab_id, anchor, point, rows, cols) {
-                self.terminal_double_click = None;
-                self.recent_terminal_click = None;
+                self.terminal_click_chain.clear();
                 if let Err(error) = self.copy_terminal_selection() {
                     self.set_status_message(format!("Copy failed: {error}"));
                 }
@@ -3499,54 +3483,42 @@ impl UnixApp {
             return true;
         }
 
-        if self.terminal_double_click.is_some_and(|click| {
-            click.tab_id == tab_id && click.point == point && now <= click.expires_at
-        }) {
-            self.terminal_double_click = None;
-            self.recent_terminal_click = None;
-            if let Some((start, end)) =
-                visible_row_selection(self.tabs[position].parser.screen(), row)
-                && self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
-                && let Err(error) = self.copy_terminal_selection()
-            {
-                self.set_status_message(format!("Copy failed: {error}"));
-            }
-            self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
-            self.request_redraw();
-            return true;
-        }
-
-        if self.recent_terminal_click.is_some_and(|click| {
-            click.tab_id == tab_id
-                && click.point == point
-                && now.duration_since(click.at) <= Duration::from_millis(double_click_ms())
-        }) {
-            self.recent_terminal_click = None;
-            if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point) {
-                if self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
+        let window = Duration::from_millis(double_click_ms());
+        match self
+            .terminal_click_chain
+            .classify(&tab_id, point, now, window, true)
+        {
+            crate::frontend::selection::ClickStage::Triple => {
+                if let Some((start, end)) =
+                    visible_row_selection(self.tabs[position].parser.screen(), row)
+                    && self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
                     && let Err(error) = self.copy_terminal_selection()
                 {
                     self.set_status_message(format!("Copy failed: {error}"));
                 }
-                self.terminal_double_click = now
-                    .checked_add(Duration::from_millis(double_click_ms()))
-                    .map(|expires_at| TerminalDoubleClick {
-                        tab_id,
-                        point,
-                        expires_at,
-                    });
                 self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
                 self.request_redraw();
                 return true;
             }
+            crate::frontend::selection::ClickStage::Double => {
+                if let Some((start, end)) =
+                    word_selection(self.tabs[position].parser.screen(), point)
+                {
+                    if self.set_completed_terminal_selection(tab_id, start, end, rows, cols)
+                        && let Err(error) = self.copy_terminal_selection()
+                    {
+                        self.set_status_message(format!("Copy failed: {error}"));
+                    }
+                    self.terminal_click_chain.arm_double(tab_id, point, now, window);
+                    self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
+                    self.request_redraw();
+                    return true;
+                }
+            }
+            crate::frontend::selection::ClickStage::Single => {}
         }
 
-        self.terminal_double_click = None;
-        self.recent_terminal_click = Some(RecentTerminalClick {
-            tab_id,
-            point,
-            at: now,
-        });
+        self.terminal_click_chain.record_single(tab_id, point, now);
         let Some(gesture) = SelectionGesture::prepare(tab_id, point, rows, cols) else {
             return false;
         };
@@ -3653,7 +3625,7 @@ impl UnixApp {
         self.terminal_selection_pointer = None;
         self.terminal_selection_autoscroll = None;
         if clear_completed {
-            self.terminal_double_click = None;
+            self.terminal_click_chain.disarm_double();
         }
         if changed {
             self.request_redraw();

@@ -621,20 +621,6 @@ impl RemoteSidebarTextClick {
     }
 }
 
-#[derive(Clone, Debug)]
-struct RecentRemoteTerminalClick {
-    tab_id: String,
-    point: RemotePoint,
-    at: Instant,
-}
-
-#[derive(Clone, Debug)]
-struct RemoteTerminalDoubleClick {
-    tab_id: String,
-    point: RemotePoint,
-    expires_at: Instant,
-}
-
 impl RemoteTerminalSelection {
     fn bounds(&self) -> (RemotePoint, RemotePoint) {
         self.gesture.bounds()
@@ -828,8 +814,7 @@ struct RemoteWindowState {
     sidebar_scroll_drag: Option<ScrollbarThumbDrag>,
     sidebar_geometry_generation: u64,
     recent_sidebar_text_click: Option<RemoteSidebarTextClick>,
-    recent_terminal_click: Option<RecentRemoteTerminalClick>,
-    terminal_double_click: Option<RemoteTerminalDoubleClick>,
+    terminal_click_chain: crate::frontend::selection::ClickChain<String, RemotePoint>,
     focus_surface: RemoteFocusSurface,
     focus_state: FocusState,
     close_confirmation: CloseConfirmation,
@@ -1053,8 +1038,7 @@ impl RemoteWindowState {
             sidebar_scroll_drag: None,
             sidebar_geometry_generation: 0,
             recent_sidebar_text_click: None,
-            recent_terminal_click: None,
-            terminal_double_click: None,
+            terminal_click_chain: Default::default(),
             focus_surface: RemoteFocusSurface::Terminal,
             focus_state: FocusState::new(FocusSurface::Terminal, FocusTransitionGate::default()),
             close_confirmation: CloseConfirmation::new(),
@@ -6153,12 +6137,8 @@ impl RemoteWindowState {
         });
         self.terminal_selection_pointer = Some((x, y));
         self.terminal_selection_autoscroll = None;
-        self.terminal_double_click = None;
-        self.recent_terminal_click = Some(RecentRemoteTerminalClick {
-            tab_id: tab_id.clone(),
-            point,
-            at: Instant::now(),
-        });
+        self.terminal_click_chain
+            .record_single(tab_id.clone(), point, Instant::now());
         self.last_error = None;
         true
     }
@@ -7053,50 +7033,45 @@ impl RemoteWindowState {
             return false;
         };
         let now = Instant::now();
+        let window = Duration::from_millis(double_click_ms());
 
-        if clicks >= 3
-            && self.terminal_double_click.as_ref().is_some_and(|click| {
-                click.tab_id == tab_id && click.point == point && now <= click.expires_at
-            })
+        match self
+            .terminal_click_chain
+            .classify(&tab_id, point, now, window, clicks >= 3)
         {
-            self.terminal_double_click = None;
-            self.recent_terminal_click = None;
-            if let Some((start, end)) = remote_visible_row_selection(rows, columns, point.row) {
-                self.set_completed_terminal_selection(tab_id, rows, columns, start, end);
-                let _ = self.copy_terminal_selection();
+            crate::frontend::selection::ClickStage::Triple => {
+                if let Some((start, end)) = remote_visible_row_selection(rows, columns, point.row)
+                {
+                    self.set_completed_terminal_selection(tab_id, rows, columns, start, end);
+                    let _ = self.copy_terminal_selection();
+                }
+                self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+                self.window.focus();
+                true
             }
-            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
-            self.window.focus();
-            return true;
-        }
-
-        if self.recent_terminal_click.as_ref().is_some_and(|click| {
-            click.tab_id == tab_id
-                && click.point == point
-                && now.duration_since(click.at) <= Duration::from_millis(double_click_ms())
-        }) {
-            self.recent_terminal_click = None;
-            let cells = self.active_tab().map(|tab| screen_cells(&tab.screen));
-            let selected = cells
-                .as_deref()
-                .and_then(|cells| remote_word_selection(cells, point));
-            if let Some((start, end)) = selected {
-                self.set_completed_terminal_selection(tab_id.clone(), rows, columns, start, end);
-                self.terminal_double_click = now
-                    .checked_add(Duration::from_millis(double_click_ms()))
-                    .map(|expires_at| RemoteTerminalDoubleClick {
-                        tab_id: tab_id.clone(),
-                        point,
-                        expires_at,
-                    });
-                let _ = self.copy_terminal_selection();
+            crate::frontend::selection::ClickStage::Double => {
+                let cells = self.active_tab().map(|tab| screen_cells(&tab.screen));
+                let selected = cells
+                    .as_deref()
+                    .and_then(|cells| remote_word_selection(cells, point));
+                if let Some((start, end)) = selected {
+                    self.set_completed_terminal_selection(
+                        tab_id.clone(),
+                        rows,
+                        columns,
+                        start,
+                        end,
+                    );
+                    self.terminal_click_chain
+                        .arm_double(tab_id, point, now, window);
+                    let _ = self.copy_terminal_selection();
+                }
+                self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
+                self.window.focus();
+                true
             }
-            self.set_focus_surface_unchecked(RemoteFocusSurface::Terminal);
-            self.window.focus();
-            return true;
+            crate::frontend::selection::ClickStage::Single => false,
         }
-
-        false
     }
 
     fn set_completed_terminal_selection(
@@ -9920,7 +9895,7 @@ mod tests {
             bottom: 700,
         };
         let geometry = sidebar_tree_row_geometry(sidebar, 0, 2, TreeRowMode::Editing);
-        let track = sidebar_scrollbar_track(sidebar);
+        let track = crate::ui_geometry::sidebar_scrollbar_track(sidebar);
 
         assert_eq!(track.left, sidebar.left);
         assert_eq!(track.right, TERMINAL_SCROLLBAR_WIDTH);

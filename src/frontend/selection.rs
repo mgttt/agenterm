@@ -1,6 +1,101 @@
 // This module owns linear local-selection and shared remote selection gesture
 // arbitration and rectangular selection are intentionally outside this slice.
 
+use std::time::{Duration, Instant};
+
+/// Multi-click (double/triple) chain shared by both frontend hosts. Both
+/// adapters carried the same two-stage state — a recent single click and an
+/// armed post-double window — with byte-identical match predicates
+/// (design-frontend-shared-core.md §2.1 g). The hosts differ in ONE place,
+/// made explicit as `classify`'s `os_triple_hint`: Windows receives
+/// dedicated OS double-click messages and additionally gates Triple on the
+/// OS click count (`clicks >= 3`), while Unix synthesizes purely from this
+/// state machine and passes `true`.
+pub(crate) struct ClickChain<Id, Point> {
+    recent: Option<(Id, Point, Instant)>,
+    armed_double: Option<(Id, Point, Instant)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClickStage {
+    Single,
+    Double,
+    Triple,
+}
+
+impl<Id, Point> Default for ClickChain<Id, Point> {
+    fn default() -> Self {
+        Self {
+            recent: None,
+            armed_double: None,
+        }
+    }
+}
+
+impl<Id: Clone + PartialEq, Point: Copy + PartialEq> ClickChain<Id, Point> {
+    /// Classify a press at (`id`, `point`). Triple consumes both stages;
+    /// Double consumes the recent stage (the caller arms the double window
+    /// via [`Self::arm_double`] only once its word selection succeeded —
+    /// both hosts always did); Single leaves state untouched so callers
+    /// can [`Self::record_single`] at their own point in the flow.
+    pub(crate) fn classify(
+        &mut self,
+        id: &Id,
+        point: Point,
+        now: Instant,
+        window: Duration,
+        os_triple_hint: bool,
+    ) -> ClickStage {
+        if os_triple_hint
+            && self
+                .armed_double
+                .as_ref()
+                .is_some_and(|(armed_id, armed_point, expires_at)| {
+                    armed_id == id && *armed_point == point && now <= *expires_at
+                })
+        {
+            self.recent = None;
+            self.armed_double = None;
+            return ClickStage::Triple;
+        }
+        if self
+            .recent
+            .as_ref()
+            .is_some_and(|(recent_id, recent_point, at)| {
+                recent_id == id && *recent_point == point && now.duration_since(*at) <= window
+            })
+        {
+            self.recent = None;
+            return ClickStage::Double;
+        }
+        ClickStage::Single
+    }
+
+    /// Arm the triple-click window after a successful double-click action.
+    pub(crate) fn arm_double(&mut self, id: Id, point: Point, now: Instant, window: Duration) {
+        self.armed_double = now
+            .checked_add(window)
+            .map(|expires_at| (id, point, expires_at));
+    }
+
+    /// Record a plain single click as the potential start of a chain.
+    pub(crate) fn record_single(&mut self, id: Id, point: Point, now: Instant) {
+        self.armed_double = None;
+        self.recent = Some((id, point, now));
+    }
+
+    /// Drop only the armed triple-click window, keeping any recent single
+    /// click (the unix cancel path's exact behavior).
+    pub(crate) fn disarm_double(&mut self) {
+        self.armed_double = None;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.recent = None;
+        self.armed_double = None;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct TerminalPoint {
     pub(crate) row: u16,
@@ -518,6 +613,43 @@ pub(crate) fn terminal_selection_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn click_chain_walks_single_double_triple_and_respects_the_os_hint() {
+        let window = Duration::from_millis(400);
+        let start = Instant::now();
+        let point = TerminalPoint { row: 2, col: 5 };
+        let mut chain: ClickChain<u64, TerminalPoint> = ClickChain::default();
+
+        // First press: nothing recorded yet.
+        assert_eq!(chain.classify(&7, point, start, window, true), ClickStage::Single);
+        chain.record_single(7, point, start);
+
+        // Second press inside the window doubles; the host then arms.
+        let second = start + Duration::from_millis(100);
+        assert_eq!(chain.classify(&7, point, second, window, true), ClickStage::Double);
+        chain.arm_double(7, point, second, window);
+
+        // Third press: unix (hint=true) triples; the windows OS gate
+        // (hint=false) must NOT — and must not consume the armed state.
+        let third = second + Duration::from_millis(100);
+        assert_eq!(chain.classify(&7, point, third, window, false), ClickStage::Single);
+        assert_eq!(chain.classify(&7, point, third, window, true), ClickStage::Triple);
+
+        // Chain fully consumed by the triple.
+        assert_eq!(chain.classify(&7, point, third, window, true), ClickStage::Single);
+
+        // A stale single outside the window stays single.
+        chain.record_single(7, point, third);
+        let late = third + window + Duration::from_millis(1);
+        assert_eq!(chain.classify(&7, point, late, window, true), ClickStage::Single);
+
+        // Different tab or point never chains.
+        chain.record_single(7, point, late);
+        let other = TerminalPoint { row: 3, col: 5 };
+        assert_eq!(chain.classify(&7, other, late, window, true), ClickStage::Single);
+        assert_eq!(chain.classify(&8, point, late, window, true), ClickStage::Single);
+    }
 
     #[test]
     fn selection_is_empty_when_anchor_matches_focus() {
