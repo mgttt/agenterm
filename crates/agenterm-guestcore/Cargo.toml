@@ -1,0 +1,37 @@
+[package]
+name = "agenterm-guestcore"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "Phase 1 of plan/design-dynacore-emulated-guest-core.md: a real x86_64 machine-code interpreter running on Windows, translating a subset of the Linux x86_64 syscall ABI to real Win32 calls via agenterm-nativecore's seam.rs. Same-ISA only (x86_64 guest on x86_64 host); no JIT, no codegen, no executable memory ever requested."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mgttt/agenterm"
+publish = false
+autobins = false
+
+[lib]
+name = "agenterm_guestcore"
+path = "src/lib.rs"
+
+# Standalone example binaries used by the crate's own integration tests to
+# exercise the REAL `ExitProcess` path (see README.md "why examples, not just
+# `#[test]`s" -- calling the real process-terminating Win32 API in-process
+# would kill the `cargo test` harness itself, so the exit/exit_group path is
+# only exercised for real from a spawned child process).
+[[example]]
+name = "verify_loop_cond"
+path = "examples/verify_loop_cond.rs"
+
+[[example]]
+name = "verify_file_roundtrip"
+path = "examples/verify_file_roundtrip.rs"
+
+[[example]]
+name = "verify_mmap_write"
+path = "examples/verify_mmap_write.rs"
+
+[dependencies]
+agenterm-nativecore = { path = "../agenterm-nativecore" }
+
+[dev-dependencies]
+tempfile = "3.25"
