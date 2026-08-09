@@ -31,6 +31,7 @@ dependencies = [
  "ab_glyph",
  "agenterm-dynacore",
  "agenterm-lua",
+ "agenterm-nativecore",
  "agenterm-platform",
  "agenterm-qjs",
  "agenterm-rh",
@@ -72,6 +73,13 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "walkdir",
+]
+
+[[package]]
+name = "agenterm-nativecore"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]
