@@ -2,8 +2,20 @@
 
 const INTERNAL_CLI_SUBCOMMAND: &str = "__agenterm-internal-cli";
 const INTERNAL_TUI_SUBCOMMAND: &str = "__agenterm-internal-tui";
+const INTERNAL_ENGINE_SUBCOMMAND: &str = "__agenterm-internal-engine";
+/// `agenterm rh|lua|qjs|sql <rest>` — argv-transparent aliases for the four
+/// standalone `agenterm-{rh,lua,qjs,sql}` binaries (SUB-M3,
+/// `plan/design-script-engine-subcommands.md` §3). One shared internal
+/// marker (`INTERNAL_ENGINE_SUBCOMMAND`) carries the engine token as its
+/// first forwarded argument, rather than minting four more
+/// `__agenterm-internal-{rh,lua,qjs,sql}` markers — the design doc's own
+/// preference (§3: "倾向...一个内部标记 + 第一个参数是入口选择器") and the
+/// shape that composes with zero changes to `run_console_worker`, which
+/// already treats its `args` parameter as an opaque, ordered Vec forwarded
+/// after the marker.
+const ENGINE_SUBCOMMANDS: &[&str] = &["rh", "lua", "qjs", "sql"];
 
-fn main() {
+fn main() -> std::process::ExitCode {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
 
     // The public GUI-subsystem process attaches to the caller's console, then
@@ -17,6 +29,12 @@ fn main() {
     if args.first().map(String::as_str) == Some("tui") {
         args.remove(0);
         std::process::exit(run_tui_from_gui_subsystem(args));
+    }
+    if let Some(engine) = args.first().map(String::as_str)
+        && ENGINE_SUBCOMMANDS.contains(&engine)
+    {
+        let engine = args.remove(0);
+        return run_engine_from_gui_subsystem(engine, args);
     }
     if args.first().map(String::as_str) == Some(INTERNAL_CLI_SUBCOMMAND) {
         args.remove(0);
@@ -35,6 +53,21 @@ fn main() {
         let _console =
             agenterm_platform::process::ScopedConsole::attach_parent_with_default_interrupts();
         std::process::exit(agenterm::tui::run_entry_with_args(args));
+    }
+    if args.first().map(String::as_str) == Some(INTERNAL_ENGINE_SUBCOMMAND) {
+        args.remove(0);
+        let _console =
+            agenterm_platform::process::ScopedConsole::attach_parent_with_default_interrupts();
+        // Unlike the cli/tui workers above (both `i32`-returning entry
+        // points, forwarded via `std::process::exit`), rh's entry point
+        // returns `std::process::ExitCode`, which stable Rust offers no way
+        // to convert back into a raw `i32` — the only sanctioned way to
+        // apply it to the real process exit status is to return it out of
+        // `main` itself. That's why `main` returns `ExitCode` (all the
+        // `std::process::exit` calls elsewhere in this function still
+        // typecheck fine against that return type: `exit`'s return type is
+        // `!`, which unifies with any expected type).
+        return dispatch_engine_from_args(args);
     }
 
     // G3: GUI PE must still print version/help when launched from a terminal.
@@ -71,6 +104,23 @@ fn run_cli_from_gui_subsystem(args: Vec<String>) -> i32 {
 #[cfg(windows)]
 fn run_tui_from_gui_subsystem(args: Vec<String>) -> i32 {
     run_console_worker(INTERNAL_TUI_SUBCOMMAND, "TUI", args)
+}
+
+/// Windows: re-exec through the same duplicated-handle console worker as
+/// `cli`/`tui` (§1), with `engine` spliced in as the first forwarded
+/// argument after the internal marker. `run_console_worker` returns the
+/// child's raw exit code as `i32`; folded into `ExitCode` here (not
+/// `std::process::exit`, see the `dispatch_engine_from_args` call site's
+/// comment) via `u8::try_from` so this function's signature matches its
+/// non-Windows counterpart below and `main`'s single, platform-agnostic
+/// `return run_engine_from_gui_subsystem(...)` call site needs no `#[cfg]`.
+#[cfg(windows)]
+fn run_engine_from_gui_subsystem(engine: String, args: Vec<String>) -> std::process::ExitCode {
+    let mut forwarded = Vec::with_capacity(args.len() + 1);
+    forwarded.push(engine);
+    forwarded.extend(args);
+    let status = run_console_worker(INTERNAL_ENGINE_SUBCOMMAND, "engine", forwarded);
+    std::process::ExitCode::from(u8::try_from(status).unwrap_or(1))
 }
 
 #[cfg(windows)]
@@ -127,6 +177,65 @@ fn run_tui_from_gui_subsystem(args: Vec<String>) -> i32 {
     agenterm::tui::run_entry_with_args(args)
 }
 
+/// Unix: no GUI-subsystem console problem to work around (§1/§3), so this
+/// calls straight into the engine entry point in-process — no re-exec.
+#[cfg(not(windows))]
+fn run_engine_from_gui_subsystem(engine: String, args: Vec<String>) -> std::process::ExitCode {
+    dispatch_engine(&engine, args)
+}
+
+/// Shared by both the Windows internal-marker branch (post re-exec) and the
+/// Unix direct-call branch above: `args[0]` is the engine token, the rest is
+/// that engine's own argv with the token (and program name) already
+/// stripped.
+fn dispatch_engine_from_args(mut args: Vec<String>) -> std::process::ExitCode {
+    if args.is_empty() {
+        eprintln!("agenterm: missing engine token (expected one of: rh, lua, qjs, sql)");
+        return std::process::ExitCode::from(2);
+    }
+    let engine = args.remove(0);
+    dispatch_engine(&engine, args)
+}
+
+/// Runs one engine's CLI entry point in-process. `rest` is that engine's own
+/// argv with both the program name and the engine token already stripped —
+/// exactly what a standalone `agenterm-<engine>` binary's `main()` collects
+/// from `env::args().skip(1)`.
+fn dispatch_engine(engine: &str, rest: Vec<String>) -> std::process::ExitCode {
+    match engine {
+        "rh" => {
+            // rh's worker modes (`--worker`, `--framed-worker`,
+            // `--internal-incremental-finalize`) are argv-shape-sensitive
+            // (design §7: exact single-argument matches) and handled
+            // entirely inside `run_main` — forward `rest` untouched, with no
+            // normalization and no flag inspection here.
+            let os_args: Vec<std::ffi::OsString> = rest.into_iter().map(Into::into).collect();
+            agenterm::script_rh_cli_main::run_main(os_args)
+        }
+        "lua" => {
+            // `agenterm_lua::cli::run` indexes into its `args` slice
+            // starting at `[1]` — it expects argv INCLUDING a program-name
+            // slot at index 0, mirroring `std::env::args()`'s shape (see
+            // `crates/agenterm-lua/src/cli.rs`'s doc comment on `run`). The
+            // other three engines' entry points all take argv with the
+            // program name already stripped, so lua is the one asymmetric
+            // case here: splice in a placeholder purely to satisfy that
+            // indexing convention, since the real argv[0] was discarded
+            // before this function was ever called.
+            let mut full = Vec::with_capacity(rest.len() + 1);
+            full.push("agenterm-lua".to_owned());
+            full.extend(rest);
+            std::process::ExitCode::from(agenterm_lua::cli::run(&full))
+        }
+        "qjs" => std::process::ExitCode::from(agenterm_qjs::cli::run(&rest)),
+        "sql" => std::process::ExitCode::from(agenterm_sql::cli::run(&rest)),
+        other => {
+            eprintln!("agenterm: unknown engine subcommand `{other}`");
+            std::process::ExitCode::from(2)
+        }
+    }
+}
+
 /// Flags that must not open a window. Returns Some(exit_code) when handled.
 fn offline_cli_exit(args: &[String]) -> Option<i32> {
     let alone = args.len() == 1;
@@ -142,6 +251,7 @@ Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --i
        agenterm server [server options]
        agenterm cli <command> [options]
        agenterm tui
+       agenterm rh|lua|qjs|sql <args>  (aliases for the standalone agenterm-{rh,lua,qjs,sql} binaries)
        agenterm --version
        agenterm --help
 

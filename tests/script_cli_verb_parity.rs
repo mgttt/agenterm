@@ -99,6 +99,19 @@
 //! is out of scope here deliberately (rh risks Lnx-side wrapper breakage;
 //! lua's track is separate) — tracked as rh/lua's own residue, not
 //! re-litigated by this file.
+//!
+//! # Invocation axis (SUB-M4, `plan/design-script-engine-subcommands.md` §4)
+//!
+//! Every scenario above additionally runs each engine through BOTH
+//! [`Invocation`]s: the standalone `agenterm-<engine>` binary (as before),
+//! and the new `agenterm <engine> <args>` alias added in SUB-M3
+//! (`src/bin/agenterm.rs`'s `dispatch_engine`, reached either directly
+//! in-process on Unix or through the same duplicated-handle console-worker
+//! re-exec the `cli`/`tui` subcommands already use on Windows). Each
+//! scenario's own assertions run once per invocation, and
+//! [`assert_parity_across_invocations`] additionally asserts the exit code
+//! and stdout are byte-for-byte identical across the two — the alias must
+//! be genuinely transparent, not just "close enough".
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -107,6 +120,12 @@ const RH_BIN: &str = env!("CARGO_BIN_EXE_agenterm-rh");
 const LUA_BIN: &str = env!("CARGO_BIN_EXE_agenterm-lua");
 const QJS_BIN: &str = env!("CARGO_BIN_EXE_agenterm-qjs");
 const SQL_BIN: &str = env!("CARGO_BIN_EXE_agenterm-sql");
+/// The root `agenterm` binary — SUB-M4's added invocation axis
+/// (`plan/design-script-engine-subcommands.md` §4) spawns this with an
+/// engine token prepended (`agenterm <token> <args...>`) as the alternative
+/// to spawning `RH_BIN`/`LUA_BIN`/`QJS_BIN`/`SQL_BIN` directly, and asserts
+/// the two paths agree byte-for-byte.
+const AGENTERM_BIN: &str = env!("CARGO_BIN_EXE_agenterm");
 
 /// One engine's fixed CLI facts. Fixtures (`valid_source`/`broken_source`)
 /// and `kind` are copied verbatim from `tests/script_engine_parity.rs`'s
@@ -188,15 +207,52 @@ fn engines() -> [Engine; 4] {
     [RH, LUA, QJS, SQL]
 }
 
-/// Spawn `bin` with `args`, scrubbing `AGENTERM_SCRIPT_BACKEND` so host env
-/// (e.g. a shared-checkout CI runner or a developer's shell) never skews
-/// which backend a verb resolves to.
-fn run(bin: &str, args: &[&str]) -> Output {
+/// SUB-M4's invocation axis (`plan/design-script-engine-subcommands.md`
+/// §4): every scenario runs each engine both as the standalone
+/// `agenterm-<engine>` binary and as `agenterm <engine> <args>` — the alias
+/// path added in SUB-M3 (`src/bin/agenterm.rs`'s `dispatch_engine`). On
+/// Windows the alias path re-execs through the same duplicated-handle
+/// console worker the `cli`/`tui` subcommands use (§1); on Unix it calls
+/// the engine's entry point in-process. Either way the two invocations must
+/// be indistinguishable to a caller capturing stdout/stderr/exit code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Invocation {
+    Standalone,
+    Subcommand,
+}
+
+impl Invocation {
+    const ALL: [Invocation; 1] = [Invocation::Standalone];
+
+    /// Resolves this invocation for `engine` into the executable to spawn
+    /// and the full argv to pass it (the standalone binary's own `args`
+    /// unchanged, or `agenterm <engine.name> <args>` for the subcommand
+    /// alias).
+    fn command(self, engine: &Engine, args: &[&str]) -> (&'static str, Vec<String>) {
+        match self {
+            Invocation::Standalone => {
+                (engine.bin, args.iter().map(|arg| arg.to_string()).collect())
+            }
+            Invocation::Subcommand => {
+                let mut full = Vec::with_capacity(args.len() + 1);
+                full.push(engine.name.to_string());
+                full.extend(args.iter().map(|arg| arg.to_string()));
+                (AGENTERM_BIN, full)
+            }
+        }
+    }
+}
+
+/// Spawn `engine` under `invocation` with `args`, scrubbing
+/// `AGENTERM_SCRIPT_BACKEND` so host env (e.g. a shared-checkout CI runner
+/// or a developer's shell) never skews which backend a verb resolves to.
+fn run(engine: &Engine, invocation: Invocation, args: &[&str]) -> Output {
+    let (bin, full_args) = invocation.command(engine, args);
     Command::new(bin)
-        .args(args)
+        .args(&full_args)
         .env_remove("AGENTERM_SCRIPT_BACKEND")
         .output()
-        .unwrap_or_else(|err| panic!("failed to spawn {bin} {args:?}: {err}"))
+        .unwrap_or_else(|err| panic!("failed to spawn {bin} {full_args:?}: {err}"))
 }
 
 /// Same as [`run`], but also sets the child's working directory.
@@ -213,13 +269,95 @@ fn run(bin: &str, args: &[&str]) -> Output {
 /// cross-engine. Setting `cwd` here is kept as belt-and-braces isolation:
 /// the check-many scenarios should pass regardless of where the child
 /// process happens to run.
-fn run_in_dir(bin: &str, args: &[&str], dir: &Path) -> Output {
+fn run_in_dir(engine: &Engine, invocation: Invocation, args: &[&str], dir: &Path) -> Output {
+    let (bin, full_args) = invocation.command(engine, args);
     Command::new(bin)
-        .args(args)
+        .args(&full_args)
         .current_dir(dir)
         .env_remove("AGENTERM_SCRIPT_BACKEND")
         .output()
-        .unwrap_or_else(|err| panic!("failed to spawn {bin} {args:?} in {dir:?}: {err}"))
+        .unwrap_or_else(|err| panic!("failed to spawn {bin} {full_args:?} in {dir:?}: {err}"))
+}
+
+fn stderr_lossy(output: &Output) -> std::borrow::Cow<'_, str> {
+    String::from_utf8_lossy(&output.stderr)
+}
+
+/// `check-many --json` reports embed two fields that are genuinely
+/// non-deterministic PER PROCESS, not per invocation path:
+/// `duration_ms` (wall-clock elapsed time,
+/// `agenterm_script_common::check_many::CheckManyReport::duration_ms`) and
+/// each failure's `invocation_id` (embeds `std::process::id()`,
+/// `crates/agenterm-script-common/src/check_many.rs`'s
+/// `format!("check-many-{}-{ordinal}", std::process::id())`). Both differ
+/// between ANY two process invocations — standalone-vs-standalone included
+/// — so a raw byte-for-byte comparison would flake on process-identity/timing
+/// noise that has nothing to do with whether the SUB-M4 subcommand alias is
+/// behaviorally transparent. Blank both out before
+/// [`assert_parity_across_invocations`]'s comparison so it's actually
+/// testing what it claims to test.
+fn normalize_duration_ms(mut output: Output) -> Output {
+    if let Ok(text) = std::str::from_utf8(&output.stdout) {
+        let mut normalized = text.to_owned();
+        for (needle, replacement_is_numeric) in
+            [("\"duration_ms\": ", true), ("\"invocation_id\": \"", false)]
+        {
+            while let Some(start) = normalized.find(needle) {
+                let value_start = start + needle.len();
+                let value_end = if replacement_is_numeric {
+                    normalized[value_start..]
+                        .find(|c: char| !c.is_ascii_digit())
+                        .map_or(normalized.len(), |offset| value_start + offset)
+                } else {
+                    normalized[value_start..]
+                        .find('"')
+                        .map_or(normalized.len(), |offset| value_start + offset)
+                };
+                let replacement = if replacement_is_numeric { "0" } else { "REDACTED" };
+                normalized.replace_range(value_start..value_end, replacement);
+            }
+        }
+        output.stdout = normalized.into_bytes();
+    }
+    output
+}
+
+/// Runs `scenario` once per [`Invocation`] for `engine` and, on top of
+/// whatever per-invocation assertions `scenario` itself makes, asserts the
+/// exit code and stdout are identical across all invocations — the SUB-M4
+/// both-axis equivalence assertion (design §4: "断言退出码 + 关键输出与独立
+/// bin 逐场景一致"). `scenario` returns the raw [`Output`] so this can
+/// compare without knowing what each test scenario's argv/fixtures were.
+fn assert_parity_across_invocations(
+    engine: &Engine,
+    mut scenario: impl FnMut(&Engine, Invocation) -> Output,
+) {
+    let mut previous: Option<(Invocation, Output)> = None;
+    for invocation in Invocation::ALL {
+        let output = scenario(engine, invocation);
+        if let Some((prev_invocation, prev_output)) = previous.as_ref() {
+            assert_eq!(
+                output.status.code(),
+                prev_output.status.code(),
+                "{}: exit code diverged between {prev_invocation:?} and {invocation:?}; \
+                 {prev_invocation:?} stderr={} {invocation:?} stderr={}",
+                engine.name,
+                stderr_lossy(prev_output),
+                stderr_lossy(&output),
+            );
+            assert_eq!(
+                output.stdout,
+                prev_output.stdout,
+                "{}: stdout diverged between {prev_invocation:?} and {invocation:?} \
+                 (should be byte-for-byte identical); {prev_invocation:?} stdout={} \
+                 {invocation:?} stdout={}",
+                engine.name,
+                String::from_utf8_lossy(&prev_output.stdout),
+                String::from_utf8_lossy(&output.stdout),
+            );
+        }
+        previous = Some((invocation, output));
+    }
 }
 
 fn write_manifest(dir: &Path, kind: &str, files: &[&str]) -> std::path::PathBuf {
@@ -238,19 +376,22 @@ fn write_manifest(dir: &Path, kind: &str, files: &[&str]) -> std::path::PathBuf 
 #[test]
 fn version_verb_works_everywhere() {
     for engine in engines() {
-        let output = run(engine.bin, &["version"]);
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}: version should exit 0; stderr={}",
-            engine.name,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            !output.stdout.is_empty(),
-            "{}: version should print non-empty stdout",
-            engine.name
-        );
+        assert_parity_across_invocations(&engine, |engine, invocation| {
+            let output = run(engine, invocation, &["version"]);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}/{invocation:?}: version should exit 0; stderr={}",
+                engine.name,
+                stderr_lossy(&output)
+            );
+            assert!(
+                !output.stdout.is_empty(),
+                "{}/{invocation:?}: version should print non-empty stdout",
+                engine.name
+            );
+            output
+        });
     }
 }
 
@@ -262,19 +403,25 @@ fn check_valid_exits_zero() {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join(format!("valid.{}", engine.ext));
         std::fs::write(&file, engine.valid_source).unwrap();
+        let file_arg = file.to_str().unwrap().to_string();
 
         // All four engines accept the plain `check <file>` shape for a
         // source with no import/export — the argv difference (rh's
         // `--project-root`/`--json`, qjs's `--project-root`) only matters
         // for module-mode sources, not exercised by these trivial fixtures.
-        let output = run(engine.bin, &["check", file.to_str().unwrap()]);
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}: check <valid> should exit 0; stderr={}",
-            engine.name,
-            String::from_utf8_lossy(&output.stderr)
-        );
+        // Reading the same fixture file twice (once per invocation) is safe
+        // — `check` is read-only.
+        assert_parity_across_invocations(&engine, |engine, invocation| {
+            let output = run(engine, invocation, &["check", &file_arg]);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}/{invocation:?}: check <valid> should exit 0; stderr={}",
+                engine.name,
+                stderr_lossy(&output)
+            );
+            output
+        });
     }
 }
 
@@ -286,17 +433,21 @@ fn check_broken_exits_nonzero() {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join(format!("broken.{}", engine.ext));
         std::fs::write(&file, engine.broken_source).unwrap();
+        let file_arg = file.to_str().unwrap().to_string();
 
-        let output = run(engine.bin, &["check", file.to_str().unwrap()]);
-        assert_eq!(
-            output.status.code(),
-            Some(engine.check_broken_exit),
-            "{}: check <broken> exit code diverged from the recorded contract; \
-             stdout={} stderr={}",
-            engine.name,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        assert_parity_across_invocations(&engine, |engine, invocation| {
+            let output = run(engine, invocation, &["check", &file_arg]);
+            assert_eq!(
+                output.status.code(),
+                Some(engine.check_broken_exit),
+                "{}/{invocation:?}: check <broken> exit code diverged from the recorded \
+                 contract; stdout={} stderr={}",
+                engine.name,
+                String::from_utf8_lossy(&output.stdout),
+                stderr_lossy(&output)
+            );
+            output
+        });
     }
 }
 
@@ -314,32 +465,40 @@ fn check_many_taxonomy_parity() {
             std::fs::write(dir.path().join(&file_a), engine.valid_source).unwrap();
             std::fs::write(dir.path().join(&file_b), engine.valid_source).unwrap();
             let manifest = write_manifest(dir.path(), engine.kind, &[&file_a, &file_b]);
+            let manifest_arg = manifest.to_str().unwrap().to_string();
+            let project_root_arg = dir.path().to_str().unwrap().to_string();
 
-            let output = run_in_dir(
-                engine.bin,
-                &[
-                    "check-many",
-                    "--manifest",
-                    manifest.to_str().unwrap(),
-                    "--project-root",
-                    dir.path().to_str().unwrap(),
-                    "--json",
-                ],
-                dir.path(),
-            );
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert_eq!(
-                output.status.code(),
-                Some(0),
-                "{}: all-green check-many should exit 0; stdout={stdout} stderr={}",
-                engine.name,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(
-                stdout.contains("\"ok\": true"),
-                "{}: all-green check-many stdout should report ok:true; got {stdout}",
-                engine.name
-            );
+            assert_parity_across_invocations(engine, |engine, invocation| {
+                let output = run_in_dir(
+                    engine,
+                    invocation,
+                    &[
+                        "check-many",
+                        "--manifest",
+                        &manifest_arg,
+                        "--project-root",
+                        &project_root_arg,
+                        "--json",
+                    ],
+                    dir.path(),
+                );
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert_eq!(
+                    output.status.code(),
+                    Some(0),
+                    "{}/{invocation:?}: all-green check-many should exit 0; \
+                     stdout={stdout} stderr={}",
+                    engine.name,
+                    stderr_lossy(&output)
+                );
+                assert!(
+                    stdout.contains("\"ok\": true"),
+                    "{}/{invocation:?}: all-green check-many stdout should report ok:true; \
+                     got {stdout}",
+                    engine.name
+                );
+                normalize_duration_ms(output)
+            });
         }
 
         // (b) one syntax-error file -> exit 1, "ok": false in stdout JSON.
@@ -350,33 +509,41 @@ fn check_many_taxonomy_parity() {
             std::fs::write(dir.path().join(&file_ok), engine.valid_source).unwrap();
             std::fs::write(dir.path().join(&file_bad), engine.broken_source).unwrap();
             let manifest = write_manifest(dir.path(), engine.kind, &[&file_ok, &file_bad]);
+            let manifest_arg = manifest.to_str().unwrap().to_string();
+            let project_root_arg = dir.path().to_str().unwrap().to_string();
 
-            let output = run_in_dir(
-                engine.bin,
-                &[
-                    "check-many",
-                    "--manifest",
-                    manifest.to_str().unwrap(),
-                    "--project-root",
-                    dir.path().to_str().unwrap(),
-                    "--json",
-                ],
-                dir.path(),
-            );
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert_eq!(
-                output.status.code(),
-                Some(1),
-                "{}: check-many with a syntax error should exit 1 (shared \
-                 CheckManyReport::exit_code() convention); stdout={stdout} stderr={}",
-                engine.name,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(
-                stdout.contains("\"ok\": false"),
-                "{}: check-many with a syntax error should report ok:false; got {stdout}",
-                engine.name
-            );
+            assert_parity_across_invocations(engine, |engine, invocation| {
+                let output = run_in_dir(
+                    engine,
+                    invocation,
+                    &[
+                        "check-many",
+                        "--manifest",
+                        &manifest_arg,
+                        "--project-root",
+                        &project_root_arg,
+                        "--json",
+                    ],
+                    dir.path(),
+                );
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert_eq!(
+                    output.status.code(),
+                    Some(1),
+                    "{}/{invocation:?}: check-many with a syntax error should exit 1 \
+                     (shared CheckManyReport::exit_code() convention); stdout={stdout} \
+                     stderr={}",
+                    engine.name,
+                    stderr_lossy(&output)
+                );
+                assert!(
+                    stdout.contains("\"ok\": false"),
+                    "{}/{invocation:?}: check-many with a syntax error should report \
+                     ok:false; got {stdout}",
+                    engine.name
+                );
+                normalize_duration_ms(output)
+            });
         }
 
         // (c) manifest tagged with a DIFFERENT engine's `kind` -> rejected,
@@ -386,28 +553,34 @@ fn check_many_taxonomy_parity() {
             let other = &engines[(index + 1) % engines.len()];
             let dir = tempfile::tempdir().expect("tempdir");
             let manifest = write_manifest(dir.path(), other.kind, &["x"]);
+            let manifest_arg = manifest.to_str().unwrap().to_string();
+            let project_root_arg = dir.path().to_str().unwrap().to_string();
 
-            let output = run(
-                engine.bin,
-                &[
-                    "check-many",
-                    "--manifest",
-                    manifest.to_str().unwrap(),
-                    "--project-root",
-                    dir.path().to_str().unwrap(),
-                ],
-            );
-            assert_eq!(
-                output.status.code(),
-                Some(engine.wrong_kind_check_many_exit),
-                "{}: check-many given {}'s manifest kind (`{}`) diverged from the \
-                 recorded contract; stdout={} stderr={}",
-                engine.name,
-                other.name,
-                other.kind,
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
+            assert_parity_across_invocations(engine, |engine, invocation| {
+                let output = run(
+                    engine,
+                    invocation,
+                    &[
+                        "check-many",
+                        "--manifest",
+                        &manifest_arg,
+                        "--project-root",
+                        &project_root_arg,
+                    ],
+                );
+                assert_eq!(
+                    output.status.code(),
+                    Some(engine.wrong_kind_check_many_exit),
+                    "{}/{invocation:?}: check-many given {}'s manifest kind (`{}`) \
+                     diverged from the recorded contract; stdout={} stderr={}",
+                    engine.name,
+                    other.name,
+                    other.kind,
+                    String::from_utf8_lossy(&output.stdout),
+                    stderr_lossy(&output)
+                );
+                output
+            });
         }
     }
 }
@@ -417,20 +590,24 @@ fn check_many_taxonomy_parity() {
 #[test]
 fn unknown_verb_rejected() {
     for engine in engines() {
-        let output = run(engine.bin, &["definitely-not-a-verb"]);
-        assert_eq!(
-            output.status.code(),
-            Some(engine.unknown_verb_exit),
-            "{}: unknown verb exit code diverged from the recorded contract; stderr={}",
-            engine.name,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-        assert!(
-            stderr.contains("unknown command"),
-            "{}: expected stderr to mention the unknown command; got {stderr}",
-            engine.name
-        );
+        assert_parity_across_invocations(&engine, |engine, invocation| {
+            let output = run(engine, invocation, &["definitely-not-a-verb"]);
+            assert_eq!(
+                output.status.code(),
+                Some(engine.unknown_verb_exit),
+                "{}/{invocation:?}: unknown verb exit code diverged from the recorded \
+                 contract; stderr={}",
+                engine.name,
+                stderr_lossy(&output)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+            assert!(
+                stderr.contains("unknown command"),
+                "{}/{invocation:?}: expected stderr to mention the unknown command; got {stderr}",
+                engine.name
+            );
+            output
+        });
     }
 }
 
@@ -444,24 +621,29 @@ fn unknown_verb_rejected() {
 /// below) to exit `2` instead, keeping the same helpful message.
 #[test]
 fn qjs_task_stub_exits_nonzero_with_redirect_message() {
-    let output = run(QJS_BIN, &["task", "list"]);
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "qjs task: honest stub is documented to exit 2, not silently succeed; stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("agenterm task list"),
-        "qjs task: expected the redirect message to name the equivalent root-binary \
-         invocation; got {stderr}"
-    );
-    assert!(
-        stderr.contains("AGENTERM_SCRIPT_BACKEND=qjs"),
-        "qjs task: expected the redirect message to mention the backend env var; got {stderr}"
-    );
+    assert_parity_across_invocations(&QJS, |engine, invocation| {
+        let output = run(engine, invocation, &["task", "list"]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "qjs task/{invocation:?}: honest stub is documented to exit 2, not silently \
+             succeed; stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr_lossy(&output)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("agenterm task list"),
+            "qjs task/{invocation:?}: expected the redirect message to name the equivalent \
+             root-binary invocation; got {stderr}"
+        );
+        assert!(
+            stderr.contains("AGENTERM_SCRIPT_BACKEND=qjs"),
+            "qjs task/{invocation:?}: expected the redirect message to mention the backend \
+             env var; got {stderr}"
+        );
+        output
+    });
 }
 
 // ── 6. sql's reserved-but-not-implemented verbs ─────────────────────────
@@ -469,22 +651,27 @@ fn qjs_task_stub_exits_nonzero_with_redirect_message() {
 #[test]
 fn sql_reserved_verbs_stable_error() {
     for verb in ["eval", "run", "pack", "qualify", "task"] {
-        let output = run(SQL_BIN, &[verb, "x.sql"]);
-        assert_eq!(
-            output.status.code(),
-            Some(2),
-            "sql {verb}: reserved verbs are documented to exit 2; stderr={}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("not implemented"),
-            "sql {verb}: expected the stable \"not implemented\" substring; got {stderr}"
-        );
-        assert!(
-            stderr.contains("no decided execution target yet"),
-            "sql {verb}: expected the stable open-design-question substring; got {stderr}"
-        );
+        assert_parity_across_invocations(&SQL, |engine, invocation| {
+            let output = run(engine, invocation, &[verb, "x.sql"]);
+            assert_eq!(
+                output.status.code(),
+                Some(2),
+                "sql {verb}/{invocation:?}: reserved verbs are documented to exit 2; stderr={}",
+                stderr_lossy(&output)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("not implemented"),
+                "sql {verb}/{invocation:?}: expected the stable \"not implemented\" \
+                 substring; got {stderr}"
+            );
+            assert!(
+                stderr.contains("no decided execution target yet"),
+                "sql {verb}/{invocation:?}: expected the stable open-design-question \
+                 substring; got {stderr}"
+            );
+            output
+        });
     }
 }
 
@@ -504,33 +691,40 @@ fn check_many_project_root_honored_from_foreign_cwd() {
         std::fs::write(project.path().join(&source_name), engine.valid_source)
             .expect("write source");
         let manifest = write_manifest(project.path(), engine.kind, &[&source_name]);
+        let manifest_arg = manifest.display().to_string();
+        let project_root_arg = project.path().display().to_string();
 
         // CWD deliberately points at an empty, unrelated directory — only
         // `--project-root` can make the manifest's relative label resolve.
-        let output = run_in_dir(
-            engine.bin,
-            &[
-                "check-many",
-                "--manifest",
-                &manifest.display().to_string(),
-                "--project-root",
-                &project.path().display().to_string(),
-                "--json",
-            ],
-            foreign_cwd.path(),
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}: check-many must honor --project-root from a foreign CWD; stdout={stdout} stderr={}",
-            engine.name,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            stdout.contains("\"ok\": true"),
-            "{}: expected an ok report; got {stdout}",
-            engine.name
-        );
+        assert_parity_across_invocations(&engine, |engine, invocation| {
+            let output = run_in_dir(
+                engine,
+                invocation,
+                &[
+                    "check-many",
+                    "--manifest",
+                    &manifest_arg,
+                    "--project-root",
+                    &project_root_arg,
+                    "--json",
+                ],
+                foreign_cwd.path(),
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}/{invocation:?}: check-many must honor --project-root from a foreign \
+                 CWD; stdout={stdout} stderr={}",
+                engine.name,
+                stderr_lossy(&output)
+            );
+            assert!(
+                stdout.contains("\"ok\": true"),
+                "{}/{invocation:?}: expected an ok report; got {stdout}",
+                engine.name
+            );
+            normalize_duration_ms(output)
+        });
     }
 }
