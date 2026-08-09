@@ -20,7 +20,7 @@ fn entry() {
         let cli_arg_exe = cli_arg + ".exe";
         require(
             std::fs::exists(cli_arg) != 0 || std::fs::exists(cli_arg_exe) != 0,
-            "prd_alignment_input_missing"
+            "prd_alignment_input_missing:" + cli_arg
         );
     } else {
         let cli_default = std::path::join(repo, "dist/agenterm").display;
@@ -28,7 +28,7 @@ fn entry() {
         require(
             std::fs::exists(cli_default) != 0
                 || std::fs::exists(cli_default_exe) != 0,
-            "prd_alignment_input_missing"
+            "prd_alignment_input_missing:" + cli_default
         );
     }
 
