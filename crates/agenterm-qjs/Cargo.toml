@@ -1,6 +1,6 @@
 [package]
 name = "agenterm-qjs"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
 description = "AgenTerm qjs pack language: QuickJS-backed script engine, capability-aligned with agenterm-rh"

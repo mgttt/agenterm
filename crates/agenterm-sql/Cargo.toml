@@ -1,6 +1,6 @@
 [package]
 name = "agenterm-sql"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
 description = "AgenTerm sql pack language scaffold: SQL-92/PostgreSQL-benchmarked script engine, capability-aligned with agenterm-rh/agenterm-lua/agenterm-qjs"

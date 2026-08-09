@@ -1,6 +1,6 @@
 [package]
 name = "agenterm-rh"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
 description = "AgenTerm rh pack language: subset check, transpile, and AOT pipeline"
