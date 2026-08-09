@@ -8,6 +8,11 @@ box) rather than by argument. The method itself is packaged as
 [`.claude/skills/decisive-experiment/SKILL.md`](../../.claude/skills/decisive-experiment/SKILL.md) —
 read it before writing a new Q spec.
 
+> **原点在哪：** 起点问的是"要用上 JIT/AOT/FFI/mmap 里的哪些"——这个提法本身被测量纠正了。
+> 真正的一句话是"agent 产出的、构建内核时不知道的逻辑，要能在构建内核时也不知道的机器上正确
+> 跑起来，且过程可验证"。二十二个 Q 是这句话逐词拆开测出来的结果，不是二十二件互不相干的事。
+> 完整推导见 [`SYNTHESIS.md`](./SYNTHESIS.md) 开头的「初心」一节——**先读那里，再读问题板**。
+
 > 📄 **Reading the whole track at once:** [`SYNTHESIS.md`](./SYNTHESIS.md) — the cross-Q
 > synthesis (shape / cost / permanent residues / conditions under which it fails / what it
 > means for the north star), with an evidence grade on every claim and a
