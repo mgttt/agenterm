@@ -73,3 +73,66 @@ pub fn write_parent_console_stderr(message: &str) -> bool {
 pub fn write_parent_console_stdout(message: &str) -> bool {
     adapter::write_parent_console_stdout(message)
 }
+
+/// Duplicate the caller-visible stdin/stdout/stderr handles for explicit
+/// child stdio wiring (`[stdin, stdout, stderr]`, `None` where the process
+/// holds no valid handle). Attach the parent console first (`ScopedConsole`)
+/// so console-backed slots are populated; caller pipe or file redirections
+/// are duplicated as-is. This is how a GUI-subsystem binary hands its real
+/// streams to a worker child without trusting `Stdio::inherit`.
+#[cfg(windows)]
+pub fn duplicated_std_handles() -> [Option<std::os::windows::io::OwnedHandle>; 3] {
+    crate::selected::console::duplicate_std_handles()
+}
+
+/// Opaque guard that keeps the parent console attached.
+///
+/// On Windows this wraps the shared `ConsoleGuard`; the console is released
+/// when the guard is dropped. Spawn this before any `println!` calls in a
+/// `windows_subsystem = "windows"` binary.
+///
+/// On Unix this is a zero-size no-op.
+pub struct ScopedConsole {
+    #[cfg(windows)]
+    _inner: Option<crate::selected::console::ConsoleGuard>,
+    #[cfg(not(windows))]
+    _unused: (),
+}
+
+impl ScopedConsole {
+    /// Attach to the parent console. Returns `None` when there is no parent
+    /// console (double-click launch on Windows).
+    pub fn attach_parent() -> Option<Self> {
+        #[cfg(windows)]
+        {
+            crate::selected::console::ConsoleGuard::attach_parent()
+                .ok()
+                .map(|inner| Self {
+                    _inner: Some(inner),
+                })
+        }
+        #[cfg(not(windows))]
+        {
+            Some(Self { _unused: () })
+        }
+    }
+
+    /// Attach to the parent console without suppressing console control
+    /// events, so `Ctrl+C` keeps its default terminate behavior. This is
+    /// the variant for CLI worker processes; the GUI host uses
+    /// `attach_parent`, which must survive child-console control events.
+    pub fn attach_parent_with_default_interrupts() -> Option<Self> {
+        #[cfg(windows)]
+        {
+            crate::selected::console::ConsoleGuard::attach_parent_with_default_interrupts()
+                .ok()
+                .map(|inner| Self {
+                    _inner: Some(inner),
+                })
+        }
+        #[cfg(not(windows))]
+        {
+            Some(Self { _unused: () })
+        }
+    }
+}

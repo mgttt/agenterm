@@ -101,10 +101,10 @@ mod unix {
 
     #[test]
     fn agenterm_cli_script_hosting_remains_stubbed() {
-        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"))
-            .args(["script", "eval", "1"])
+        let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+            .args(["cli", "script", "eval", "1"])
             .output()
-            .expect("spawn agenterm-cli");
+            .expect("spawn agenterm cli");
         assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("invoke agenterm-rh directly"));

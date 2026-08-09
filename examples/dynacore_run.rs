@@ -5,7 +5,7 @@
 //! it, and prints the outcome — from an actual terminal, against an actual running
 //! `agenterm` server, no test harness required.
 //!
-//! This lives under `examples/` rather than as a new `[[bin]]` or `agenterm-cli`
+//! This lives under `examples/` rather than as a new `[[bin]]` or `agenterm`
 //! subcommand because `Cargo.toml`/`src/client/mod.rs`/`src/commands.rs` were, at the
 //! time this was written, mid-flight-modified by a concurrent session (see
 //! `tests/dynacore_live_server.rs`'s header for the full account) — the same
@@ -83,20 +83,20 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
-/// Locate the `agenterm-cli` executable this run's bridge shells out to.
+/// Locate the `agenterm` executable this run's bridge shells out to.
 ///
-/// `tests/dynacore_live_server.rs` uses `env!("CARGO_BIN_EXE_agenterm-cli")` — but that
+/// `tests/dynacore_live_server.rs` uses `env!("CARGO_BIN_EXE_agenterm")` — but that
 /// is a Cargo integration-test/benchmark-only mechanism: confirmed by probe (`cargo
 /// build --example` against a trial file using it fails at compile time with
-/// "environment variable `CARGO_BIN_EXE_agenterm-cli` not defined at compile time... may
+/// "environment variable `CARGO_BIN_EXE_agenterm` not defined at compile time... may
 /// not be available for the current Cargo target"), it is not defined for `[[example]]`
 /// targets. This falls back to a runtime sibling-path lookup instead: an example binary
-/// builds to `target/<profile>/examples/dynacore_run(.exe)`, and `agenterm-cli` builds
-/// to `target/<profile>/agenterm-cli(.exe)` — one directory up. If that sibling path
+/// builds to `target/<profile>/examples/dynacore_run(.exe)`, and `agenterm` builds
+/// to `target/<profile>/agenterm(.exe)` — one directory up. If that sibling path
 /// does not exist (e.g. a stripped/relocated install), falls back to bare `PATH`
 /// resolution by executable name, same as any other shell-invoked tool.
 fn locate_agenterm_cli() -> PathBuf {
-    let exe_name = format!("agenterm-cli{}", std::env::consts::EXE_SUFFIX);
+    let exe_name = format!("agenterm{}", std::env::consts::EXE_SUFFIX);
     if let Ok(current) = std::env::current_exe()
         && let Some(sibling) = current.parent().and_then(|examples_dir| examples_dir.parent())
     {
@@ -110,7 +110,7 @@ fn locate_agenterm_cli() -> PathBuf {
 
 /// Same bridge SEMANTICS as `tests/dynacore_live_server.rs::live_bridge`: only
 /// `tabs.list` is wired — it shells out to the already-existing, unmodified
-/// `agenterm-cli ui-snapshot` command against `address` and projects the real `tabs`
+/// `agenterm ui-snapshot` command against `address` and projects the real `tabs`
 /// field out of its JSON output (the same translation `src/client/mod.rs`'s
 /// `handle_script_broker` performs for the `tabs.list` broker operation). Every other
 /// `operation_id` returns a typed `Err` describing exactly that — this bridge does not
@@ -131,7 +131,7 @@ fn live_bridge(agenterm_cli: PathBuf, address: String) -> DynacoreFleetBridgeFn 
             .map_err(|error| format!("failed to spawn {}: {error}", agenterm_cli.display()))?;
         if !output.status.success() {
             return Err(format!(
-                "agenterm-cli ui-snapshot exited {:?}: {}",
+                "agenterm ui-snapshot exited {:?}: {}",
                 output.status.code(),
                 String::from_utf8_lossy(&output.stderr)
             ));

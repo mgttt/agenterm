@@ -14,13 +14,10 @@ pub(crate) fn write_parent_console_stdout(message: &str) -> bool {
 }
 
 fn write_parent_console(message: &str, to_stderr: bool) -> bool {
-    use std::{fs::OpenOptions, io::Write as _};
+    use std::{fs::OpenOptions, io::Write as _, os::windows::fs::OpenOptionsExt};
     use windows_sys::Win32::{
         Foundation::INVALID_HANDLE_VALUE,
-        System::Console::{
-            ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetStdHandle, STD_ERROR_HANDLE,
-            STD_OUTPUT_HANDLE,
-        },
+        System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
     };
 
     let payload = format!("{message}\n");
@@ -43,17 +40,19 @@ fn write_parent_console(message: &str, to_stderr: bool) -> bool {
             }
         }
     }
-    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+    let Ok(_guard) = super::console::ConsoleGuard::attach_parent() else {
         return false;
-    }
-    let written = OpenOptions::new()
-        .write(true)
-        .open("CONOUT$")
+    };
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true);
+    opts.share_mode(
+        windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ
+            | windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE,
+    );
+    opts.open("CONOUT$")
         .is_ok_and(|mut console| {
             console.write_all(payload.as_bytes()).is_ok() && console.flush().is_ok()
-        });
-    unsafe { FreeConsole() };
-    written
+        })
 }
 
 pub(crate) fn stdout_probe_token(reader: &ChildStdout) -> Option<PipeProbeToken> {

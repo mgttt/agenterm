@@ -5,15 +5,13 @@ use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::PathBuf;
 use std::process::ExitStatus;
-use std::sync::Mutex;
 
 use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    AttachConsole, ENABLE_LINE_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT, FreeConsole, GetConsoleMode,
-    SetConsoleCtrlHandler,
+    ENABLE_LINE_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT, GetConsoleMode,
 };
 
 use crate::contract::pty::{
@@ -29,7 +27,6 @@ pub fn login_shell_argument(
 }
 
 const ENHANCED_KEY: u32 = 0x0100;
-static CONSOLE_ATTACH_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug)]
 pub struct ChildCommand(rmux_pty::ChildCommand);
@@ -167,13 +164,7 @@ impl PtyChild {
                 "repeat count must be greater than zero",
             ));
         }
-        let _guard = CONSOLE_ATTACH_LOCK.lock().map_err(|_| {
-            PtyError::failed(
-                "send native key",
-                "pty_console_attach_lock_poisoned",
-                "Windows console attach lock poisoned",
-            )
-        })?;
+        let _guard = super::console::lock();
         rmux_pty::write_windows_console_key(
             self.0.pid(),
             native_console_key_event(key, repeat_count),
@@ -184,20 +175,14 @@ impl PtyChild {
     /// Queries the target child's console mode without guessing from terminal
     /// output or from the host process's own console state.
     pub fn native_input_ownership(&self) -> PtyResult<NativeInputOwnership> {
-        let _guard = CONSOLE_ATTACH_LOCK.lock().map_err(|_| {
-            PtyError::failed(
-                "inspect native input ownership",
-                "pty_console_attach_lock_poisoned",
-                "Windows console attach lock poisoned",
-            )
-        })?;
-        let _attachment = ConsoleAttachment::attach(self.0.pid().as_u32()).map_err(|error| {
-            PtyError::failed(
-                "inspect native input ownership",
-                "pty_console_attach_failed",
-                error,
-            )
-        })?;
+        let _attachment = super::console::ConsoleGuard::attach_process(self.0.pid().as_u32())
+            .map_err(|error| {
+                PtyError::failed(
+                    "inspect native input ownership",
+                    "pty_console_attach_failed",
+                    error,
+                )
+            })?;
         let input = open_console_input().map_err(|error| {
             PtyError::failed(
                 "inspect native input ownership",
@@ -268,75 +253,6 @@ fn console_input_mode(input: &OwnedHandle) -> io::Result<u32> {
         return Err(io::Error::last_os_error());
     }
     Ok(mode)
-}
-
-struct ConsoleAttachment {
-    _ignore_console_control: ConsoleControlIgnoreGuard,
-}
-
-impl ConsoleAttachment {
-    fn attach(process_id: u32) -> io::Result<Self> {
-        let _ = unsafe {
-            // SAFETY: Console attachment is process-wide and serialized above.
-            FreeConsole()
-        };
-        let attached = unsafe {
-            // SAFETY: AttachConsole validates the nonzero child process id.
-            AttachConsole(process_id)
-        };
-        if attached == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        match ConsoleControlIgnoreGuard::install() {
-            Ok(ignore_console_control) => Ok(Self {
-                _ignore_console_control: ignore_console_control,
-            }),
-            Err(error) => {
-                let _ = unsafe {
-                    // SAFETY: AttachConsole succeeded immediately above.
-                    FreeConsole()
-                };
-                Err(error)
-            }
-        }
-    }
-}
-
-impl Drop for ConsoleAttachment {
-    fn drop(&mut self) {
-        let _ = unsafe {
-            // SAFETY: This releases this scope's serialized attachment.
-            FreeConsole()
-        };
-    }
-}
-
-struct ConsoleControlIgnoreGuard;
-
-impl ConsoleControlIgnoreGuard {
-    fn install() -> io::Result<Self> {
-        let result = unsafe {
-            // SAFETY: The callback has the required static system ABI.
-            SetConsoleCtrlHandler(Some(ignore_console_control_event), 1)
-        };
-        if result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self)
-    }
-}
-
-impl Drop for ConsoleControlIgnoreGuard {
-    fn drop(&mut self) {
-        let _ = unsafe {
-            // SAFETY: Removes the exact callback installed by install.
-            SetConsoleCtrlHandler(Some(ignore_console_control_event), 0)
-        };
-    }
-}
-
-unsafe extern "system" fn ignore_console_control_event(_control_type: u32) -> i32 {
-    1
 }
 
 const fn native_console_key_event(

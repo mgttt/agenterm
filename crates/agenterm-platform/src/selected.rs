@@ -484,6 +484,13 @@ pub mod ipc;
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;
 
+#[cfg(all(
+    windows,
+    any(feature = "pty", feature = "process")
+))]
+#[path = "adapters/windows/console.rs"]
+pub(crate) mod console;
+
 #[cfg(all(feature = "process-control", windows))]
 #[path = "adapters/windows/process_control.rs"]
 pub(crate) mod process_control;

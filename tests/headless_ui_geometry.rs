@@ -38,6 +38,14 @@ struct Harness {
     settings: PathBuf,
     instances: PathBuf,
     server: Option<std::process::Child>,
+    // OS-enforced backstop for the manual kill in `Drop` below — see
+    // `tests/dynacore_live_server.rs`'s `Harness` for why: Rust `Drop` never
+    // runs if this test binary is force-killed from the outside (a CI
+    // timeout, a hung wait loop someone interrupts), which otherwise orphans
+    // `agenterm.exe server`. This kill-on-close containment handle is closed
+    // by the OS during process teardown regardless of how that teardown
+    // happens.
+    _server_tree_guard: Option<agenterm_platform::process::ProcessTreeGuard>,
 }
 
 impl Harness {
@@ -65,16 +73,20 @@ impl Harness {
             address,
             root,
             server: None,
+            _server_tree_guard: None,
         };
-        harness.server = Some(
-            harness
-                .command(env!("CARGO_BIN_EXE_agenterm"))
-                .args(["server", "--address", &harness.address])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("start isolated headless server"),
+        let server = harness
+            .command(env!("CARGO_BIN_EXE_agenterm"))
+            .args(["server", "--address", &harness.address])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start isolated headless server");
+        harness._server_tree_guard = Some(
+            agenterm_platform::process::ProcessTreeGuard::attach(&server)
+                .expect("attach kill-on-close containment to isolated server"),
         );
+        harness.server = Some(server);
         harness.wait_for(&["protocol-info", "--running"], Duration::from_secs(20));
         harness
     }
@@ -92,7 +104,8 @@ impl Harness {
     }
 
     fn cli(&self, arguments: &[&str]) -> std::process::Output {
-        self.command(env!("CARGO_BIN_EXE_agenterm-cli"))
+        self.command(env!("CARGO_BIN_EXE_agenterm"))
+            .arg("cli")
             .args(["--address", &self.address])
             .args(arguments)
             .output()

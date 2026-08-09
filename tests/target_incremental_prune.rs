@@ -267,7 +267,9 @@ fn both_executables_dispatch_incremental_wrapper_mode() {
     let incremental = target.join("debug/incremental");
     let invocation = "test-wrapper-parity-0001";
     let state = target.join("debug/.agenterm-incremental").join(invocation);
-    let compiler_probe = Path::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+    let compiler_probe_env = std::env::var("CARGO_BIN_EXE_agenterm")
+        .expect("Cargo should expose the agenterm test binary");
+    let compiler_probe = Path::new(&compiler_probe_env);
     let direct = Command::new(compiler_probe)
         .arg("--version")
         .output()
@@ -312,7 +314,9 @@ fn rustc_wrapper_snapshots_under_cargo_lock_and_finalizes_exact_touch_manifest()
     fs::create_dir_all(&state).expect("create producer state");
     let touched = incremental.join("probe-root");
     let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rh"));
-    let compiler_probe = Path::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+    let compiler_probe_env = std::env::var("CARGO_BIN_EXE_agenterm")
+        .expect("Cargo should expose the agenterm test binary");
+    let compiler_probe = Path::new(&compiler_probe_env);
     let compiler_arguments = [
         "--crate-name".to_owned(),
         "agenterm_incremental_probe".to_owned(),

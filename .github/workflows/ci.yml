@@ -416,7 +416,7 @@ jobs:
         run: >-
           ./scripts/bootstrap.sh
           --server target/x86_64-unknown-linux-gnu/debug/agenterm
-          --cli target/x86_64-unknown-linux-gnu/debug/agenterm-cli
+          --cli target/x86_64-unknown-linux-gnu/debug/agenterm
           --ci-main-dev
       - name: Prove published Linux IPC upgrade and rollback
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -431,7 +431,7 @@ jobs:
           target/x86_64-unknown-linux-gnu/debug/agenterm-rh task run \
             native-ipc-compat-smoke --manifest agenterm.tasks.json -- \
             --head-server target/x86_64-unknown-linux-gnu/debug/agenterm \
-            --head-cli target/x86_64-unknown-linux-gnu/debug/agenterm-cli \
+            --head-cli target/x86_64-unknown-linux-gnu/debug/agenterm \
             --head-metadata target/x86_64-unknown-linux-gnu/debug/agenterm.json
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
@@ -498,7 +498,7 @@ jobs:
             AGENTERM_BOOTSTRAP_TASK=unix-frontend-linux-smoke \
               ./scripts/bootstrap.sh \
               target/x86_64-unknown-linux-gnu/debug/agenterm \
-              target/x86_64-unknown-linux-gnu/debug/agenterm-cli \
+              target/x86_64-unknown-linux-gnu/debug/agenterm \
               --platform linux
           ' 2>&1)
           journey_status=$?
@@ -770,7 +770,7 @@ jobs:
           fi
           ./scripts/bootstrap.sh \
             --server "target/${{ matrix.target }}/debug/agenterm" \
-            --cli "target/${{ matrix.target }}/debug/agenterm-cli" \
+            --cli "target/${{ matrix.target }}/debug/agenterm" \
             --ci-main-dev
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
           duration_ms=$((end_ms - start_ms))
@@ -801,7 +801,7 @@ jobs:
           "$binary_dir/agenterm-rh" task run native-ipc-compat-smoke \
             --manifest agenterm.tasks.json -- \
             --head-server "$binary_dir/agenterm" \
-            --head-cli "$binary_dir/agenterm-cli" \
+            --head-cli "$binary_dir/agenterm" \
             --head-metadata "$binary_dir/agenterm.json"
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
           duration_ms=$((end_ms - start_ms))
@@ -825,7 +825,7 @@ jobs:
             --manifest agenterm.tasks.json -- \
             --control-center "$binary_dir/agenterm-cc" \
             --server "$binary_dir/agenterm" \
-            --cli "$binary_dir/agenterm-cli" 2>&1)
+            --cli "$binary_dir/agenterm" 2>&1)
           control_center_status=$?
           set -e
           printf '%s\n' "$control_center_output"
@@ -855,7 +855,7 @@ jobs:
           set +e
           journey_output=$("$binary_dir/agenterm-rh" task run unix-frontend-macos-smoke \
             --manifest agenterm.tasks.json -- \
-            "$binary_dir/agenterm" "$binary_dir/agenterm-cli" --platform macos 2>&1)
+            "$binary_dir/agenterm" "$binary_dir/agenterm" --platform macos 2>&1)
           journey_status=$?
           set -e
           printf '%s\n' "$journey_output"

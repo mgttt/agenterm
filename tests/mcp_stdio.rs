@@ -250,8 +250,8 @@ fn public_resource_matches_cli_snapshot_field_for_field() {
         }
     });
 
-    let cli_output = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"))
-        .args(["--address", &address, "ui-snapshot"])
+    let cli_output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+        .args(["cli", "--address", &address, "ui-snapshot"])
         .output()
         .expect("run public CLI snapshot");
     assert!(cli_output.status.success(), "{cli_output:?}");
@@ -870,7 +870,18 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
         .spawn()
         .expect("start isolated server"),
     );
+    // OS-enforced backstop for the manual kill/wait loop below the
+    // `catch_unwind`: a kill-on-close containment handle that the OS closes
+    // during this test process's teardown no matter how that teardown
+    // happens (normal return, panic, or this binary being force-killed from
+    // the outside by a CI timeout) — unlike the manual cleanup, it does not
+    // depend on any Rust code running.
+    let _server_tree_guard = agenterm_platform::process::ProcessTreeGuard::attach(
+        server.as_ref().expect("server just spawned"),
+    )
+    .expect("attach kill-on-close containment to isolated server");
     let mut gui: Option<std::process::Child> = None;
+    let mut _gui_tree_guard: Option<agenterm_platform::process::ProcessTreeGuard> = None;
     let mut mcp: Option<std::process::Child> = None;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         wait_for_cli(
@@ -894,6 +905,12 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
             .stderr(Stdio::null())
             .spawn()
             .expect("start replaceable GUI"),
+        );
+        _gui_tree_guard = Some(
+            agenterm_platform::process::ProcessTreeGuard::attach(
+                gui.as_ref().expect("GUI just spawned"),
+            )
+            .expect("attach kill-on-close containment to replaceable GUI"),
         );
         wait_for_cli(
             &address,
@@ -961,7 +978,7 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
 
         let mut sidecar =
             configured_command(mcp_cli(), &address, &workspace, &settings, &instances)
-                .args(["mcp", "--address", &address, "serve", "--stdio"])
+                .args(["cli", "mcp", "--address", &address, "serve", "--stdio"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -1492,7 +1509,7 @@ fn run_discovery_resource(instances: &Path, uri: &str) -> Vec<Value> {
 
 fn run_selected_resource(instances: &Path, selectors: &[&str], uri: &str) -> Vec<Value> {
     let mut child = Command::new(mcp_cli())
-        .arg("mcp")
+        .args(["cli", "mcp"])
         .args(selectors)
         .args(["serve", "--stdio"])
         .env("AGENTERM_INSTANCE_DIR", instances)
@@ -1687,16 +1704,16 @@ fn configured_command(
 }
 
 fn mcp_cli() -> PathBuf {
-    // MCP is only hosted under agenterm-cli (standalone PE removed).
+    // MCP is hosted under `agenterm cli mcp` (standalone PE removed).
     std::env::var_os("AGENTERM_MCP_CLI")
         .or_else(|| std::env::var_os("AGENTERM_MCP_EXE"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_agenterm-cli")))
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_agenterm")))
 }
 
 fn mcp_command(args: &[&str]) -> Command {
     let mut command = Command::new(mcp_cli());
-    command.arg("mcp");
+    command.args(["cli", "mcp"]);
     command.args(args);
     command
 }
@@ -1710,13 +1727,13 @@ fn run_cli(
     arguments: &[&str],
 ) -> std::process::Output {
     configured_command(
-        env!("CARGO_BIN_EXE_agenterm-cli"),
+        env!("CARGO_BIN_EXE_agenterm"),
         address,
         workspace,
         settings,
         instances,
     )
-    .args(["--address", address])
+    .args(["cli", "--address", address])
     .args(arguments)
     .output()
     .expect("run isolated CLI")

@@ -52,7 +52,7 @@ fn informational_commands_are_machine_readable_without_opening_the_shell() {
 
 #[test]
 fn cli_control_contract_is_strict_and_does_not_autostart_a_server() {
-    let cli = env!("CARGO_BIN_EXE_agenterm-cli");
+    let cli = env!("CARGO_BIN_EXE_agenterm");
     let executable = env!("CARGO_BIN_EXE_agenterm-cc");
     let registry = std::env::temp_dir().join(format!(
         "agenterm-cc-cli-contract-test-{}.json",
@@ -61,6 +61,7 @@ fn cli_control_contract_is_strict_and_does_not_autostart_a_server() {
     let _ = std::fs::remove_file(&registry);
 
     let status = Command::new(cli)
+        .arg("cli")
         .args(["control-center", "status"])
         .env("AGENTERM_CC_REGISTRY_PATH", &registry)
         .output()
@@ -71,6 +72,7 @@ fn cli_control_contract_is_strict_and_does_not_autostart_a_server() {
     assert_eq!(document["pid"], serde_json::Value::Null);
 
     let close = Command::new(cli)
+        .arg("cli")
         .args(["control-center", "close"])
         .env("AGENTERM_CC_REGISTRY_PATH", &registry)
         .output()
@@ -81,6 +83,7 @@ fn cli_control_contract_is_strict_and_does_not_autostart_a_server() {
     assert_eq!(document["pid"], serde_json::Value::Null);
 
     let snapshot = Command::new(cli)
+        .arg("cli")
         .args(["--address", "127.0.0.1:9", "control-center", "snapshot"])
         .env("AGENTERM_CC_REGISTRY_PATH", &registry)
         .output()
@@ -118,6 +121,7 @@ fn cli_control_contract_is_strict_and_does_not_autostart_a_server() {
     assert!(!registry.exists());
 
     let invalid = Command::new(cli)
+        .arg("cli")
         .args(["control-center", "snapshot", "--no-activate"])
         .output()
         .expect("run invalid arguments");

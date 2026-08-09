@@ -32,9 +32,9 @@ fn local_build_installs_a_dock_safe_app_bundle() {
     let applications = root.join("applications");
     fs::create_dir_all(&binaries).expect("create fixture build");
 
-    for name in ["agenterm", "agenterm-cli", "agenterm-rh"] {
-        let body = if name == "agenterm-cli" {
-            format!("#!/bin/sh\necho 'agenterm-cli {CURRENT_VERSION}'\n")
+    for name in ["agenterm", "agenterm-rh"] {
+        let body = if name == "agenterm" {
+            format!("#!/bin/sh\necho 'agenterm cli {CURRENT_VERSION}'\n")
         } else if name == "agenterm-rh" {
             format!("#!/bin/sh\necho 'agenterm-rh {CURRENT_VERSION}'\n")
         } else {
@@ -85,16 +85,18 @@ fn local_build_installs_a_dock_safe_app_bundle() {
             && plist.contains("<string>AgenTerm.icns</string>"),
         "app icon is not declared"
     );
-    assert!(bin.join("agenterm-cli").exists(), "CLI link is missing");
+    assert!(bin.join("agenterm").exists(), "agenterm link is missing");
     assert!(install.join("current").exists(), "current link is missing");
     let installed: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(install.join("current/installed.json"))
-            .expect("read installed.json"),
+        &fs::read_to_string(install.join("current/installed.json")).expect("read installed.json"),
     )
     .expect("parse installed.json");
     assert_eq!(installed["channel"], "local-build");
     assert_eq!(installed["distribution"], "local");
-    assert_eq!(installed["variant"], format!("macos-{}-local", std::env::consts::ARCH));
+    assert_eq!(
+        installed["variant"],
+        format!("macos-{}-local", std::env::consts::ARCH)
+    );
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("distribution local"),
         "install output does not report the distribution"

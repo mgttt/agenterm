@@ -293,8 +293,26 @@ fn verify_head(context, repo, server, cli, metadata_path) {
 fn authority_argv(program, arguments) {
     let name = std::path::PathBuf::from(program).file_name;
     let argv = [];
+    let cli_role = 0;
+    let selector_value = 0;
+    for argument in arguments {
+        let argument_text = "" + argument;
+        if selector_value != 0 {
+            selector_value = 0;
+        } else if argument_text == "--instance"
+                || argument_text == "--address"
+                || argument_text == "--endpoint" {
+            selector_value = 1;
+        } else if !argument_text.starts_with("-") {
+            cli_role = 1;
+        }
+    }
     if name == "agenterm" || name == "agenterm.exe" {
-        argv.push("server");
+        if cli_role != 0 {
+            argv.push("cli");
+        } else {
+            argv.push("server");
+        }
     }
     let arg_idx = 0;
     while arg_idx < arguments.len {
@@ -576,9 +594,13 @@ if head_server == "" {
     head_server = std::path::absolute(head_server).display;
 }
 if head_cli == "" {
+    let head_cli_name = "agenterm";
+    if facts.os == "windows" {
+        head_cli_name = "agenterm.exe";
+    }
     head_cli = std::path::join(
         repo,
-        "dist/agenterm-cli" + suffix
+        "dist/" + head_cli_name
     ).display;
 } else {
     head_cli = std::path::absolute(head_cli).display;

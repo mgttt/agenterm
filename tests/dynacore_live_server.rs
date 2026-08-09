@@ -4,8 +4,8 @@
 //! calls against a REAL, separately-spawned `agenterm` server process — not
 //! the mock bridge `tests/dynacore_host.rs` uses. The round trip goes
 //! through the exact external IPC client surface every other black-box test
-//! in this repo already uses: `env!("CARGO_BIN_EXE_agenterm-cli")` +
-//! `--address`, following `tests/headless_ui_geometry.rs`'s `Harness`
+//! in this repo already uses: `env!("CARGO_BIN_EXE_agenterm")` +
+//! `cli --address`, following `tests/headless_ui_geometry.rs`'s `Harness`
 //! pattern — not a new, reinvented connection mechanism, and not the
 //! internal `script_worker.rs`/`BrokerClient` path (out of scope per the
 //! task's own rule against touching that file while it is mid-refactor).
@@ -22,9 +22,9 @@
 //! binary target needs an explicit `[[bin]]` entry). As of this session's
 //! `git status`, all three are ALREADY mid-flight-modified by a concurrent
 //! session (the same files the git-log "Trait-M3/M4 fold" work touches,
-//! plus what `plan/design-agenterm-cli-merge.md` /
-//! `plan/design-agenterm-bin-separation.md` show is an in-progress CLI
-//! binary restructuring). This environment's git tooling has no
+//! plus what `plan/archive/design-agenterm-cli-merge.md` /
+//! `plan/archive/design-agenterm-bin-separation.md` show was the then
+//! in-progress CLI binary restructuring, since shipped). This environment's git tooling has no
 //! non-interactive way to commit only NEW hunks in an already-dirty file
 //! (no `git add -p`/`git rebase -i`), so editing any of those three right
 //! now would mean committing a mix of this task's work and the other
@@ -56,6 +56,15 @@ struct Harness {
     settings: PathBuf,
     instances: PathBuf,
     server: Option<Child>,
+    // OS-enforced backstop for the manual kill in `Drop` below: a Job Object
+    // (Windows) / process-group containment (elsewhere) with kill-on-close
+    // semantics. `Drop::drop` only runs when this test process exits or
+    // panics normally; an external force-kill of the test binary (a CI
+    // timeout, a hung `wait_ready` loop someone Ctrl-C's) skips Rust `Drop`
+    // entirely and orphans `agenterm.exe server` — this guard's containment
+    // handle is closed by the OS during process teardown regardless of how
+    // that teardown happens, so the child dies either way.
+    _server_tree_guard: Option<agenterm_platform::process::ProcessTreeGuard>,
 }
 
 impl Harness {
@@ -83,16 +92,20 @@ impl Harness {
             address,
             root,
             server: None,
+            _server_tree_guard: None,
         };
-        harness.server = Some(
-            harness
-                .server_command()
-                .args(["server", "--address", &harness.address])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("start isolated headless server"),
+        let server = harness
+            .server_command()
+            .args(["server", "--address", &harness.address])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start isolated headless server");
+        harness._server_tree_guard = Some(
+            agenterm_platform::process::ProcessTreeGuard::attach(&server)
+                .expect("attach kill-on-close containment to isolated server"),
         );
+        harness.server = Some(server);
         harness.wait_ready();
         harness
     }
@@ -110,7 +123,8 @@ impl Harness {
     }
 
     fn cli(&self, args: &[&str]) -> std::process::Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm"));
+        command.arg("cli");
         command
             .env("AGENTERM_IPC_ADDRESS", &self.address)
             .env("AGENTERM_WORKSPACE_PATH", &self.workspace)
@@ -160,12 +174,12 @@ impl Drop for Harness {
 
 /// The real bridge for this proof: routes `fleet.tabs.list` to a real,
 /// already-running server by shelling out to the ALREADY-EXISTING,
-/// unmodified `agenterm-cli ui-snapshot` command (this task added nothing to
+/// unmodified `agenterm cli ui-snapshot` command (this task added nothing to
 /// that command) and projecting its real `tabs` field — the exact
 /// translation `src/client/mod.rs`'s `handle_script_broker` already performs
 /// for the `tabs.list` broker operation. This duplicates that one mapping,
 /// not the IPC connection mechanism itself, which is entirely
-/// `agenterm-cli`'s own compiled, unmodified behavior.
+/// `agenterm cli`'s own compiled, unmodified behavior.
 fn live_bridge(cli_env: Vec<(&'static str, String)>, address: String) -> DynacoreFleetBridgeFn {
     Arc::new(move |operation_id: &str, _params_json: &str| -> Result<String, String> {
         if operation_id != "tabs.list" {
@@ -173,17 +187,18 @@ fn live_bridge(cli_env: Vec<(&'static str, String)>, address: String) -> Dynacor
                 "dynacore_live_server test bridge has no real mapping wired for {operation_id}"
             ));
         }
-        let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm"));
+        command.arg("cli");
         for (key, value) in &cli_env {
             command.env(key, value);
         }
         let output = command
             .args(["--address", &address, "ui-snapshot"])
             .output()
-            .map_err(|error| format!("failed to spawn agenterm-cli: {error}"))?;
+            .map_err(|error| format!("failed to spawn agenterm cli: {error}"))?;
         if !output.status.success() {
             return Err(format!(
-                "agenterm-cli ui-snapshot exited {:?}: {}",
+                "agenterm cli ui-snapshot exited {:?}: {}",
                 output.status.code(),
                 String::from_utf8_lossy(&output.stderr)
             ));

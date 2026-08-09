@@ -185,15 +185,15 @@ if [[ -n "$LOCAL_BUILD_DIR" ]]; then
   [[ "$OS" == "macos" ]] || fail "--local-build currently supports macOS only"
   [[ -d "$LOCAL_BUILD_DIR" ]] || fail "local build directory does not exist: $LOCAL_BUILD_DIR"
   LOCAL_BUILD_DIR="$(cd "$LOCAL_BUILD_DIR" && pwd -P)"
-  REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-rh)
+  REQUIRED_EXECUTABLES=(agenterm agenterm-rh)
   for executable in "${REQUIRED_EXECUTABLES[@]}"; do
     SOURCE_PATH="$LOCAL_BUILD_DIR/$executable"
     [[ -f "$SOURCE_PATH" && ! -L "$SOURCE_PATH" && -x "$SOURCE_PATH" ]] ||
       fail "local build is missing executable: $SOURCE_PATH"
   done
-  LOCAL_VERSION_OUTPUT="$($LOCAL_BUILD_DIR/agenterm-cli --version)"
-  [[ "$LOCAL_VERSION_OUTPUT" =~ ^agenterm-cli[[:space:]]+([0-9A-Za-z.+_-]+)$ ]] ||
-    fail "local agenterm-cli returned an invalid version: $LOCAL_VERSION_OUTPUT"
+  LOCAL_VERSION_OUTPUT="$($LOCAL_BUILD_DIR/agenterm cli --version)"
+  [[ "$LOCAL_VERSION_OUTPUT" =~ ^agenterm[[:space:]]+cli[[:space:]]+([0-9A-Za-z.+_-]+)$ ]] ||
+    fail "local agenterm cli returned an invalid version: $LOCAL_VERSION_OUTPUT"
   RELEASE_VERSION="${BASH_REMATCH[1]}"
   VERSION="v$RELEASE_VERSION-local"
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agenterm-install.XXXXXXXX")"
@@ -430,7 +430,6 @@ fi
 
 REQUIRED_EXECUTABLES=(
   agenterm
-  agenterm-cli
   agenterm-rh
 )
 for executable in "${REQUIRED_EXECUTABLES[@]}"; do
@@ -660,7 +659,7 @@ if [[ -n "$SOURCE_COMMIT" ]]; then
   say "Supply-chain: commit=$SOURCE_COMMIT signed=${PROVENANCE_SIGNED:-?} notarized=${PROVENANCE_NOTARIZED:-?}"
 fi
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  say "Add $BIN_DIR to PATH to use agenterm-rh (.rh tasks) and agenterm-cli (mux/mcp subcommands)"
+  say "Add $BIN_DIR to PATH to use agenterm-rh (.rh tasks) and agenterm cli (mux/mcp subcommands)"
 fi
 
 if command -v pgrep >/dev/null 2>&1 && pgrep -f '/agenterm( |$)' >/dev/null 2>&1; then
@@ -668,8 +667,8 @@ if command -v pgrep >/dev/null 2>&1 && pgrep -f '/agenterm( |$)' >/dev/null 2>&1
   say "A running AgenTerm process was detected (server may still be the previous version)."
   say "Disk install is $VERSION, but keep-server windows keep using the already-loaded PE."
   say "To enable $VERSION in the UI: close AgenTerm and choose \"stop server and exit\" (not \"keep server running\"), then reopen."
-  say "Or: agenterm-cli shutdown   then start AgenTerm again."
-  say "Check disk version without opening a window: agenterm --version   (or agenterm-cli --version)"
+  say "Or: agenterm cli shutdown   then start AgenTerm again."
+  say "Check disk version without opening a window: agenterm cli --version"
 fi
 
 if [[ "$NO_LAUNCH" != "1" ]]; then
