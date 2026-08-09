@@ -98,3 +98,30 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
 - rhai 不拆:rh 是任务系统与构建管线的承重墙。
 - 不引入 wrapper/.com/动态库拆分来"作弊"减重:与单 PE 设计决定冲突。
 - debug 产物体积不做目标。
+- (2026-08-09 预算裁决)GUI 体积预算已由 4MiB 上调至 10MiB——体积不再是驱动;
+  本文档自此以"持续的抽象与复用"为主目标,体积数据保留作事实基线。
+
+## 4. 复用工作日志与队列(滚动更新)
+
+### 已落地
+- 2026-08-09 `03412921`:agenterm-qjs 未使用的 sha2/walkdir 直接依赖删除;tempfile
+  降为 dev-dep(P3 第一刀)。
+- 2026-08-09 `5e2936d8`:qjs/sql 的 check-many / corpus-scan **整命令体**下沉到
+  script-common(继 parse_check_many_cli 下沉后的上一层)。两引擎各留 3–8 行适配,
+  输出与退出码逐字节不变;crate 测试 common 47 / qjs 93 / sql 19 全绿。
+- 同日并行 lane 的 `82019aa9` 开始退役独立引擎 exe——与本文档 P1/P2 的
+  "引擎搭载策略收敛到主 PE + 编译期门控"同向,后续按其波次推进后再评估 feature 门。
+
+### 队列(按价值排序)
+1. **P5 frontend 三面重复测绘**(audit 进行中):remote_frontend(378KB)/unix
+   frontend(276+132KB)/windows frontend 的共享核提取地图,产出后另立设计节。
+2. corpus-scan 契约测试 ×3(lua/qjs/sql 各 ~50 行结构相同)→ script-common
+   test-support;顺带把"契约"从复制粘贴变成单点定义。
+3. lua 的 corpus-scan/check-many 是否向共享命令体对齐:其"`--dir` 悬空回退 CWD"
+   与人类输出格式为真实分叉,由 parity 测试钉住——对齐是产品决定,归 script lane。
+4. sha2 0.10→0.11 统一(script-common 升版后 0.10 整链消失),连带 lua 的直接依赖
+   使用面核查。
+
+### 显式拒绝(记录以免反复)
+- `read_source` 7 行 ×2(qjs/sql):不下沉。两份五行函数配各自文档注释的清晰度
+  高于一个带错误映射参数的共享函数;不是所有重复都值得一个抽象。
