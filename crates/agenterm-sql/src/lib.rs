@@ -60,6 +60,7 @@
 
 pub mod check;
 pub mod check_many;
+pub mod cli;
 pub mod corpus_scan;
 pub mod error;
 pub mod eval;

@@ -40,6 +40,7 @@ pub mod script_protocol;
 pub mod script_rh_cache;
 pub mod script_rh_cli;
 pub mod script_rh_host;
+pub mod script_rh_cli_main;
 pub mod script_rh_pack;
 pub mod script_rh_run;
 pub mod script_lua_host;
