@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, check, transpile_cdylib_with_mode};
 
-const NEW_PUBLIC_PROBES: [(&str, &[&str]); 27] = [
+const NEW_PUBLIC_PROBES: [(&str, &[&str]); 28] = [
     (
         "bytes-append-probe.rh",
         &["rh_bytes_append(", "rh_bytes_from_text("],
@@ -111,6 +111,12 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 27] = [
     (
         "json-scalar-concat-probe.rh",
         &["rh_json_string_path("],
+    ),
+    // json == json must emit a real serde_json::Value equality (null-safe),
+    // never the fail-closed string coercion the qualification gate died on.
+    (
+        "json-null-eq-probe.rh",
+        &["== null_json())) as INT"],
     ),
 ];
 

@@ -1,0 +1,14 @@
+// Probe: json == json equality must be a real Value comparison in native
+// packs — comparing a null field against a null-returning helper must not
+// trip the fail-closed string path (the qualification gate's shape).
+fn null_json() {
+    rh::json::parse("null")
+}
+
+fn entry() {
+    let doc = rh::json::parse("{\"first_failure\":null,\"name\":\"x\"}");
+    require(doc.first_failure == null_json(), "null_field_equals_null_helper");
+    require(doc.name != null_json(), "string_field_differs_from_null");
+    print("json_null_eq_probe_ok");
+    0
+}

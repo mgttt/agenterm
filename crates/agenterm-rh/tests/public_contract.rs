@@ -9,7 +9,7 @@ use agenterm_rh::{
     read_manifest, run_check_many, transpile_cdylib,
 };
 
-const FIXTURE_NAMES: [&str; 77] = [
+const FIXTURE_NAMES: [&str; 79] = [
     "append-sync-probe.rh",
     "atomic-write-probe.rh",
     "break-continue.rh",
@@ -47,6 +47,8 @@ const FIXTURE_NAMES: [&str; 77] = [
     "json-array-walk.rh",
     "json-keys-probe.rh",
     "json-marker-run-probe.rh",
+    "json-null-eq-probe.rh",
+    "json-scalar-concat-probe.rh",
     "json-param-index-assign-probe.rh",
     "json-parse-file-probe.rh",
     "json-parse-schema.rh",

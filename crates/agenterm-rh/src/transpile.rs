@@ -10966,6 +10966,21 @@ fn is_json_null_compare_value(expr: &Expr, ctx: &EmitCtx) -> bool {
         || json_value_path(expr, ctx).is_some()
 }
 
+/// Operand of a json-to-json equality: any json value expression
+/// `is_json_null_compare_value` accepts, plus a zero-argument local fn call
+/// whose inferred return kind is Json (the bundled `alias__null_json()`
+/// helper shape the qualification gate compares against).
+fn is_json_equality_operand(expr: &Expr, ctx: &EmitCtx) -> bool {
+    if let Expr::FnCall(call, ..) = expr
+        && call.namespace.is_empty()
+        && call.args.is_empty()
+        && ctx.local_fn_return_kinds.get(call.name.as_str()).copied() == Some(ValueKind::Json)
+    {
+        return true;
+    }
+    is_json_null_compare_value(expr, ctx)
+}
+
 fn json_unit_compare_pair<'a>(
     lhs: &'a Expr,
     rhs: &'a Expr,
@@ -10989,6 +11004,15 @@ fn emit_json_value_operand(
         && ctx.scope.get(ident.1.as_str()).copied() == Some(ValueKind::Json)
     {
         out.push_str(ident.1.as_str());
+        return Ok(());
+    }
+    if let Expr::FnCall(call, ..) = expr
+        && call.namespace.is_empty()
+        && call.args.is_empty()
+        && ctx.local_fn_return_kinds.get(call.name.as_str()).copied() == Some(ValueKind::Json)
+    {
+        out.push_str(call.name.as_str());
+        out.push_str("()");
         return Ok(());
     }
     if let Some((binding, path, key)) = json_path_key_get(expr, ctx) {
@@ -11086,6 +11110,26 @@ fn comparison_binary(
             out.push('(');
             emit_json_value_operand(out, json_expr, ctx)?;
             out.push_str(".is_null())) as INT");
+            return Ok(());
+        }
+        if (op == "==" || op == "!=")
+            && is_json_equality_operand(lhs, ctx)
+            && is_json_equality_operand(rhs, ctx)
+        {
+            // json == json compares as real serde_json::Value equality.
+            // Routing both sides through string coercion was lossy and
+            // fail-closed on null — the qualification gate's
+            // `timing.first_failure == null_json()` died exactly there
+            // whenever there was no failure to report.
+            out.push('(');
+            if op == "!=" {
+                out.push('!');
+            }
+            out.push('(');
+            emit_json_value_operand(out, lhs, ctx)?;
+            out.push_str(" == ");
+            emit_json_value_operand(out, rhs, ctx)?;
+            out.push_str(")) as INT");
             return Ok(());
         }
         out.push('(');
