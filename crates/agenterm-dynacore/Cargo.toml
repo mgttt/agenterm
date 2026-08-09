@@ -1,0 +1,21 @@
+[package]
+name = "agenterm-dynacore"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "dynacore logic-pack v1 skeleton: neutral IR, produce-time verification gate, interpreter, and content-addressed pack store, whose only host-call primitive is fleet_call(operation_id, params_json)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mgttt/agenterm"
+publish = false
+autobins = false
+
+[lib]
+name = "agenterm_dynacore"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3.25"

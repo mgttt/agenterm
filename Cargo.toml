@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs"]
+members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-dynacore"]
 resolver = "2"
 
 [package]
@@ -41,6 +41,7 @@ path = "src/bin/agenterm-con.rs"
 
 [dependencies]
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
+agenterm-dynacore = { path = "crates/agenterm-dynacore" }
 agenterm-rh = { path = "crates/agenterm-rh" }
 agenterm-lua = { path = "crates/agenterm-lua" }
 agenterm-qjs = { path = "crates/agenterm-qjs" }
