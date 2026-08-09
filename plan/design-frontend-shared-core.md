@@ -89,7 +89,10 @@ Unix:XRGB 像素帧、HiDPI 缩放、字形栅格、vt100 归属、X11/Wayland �
 
 ## 5. 进度
 
-- [ ] #1 前置护栏:快照键集对等测试
+- [x] #1 前置护栏:快照键集对等测试(tests/snapshot_key_parity.rs,2026-08-09)——
+  两宿主词汇表 192/180 键,共享 170;WIN-only 22(远端协议/原生控件机械)、
+  UNIX-only 10(含 F7 三键)以显式 allowlist 钉住,新增键必须双侧同步或书面豁免;
+  allowlist 条目本身有活性检查(键消失或对侧补齐都会报"删掉该条")。
 - [ ] #1 UiSnapshotSource 提取
 - [ ] #2 SelectionController 合并(含 shift 扩选补 Win)
 - [ ] #3 modal_geometry.rs(含漂移收敛的产品决定:以哪套数字为准)
