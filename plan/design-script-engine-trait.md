@@ -10,6 +10,70 @@
 
 ---
 
+## 状态回填（2026-08-09）
+
+本文档写成时状态是"设计稿 rev1（未实现）"（见上表「状态」行，该行字面保留不改，作为原始记录）。
+截至 2026-08-09，§4 的 M1–M4 四期**全部已落地**，§2.6 描述的第四后端（sql）也已经开工并验证了
+该节的设计承诺。以下按 `plan/plan-v0.1.16.md` 对应行（Common-M3/Trait-M1+M2、Common-M4/Trait-M3、
+Common-M5/Trait-M4、SQL-M0）逐项回填**已发生的事**，不改写上面 §1–§5 的设计推理本身——那些是
+"为什么这样设计"的记录，仍然按原样保留。
+
+### 各期完成状态 + commit
+
+| 叶 | 状态 | commit | plan 行 |
+|----|------|--------|---------|
+| Trait-M1 + Trait-M2 | [x] 已落地 | `9de627f7` | Common-M3 / Trait-M1+M2（2026-08-08） |
+| Trait-M3 | [x] 已落地 | `50ab1f7e` | Common-M4 / Trait-M3（2026-08-09） |
+| Trait-M4 | [x] 已落地（rh 例外，见下） | `605e86c1` | Common-M5 / Trait-M4（2026-08-09） |
+| §2.6（sql 第四后端验证） | [x] 已验证 | `d50194fa` | SQL-M0（2026-08-09，用户拍板开工） |
+
+### 实施中发现的偏差（对照设计稿原文，记录"设计以为会发生"但"实际没发生/不一样"的地方）
+
+1. **`try_execute_*` 本来就是 `pub`，不需要降级成 `pub(crate)`**——§4 Trait-M2 那一行原文写
+   "标记 `#[deprecated]` 或直接留作 `pub(crate)`"，预设了一种可见性收窄；实施后发现三个
+   `try_execute_*` 函数在旧代码里本来就是 crate 外可见的 `pub` 项，Trait-M1+M2 落地时原样保留
+   `pub`，没有做这层收窄——委托关系（新 `EngineBackend::execute`/`check` 调旧
+   `try_execute_*`）不需要改变旧函数的可见性就能成立。
+2. **lua/qjs 的 `FleetBridgeFn` 类型别名与 trait 的 `ScriptFleetBridgeFn` 是完全同型（type-identical）
+   的 `Arc<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>`**——§2.2 原文只明确讨论了
+   rh 的 `Box→Arc` 转换需求（"这是有真实差异点，不能假装它不存在"），但没有反向明说"lua/qjs 那边
+   是不是零成本"；实施后确认 lua/qjs 的 `EngineBackend::execute` 实现直接传递、**不需要任何转换
+   代码**，`Arc<dyn Fn>` 到 `Arc<dyn Fn>` 是同一个类型。差异吸收的成本完全集中在 rh 一侧，符合
+   §2.2 的判断方向，但 lua/qjs 侧"零转换"这一点在设计阶段没有被显式验证过。
+3. **§4 表格原文声称"`script_backend` 20 个测试"，实测是 15 个**——`design-script-engine-trait.md`
+   §1.4/§4 多处引用"`script_backend.rs` 现有的 20 个测试"作为迁移前基线（例如 Trait-M1 行"不动
+   现有 `cargo test --lib script_backend` 的 20 个测试"），Common-M3 落地时重新数出的真实数字是
+   **15**。这是设计阶段盘点时的计数误差，不影响迁移方案本身（迁移仍然要求逐条断言对齐，不是
+   按数字对齐），但基线数字本身不准确，此处更正为实测值。
+4. **Trait-M4 对 rh 的折叠被拒绝，rh 保持独立委托适配层——这不是范围收缩，是设计验证成立**：
+   §4 Trait-M4 原文预期"删除旧的 `try_execute_rh_invocation`/`try_execute_lua_invocation`/
+   `try_execute_qjs_invocation` 三个公开函数"（三个一起删）。实施时 lua/qjs 两个按计划**全量折叠**
+   进 `LuaEngineBackend`/`QjsEngineBackend`（旧函数体+旧 Options/Result struct 一并删除，
+   `script_backend.rs` 753→370 行）；rh **没有折叠**——grep 实证 `crates/agenterm-rh/src/main.rs`
+   （根包 `[[bin]]`）直接调用 `try_execute_rh_invocation` 并依赖它返回的 typed `agenterm_rh::RhError`
+   经 `?` 向上传播，而 trait 边界的 `ScriptEngineError = String`（§2.2 已经标注这是"有损收敛"）
+   装不下这个真实调用方需要的类型信息，折叠会破坏 `agenterm-rh` 这个 bin 的错误传播契约或制造
+   一份重复逻辑。因此 `try_execute_rh_invocation` **永久保留**，`RhEngineBackend::execute`/`check`
+   继续做薄委托（调旧函数 + `.to_string()` 错误），除非 `agenterm-rh/src/main.rs` 这个 bin 自己的
+   错误处理契约先变。这正是 §2.2"部分吸收，但明确降级"那条判断在实施阶段的真实验证：`String`
+   收敛对 lua/qjs 无损（它们本来就是 `String`），对 rh 有损且**有真实调用方在依赖那份信息**，
+   不是本文档最初假设的"目前没有实际信息损失"能覆盖到的全部情况——`try_execute_rh_invocation`
+   这一个具体调用点就是那个例外。
+5. **§2.6 的 sql 验证结果：4 方法承诺成立，trait 零改动，但发现一处设计阶段未预言的摩擦**——
+   `SqlEngineBackend` 确实只需要实现 `backend_id`/`entry_extensions`/`check`/`execute` 四个方法
+   （`enabled` 用默认实现）即可接入第四后端，`ScriptEngineBackend` trait 本身**没有为 sql 新增
+   或修改任何方法签名**，验证了 §2.6 末尾"如果 sql 需要的方法集和现有三个不一样，说明 trait
+   边界画错了地方"这句判断——边界画对了。未预言的摩擦点：`execute` 方法签名要求返回
+   `Result<ScriptInvocationResult, ScriptEngineError>`，是一个**全函数（total function）**签名；
+   sql 的 `execute` 目前是"诚实占位"（真正的 SQL 执行还没有设计出跑在什么之上），永远不返回
+   `Ok`，但 Rust 的类型系统仍然要求这个签名在语法上是全函数——桩实现用显式的
+   `unreachable`-风格错误返回值兜底，而不是 `panic!`/`todo!`，以保持"调用会得到一个结构化错误，
+   不会让进程崩溃"这条契约。这个摩擦本身没有导致 trait 签名改动，只是桩代码写法上多想了一步。
+
+*上面五条是本次状态回填新增内容；§1–§5 的原始设计推理不改写，仍然是"为什么当初这样设计"的记录。*
+
+---
+
 ## 0. 背景与边界
 
 `crates/agenterm-script-common`（`Common-M1`，见 plan §1 表尾）已经把三引擎 library 级的
@@ -454,10 +518,10 @@ engine.backend_id()); } }`），把"扩展名到 backend 的映射"从"两处手
 
 | 叶 | 内容 | 落地文件 | 测试保障 |
 |----|------|----------|----------|
-| **Trait-M1** | 定义 `ScriptEngineBackend` trait + `ScriptInvocationOptions`/`ScriptInvocationResult`/`ScriptEngineError`/`ScriptFleetBridgeFn` 公共类型（§2.2/§2.3）。**不改动任何现有 `try_execute_*` 函数体或调用点**——先让新类型和旧类型并存，新类型只在新增的单测里被构造和断言字段形状。 | 新文件 `src/script_engine.rs`（避免继续膨胀已经 736 行的 `script_backend.rs`），`src/lib.rs` 加 `pub mod script_engine;` | 新增单测：object-safety 编译期断言（`fn _assert_object_safe(_: &dyn ScriptEngineBackend) {}`）、`ScriptInvocationOptions::default()` 字段形状。不动现有 `cargo test --lib script_backend` 的 20 个测试——它们必须逐字节保持绿。 |
-| **Trait-M2** | 实现 `RhEngineBackend`/`LuaEngineBackend`/`QjsEngineBackend`（各自 `impl ScriptEngineBackend`，方法体是把现有 `try_execute_rh_invocation`/`try_execute_lua_invocation`/`try_execute_qjs_invocation` 的 `Run\|Eval`/`Check` 分支**原样搬过来**，剥掉"未启用返回 None"这层——那层现在由调用方先查 `enabled()` 再调用）。旧的 `try_execute_*` 函数**保留不删**，标记 `#[deprecated]` 或直接留作 `pub(crate)` 内部实现细节，避免一次性大改动破坏 `#[cfg(not(test))]` 编译期属性（见 §5 风险）。 | `src/script_engine.rs` 或按引擎拆 `src/script_engine_rh.rs` 等（依实现时体量决定，不预先定死） | 每个 `EngineBackend::execute`/`check` 补对应单测，复用 §Trait-M1 已有的测试夹具风格（`ENV_LOCK` mutex 保护环境变量，参照现有 `script_backend.rs:388` 的 `ENV_LOCK` 模式）。目标：`cargo test --lib script_engine` 全绿，且不影响 `cargo test --lib script_backend` 原有 20 个测试。 |
-| **Trait-M3** | 引入 `ScriptEngine` 枚举（§2.4）+ `ScriptEngine::for_backend`/`all`/`enabled`；**切换 `script_worker.rs::execute_inner` 的调用点**改用 `ScriptEngine`，删除 `execute_inner` 里三段逐字符重复的 `project_root`/`arguments`/`budgets` 构造和 fleet_bridge 包装闭包（§2.4 末尾示例）。**关键约束**：迁移后必须显式验证 `#[cfg(not(test))]` 的编译期属性去留（rh 分支现在没有这个 cfg，lua/qjs 有）在新代码里如何处理——见 §5 风险第一条,这里不能悄悄丢掉这条属性的效果，否则要么测试构建时间暴涨（如果去掉 cfg 导致 lua/qjs 引擎在测试构建里也被链接进来）要么测试覆盖率暴跌得更隐蔽。 | `src/script_worker.rs`（`execute_inner` 函数体，`:565-711`） | 现有 `script_worker.rs` 里 `#[cfg(test)] mod tests`（`:877` 起）的所有测试必须保持绿（`framed_worker_runs_multiple_invocations_without_stdout_corruption` 等——这些测试驱动的是走 rh 分支的 eval，因为测试构建里只有 rh 分支存在）。新增一条集成级测试验证 `ScriptEngine::for_backend` 路由和旧 `ScriptBackend::from_env()` 行为一致。 |
-| **Trait-M4（可选，视 M1–M3 实际工作量决定是否单独立叶）** | 删除旧的 `try_execute_rh_invocation`/`try_execute_lua_invocation`/`try_execute_qjs_invocation` 三个公开函数（此时它们的调用者只剩 `script_engine.rs` 内部，且逻辑已经完全等价搬入 `EngineBackend::execute`/`check`），清理 `RhInvocationOptions`/`LuaInvocationOptions`/`QjsInvocationOptions`/`RhInvocationResult`/`LuaInvocationResult`/`QjsInvocationResult` 六个旧 struct。**这一叶有破坏性**（`script_backend.rs` 现有的 20 个测试直接调用这些函数，`:390-736`）——必须先把这 20 个测试改写成调 `ScriptEngine`/`EngineBackend` 等价路径，逐条核对断言不变，再删除旧代码。 | `src/script_backend.rs` | 删除后 `cargo test --lib script_backend` + `cargo test --lib script_engine` 合计条数应 ≥ 删除前的 20 条（允许合并同类项减少条数，但每条旧断言必须能在新测试里找到等价覆盖——不是"数字对齐"而是"断言对齐"，需要逐条人工核对，不能只看 `cargo test` 总数）。 |
+| **Trait-M1**（[x] done, commit `9de627f7`） | 定义 `ScriptEngineBackend` trait + `ScriptInvocationOptions`/`ScriptInvocationResult`/`ScriptEngineError`/`ScriptFleetBridgeFn` 公共类型（§2.2/§2.3）。**不改动任何现有 `try_execute_*` 函数体或调用点**——先让新类型和旧类型并存，新类型只在新增的单测里被构造和断言字段形状。 | 新文件 `src/script_engine.rs`（避免继续膨胀已经 736 行的 `script_backend.rs`），`src/lib.rs` 加 `pub mod script_engine;` | 新增单测：object-safety 编译期断言（`fn _assert_object_safe(_: &dyn ScriptEngineBackend) {}`）、`ScriptInvocationOptions::default()` 字段形状。不动现有 `cargo test --lib script_backend` 的 20 个测试——它们必须逐字节保持绿。 |
+| **Trait-M2**（[x] done, commit `9de627f7`） | 实现 `RhEngineBackend`/`LuaEngineBackend`/`QjsEngineBackend`（各自 `impl ScriptEngineBackend`，方法体是把现有 `try_execute_rh_invocation`/`try_execute_lua_invocation`/`try_execute_qjs_invocation` 的 `Run\|Eval`/`Check` 分支**原样搬过来**，剥掉"未启用返回 None"这层——那层现在由调用方先查 `enabled()` 再调用）。旧的 `try_execute_*` 函数**保留不删**，标记 `#[deprecated]` 或直接留作 `pub(crate)` 内部实现细节，避免一次性大改动破坏 `#[cfg(not(test))]` 编译期属性（见 §5 风险）。 | `src/script_engine.rs` 或按引擎拆 `src/script_engine_rh.rs` 等（依实现时体量决定，不预先定死） | 每个 `EngineBackend::execute`/`check` 补对应单测，复用 §Trait-M1 已有的测试夹具风格（`ENV_LOCK` mutex 保护环境变量，参照现有 `script_backend.rs:388` 的 `ENV_LOCK` 模式）。目标：`cargo test --lib script_engine` 全绿，且不影响 `cargo test --lib script_backend` 原有 20 个测试。 |
+| **Trait-M3**（[x] done, commit `50ab1f7e`） | 引入 `ScriptEngine` 枚举（§2.4）+ `ScriptEngine::for_backend`/`all`/`enabled`；**切换 `script_worker.rs::execute_inner` 的调用点**改用 `ScriptEngine`，删除 `execute_inner` 里三段逐字符重复的 `project_root`/`arguments`/`budgets` 构造和 fleet_bridge 包装闭包（§2.4 末尾示例）。**关键约束**：迁移后必须显式验证 `#[cfg(not(test))]` 的编译期属性去留（rh 分支现在没有这个 cfg，lua/qjs 有）在新代码里如何处理——见 §5 风险第一条,这里不能悄悄丢掉这条属性的效果，否则要么测试构建时间暴涨（如果去掉 cfg 导致 lua/qjs 引擎在测试构建里也被链接进来）要么测试覆盖率暴跌得更隐蔽。 | `src/script_worker.rs`（`execute_inner` 函数体，`:565-711`） | 现有 `script_worker.rs` 里 `#[cfg(test)] mod tests`（`:877` 起）的所有测试必须保持绿（`framed_worker_runs_multiple_invocations_without_stdout_corruption` 等——这些测试驱动的是走 rh 分支的 eval，因为测试构建里只有 rh 分支存在）。新增一条集成级测试验证 `ScriptEngine::for_backend` 路由和旧 `ScriptBackend::from_env()` 行为一致。 |
+| **Trait-M4（可选，视 M1–M3 实际工作量决定是否单独立叶）**（[x] done for lua/qjs, commit `605e86c1`；**rh 例外未折叠**——见文首「状态回填」偏差 4） | 删除旧的 `try_execute_rh_invocation`/`try_execute_lua_invocation`/`try_execute_qjs_invocation` 三个公开函数（此时它们的调用者只剩 `script_engine.rs` 内部，且逻辑已经完全等价搬入 `EngineBackend::execute`/`check`），清理 `RhInvocationOptions`/`LuaInvocationOptions`/`QjsInvocationOptions`/`RhInvocationResult`/`LuaInvocationResult`/`QjsInvocationResult` 六个旧 struct。**这一叶有破坏性**（`script_backend.rs` 现有的 20 个测试直接调用这些函数，`:390-736`）——必须先把这 20 个测试改写成调 `ScriptEngine`/`EngineBackend` 等价路径，逐条核对断言不变，再删除旧代码。 | `src/script_backend.rs` | 删除后 `cargo test --lib script_backend` + `cargo test --lib script_engine` 合计条数应 ≥ 删除前的 20 条（允许合并同类项减少条数，但每条旧断言必须能在新测试里找到等价覆盖——不是"数字对齐"而是"断言对齐"，需要逐条人工核对，不能只看 `cargo test` 总数）。 |
 
 **为什么不是一步做完**：`execute_inner` 是共享工作树里活跃改动的文件（§5 风险第二条），
 `script_backend.rs` 的 20 个测试是当前唯一验证"三引擎调用契约没有跑偏"的机制——分四叶

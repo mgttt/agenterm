@@ -27,9 +27,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use agenterm_script_common::hex::sha256_hex;
+use agenterm_script_common::pack_support::write_json_receipt;
 use rquickjs::loader::{ImportAttributes, Loader, ScriptLoader};
 use rquickjs::{CatchResultExt, Context, Module, Runtime};
-use sha2::Digest;
 
 use crate::error::QjsError;
 use crate::eval::EvalOutcome;
@@ -145,6 +146,17 @@ pub struct QjsModulePackManifest {
 }
 
 impl QjsModulePackManifest {
+    // NOT adopted onto `agenterm_script_common::pack_support`'s
+    // `write_json_receipt`/`read_json_receipt`: those bake in fixed
+    // `receipt_serialize`/`receipt_write`/`receipt_read`/`receipt_parse`
+    // error prefixes, but this manifest's observable text has always been
+    // `manifest_serialize`/`manifest_write`/`manifest_read`/`manifest_parse`
+    // (matching `pack.rs`'s `QjsPackManifest`, a distinct type with its own
+    // hand-rolled write/read predating `pack_support`). Adopting the shared
+    // helpers here would change that text with no parameter in either
+    // helper to preserve it, so this stays a local, structurally-identical
+    // duplicate rather than a signature change to `pack_support` for one
+    // caller's wording.
     pub fn write(&self, path: &Path) -> Result<(), String> {
         let json =
             serde_json::to_string_pretty(self).map_err(|err| format!("manifest_serialize: {err}"))?;
@@ -159,12 +171,29 @@ impl QjsModulePackManifest {
     /// Verify every file's `content_hash` against what's actually on disk
     /// in `dir` — load-bearing (unlike `pack.rs`'s `verify_bytecode`,
     /// every file here is what execution actually reads).
+    ///
+    /// NOT adopted onto `pack_support::verify_file_hash`: that helper's
+    /// mismatch text is fixed as `manifest_{kind}_hash_mismatch: expected
+    /// {expected}, got {actual}` (no file path — `pack.rs`'s single-file
+    /// manifest only ever verifies one bytecode/source file per call, so it
+    /// never needed one), whereas this loop verifies N files per manifest
+    /// and its `module_pack_content_hash_mismatch: {path}: expected
+    /// {expected}, got {actual}` text — asserted by
+    /// `load_rejects_a_tampered_file` — needs the path to say which of the
+    /// N files failed. `verify_file_hash`'s read-error half *would* line up
+    /// (its `{read_err_prefix}: {err}` matches `module_pack_verify_read:
+    /// {path}: {err}` if `read_err_prefix` is built as
+    /// `format!("module_pack_verify_read: {}", file.path)`), but splitting
+    /// read and compare across two different helpers/paths per file is not
+    /// simpler than the single local loop, so both stay local together
+    /// rather than changing `verify_file_hash`'s signature to also carry a
+    /// path into its mismatch text.
     fn verify_files(&self, dir: &Path) -> Result<(), String> {
         for file in &self.files {
             let path = dir.join(&file.path);
             let bytes = std::fs::read(&path)
                 .map_err(|err| format!("module_pack_verify_read: {}: {err}", file.path))?;
-            let actual = hex_sha256(&bytes);
+            let actual = sha256_hex(&bytes);
             if actual != file.content_hash {
                 return Err(format!(
                     "module_pack_content_hash_mismatch: {}: expected {}, got {actual}",
@@ -176,17 +205,9 @@ impl QjsModulePackManifest {
     }
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let digest = sha2::Sha256::digest(bytes);
-    let mut out = String::with_capacity(64);
-    for byte in digest {
-        out.push(HEX[usize::from(byte >> 4)] as char);
-        out.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    out
-}
-
+/// Hash the whole graph's shape+content. Not a `pack_support` duplicate —
+/// nothing there hashes a *list* of (path, hash) pairs into one fingerprint,
+/// this is unique to the multi-file module-pack manifest.
 fn graph_hash(files: &[QjsModulePackFile]) -> String {
     let mut sorted = files.to_vec();
     sorted.sort_by(|a, b| a.path.cmp(&b.path));
@@ -197,7 +218,7 @@ fn graph_hash(files: &[QjsModulePackFile]) -> String {
         buffer.push_str(&file.content_hash);
         buffer.push('\n');
     }
-    hex_sha256(buffer.as_bytes())
+    sha256_hex(buffer.as_bytes())
 }
 
 /// A loaded module pack: directory root + manifest + the entry's source
@@ -269,7 +290,7 @@ pub fn build_module_pack_dir(
         std::fs::write(&dest, &bytes).map_err(|err| format!("module_pack_write: {err}"))?;
         files.push(QjsModulePackFile {
             path: relative.to_string_lossy().replace('\\', "/"),
-            content_hash: hex_sha256(&bytes),
+            content_hash: sha256_hex(&bytes),
         });
     }
 
@@ -304,10 +325,13 @@ pub struct QjsModuleQualificationReceipt {
 }
 
 impl QjsModuleQualificationReceipt {
+    // Adopted onto `pack_support::write_json_receipt`: this type's
+    // `receipt_serialize`/`receipt_write` text was already byte-for-byte
+    // identical to the shared helper's (both predate/postdate `pack.rs`'s
+    // `QjsQualificationReceipt`, which already made this same call), so no
+    // local duplicate is needed here.
     pub fn write(&self, path: &Path) -> Result<(), String> {
-        let json =
-            serde_json::to_string_pretty(self).map_err(|err| format!("receipt_serialize: {err}"))?;
-        std::fs::write(path, json).map_err(|err| format!("receipt_write: {err}"))
+        write_json_receipt(path, self)
     }
 }
 

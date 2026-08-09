@@ -637,40 +637,32 @@ panic 位置同上。
 
 ---
 
-### CLI. `agenterm.exe cli` 单 PE 控制入口
+### CLI. `agenterm cli` 统一控制入口
 
-- [~] **CLI1 GUI-subsystem 转发机制**
-  - **用户问题**：同一产品同时发布 `agenterm.exe` 与
-    `agenterm-cli.exe`，命令发现、打包和自动化入口重复；目标入口是
-    `agenterm cli list-windows`，行为与旧控制 PE 相同。
-  - **权威边界**：CLI 命令语义只由 `run_cli_entry_with_args` 拥有；
-    `crates/agenterm-platform` 只拥有 Windows 控制台附着、标准句柄和进程
-    生命周期机制，不拥有 AgenTerm 命令策略。
-  - **实现**：Windows GUI-subsystem 父进程仅附着已有父控制台，保留有效
-    pipe/file 标准句柄，只补齐缺失的 `CONIN$` / `CONOUT$` 句柄，再等待
-    同一 `agenterm.exe` 的隐藏 CLI 子进程；子进程从启动时获得有效 stdio，
-    避开 Rust 在 GUI PE 中缓存空句柄的问题。Unix 直接调用共享 CLI 入口。
-  - **安全失败**：无法解析或启动同 PE 子进程时返回非零；双击 GUI 不分配
-    控制台、不闪控制台窗；完成证据前继续交付 `agenterm-cli.exe`。
-  - **当前证据**：源码机制已落；尚无集成 Windows 树的黑盒收据，不得宣称
-    已替代独立 PE。
-  - **非目标**：不复制 CLI parser，不引入 `AllocConsole`，不把 mux/MCP
-    重新拆成独立 PE，不借此改变 IPC 或命令语义。
-- [ ] **CLI2 Windows 公共黑盒等价**
-  - **owner**：Windows 公共命令面；从 `cmd.exe` 与 PowerShell 分别覆盖
-    终端 stdout/stderr、`> file`、管道、stdin、正常/错误退出码、mux 与 MCP
-    stdio，并证明父进程等待隐藏子进程后返回准确 exit code。
-  - **成功证据**：同一场景分别调用 `agenterm cli` 与 `agenterm-cli`，输出
-    字节、错误通道和退出码一致；普通 `agenterm` GUI 启动仍无控制台闪窗。
-  - **安全失败**：任何 shell/重定向/交互场景不一致即保留兼容 PE，并把差异
-    记录为阻塞，不以“终端肉眼能看到输出”代替证据。
-- [ ] **CLI3 删除独立 `agenterm-cli` PE**
-  - **依赖**：CLI2 全绿后才开始。
-  - **delivery**：迁移 Cargo bin、artifact manifest、CI、Rhai smoke、README、
-    PRD、安装与发布清单中的所有调用；删除 `src/bin/agenterm-cli.rs`，产物与
-    预算闸证明不再生成或要求 `agenterm-cli{.exe}`。
-  - **最终串行门**：lint → Quick → Windows build → owning CLI smoke →
-    SkipSmoke/完整公共接口门；同一集成树上执行，不并行争用产物。
+- [x] **CLI1 Windows 同步入口机制**
+  - **用户问题**：Windows-subsystem `agenterm.exe` 在 `main` 前缓存空 stdio，
+    且 cmd/PowerShell 不会等待 GUI PE；仅运行期 `AttachConsole` 无法提供可靠的
+    shell 同步语义。
+  - **权威边界**：CLI 命令语义只由 `run_cli_entry_with_args` 拥有；平台层只
+    管控制台、句柄和进程机制。Windows 交付把 Console-subsystem
+    `agenterm.exe` 命名为 `agenterm.exe`，PATHEXT 令无扩展名 `agenterm`
+    优先解析它；launcher 再以继承 stdio 启动 `agenterm.exe` 的隐藏 CLI 模式。
+  - **安全失败**：launcher 启动失败或子进程失败均返回准确非零码；普通
+    `agenterm.exe` GUI 启动不分配控制台、不闪窗。显式 `agenterm.exe cli`
+    仅对会等待子进程的 API 父进程保证转发，不宣传为交互 shell 入口。
+- [x] **CLI2 Windows 公共黑盒**
+  - `tests/agenterm_cli_forwarding.rs` 覆盖等待型显式 `.exe` 转发、stderr 与
+    exit code、MCP 双向 stdin/stdout、cmd 管道/重定向及 PowerShell 无扩展名
+    解析；launcher 单元测试覆盖 GUI detach 与同步命令分类。
+  - 实测 `dist/agenterm cli --version` 在 cmd 与 PowerShell 同步输出，
+    `list-windows` 无 server 时同步返回非零 stderr，`mcp --version` 正常。
+- [x] **CLI3 删除独立 `agenterm-cli` PE**
+  - Cargo bin 与 `src/bin/agenterm-cli.rs` 已删除；Windows artifact manifest
+    只交付 `agenterm.exe`、`agenterm.exe`、`agenterm-cc.exe`、`agenterm-rh.exe`。
+  - 安装、CI、Rhai smoke、README、PRD 和发布验证改用 `agenterm cli`；staging
+    显式清除遗留 `agenterm-cli.exe`，`dist` 黑盒证明旧 PE 不存在。
+  - **非目标**：不引入 `AllocConsole`，不把 mux/MCP 重新拆成独立 PE，不改变
+    IPC 或 CLI 命令语义。
 
 ### R′. 发布链证据收口（配置已合，只收证 + 最小修）
 
@@ -791,6 +783,8 @@ lua 雏形来去规避这个风险。
 | **SQL-M0（2026-08-09，用户拍板开工）** | [x] 第四后端 `crates/agenterm-sql` 占位落地（对标 SQL-92 + PostgreSQL，用户明确指定）。**真实现**：`check` 用 `sqlparser 0.62`（纯 Rust）PostgreSqlDialect parse-only（PG 作为 SQL-92 实用超集的单方言近似，check.rs 文档里明说这不是 SQL-92 合规性验证）；check-many/corpus-scan/CLI 参数解析**全部复用 script-common driver，零手抄**——五轮抽象的直接兑现。**诚实占位**：`eval`/`execute` fail-closed not-implemented，开放设计问题（SQL 执行到底跑在什么之上：嵌入引擎 vs 外部 DB 连接 vs host 状态虚拟表）写进 lib.rs 文档不猜答案；CLI 的 eval/run/pack/qualify/task 动词保留占位（exit 2 + 指向设计文档的稳定报错，不是 unknown command）。**接线**：`ScriptBackend::Sql` + `.sql` 映射 + `SqlEngineBackend`（4 方法 trait）+ `execute_inner` 第四分支（同 lua/qjs 的 `#[cfg(not(test))]` 门）。**§2.6 设计承诺实测成立**：4 方法零 trait 改动接入第四后端，唯一未预言的小摩擦是 execute 签名要求 total 函数（eval 桩永不返回 Ok，用显式 unreachable-error 兜底而非 panic）。**有意不做**：不 enroll 进三个 parity 套件（execute 是桩会假失败），等真 execute 落地再进。验证：sql 18/18、engine 26/26、backend 11/11、worker 16/16、两个 parity 套件不受影响 8/8+6/6、复活的 rh_backend/lua_task_entry 11/11+6/6、clippy 全净、`cargo check --workspace` 过 |
 
 | **Common-M6（2026-08-09）** | [x] 第六轮，两并发 subagent：① **sql 进 parity 套件**——`script_engine_parity.rs` 第四个 EngineSpec（fixture 取自 sql 自己的测试常量，非发明），8 场景 4 引擎宽度全绿，kind 互斥升为真 4×4 矩阵（12 拒 + 4 收）；`script_engine_exec_parity.rs` 只 enroll check 形状 + disabled-error 场景（现在 4×3=12 组合），另加 `sql_execute_placeholder_contract` 把「execute 是占位」这个契约钉在 parity 层（断言稳定 marker `sql_eval_not_implemented`，不断言整句免措辞抖动）；execute 级场景排除原因写在文件头注释。**实测无分歧**——sql 和其它三引擎在全部共享场景逐字段一致（同一共享 driver 的预期结果，但验证了不是假设）。② **pack/qualify/compile 最后手抄清理**——script-common 新 `pack_support` 模块（`verify_file_hash`——比草案多一个 `mismatch_kind` 参数，因为 qjs 测试逐字断言四种历史错误文本，单前缀设计还原不了，5 参版本 byte-for-byte 还原；`write_json_receipt`/`read_json_receipt`——lua/qjs 本就逐字相同零参数化；`hash_source`——两边确认同为 sha256→hex 包装后收编，连带删掉两份私有 hex_encode）；**明确拒绝迁移的**：manifest write/read/parse（schema 构造本就 per-engine，硬套会产生误导性错误文本零收益）、qjs `pack_module.rs`（独立 schema，报告了未来可对齐点但本轮不动）、rh native-pack（本质不同）。lua/qjs 各 −19/−21 行。验证：script-common 47/47（+9 新）、lua 124/124、qjs 84/84 不变（含两条 load-bearing 错误文本断言原样通过）、parity 8/8+7/7、sql 18/18 |
+
+| **Common-M7（2026-08-09）** | [x] 第七轮，两并发 subagent + 主 agent 修 bug：① **CLI 动词层跨引擎 parity 测试**——`tests/script_cli_verb_parity.rs`（`CARGO_BIN_EXE_*` spawn 四个真实二进制，7 测试全绿）：version/check/check-many/未知动词/sql 保留动词逐场景断言，产出 verb×engine 可用性地图（文件头 doc）。**真实发现三条**：(a) **退出码分裂**——rh/lua 顶层失败折成 1，qjs/sql 折成 2（check broken、未知动词都如此；rh 的 wrong-kind check-many 例外地是 2）——qjs/sql 下语法错误和用法错误单靠退出码不可区分，已按各引擎实际值精确断言钉住防继续漂移；(b) **真 bug：lua `cmd_check_many` 完全忽略 `--project-root`/`--timeout-ms`**——从没迁到共享 parse_check_many_cli，手解析只认 `--manifest`/`--json`，wrapper 按对齐契约传参被静默丢弃（测试首跑当场抓到：manifest 相对路径按进程 CWD 解析全部 host_source_resolve 失败）。**主 agent 已修**：`cmd_check_many` 改走共享解析器，从 `C:\Windows` 作为 CWD 的真实二进制复测确认 `--project-root` 生效，另加 `check_many_project_root_honored_from_foreign_cwd` 四引擎回归锁；(c) qjs `task` 存根 exit 0 vs sql `task` 存根 exit 2——同名动词两种存根哲学，已记录。② **qjs pack_module 对齐 + 设计文档回填**——pack_module 收编共享 `sha256_hex`（删本地 hex_sha256）和 `write_json_receipt`（文本本就逐字同）；manifest write/read 和 verify_files 因错误文本形状真不同（mismatch 文本内嵌 path，共享 helper 无 path 槽）**留局部并注释原因**，不为复用改可观察文本；`design-script-engine-trait.md` 增「状态回填」节：M1-M4 完成表（各带 commit hash）+ 5 条实施偏差记录（含 rh 折叠被拒的永久性理由、§2.6 sql 验证结果）。验证：cli-parity 7/7、lua 124/124、qjs 84/84、engine-parity 8/8、exec-parity 7/7。另：测试运行会泄漏 `agenterm.exe server` 孤儿进程锁住构建输出（本轮撞到三次，均 taskkill 解决）——测试基建债，记录待查 |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
 [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md)。

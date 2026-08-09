@@ -13,7 +13,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use agenterm_lua::{find_flag_value, has_flag, positional, require_flag_value};
+use agenterm_lua::{find_flag_value, positional, require_flag_value};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -151,19 +151,21 @@ fn cmd_qualify(args: &[String]) -> Result<u8, String> {
     Ok(0)
 }
 
-/// `check-many --manifest <file> [--json]` — bounded multi-file validation.
+/// `check-many --manifest <file> [--project-root DIR] [--timeout-ms N] [--json]`
+/// — bounded multi-file validation.
+///
+/// Parses through the shared `parse_check_many_cli` (same flag surface as
+/// rh/qjs/sql). The previous version parsed only `--manifest`/`--json` by
+/// hand and silently DROPPED `--project-root`/`--timeout-ms`/
+/// `--max-output-bytes` — a caller following the aligned-CLI contract got
+/// their project root ignored (paths resolved against the process CWD
+/// instead), caught live by `tests/script_cli_verb_parity.rs`.
 fn cmd_check_many(args: &[String]) -> Result<u8, String> {
-    let manifest_path = PathBuf::from(require_flag_value(
-        args,
-        "--manifest",
-        "check-many requires --manifest <file>",
-    )?);
-    let json_out = has_flag(args, "--json");
-    let manifest = agenterm_lua::check_many::read_manifest(&manifest_path)
+    let parsed = agenterm_lua::check_many::parse_check_many_cli(args.iter().cloned())?;
+    let manifest = agenterm_lua::check_many::read_manifest(&parsed.manifest_path)
         .map_err(|e| format!("check_many_manifest: {e}"))?;
-    let options = agenterm_lua::check_many::CheckManyOptions::default();
-    let report = agenterm_lua::check_many::run_check_many(manifest, options);
-    if json_out {
+    let report = agenterm_lua::check_many::run_check_many(manifest, parsed.options);
+    if parsed.json {
         println!("{}", serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?);
     } else if report.failures.is_empty() {
         println!("check-many: {} files ok", report.checked_files);
