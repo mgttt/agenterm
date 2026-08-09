@@ -23,6 +23,8 @@
 | `plan-platform-facade-v4.md` | 已完成 | 2026-08-01；结构 SSOT → ARCHITECTURE |
 | `osx-cpu-improve.md` | 已 shipped | P0–P3；再卡顿对照历史 + O 组 |
 | `platform-ui-ux-boundary-tree.md` | superseded | 只叙事；权威 ARCHITECTURE |
+| `design-agenterm-cli-merge.md` | 已 shipped | `agenterm cli` 同 PE 转发（AttachConsole + DuplicateHandle）落地 + 真机验证记录；权威 PRD_02_02 + plan-v0.1.16 §CLI |
+| `design-agenterm-bin-separation.md` | 结论被推翻 | 同日"不能合并"分析；被落地实现证伪，保留论证过程 |
 
 > 公开发布序列：v0.1.6 → v0.1.10 → v0.1.11 → **v0.1.14**。  
 > v0.1.12 与 v0.1.13 有完整 plan 但无 tag、无 GitHub Release  
@@ -33,7 +35,7 @@
 | 内容 | 文档 |
 |------|------|
 | **plan/ 现行索引** | [`plan/README.md`](../README.md) |
-| 在制版本工作树 | `plan/plan-v0.1.15.md` |
+| 在制版本工作树 | `plan/plan-v0.1.16.md` |
 | 上一已发布版本复盘（历史） | `plan/archive/plan-v0.1.14.md` |
 | 发布链要求（版本无关） | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements |
 | 结构 SSOT | `plan/ARCHITECTURE.md` |

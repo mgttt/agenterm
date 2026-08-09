@@ -311,7 +311,7 @@ checks may skip the bounded-journal saturation load. A candidate-bound
 qualification receipt requires `check.cmd --release --include-stress`; packaging
 must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
-`agenterm-cc.exe`, plus 2 MiB for `agenterm-cli.exe` (hosts `mux`/`mcp`
+`agenterm-cc.exe`, plus 512 KiB for `agenterm.exe` (the synchronous launcher for `agenterm cli`; `mux`/`mcp`
 subcommands; no separate mux/mcp PE); investigate dependency or feature growth
 instead of raising them casually.
 
@@ -320,11 +320,11 @@ instead of raising them casually.
 Discover the live interface instead of duplicating a long command manual:
 
 ```powershell
-.\dist\agenterm-cli.exe --help
-.\dist\agenterm-cli.exe list-commands
-.\dist\agenterm-cli.exe protocol-info
-.\dist\agenterm-cli.exe ui-snapshot
-.\dist\agenterm-cli.exe list-windows -F '#{window_id}:#{window_name}'
+.\dist\agenterm cli --help
+.\dist\agenterm cli list-commands
+.\dist\agenterm cli protocol-info
+.\dist\agenterm cli ui-snapshot
+.\dist\agenterm cli list-windows -F '#{window_id}:#{window_name}'
 ```
 
 Use distinct `AGENTERM_IPC_ADDRESS` and `AGENTERM_WORKSPACE_PATH` values for
@@ -394,9 +394,16 @@ behavior.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
   downloadable binaries are published only by exact-Candidate Promotion.
-- Keep `agenterm.exe` as a Windows-subsystem GUI and `agenterm-cli.exe` as the
-  native control client (including **`agenterm-cli mux`** / **`agenterm-cli mcp`**
-  subcommands; the standalone `agenterm-mux` / `agenterm-mcp` PEs are removed).
+- Keep `agenterm.exe` as a Windows-subsystem GUI; there is exactly one PE and
+  no console-subsystem launcher, wrapper, or `agenterm.com`. **`agenterm cli
+  <command>`** runs on the same PE: the process attaches the caller's console
+  (`AttachConsole(ATTACH_PARENT_PROCESS)`), duplicates the real
+  stdin/stdout/stderr via `GetStdHandle` + `DuplicateHandle`, and spawns
+  itself as a hidden `__agenterm-internal-cli` worker with those explicit
+  handles, waiting and forwarding the exit code. Explorer and plain
+  `agenterm.exe` launches remain no-flash GUI entry points. The CLI
+  includes **`agenterm cli mux`** / **`agenterm cli mcp`**; the standalone
+  `agenterm-cli`, `agenterm-mux`, and `agenterm-mcp` PEs are removed.
   Preferred headless authority entry is `agenterm server` (separate process
   of the same PE; the old `agenterm-server.exe` binary is removed). All
   entry points must reuse the library.
@@ -471,8 +478,8 @@ LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
 build commands per cell. `src/bin/` currently holds **four** product binaries
-(`agenterm`, `agenterm-cli`, `agenterm-rh`, `agenterm-cc`). Mux/MCP are
-**`agenterm-cli` subcommands**, not separate PEs. **Prefer building without
+(`agenterm`, `agenterm`, `agenterm-rh`, `agenterm-cc`). Mux/MCP are
+**`agenterm cli` subcommands**, not separate PEs. **Prefer building without
 `--bin` filters** so new binaries are covered automatically:
 
 | Cell | Host | Build |
@@ -498,7 +505,7 @@ test target is linted. On Linux, `cargo fmt --check` runs natively.
   Windows and runs the test exes under Wine. Do not treat any pass count as an
   expected value — the suite grows; read the command's own output.
   Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
-- Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm-cli.exe --help`.
+- Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm.exe cli --help`.
   Launching `agenterm.exe` on `DISPLAY=:1` starts a working IPC server:
   `server-list`, `ui-snapshot`, `new-window`, `inspect`, `save-workspace`, etc.
   all round-trip.
@@ -508,7 +515,7 @@ test target is linted. On Linux, `cargo fmt --check` runs natively.
 - x86_64: `./scripts/build-linux-clients.sh` (or set `AGENTERM_BUILD_PROFILE=release`)
 - aarch64: install `gcc-aarch64-linux-gnu`, then
   `./scripts/build-linux-aarch64-clients.sh` (or the `lnx × aarch64` cargo line above).
-  Smoke under QEMU: `qemu-aarch64-static target/aarch64-unknown-linux-gnu/debug/agenterm-cli --help`
+  Smoke under QEMU: `qemu-aarch64-static target/aarch64-unknown-linux-gnu/debug/agenterm cli --help`
 - Native GUI packages needed for `agenterm` / `agenterm-cc` on X11 (see README):
   `libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcb1 libxcb-xkb1`.
   Missing `libxkbcommon-x11-0` panics in `xkbcommon-dl` at window open.
@@ -529,6 +536,6 @@ Interactive-terminal and rendering work must be validated on a real Windows host
 Windows-target lint/build/unit-test and control-plane sanity loop; native Linux
 GUI/PTY smokes use the real `DISPLAY=:1` desktop or CI Xvfb instead.
 
-Rhai REPL and `agenterm-cli script repl` were removed with Phase C Wave 4.5 —
+Rhai REPL and `agenterm cli script repl` were removed with Phase C Wave 4.5 —
 invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery uses
 `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).

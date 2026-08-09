@@ -40,7 +40,7 @@ Get-Process agenterm | Select-Object Id, MainWindowTitle
 ```powershell
 $env:AGENTERM_INSTANCE = 'dev'
 # or: $env:AGENTERM_IPC_ENDPOINT = 'pipe:\\.\pipe\agenterm-agt-v1-<hash>'
-.\dist\agenterm-cli.exe ui-snapshot
+.\dist\agenterm.exe cli ui-snapshot
 # Expect server_pid == server-list PID for that instance; detached=false when GUI up.
 ```
 
@@ -48,7 +48,7 @@ $env:AGENTERM_INSTANCE = 'dev'
 
 ```powershell
 # Product:
-.\dist\agenterm-cli.exe --instance dev ui-action window-activate
+.\dist\agenterm.exe cli --instance dev ui-action window-activate
 # Win32 last resort: SW_RESTORE + on-screen SetWindowPos; optional brief TOPMOST.
 ```
 

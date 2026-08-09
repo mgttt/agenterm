@@ -11,9 +11,10 @@ description: >
 
 # AgenTerm Windows GUI operations
 
-Operational skill for **native Windows** hosts. Prefer `dist\agenterm.exe` and
-`dist\agenterm-cli.exe` after a successful local build. Never invent a second
-IPC authority when a live peer already holds the session.
+Operational skill for **native Windows** hosts. Prefer `dist\agenterm.exe`
+after a successful local build; CLI verbs live on the same PE as
+`agenterm.exe cli <command>` (the standalone `agenterm-cli.exe` is gone).
+Never invent a second IPC authority when a live peer already holds the session.
 
 ## Hard rules (from production incidents)
 
@@ -103,7 +104,7 @@ Run in order; stop when the human confirms:
 Product path for focus (preferred over raw user32 when UI client is connected):
 
 ```text
-agenterm-cli --instance <name> ui-action window-activate
+agenterm.exe cli --instance <name> ui-action window-activate
 ```
 
 or pin `AGENTERM_IPC_ENDPOINT` to the live pipe from `server-list`.
@@ -112,8 +113,8 @@ or pin `AGENTERM_IPC_ENDPOINT` to the live pipe from `server-list`.
 
 ```text
 # List authorities (desensitize before pasting into repo docs)
-agenterm-cli server-list
-agenterm-cli server-list --prune
+agenterm.exe cli server-list
+agenterm.exe cli server-list --prune
 
 # GUI attach via instance env (durable launch recipe above)
 AGENTERM_INSTANCE=dev  -> dist\agenterm.exe
@@ -121,8 +122,8 @@ AGENTERM_INSTANCE=work -> dist\agenterm.exe
 
 # CLI pin without changing defaults permanently
 set AGENTERM_IPC_ENDPOINT=pipe:\\.\pipe\agenterm-agt-v1-<hash>
-agenterm-cli list-windows -F "#{window_id}:#{window_name}"
-agenterm-cli ui-snapshot
+agenterm.exe cli list-windows -F "#{window_id}:#{window_name}"
+agenterm.exe cli ui-snapshot
 ```
 
 Success criteria:
@@ -149,8 +150,8 @@ Pin before mutate:
 
 ```text
 set AGENTERM_IPC_ENDPOINT=pipe:\\.\pipe\agenterm-agt-v1-<hash>
-agenterm-cli list-windows -F "#{window_id}:#{window_name}"
-agenterm-cli kill-server
+agenterm.exe cli list-windows -F "#{window_id}:#{window_name}"
+agenterm.exe cli kill-server
 ```
 
 Never use PowerShell automatic `$PID` / `$Args` as loop variables (read-only /
@@ -170,15 +171,16 @@ If title-bar close or taskbar close skips Keep/Stop/Cancel:
 
 ## Build note when servers hold file locks
 
-Live `agenterm.exe` (including `server`) can lock `dist` / `target` outputs. Prefer:
-
-```text
-cargo build --bin agenterm --bin agenterm-cli
-copy into dist\
-```
-
-Do not kill the user's agent-bearing server just to complete a full package
-build unless they approve.
+Live `agenterm.exe` (including `server`) locks only its own PE image, never
+the directory. `build.bat` / the `build` task parks an in-use
+`target\<profile>\` output by same-volume rename (`agenterm.locked-<millis>.exe`,
+reaped automatically once the process exits), and `stage-build` does the same
+for `dist\`, so a running instance never blocks a rebuild — use the build task
+instead of killing the user's agent-bearing server. A bare `cargo build`
+outside the task can still fail with `os error 5` if the previous
+`target\<profile>\` exe is the running image; rename it aside yourself or go
+through the build task. Launch long-lived instances from `dist\`, not
+`target\`, so debug relinks stay unencumbered.
 
 ## Evidence standard (before claiming "done")
 

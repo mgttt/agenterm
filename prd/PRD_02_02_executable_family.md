@@ -189,8 +189,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   inherited-stderr guidance and exits nonzero; normal and focus-existing
   launches use the same compact four-line summary for launcher PID,
   configured server address, and pointers to
-  `agenterm-cli.exe server-list` for the authoritative PID/port map and
-  `agenterm-cli.exe -h` for further commands; it prints before GUI
+  `agenterm cli server-list` for the authoritative PID/port map and
+  `agenterm cli -h` for further commands; it prints before GUI
   initialization so an interactive shell prompt is not overwritten by
   delayed output, prefers inherited stderr, and otherwise briefly attaches
   to the parent console without allocating a console or rebinding stdio;
@@ -204,16 +204,27 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   unknown, and missing-value options fail before startup, and a running
   older server that rejects the internal handoff produces nonzero stderr
   guidance rather than a false-success launcher exit
-- [x] `agenterm-cli.exe`: native AgenTerm observation and automation client;
-  the pre-release `agentermctl.exe` name is removed rather than retained as
-  a parallel compatibility shim
-- [ ] optional `agenterm.exe` command forwarding remains exploratory:
-  `agenterm-cli.exe` stays the authoritative Console-subsystem entry point,
-  no forwarding path may call `AllocConsole` or regress the no-console-flash
-  GUI launch, and acceptance requires correct inherited/redirection handles,
-  synchronous pipeline behavior, and child exit-code propagation in both
-  `cmd.exe` and PowerShell
-- [x] `agenterm-cli mux ...` and `agenterm-cli mcp ...` are the **only** public
+- [x] `agenterm cli`: native AgenTerm observation and automation client on the
+  **same single Windows-subsystem PE** — no console-subsystem launcher, no
+  `agenterm.com`, no wrapper script. `agenterm.exe cli <command>` snapshots its
+  std handles, attaches the caller's console
+  (`AttachConsole(ATTACH_PARENT_PROCESS)`), restores any caller pipe/file
+  redirection the attach displaced, duplicates the real stdin/stdout/stderr
+  (`GetStdHandle` + `DuplicateHandle`), and spawns itself as a hidden
+  `__agenterm-internal-cli` worker with those explicit `OwnedHandle` stdio
+  slots, waiting synchronously and propagating the exact exit code. The worker
+  attaches the same console for its ConDrv connection with default `Ctrl+C`
+  termination and reuses the ordinary CLI entry. It never uses `AllocConsole`
+  and preserves pipe/file redirection plus MCP bidirectional stdio.
+- [x] The independent `agenterm-cli.exe` Cargo target and artifact are removed.
+  Windows cmd and PowerShell black-box coverage
+  (`tests/agenterm_cli_forwarding.rs` plus real-console ConPTY verification)
+  owns version output, stderr, redirection, pipelines, MCP stdin/stdout,
+  `Ctrl+C`, and exit-code propagation. Known boundary: interactive shells do
+  not synchronously wait for a GUI-subsystem PE (PowerShell waits when output
+  is piped or captured; `cmd /c` and batch always wait), so output from a bare
+  interactive invocation can print after the prompt returns.
+- [x] `agenterm cli mux ...` and `agenterm cli mcp ...` are the **only** public
   fleet-mux and MCP entry points. Each subcommand strips its own name and
   runs the shared library frontend (same implementation as the former
   standalone PEs). Routing is decided before the CLI parses its own options,
@@ -230,7 +241,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm-rh.exe`: general-purpose local rh runtime with one-shot
   run/eval/check/task entry points through native AOT and the shared worker
   library. Each one-shot invocation owns a fresh supervised worker. The formerly
-  shipped legacy `agenterm-rhai.exe` Rhai shim (removed Wave 4.5), persistent REPL, and `agenterm-cli script repl`
+  shipped legacy `agenterm-rhai.exe` Rhai shim (removed Wave 4.5), persistent REPL, and `agenterm cli script repl`
   forwarding were **removed** in Phase C Wave 4.5; archived `.rhai` sources
   live under `scripts/archive/rhai/`. Linux/macOS callers invoke `agenterm-rh`
   directly. Existing one-shot commands retain their single-worker supervisor.
@@ -282,3 +293,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] each binary has independent release size reporting and an enforced
   budget (4 MiB GUI, 2 MiB per CLI); per-binary startup reporting remains
   planned, and adding a frontend must not inflate `agenterm.exe`
+
+## Unified placeholder TUI entry
+
+- **Shipped:** `agenterm tui` runs from the GUI-subsystem `agenterm` executable
+  and reuses the same parent-console attachment and same-PE worker boundary as
+  `agenterm cli`; it does not introduce another executable or launcher.
+- **Observable evidence:** the command enters the terminal alternate screen,
+  renders the `AGENTERM TUI` placeholder, accepts `q`, `Q`, Enter, or EOF, then
+  restores the cursor, screen, console input mode, and caller shell.
+- **Safe failure:** a missing interactive terminal produces a specific error
+  and non-zero exit instead of opening the GUI or leaving terminal modes set.
+- **Public black-box owner:** `tests/agenterm_tui_forwarding.rs` drives the
+  command through a real ConPTY and verifies render, input, and shell return.
+- **Excluded for this leaf:** workspace navigation, Fleet state, panes, script
+  execution, and production TUI information architecture remain future work.

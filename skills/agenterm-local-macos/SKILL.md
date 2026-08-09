@@ -17,7 +17,7 @@ open ~/Applications/AgenTerm.app
 
 Use `target/release-fast` after `./build.sh release-fast`. The installer
 validates every required executable and derives the version from
-`agenterm-cli --version`.
+`agenterm cli --version`.
 
 ## Install before claiming a GUI fix works
 
@@ -34,7 +34,7 @@ sees the old behaviour, and the code looks correct when you re-read it.
 Install, then prove the binary actually carries the change:
 
 ```bash
-cargo build --release --bin agenterm --bin agenterm-cli --bin agenterm-rh
+cargo build --release --bin agenterm --bin agenterm-rh
 ./install.sh --local-build target/release
 readlink ~/.local/share/agenterm/current          # must be the new release dir
 stat -f "%Sm" ~/Applications/AgenTerm.app/Contents/MacOS/AgenTerm
@@ -44,18 +44,19 @@ strings ~/.local/share/agenterm/current/agenterm | grep -c "<a new string litera
 The `strings` check is the one that cannot be fooled by a stale symlink: pick a
 message the fix introduced and confirm it is present in the installed bytes.
 
-`--local-build` requires **all three** installer-validated executables
-(`agenterm`, `agenterm-cli`, `agenterm-rh`); building
-only `agenterm` fails the installer's validation. Live `.rh` task automation
-uses `agenterm-rh` (build separately or via `./build.sh`).
+`--local-build` requires **both** installer-validated executables
+(`agenterm`, `agenterm-rh`); building
+only `agenterm` fails the installer's validation. CLI verbs ride the main PE
+as `agenterm cli <command>` — there is no separate `agenterm-cli`. Live `.rh`
+task automation uses `agenterm-rh` (build separately or via `./build.sh`).
 
 An already-running server keeps its loaded version. After installing, close the
 window with **stop server and exit** (not *keep server running*), or run
-`agenterm-cli shutdown`, before testing.
+`agenterm cli shutdown`, before testing.
 
 ## Know what you cannot verify from the CLI
 
-GUI text selection is mouse-driven. `agenterm-cli ui-interact select` selects a
+GUI text selection is mouse-driven. `agenterm cli ui-interact select` selects a
 *window*, not terminal text, and `send-mouse` targets the application's xterm
 mouse protocol rather than the frontend's selection layer. There is no CLI path
 that reproduces a drag- or shift-select gesture.
@@ -98,7 +99,7 @@ Do not pin `target/debug/agenterm` or `target/release-fast/agenterm`.
 
 ```bash
 test -x ~/Applications/AgenTerm.app/Contents/MacOS/AgenTerm
-~/.local/bin/agenterm-cli --version
+~/.local/bin/agenterm cli --version
 plutil -lint ~/Applications/AgenTerm.app/Contents/Info.plist
 ```
 

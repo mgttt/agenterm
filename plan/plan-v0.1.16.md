@@ -639,28 +639,40 @@ panic 位置同上。
 
 ### CLI. `agenterm cli` 统一控制入口
 
-- [x] **CLI1 Windows 同步入口机制**
-  - **用户问题**：Windows-subsystem `agenterm.exe` 在 `main` 前缓存空 stdio，
-    且 cmd/PowerShell 不会等待 GUI PE；仅运行期 `AttachConsole` 无法提供可靠的
-    shell 同步语义。
-  - **权威边界**：CLI 命令语义只由 `run_cli_entry_with_args` 拥有；平台层只
-    管控制台、句柄和进程机制。Windows 交付把 Console-subsystem
-    `agenterm.exe` 命名为 `agenterm.exe`，PATHEXT 令无扩展名 `agenterm`
-    优先解析它；launcher 再以继承 stdio 启动 `agenterm.exe` 的隐藏 CLI 模式。
-  - **安全失败**：launcher 启动失败或子进程失败均返回准确非零码；普通
-    `agenterm.exe` GUI 启动不分配控制台、不闪窗。显式 `agenterm.exe cli`
-    仅对会等待子进程的 API 父进程保证转发，不宣传为交互 shell 入口。
-- [x] **CLI2 Windows 公共黑盒**
-  - `tests/agenterm_cli_forwarding.rs` 覆盖等待型显式 `.exe` 转发、stderr 与
-    exit code、MCP 双向 stdin/stdout、cmd 管道/重定向及 PowerShell 无扩展名
-    解析；launcher 单元测试覆盖 GUI detach 与同步命令分类。
-  - 实测 `dist/agenterm cli --version` 在 cmd 与 PowerShell 同步输出，
-    `list-windows` 无 server 时同步返回非零 stderr，`mcp --version` 正常。
+- [x] **CLI1 Windows 同 PE 转发机制（AttachConsole + DuplicateHandle）**
+  - **用户问题**：Windows-subsystem `agenterm.exe` 启动时 std 槽位为空，
+    `println!`/`Stdio::inherit` 不可信；且绝不引入 `agenterm.com`、脚本或
+    其他包装器——只有一个 PE。
+  - **机制**（`src/bin/agenterm.rs` + 平台 `console.rs`）：`agenterm.exe cli`
+    先快照 attach 前的 std 句柄（调用方管道/文件重定向），
+    `AttachConsole(ATTACH_PARENT_PROCESS)` 后恢复被顶掉的重定向、无效槽位
+    回退 `CONOUT$`/`CONIN$`；再 `GetStdHandle` + `DuplicateHandle` 复制真实
+    stdin/stdout/stderr，以显式 `OwnedHandle`→`Stdio` 启动隐藏的同 PE
+    `__agenterm-internal-cli` worker，同步等待并透传退出码。worker 亦
+    attach 同一控制台（ConDrv 连接是控制台句柄可写的前提），但保留默认
+    `Ctrl+C` 终止（`attach_parent_with_default_interrupts`），复用
+    `run_cli_entry_with_args`。CLI 命令语义只由 `run_cli_entry_with_args`
+    拥有；平台层只管控制台、句柄和进程机制。
+  - **安全失败**：转发启动失败返回准确非零码并写父控制台 stderr；普通
+    `agenterm.exe` GUI 启动不分配控制台、不闪窗。**已知边界**：交互式
+    shell 对 GUI-subsystem PE 不同步等待（PowerShell 在输出被管道/捕获时
+    等待；`cmd /c` 与批处理总是等待），裸交互调用的输出可能在提示符
+    返回后打印。
+- [x] **CLI2 Windows 公共黑盒（2026-08-09 真机全过）**
+  - `tests/agenterm_cli_forwarding.rs`（5 项）：显式 `.exe` 转发 stdout、
+    stderr 与 exit code、MCP 双向 stdin/stdout、cmd 管道、PowerShell 调用。
+  - 真机矩阵：PS/cmd 直接调用、`> out 2> err` 文件重定向（重定向句柄
+    保留）、`| findstr` 管道、无 server exit 1 + stderr、非法命令 exit 2、
+    `type req.jsonl | agenterm.exe cli mcp serve --stdio` 完整
+    initialize/tools-list 应答、agenterm 自身 ConPTY 窗口内真实控制台
+    输出上屏（capture-pane 自证）、`Ctrl+C` 中断阻塞 `wait-events` 且无
+    残留进程。
 - [x] **CLI3 删除独立 `agenterm-cli` PE**
   - Cargo bin 与 `src/bin/agenterm-cli.rs` 已删除；Windows artifact manifest
-    只交付 `agenterm.exe`、`agenterm.exe`、`agenterm-cc.exe`、`agenterm-rh.exe`。
-  - 安装、CI、Rhai smoke、README、PRD 和发布验证改用 `agenterm cli`；staging
-    显式清除遗留 `agenterm-cli.exe`，`dist` 黑盒证明旧 PE 不存在。
+    只交付 `agenterm.exe`、`agenterm-cc.exe`、`agenterm-rh.exe`。
+  - 安装、CI、rh smoke、README、PRD、skills 和发布验证改用 `agenterm cli`；
+    staging 显式清除遗留 `agenterm-cli.exe`；dist 中 `.com` 时代过期
+    manifest/二进制已删，源码树 `agenterm.com` 字面量为零。
   - **非目标**：不引入 `AllocConsole`，不把 mux/MCP 重新拆成独立 PE，不改变
     IPC 或 CLI 命令语义。
 
@@ -923,3 +935,13 @@ lua 雏形来去规避这个风险。
 ---
 
 *执行投影，非产品宪法。能力状态以 PRD 为准。*
+
+## Unified placeholder TUI
+
+- `agenterm tui` is the first interactive terminal surface owned by the unified
+  GUI-subsystem executable. It shares the proven AttachConsole and same-PE
+  worker path with `agenterm cli` and adds no launcher artifact.
+- The initial delivery is intentionally a placeholder: alternate-screen entry,
+  clear product identity, per-key exit, and complete terminal-state restoration.
+- A real ConPTY black-box journey is the acceptance boundary; richer workspace
+  and Fleet interactions are explicitly deferred.
