@@ -1018,7 +1018,33 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   fallback, and AST parsing were retired with the Rhai backend while their
   typed boundaries migrated to native rh. Release verification requires both
   manifest roles and validates each role's declared offline version probe.
-- [ ] **Layered deployment** (JVM / JAR analogue):
+- [~] **Layered deployment** (JVM / JAR analogue): the **interpreted** half
+  of this concept is now real, via a separate mechanism from the
+  `script_rh_pack` bullets below — `agenterm-dynacore` (design SSOT
+  [`plan/design-dynacore-logic-pack.md`](../plan/design-dynacore-logic-pack.md)).
+  It is not a fourth script engine; it is a typed, verified, hot-loadable
+  "logic pack" IR interpreted in-process against the same `fleet_call`
+  bridge shape rh/lua/qjs already use. v1 done so far: `crates/agenterm-dynacore`
+  (neutral IR, a produce-time well-formedness gate that checks each pack's
+  `fleet_call` sites against the real `OPERATION_CATALOG`, an interpreter,
+  and a content-addressed pack store — ported from the dynamic-core research
+  track's Q1/Q3/Q7/Q9/Q18/Q19/Q21/Q22) plus the `src/script_dynacore_host.rs`
+  binding; a step-limit safety hardening (Q15's halting-check mechanism,
+  ported) so a well-formed pack with a real control-flow bug cannot hang the
+  host thread (`RunOutcome::termination`'s `Termination::StepLimitExceeded`,
+  a distinct outcome from a normal `Exited` result — a caller can no longer
+  mistake "forcibly cut off" for "finished and returned N"); and a real
+  (not mocked) round trip proven black-box (`tests/dynacore_live_server.rs`)
+  — a demo pack with a genuine `BrCond` branch calls `fleet.tabs.list`
+  against a separately spawned, live `agenterm` server process over the real
+  external IPC client path and gets real data back, both on its Ok arm (two
+  successful calls) and its Err arm (server unreachable). Still open: a
+  CLI-triggerable load/run entry point (blocked this round by unrelated
+  concurrent work already in flight on `src/client/mod.rs`/`src/commands.rs`/
+  the root `Cargo.toml`; see that test file's header for the specific
+  conflict), and everything in the design doc's §5 unresolved-questions list
+  (who produces a pack, signing/provenance, a pack's full `fleet.*`
+  dependency-declaration schema).
   - **Base runtime** — stable PE family (`agenterm`, `agenterm-rh`, …):
     host Facade, broker, supervision, qualification; rebases rarely
   - **Application layer** — signed **rh pack** (native artifact + manifest;
