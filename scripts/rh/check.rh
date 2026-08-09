@@ -1306,7 +1306,11 @@ if quick != 0 {
         "clippy", "--quiet", "--locked", "--all-targets", "--", "-D", "warnings"
     ];
     let unit_arguments = ["test", "--quiet", "--locked", "--lib"];
-    let quick_client_build_args = [];
+    // dev, explicitly: build.rh defaults to release-fast, but
+    // compute_quick_native_bin_root (and so prd-alignment's probe)
+    // addresses <root>/<triple>/debug — the profile mismatch left the
+    // quick chain's client gate green while its consumers found nothing.
+    let quick_client_build_args = ["dev"];
     if quick_target != "" {
         let target_text = "" + quick_target;
         clippy_arguments.push("--target");

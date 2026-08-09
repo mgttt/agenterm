@@ -616,7 +616,9 @@ jobs:
           AGENTERM_BOOTSTRAP_TASK: client-build
         run: |
           start_ms=$(date +%s%3N)
-          ./scripts/bootstrap.sh --target aarch64-unknown-linux-gnu
+          # dev, explicitly: build.rh defaults to release-fast, but every
+          # consumer (client-smoke probes, target caches) addresses debug/.
+          ./scripts/bootstrap.sh dev --target aarch64-unknown-linux-gnu
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -734,7 +736,9 @@ jobs:
           AGENTERM_BOOTSTRAP_TASK: client-build
         run: |
           start_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
-          ./scripts/bootstrap.sh --target ${{ matrix.target }}
+          # dev, explicitly: build.rh defaults to release-fast, but every
+          # consumer (client-smoke probes, target caches) addresses debug/.
+          ./scripts/bootstrap.sh dev --target ${{ matrix.target }}
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -987,7 +991,9 @@ jobs:
           AGENTERM_BOOTSTRAP_TASK: client-build
         run: |
           start_ms=$(date +%s%3N)
-          ./scripts/bootstrap.sh --target aarch64-pc-windows-msvc \
+          # dev, explicitly: build.rh defaults to release-fast, but every
+          # consumer (client-smoke probes, target caches) addresses debug/.
+          ./scripts/bootstrap.sh dev --target aarch64-pc-windows-msvc \
             --driver cargo-xwin
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
