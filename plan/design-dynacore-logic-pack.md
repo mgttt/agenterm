@@ -236,7 +236,7 @@ String, params_json: String }`（`Module::externs`）本身也是纯数据，不
 | 超过 `u64` 范围的巨大整数字面量 | `serde_json` 无 `arbitrary_precision` 特性时溢出会退化为 `f64` 近似值，`as_u64()` 变 `None`，因此在 `"uint32"` 类型检查处被正确拒绝 | 符合预期 |
 | 负整数对 `"uint32"` | 正确拒绝 | 符合预期 |
 | `"number"` 类型参数的 `minimum`/`maximum` 遇到**浮点数写法**的值 | **发现真实 bug（已修复）**——见下 | **bug，已修复** |
-| 字符串参数里的 Unicode/控制字符（emoji 代理对、` `、RTL override、多字节 UTF-8）| 全部作为纯字符串通过类型校验，内容不做任何审查 | 符合预期（内容审查不是 schema 校验的职责，和 `rh`/`lua`/`qjs` 脚本字符串现状一致） |
+| 字符串参数里的 Unicode/控制字符（emoji 代理对、`\0`、RTL override、多字节 UTF-8）| 全部作为纯字符串通过类型校验，内容不做任何审查 | 符合预期（内容审查不是 schema 校验的职责，和 `rh`/`lua`/`qjs` 脚本字符串现状一致） |
 | 空/退化 `params_json`（`""`、`"   "`、`"null"`、`{}` + 尾随垃圾）| 全部正确拒绝为"不是合法 JSON"或"不是 JSON 对象"；`"{}"` 在操作无声明参数时正确接受 | 符合预期 |
 
 **发现的 bug（本节对应 commit 已修复，`verify.rs::check_param_value`）**：数值边界检查原来用
