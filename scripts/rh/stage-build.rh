@@ -105,6 +105,30 @@ fn entry() {
         profile
     );
 
+    // Size tracking: append one line per staging to dist/size-history.jsonl
+    // (local, untracked — a per-machine trend log) so per-artifact byte
+    // growth is observable over time instead of anecdotal. Source of truth
+    // is the metadata just written: it already records commit, profile, and
+    // each staged executable's size.
+    let metadata = rh::json::parse(std::fs::read_to_string(output_manifest));
+    let history_entry = #{
+        build_time_utc: metadata.build_time_utc,
+        git_commit: metadata.git_commit,
+        git_dirty: metadata.git_dirty,
+        profile: metadata.profile,
+        executables: metadata.executables,
+    };
+    let history_path =
+        std::path::join(destination_directory, "size-history.jsonl").display;
+    let history = "";
+    if std::fs::exists(history_path) {
+        history = std::fs::read_to_string(history_path);
+    }
+    std::fs::write(
+        history_path,
+        history + rh::json::stringify(history_entry) + "\n"
+    );
+
     let _locked_again = artifact_files::clean_locked(
         destination_directory,
         artifact_manifest_path

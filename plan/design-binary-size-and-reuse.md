@@ -127,3 +127,46 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
 ### 显式拒绝(记录以免反复)
 - `read_source` 7 行 ×2(qjs/sql):不下沉。两份五行函数配各自文档注释的清晰度
   高于一个带错误映射参数的共享函数;不是所有重复都值得一个抽象。
+
+## 5. 体积追踪与死代码灰度归档(2026-08-09 起)
+
+### 5.1 体积追踪设施
+- **逐产物历史**:stage-build 每次运行向 `dist/size-history.jsonl` 追加一行
+  (commit、profile、各产物字节)。本地未跟踪文件——每台机器一条趋势线,
+  避免共享 checkout 的追加冲突。
+- **逐 crate 归因**:`scripts/rh/size-attribution.rh`(rh run 直跑)在专用
+  `target/size-report` 目录用 cargo-bloat(--message-format json)产出
+  `dist/size-attribution.json` 并打印 top-N 表。依赖 `cargo install cargo-bloat`,
+  未安装时给出明确提示而非静默跳过。
+- 注意:dist 里 dev 与 release-fast 产物会被不同 lane 轮流暂存,**对比体积必须
+  先对齐 profile**(size-history 每行都带 profile 字段,别跨行直接比)。
+
+### 5.2 死代码灰度归档流程
+编译器已经在持续报告死代码——先把信号清单化,再按"冷却期"分级处置,
+不在活跃 lane 的热文件上直接动刀:
+1. **清单化**:每轮 loop 用 `cargo build --workspace` 收集 dead_code/unused 警告,
+   更新下表(新增/消失都记)。
+2. **归属与冷却**:每项标注疑似归属 lane;连续 ≥2 天仍在清单上且其文件无
+   in-flight 改动(git status 干净)才进入处置。
+3. **处置**:优先删除(git 历史即归档);语义上"未来会接线"的,要求归属 lane
+   加 `#[expect(dead_code, reason)]` 注明意图,否则按死代码删。
+4. 长线:清零后在 CI 把 dead_code 升级为 deny,防再堆积。
+
+### 5.3 清单(2026-08-09 首采,13 项)
+| 位置 | 符号 | 疑似来源 | 状态 |
+|---|---|---|---|
+| crates/agenterm-rh/transpile.rs:134 | `emit_scope_json_expr` | rh AOT lane | 冷却中 |
+| src/client/mod.rs:5 | `use BufRead` | retirement 波次残留 | 冷却中 |
+| src/platform/adapters/unix/frontend/mod.rs:51 | `TerminalAppearanceOverride` | frontend lane | 冷却中 |
+| src/platform/mod.rs:50 | `ConsoleKey`/`LineBuffer`/`LineHistory` | console-line-editor 在制 | 冷却中 |
+| src/platform/mod.rs:64 | `enter_console_line_editor` | 同上 | 冷却中 |
+| src/script_rh_host.rs:10 | `RhHostEntryValue::{Unit,Value}` | rh host lane | 冷却中 |
+| src/script_lua_run.rs:75 | `current_run_context` | lua lane | 冷却中 |
+| src/script_worker.rs:854–870 | `script_error`/`child_error`/`cancelled_error`/`fleet_error`/`classify_runtime_error` ×5 | retirement 波次孤儿 | 冷却中 |
+| src/frontend/server_strip_ui.rs:37 | `StripRect::width` | frontend lane | 冷却中 |
+| scripts/rh/artifact-verification.rh:185 | 探测 `dist\agenterm-cli.exe`(该 PE 已删除) | release 验证门失效合同 | **待修**(release 通道必炸) |
+
+首采当日的 release-fast 归因快照(size-attribution.rh 产出,strip=none):
+.text 8.13MiB — agenterm 22.4%、C 代码(LuaJIT+QuickJS+SQLite)19.8%、sqlparser
+19.6%、rhai 11.2%、std 6.6%。较上一次测量的显著变化:rusqlite/SQLite 的加入把
+无名 C 行从 0.76MiB 抬到 1.62MiB(sql M1 的代价,预算内)。

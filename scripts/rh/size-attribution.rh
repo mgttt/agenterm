@@ -1,0 +1,150 @@
+// Per-crate .text size attribution for one bin, via cargo-bloat.
+//
+// Args:
+//   REPO [PROFILE] [BIN]     (defaults: release-fast, agenterm)
+//
+// Writes dist/size-attribution.json and prints a top-15 table. Uses the
+// dedicated target/size-report directory so the strip=none override never
+// churns the shared build cache, and clears the session shells'
+// NoDefaultCurrentDirectoryInExePath so LuaJIT's msvcbuild can resolve
+// its freshly linked minilua from the CWD.
+//
+// Companion to dist/size-history.jsonl (per-artifact trend, appended by
+// stage-build.rh): history answers "did it grow", this answers "which
+// crate grew". See plan/design-binary-size-and-reuse.md §5.1.
+
+fn entry() {
+    if args.len < 1 || args.len > 3 {
+        return rh::fail("expected: REPO [PROFILE] [BIN]");
+    }
+    let repo = std::path::absolute(args[0]).display;
+    let profile = "release-fast";
+    if args.len >= 2 {
+        profile = args[1];
+    }
+    let bin = "agenterm";
+    if args.len == 3 {
+        bin = args[2];
+    }
+    let strip_env = "";
+    if profile == "release-fast" {
+        strip_env = "CARGO_PROFILE_RELEASE_FAST_STRIP";
+    } else if profile == "release" {
+        strip_env = "CARGO_PROFILE_RELEASE_STRIP";
+    } else if profile == "dev" {
+        strip_env = "CARGO_PROFILE_DEV_STRIP";
+    } else {
+        return rh::fail("size_attribution_profile_invalid:" + profile);
+    }
+
+    let dist = std::path::join(repo, "dist").display;
+    std::fs::create_dir_all(dist);
+    let stdout_path =
+        std::path::join(dist, ".size-attribution.stdout.tmp").display;
+
+    // cargo-bloat needs symbols to attribute; strip only for this target
+    // dir, which exists solely for size analysis.
+    let child_env = #{
+        "CARGO_TARGET_DIR": std::path::join(repo, "target/size-report").display,
+    };
+    child_env[strip_env] = "none";
+    let options = #{
+        current_dir: repo,
+        env: child_env,
+        env_remove: ["NoDefaultCurrentDirectoryInExePath"],
+    };
+
+    let code = std::process::command_stdout_file(
+        "cargo",
+        [
+            "bloat",
+            "--profile", profile,
+            "--bin", bin,
+            "--crates",
+            "-n", "0",
+            "--message-format", "json"
+        ],
+        1200000,
+        stdout_path,
+        options
+    );
+    require(
+        code == 0,
+        "size_attribution_cargo_bloat_failed (is cargo-bloat installed? \
+         `cargo install cargo-bloat`)"
+    );
+    let text = std::fs::read_to_string(stdout_path);
+    std::fs::try_remove_file(stdout_path);
+    require(text.starts_with("{"), "size_attribution_output_not_json");
+    let report = rh::json::parse(text);
+    // cargo-bloat's totals live under hyphenated keys the AOT transpiler
+    // cannot index; recover both without them — the .text total is the sum
+    // of per-crate sizes, and the file size is the artifact on disk.
+    let text_size = 0;
+    for entry in report.crates {
+        text_size += 0 + entry.size;
+    }
+    require(text_size > 0, "size_attribution_text_size_zero");
+    let built = std::path::join(
+        std::path::join(
+            std::path::join(repo, "target/size-report").display,
+            profile
+        ).display,
+        bin + ".exe"
+    ).display;
+    let file_size = 0;
+    if std::fs::exists(built) {
+        file_size = std::fs::metadata(built).len;
+    }
+
+    let commit_stdout =
+        std::path::join(dist, ".size-attribution.commit.tmp").display;
+    let commit = "unknown";
+    if std::process::command_stdout_file(
+        "git",
+        ["-C", repo, "rev-parse", "HEAD"],
+        10000,
+        commit_stdout
+    ) == 0 {
+        commit = std::fs::read_to_string(commit_stdout);
+        commit.trim();
+    }
+    std::fs::try_remove_file(commit_stdout);
+
+    let output = #{
+        kind: "agenterm-size-attribution",
+        schema_version: 1,
+        git_commit: commit,
+        profile: profile,
+        bin: bin,
+        note: "symbols kept (strip=none) for attribution; shipped strip=true \
+               binaries are smaller than file_size here",
+        file_size: file_size,
+        text_section_size: text_size,
+        crates: report.crates,
+    };
+    let output_path = std::path::join(dist, "size-attribution.json").display;
+    std::fs::write(output_path, rh::json::stringify(output));
+
+    print("size-attribution: " + bin + " (" + profile + ", strip=none)");
+    print("  file " + file_size + " B, .text " + text_size + " B");
+    let shown = 0;
+    for entry in report.crates {
+        if shown >= 15 {
+            break;
+        }
+        shown += 1;
+        let name = "" + entry.name;
+        if name == "" {
+            name = "(no-crate C: LuaJIT/QuickJS/SQLite)";
+        }
+        let size = 0 + entry.size;
+        let tenths = size * 1000 / text_size;
+        print(
+            "  " + (tenths / 10) + "." + (tenths % 10) + "%  " +
+                size + " B  " + name
+        );
+    }
+    print("  full list: " + output_path);
+    0
+}
