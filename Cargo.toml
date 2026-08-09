@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-dynacore", "crates/agenterm-nativecore"]
+members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-dynacore", "crates/agenterm-nativecore", "crates/agenterm-guestcore"]
 resolver = "2"
 
 [package]
