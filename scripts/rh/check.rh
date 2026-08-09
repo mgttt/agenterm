@@ -81,8 +81,10 @@ fn wrap_add_process_observation(
     observed_powershell,
     terminal_compatibility
 ) {
+    // Json-type evidence only — `context` has no `timing` key (see
+    // qualification::q_new_context), and the AOT lane fails closed on
+    // absent paths, so probing one here would rh_fail every gate.
     let _manifest = context.manifest;
-    let _timing = context.timing;
     qualification::add_process_observation(
         context,
         process_samples,
@@ -93,7 +95,6 @@ fn wrap_add_process_observation(
 
 fn wrap_add_result(context, id, status, duration_ms, output) {
     let _manifest = context.manifest;
-    let _timing = context.timing;
     let gate_key = "" + id;
     let status_text = "" + status;
     let evidence = [];
@@ -128,14 +129,12 @@ fn wrap_new_context(manifest_path, release, stress_included) {
 
 fn wrap_write_receipt(context, repo, receipt_path) {
     let _manifest = context.manifest;
-    let _timing = context.timing;
     qualification::write_receipt(context, repo, receipt_path)
 }
 
 fn map_context(value) {
     let context = value.context;
     let _manifest = context.manifest;
-    let _timing = context.timing;
     context
 }
 

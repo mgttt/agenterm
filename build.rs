@@ -18,20 +18,26 @@ fn main() {
     // `mainCRTStartup`. link.exe infers the subsystem from a standard
     // `main`/`WinMain` symbol; with neither present it stops at LNK1561
     // before the custom entry is ever considered, so the subsystem must be
-    // stated. Once it is, CONSOLE's default entry name resolves to the
+    // stated (lld-link in cross builds refuses outright: "subsystem must be
+    // defined"). Once it is, CONSOLE's default entry name resolves to the
     // exported symbol — no explicit /ENTRY needed.
-    #[cfg(windows)]
-    println!("cargo:rustc-link-arg-bin=agenterm-com=/SUBSYSTEM:CONSOLE");
-    // no_std leaves three externs unresolved on MSVC: core's memcpy/memcmp
-    // references and the unwind personality __CxxFrameHandler3. They come
-    // from the CRT import libs; pulling them via /DEFAULTLIB cannot clash
-    // with the bin's own `mainCRTStartup` because default libraries are
-    // only searched for still-unresolved symbols, and the entry is already
-    // defined in the bin's object file.
-    #[cfg(windows)]
-    println!("cargo:rustc-link-arg-bin=agenterm-com=/DEFAULTLIB:vcruntime");
-    #[cfg(windows)]
-    println!("cargo:rustc-link-arg-bin=agenterm-com=/DEFAULTLIB:ucrt");
+    //
+    // Keyed on the TARGET, not `#[cfg(windows)]`: build scripts compile for
+    // the host, so a host cfg silently drops these args when cross-compiling
+    // to *-pc-windows-msvc from linux (cargo-xwin lanes).
+    let target_msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    if target_msvc {
+        println!("cargo:rustc-link-arg-bin=agenterm-com=/SUBSYSTEM:CONSOLE");
+        // no_std leaves three externs unresolved on MSVC: core's memcpy/memcmp
+        // references and the unwind personality __CxxFrameHandler3. They come
+        // from the CRT import libs; pulling them via /DEFAULTLIB cannot clash
+        // with the bin's own `mainCRTStartup` because default libraries are
+        // only searched for still-unresolved symbols, and the entry is already
+        // defined in the bin's object file.
+        println!("cargo:rustc-link-arg-bin=agenterm-com=/DEFAULTLIB:vcruntime");
+        println!("cargo:rustc-link-arg-bin=agenterm-com=/DEFAULTLIB:ucrt");
+    }
 
     // Embed the icon into every bin EXCEPT agenterm-com. The icon .rsrc is
     // ~59KiB and the trampoline's staged-size budget is 64KiB total

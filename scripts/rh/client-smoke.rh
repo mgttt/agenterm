@@ -232,8 +232,11 @@ fn entry() {
         platform_match_count == 1,
         "client_smoke_platform_match"
     );
+    // The standalone rh dev CLI retired into the main binary (`agenterm rh ...`);
+    // no platform set carries the role anymore. Count must stay zero so a
+    // reappearing role is a conscious manifest decision, not drift.
     require(
-        rh_dev_cli_count == 1,
+        rh_dev_cli_count == 0,
         "client_smoke_rh_dev_cli_count"
     );
 
