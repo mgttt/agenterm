@@ -74,10 +74,18 @@ v1 要的东西，22 个实验里已经全部验证过：
 
 `rh`/`lua`/`qjs` 是**人或 agent 写源码、走 CLI 跑任务**的东西——它们的产品位置是
 "给一个任务写脚本"。`dynacore` 的产品位置不同：**它是让 agenterm 在不重建二进制的前提下
-获得新能力的机制**——一份签名的、typed 的、可验证的 IR 制品（"能力包"，logic pack），
+获得新能力的机制**——一份 typed、可验证的 IR 制品（"能力包"，logic pack），
 在运行的 agenterm 进程里被加载、验证、解释执行，效果等价于给 `fleet.*` 目录旁边挂一段
 新逻辑。消费者不是"运行一次任务的人"，是**运行中的 agenterm 自己**，或者操作它的
 超控智能体（`plan/design-cc-hyper-control-agent.md` 里设想的那个）。
+
+> **v1 明确不做签名/来源认证。** §3.2 组件表原稿在 pack 清单里写了"签名"，
+> 与 §5「谁产出能力包」把信任链列为独立未决问题自相矛盾——**已改正，以 §5 为准**。
+> 内容寻址给的是**完整性**（`store.get` 会重算哈希拒绝篡改/损坏内容，见 `store.rs`），
+> **不是真实性**（这份内容是谁产的、该不该信）。v1 的信任边界就是"谁能把 pack 放进
+> 加载方读取的 store 目录"这件事本身，跟 rh/lua/qjs 脚本文件今天的信任边界完全一样
+> （谁能把 `.rh`/`.lua`/`.js` 放进磁盘）——**不是新洞，是复用既有的那个洞**。
+> 签名/供应链认证是**信任链设计**的题目，属于 §5 未决问题，不在这份文档锁死。
 
 这解决了 `PRD_02_10` 里"Layered deployment"条目一直悬着的问题：**Base runtime 稳定不常变，
 Application layer（能力包）可以独立发布、独立更新，不用重新发一次 `agenterm.exe`。**
@@ -92,7 +100,8 @@ crates/agenterm-dynacore/          机制 crate，无产品名（同 agenterm-pl
 │                arity/参数 schema，不能只验 IR 内部一致性）
 ├─ eval_core.rs 解释器（移植 Q9）
 ├─ store.rs     内容寻址 pack 存储（移植 Q3/Q18，构建时钉死 hash，无运行时发现服务）
-└─ pack.rs      pack 清单格式（签名、目标 ISA、fleet-操作依赖清单——供加载方审计）
+└─ pack.rs      pack 清单格式（schema 版本、内容哈希、fleet-操作依赖清单——供加载方审计；
+                 **不含签名/目标 ISA**，见上方 v1 范围说明）
 
 src/script_dynacore_host.rs        宿主绑定（对齐 script_rh_host.rs 的形状：一个
                                      fleet_call(operation_id, params_json) 桥接，
