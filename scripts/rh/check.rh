@@ -343,7 +343,9 @@ fn cargo_clippy_all_spec(environment) {
         "clippy", "--quiet", "--locked", "--all-targets",
         "--all-features", "--", "-D", "warnings"
     ];
-    spec("cargo", arguments, 60000, environment, 0)
+    // 60s only fit a fully warm cache; any crate edit forces a workspace
+    // re-lint that runs minutes on CI runners.
+    spec("cargo", arguments, 600000, environment, 0)
 }
 
 fn cargo_unit_primary_spec(environment) {
@@ -1434,7 +1436,8 @@ if quick != 0 {
         timing,
         "clippy",
         "all-target Clippy",
-        spec("cargo", clippy_arguments, 60000, identity_environment, 0),
+        // 60s only fit a warm cache; a crate edit re-lints the workspace.
+        spec("cargo", clippy_arguments, 600000, identity_environment, 0),
         repo,
         scratch,
         sequence

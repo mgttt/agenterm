@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 85;
+pub const RH_CODEGEN_REVISION: u32 = 86;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -948,6 +948,7 @@ pub fn emit_host_runtime(out: &mut String) {
              mut child: std::process::Child,\n\
              timeout: std::time::Duration,\n\
              capture_limit: usize,\n\
+             program: &str,\n\
          ) -> RhOutput {\n\
              let stdout_pipe = child.stdout.take();\n\
              let stderr_pipe = child.stderr.take();\n\
@@ -959,7 +960,12 @@ pub fn emit_host_runtime(out: &mut String) {
                          if std::time::Instant::now() >= deadline {\n\
                              let _ = child.kill();\n\
                              let _ = child.wait();\n\
-                             let _ = rh_fail(\"process_timeout\");\n\
+                             // Name the culprit: a bare label made CI\n\
+                             // timeouts undiagnosable.\n\
+                             let _ = rh_fail(&format!(\n\
+                                 \"process_timeout: {program} after {}ms\",\n\
+                                 timeout.as_millis()\n\
+                             ));\n\
                              return RhOutput {\n\
                                  success: 0,\n\
                                  exit_code: -1,\n\
@@ -1006,7 +1012,7 @@ pub fn emit_host_runtime(out: &mut String) {
              match process.spawn() {\n\
                  Ok(mut child) => {\n\
                      rh_command_write_stdin(&mut child, &stdin_text);\n\
-                     rh_finish_process_output(child, timeout, capture_limit)\n\
+                     rh_finish_process_output(child, timeout, capture_limit, &command.program)\n\
                  }\n\
                  Err(error) => {\n\
                      let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
@@ -1357,7 +1363,7 @@ pub fn emit_host_runtime(out: &mut String) {
                      stderr: String::new(),\n\
                  };\n\
              };\n\
-             rh_finish_process_output(process, timeout, capture_limit)\n\
+             rh_finish_process_output(process, timeout, capture_limit, \"child\")\n\
          }\n\n\
          fn rh_utility(operation: u32, input: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_UTILITY_CALL }) else {\n\
@@ -1607,12 +1613,19 @@ pub fn emit_host_runtime(out: &mut String) {
              None\n\
          }\n\n\
          fn rh_json_int_path(value: &serde_json::Value, path: &[&str]) -> INT {\n\
-             match rh_json_path(value, path).and_then(rh_json_intish) {\n\
-                 Some(value) => value,\n\
-                 None => {\n\
-                     let _ = rh_fail(&format!(\"json_integer_path: {}\", path.join(\".\")));\n\
-                     0\n\
-                 }\n\
+             // Absent/null reads 0 -- the interpreter's is-absent idiom\n\
+             // (`0 + row.maybe.field`), which live smokes rely on for\n\
+             // optional fields like cleanup_receipt. A PRESENT non-numeric\n\
+             // value is still a type error and fails closed.\n\
+             match rh_json_path(value, path) {\n\
+                 None | Some(serde_json::Value::Null) => 0,\n\
+                 Some(node) => match rh_json_intish(node) {\n\
+                     Some(value) => value,\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_integer_path: {}\", path.join(\".\")));\n\
+                         0\n\
+                     }\n\
+                 },\n\
              }\n\
          }\n\n\
          fn rh_json_array_len(value: &serde_json::Value, path: &[&str]) -> INT {\n\
@@ -1710,12 +1723,18 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
          }\n\n\
          fn rh_json_string_path(value: &serde_json::Value, path: &[&str]) -> String {\n\
-             match rh_json_path(value, path).and_then(rh_json_scalar_string) {\n\
-                 Some(value) => value,\n\
-                 None => {\n\
-                     let _ = rh_fail(&format!(\"json_string_path: {}\", path.join(\".\")));\n\
-                     String::new()\n\
-                 }\n\
+             // Absent reads \"\" -- same is-absent idiom as rh_json_int_path\n\
+             // (rh_json_scalar_string already maps null to \"\"). Present\n\
+             // structural values (arrays/objects) still fail closed.\n\
+             match rh_json_path(value, path) {\n\
+                 None => String::new(),\n\
+                 Some(node) => match rh_json_scalar_string(node) {\n\
+                     Some(value) => value,\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_string_path: {}\", path.join(\".\")));\n\
+                         String::new()\n\
+                     }\n\
+                 },\n\
              }\n\
          }\n\n\
          fn rh_json_contains_path(\n\
