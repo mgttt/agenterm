@@ -71,8 +71,27 @@ impl Row {
     }
 
     pub fn resize(&mut self, len: u16, cell: crate::Cell) {
+        let shrinking = usize::from(len) < self.cells.len();
         self.cells.resize(usize::from(len), cell);
         self.wrapped = false;
+        // Shrinking the row can cut a wide (double-width) character in half:
+        // the continuation cell is truncated away while the first half stays
+        // behind in the new final column. That breaks the invariant the rest
+        // of this crate relies on — that a wide cell always has its
+        // continuation at col+1 — and the next narrow character written onto
+        // the orphan makes `Screen::text` unwrap a `None` neighbour, which
+        // aborts the process for any embedder built with `panic = "abort"`.
+        // `truncate` already clears the orphan for exactly this reason; a
+        // shrinking `resize` (which is what a grid resize goes through) has
+        // to do the same. Reached in practice by Ctrl+wheel font zoom: a
+        // larger font means fewer columns, so every notch shrinks every row.
+        if shrinking {
+            if let Some(last) = self.cells.last_mut() {
+                if last.is_wide() {
+                    last.clear(*last.attrs());
+                }
+            }
+        }
     }
 
     pub fn wrap(&mut self, wrap: bool) {

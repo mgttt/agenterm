@@ -2454,6 +2454,113 @@ mod tests {
         assert_eq!(app.scroll_offset, 0, "scrolling back down must return to the bottom");
     }
 
+    /// The reported "Ctrl+wheel zoom occasionally makes the window vanish
+    /// with no dialog" crash, reproduced as a unit test.
+    ///
+    /// Zooming *in* grows the cell, which shrinks the column count, which
+    /// makes `apply_resize` call `vt100::Screen::set_size` with fewer
+    /// columns. Shrinking a row truncates its cell array — and if a wide
+    /// (CJK/emoji) character straddled the new right edge, its continuation
+    /// cell is dropped while the first half stays behind in the final
+    /// column. From then on the row violates vt100's own invariant that a
+    /// wide cell always has its continuation at `col + 1`, and the next
+    /// narrow character written onto that orphan made `Screen::text`
+    /// dereference `col + 1` and `unwrap()` a `None` — a panic, which under
+    /// this binary's `panic = "abort"` release profile is a silent,
+    /// dialog-free process exit. Exactly the reported symptom, exactly the
+    /// reported direction (enlarging, not shrinking), and "occasional"
+    /// because it needs a wide glyph to land on the new last column.
+    ///
+    /// A shell that prints CJK (a localized Windows shell banner, a path
+    /// with Han characters, any CJK program output) hits this; a pure-ASCII
+    /// session never does, which is why earlier ASCII-driven reproduction
+    /// attempts came back clean.
+    #[test]
+    fn narrow_write_over_a_wide_cell_orphaned_by_a_zoom_in_resize_survives() {
+        let mut parser =
+            vt100::Parser::<ConCallbacks>::new_with_callbacks(2, 6, 0, ConCallbacks::default());
+        // Three wide chars fill columns 0-1, 2-3, 4-5 exactly.
+        parser.process("你好吗".as_bytes());
+        assert!(parser.screen().cell(0, 4).expect("col 4 exists").is_wide());
+
+        // One Ctrl+wheel notch's worth of zoom-in: the same call
+        // `apply_resize` makes, with one column fewer. Column 5 (the
+        // continuation half) is truncated away; column 4 keeps the first
+        // half and is now an orphan.
+        parser.screen_mut().set_size(2, 5);
+
+        // The shell then prints one ordinary narrow character onto that
+        // cell — a cursor move to row 1, column 5 (1-indexed) and an 'x'.
+        // Before the fix this aborted the process here.
+        parser.process(b"\x1b[1;5Hx");
+
+        assert_eq!(
+            parser.screen().cell(0, 4).expect("col 4 still exists").contents(),
+            "x",
+            "the narrow write must land, not just avoid panicking"
+        );
+    }
+
+    /// The same invariant, checked one level down: a shrinking row resize
+    /// must never leave a wide cell without its continuation. This is the
+    /// property the fix actually restores, independent of which write
+    /// happens to trip over the violation afterwards.
+    #[test]
+    fn shrinking_a_grid_never_leaves_a_wide_cell_without_its_continuation() {
+        for cols in 2u16..=12 {
+            let mut parser =
+                vt100::Parser::<ConCallbacks>::new_with_callbacks(2, 12, 0, ConCallbacks::default());
+            // Offset by one narrow char so the wide pairs straddle both odd
+            // and even column boundaries as `cols` sweeps down.
+            parser.process("a你好吗你".as_bytes());
+            parser.screen_mut().set_size(2, cols);
+            let last = cols - 1;
+            let cell = parser.screen().cell(0, last).expect("last column exists");
+            assert!(
+                !cell.is_wide(),
+                "cols={cols}: wide cell orphaned in the final column by the resize"
+            );
+        }
+    }
+
+    /// The same crash one level up, driven the way the product drives it:
+    /// a full Ctrl+wheel zoom-in sweep through `apply_resize` against a
+    /// shell that keeps printing CJK. Every notch shrinks the column count,
+    /// and the CJK text guarantees wide characters sit near whatever the new
+    /// right edge turns out to be. Deterministic — no window, no timing.
+    ///
+    /// The reason this angle went unnoticed for two rounds of investigation
+    /// is that the existing zoom stress tests either resize without any
+    /// output in flight, or push output through a fixed grid; only doing
+    /// both, with *wide* characters, reaches the broken invariant.
+    #[test]
+    fn zoom_in_sweep_while_printing_cjk_never_aborts() {
+        // A localized Windows shell banner is CJK, so this is what a real
+        // session looks like from its very first frame — not an exotic case.
+        let chunks: [&[u8]; 3] = [
+            "Microsoft Windows [版本 10.0.20348.1006]\r\n".as_bytes(),
+            "(c) Microsoft Corporation。保留所有权利。\r\n".as_bytes(),
+            "C:\\dev> 编译 中文日本語 한국어 ██▒░\r\n".as_bytes(),
+        ];
+        for &(phys_w, phys_h) in &[(960u32, 600u32), (1280, 400), (420, 900)] {
+            for scale_tenths in [10u32, 15, 25] {
+                let scale = f64::from(scale_tenths) / 10.0;
+                let mut app = ConTerminal::new(None);
+                app.apply_resize(phys_w, phys_h, scale);
+                // One notch per step across the whole clamp range, exactly
+                // as `zoom_font` walks it, with output in flight throughout.
+                for step in 0..=28u32 {
+                    app.font_size_logical = (8.0 + f64::from(step)).clamp(8.0, 36.0);
+                    app.apply_resize(phys_w, phys_h, scale);
+                    for chunk in &chunks {
+                        app.parser.process(chunk);
+                    }
+                }
+                assert!(app.cols >= 2 && app.rows >= 2);
+            }
+        }
+    }
+
     #[test]
     fn double_click_selects_a_word_and_keeps_paths_whole() {
         let mut app = ConTerminal::new(None);

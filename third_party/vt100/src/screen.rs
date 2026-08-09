@@ -900,21 +900,23 @@ impl Screen {
                 .unwrap()
                 .is_wide_continuation()
             {
-                let prev_cell = self
-                    .grid_mut()
-                    .drawing_cell_mut(crate::grid::Pos {
+                // pos.row is valid because we assume self.grid().pos() to
+                // always have a valid row value. pos.col is valid because we
+                // called col_wrap() immediately before this, which ensures
+                // that self.grid().pos().col has a valid value. pos.col - 1
+                // *should* be valid because the cell at pos.col is a wide
+                // continuation character, so it must have the first half of
+                // the wide character before it — but see the note on the
+                // sibling `col + 1` access below for why that "must" is not
+                // worth aborting the whole process over.
+                if let Some(prev_cell) =
+                    self.grid_mut().drawing_cell_mut(crate::grid::Pos {
                         row: pos.row,
-                        col: pos.col - 1,
+                        col: pos.col.wrapping_sub(1),
                     })
-                    // pos.row is valid because we assume self.grid().pos() to
-                    // always have a valid row value. pos.col is valid because
-                    // we called col_wrap() immediately before this, which
-                    // ensures that self.grid().pos().col has a valid value.
-                    // pos.col - 1 is valid because the cell at pos.col is a
-                    // wide continuation character, so it must have the first
-                    // half of the wide character before it.
-                    .unwrap();
-                prev_cell.clear(attrs);
+                {
+                    prev_cell.clear(attrs);
+                }
             }
 
             if self
@@ -927,21 +929,26 @@ impl Screen {
                 .unwrap()
                 .is_wide()
             {
-                let next_cell = self
-                    .grid_mut()
-                    .drawing_cell_mut(crate::grid::Pos {
+                // pos.row/pos.col are valid (see above), and pos.col + 1 is
+                // *supposed* to be valid because a wide cell must have its
+                // continuation half after it. That invariant was violated for
+                // real: a shrinking row resize used to truncate the
+                // continuation away and leave the first half orphaned in the
+                // final column, and this `.unwrap()` then aborted the process
+                // — silently, with no dialog, for any embedder built with
+                // `panic = "abort"`. The orphan source is fixed at its root in
+                // `Row::resize`, so this branch is not expected to see `None`
+                // any more; it degrades to "leave the neighbour alone" rather
+                // than killing the terminal if some other path ever
+                // reintroduces a half-truncated wide character.
+                if let Some(next_cell) =
+                    self.grid_mut().drawing_cell_mut(crate::grid::Pos {
                         row: pos.row,
-                        col: pos.col + 1,
+                        col: pos.col.wrapping_add(1),
                     })
-                    // pos.row is valid because we assume self.grid().pos() to
-                    // always have a valid row value. pos.col is valid because
-                    // we called col_wrap() immediately before this, which
-                    // ensures that self.grid().pos().col has a valid value.
-                    // pos.col + 1 is valid because the cell at pos.col is a
-                    // wide character, so it must have the second half of the
-                    // wide character after it.
-                    .unwrap();
-                next_cell.set(' ', attrs);
+                {
+                    next_cell.set(' ', attrs);
+                }
             }
 
             let cell = self
@@ -973,21 +980,14 @@ impl Screen {
                         row: pos.row,
                         col: pos.col + 1,
                     };
-                    let next_next_cell = self
-                        .grid_mut()
-                        .drawing_cell_mut(next_next_pos)
-                        // pos.row is valid because we assume
-                        // self.grid().pos() to always have a valid row value.
-                        // pos.col is valid because we called col_wrap()
-                        // earlier, which ensures that self.grid().pos().col
-                        // has a valid value. this is true even though we just
-                        // called col_inc, because this branch only happens if
-                        // width > 1, and col_wrap takes width into account.
-                        // pos.col + 1 is valid because the cell at pos.col is
-                        // wide, and so it must have the second half of the
-                        // wide character after it.
-                        .unwrap();
-                    next_next_cell.clear(attrs);
+                    // Same "a wide cell must have its continuation after it"
+                    // assumption as the branch above, and hardened the same
+                    // way rather than aborting the process on a violation.
+                    if let Some(next_next_cell) =
+                        self.grid_mut().drawing_cell_mut(next_next_pos)
+                    {
+                        next_next_cell.clear(attrs);
+                    }
                     if next_next_pos.col == size.cols - 1 {
                         self.grid_mut()
                             .drawing_row_mut(pos.row)
