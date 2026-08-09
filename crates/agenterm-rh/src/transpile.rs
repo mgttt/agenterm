@@ -7566,6 +7566,13 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
     }
     if let Some(path) = path_buf_from_arg(expr) {
         emit_stringish(out, path, ctx)?;
+        // `PathBuf::from(variable)` passes the string through — but a bare
+        // variable here MOVES it into the new binding, and rh scripts have
+        // value semantics (the source keeps using the original afterwards;
+        // prune-target-incremental's `target_argument` was the live E0382).
+        if matches!(path, Expr::Variable(..)) {
+            out.push_str(".clone()");
+        }
         return Ok(());
     }
     if emit_bytes_method(out, expr, ctx)? {
@@ -11212,6 +11219,32 @@ mod tests {
         let rust = transpile("fn add(a, b) { a + b }").expect("transpile");
         assert!(rust.contains("pub fn add"));
         assert!(rust.contains("a + b"));
+    }
+
+    /// `PathBuf::from(variable)` passes the string through, but a bare
+    /// variable there MOVES it into the new binding while the script (value
+    /// semantics) keeps using the original — prune-target-incremental's
+    /// `target_argument` produced a live E0382 in the generated pack. The
+    /// passthrough must clone variables.
+    #[test]
+    fn path_buf_from_variable_clones_instead_of_moving() {
+        let rust = transpile_cdylib_with_mode(
+            "fn entry() {\n\
+                 let target_argument = \"target\";\n\
+                 let candidate = std::path::PathBuf::from(target_argument);\n\
+                 let joined = std::path::join(\"root\", target_argument).display;\n\
+                 if candidate.is_absolute != 0 {\n\
+                     print(joined);\n\
+                 }\n\
+                 0\n\
+             }",
+        )
+        .expect("transpile")
+        .rust;
+        assert!(
+            rust.contains("target_argument.clone()"),
+            "PathBuf::from(variable) must clone the passthrough: {rust}"
+        );
     }
 
     #[test]

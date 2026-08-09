@@ -56,6 +56,22 @@ fn entry() {
         print("Cargo incremental prune: skipped (debug/incremental is absent)");
         return 0;
     }
+
+    // Everything past this point probes cargo's advisory locks through
+    // python3 + fcntl.flock (see lib/prune_target_incremental.rh) — POSIX
+    // by construction; fcntl does not exist on Windows Python. Skip
+    // honestly on Windows instead of dying on process_spawn: pruning is
+    // disk hygiene, and skipping only defers reclamation. Host probe uses
+    // the same idiom as package-client-release.rh (default windows unless
+    // /proc or CoreServices exists).
+    let posix_host = std::fs::exists("/proc")
+        || std::fs::exists("/System/Library/CoreServices");
+    if !posix_host {
+        print(
+            "Cargo incremental prune: skipped (posix-only lock probe; no windows backend yet)"
+        );
+        return 0;
+    }
     prune::direct_directory(debug_profile, "incremental_prune_debug");
     prune::direct_directory(incremental, "incremental_prune_root");
 
