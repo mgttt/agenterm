@@ -113,8 +113,10 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
   "引擎搭载策略收敛到主 PE + 编译期门控"同向,后续按其波次推进后再评估 feature 门。
 
 ### 队列(按价值排序)
-1. **P5 frontend 三面重复测绘**(audit 进行中):remote_frontend(378KB)/unix
-   frontend(276+132KB)/windows frontend 的共享核提取地图,产出后另立设计节。
+1. **P5 frontend 三面重复测绘**:已完成 → `plan/design-frontend-shared-core.md`。
+   66 个同名函数横跨两 controller;五大提取候选(快照装配 ~600 行、选区生命周期
+   ~450 行、modal 几何 ~500 行且已实际漂移、sidebar 命中 ~300 行、滚动条+指针合成
+   ~450 行),另有 4 个可独立修的具体缺陷。下一步:先补"快照键集对等"护栏测试。
 2. corpus-scan 契约测试 ×3(lua/qjs/sql 各 ~50 行结构相同)→ script-common
    test-support;顺带把"契约"从复制粘贴变成单点定义。
 3. lua 的 corpus-scan/check-many 是否向共享命令体对齐:其"`--dir` 悬空回退 CWD"
