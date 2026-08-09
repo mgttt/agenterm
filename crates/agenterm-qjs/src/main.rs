@@ -19,6 +19,17 @@
 //! (`src/script_worker.rs`), the same place lua's task dispatch lives —
 //! `agenterm-lua`'s own `task` subcommand is the same kind of stub, not a
 //! coincidence.
+//!
+//! Argv parsing goes through `agenterm_script_common::cli`'s slice-based
+//! helpers (re-exported from `agenterm_qjs`'s lib — `main.rs` is compiled
+//! as a `[[bin]]` of the root `agenterm` package, which doesn't depend on
+//! `agenterm-script-common` directly, see that re-export's doc). This
+//! replaced a local, iterator-based `find_flag_value`/`optional_flag_value`
+//! pair that caused a real bug: `optional_flag_value` internally collected
+//! (draining) its `&mut impl Iterator`, so calling it twice on the same
+//! iterator for two different flags always lost the second one (see the
+//! regression tests at the bottom of this file, still exercised here
+//! against the shared `find_flag_value`).
 
 use std::{
     env, fs,
@@ -28,13 +39,14 @@ use std::{
 
 use agenterm_qjs::{
     QJS_VERSION, QjsError, QjsHostFunctions, check, check_with_project_validation,
-    eval_entry, eval_entry_with_host, eval_module_entry_with_host, parse_check_many_cli,
-    read_manifest, run_check_many, wants_module_mode,
+    eval_entry, eval_entry_with_host, eval_module_entry_with_host, find_flag_value, has_flag,
+    parse_check_many_cli, positional, read_manifest, require_flag_value, run_check_many,
+    wants_module_mode,
 };
 
 fn main() -> ExitCode {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
-    match run(arguments.into_iter()) {
+    match run(&arguments) {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
             eprintln!("{error}");
@@ -43,19 +55,23 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let Some(command) = args.next() else {
+fn run(args: &[String]) -> Result<u8, QjsError> {
+    let Some(command) = args.first() else {
         print_usage();
         return Ok(0);
     };
+    let rest = &args[1..];
 
     match command.as_str() {
         "version" | "--version" | "-V" => {
             println!("agenterm-qjs {QJS_VERSION}");
         }
         "check" => {
-            let path = require_path(&mut args, "check")?;
-            let project_root = optional_flag_value(&mut args, "--project-root");
+            let path = PathBuf::from(
+                positional(rest, 0, "usage: agenterm-qjs check <file.js>")
+                    .map_err(QjsError::Check)?,
+            );
+            let project_root = find_flag_value(&rest[1..], "--project-root").map(PathBuf::from);
             let source = read_source(&path)?;
             let label = path.display().to_string();
             // No implicit default here (unlike `eval`/`run` below): plain
@@ -72,8 +88,11 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
             println!("qjs check ok: {label}");
         }
         "eval" => {
-            let path = require_path(&mut args, "eval")?;
-            let project_root = optional_flag_value(&mut args, "--project-root");
+            let path = PathBuf::from(
+                positional(rest, 0, "usage: agenterm-qjs eval <file.js>")
+                    .map_err(QjsError::Check)?,
+            );
+            let project_root = find_flag_value(&rest[1..], "--project-root").map(PathBuf::from);
             let source = read_source(&path)?;
             let label = path.display().to_string();
             let outcome = if wants_module_mode(&source) {
@@ -89,39 +108,42 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
             println!("qjs eval ok: {label} -> {rendered}");
         }
         "hash" => {
-            let path = require_path(&mut args, "hash")?;
+            let path = PathBuf::from(
+                positional(rest, 0, "usage: agenterm-qjs hash <file.js>")
+                    .map_err(QjsError::Check)?,
+            );
             let source = read_source(&path)?;
             println!("{}  {}", agenterm_qjs::hash_source(&source), path.display());
         }
         "run" => {
-            return run_run_command(&mut args);
+            return run_run_command(rest);
         }
         "pack" => {
-            return run_pack_command(&mut args);
+            return run_pack_command(rest);
         }
         "qualify" => {
-            return run_qualify_command(&mut args);
+            return run_qualify_command(rest);
         }
         "check-many" => {
-            return run_check_many_command(&mut args);
+            return run_check_many_command(rest);
         }
         "corpus-scan" => {
-            return run_corpus_scan_command(&mut args);
+            return run_corpus_scan_command(rest);
         }
         "run-smoke" => {
             // Bytecode smoke test — delegates to `pack load`, same as
             // `agenterm-lua`'s `cmd_run_smoke` (a pack dir is what both
-            // engines actually load, not a raw bytecode file).
-            let dir = args
-                .next()
-                .ok_or_else(|| QjsError::Check("usage: agenterm-qjs run-smoke <dir>".into()))?;
-            let mut rest = std::iter::once(dir).chain(args);
-            return run_pack_load(&mut rest);
+            // engines actually load, not a raw bytecode file). The
+            // presence check happens here (for `run-smoke`'s own usage
+            // message) before delegating, so `run_pack_load`'s own
+            // "missing dir" case can never actually fire below.
+            positional(rest, 0, "usage: agenterm-qjs run-smoke <dir>").map_err(QjsError::Check)?;
+            return run_pack_load(rest);
         }
         "task" => {
-            let rest = args.collect::<Vec<_>>().join(" ");
+            let joined = rest.join(" ");
             eprintln!(
-                "task: use `agenterm task {rest}` (root binary; set \
+                "task: use `agenterm task {joined}` (root binary; set \
                  AGENTERM_SCRIPT_BACKEND=qjs to route it through this engine) — \
                  agenterm-qjs itself doesn't re-implement task dispatch, see \
                  plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3"
@@ -147,19 +169,21 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<u8, QjsError> {
 /// `file_args` only, never in the script's own trailing `-- <args>`, so a
 /// script argument that happens to be the literal string `--project-root`
 /// isn't misread as this command's own flag.
-fn run_run_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let collected = args.collect::<Vec<_>>();
-    let sep = collected.iter().position(|a| a == "--");
+fn run_run_command(args: &[String]) -> Result<u8, QjsError> {
+    let sep = args.iter().position(|a| a == "--");
     let (file_args, script_args): (&[String], &[String]) = match sep {
-        Some(pos) => (&collected[..pos], &collected[pos + 1..]),
-        None => (&collected[..], &[]),
+        Some(pos) => (&args[..pos], &args[pos + 1..]),
+        None => (&args[..], &[]),
     };
-    let mut file_args_iter = file_args.iter().cloned();
-    let path = file_args_iter
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| QjsError::Check("usage: agenterm-qjs run <file.js> [-- <args>...]".into()))?;
-    let project_root = optional_flag_value(&mut file_args_iter, "--project-root");
+    let path = PathBuf::from(
+        positional(
+            file_args,
+            0,
+            "usage: agenterm-qjs run <file.js> [-- <args>...]",
+        )
+        .map_err(QjsError::Check)?,
+    );
+    let project_root = find_flag_value(&file_args[1..], "--project-root").map(PathBuf::from);
     let source = read_source(&path)?;
     let label = path.display().to_string();
 
@@ -199,24 +223,31 @@ fn run_run_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsErr
 /// about what it was scoped to) and builds a self-contained
 /// [`agenterm_qjs::QjsModulePack`] instead of the single-file
 /// [`agenterm_qjs::QjsPack`].
-fn run_pack_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let Some(subcommand) = args.next() else {
+fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
+    let Some(subcommand) = args.first() else {
         return Err(QjsError::Check(
             "usage: agenterm-qjs pack build <file.js> --dir <out> [--project-root DIR] | \
              pack load <dir>"
                 .into(),
         ));
     };
+    let rest = &args[1..];
     match subcommand.as_str() {
         "build" => {
-            let path = require_path(args, "pack build")?;
-            // Collect once — see `find_flag_value`'s doc for why chaining
-            // `require_flag_value`/`optional_flag_value` here would
-            // silently lose `--project-root`.
-            let rest = args.collect::<Vec<_>>();
-            let dir = find_flag_value(&rest, "--dir")
+            let path = PathBuf::from(
+                positional(rest, 0, "usage: agenterm-qjs pack build <file.js>")
+                    .map_err(QjsError::Check)?,
+            );
+            // Slice-based lookups — no iterator to accidentally drain, so
+            // both flags can be looked up independently from the same
+            // slice (see `find_flag_value`'s doc in
+            // `agenterm-script-common/src/cli.rs` for the bug class this
+            // structurally rules out).
+            let flags = &rest[1..];
+            let dir = find_flag_value(flags, "--dir")
+                .map(PathBuf::from)
                 .ok_or_else(|| QjsError::Check("pack build requires --dir <out>".into()))?;
-            let project_root = find_flag_value(&rest, "--project-root");
+            let project_root = find_flag_value(flags, "--project-root").map(PathBuf::from);
             let source = read_source(&path)?;
             if wants_module_mode(&source) {
                 let root = project_root.ok_or_else(|| {
@@ -237,7 +268,7 @@ fn run_pack_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsEr
             }
             Ok(0)
         }
-        "load" => run_pack_load(args),
+        "load" => run_pack_load(rest),
         other => Err(QjsError::Check(format!(
             "pack: unknown subcommand `{other}`; try build or load"
         ))),
@@ -251,11 +282,10 @@ fn run_pack_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsEr
 /// `agenterm.qjs-module-pack-manifest/v1`) — both kinds write to the same
 /// `manifest.json` filename inside their pack directory, so the schema
 /// string is what actually distinguishes them, not the directory shape.
-fn run_pack_load(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let dir = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| QjsError::Check("usage: agenterm-qjs pack load <dir>".into()))?;
+fn run_pack_load(args: &[String]) -> Result<u8, QjsError> {
+    let dir = PathBuf::from(
+        positional(args, 0, "usage: agenterm-qjs pack load <dir>").map_err(QjsError::Check)?,
+    );
     let host = QjsHostFunctions::default();
     if pack_manifest_schema(&dir)?.starts_with("agenterm.qjs-module-pack-manifest/") {
         let pack = agenterm_qjs::QjsModulePack::load(&dir).map_err(QjsError::Check)?;
@@ -299,16 +329,21 @@ fn pack_manifest_schema(dir: &Path) -> Result<String, QjsError> {
 }
 
 /// `corpus-scan [--dir <dir>]` — scan a directory for `.js`/`.mjs` files
-/// and check syntax, mirroring `agenterm-lua`'s `cmd_corpus_scan`.
-fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let collected = args.collect::<Vec<_>>();
-    let dir = match collected.iter().position(|a| a == "--dir") {
-        Some(pos) => collected
-            .get(pos + 1)
-            .map(PathBuf::from)
-            .ok_or_else(|| QjsError::Check("--dir requires a value".into()))?,
-        None => std::env::current_dir()
-            .map_err(|err| QjsError::Check(format!("corpus_scan_cwd: {err}")))?,
+/// and check syntax, mirroring `agenterm-lua`'s `cmd_corpus_scan`. Unlike
+/// lua's corpus-scan (which silently falls back to cwd if `--dir` has no
+/// following value), qjs's has always distinguished "no `--dir`" from
+/// "`--dir` with nothing after it" — the latter is a hard error. Preserved
+/// here via `has_flag` + `require_flag_value` rather than the
+/// absent/no-value-collapsing `find_flag_value`.
+fn run_corpus_scan_command(args: &[String]) -> Result<u8, QjsError> {
+    let dir = if has_flag(args, "--dir") {
+        // `usage` is unreachable here: `has_flag` already guarantees the
+        // flag is present, so the only way `require_flag_value` can fail
+        // is the "no value follows" branch.
+        PathBuf::from(require_flag_value(args, "--dir", "unreachable").map_err(QjsError::Check)?)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| QjsError::Check(format!("corpus_scan_cwd: {err}")))?
     };
     let report = agenterm_qjs::scan_directory(&dir)
         .map_err(|err| QjsError::Check(format!("corpus_scan: {err}")))?;
@@ -331,14 +366,16 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<u8
 /// `qualify <file.js> --dir <out> [--project-root DIR]`. Same
 /// explicit-`--project-root`-required convention as `pack build`/`check`
 /// for scripts using `import`/`export`.
-fn run_qualify_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let path = require_path(args, "qualify")?;
-    // Collect once — same reason as `pack build`'s handler (see
-    // `find_flag_value`'s doc).
-    let rest = args.collect::<Vec<_>>();
-    let dir = find_flag_value(&rest, "--dir")
+fn run_qualify_command(args: &[String]) -> Result<u8, QjsError> {
+    let path = PathBuf::from(
+        positional(args, 0, "usage: agenterm-qjs qualify <file.js>")
+            .map_err(QjsError::Check)?,
+    );
+    let flags = &args[1..];
+    let dir = find_flag_value(flags, "--dir")
+        .map(PathBuf::from)
         .ok_or_else(|| QjsError::Check("qualify requires --dir <out>".into()))?;
-    let project_root = find_flag_value(&rest, "--project-root");
+    let project_root = find_flag_value(flags, "--project-root").map(PathBuf::from);
     let source = read_source(&path)?;
     let host = QjsHostFunctions::default();
     let receipt_path = dir.join("receipt.json");
@@ -371,8 +408,8 @@ fn run_qualify_command(args: &mut impl Iterator<Item = String>) -> Result<u8, Qj
     Ok(0)
 }
 
-fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<u8, QjsError> {
-    let parsed = parse_check_many_cli(args)?;
+fn run_check_many_command(args: &[String]) -> Result<u8, QjsError> {
+    let parsed = parse_check_many_cli(args.iter().cloned())?;
     let manifest = read_manifest(&parsed.manifest_path)?;
     let report = run_check_many(manifest, parsed.options);
     if parsed.json {
@@ -407,47 +444,6 @@ fn render_value(value: Option<&serde_json::Value>) -> String {
 
 fn read_source(path: &PathBuf) -> Result<String, QjsError> {
     fs::read_to_string(path).map_err(|err| QjsError::Check(format!("{}: {err}", path.display())))
-}
-
-fn require_path(
-    args: &mut impl Iterator<Item = String>,
-    command: &str,
-) -> Result<PathBuf, QjsError> {
-    args.next()
-        .map(PathBuf::from)
-        .ok_or_else(|| QjsError::Check(format!("usage: agenterm-qjs {command} <file.js>")))
-}
-
-/// Find `flag`'s value in an already-collected argument slice. Callers
-/// that need more than one flag out of the same argument tail MUST
-/// collect once and call this repeatedly on the same slice, rather than
-/// calling `optional_flag_value` (below) more than once on the same
-/// iterator — `optional_flag_value` collects (draining) the iterator each
-/// call, so a second call always finds nothing, not "the flag is absent".
-/// Found this the hard way, as a real bug, not a hypothetical: an earlier
-/// version of `run_pack_command`'s "build" arm called a `--dir`-only
-/// helper (since removed, its collect-then-search body is now
-/// `optional_flag_value`) followed by `optional_flag_value(args,
-/// "--project-root")` on the *same* iterator — `pack build --dir X
-/// --project-root Y` silently lost `Y`, because the first call had
-/// already drained the tail. `run_pack_command`/`run_qualify_command` now
-/// collect once and call this function directly for both flags instead.
-fn find_flag_value(collected: &[String], flag: &str) -> Option<PathBuf> {
-    collected
-        .iter()
-        .position(|a| a == flag)
-        .and_then(|pos| collected.get(pos + 1))
-        .map(PathBuf::from)
-}
-
-/// `flag`'s value if present, `None` otherwise. Consumes the rest of the
-/// iterator (same caveat as `find_flag_value`'s doc: callers needing more
-/// than one flag from the same argument tail must collect once and call
-/// `find_flag_value` directly instead of calling this more than once on
-/// the same iterator).
-fn optional_flag_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Option<PathBuf> {
-    let collected = args.collect::<Vec<_>>();
-    find_flag_value(&collected, flag)
 }
 
 /// `--project-root`, if given; otherwise the entry file's own parent
@@ -495,7 +491,7 @@ load` never needs the original --project-root again."
 
 #[cfg(test)]
 mod tests {
-    use super::find_flag_value;
+    use agenterm_qjs::find_flag_value;
 
     #[test]
     fn find_flag_value_reads_multiple_distinct_flags_from_one_collected_slice() {
@@ -508,21 +504,15 @@ mod tests {
         // nothing. `find_flag_value` operating on an already-collected
         // slice, called twice on the SAME slice, is the fix — this test
         // is what `run_pack_command`/`run_qualify_command` actually rely
-        // on now.
+        // on now (via the shared `agenterm_script_common::cli` helpers).
         let collected = vec![
             "--dir".to_owned(),
             "out".to_owned(),
             "--project-root".to_owned(),
             "proj".to_owned(),
         ];
-        assert_eq!(
-            find_flag_value(&collected, "--dir"),
-            Some(std::path::PathBuf::from("out"))
-        );
-        assert_eq!(
-            find_flag_value(&collected, "--project-root"),
-            Some(std::path::PathBuf::from("proj"))
-        );
+        assert_eq!(find_flag_value(&collected, "--dir"), Some("out"));
+        assert_eq!(find_flag_value(&collected, "--project-root"), Some("proj"));
     }
 
     #[test]
@@ -533,14 +523,8 @@ mod tests {
             "--dir".to_owned(),
             "out".to_owned(),
         ];
-        assert_eq!(
-            find_flag_value(&collected, "--dir"),
-            Some(std::path::PathBuf::from("out"))
-        );
-        assert_eq!(
-            find_flag_value(&collected, "--project-root"),
-            Some(std::path::PathBuf::from("proj"))
-        );
+        assert_eq!(find_flag_value(&collected, "--dir"), Some("out"));
+        assert_eq!(find_flag_value(&collected, "--project-root"), Some("proj"));
     }
 
     #[test]

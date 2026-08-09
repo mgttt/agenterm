@@ -13,6 +13,12 @@ pub mod manifest;
 pub mod pack;
 pub mod qualify;
 
+// `main.rs` is compiled as a `[[bin]]` of the root `agenterm` package (see
+// the root Cargo.toml), not as a target of this crate — it can only reach
+// `agenterm-script-common` through a re-export here, since the root
+// package's own `[dependencies]` doesn't list it directly.
+pub use agenterm_script_common::cli::{find_flag_value, has_flag, positional, require_flag_value};
+
 use std::sync::Arc;
 use std::sync::OnceLock;
 

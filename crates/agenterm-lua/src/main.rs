@@ -13,6 +13,8 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+use agenterm_lua::{find_flag_value, has_flag, positional, require_flag_value};
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let code = match dispatch(&args) {
@@ -61,7 +63,7 @@ fn dispatch(args: &[String]) -> Result<u8, String> {
 
 /// `check <file.lua>` — syntax check.
 fn cmd_check(args: &[String]) -> Result<u8, String> {
-    let path = require_arg(args, 0, "check <file.lua>")?;
+    let path = PathBuf::from(positional(args, 0, "missing argument: check <file.lua>")?);
     let source = read_file(&path)?;
     let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
     engine.check(&source).map_err(|e| e.to_string())?;
@@ -71,7 +73,7 @@ fn cmd_check(args: &[String]) -> Result<u8, String> {
 
 /// `eval <file.lua>` — compile and evaluate (with bytecode cache).
 fn cmd_eval(args: &[String]) -> Result<u8, String> {
-    let path = require_arg(args, 0, "eval <file.lua>")?;
+    let path = PathBuf::from(positional(args, 0, "missing argument: eval <file.lua>")?);
     let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
     let host = agenterm_lua::LuaHostFunctions::default();
     let (result, cache_hit) = engine.eval_file_cached(&path, &host)
@@ -86,7 +88,7 @@ fn cmd_eval(args: &[String]) -> Result<u8, String> {
 
 /// `hash <file.lua>` — print SHA256 of source.
 fn cmd_hash(args: &[String]) -> Result<u8, String> {
-    let path = require_arg(args, 0, "hash <file.lua>")?;
+    let path = PathBuf::from(positional(args, 0, "missing argument: hash <file.lua>")?);
     let source = read_file(&path)?;
     let hash = agenterm_lua::LuaEngine::hash_source(&source);
     println!("{hash}  {path}", path = path.display());
@@ -95,8 +97,16 @@ fn cmd_hash(args: &[String]) -> Result<u8, String> {
 
 /// `pack build <file.lua> --dir <out>` — compile source to bytecode pack.
 fn cmd_pack_build(args: &[String]) -> Result<u8, String> {
-    let path = require_arg(args, 0, "pack build <file.lua> --dir <out>")?;
-    let dir = require_flag_value(args, "--dir", "pack build requires --dir <out>")?;
+    let path = PathBuf::from(positional(
+        args,
+        0,
+        "missing argument: pack build <file.lua> --dir <out>",
+    )?);
+    let dir = PathBuf::from(require_flag_value(
+        args,
+        "--dir",
+        "pack build requires --dir <out>",
+    )?);
     let source = read_file(&path)?;
     let _bc_path = agenterm_lua::pack::build_pack_dir(&source, &dir)
         .map_err(|e| e.to_string())?;
@@ -107,7 +117,7 @@ fn cmd_pack_build(args: &[String]) -> Result<u8, String> {
 
 /// `pack load <dir>` — load and execute a pack directory.
 fn cmd_pack_load(args: &[String]) -> Result<u8, String> {
-    let dir = require_arg(args, 0, "pack load <dir>")?;
+    let dir = PathBuf::from(positional(args, 0, "missing argument: pack load <dir>")?);
     let pack = agenterm_lua::pack::LuaPack::load(&dir).map_err(|e| e.to_string())?;
     let host = agenterm_lua::LuaHostFunctions::default();
     let result = pack.eval(&host).map_err(|e| e.to_string())?;
@@ -120,8 +130,16 @@ fn cmd_pack_load(args: &[String]) -> Result<u8, String> {
 
 /// `qualify <file.lua> --dir <out>` — build + load + entry → receipt.
 fn cmd_qualify(args: &[String]) -> Result<u8, String> {
-    let path = require_arg(args, 0, "qualify <file.lua> --dir <out>")?;
-    let dir = require_flag_value(args, "--dir", "qualify requires --dir <out>")?;
+    let path = PathBuf::from(positional(
+        args,
+        0,
+        "missing argument: qualify <file.lua> --dir <out>",
+    )?);
+    let dir = PathBuf::from(require_flag_value(
+        args,
+        "--dir",
+        "qualify requires --dir <out>",
+    )?);
     let source = read_file(&path)?;
     let host = agenterm_lua::LuaHostFunctions::default();
     let receipt = agenterm_lua::qualify::qualify_pack_dir(&source, &dir, &host)
@@ -135,8 +153,12 @@ fn cmd_qualify(args: &[String]) -> Result<u8, String> {
 
 /// `check-many --manifest <file> [--json]` — bounded multi-file validation.
 fn cmd_check_many(args: &[String]) -> Result<u8, String> {
-    let manifest_path = require_flag_value(args, "--manifest", "check-many requires --manifest <file>")?;
-    let json_out = args.iter().any(|a| a == "--json");
+    let manifest_path = PathBuf::from(require_flag_value(
+        args,
+        "--manifest",
+        "check-many requires --manifest <file>",
+    )?);
+    let json_out = has_flag(args, "--json");
     let manifest = agenterm_lua::check_many::read_manifest(&manifest_path)
         .map_err(|e| format!("check_many_manifest: {e}"))?;
     let options = agenterm_lua::check_many::CheckManyOptions::default();
@@ -156,8 +178,8 @@ fn cmd_check_many(args: &[String]) -> Result<u8, String> {
 
 /// `corpus-scan [--dir <dir>]` — scan directory for .lua files and check syntax.
 fn cmd_corpus_scan(args: &[String]) -> Result<u8, String> {
-    let dir = if let Some(d) = require_flag_value_opt(args, "--dir") {
-        d
+    let dir = if let Some(d) = find_flag_value(args, "--dir") {
+        PathBuf::from(d)
     } else {
         std::env::current_dir().map_err(|e| e.to_string())?
     };
@@ -186,7 +208,11 @@ fn cmd_run(args: &[String]) -> Result<u8, String> {
     } else {
         (args, &[])
     };
-    let path = require_arg(file_args, 0, "run <file.lua> [-- <args>...]")?;
+    let path = PathBuf::from(positional(
+        file_args,
+        0,
+        "missing argument: run <file.lua> [-- <args>...]",
+    )?);
     let source = read_file(&path)?;
     let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
     let base_host = agenterm_lua::LuaHostFunctions::default();
@@ -206,7 +232,11 @@ fn cmd_task(args: &[String]) -> Result<u8, String> {
         eprintln!("task: expected subcommand: list, run, show");
         return Ok(1);
     }
-    let manifest_path = require_flag_value(args, "--manifest", "task requires --manifest <file>")?;
+    let manifest_path = PathBuf::from(require_flag_value(
+        args,
+        "--manifest",
+        "task requires --manifest <file>",
+    )?);
     let manifest = read_file(&manifest_path)?;
     let parsed: serde_json::Value =
         serde_json::from_str(&manifest).map_err(|e| format!("manifest_json: {e}"))?;
@@ -275,35 +305,12 @@ fn cmd_task(args: &[String]) -> Result<u8, String> {
 
 /// `run-smoke <pack.luac>` — bytecode smoke test (delegates to pack load).
 fn cmd_run_smoke(args: &[String]) -> Result<u8, String> {
-    let path = require_arg(args, 0, "run-smoke <dir>")?;
+    let path = PathBuf::from(positional(args, 0, "missing argument: run-smoke <dir>")?);
     // Treat as pack dir
     cmd_pack_load(&[path.to_string_lossy().to_string()])
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
-
-fn require_arg(args: &[String], index: usize, usage: &str) -> Result<PathBuf, String> {
-    let value = args
-        .get(index)
-        .ok_or_else(|| format!("missing argument: {usage}"))?;
-    Ok(PathBuf::from(value))
-}
-
-fn require_flag_value(args: &[String], flag: &str, usage: &str) -> Result<PathBuf, String> {
-    let pos = args
-        .iter()
-        .position(|a| a == flag)
-        .ok_or_else(|| usage.to_string())?;
-    let value = args
-        .get(pos + 1)
-        .ok_or_else(|| format!("{flag} requires a value"))?;
-    Ok(PathBuf::from(value))
-}
-
-fn require_flag_value_opt(args: &[String], flag: &str) -> Option<PathBuf> {
-    let pos = args.iter().position(|a| a == flag)?;
-    args.get(pos + 1).map(PathBuf::from)
-}
 
 fn read_file(path: &std::path::Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("read_file {}: {e}", path.display()))

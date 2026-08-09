@@ -11,6 +11,7 @@ use std::{
 
 #[cfg(test)]
 use crate::script_protocol::ScriptProfile;
+use crate::script_engine::ScriptEngineBackend as _;
 use crate::script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
     SCRIPT_INVOCATION_MAX_BYTES, ScriptBrokerRequest, ScriptBrokerResponse, ScriptBudgets,
@@ -602,112 +603,119 @@ fn execute_inner(
         return Ok((String::new(), Some(crate::script_catalog::catalog())));
     }
 
-    if let Some(result) = crate::script_backend::try_execute_rh_invocation(
-        invocation.operation,
-        &invocation.source,
-        crate::script_backend::RhInvocationOptions {
-            project_root: invocation
-                .project_root
-                .as_ref()
-                .map(std::path::PathBuf::from),
-            arguments: serde_json::to_value(&invocation.arguments).ok(),
-            budgets: Some(invocation.budgets.clone()),
-        },
+    // Shared invocation options + fleet_bridge, built once (Trait-M3: this
+    // used to be reconstructed identically per backend — see design
+    // §1.4/§2.4). `fleet_bridge` wraps `BrokerClient::call_json("fleet.call",
+    // ...)` exactly like rh's `script_rh_host::broker_fleet_bridge` already
+    // did; `RhEngineBackend::execute` (script_engine.rs) converts this Arc
+    // into the `Box`-shaped `script_rh_host::FleetBridgeFn` internally.
+    let options = crate::script_engine::ScriptInvocationOptions {
+        project_root: invocation
+            .project_root
+            .as_ref()
+            .map(std::path::PathBuf::from),
+        arguments: serde_json::to_value(&invocation.arguments).ok(),
+        budgets: Some(invocation.budgets.clone()),
+    };
+    let fleet_bridge: Option<crate::script_engine::ScriptFleetBridgeFn> =
         broker.as_ref().map(|broker| {
             let broker = broker.clone();
-            crate::script_rh_host::broker_fleet_bridge(move |operation, arguments| {
-                broker.call_json(operation, arguments)
-            })
-        }),
-    )
-    .map_err(|error| configuration_error("rh_backend", error.to_string()))?
-    {
-        return Ok((result.stdout, result.value));
+            let bridge: crate::script_engine::ScriptFleetBridgeFn = Arc::new(
+                move |op_id: &str, params: &str| -> Result<String, String> {
+                    let arguments =
+                        serde_json::from_str(params).unwrap_or(serde_json::json!({}));
+                    broker
+                        .call_json(
+                            "fleet.call",
+                            serde_json::json!({
+                                "operation_id": op_id,
+                                "parameters": arguments,
+                            }),
+                        )
+                        .map(|value| value.to_string())
+                },
+            );
+            bridge
+        });
+
+    // rh backend: no `#[cfg(not(test))]` gate — rh's `execute_inner` unit
+    // tests (below) rely on this branch actually running.
+    if crate::script_engine::RhEngineBackend.enabled() {
+        return dispatch_via_engine(
+            &crate::script_engine::RhEngineBackend,
+            invocation.operation,
+            &invocation.source,
+            &options,
+            fleet_bridge,
+        );
     }
 
     // Lua backend: enabled via AGENTERM_SCRIPT_BACKEND=lua or `.lua` entry.
     #[cfg(not(test))]
-    if let Some(result) = crate::script_backend::try_execute_lua_invocation(
-        invocation.operation,
-        &invocation.source,
-        crate::script_backend::LuaInvocationOptions {
-            project_root: invocation
-                .project_root
-                .as_ref()
-                .map(std::path::PathBuf::from),
-            arguments: serde_json::to_value(&invocation.arguments).ok(),
-            budgets: Some(invocation.budgets.clone()),
-        },
-        broker.as_ref().map(|broker| {
-            let broker = broker.clone();
-            let bridge: crate::script_lua_host::LuaFleetBridgeFn = std::sync::Arc::new(
-                move |op_id: &str, params: &str| -> Result<String, String> {
-                    let arguments =
-                        serde_json::from_str(params).unwrap_or(serde_json::json!({}));
-                    broker
-                        .call_json(
-                            "fleet.call",
-                            serde_json::json!({
-                                "operation_id": op_id,
-                                "parameters": arguments,
-                            }),
-                        )
-                        .map(|value| value.to_string())
-                },
-            );
-            bridge
-        }),
-    )
-    .map_err(|error| configuration_error("lua_backend", error))?
-    {
-        return Ok((
-            result.stdout,
-            result.value.map(|v| serde_json::Value::from(v)),
-        ));
+    if crate::script_engine::LuaEngineBackend.enabled() {
+        return dispatch_via_engine(
+            &crate::script_engine::LuaEngineBackend,
+            invocation.operation,
+            &invocation.source,
+            &options,
+            fleet_bridge,
+        );
     }
 
     // qjs backend: enabled via AGENTERM_SCRIPT_BACKEND=qjs or `.js`/`.mjs` entry.
     #[cfg(not(test))]
-    if let Some(result) = crate::script_backend::try_execute_qjs_invocation(
-        invocation.operation,
-        &invocation.source,
-        crate::script_backend::QjsInvocationOptions {
-            project_root: invocation
-                .project_root
-                .as_ref()
-                .map(std::path::PathBuf::from),
-            arguments: serde_json::to_value(&invocation.arguments).ok(),
-            budgets: Some(invocation.budgets.clone()),
-        },
-        broker.as_ref().map(|broker| {
-            let broker = broker.clone();
-            let bridge: crate::script_qjs_host::QjsFleetBridgeFn = std::sync::Arc::new(
-                move |op_id: &str, params: &str| -> Result<String, String> {
-                    let arguments =
-                        serde_json::from_str(params).unwrap_or(serde_json::json!({}));
-                    broker
-                        .call_json(
-                            "fleet.call",
-                            serde_json::json!({
-                                "operation_id": op_id,
-                                "parameters": arguments,
-                            }),
-                        )
-                        .map(|value| value.to_string())
-                },
-            );
-            bridge
-        }),
-    )
-    .map_err(|error| configuration_error("qjs_backend", error))?
-    {
-        return Ok((result.stdout, result.value));
+    if crate::script_engine::QjsEngineBackend.enabled() {
+        return dispatch_via_engine(
+            &crate::script_engine::QjsEngineBackend,
+            invocation.operation,
+            &invocation.source,
+            &options,
+            fleet_bridge,
+        );
     }
 
     Err(configuration_error(
         "script_backend_unavailable",
         "no script backend handled this invocation; set AGENTERM_SCRIPT_BACKEND to rh, lua, or qjs with matching source",
     ))
+}
+
+/// Routes a single invocation through the `ScriptEngineBackend` trait layer
+/// (`src/script_engine.rs`) once its owning `execute_inner` call site has
+/// already confirmed `engine.enabled()`. Mirrors what each
+/// `try_execute_*`'s `Check` vs `Run|Eval` match arms did inline before
+/// Trait-M3 — kept as one shared function (instead of `ScriptEngine::all()`
+/// looped dispatch) so the three call sites above keep their independent
+/// `#[cfg(not(test))]` attributes per the M3 phase's conservative scope.
+fn dispatch_via_engine(
+    engine: &dyn crate::script_engine::ScriptEngineBackend,
+    operation: ScriptOperation,
+    source: &str,
+    options: &crate::script_engine::ScriptInvocationOptions,
+    fleet_bridge: Option<crate::script_engine::ScriptFleetBridgeFn>,
+) -> Result<(String, Option<serde_json::Value>), ScriptFailure> {
+    let backend_code = format!("{}_backend", engine.backend_id().as_str());
+    match operation {
+        ScriptOperation::Check => {
+            engine
+                .check(source, options)
+                .map_err(|error| configuration_error(backend_code, error))?;
+            Ok((String::new(), None))
+        }
+        ScriptOperation::Run | ScriptOperation::Eval => {
+            let result = engine
+                .execute(source, options, fleet_bridge)
+                .map_err(|error| configuration_error(backend_code, error))?;
+            Ok((result.stdout, result.value))
+        }
+        // Unreachable in practice: `execute_inner` short-circuits
+        // `ScriptOperation::Api` before any backend dispatch (see the
+        // `invocation.operation == ScriptOperation::Api` check above).
+        ScriptOperation::Api => Err(configuration_error(
+            "script_backend_unavailable",
+            "Api operation is handled before backend dispatch",
+        )),
+    }
 }
 
 fn validate_budgets(budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
