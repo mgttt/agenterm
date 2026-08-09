@@ -1,6 +1,6 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
-pub const RH_HOST_API_VERSION: u32 = 11;
+pub const RH_HOST_API_VERSION: u32 = 12;
 pub const RH_CODEGEN_REVISION: u32 = 83;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
@@ -1671,9 +1671,24 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
+         fn rh_json_scalar_string(value: &serde_json::Value) -> Option<String> {\n\
+             // Scalars stringify exactly as the interpreter's `\"\" + value`\n\
+             // does. The AOT lane used to hard-fail on numbers and bools\n\
+             // here -- an interpreter/native semantic divergence that broke\n\
+             // every gate whose message concatenated a JSON number (budget\n\
+             // gates, qualification timing). Structural values (null, array,\n\
+             // object) still fail closed: those in a string slot are a logic\n\
+             // error, not a formatting choice.\n\
+             match value {\n\
+                 serde_json::Value::String(text) => Some(text.clone()),\n\
+                 serde_json::Value::Number(number) => Some(number.to_string()),\n\
+                 serde_json::Value::Bool(flag) => Some(flag.to_string()),\n\
+                 _ => None,\n\
+             }\n\
+         }\n\n\
          fn rh_json_as_str(value: &serde_json::Value) -> String {\n\
-             match value.as_str() {\n\
-                 Some(value) => value.to_owned(),\n\
+             match rh_json_scalar_string(value) {\n\
+                 Some(value) => value,\n\
                  None => {\n\
                      let _ = rh_fail(\"json_string_value\");\n\
                      String::new()\n\
@@ -1681,8 +1696,8 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
          }\n\n\
          fn rh_json_string_path(value: &serde_json::Value, path: &[&str]) -> String {\n\
-             match rh_json_path(value, path).and_then(serde_json::Value::as_str) {\n\
-                 Some(value) => value.to_owned(),\n\
+             match rh_json_path(value, path).and_then(rh_json_scalar_string) {\n\
+                 Some(value) => value,\n\
                  None => {\n\
                      let _ = rh_fail(&format!(\"json_string_path: {}\", path.join(\".\")));\n\
                      String::new()\n\

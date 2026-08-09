@@ -1,0 +1,10 @@
+// Probe: string + JSON scalar must stringify in the native pack exactly as
+// the interpreter does (numbers, bools); strings unchanged.
+fn entry() {
+    let doc = rh::json::parse("{\"n\":65536,\"flag\":true,\"name\":\"x\"}");
+    print("n=" + doc.n);
+    print("flag=" + doc.flag);
+    print("name=" + doc.name);
+    require("budget=" + doc.n == "budget=65536", "number_stringification");
+    0
+}

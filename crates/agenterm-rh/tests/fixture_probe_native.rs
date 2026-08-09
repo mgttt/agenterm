@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use agenterm_rh::{CdylibExecutionMode, check, transpile_cdylib_with_mode};
 
-const NEW_PUBLIC_PROBES: [(&str, &[&str]); 26] = [
+const NEW_PUBLIC_PROBES: [(&str, &[&str]); 27] = [
     (
         "bytes-append-probe.rh",
         &["rh_bytes_append(", "rh_bytes_from_text("],
@@ -103,6 +103,14 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 26] = [
     (
         "std-fs-read-to-string-probe.rh",
         &["rh_std_fs_read_to_string("],
+    ),
+    // `"x" + json_number` must transpile through the JSON string helpers,
+    // whose prelude now stringifies scalars (numbers/bools) instead of
+    // hard-failing — the interpreter/native divergence that broke every
+    // gate message concatenating a JSON number.
+    (
+        "json-scalar-concat-probe.rh",
+        &["rh_json_string_path("],
     ),
 ];
 
