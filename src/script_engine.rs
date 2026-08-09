@@ -145,11 +145,13 @@ fn not_enabled_error(backend: ScriptBackend) -> ScriptEngineError {
 ///
 /// Moved here (Trait-M4) from `script_backend.rs` — only `LuaEngineBackend`/
 /// `QjsEngineBackend::execute` call this now.
+#[cfg(any(feature = "script-lua", feature = "script-qjs"))]
 type ScriptArgsAccessors = (
     Arc<dyn Fn() -> i64 + Send + Sync>,
     Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync>,
 );
 
+#[cfg(any(feature = "script-lua", feature = "script-qjs"))]
 fn script_args_accessors(arguments: Value) -> ScriptArgsAccessors {
     let args_for_len = arguments.clone();
     let args_for_arg = arguments;
@@ -323,8 +325,10 @@ impl ScriptEngineBackend for LuaEngineBackend {
 /// because `agenterm_qjs::eval_entry_with_host` already produces a typed
 /// JSON value (via `JSON.stringify`) — a strict superset, not a divergence:
 /// any lua-shaped i64 result is also representable here.
+#[cfg(feature = "script-qjs")]
 pub struct QjsEngineBackend;
 
+#[cfg(feature = "script-qjs")]
 impl ScriptEngineBackend for QjsEngineBackend {
     fn backend_id(&self) -> ScriptBackend {
         ScriptBackend::Qjs
@@ -472,6 +476,7 @@ pub enum ScriptEngine {
     Rh(RhEngineBackend),
     #[cfg(feature = "script-lua")]
     Lua(LuaEngineBackend),
+    #[cfg(feature = "script-qjs")]
     Qjs(QjsEngineBackend),
     #[cfg(feature = "script-sql")]
     Sql(SqlEngineBackend),
@@ -480,7 +485,9 @@ pub enum ScriptEngine {
 impl ScriptEngine {
     pub fn all() -> Vec<ScriptEngine> {
         #[allow(unused_mut)]
-        let mut engines = vec![Self::Rh(RhEngineBackend), Self::Qjs(QjsEngineBackend)];
+        let mut engines = vec![Self::Rh(RhEngineBackend)];
+        #[cfg(feature = "script-qjs")]
+        engines.push(Self::Qjs(QjsEngineBackend));
         #[cfg(feature = "script-lua")]
         engines.push(Self::Lua(LuaEngineBackend));
         #[cfg(feature = "script-sql")]
@@ -494,6 +501,7 @@ impl ScriptEngine {
             ScriptBackend::Rh => Self::Rh(RhEngineBackend),
             #[cfg(feature = "script-lua")]
             ScriptBackend::Lua => Self::Lua(LuaEngineBackend),
+            #[cfg(feature = "script-qjs")]
             ScriptBackend::Qjs => Self::Qjs(QjsEngineBackend),
             #[cfg(feature = "script-sql")]
             ScriptBackend::Sql => Self::Sql(SqlEngineBackend),
@@ -513,6 +521,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.backend_id(),
             #[cfg(feature = "script-lua")]
             Self::Lua(backend) => backend.backend_id(),
+            #[cfg(feature = "script-qjs")]
             Self::Qjs(backend) => backend.backend_id(),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.backend_id(),
@@ -524,6 +533,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.entry_extensions(),
             #[cfg(feature = "script-lua")]
             Self::Lua(backend) => backend.entry_extensions(),
+            #[cfg(feature = "script-qjs")]
             Self::Qjs(backend) => backend.entry_extensions(),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.entry_extensions(),
@@ -539,6 +549,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.check(source, options),
             #[cfg(feature = "script-lua")]
             Self::Lua(backend) => backend.check(source, options),
+            #[cfg(feature = "script-qjs")]
             Self::Qjs(backend) => backend.check(source, options),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.check(source, options),
@@ -555,6 +566,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.execute(source, options, fleet_bridge),
             #[cfg(feature = "script-lua")]
             Self::Lua(backend) => backend.execute(source, options, fleet_bridge),
+            #[cfg(feature = "script-qjs")]
             Self::Qjs(backend) => backend.execute(source, options, fleet_bridge),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.execute(source, options, fleet_bridge),
@@ -624,6 +636,7 @@ mod tests {
         assert!(RhEngineBackend.enabled());
         #[cfg(feature = "script-lua")]
         assert!(!LuaEngineBackend.enabled());
+        #[cfg(feature = "script-qjs")]
         assert!(!QjsEngineBackend.enabled());
         #[cfg(feature = "script-sql")]
         assert!(!SqlEngineBackend.enabled());
@@ -711,7 +724,9 @@ mod tests {
 
     // ---- lua ----
 
+    #[cfg(feature = "script-lua")]
     const LUA_VALID_SOURCE: &str = "return 42";
+    #[cfg(feature = "script-lua")]
     const LUA_BROKEN_SOURCE: &str = "return !!";
 
     #[test]
@@ -793,9 +808,12 @@ mod tests {
 
     // ---- qjs ----
 
+    #[cfg(feature = "script-qjs")]
     const QJS_VALID_SOURCE: &str = "function entry() { return 42; }";
+    #[cfg(feature = "script-qjs")]
     const QJS_BROKEN_SOURCE: &str = "function entry() { return 1 ";
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_engine_enabled_matches_env() {
         let _guard = ENV_LOCK.lock().expect("lock");
@@ -808,6 +826,7 @@ mod tests {
         assert!(!QjsEngineBackend.enabled());
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_engine_check_valid_and_broken_source() {
         let _guard = ENV_LOCK.lock().expect("lock");
@@ -824,6 +843,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_engine_execute_returns_evaluated_value() {
         // Trait-M4: was an equivalence test against try_execute_qjs_invocation
@@ -842,6 +862,7 @@ mod tests {
         assert_eq!(result.value, Some(serde_json::json!(42)));
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_engine_execute_errors_when_not_enabled() {
         // Migrated from script_backend.rs's qjs_backend_not_enabled_without_env
@@ -856,6 +877,7 @@ mod tests {
         assert!(engine.execute(QJS_VALID_SOURCE, &options, None).is_err());
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_engine_execute_wires_fleet_bridge_and_args() {
         // Migrated from script_backend.rs's
@@ -893,6 +915,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_engine_entry_extensions_match_from_entry_path() {
         for ext in QjsEngineBackend.entry_extensions() {
@@ -907,7 +930,9 @@ mod tests {
 
     // ---- sql ----
 
+    #[cfg(feature = "script-sql")]
     const SQL_VALID_SOURCE: &str = "SELECT 1;";
+    #[cfg(feature = "script-sql")]
     const SQL_BROKEN_SOURCE: &str = "SELEC 1 FORM;";
 
     #[test]
@@ -1043,10 +1068,14 @@ mod tests {
 
     #[test]
     fn script_engine_for_backend_and_engine_for_agree() {
+        // Single-element with every engine feature off — the list grows
+        // with features, so the loop shape is the point.
+        #[allow(clippy::single_element_loop)]
         for id in [
             ScriptBackend::Rh,
             #[cfg(feature = "script-lua")]
             ScriptBackend::Lua,
+            #[cfg(feature = "script-qjs")]
             ScriptBackend::Qjs,
             #[cfg(feature = "script-sql")]
             ScriptBackend::Sql,
@@ -1059,7 +1088,10 @@ mod tests {
     #[test]
     fn script_engine_all_covers_every_backend_id() {
         let ids: Vec<ScriptBackend> = ScriptEngine::all().iter().map(|e| e.backend_id()).collect();
-        let mut expected = vec![ScriptBackend::Rh, ScriptBackend::Qjs];
+        #[allow(unused_mut)]
+        let mut expected = vec![ScriptBackend::Rh];
+        #[cfg(feature = "script-qjs")]
+        expected.push(ScriptBackend::Qjs);
         #[cfg(feature = "script-lua")]
         expected.push(ScriptBackend::Lua);
         #[cfg(feature = "script-sql")]

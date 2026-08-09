@@ -17,6 +17,7 @@ const ENGINE_SUBCOMMANDS: &[&str] = &[
     "rh",
     #[cfg(feature = "script-lua")]
     "lua",
+    #[cfg(feature = "script-qjs")]
     "qjs",
     #[cfg(feature = "script-sql")]
     "sql",
@@ -290,6 +291,7 @@ fn dispatch_engine(engine: &str, rest: Vec<String>) -> std::process::ExitCode {
             full.extend(rest);
             std::process::ExitCode::from(agenterm_lua::cli::run(&full))
         }
+        #[cfg(feature = "script-qjs")]
         "qjs" => std::process::ExitCode::from(agenterm_qjs::cli::run(&rest)),
         #[cfg(feature = "script-sql")]
         "sql" => std::process::ExitCode::from(agenterm_sql::cli::run(&rest)),

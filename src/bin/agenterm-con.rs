@@ -2521,7 +2521,7 @@ mod tests {
         let mut parser = parser();
         parser.process(b"ab\r\ncd");
         let text = selection_text(
-            &parser.screen(),
+            parser.screen(),
             TerminalPoint { row: 0, col: 0 },
             TerminalPoint { row: 1, col: 79 },
         );

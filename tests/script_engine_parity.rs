@@ -1,3 +1,6 @@
+//! Whole-file gate: cross-engine parity needs every engine compiled in.
+#![cfg(all(feature = "script-lua", feature = "script-qjs", feature = "script-sql"))]
+
 //! Cross-engine parity tests for the shared `check-many` driver
 //! (`agenterm_script_common::check_many`, re-exported unchanged through
 //! each of `agenterm-rh`, `agenterm-lua`, `agenterm-qjs`, `agenterm-sql`).

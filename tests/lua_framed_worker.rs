@@ -1,3 +1,6 @@
+//! Whole-file gate: exercises the lua engine, which defaults off.
+#![cfg(feature = "script-lua")]
+
 //! Black-box framed-worker test for the lua script engine.
 //! Spawns `agenterm __agenterm-internal-engine lua --framed-worker`
 //! (the standalone `agenterm-lua` binary is retired; this is the internal

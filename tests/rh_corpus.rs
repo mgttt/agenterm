@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[test]
 fn scripts_rh_corpus_scan_from_integration_test() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let report = agenterm_rh::scan_rhai_directory(agenterm_rh::CorpusScanOptions {
+    let report = agenterm_rh::scan_rh_directory(agenterm_rh::CorpusScanOptions {
         project_root: repo.clone(),
         relative_dir: "scripts/rh".to_owned(),
         ..Default::default()

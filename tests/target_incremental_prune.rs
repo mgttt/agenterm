@@ -294,25 +294,24 @@ fn both_executables_dispatch_incremental_wrapper_mode() {
     // subcommand dispatch (commit 82019aa9), which is exactly what makes
     // the standalone `agenterm-rh` wrapper binary retirable — this test
     // now locks that production shape.
-    for executable in [Path::new(env!("CARGO_BIN_EXE_agenterm"))] {
-        let wrapped = Command::new(executable)
-            .env(
-                "AGENTERM_INTERNAL_RUSTC_WRAPPER",
-                "agenterm-incremental-manifest-v1",
-            )
-            .env("AGENTERM_INCREMENTAL_INVOCATION_ID", invocation)
-            .env("AGENTERM_INCREMENTAL_TARGET", &target)
-            .env("AGENTERM_INCREMENTAL_ROOT", &incremental)
-            .env("AGENTERM_INCREMENTAL_STATE", &state)
-            .env("RUSTC_WRAPPER", executable)
-            .arg(compiler_probe)
-            .arg("--version")
-            .output()
-            .expect("run wrapper parity probe");
-        assert_eq!(wrapped.status.code(), direct.status.code());
-        assert_eq!(wrapped.stdout, direct.stdout);
-        assert_eq!(wrapped.stderr, direct.stderr);
-    }
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm"));
+    let wrapped = Command::new(executable)
+        .env(
+            "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+            "agenterm-incremental-manifest-v1",
+        )
+        .env("AGENTERM_INCREMENTAL_INVOCATION_ID", invocation)
+        .env("AGENTERM_INCREMENTAL_TARGET", &target)
+        .env("AGENTERM_INCREMENTAL_ROOT", &incremental)
+        .env("AGENTERM_INCREMENTAL_STATE", &state)
+        .env("RUSTC_WRAPPER", executable)
+        .arg(compiler_probe)
+        .arg("--version")
+        .output()
+        .expect("run wrapper parity probe");
+    assert_eq!(wrapped.status.code(), direct.status.code());
+    assert_eq!(wrapped.stdout, direct.stdout);
+    assert_eq!(wrapped.stderr, direct.stderr);
 
     fs::remove_dir_all(root).expect("remove wrapper parity fixture");
 }

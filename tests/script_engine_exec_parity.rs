@@ -1,6 +1,15 @@
 //! Execution-level parity across rh/lua/qjs/sql through the unified
 //! `ScriptEngineBackend` trait (`src/script_engine.rs`).
 //!
+//! Whole-file gate: parity across all four engines only exists when all
+//! four are compiled in — the engine features default off, so a plain
+//! `cargo test` skips this file rather than failing to name gated variants.
+#![cfg(all(
+    feature = "script-lua",
+    feature = "script-qjs",
+    feature = "script-sql"
+))]
+//!
 //! `tests/script_engine_parity.rs` already locks check-many-level parity.
 //! Nothing locked EXECUTION-level parity — what each engine actually
 //! returns for equivalent trivial programs through `check`/`execute` — until

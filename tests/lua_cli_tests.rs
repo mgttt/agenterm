@@ -1,3 +1,6 @@
+//! Whole-file gate: exercises the lua engine, which defaults off.
+#![cfg(feature = "script-lua")]
+
 //! Task CLI tests for the lua script engine, run through the main
 //! `agenterm` PE's internal engine dispatch (the standalone `agenterm-lua`
 //! binary is retired).

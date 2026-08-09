@@ -1128,7 +1128,7 @@ fn entry() { 42 }"#;
         let mut scope = Scope::new();
         scope.push_dynamic(
             "args",
-            rhai::serde::to_dynamic(&vec!["alpha".to_owned(), "beta".to_owned()]).expect("args"),
+            rhai::serde::to_dynamic(vec!["alpha".to_owned(), "beta".to_owned()]).expect("args"),
         );
         let source = "fn entry() { args.len() }";
         let ast = engine

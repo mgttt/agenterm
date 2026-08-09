@@ -657,7 +657,7 @@ fn execute_inner(
     }
 
     // qjs backend: enabled via AGENTERM_SCRIPT_BACKEND=qjs or `.js`/`.mjs` entry.
-    #[cfg(not(test))]
+    #[cfg(all(not(test), feature = "script-qjs"))]
     if crate::script_engine::QjsEngineBackend.enabled() {
         return dispatch_via_engine(
             &crate::script_engine::QjsEngineBackend,
@@ -822,53 +822,11 @@ fn failure(
 mod tests {
     use super::*;
     use crate::script_api_validate::external_function_calls;
-    use std::io::{Cursor, Read, Write};
+    use std::io::Cursor;
 
-    struct ChannelReader {
-        receiver: mpsc::Receiver<Vec<u8>>,
-        current: Cursor<Vec<u8>>,
-    }
-
-    impl ChannelReader {
-        fn new(receiver: mpsc::Receiver<Vec<u8>>) -> Self {
-            Self {
-                receiver,
-                current: Cursor::new(Vec::new()),
-            }
-        }
-    }
-
-    impl Read for ChannelReader {
-        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-            loop {
-                let read = self.current.read(buffer)?;
-                if read != 0 {
-                    return Ok(read);
-                }
-                match self.receiver.recv() {
-                    Ok(bytes) => self.current = Cursor::new(bytes),
-                    Err(_) => return Ok(0),
-                }
-            }
-        }
-    }
-
-    #[derive(Clone, Default)]
-    struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for SharedBuffer {
-        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .expect("shared test output lock")
-                .extend_from_slice(buffer);
-            Ok(buffer.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
+    // The ChannelReader/SharedBuffer framed-transport doubles that used to
+    // live here left with the framed-worker tests that consumed them; the
+    // integration coverage lives in tests/rh_framed_worker.rs.
 
     fn rh_entry_source(body: &str) -> String {
         if body.contains("fn entry") {

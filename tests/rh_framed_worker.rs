@@ -163,11 +163,13 @@ fn framed_worker_captures_compat_fallback_print_output() {
             .spawn()
             .expect("spawn framed worker");
 
-        let mut budgets = ScriptBudgets::default();
-        budgets.operations = 100_000_000;
-        budgets.wall_time_ms = 120_000;
-        budgets.output_bytes = 1_048_576;
-        budgets.string_bytes = 1_048_576;
+        let budgets = ScriptBudgets {
+            operations: 100_000_000,
+            wall_time_ms: 120_000,
+            output_bytes: 1_048_576,
+            string_bytes: 1_048_576,
+            ..ScriptBudgets::default()
+        };
         let invocation = ScriptInvocation {
             envelope_version: SCRIPT_ENVELOPE_VERSION,
             invocation_id: "rh-framed-compat-output".into(),

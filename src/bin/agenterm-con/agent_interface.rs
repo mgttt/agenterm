@@ -227,11 +227,12 @@ pub enum ScriptCommand {
     Screenshot(PathBuf),
     /// Presses then releases a mouse button at a cell coordinate, through
     /// the same `handle_pointer_button` path a real click takes — so an
-    /// application that has grabbed mouse reporting (DECSET 1000/1002/1003
-    /// + 1006) sees a real press/release pair, and one that hasn't gets the
-    /// same local click-counting (select/word-select/line-select) a human
-    /// click does. Closes the gap this binary's docs flagged: `--script`
-    /// had text/key/paste but nothing that reaches `report_mouse` at all.
+    /// application that has grabbed mouse reporting (DECSET
+    /// 1000/1002/1003/1006) sees a real press/release pair, and one that
+    /// hasn't gets the same local click-counting (select/word-select/
+    /// line-select) a human click does. Closes the gap this binary's docs
+    /// flagged: `--script` had text/key/paste but nothing that reaches
+    /// `report_mouse` at all.
     Click {
         row: u16,
         col: u16,

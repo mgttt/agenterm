@@ -28,6 +28,7 @@ pub enum ScriptBackend {
     Rh,
     #[cfg(feature = "script-lua")]
     Lua,
+    #[cfg(feature = "script-qjs")]
     Qjs,
     #[cfg(feature = "script-sql")]
     Sql,
@@ -45,6 +46,7 @@ impl ScriptBackend {
             Some("rhai") => Self::Rh,
             #[cfg(feature = "script-lua")]
             Some("lua") => Self::Lua,
+            #[cfg(feature = "script-qjs")]
             Some("qjs") => Self::Qjs,
             #[cfg(feature = "script-sql")]
             Some("sql") => Self::Sql,
@@ -57,6 +59,7 @@ impl ScriptBackend {
             Self::Rh => "rh",
             #[cfg(feature = "script-lua")]
             Self::Lua => "lua",
+            #[cfg(feature = "script-qjs")]
             Self::Qjs => "qjs",
             #[cfg(feature = "script-sql")]
             Self::Sql => "sql",
@@ -69,6 +72,7 @@ impl ScriptBackend {
         if path.ends_with(".lua") {
             return Self::Lua;
         }
+        #[cfg(feature = "script-qjs")]
         if path.ends_with(".js") || path.ends_with(".mjs") {
             return Self::Qjs;
         }
@@ -336,6 +340,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_backend_from_env() {
         // Trait-M4: was mixed with a try_execute_qjs_invocation check-path
@@ -360,6 +365,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_backend_from_entry_path() {
         assert_eq!(
@@ -377,6 +383,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "script-qjs")]
     #[test]
     fn qjs_backend_as_str() {
         assert_eq!(ScriptBackend::Qjs.as_str(), "qjs");

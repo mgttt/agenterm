@@ -9,6 +9,10 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+// Unreferenced since the wave that trimmed this suite's transpile-shape
+// assertions; kept as the sanctioned helper for the next entry-shape
+// regression rather than deleted-and-reinvented.
+#[allow(dead_code)]
 fn transpile_entry(entry: &str) -> (String, agenterm_rh::CdylibTranspileOutput) {
     let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
         panic!("read {entry}: {error}");
@@ -705,7 +709,7 @@ fn assert_bundled_aot_pack_builds(entry: &str) {
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
     let dir = std::env::temp_dir().join(format!(
         "agenterm-rh-aot-pack-{}-{}",
-        entry.replace('/', "_").replace('.', "_"),
+        entry.replace(['/', '.'], "_"),
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);

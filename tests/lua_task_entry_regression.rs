@@ -1,3 +1,6 @@
+//! Whole-file gate: exercises the lua engine, which defaults off.
+#![cfg(feature = "script-lua")]
+
 //! Regression test: Lua task entry execution through the script backend.
 //!
 //! Verifies that `.lua` entries in the task manifest are recognized,
