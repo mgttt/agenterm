@@ -181,6 +181,7 @@ mod tests {
     use super::*;
 
     const PROBE_ENV: &str = "AGENTERM_PLATFORM_DETACHED_CHILD_PROBE";
+    const VISIBLE_PROBE_ENV: &str = "AGENTERM_PLATFORM_VISIBLE_BREAKAWAY_CHILD_PROBE";
     const PROBE_PID_FILE_ENV: &str = "AGENTERM_PLATFORM_DETACHED_CHILD_PID_FILE";
 
     #[test]
@@ -237,6 +238,15 @@ mod tests {
         if std::env::var_os(PROBE_ENV).is_some() {
             assert_eq!(unsafe { libc::getsid(0) }, unsafe { libc::getpid() });
         }
+        // A visible breakaway child owns a fresh process GROUP (`setpgid`),
+        // not a new session — the unix implementation is deliberately
+        // group-only ("Visible GUI siblings only need a new process group").
+        // Reusing the detached probe's session-leader assertion here is what
+        // kept the ubuntu/macos contract lanes red.
+        #[cfg(unix)]
+        if std::env::var_os(VISIBLE_PROBE_ENV).is_some() {
+            assert_eq!(unsafe { libc::getpgrp() }, unsafe { libc::getpid() });
+        }
         if let Some(path) = std::env::var_os(PROBE_PID_FILE_ENV) {
             std::fs::write(path, std::process::id().to_string()).expect("write child PID probe");
         }
@@ -282,7 +292,7 @@ mod tests {
         command
             .arg("--exact")
             .arg("process_spawn::tests::detached_child_probe")
-            .env(PROBE_ENV, "1")
+            .env(VISIBLE_PROBE_ENV, "1")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
