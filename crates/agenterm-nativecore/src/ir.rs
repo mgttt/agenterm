@@ -53,9 +53,9 @@ pub enum Op {
     /// unsigned less-than: 1 if a < b else 0.
     Ult(Val, Val),
 
-    /// zero-extend the byte at [addr]
+    /// zero-extend the byte at `[addr]`
     Load8(Val),
-    /// pointer-width load at [addr]
+    /// pointer-width load at `[addr]`
     LoadW(Val),
 }
 
@@ -64,9 +64,9 @@ pub enum Op {
 pub enum Inst {
     /// dest = op
     Set(Val, Op),
-    /// store low byte of `v` at [addr]
+    /// store low byte of `v` at `[addr]`
     Store8(Val, Val),
-    /// store word `v` at [addr]
+    /// store word `v` at `[addr]`
     StoreW(Val, Val),
     /// dest = call extern#id(args...)  (semantic-signature call; ABI is the
     /// seam's problem, not the IR's — see `seam.rs`)
@@ -97,23 +97,23 @@ pub struct Block {
 /// v1 does not add an eighth (design doc §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Intent {
-    /// allocate `n` writable bytes, zero-filled; returns base pointer. (args: [n])
+    /// allocate `n` writable bytes, zero-filled; returns base pointer. (args: `[n]`)
     Alloc,
-    /// open a file named by the NUL-terminated path at args[0], for reading;
-    /// returns an opaque handle word. (args: [path_ptr])
+    /// open a file named by the NUL-terminated path at `args[0]`, for reading;
+    /// returns an opaque handle word. (args: `[path_ptr]`)
     FileOpen,
-    /// read up to args[2] bytes from handle args[0] into buffer args[1];
-    /// returns the count actually read. (args: [handle, buf, cap])
+    /// read up to `args[2]` bytes from handle `args[0]` into buffer `args[1]`;
+    /// returns the count actually read. (args: `[handle, buf, cap]`)
     FileRead,
-    /// close handle args[0]. (args: [handle])
+    /// close handle `args[0]`. (args: `[handle]`)
     FileClose,
-    /// write args[1] bytes from args[0] to standard output. (args: [buf, len])
+    /// write `args[1]` bytes from `args[0]` to standard output. (args: `[buf, len]`)
     WriteStdout,
-    /// spawn a fixed child, wait for it, return its exit code. (args: [])
+    /// spawn a fixed child, wait for it, return its exit code. (args: `[]`)
     SpawnWait,
-    /// create/truncate the file named by the NUL-terminated path at args[0],
-    /// write args[2] bytes from buffer args[1] into it, close it; returns
-    /// the byte count actually written. (args: [path_ptr, buf, len])
+    /// create/truncate the file named by the NUL-terminated path at `args[0]`,
+    /// write `args[2]` bytes from buffer `args[1]` into it, close it; returns
+    /// the byte count actually written. (args: `[path_ptr, buf, len]`)
     FileWrite,
 }
 
