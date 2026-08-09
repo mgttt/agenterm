@@ -45,13 +45,14 @@ fn validate(path) {
         "artifact_manifest_schema_unsupported"
     );
     require(
-        type_of(manifest.executables) == "array"
-            && manifest.executables.len > 0,
-        "artifact_manifest_executables_empty"
+        type_of(manifest.executables) == "array",
+        "artifact_manifest_executables_invalid"
     );
 
     let names = #{};
+    let executable_count = 0;
     for entry in manifest.executables {
+        executable_count += 1;
         let name = entry.name;
         require(
             is_artifact_name(name),
@@ -85,14 +86,15 @@ fn validate(path) {
             "artifact_manifest_offline_probe_invalid:" + name
         );
         if subsystem == 2 {
-            if role == "control-center-gui" {
-                // Unlike the daily GUI, the optional Control Center defines
-                // side-effect-free informational commands. Command::output
-                // supplies redirected handles and waits for a Windows-
-                // subsystem child, so this is a real offline entrypoint gate.
+            if role == "control-center-gui" || role == "gui-cli" {
+                // Both GUI-subsystem roles define side-effect-free
+                // informational commands (`--version`, `cli --version` via
+                // the same-PE forwarder). Command::output supplies redirected
+                // handles and waits for a Windows-subsystem child, so this is
+                // a real offline entrypoint gate.
                 require(
                     entry.offline_probe.len > 0,
-                    "artifact_manifest_control_center_probe_required:" + name
+                    "artifact_manifest_gui_probe_required:" + name
                 );
             } else {
                 require(
@@ -121,5 +123,6 @@ fn validate(path) {
         );
     }
 
-    manifest.executables.len
+    require(executable_count > 0, "artifact_manifest_executables_empty");
+    executable_count
 }

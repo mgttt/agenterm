@@ -1,194 +1,127 @@
 // Shared filesystem operations for validated AgenTerm build artifacts.
 
-import "scripts/rh/lib/artifact_manifest" as artifact_manifest;
-
-fn clean_locked_for_name(directory, prefix) {
-    let removed = 0;
-    let retained = 0;
-    for dir_entry in std::fs::read_dir(directory) {
-        if dir_entry.is_file
-                && dir_entry.file_name.starts_with(prefix)
-                && dir_entry.file_name.ends_with(".exe") {
-            // try_remove_file returns 1 on success / 0 when locked or missing.
-            if std::fs::try_remove_file(dir_entry.path.display) != 0 {
-                removed += 1;
-            } else {
-                retained += 1;
-            }
-        }
-    }
-    removed * 10000 + retained
-}
-
-fn clean_locked(directory_value, manifest_path) {
-    // Local fns are INT-only today: validate for invariants, then re-parse JSON.
-    artifact_manifest::validate(manifest_path);
-    let manifest_path = std::path::absolute(manifest_path).display;
-    let text = std::fs::read_to_string(manifest_path);
-    let manifest = rh::json::parse(text);
+fn clean_locked(directory_value, manifest_path_value) {
     let directory = std::path::absolute(directory_value).display;
+    let _manifest_path = "" + manifest_path_value;
     if !std::fs::exists(directory) {
         return 0;
     }
-    let directory_meta = std::fs::symlink_metadata(directory);
     require(
-        directory_meta.is_dir,
+        std::fs::metadata(directory).is_dir,
         "locked_artifact_directory_not_directory"
     );
-
-    let names = #{};
-    for entry in manifest.executables {
-        let name = entry.name;
-        require(
-            artifact_manifest::is_artifact_name(name),
-            "artifact_manifest_name_invalid:" + name
-        );
-        require(
-            !names.contains(name),
-            "artifact_manifest_name_duplicate:" + name
-        );
-        names[name] = true;
-    }
-
     let removed = 0;
-    let retained = 0;
-    for entry in manifest.executables {
-        let name = entry.name;
-        let stem = name;
-        stem.replace(".exe", "");
-        let prefix = stem + ".locked-";
-        let outcome = clean_locked_for_name(directory, prefix);
-        removed += outcome / 10000;
-        retained += outcome % 10000;
+    for entry in std::fs::read_dir(directory) {
+        let name = "" + entry.file_name;
+        // Any parked AgenTerm executable: `<stem>.locked-<millis>.exe`.
+        let locked_exe = name.starts_with("agenterm")
+            && name.contains(".locked-")
+            && name.ends_with(".exe");
+        if entry.is_file && locked_exe {
+            std::fs::try_remove_file(entry.path.display);
+            removed += 1;
+        }
     }
-
-    if removed > 0 {
-        print(
-            "Removed " + removed +
-            " stale locked artifact(s) from " + directory
-        );
-    }
-    if retained > 0 {
-        print(
-            "Retained " + retained +
-            " locked artifact(s) still in use; the next build will retry."
-        );
-    }
-
-    removed + retained
+    removed
 }
 
-fn remove_obsolete(directory_value, name) {
+fn remove_obsolete(directory_value, name_value) {
+    let directory = std::path::absolute(directory_value).display;
+    let name = "" + name_value;
     require(
         name != ""
-            && !name.contains("/")
-            && !name.contains("\\")
             && name != "."
-            && name != "..",
+            && name != ".."
+            && !name.contains("/")
+            && !name.contains("\\"),
         "obsolete_artifact_name_invalid:" + name
     );
-    let directory = std::path::absolute(directory_value).display;
-    let obsolete_path = std::path::join(directory, name).display;
-    if !std::fs::exists(obsolete_path) {
+    let path = std::path::join(directory, name).display;
+    if !std::fs::exists(path) {
         return 0;
     }
-    let obsolete_meta = std::fs::symlink_metadata(obsolete_path);
     require(
-        obsolete_meta.is_file,
+        std::fs::metadata(path).is_file,
         "obsolete_artifact_not_file:" + name
     );
-    std::fs::remove_file(obsolete_path);
+    std::fs::remove_file(path);
     print("Removed obsolete artifact " + name + " from " + directory);
     1
 }
 
-// Park an in-use destination as stem.locked-<n>.exe.
-// Prefer a 0..4096 try_rename counter over SystemTime.unix_millis: the millis
-// API is native (M42f3) but wall-clock stamps can collide under concurrency and
-// do not probe name availability; sequential try_rename is deterministic.
-// Returns INT 1 on success (caller stage/stage_as: 0 = direct copy, 1 = parked).
-fn park_running_destination(
-    source,
-    destination,
-    destination_directory,
-    stem,
-    fail_park,
-    fail_rollback,
-    fail_after_park
-) {
-    let suffix = 0;
-    let parked = "";
-    let parked_ready = 0;
-    while parked_ready == 0 {
-        if suffix >= 4096 {
-            return rh::fail(fail_park);
-        }
-        let parked_name = stem + ".locked-" + suffix + ".exe";
-        parked = std::path::join(destination_directory, parked_name).display;
-        if std::fs::try_rename(destination, parked) != 0 {
-            parked_ready = 1;
-        } else {
-            suffix += 1;
-        }
+fn unlock_output(directory_value, name_value) {
+    // Cargo cannot delete or overwrite the PE image of a live instance
+    // ("os error 5" at the final bin uplift), but Windows always allows a
+    // same-volume rename of a running image. Park the possibly-running
+    // output under the shared .locked- naming, restore identical bytes at
+    // the original path so an unchanged build does not relink, and drop the
+    // parked copy immediately when no process holds it. clean_locked reaps
+    // any parked copy that outlives its process.
+    let directory = std::path::absolute(directory_value).display;
+    let name = "" + name_value;
+    // Any workspace bin can be the running image that blocks a rebuild
+    // (agenterm-con.exe held a workspace build hostage once), so accept every
+    // AgenTerm executable name rather than a shipped-artifact whitelist.
+    require(
+        name.starts_with("agenterm")
+            && name.ends_with(".exe")
+            && !name.contains(".locked-")
+            && !name.contains("/")
+            && !name.contains("\\"),
+        "unlock_output_name_invalid:" + name
+    );
+    let path = std::path::join(directory, name).display;
+    if !std::fs::exists(path) {
+        return 0;
     }
-
-    if std::fs::try_copy(source, destination) == 0 {
-        if std::fs::try_rename(parked, destination) == 0 {
-            return rh::fail(fail_rollback);
-        }
-        return rh::fail(fail_after_park);
+    let metadata = std::fs::symlink_metadata(path);
+    if !metadata.is_file || metadata.is_symlink || metadata.is_reparse_point {
+        return 0;
     }
-
-    print("Staged new artifact; running copy remains at " + parked);
+    let stem = name;
+    stem.replace(".exe", "");
+    let parked_name = stem + ".locked-" +
+        std::time::SystemTime::now().unix_millis + ".exe";
+    let parked = std::path::join(directory, parked_name).display;
+    // Best-effort: a data handle without FILE_SHARE_DELETE (scanner, hasher,
+    // concurrent cargo) denies even the rename. Skip such a file rather than
+    // failing the build — cargo will report it plainly if it still matters.
+    if std::fs::try_rename(path, parked) != 1 {
+        return 0;
+    }
+    if std::fs::try_copy(parked, path) != 1 {
+        std::fs::try_rename(parked, path);
+        return 0;
+    }
+    if std::fs::try_remove_file(parked) == 1 {
+        return 0;
+    }
+    print("Parked in-use build output; live image remains at " + parked);
     1
 }
 
-fn stage(source_directory_value, destination_directory_value, name) {
-    let source_directory =
-        std::path::absolute(source_directory_value).display;
+fn stage(source_directory_value, destination_directory_value, name_value) {
+    let source_directory = std::path::absolute(source_directory_value).display;
     let destination_directory =
         std::path::absolute(destination_directory_value).display;
+    let name = "" + name_value;
     require(
-        artifact_manifest::is_artifact_name(name),
+        name == "agenterm.exe"
+            || name == "agenterm-cc.exe"
+            || name == "agenterm-rh.exe",
         "stage_artifact_name_invalid:" + name
     );
-
     require(
-        std::fs::exists(source_directory),
+        std::fs::exists(source_directory)
+            && std::fs::metadata(source_directory).is_dir,
         "stage_artifact_source_directory_invalid:" + source_directory
     );
-    let source_directory_metadata =
-        std::fs::symlink_metadata(source_directory);
-    require(
-        source_directory_metadata.is_dir
-            && !source_directory_metadata.is_symlink
-            && !source_directory_metadata.is_reparse_point,
-        "stage_artifact_source_directory_invalid:" + source_directory
-    );
+    std::fs::create_dir_all(destination_directory);
 
-    if std::fs::try_create_dir_all(destination_directory) == 0 {
-        return rh::fail(
-            "stage_artifact_destination_directory_invalid:" +
-                destination_directory
-        );
-    }
-    let destination_directory_metadata =
-        std::fs::symlink_metadata(destination_directory);
-    require(
-        destination_directory_metadata.is_dir
-            && !destination_directory_metadata.is_symlink
-            && !destination_directory_metadata.is_reparse_point,
-        "stage_artifact_destination_directory_invalid:" +
-            destination_directory
-    );
-
-    let source = std::path::join(source_directory, name).display;
-    let destination =
-        std::path::join(destination_directory, name).display;
-    require(
-        std::fs::exists(source),
-        "stage_artifact_source_missing:" + source
-    );
+    let source_name = name;
+    let source = std::path::join(source_directory, source_name).display;
+    let destination = std::path::join(destination_directory, name).display;
+    require(std::fs::exists(source), "stage_artifact_source_missing:" + source);
     let source_metadata = std::fs::symlink_metadata(source);
     require(
         source_metadata.is_file
@@ -197,99 +130,25 @@ fn stage(source_directory_value, destination_directory_value, name) {
         "stage_artifact_source_invalid:" + source
     );
 
-    if std::fs::try_copy(source, destination) != 0 {
-        print("Staged artifact: " + destination);
-        return 0;
+    let parked = "";
+    if std::fs::exists(destination) {
+        let stem = name;
+        let extension = ".exe";
+        stem.replace(".exe", "");
+        if name.ends_with(".com") {
+            stem.replace(".com", "");
+            extension = ".com";
+        }
+        let parked_name = stem + ".locked-" +
+            std::time::SystemTime::now().unix_millis + extension;
+        parked = std::path::join(destination_directory, parked_name).display;
+        std::fs::rename(destination, parked);
     }
-
-    require(
-        std::fs::exists(destination),
-        "stage_artifact_copy_failed"
-    );
-
-    let destination_metadata = std::fs::symlink_metadata(destination);
-    require(
-        destination_metadata.is_file
-            && !destination_metadata.is_symlink
-            && !destination_metadata.is_reparse_point,
-        "stage_artifact_destination_invalid:" + destination
-    );
-
-    let stem = name;
-    stem.replace(".exe", "");
-    park_running_destination(
-        source,
-        destination,
-        destination_directory,
-        stem,
-        "stage_artifact_copy_failed",
-        "stage_artifact_copy_and_rollback_failed",
-        "stage_artifact_copy_after_park_failed"
-    )
-}
-
-fn stage_as(
-    source_directory_value,
-    destination_directory_value,
-    source_name,
-    destination_name
-) {
-    let source_directory =
-        std::path::absolute(source_directory_value).display;
-    let destination_directory =
-        std::path::absolute(destination_directory_value).display;
-    require(
-        artifact_manifest::is_artifact_name(destination_name),
-        "stage_artifact_as_destination_invalid:" + destination_name
-    );
-
-    require(
-        source_name != "",
-        "stage_artifact_as_source_empty"
-    );
-
-    let source = std::path::join(source_directory, source_name).display;
-    let destination =
-        std::path::join(destination_directory, destination_name).display;
-    require(
-        std::fs::exists(source),
-        "stage_artifact_as_source_missing:" + source
-    );
-    let source_metadata = std::fs::symlink_metadata(source);
-    require(
-        source_metadata.is_file
-            && !source_metadata.is_symlink
-            && !source_metadata.is_reparse_point,
-        "stage_artifact_as_source_invalid:" + source
-    );
-
-    if std::fs::try_copy(source, destination) != 0 {
-        print("Staged artifact: " + destination);
-        return 0;
+    std::fs::copy(source, destination);
+    if parked != "" {
+        print("Staged new artifact; previous copy remains at " + parked);
+        return 1;
     }
-
-    require(
-        std::fs::exists(destination),
-        "stage_artifact_as_copy_failed"
-    );
-
-    let destination_metadata = std::fs::symlink_metadata(destination);
-    require(
-        destination_metadata.is_file
-            && !destination_metadata.is_symlink
-            && !destination_metadata.is_reparse_point,
-        "stage_artifact_as_destination_invalid:" + destination
-    );
-
-    let stem = destination_name;
-    stem.replace(".exe", "");
-    park_running_destination(
-        source,
-        destination,
-        destination_directory,
-        stem,
-        "stage_artifact_as_copy_failed",
-        "stage_artifact_as_copy_and_rollback_failed",
-        "stage_artifact_as_copy_after_park_failed"
-    )
+    print("Staged artifact: " + destination);
+    0
 }

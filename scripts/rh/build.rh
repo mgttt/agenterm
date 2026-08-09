@@ -13,6 +13,7 @@
 // and cross-client lanes return after artifact listing and report this
 // producer as not applicable; they do not claim cleanup integration.
 
+import "scripts/rh/lib/artifact_files" as artifact_files;
 import "scripts/rh/lib/build_identity" as build_identity;
 import "scripts/rh/lib/bootstrap_timing" as bootstrap_timing;
 
@@ -338,6 +339,55 @@ fn entry() {
             identity,
             cargo_output
         );
+    }
+
+    // A live dev instance started from the profile directory holds its PE
+    // image open, so the cargo bin uplift fails with "failed to remove file
+    // ... (os error 5)" — and the linker can hit the same image again through
+    // the deps\ hardlink twin (underscored stem). Reap unlocked parked
+    // copies, then park every top-level AgenTerm executable (any workspace
+    // bin can be the running one, not just shipped artifacts) plus its deps
+    // twin via a same-volume rename before cargo runs; launching the app
+    // must never block a rebuild.
+    if action == "build" && cross_client == 0 && unix_bootstrap == 0 {
+        let unlock_manifest_path =
+            std::path::join(repo, "scripts/artifacts.json").display;
+        let deps_directory =
+            std::path::join(profile_directory, "deps").display;
+        if std::fs::exists(profile_directory) {
+            let _reaped = artifact_files::clean_locked(
+                profile_directory,
+                unlock_manifest_path
+            );
+            if std::fs::exists(deps_directory) {
+                let _deps_reaped = artifact_files::clean_locked(
+                    deps_directory,
+                    unlock_manifest_path
+                );
+            }
+            for entry in std::fs::read_dir(profile_directory) {
+                let name = "" + entry.file_name;
+                if entry.is_file
+                    && name.starts_with("agenterm")
+                    && name.ends_with(".exe")
+                    && !name.contains(".locked-") {
+                    let _parked = artifact_files::unlock_output(
+                        profile_directory,
+                        name
+                    );
+                    let twin = name;
+                    twin.replace("-", "_");
+                    let twin_path =
+                        std::path::join(deps_directory, twin).display;
+                    if std::fs::exists(twin_path) {
+                        let _twin_parked = artifact_files::unlock_output(
+                            deps_directory,
+                            twin
+                        );
+                    }
+                }
+            }
+        }
     }
 
     let cargo_args = [];

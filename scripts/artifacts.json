@@ -3,10 +3,13 @@
   "executables": [
     {
       "name": "agenterm.exe",
-      "role": "gui",
+      "role": "gui-cli",
       "pe_subsystem": 2,
-      "documentation_role": "GUI application",
-      "offline_probe": [],
+      "documentation_role": "GUI application and agenterm cli entry",
+      "offline_probe": [
+        "cli",
+        "--version"
+      ],
       "release_budget_bytes": 4194304
     },
     {
@@ -18,16 +21,6 @@
         "--version"
       ],
       "release_budget_bytes": 4194304
-    },
-    {
-      "name": "agenterm-cli.exe",
-      "role": "cli",
-      "pe_subsystem": 3,
-      "documentation_role": "native observation and automation client",
-      "offline_probe": [
-        "--version"
-      ],
-      "release_budget_bytes": 2097152
     },
     {
       "name": "agenterm-rh.exe",
@@ -48,10 +41,13 @@
       "executables": [
         {
           "name": "agenterm.exe",
-          "role": "gui",
+          "role": "gui-cli",
           "pe_subsystem": 2,
-          "documentation_role": "GUI application",
-          "offline_probe": [],
+          "documentation_role": "GUI application and agenterm cli entry",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
           "release_budget_bytes": 4194304
         },
         {
@@ -63,16 +59,6 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
-        },
-        {
-          "name": "agenterm-cli.exe",
-          "role": "cli",
-          "pe_subsystem": 3,
-          "documentation_role": "native observation and automation client",
-          "offline_probe": [
-            "--version"
-          ],
-          "release_budget_bytes": 2097152
         },
         {
           "name": "agenterm-rh.exe",
@@ -93,10 +79,14 @@
       "executables": [
         {
           "name": "agenterm.exe",
-          "role": "gui",
+          "role": "gui-cli",
           "pe_subsystem": 2,
-          "documentation_role": "GUI application",
-          "offline_probe": []
+          "documentation_role": "GUI application and agenterm cli entry",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cc.exe",
@@ -109,22 +99,14 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-cli.exe",
-          "role": "cli",
-          "pe_subsystem": 3,
-          "documentation_role": "native observation and automation client",
-          "offline_probe": [
-            "--version"
-          ]
-        },
-        {
           "name": "agenterm-rh.exe",
           "role": "rh-dev-cli",
           "pe_subsystem": 3,
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
           "offline_probe": [
             "version"
-          ]
+          ],
+          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -135,9 +117,13 @@
       "executables": [
         {
           "name": "agenterm",
-          "role": "gui",
-          "documentation_role": "GUI application",
-          "offline_probe": []
+          "role": "gui-cli",
+          "documentation_role": "GUI application and native observation/automation client",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cc",
@@ -149,20 +135,13 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-cli",
-          "role": "cli",
-          "documentation_role": "native observation and automation client",
-          "offline_probe": [
-            "--version"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
           "offline_probe": [
             "version"
-          ]
+          ],
+          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -173,9 +152,13 @@
       "executables": [
         {
           "name": "agenterm",
-          "role": "gui",
-          "documentation_role": "GUI application",
-          "offline_probe": []
+          "role": "gui-cli",
+          "documentation_role": "GUI application and native observation/automation client",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cc",
@@ -187,20 +170,13 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-cli",
-          "role": "cli",
-          "documentation_role": "native observation and automation client",
-          "offline_probe": [
-            "--version"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
           "offline_probe": [
             "version"
-          ]
+          ],
+          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -211,9 +187,13 @@
       "executables": [
         {
           "name": "agenterm",
-          "role": "gui",
-          "documentation_role": "GUI application",
-          "offline_probe": []
+          "role": "gui-cli",
+          "documentation_role": "GUI application and native observation/automation client",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cc",
@@ -225,20 +205,13 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-cli",
-          "role": "cli",
-          "documentation_role": "native observation and automation client",
-          "offline_probe": [
-            "--version"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
           "offline_probe": [
             "version"
-          ]
+          ],
+          "release_budget_bytes": 4194304
         }
       ]
     },
@@ -249,9 +222,13 @@
       "executables": [
         {
           "name": "agenterm",
-          "role": "gui",
-          "documentation_role": "GUI application",
-          "offline_probe": []
+          "role": "gui-cli",
+          "documentation_role": "GUI application and native observation/automation client",
+          "offline_probe": [
+            "cli",
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cc",
@@ -263,20 +240,13 @@
           "release_budget_bytes": 4194304
         },
         {
-          "name": "agenterm-cli",
-          "role": "cli",
-          "documentation_role": "native observation and automation client",
-          "offline_probe": [
-            "--version"
-          ]
-        },
-        {
           "name": "agenterm-rh",
           "role": "rh-dev-cli",
           "documentation_role": "rh AOT dev CLI (check, eval, pack, qualify)",
           "offline_probe": [
             "version"
-          ]
+          ],
+          "release_budget_bytes": 4194304
         }
       ]
     }
