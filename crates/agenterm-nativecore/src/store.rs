@@ -17,7 +17,18 @@ pub fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
         h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0001_0000_01b3);
+        // NOTE: the canonical FNV-1a/64 prime 0x100000001b3, correctly
+        // grouped in 4-hex-digit chunks, is 0x0000_0100_0000_01b3 -- NOT
+        // 0x0000_0001_0000_01b3 (an extra zero group; a real off-by-one-group
+        // typo found while building this crate's own black-box tests, whose
+        // independent reference hash didn't match a real interpreter run
+        // until this was corrected). `crates/agenterm-dynacore/src/store.rs`
+        // (the logic pack, out of this crate's scope, not touched here) has
+        // the identical typo in its own copy of this function -- harmless
+        // there too (content addressing only needs a hash to be internally
+        // consistent between `put`/`get`, not to literally BE FNV-1a/64),
+        // but flagged so it doesn't silently propagate further.
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
 }

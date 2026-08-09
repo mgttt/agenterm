@@ -18,13 +18,11 @@
 //! any target, but this crate is only ever RUN for real on Windows.
 
 pub mod declare;
+pub mod eval_core;
 pub mod ir;
 pub mod pack;
 pub mod payloads;
+pub mod seam;
+pub mod step_table;
 pub mod store;
 pub mod verify;
-
-// eval_core / seam / step_table (the interpreter + seven-intent Win32
-// bindings) land in the next commit — this one is the produce-time gate half
-// (neutral IR, verification incl. the F1 contract-arity fix, the
-// bake-and-detect layout self-check, and the content-addressed pack store).

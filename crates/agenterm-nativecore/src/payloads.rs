@@ -182,10 +182,10 @@ pub fn filewrite_demo(out_filename: &str) -> Module {
     let mut path_bytes = out_filename.as_bytes().to_vec();
     path_bytes.push(0);
     let path_off = b.rodata(&path_bytes);
-    let payload_off = b.rodata(b"hello from nativecore\n"); // 23 bytes
+    let payload_off = b.rodata(b"hello from nativecore\n"); // 22 bytes
     let path = b.set(Op::Rodata(path_off));
     let buf = b.set(Op::Rodata(payload_off));
-    let len = b.konst(23);
+    let len = b.konst(22);
     let n = b.call(Intent::FileWrite, vec![path, buf, len]);
     b.term(Term::Exit(n));
     b.finish("filewrite_demo", 0)
