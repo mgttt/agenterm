@@ -218,9 +218,7 @@ mod tests {
         let json = inspect_png_json(&path).unwrap();
         assert_eq!(json["width"], 2);
         assert_eq!(json["height"], 1);
-        assert!(
-            (json["luminance"].as_f64().unwrap() - 118.2945).abs() < 0.001
-        );
+        assert!((json["luminance"].as_f64().unwrap() - 118.2945).abs() < 0.001);
         std::fs::remove_file(path).unwrap();
     }
 }

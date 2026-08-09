@@ -76,11 +76,6 @@ use crate::frontend::input;
 use crate::frontend::instance_picker::{
     InstancePickerDialog, InstancePickerMode, InstancePickerRow, collect_instance_picker_rows,
 };
-use crate::frontend::server_strip_ui::{
-    SERVER_TABS_REFRESH, ServerCloseConfirm, ServerContextAction, ServerTabContextMenu, StripRect,
-    ServerContextMenuRects, layout_server_add_chip, layout_server_context_menu,
-    layout_server_tab_chips, server_tab_chip_label,
-};
 use crate::frontend::interaction::{
     ApplicationMouseMode, CancelTarget, ConfirmTarget, FocusDirection, FocusState, FocusSurface,
     FocusTransitionGate, ModalSurface, MouseReportEncoding, MouseReportInput, MouseReportOutcome,
@@ -95,6 +90,11 @@ use crate::frontend::pointer_input::{
 use crate::frontend::selection::{
     AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
     autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
+};
+use crate::frontend::server_strip_ui::{
+    SERVER_TABS_REFRESH, ServerCloseConfirm, ServerContextAction, ServerContextMenuRects,
+    ServerTabContextMenu, StripRect, layout_server_add_chip, layout_server_context_menu,
+    layout_server_tab_chips, server_tab_chip_label,
 };
 use crate::frontend::settings::{self, SettingsDialog};
 use crate::frontend::tab_editor::{TabEditorDialog, TabEditorFocus};
@@ -286,7 +286,6 @@ impl RenderBuffers {
         self.captured.take()
     }
 }
-
 
 #[derive(Clone, Copy, Debug)]
 struct RecentSidebarTextClick {
@@ -1640,7 +1639,10 @@ impl UnixApp {
             .strip_prefix("custom:")
             .unwrap_or(row.instance.as_str());
         let pid = spawn_gui_for_instance(short, Some(row.endpoint.as_str()))?;
-        self.set_status_message(format!("Opened `{}` in a new window (PID {pid})", row.instance));
+        self.set_status_message(format!(
+            "Opened `{}` in a new window (PID {pid})",
+            row.instance
+        ));
         Ok(())
     }
 
@@ -2595,7 +2597,10 @@ impl UnixApp {
         if !self.config.tabs_visible {
             return None;
         }
-        Some(self.sidebar_viewport().scrollbar(self.layout().sidebar_tree))
+        Some(
+            self.sidebar_viewport()
+                .scrollbar(self.layout().sidebar_tree),
+        )
     }
 
     fn sidebar_viewport_rows(&self) -> Vec<SidebarTabRow> {
@@ -3509,7 +3514,8 @@ impl UnixApp {
                     {
                         self.set_status_message(format!("Copy failed: {error}"));
                     }
-                    self.terminal_click_chain.arm_double(tab_id, point, now, window);
+                    self.terminal_click_chain
+                        .arm_double(tab_id, point, now, window);
                     self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
                     self.request_redraw();
                     return true;
@@ -4845,13 +4851,13 @@ impl UnixApp {
                 bottom: strip.bottom,
             });
             render::ServerStripView {
-                menu: self.server_context_menu_geometry().map(
-                    |menu| render::ServerStripMenuView {
+                menu: self
+                    .server_context_menu_geometry()
+                    .map(|menu| render::ServerStripMenuView {
                         frame: u32_rect(menu.frame),
                         as_window: u32_rect(menu.as_window),
                         close: u32_rect(menu.close),
-                    },
-                ),
+                    }),
                 bounds: u32_rect(strip),
                 chips,
                 add: u32_rect(crate::ui_geometry::PixelRect {

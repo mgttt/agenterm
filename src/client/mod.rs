@@ -2253,7 +2253,10 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
                     Ok(value) => {
                         cli_eprintln!(
                             "task_budget_exceeded: {} {} requested {}, declared {}",
-                            task.id, option, value, declared
+                            task.id,
+                            option,
+                            value,
+                            declared
                         );
                         return 2;
                     }

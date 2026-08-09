@@ -106,7 +106,10 @@ mod tests {
         // A terminal on a CJK system renders blank cells if this list is
         // empty, so its emptiness is a real regression, not a style nit.
         let fallbacks = super::fallback_candidates();
-        assert!(!fallbacks.is_empty(), "every platform needs coverage fallbacks");
+        assert!(
+            !fallbacks.is_empty(),
+            "every platform needs coverage fallbacks"
+        );
 
         // The primary face must stay a monospace Latin font: cell metrics come
         // from it, so a proportional CJK face must never lead the list.

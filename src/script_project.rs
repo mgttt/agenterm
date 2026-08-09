@@ -1275,11 +1275,7 @@ mod tests {
             .to_string();
         assert!(error.contains("script_module_root_escape"));
 
-        fs::write(
-            root.join("compile-only.rh"),
-            r#"throw "must not execute";"#,
-        )
-        .unwrap();
+        fs::write(root.join("compile-only.rh"), r#"throw "must not execute";"#).unwrap();
         validate_project_imports(&engine, &root, r#"import "compile-only" as compile_only;"#)
             .unwrap();
 

@@ -64,6 +64,7 @@ pub mod pack;
 pub mod pack_module;
 pub mod qualify;
 
+pub use agenterm_script_common::cli::{find_flag_value, has_flag, positional, require_flag_value};
 pub use check::{check, check_with_project_validation};
 pub use check_many::{
     CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
@@ -71,7 +72,6 @@ pub use check_many::{
 };
 pub use compile::{compile_qjs, hash_source};
 pub use corpus_scan::{CorpusScanReport, FailedFile as CorpusScanFailedFile, scan_directory};
-pub use agenterm_script_common::cli::{find_flag_value, has_flag, positional, require_flag_value};
 pub use error::QjsError;
 pub use eval::{EvalOutcome, eval_entry, eval_entry_with_host};
 pub use eval_module::eval_module_entry_with_host;

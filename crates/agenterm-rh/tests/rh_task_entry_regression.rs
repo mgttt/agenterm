@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use agenterm_rh::{check, qualify_pack_dir, transpile_cdylib_with_mode, CdylibExecutionMode};
+use agenterm_rh::{CdylibExecutionMode, check, qualify_pack_dir, transpile_cdylib_with_mode};
 
 const NATIVE_PACK_FIXTURES: [&str; 4] = [
     "rh_empty_map_fn_return.rh",
@@ -42,8 +42,8 @@ fn assert_native_pack_fixture(name: &str) {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    let receipt = qualify_pack_dir(&source, &dir)
-        .unwrap_or_else(|error| panic!("qualify {name}: {error}"));
+    let receipt =
+        qualify_pack_dir(&source, &dir).unwrap_or_else(|error| panic!("qualify {name}: {error}"));
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(receipt.entry_value, 0, "{name}");
 }

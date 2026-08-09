@@ -71,9 +71,7 @@ fn execution_mode_is_native_only() {
         }
     }
 
-    match agenterm_rh::transpile_cdylib_with_mode(
-        "fn entry() { switch 1 { 1 => 42, _ => 0 } }",
-    ) {
+    match agenterm_rh::transpile_cdylib_with_mode("fn entry() { switch 1 { 1 => 42, _ => 0 } }") {
         Err(_) => {}
         Ok(output) => {
             assert_eq!(
@@ -124,7 +122,11 @@ fn task_corpus_accepts_native_rh_entries() {
     let repo = repo_root();
     let entries =
         agenterm_rh::extract_task_entries(&repo.join("agenterm.tasks.json")).expect("task entries");
-    assert!(entries.iter().all(|entry| entry.ends_with(".rh") || entry.ends_with(".lua")));
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.ends_with(".rh") || entry.ends_with(".lua"))
+    );
     assert!(!entries.iter().any(|entry| entry.ends_with(".rhai")));
     assert!(entries.contains(&"scripts/rh/native-task-probe.rh".to_owned()));
     assert!(entries.contains(&"scripts/rh/verify-docs-site.rh".to_owned()));

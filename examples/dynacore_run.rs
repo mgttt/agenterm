@@ -60,7 +60,9 @@ fn parse_args() -> Result<Args, String> {
                 address = Some(it.next().ok_or("--address requires a value")?);
             }
             "--pack-store" => {
-                pack_store = Some(PathBuf::from(it.next().ok_or("--pack-store requires a value")?));
+                pack_store = Some(PathBuf::from(
+                    it.next().ok_or("--pack-store requires a value")?,
+                ));
             }
             "--pack-hash" => {
                 pack_hash = Some(it.next().ok_or("--pack-hash requires a value")?);
@@ -73,7 +75,11 @@ fn parse_args() -> Result<Args, String> {
     let address = address.ok_or("--address is required")?;
     match (&pack_store, &pack_hash) {
         (Some(_), Some(_)) | (None, None) => {}
-        _ => return Err("--pack-store and --pack-hash must be given together, or not at all".to_string()),
+        _ => {
+            return Err(
+                "--pack-store and --pack-hash must be given together, or not at all".to_string(),
+            );
+        }
     }
 
     Ok(Args {
@@ -98,7 +104,9 @@ fn parse_args() -> Result<Args, String> {
 fn locate_agenterm_cli() -> PathBuf {
     let exe_name = format!("agenterm{}", std::env::consts::EXE_SUFFIX);
     if let Ok(current) = std::env::current_exe()
-        && let Some(sibling) = current.parent().and_then(|examples_dir| examples_dir.parent())
+        && let Some(sibling) = current
+            .parent()
+            .and_then(|examples_dir| examples_dir.parent())
     {
         let candidate = sibling.join(&exe_name);
         if candidate.is_file() {
@@ -118,29 +126,34 @@ fn locate_agenterm_cli() -> PathBuf {
 /// file: an example and a test are separate compilation units, and the test's
 /// `live_bridge` is a private `fn`, not something an example can `use`.
 fn live_bridge(agenterm_cli: PathBuf, address: String) -> DynacoreFleetBridgeFn {
-    Arc::new(move |operation_id: &str, _params_json: &str| -> Result<String, String> {
-        if operation_id != "tabs.list" {
-            return Err(format!(
-                "dynacore_run's live bridge has no real mapping wired for '{operation_id}' \
+    Arc::new(
+        move |operation_id: &str, _params_json: &str| -> Result<String, String> {
+            if operation_id != "tabs.list" {
+                return Err(format!(
+                    "dynacore_run's live bridge has no real mapping wired for '{operation_id}' \
                  (only 'tabs.list' is supported)"
-            ));
-        }
-        let output = Command::new(&agenterm_cli)
-            .args(["--address", &address, "ui-snapshot"])
-            .output()
-            .map_err(|error| format!("failed to spawn {}: {error}", agenterm_cli.display()))?;
-        if !output.status.success() {
-            return Err(format!(
-                "agenterm ui-snapshot exited {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        let snapshot: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .map_err(|error| format!("ui-snapshot did not print valid JSON: {error}"))?;
-        let tabs = snapshot.get("tabs").cloned().unwrap_or_else(|| serde_json::json!([]));
-        Ok(tabs.to_string())
-    })
+                ));
+            }
+            let output = Command::new(&agenterm_cli)
+                .args(["--address", &address, "ui-snapshot"])
+                .output()
+                .map_err(|error| format!("failed to spawn {}: {error}", agenterm_cli.display()))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "agenterm ui-snapshot exited {:?}: {}",
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            let snapshot: serde_json::Value = serde_json::from_slice(&output.stdout)
+                .map_err(|error| format!("ui-snapshot did not print valid JSON: {error}"))?;
+            let tabs = snapshot
+                .get("tabs")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            Ok(tabs.to_string())
+        },
+    )
 }
 
 /// Load-or-build the module to run. With `--pack-store`/`--pack-hash`: opens the store,
@@ -154,8 +167,9 @@ fn live_bridge(agenterm_cli: PathBuf, address: String) -> DynacoreFleetBridgeFn 
 fn load_module(args: &Args) -> Result<agenterm_dynacore::ir::Module, String> {
     match (&args.pack_store, &args.pack_hash) {
         (Some(store_dir), Some(hash)) => {
-            let store = Store::open(store_dir)
-                .map_err(|error| format!("failed to open pack store {}: {error}", store_dir.display()))?;
+            let store = Store::open(store_dir).map_err(|error| {
+                format!("failed to open pack store {}: {error}", store_dir.display())
+            })?;
             let manifest = PackManifest {
                 schema_version: pack::PACK_SCHEMA_VERSION,
                 hash: hash.clone(),
@@ -226,7 +240,9 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Termination::StepLimitExceeded => {
-            eprintln!("Termination: StepLimitExceeded — the run was forcibly cut off before finishing");
+            eprintln!(
+                "Termination: StepLimitExceeded — the run was forcibly cut off before finishing"
+            );
             ExitCode::FAILURE
         }
     }

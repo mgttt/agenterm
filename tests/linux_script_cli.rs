@@ -77,10 +77,7 @@ mod unix {
         ]);
         assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.starts_with("OK ("),
-            "unexpected stdout: {stdout}"
-        );
+        assert!(stdout.starts_with("OK ("), "unexpected stdout: {stdout}");
     }
 
     #[test]

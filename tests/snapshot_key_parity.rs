@@ -73,9 +73,9 @@ const UNIX_ONLY_SNAPSHOT_KEYS: &[&str] = &[
 /// that renames the functions fails this gate visibly instead of silently
 /// scanning nothing.
 fn slice_between<'a>(source: &'a str, start_marker: &str, end_marker: &str) -> &'a str {
-    let start = source
-        .find(start_marker)
-        .unwrap_or_else(|| panic!("marker `{start_marker}` not found — update snapshot_key_parity"));
+    let start = source.find(start_marker).unwrap_or_else(|| {
+        panic!("marker `{start_marker}` not found — update snapshot_key_parity")
+    });
     let end = source[start..]
         .find(end_marker)
         .map(|offset| start + offset)
@@ -96,13 +96,15 @@ fn json_keys(haystack: &str) -> BTreeSet<String> {
         };
         let key = &haystack[open + 1..close];
         let mut after = close + 1;
-        while after < bytes.len() && (bytes[after] == b' ' || bytes[after] == b'\n' || bytes[after] == b'\r') {
+        while after < bytes.len()
+            && (bytes[after] == b' ' || bytes[after] == b'\n' || bytes[after] == b'\r')
+        {
             after += 1;
         }
         let is_key_shape = !key.is_empty()
-            && key
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-');
+            && key.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-'
+            });
         if is_key_shape && after < bytes.len() && bytes[after] == b':' {
             keys.insert(key.to_owned());
         }

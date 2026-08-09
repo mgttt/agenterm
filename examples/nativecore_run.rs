@@ -112,7 +112,9 @@ fn parse_args() -> Result<ParsedArgs, String> {
                 payload = Some(Payload::parse(&value)?);
             }
             "--pack-store" => {
-                pack_store = Some(PathBuf::from(it.next().ok_or("--pack-store requires a value")?));
+                pack_store = Some(PathBuf::from(
+                    it.next().ok_or("--pack-store requires a value")?,
+                ));
             }
             "--pack-hash" => {
                 pack_hash = Some(it.next().ok_or("--pack-hash requires a value")?);
@@ -129,9 +131,17 @@ fn parse_args() -> Result<ParsedArgs, String> {
     };
 
     match (payload.is_some(), has_pack_store_pair) {
-        (true, true) => Err("--payload cannot be combined with --pack-store/--pack-hash — pick one".to_string()),
-        (false, false) => Err("nothing to run: pass --payload NAME, or --pack-store DIR --pack-hash HASH".to_string()),
-        _ => Ok(ParsedArgs::Run(Args { payload, pack_store, pack_hash })),
+        (true, true) => {
+            Err("--payload cannot be combined with --pack-store/--pack-hash — pick one".to_string())
+        }
+        (false, false) => Err(
+            "nothing to run: pass --payload NAME, or --pack-store DIR --pack-hash HASH".to_string(),
+        ),
+        _ => Ok(ParsedArgs::Run(Args {
+            payload,
+            pack_store,
+            pack_hash,
+        })),
     }
 }
 
@@ -166,9 +176,21 @@ fn build_and_pack_payload(payload: Payload) -> Result<Module, String> {
         }
     };
 
-    let store = Store::open(&dir).map_err(|error| format!("failed to open fresh pack store {}: {error}", dir.display()))?;
-    let manifest = pack::pack(&store, &module).map_err(|error| format!("failed to pack '{}' into {}: {error}", payload.name(), dir.display()))?;
-    println!("packed '{}' into {} as {}", payload.name(), dir.display(), manifest.hash);
+    let store = Store::open(&dir)
+        .map_err(|error| format!("failed to open fresh pack store {}: {error}", dir.display()))?;
+    let manifest = pack::pack(&store, &module).map_err(|error| {
+        format!(
+            "failed to pack '{}' into {}: {error}",
+            payload.name(),
+            dir.display()
+        )
+    })?;
+    println!(
+        "packed '{}' into {} as {}",
+        payload.name(),
+        dir.display(),
+        manifest.hash
+    );
     pack::load(&store, &manifest)
 }
 
@@ -214,7 +236,11 @@ fn capture_real_stdout<T>(f: impl FnOnce() -> T) -> (T, String) {
             "CreatePipe failed"
         );
         let original = GetStdHandle(STD_OUTPUT_HANDLE);
-        assert_ne!(SetStdHandle(STD_OUTPUT_HANDLE, write_h), 0, "SetStdHandle failed");
+        assert_ne!(
+            SetStdHandle(STD_OUTPUT_HANDLE, write_h),
+            0,
+            "SetStdHandle failed"
+        );
 
         let result = f();
 
@@ -225,7 +251,13 @@ fn capture_real_stdout<T>(f: impl FnOnce() -> T) -> (T, String) {
         let mut buf = [0u8; 4096];
         loop {
             let mut got: u32 = 0;
-            let r = ReadFile(read_h, buf.as_mut_ptr(), buf.len() as u32, &mut got, std::ptr::null_mut());
+            let r = ReadFile(
+                read_h,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                &mut got,
+                std::ptr::null_mut(),
+            );
             if r == 0 || got == 0 {
                 break;
             }
@@ -280,7 +312,10 @@ fn main() -> ExitCode {
     }
 
     for (index, call) in outcome.calls.iter().enumerate() {
-        println!("[{index}] {:?} args={:?} -> {}", call.intent, call.args, call.result);
+        println!(
+            "[{index}] {:?} args={:?} -> {}",
+            call.intent, call.args, call.result
+        );
     }
 
     match outcome.termination {
@@ -289,7 +324,9 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Termination::StepLimitExceeded => {
-            eprintln!("Termination: StepLimitExceeded — the run was forcibly cut off before finishing");
+            eprintln!(
+                "Termination: StepLimitExceeded — the run was forcibly cut off before finishing"
+            );
             ExitCode::FAILURE
         }
     }

@@ -197,7 +197,10 @@ mod tests {
         let entry = dir.path().join("entry.js");
         let error = resolve_confined(dir.path(), &entry.to_string_lossy(), "/etc/passwd")
             .expect_err("must reject absolute specifier");
-        assert!(error.starts_with("qjs_module_unsupported_specifier"), "{error}");
+        assert!(
+            error.starts_with("qjs_module_unsupported_specifier"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -207,7 +210,10 @@ mod tests {
         let entry = dir.path().join("entry.js");
         let error = resolve_confined(dir.path(), &entry.to_string_lossy(), "lodash")
             .expect_err("must reject bare specifier");
-        assert!(error.starts_with("qjs_module_unsupported_specifier"), "{error}");
+        assert!(
+            error.starts_with("qjs_module_unsupported_specifier"),
+            "{error}"
+        );
     }
 
     #[test]

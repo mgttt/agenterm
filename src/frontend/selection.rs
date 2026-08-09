@@ -622,33 +622,57 @@ mod tests {
         let mut chain: ClickChain<u64, TerminalPoint> = ClickChain::default();
 
         // First press: nothing recorded yet.
-        assert_eq!(chain.classify(&7, point, start, window, true), ClickStage::Single);
+        assert_eq!(
+            chain.classify(&7, point, start, window, true),
+            ClickStage::Single
+        );
         chain.record_single(7, point, start);
 
         // Second press inside the window doubles; the host then arms.
         let second = start + Duration::from_millis(100);
-        assert_eq!(chain.classify(&7, point, second, window, true), ClickStage::Double);
+        assert_eq!(
+            chain.classify(&7, point, second, window, true),
+            ClickStage::Double
+        );
         chain.arm_double(7, point, second, window);
 
         // Third press: unix (hint=true) triples; the windows OS gate
         // (hint=false) must NOT — and must not consume the armed state.
         let third = second + Duration::from_millis(100);
-        assert_eq!(chain.classify(&7, point, third, window, false), ClickStage::Single);
-        assert_eq!(chain.classify(&7, point, third, window, true), ClickStage::Triple);
+        assert_eq!(
+            chain.classify(&7, point, third, window, false),
+            ClickStage::Single
+        );
+        assert_eq!(
+            chain.classify(&7, point, third, window, true),
+            ClickStage::Triple
+        );
 
         // Chain fully consumed by the triple.
-        assert_eq!(chain.classify(&7, point, third, window, true), ClickStage::Single);
+        assert_eq!(
+            chain.classify(&7, point, third, window, true),
+            ClickStage::Single
+        );
 
         // A stale single outside the window stays single.
         chain.record_single(7, point, third);
         let late = third + window + Duration::from_millis(1);
-        assert_eq!(chain.classify(&7, point, late, window, true), ClickStage::Single);
+        assert_eq!(
+            chain.classify(&7, point, late, window, true),
+            ClickStage::Single
+        );
 
         // Different tab or point never chains.
         chain.record_single(7, point, late);
         let other = TerminalPoint { row: 3, col: 5 };
-        assert_eq!(chain.classify(&7, other, late, window, true), ClickStage::Single);
-        assert_eq!(chain.classify(&8, point, late, window, true), ClickStage::Single);
+        assert_eq!(
+            chain.classify(&7, other, late, window, true),
+            ClickStage::Single
+        );
+        assert_eq!(
+            chain.classify(&8, point, late, window, true),
+            ClickStage::Single
+        );
     }
 
     #[test]

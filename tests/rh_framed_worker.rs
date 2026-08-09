@@ -152,8 +152,8 @@ fn framed_worker_run_entry_fixture_with_rh_backend() {
 #[test]
 fn framed_worker_captures_compat_fallback_print_output() {
     with_rh_backend(|| {
-        let source =
-            std::fs::read_to_string("scripts/archive/rhai/lint.rhai").expect("read lint task source");
+        let source = std::fs::read_to_string("scripts/archive/rhai/lint.rhai")
+            .expect("read lint task source");
         let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm"))
             .args(["__agenterm-internal-engine", "rh"])
             .arg("--framed-worker")

@@ -133,7 +133,12 @@ fn tmp_sibling(path: &Path) -> PathBuf {
 /// real type (`Surface`) lives in the main binary file, not this module —
 /// this is the narrow seam between them, not a reason to duplicate PNG
 /// encoding at the call site.
-pub fn write_png_atomic(path: &Path, pixels: &[u32], width: u32, height: u32) -> std::io::Result<()> {
+pub fn write_png_atomic(
+    path: &Path,
+    pixels: &[u32],
+    width: u32,
+    height: u32,
+) -> std::io::Result<()> {
     let mut rgb = Vec::with_capacity(pixels.len() * 3);
     for &pixel in pixels {
         rgb.push(((pixel >> 16) & 0xFF) as u8);
@@ -281,7 +286,12 @@ pub enum ScriptCommand {
     /// isolation — only a live session driving *repeated, cumulative*
     /// zoom steps through the real ConPTY resize path can tell whether
     /// something about that sequence, not any one fixed size, is at fault.
-    Wheel { row: u16, col: u16, notches: f32, ctrl: bool },
+    Wheel {
+        row: u16,
+        col: u16,
+        notches: f32,
+        ctrl: bool,
+    },
 }
 
 /// One entry of the raw JSON array — every field optional so serde can parse
@@ -410,7 +420,10 @@ impl RawCommand {
             });
         }
         if let Some(point) = self.mouse_move {
-            return Ok(ScriptCommand::MouseMove { row: point.row, col: point.col });
+            return Ok(ScriptCommand::MouseMove {
+                row: point.row,
+                col: point.col,
+            });
         }
         if let Some(wheel) = self.wheel {
             return Ok(ScriptCommand::Wheel {
@@ -551,15 +564,31 @@ mod tests {
 
     #[test]
     fn key_names_are_case_insensitive_and_have_shorthands() {
-        assert_eq!(parse_key_name("ArrowUp"), Some(ScriptKey::Named(NamedKey::ArrowUp)));
-        assert_eq!(parse_key_name("arrowup"), Some(ScriptKey::Named(NamedKey::ArrowUp)));
-        assert_eq!(parse_key_name("UP"), Some(ScriptKey::Named(NamedKey::ArrowUp)));
-        assert_eq!(parse_key_name("Esc"), Some(ScriptKey::Named(NamedKey::Escape)));
+        assert_eq!(
+            parse_key_name("ArrowUp"),
+            Some(ScriptKey::Named(NamedKey::ArrowUp))
+        );
+        assert_eq!(
+            parse_key_name("arrowup"),
+            Some(ScriptKey::Named(NamedKey::ArrowUp))
+        );
+        assert_eq!(
+            parse_key_name("UP"),
+            Some(ScriptKey::Named(NamedKey::ArrowUp))
+        );
+        assert_eq!(
+            parse_key_name("Esc"),
+            Some(ScriptKey::Named(NamedKey::Escape))
+        );
         assert_eq!(parse_key_name("a"), Some(ScriptKey::Char('a')));
         assert_eq!(parse_key_name("中"), Some(ScriptKey::Char('中')));
         assert_eq!(parse_key_name("notakey"), None);
         assert_eq!(parse_key_name(""), None);
-        assert_eq!(parse_key_name("ab"), None, "two ASCII chars is not a single key");
+        assert_eq!(
+            parse_key_name("ab"),
+            None,
+            "two ASCII chars is not a single key"
+        );
     }
 
     #[test]
@@ -602,9 +631,24 @@ mod tests {
                     shift: true,
                 },
                 ScriptCommand::MouseMove { row: 5, col: 20 },
-                ScriptCommand::Wheel { row: 5, col: 20, notches: 3.0, ctrl: false },
-                ScriptCommand::Wheel { row: 5, col: 20, notches: -1.5, ctrl: false },
-                ScriptCommand::Wheel { row: 5, col: 20, notches: 1.0, ctrl: true },
+                ScriptCommand::Wheel {
+                    row: 5,
+                    col: 20,
+                    notches: 3.0,
+                    ctrl: false
+                },
+                ScriptCommand::Wheel {
+                    row: 5,
+                    col: 20,
+                    notches: -1.5,
+                    ctrl: false
+                },
+                ScriptCommand::Wheel {
+                    row: 5,
+                    col: 20,
+                    notches: 1.0,
+                    ctrl: true
+                },
             ]
         );
     }
@@ -700,7 +744,10 @@ mod tests {
                 visible_now: true,
             },
             scroll_offset: 0,
-            selection: Some((PointSnapshot { row: 0, col: 0 }, PointSnapshot { row: 0, col: 4 })),
+            selection: Some((
+                PointSnapshot { row: 0, col: 0 },
+                PointSnapshot { row: 0, col: 4 },
+            )),
             ime_preedit: String::new(),
             child_alive: true,
             font_size_px: 16,

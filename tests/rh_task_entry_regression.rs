@@ -23,11 +23,10 @@ fn transpile_project_entry(entry: &str) -> (String, agenterm_rh::CdylibTranspile
     let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
         panic!("read {entry}: {error}");
     });
-    let output = agenterm_rh::transpile_cdylib_with_project(&repo(), &source).unwrap_or_else(
-        |error| {
+    let output =
+        agenterm_rh::transpile_cdylib_with_project(&repo(), &source).unwrap_or_else(|error| {
             panic!("transpile {entry}: {error}");
-        },
-    );
+        });
     (source, output)
 }
 
@@ -35,11 +34,9 @@ fn assert_bundled_pack_builds(entry: &str) {
     let source = std::fs::read_to_string(repo().join(entry)).unwrap_or_else(|error| {
         panic!("read {entry}: {error}");
     });
-    let dir = agenterm::script_rh_cache::compile_source_to_cache_with_project(
-        &source,
-        Some(&repo()),
-    )
-    .unwrap_or_else(|error| panic!("compile cache {entry}: {error}"));
+    let dir =
+        agenterm::script_rh_cache::compile_source_to_cache_with_project(&source, Some(&repo()))
+            .unwrap_or_else(|error| panic!("compile cache {entry}: {error}"));
     assert!(dir.join("manifest.json").is_file(), "{entry}");
 }
 
@@ -221,10 +218,18 @@ fn write_build_metadata_uses_native_bundled_execution() {
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("__write("), "{}", output.rust);
     assert!(output.rust.contains("__write_platform("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(
         output.rust.contains("serde_json::Value::Bool("),
         "{}",
@@ -241,7 +246,11 @@ fn build_identity_uses_native_bundled_execution() {
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("__write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
@@ -266,8 +275,16 @@ fn bootstrap_info_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/bootstrap-info.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -278,9 +295,17 @@ fn prepare_target_clean_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/prepare-target-clean.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -293,9 +318,17 @@ fn stage_build_uses_native_bundled_execution() {
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("__stage("), "{}", output.rust);
     assert!(output.rust.contains("__write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
@@ -307,7 +340,11 @@ fn mcp_conformance_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/mcp-conformance.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_metadata("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
@@ -319,9 +356,21 @@ fn performance_samples_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/performance-samples.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -335,7 +384,11 @@ fn performance_summary_uses_native_bundled_execution() {
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -349,20 +402,31 @@ fn build_releases_index_uses_native_bundled_execution() {
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
 }
-
 
 #[test]
 fn rh_aot_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/rh-aot-smoke.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -373,8 +437,16 @@ fn client_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/client-smoke.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
@@ -386,10 +458,18 @@ fn preflight_benchmark_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/preflight-benchmark.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -401,7 +481,11 @@ fn cross_platform_automation_audit_uses_native_bundled_execution() {
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_array_items("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_array_items("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -412,7 +496,11 @@ fn artifact_verification_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/artifact-verification.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
@@ -425,8 +513,16 @@ fn lint_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/lint.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -474,10 +570,12 @@ fn task_manifest_has_no_live_rhai_entry_paths() {
         "agenterm.tasks.json must not reference live scripts/rhai/ paths"
     );
 
-    let entries = agenterm_rh::extract_task_entries(&repo.join("agenterm.tasks.json"))
-        .expect("task entries");
+    let entries =
+        agenterm_rh::extract_task_entries(&repo.join("agenterm.tasks.json")).expect("task entries");
     assert!(
-        entries.iter().all(|entry| entry.ends_with(".rh") || entry.ends_with(".lua")),
+        entries
+            .iter()
+            .all(|entry| entry.ends_with(".rh") || entry.ends_with(".lua")),
         "unexpected non-.rh/.lua task entry: {entries:?}"
     );
     assert!(
@@ -535,7 +633,6 @@ fn phase_b_smoke_entries_use_native_pack() {
     }
 }
 
-
 #[test]
 fn script_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/script-smoke.rh");
@@ -555,7 +652,6 @@ fn workbench_smoke_uses_native_bundled_execution() {
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
 }
-
 
 #[test]
 fn unix_frontend_smoke_uses_native_bundled_execution() {
@@ -663,7 +759,11 @@ fn agenterm_net_research_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/agenterm-net-research.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
@@ -675,21 +775,33 @@ fn readme_examples_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/readme-examples.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
 }
 
-	#[test]
-	fn migration_audit_uses_native_bundled_execution() {
+#[test]
+fn migration_audit_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/powershell-migration-audit.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -749,13 +861,10 @@ fn native_rh_task_without_entry_fails_manifest_qualification() {
     assert_eq!(report.passed, 0);
     assert_eq!(report.failed, 1);
     assert!(
-        report.entries[0]
-            .error
-            .as_deref()
-            .is_some_and(|error| {
-                error.contains("cdylib pack requires fn entry()")
-                    || error.contains("native .rh task requires compat-delegating")
-            }),
+        report.entries[0].error.as_deref().is_some_and(|error| {
+            error.contains("cdylib pack requires fn entry()")
+                || error.contains("native .rh task requires compat-delegating")
+        }),
         "{report:?}"
     );
 }
@@ -766,22 +875,31 @@ fn prd_alignment_uses_native_bundled_execution() {
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
 }
-
-
-
 
 #[test]
 fn preflight_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/preflight.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -804,15 +922,22 @@ fn prune_target_incremental_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/prune-target-incremental.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
-    assert!(output.rust.contains("rh_process_stdout_file("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_process_stdout_file("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_path_join("), "{}", output.rust);
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
 }
-
 
 #[test]
 fn package_qualified_uses_native_bundled_execution() {
@@ -831,12 +956,30 @@ fn candidate_aggregate_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/candidate-aggregate.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
-    assert!(output.rust.contains("pub fn build_manifest("), "{}", output.rust);
-    assert!(output.rust.contains("pub fn validate_manifest("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_parse(&rh_std_fs_read_to_string("), "{}", output.rust);
+    assert!(
+        output.rust.contains("pub fn build_manifest("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("pub fn validate_manifest("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output
+            .rust
+            .contains("rh_json_parse(&rh_std_fs_read_to_string("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("serde_json::Value::Bool("), "{}", output.rust);
+    assert!(
+        output.rust.contains("serde_json::Value::Bool("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -847,8 +990,18 @@ fn candidate_verify_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/candidate-verify.rh");
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
-    assert!(output.rust.contains("pub fn verify_platform("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_parse(&rh_std_fs_read_to_string("), "{}", output.rust);
+    assert!(
+        output.rust.contains("pub fn verify_platform("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output
+            .rust
+            .contains("rh_json_parse(&rh_std_fs_read_to_string("),
+        "{}",
+        output.rust
+    );
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_path_join("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
@@ -863,7 +1016,11 @@ fn package_release_qualified_uses_native_bundled_execution() {
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
@@ -876,8 +1033,16 @@ fn package_client_release_uses_native_bundled_execution() {
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
     assert!(output.rust.contains("rh_sha256_file("), "{}", output.rust);
     assert!(output.rust.contains("rh_atomic_write("), "{}", output.rust);
-    assert!(output.rust.contains("rh_json_stringify_pretty("), "{}", output.rust);
-    assert!(output.rust.contains("rh_process_status("), "{}", output.rust);
+    assert!(
+        output.rust.contains("rh_json_stringify_pretty("),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("rh_process_status("),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);

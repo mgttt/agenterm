@@ -49,6 +49,10 @@ cleanup() {
     rm -f -- "$WORKER" "$IDENTITY_FILE" "$POST_IDENTITY_FILE" \
         "$UNTRACKED_FILE" "$CACHE_TEMP" "$STAMP_TEMP"
     rmdir -- "$BOOTSTRAP_DIR" 2>/dev/null || true
+    # Prune stale incremental caches -- never fails the caller
+    if [ "${AGENTERM_SKIP_INCREMENTAL_PRUNE:-}" = "" ]; then
+        sh "$SCRIPT_DIR/prune-incremental.sh" >/dev/null 2>&1 || true
+    fi
 }
 trap cleanup EXIT HUP INT TERM
 

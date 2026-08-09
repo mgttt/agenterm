@@ -235,7 +235,10 @@ fn rhai_env_value_routes_check_to_rh_backend() {
         None,
     )
     .expect("probe");
-    assert!(probe.is_some(), "rhai env value should alias to the rh backend");
+    assert!(
+        probe.is_some(),
+        "rhai env value should alias to the rh backend"
+    );
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
     }

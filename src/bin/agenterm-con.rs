@@ -36,12 +36,12 @@ use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButto
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
-use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
+use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::window_host::{
-    run_pixel_window, GeometryChange, LogicalPoint, LogicalSize, PixelWindow, PixelWindowApplication,
-    PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions,
-    PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
+    GeometryChange, LogicalPoint, LogicalSize, PixelWindow, PixelWindowApplication,
+    PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions, PointerButton,
+    PointerButtonState, WheelDelta, XrgbPixelFrame, run_pixel_window,
 };
 
 use palette::Rgb;
@@ -286,35 +286,33 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
         match arg.as_str() {
             "--no-activate" => parsed.no_activate = true,
             "--working-dir" => {
-                parsed.working_dir = Some(
-                    rest.next()
-                        .cloned()
-                        .ok_or_else(|| "error: --working-dir requires a path
-".to_owned())?,
-                );
+                parsed.working_dir = Some(rest.next().cloned().ok_or_else(|| {
+                    "error: --working-dir requires a path
+"
+                    .to_owned()
+                })?);
             }
             other if other.starts_with("--working-dir=") => {
                 parsed.working_dir = Some(other["--working-dir=".len()..].to_owned());
             }
             "--font-size" => parsed.font_size = next_value(&mut rest, "--font-size")?,
             other if other.starts_with("--font-size=") => {
-                parsed.font_size = Some(parse_value(&other["--font-size=".len()..], "--font-size")?);
+                parsed.font_size =
+                    Some(parse_value(&other["--font-size=".len()..], "--font-size")?);
             }
             "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
             "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
             "--emit-snapshot" => {
-                parsed.snapshot_path = Some(PathBuf::from(
-                    rest.next()
-                        .cloned()
-                        .ok_or_else(|| "error: --emit-snapshot requires a path\n".to_owned())?,
-                ));
+                parsed.snapshot_path =
+                    Some(PathBuf::from(rest.next().cloned().ok_or_else(|| {
+                        "error: --emit-snapshot requires a path\n".to_owned()
+                    })?));
             }
             "--script" => {
-                parsed.script_path = Some(PathBuf::from(
-                    rest.next()
-                        .cloned()
-                        .ok_or_else(|| "error: --script requires a path\n".to_owned())?,
-                ));
+                parsed.script_path =
+                    Some(PathBuf::from(rest.next().cloned().ok_or_else(|| {
+                        "error: --script requires a path\n".to_owned()
+                    })?));
             }
             // Everything after -e is the command line, verbatim. Consuming the
             // remainder is what lets `-e ssh host -p 22` pass `-p 22` through
@@ -323,15 +321,18 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
                 let argv: Vec<String> = rest.cloned().collect();
                 if argv.is_empty() {
                     return Err("error: -e requires a program to run
-".to_owned());
+"
+                    .to_owned());
                 }
                 parsed.command = Some(argv);
                 return Ok(parsed);
             }
             unknown => {
-                return Err(format!("error: unknown argument '{unknown}'
+                return Err(format!(
+                    "error: unknown argument '{unknown}'
 
-{USAGE}"));
+{USAGE}"
+                ));
             }
         }
     }
@@ -345,17 +346,22 @@ fn next_value<'a, T: std::str::FromStr>(
     rest: &mut impl Iterator<Item = &'a String>,
     flag: &str,
 ) -> Result<Option<T>, String> {
-    let raw = rest
-        .next()
-        .ok_or_else(|| format!("error: {flag} requires a value
-"))?;
+    let raw = rest.next().ok_or_else(|| {
+        format!(
+            "error: {flag} requires a value
+"
+        )
+    })?;
     parse_value(raw, flag).map(Some)
 }
 
 fn parse_value<T: std::str::FromStr>(raw: &str, flag: &str) -> Result<T, String> {
-    raw.parse()
-        .map_err(|_| format!("error: {flag} expects a number, got '{raw}'
-"))
+    raw.parse().map_err(|_| {
+        format!(
+            "error: {flag} expects a number, got '{raw}'
+"
+        )
+    })
 }
 
 fn main() {
@@ -390,7 +396,10 @@ fn main() {
     let script = script_path
         .map(|path| {
             let bytes = std::fs::read(&path).map_err(|error| {
-                format!("error: could not read --script {}: {error}\n", path.display())
+                format!(
+                    "error: could not read --script {}: {error}\n",
+                    path.display()
+                )
             })?;
             agent_interface::parse_script(&bytes)
                 .map_err(|error| format!("error: --script {}: {error}\n", path.display()))
@@ -693,9 +702,13 @@ impl ConTerminal {
     /// Spawns the shell PTY and the reader thread. Called once from `opened`.
     fn spawn_pty(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         // `-e` hosts a chosen program; otherwise fall back to the user's shell.
-        let (program, extra_args) = match self.command.as_ref().and_then(|argv| argv.split_first()) {
+        let (program, extra_args) = match self.command.as_ref().and_then(|argv| argv.split_first())
+        {
             Some((program, args)) => (program.clone(), args.to_vec()),
-            None => (agenterm_platform::runtime::default_terminal_shell(), Vec::new()),
+            None => (
+                agenterm_platform::runtime::default_terminal_shell(),
+                Vec::new(),
+            ),
         };
 
         let mut command = ChildCommand::new(program.clone())
@@ -715,7 +728,10 @@ impl ConTerminal {
             // None on Windows or when the shell already has explicit args.
             // Only meaningful for the default-shell path — a program given
             // via -e must receive exactly the arguments the user wrote.
-            agenterm_platform::pty::login_shell_argument(std::path::Path::new(&program), 0)
+            agenterm_platform::pty::login_shell_argument(
+                std::path::Path::new(&program),
+                0,
+            )
         {
             command = command.arg(login_arg);
         }
@@ -732,9 +748,9 @@ impl ConTerminal {
 
         // Reader thread: blocking read loop (the platform read polls internally),
         // forwarding chunks over the channel and waking the window loop.
-        let reader = master
-            .try_clone_for_startup_reader()
-            .map_err(|error| PixelWindowError::failed("cmd_reader_clone_failed", format!("{error}")))?;
+        let reader = master.try_clone_for_startup_reader().map_err(|error| {
+            PixelWindowError::failed("cmd_reader_clone_failed", format!("{error}"))
+        })?;
         let (tx, rx) = mpsc::channel();
         let waker = window.waker();
         thread::Builder::new()
@@ -756,7 +772,9 @@ impl ConTerminal {
                 }
                 let _ = waker.wake();
             })
-            .map_err(|error| PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}")))?;
+            .map_err(|error| {
+                PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}"))
+            })?;
 
         // Waiter thread: on Windows, ConPTY's output pipe does not reliably
         // EOF just because the immediate child process exited — the pipe
@@ -770,9 +788,9 @@ impl ConTerminal {
         // Windows' actual process-exit signal (WaitForSingleObject on the
         // process handle) rather than through PTY I/O, so this is the
         // correct detection path, not a workaround for the pipe's behavior.
-        let mut waiter = child
-            .try_clone_for_wait()
-            .map_err(|error| PixelWindowError::failed("cmd_wait_clone_failed", format!("{error}")))?;
+        let mut waiter = child.try_clone_for_wait().map_err(|error| {
+            PixelWindowError::failed("cmd_wait_clone_failed", format!("{error}"))
+        })?;
         let (exit_tx, exit_rx) = mpsc::channel();
         let exit_waker = window.waker();
         let explicit_command = self.command.is_some();
@@ -791,7 +809,9 @@ impl ConTerminal {
                 let _ = exit_tx.send(());
                 let _ = exit_waker.wake();
             })
-            .map_err(|error| PixelWindowError::failed("cmd_waiter_spawn_failed", format!("{error}")))?;
+            .map_err(|error| {
+                PixelWindowError::failed("cmd_waiter_spawn_failed", format!("{error}"))
+            })?;
 
         self.master = Some(master);
         self.child = Some(child);
@@ -869,7 +889,7 @@ impl ConTerminal {
     /// made "IME enabled" look like "keyboard broken" and led to IME being
     /// switched off entirely.
     fn handle_ime(&mut self, window: &PixelWindow, event: agenterm_platform::ime::ImeEvent) {
-        use agenterm_platform::ime::{classify_event, ImeAction};
+        use agenterm_platform::ime::{ImeAction, classify_event};
 
         // The terminal grid is always a valid composition anchor: we place the
         // candidate window at the cursor cell below.
@@ -998,10 +1018,7 @@ impl ConTerminal {
             end += 1;
         }
         (
-            TerminalPoint {
-                row: start,
-                col: 0,
-            },
+            TerminalPoint { row: start, col: 0 },
             TerminalPoint {
                 row: end,
                 col: cols.saturating_sub(1),
@@ -1030,7 +1047,17 @@ impl ConTerminal {
             let span = self.cell_w * cells;
             surface.fill_rect(x0, y0, span, self.cell_h, bg.to_xrgb());
             if let Some(glyph) = font::raster(character, self.font_size_px) {
-                surface.blit_glyph(&glyph, CellRect { x: x0, y: y0, w: span, h: self.cell_h }, fg, 0.0);
+                surface.blit_glyph(
+                    &glyph,
+                    CellRect {
+                        x: x0,
+                        y: y0,
+                        w: span,
+                        h: self.cell_h,
+                    },
+                    fg,
+                    0.0,
+                );
             }
             // Underline: the standard "this is not committed yet" affordance.
             let underline_y = y0 + self.cell_h.saturating_sub(1);
@@ -1197,7 +1224,10 @@ impl ConTerminal {
         let phys_x = f64::from(point.col) * self.cell_w as f64 + self.cell_w as f64 / 2.0;
         let phys_y = f64::from(point.row) * self.cell_h as f64 + self.cell_h as f64 / 2.0;
         let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
-        LogicalPoint { x: phys_x / scale, y: phys_y / scale }
+        LogicalPoint {
+            x: phys_x / scale,
+            y: phys_y / scale,
+        }
     }
 
     fn copy_selection(&self) {
@@ -1233,7 +1263,10 @@ impl ConTerminal {
         }
         let bracketed = self.parser.screen().bracketed_paste();
         self.scroll_to_bottom();
-        self.write_pty(&terminal_input::terminal_paste_bytes(&normalized, bracketed));
+        self.write_pty(&terminal_input::terminal_paste_bytes(
+            &normalized,
+            bracketed,
+        ));
     }
 
     /// Runs every `--script` command that is due, pacing `WaitMs` through the
@@ -1258,7 +1291,12 @@ impl ConTerminal {
                     self.write_pty(text.as_bytes());
                 }
                 ScriptCommand::Paste(text) => self.paste_text(&text),
-                ScriptCommand::Key { key, ctrl, alt, shift } => {
+                ScriptCommand::Key {
+                    key,
+                    ctrl,
+                    alt,
+                    shift,
+                } => {
                     self.execute_script_key(key, ctrl, alt, shift);
                 }
                 ScriptCommand::WaitMs(ms) => {
@@ -1272,10 +1310,24 @@ impl ConTerminal {
                     // actually produces a frame to capture.
                     self.pending_screenshot = Some(path);
                 }
-                ScriptCommand::Click { row, col, button, ctrl, alt, shift } => {
+                ScriptCommand::Click {
+                    row,
+                    col,
+                    button,
+                    ctrl,
+                    alt,
+                    shift,
+                } => {
                     self.execute_script_click(window, row, col, button, ctrl, alt, shift);
                 }
-                ScriptCommand::MouseDown { row, col, button, ctrl, alt, shift } => {
+                ScriptCommand::MouseDown {
+                    row,
+                    col,
+                    button,
+                    ctrl,
+                    alt,
+                    shift,
+                } => {
                     self.execute_script_pointer_button(
                         window,
                         row,
@@ -1287,7 +1339,14 @@ impl ConTerminal {
                         PointerButtonState::Pressed,
                     );
                 }
-                ScriptCommand::MouseUp { row, col, button, ctrl, alt, shift } => {
+                ScriptCommand::MouseUp {
+                    row,
+                    col,
+                    button,
+                    ctrl,
+                    alt,
+                    shift,
+                } => {
                     self.execute_script_pointer_button(
                         window,
                         row,
@@ -1302,7 +1361,12 @@ impl ConTerminal {
                 ScriptCommand::MouseMove { row, col } => {
                     self.execute_script_mouse_move(window, row, col);
                 }
-                ScriptCommand::Wheel { row, col, notches, ctrl } => {
+                ScriptCommand::Wheel {
+                    row,
+                    col,
+                    notches,
+                    ctrl,
+                } => {
                     self.execute_script_wheel(window, row, col, notches, ctrl);
                 }
             }
@@ -1396,7 +1460,12 @@ impl ConTerminal {
         shift: bool,
         state: PointerButtonState,
     ) {
-        let modifiers = ModifierState { control: ctrl, alt, shift, meta: false };
+        let modifiers = ModifierState {
+            control: ctrl,
+            alt,
+            shift,
+            meta: false,
+        };
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
         let platform_button = match button {
             ScriptMouseButton::Left => PointerButton::Left,
@@ -1473,8 +1542,14 @@ impl ConTerminal {
             scroll_offset: self.scroll_offset,
             selection: self.selection.map(|(a, b)| {
                 (
-                    agent_interface::PointSnapshot { row: a.row, col: a.col },
-                    agent_interface::PointSnapshot { row: b.row, col: b.col },
+                    agent_interface::PointSnapshot {
+                        row: a.row,
+                        col: a.col,
+                    },
+                    agent_interface::PointSnapshot {
+                        row: b.row,
+                        col: b.col,
+                    },
                 )
             }),
             ime_preedit: self.ime_preedit.clone(),
@@ -1494,7 +1569,12 @@ impl ConTerminal {
     }
 
     /// Current mouse reporting contract negotiated by the running application.
-    fn mouse_mode(&self) -> (terminal_input::ApplicationMouseMode, terminal_input::MouseReportEncoding) {
+    fn mouse_mode(
+        &self,
+    ) -> (
+        terminal_input::ApplicationMouseMode,
+        terminal_input::MouseReportEncoding,
+    ) {
         let screen = self.parser.screen();
         let mode = match screen.mouse_protocol_mode() {
             vt100::MouseProtocolMode::None => terminal_input::ApplicationMouseMode::None,
@@ -1607,10 +1687,9 @@ impl ConTerminal {
         // An application that grabbed the mouse gets buttons 64/65.
         let (mode, _) = self.mouse_mode();
         if mode != terminal_input::ApplicationMouseMode::None && !modifiers.shift {
-            let point = position.map(|p| self.hit_test(&p)).unwrap_or(TerminalPoint {
-                row: 0,
-                col: 0,
-            });
+            let point = position
+                .map(|p| self.hit_test(&p))
+                .unwrap_or(TerminalPoint { row: 0, col: 0 });
             let button = if up {
                 terminal_input::MOUSE_WHEEL_UP
             } else {
@@ -1638,7 +1717,11 @@ impl ConTerminal {
             return;
         }
 
-        self.scroll_by(if up { count as isize } else { -(count as isize) });
+        self.scroll_by(if up {
+            count as isize
+        } else {
+            -(count as isize)
+        });
     }
 
     /// Routes a pointer button press/release, preferring the application.
@@ -1654,7 +1737,9 @@ impl ConTerminal {
         let point = match position {
             Some(pos) => self.hit_test(&pos),
             // A release with no position still has to close an open gesture.
-            None => self.last_reported_cell.unwrap_or(TerminalPoint { row: 0, col: 0 }),
+            None => self
+                .last_reported_cell
+                .unwrap_or(TerminalPoint { row: 0, col: 0 }),
         };
         let code = match button {
             PointerButton::Left => 0,
@@ -1760,8 +1845,12 @@ impl PixelWindowApplication for ConTerminal {
         window.set_title(&self.current_title);
         // Request keyboard focus so winit delivers KeyboardInput events on Windows.
         window.focus();
-        let (cols, rows) =
-            Self::compute_grid(metrics.physical_width, metrics.physical_height, self.cell_w, self.cell_h);
+        let (cols, rows) = Self::compute_grid(
+            metrics.physical_width,
+            metrics.physical_height,
+            self.cell_w,
+            self.cell_h,
+        );
         self.cols = cols;
         self.rows = rows;
         self.parser.screen_mut().set_size(rows, cols);
@@ -1781,13 +1870,18 @@ impl PixelWindowApplication for ConTerminal {
                 Ok(PixelWindowDirective::Exit)
             }
             PixelWindowEvent::GeometryChanged { change, metrics } => {
-                if matches!(change, GeometryChange::Resized | GeometryChange::ScaleFactorChanged)
-                    && metrics.is_drawable()
+                if matches!(
+                    change,
+                    GeometryChange::Resized | GeometryChange::ScaleFactorChanged
+                ) && metrics.is_drawable()
                 {
                     // Coalesce: keep only the freshest metrics; the resize fires
                     // once the stream has been quiet for RESIZE_DEBOUNCE.
-                    self.pending_geometry =
-                        Some((metrics.physical_width, metrics.physical_height, metrics.scale_factor));
+                    self.pending_geometry = Some((
+                        metrics.physical_width,
+                        metrics.physical_height,
+                        metrics.scale_factor,
+                    ));
                     self.last_geometry_at = Instant::now();
                 }
                 Ok(PixelWindowDirective::Continue)
@@ -1841,7 +1935,9 @@ impl PixelWindowApplication for ConTerminal {
                 } else {
                     let lines = match delta {
                         WheelDelta::Lines { y, .. } => y,
-                        WheelDelta::LogicalPixels { y, .. } => y as f32 / (self.cell_h as f32).max(1.0),
+                        WheelDelta::LogicalPixels { y, .. } => {
+                            y as f32 / (self.cell_h as f32).max(1.0)
+                        }
                         _ => 0.0,
                     };
                     self.wheel_accumulator += lines;
@@ -1907,7 +2003,16 @@ impl PixelWindowApplication for ConTerminal {
         // way — this is parity, not an enhancement — but getting it right
         // matters for vim/nvim, which switch shape *and* blink per mode.
         let cursor_visible_now = !screen.cursor_blinking() || self.blink_visible;
-        paint_cells(&mut surface, screen, self.selection, self.cell_w, self.cell_h, self.default_fg, self.default_bg, self.font_size_px);
+        paint_cells(
+            &mut surface,
+            screen,
+            self.selection,
+            self.cell_w,
+            self.cell_h,
+            self.default_fg,
+            self.default_bg,
+            self.font_size_px,
+        );
 
         // IME composition, drawn over the cells to the right of the cursor and
         // underlined so it reads as provisional rather than committed text.
@@ -1943,15 +2048,18 @@ impl PixelWindowApplication for ConTerminal {
                         // readable — you can see what you're about to type
                         // over, as in conhost.
                         surface.fill_rect(cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
-                        let glyph = under
-                            .filter(|cell| cell.has_contents())
-                            .and_then(|cell| {
-                                font::raster(first_grapheme(cell.contents()), self.font_size_px)
-                            });
+                        let glyph = under.filter(|cell| cell.has_contents()).and_then(|cell| {
+                            font::raster(first_grapheme(cell.contents()), self.font_size_px)
+                        });
                         if let Some(glyph) = glyph {
                             surface.blit_glyph(
                                 &glyph,
-                                CellRect { x: cx, y: cy, w: span, h: self.cell_h },
+                                CellRect {
+                                    x: cx,
+                                    y: cy,
+                                    w: span,
+                                    h: self.cell_h,
+                                },
                                 self.default_bg,
                                 0.0,
                             );
@@ -1966,7 +2074,13 @@ impl PixelWindowApplication for ConTerminal {
                     }
                     vt100::CursorShape::Bar => {
                         const THICKNESS: u32 = 2;
-                        surface.fill_rect(cx, cy, THICKNESS, self.cell_h, self.default_fg.to_xrgb());
+                        surface.fill_rect(
+                            cx,
+                            cy,
+                            THICKNESS,
+                            self.cell_h,
+                            self.default_fg.to_xrgb(),
+                        );
                     }
                 }
             }
@@ -2218,7 +2332,12 @@ fn paint_cells(
                 let shear = if cell.italic() { ITALIC_SHEAR } else { 0.0 };
                 surface.blit_glyph(
                     &glyph,
-                    CellRect { x: x0, y: y0, w: span_w, h: cell_h },
+                    CellRect {
+                        x: x0,
+                        y: y0,
+                        w: span_w,
+                        h: cell_h,
+                    },
                     fg,
                     shear,
                 );
@@ -2443,15 +2562,24 @@ mod tests {
         assert_eq!(app.scroll_offset, 0);
 
         app.scroll_by(3);
-        assert_eq!(app.scroll_offset, 3, "3 lines of real scrollback exist; scrolling up must move");
+        assert_eq!(
+            app.scroll_offset, 3,
+            "3 lines of real scrollback exist; scrolling up must move"
+        );
 
         // Overshooting clamps to what's actually buffered, not to 0.
         app.scroll_by(1000);
         let max = app.scroll_offset;
-        assert!(max > 3, "clamp must be the real available scrollback, not stuck at the first move");
+        assert!(
+            max > 3,
+            "clamp must be the real available scrollback, not stuck at the first move"
+        );
 
         app.scroll_by(-1000);
-        assert_eq!(app.scroll_offset, 0, "scrolling back down must return to the bottom");
+        assert_eq!(
+            app.scroll_offset, 0,
+            "scrolling back down must return to the bottom"
+        );
     }
 
     /// The reported "Ctrl+wheel zoom occasionally makes the window vanish
@@ -2495,7 +2623,11 @@ mod tests {
         parser.process(b"\x1b[1;5Hx");
 
         assert_eq!(
-            parser.screen().cell(0, 4).expect("col 4 still exists").contents(),
+            parser
+                .screen()
+                .cell(0, 4)
+                .expect("col 4 still exists")
+                .contents(),
             "x",
             "the narrow write must land, not just avoid panicking"
         );
@@ -2508,8 +2640,12 @@ mod tests {
     #[test]
     fn shrinking_a_grid_never_leaves_a_wide_cell_without_its_continuation() {
         for cols in 2u16..=12 {
-            let mut parser =
-                vt100::Parser::<ConCallbacks>::new_with_callbacks(2, 12, 0, ConCallbacks::default());
+            let mut parser = vt100::Parser::<ConCallbacks>::new_with_callbacks(
+                2,
+                12,
+                0,
+                ConCallbacks::default(),
+            );
             // Offset by one narrow char so the wide pairs straddle both odd
             // and even column boundaries as `cols` sweeps down.
             parser.process("a你好吗你".as_bytes());
@@ -2589,7 +2725,10 @@ mod tests {
         app.parser.screen_mut().set_size(4, 10);
         // 15 characters over a 10-column grid soft-wraps onto row 1.
         app.parser.process(b"abcdefghijklmno");
-        assert!(app.parser.screen().row_wrapped(0), "row 0 should be wrapped");
+        assert!(
+            app.parser.screen().row_wrapped(0),
+            "row 0 should be wrapped"
+        );
 
         // Clicking the continuation row still selects from the start of the
         // logical line, not just the visual row under the pointer.
@@ -2625,10 +2764,7 @@ mod tests {
         // Flags belonging to the hosted program must reach it untouched, not
         // be parsed (or rejected) by this host.
         let parsed = parse_args(&argv(&["-e", "ssh", "host", "-p", "22"])).expect("parses");
-        assert_eq!(
-            parsed.command,
-            Some(argv(&["ssh", "host", "-p", "22"]))
-        );
+        assert_eq!(parsed.command, Some(argv(&["ssh", "host", "-p", "22"])));
 
         // Host flags before -e still apply.
         let parsed =
@@ -2670,8 +2806,12 @@ mod tests {
     fn render_to_buffer(bytes: &[u8], cols: u16, rows: u16) -> (Vec<u32>, u32, u32) {
         let cell_w = 10u32;
         let cell_h = 20u32;
-        let mut screen_parser =
-            vt100::Parser::<ConCallbacks>::new_with_callbacks(rows, cols, 0, ConCallbacks::default());
+        let mut screen_parser = vt100::Parser::<ConCallbacks>::new_with_callbacks(
+            rows,
+            cols,
+            0,
+            ConCallbacks::default(),
+        );
         screen_parser.process(bytes);
         let fw = u32::from(cols) * cell_w;
         let fh = u32::from(rows) * cell_h;
@@ -2771,8 +2911,14 @@ mod tests {
                     let mut app = ConTerminal::new(None);
                     app.font_size_logical = logical;
                     app.apply_resize(w, h, scale);
-                    assert!(app.cols >= 2, "cols degenerated at scale={scale} logical={logical} w={w} h={h}");
-                    assert!(app.rows >= 2, "rows degenerated at scale={scale} logical={logical} w={w} h={h}");
+                    assert!(
+                        app.cols >= 2,
+                        "cols degenerated at scale={scale} logical={logical} w={w} h={h}"
+                    );
+                    assert!(
+                        app.rows >= 2,
+                        "rows degenerated at scale={scale} logical={logical} w={w} h={h}"
+                    );
                     assert!(app.cell_w > 0);
                     assert!(app.cell_h > 0);
                 }
@@ -2788,7 +2934,9 @@ mod tests {
         // of bug that would only show up for "large font + this app's prompt
         // happens to contain that glyph," matching a real-use-only report.
         let mut chars: Vec<char> = (32u8..=126).map(char::from).collect();
-        chars.extend(['中', '文', '字', '形', '日', '本', '語', '한', '국', '어', '➜', '★', '你']);
+        chars.extend([
+            '中', '文', '字', '形', '日', '本', '語', '한', '국', '어', '➜', '★', '你',
+        ]);
         for size in 8u16..=72 {
             for &ch in &chars {
                 let _ = font::raster(ch, size);
@@ -2808,13 +2956,21 @@ mod tests {
             let cell_h = 20u32.max(u32::from(size));
             let cols = (200u32 / cell_w).clamp(2, 512) as u16;
             let rows = (200u32 / cell_h).clamp(2, 512) as u16;
-            let mut parser =
-                vt100::Parser::<ConCallbacks>::new_with_callbacks(rows, cols, 0, ConCallbacks::default());
+            let mut parser = vt100::Parser::<ConCallbacks>::new_with_callbacks(
+                rows,
+                cols,
+                0,
+                ConCallbacks::default(),
+            );
             parser.process(bytes);
             let fw = u32::from(cols) * cell_w;
             let fh = u32::from(rows) * cell_h;
             let mut pixels = vec![0u32; (fw * fh) as usize];
-            let mut surface = Surface { pixels: &mut pixels, width: fw, height: fh };
+            let mut surface = Surface {
+                pixels: &mut pixels,
+                width: fw,
+                height: fh,
+            };
             paint_cells(
                 &mut surface,
                 parser.screen(),
@@ -2840,7 +2996,10 @@ mod tests {
         assert!(!parser.screen().cursor_blinking());
 
         parser.process(b"\x1b[3 q"); // blinking underline
-        assert_eq!(parser.screen().cursor_shape(), vt100::CursorShape::Underline);
+        assert_eq!(
+            parser.screen().cursor_shape(),
+            vt100::CursorShape::Underline
+        );
         assert!(parser.screen().cursor_blinking());
 
         parser.process(b"\x1b[2 q"); // steady block

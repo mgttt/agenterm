@@ -47,11 +47,7 @@ fn main() {
     // it costs the icon, nothing else).
     #[cfg(windows)]
     {
-        const ICON_BINS: &[&str] = &[
-            "agenterm",
-            "agenterm-cc",
-            "agenterm-con",
-        ];
+        const ICON_BINS: &[&str] = &["agenterm", "agenterm-cc", "agenterm-con"];
         let me = std::env::current_exe().expect("build script path");
         let output = std::process::Command::new(me)
             .env("AGENTERM_BUILDRS_RESOURCE_CHILD", "1")
@@ -71,8 +67,7 @@ fn main() {
             // selection, rc.exe stdout/stderr) — deliberately dropped so no
             // stray global cargo directive reaches cargo.
         }
-        let resource_path =
-            resource_path.expect("winresource did not emit a resource link-arg");
+        let resource_path = resource_path.expect("winresource did not emit a resource link-arg");
         for bin in ICON_BINS {
             println!("cargo:rustc-link-arg-bin={bin}={resource_path}");
         }

@@ -344,8 +344,7 @@ fn fs_create_dir_all(path: &str) -> Result<(), Box<EvalAltResult>> {
 fn fs_copy(source: &str, destination: &str) -> Result<rhai::INT, Box<EvalAltResult>> {
     let bytes = std::fs::copy(source, destination)
         .map_err(|error| io_error("fs_copy", destination, error))?;
-    rhai::INT::try_from(bytes)
-        .map_err(|_| "fs_copy_overflow: byte count exceeds Rh integer".into())
+    rhai::INT::try_from(bytes).map_err(|_| "fs_copy_overflow: byte count exceeds Rh integer".into())
 }
 
 fn fs_rename(source: &str, destination: &str) -> Result<(), Box<EvalAltResult>> {
@@ -1033,9 +1032,7 @@ mod tests {
         {
             let engine = local_engine();
             engine
-                .run(&format!(
-                    r#"rh::runtime::append_sync("{path}", "first");"#
-                ))
+                .run(&format!(r#"rh::runtime::append_sync("{path}", "first");"#))
                 .unwrap();
         }
 

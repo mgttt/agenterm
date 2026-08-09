@@ -158,8 +158,8 @@ pub fn read_manifest(path: &Path, accepted_kinds: &[&str]) -> Result<CheckManyMa
         ));
     }
     let bytes = std::fs::read(path).map_err(|err| format!("check_many_manifest_read: {err}"))?;
-    let manifest: CheckManyManifest = serde_json::from_slice(&bytes)
-        .map_err(|err| format!("check_many_manifest_json: {err}"))?;
+    let manifest: CheckManyManifest =
+        serde_json::from_slice(&bytes).map_err(|err| format!("check_many_manifest_json: {err}"))?;
     if manifest.schema_version != 1 {
         return Err("check_many_manifest_schema".into());
     }
@@ -297,7 +297,13 @@ where
         let source = match read_source_file(&path, options.source_bytes) {
             Ok(source) => source,
             Err(SourceReadFailure::Limit(message)) => {
-                failures.push(failure(label, "limit_source_bytes", message, ordinal, "limit"));
+                failures.push(failure(
+                    label,
+                    "limit_source_bytes",
+                    message,
+                    ordinal,
+                    "limit",
+                ));
                 continue;
             }
             Err(SourceReadFailure::Host(message)) => {
@@ -329,7 +335,13 @@ where
         }
     }
 
-    report(report_kind, started, checked_files, total_source_bytes, failures)
+    report(
+        report_kind,
+        started,
+        checked_files,
+        total_source_bytes,
+        failures,
+    )
 }
 
 enum SourceReadFailure {

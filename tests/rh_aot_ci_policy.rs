@@ -13,9 +13,8 @@ static PERFORMANCE_EXPERIMENT: LazyLock<String> = LazyLock::new(|| {
 });
 static CHECK: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rh/check.rh").replace("\r\n", "\n"));
-static ARTIFACT_VERIFICATION: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../scripts/rh/artifact-verification.rh").replace("\r\n", "\n")
-});
+static ARTIFACT_VERIFICATION: LazyLock<String> =
+    LazyLock::new(|| include_str!("../scripts/rh/artifact-verification.rh").replace("\r\n", "\n"));
 static CLIENT_SMOKE: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rh/client-smoke.rh").replace("\r\n", "\n"));
 static ROOT_MANIFEST: &str = include_str!("../Cargo.toml");
@@ -140,11 +139,9 @@ fn artifact_manifest_declares_rh_dev_cli_offline_version_probe() {
         "retired rh-dev-cli role must not reappear"
     );
     assert!(
-        !executables
-            .iter()
-            .any(|entry| entry["name"]
-                .as_str()
-                .is_some_and(|name| name.starts_with("agenterm-rh"))),
+        !executables.iter().any(|entry| entry["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("agenterm-rh"))),
         "retired agenterm-rh executable must not reappear in the manifest"
     );
     assert!(

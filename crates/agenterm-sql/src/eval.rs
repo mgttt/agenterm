@@ -198,7 +198,9 @@ pub fn execute_entry(
         let column_names: Vec<String> =
             stmt.column_names().into_iter().map(str::to_owned).collect();
         let mut rows = stmt.query([]).map_err(|err| {
-            SqlError::Check(format!("{label}: query failed for statement `{sql_text}`: {err}"))
+            SqlError::Check(format!(
+                "{label}: query failed for statement `{sql_text}`: {err}"
+            ))
         })?;
 
         let mut collected: Vec<Value> = Vec::new();
@@ -247,7 +249,10 @@ pub fn execute_entry(
         }
     }
 
-    Ok(ExecuteOutcome { stdout: String::new(), value })
+    Ok(ExecuteOutcome {
+        stdout: String::new(),
+        value,
+    })
 }
 
 /// See this module's doc for the full NULL/INTEGER/REAL/TEXT/BLOB mapping
@@ -256,7 +261,9 @@ fn value_ref_to_json(value_ref: ValueRef<'_>) -> Value {
     match value_ref {
         ValueRef::Null => Value::Null,
         ValueRef::Integer(i) => Value::Number(Number::from(i)),
-        ValueRef::Real(f) => Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null),
+        ValueRef::Real(f) => Number::from_f64(f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         ValueRef::Text(bytes) => Value::String(String::from_utf8_lossy(bytes).into_owned()),
         ValueRef::Blob(bytes) => Value::String(format!("\\x{}", hex_encode(bytes))),
     }
@@ -307,11 +314,9 @@ mod tests {
 
     #[test]
     fn multi_statement_create_insert_select_sees_earlier_side_effects() {
-        let outcome = run(
-            "CREATE TABLE widgets (id INTEGER, name TEXT); \
+        let outcome = run("CREATE TABLE widgets (id INTEGER, name TEXT); \
              INSERT INTO widgets (id, name) VALUES (1, 'gizmo'); \
-             SELECT id, name FROM widgets;",
-        );
+             SELECT id, name FROM widgets;");
         assert_eq!(
             outcome.value,
             Some(serde_json::json!([{"id": 1, "name": "gizmo"}]))
@@ -326,11 +331,9 @@ mod tests {
 
     #[test]
     fn multi_row_select_returns_all_rows_in_order() {
-        let outcome = run(
-            "CREATE TABLE t (n INTEGER); \
+        let outcome = run("CREATE TABLE t (n INTEGER); \
              INSERT INTO t VALUES (1), (2), (3); \
-             SELECT n FROM t ORDER BY n;",
-        );
+             SELECT n FROM t ORDER BY n;");
         assert_eq!(
             outcome.value,
             Some(serde_json::json!([{"n": 1}, {"n": 2}, {"n": 3}]))
@@ -386,7 +389,10 @@ mod tests {
 
     #[test]
     fn wall_time_ms_budget_of_zero_means_unenforced() {
-        let budgets = ExecuteBudgets { wall_time_ms: 0, ..Default::default() };
+        let budgets = ExecuteBudgets {
+            wall_time_ms: 0,
+            ..Default::default()
+        };
         let outcome = execute_entry("SELECT 1;", "ok.sql", Some(&budgets))
             .expect("a zero wall_time_ms budget must not be treated as an immediate timeout");
         assert_eq!(outcome.value, Some(serde_json::json!([{"1": 1}])));
@@ -394,7 +400,10 @@ mod tests {
 
     #[test]
     fn collection_items_budget_rejects_a_result_set_that_is_too_big() {
-        let budgets = ExecuteBudgets { collection_items: 2, ..Default::default() };
+        let budgets = ExecuteBudgets {
+            collection_items: 2,
+            ..Default::default()
+        };
         let error = execute_entry(
             "CREATE TABLE t (n INTEGER); \
              INSERT INTO t VALUES (1), (2), (3); \
@@ -408,9 +417,16 @@ mod tests {
 
     #[test]
     fn output_bytes_budget_rejects_a_result_that_is_too_big() {
-        let budgets = ExecuteBudgets { output_bytes: 4, ..Default::default() };
-        let error = execute_entry("SELECT 'this is a long string' AS s;", "too_big.sql", Some(&budgets))
-            .expect_err("an encoded result larger than the output_bytes budget should error");
+        let budgets = ExecuteBudgets {
+            output_bytes: 4,
+            ..Default::default()
+        };
+        let error = execute_entry(
+            "SELECT 'this is a long string' AS s;",
+            "too_big.sql",
+            Some(&budgets),
+        )
+        .expect_err("an encoded result larger than the output_bytes budget should error");
         assert!(error.to_string().contains("output_bytes"));
     }
 
@@ -423,7 +439,10 @@ mod tests {
         // detail of the progress-handler interrupt path, not this crate's
         // contract) — what's pinned is "it errors, script-class, instead
         // of completing or panicking".
-        let budgets = ExecuteBudgets { wall_time_ms: 1, ..Default::default() };
+        let budgets = ExecuteBudgets {
+            wall_time_ms: 1,
+            ..Default::default()
+        };
         let error = execute_entry(
             "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 100000000) \
              SELECT count(*) FROM cnt;",

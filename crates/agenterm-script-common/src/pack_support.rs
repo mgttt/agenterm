@@ -65,8 +65,8 @@ pub fn hash_source(source: &str) -> String {
 /// `receipt_serialize` / `receipt_write` error-prefix pattern lua's and
 /// qjs's `QualificationReceipt::write` shared verbatim.
 pub fn write_json_receipt<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|err| format!("receipt_serialize: {err}"))?;
+    let json =
+        serde_json::to_string_pretty(value).map_err(|err| format!("receipt_serialize: {err}"))?;
     std::fs::write(path, json).map_err(|err| format!("receipt_write: {err}"))
 }
 
@@ -113,9 +113,14 @@ mod tests {
     #[test]
     fn verify_file_hash_uses_caller_read_prefix_when_file_missing() {
         let dir = TempDir::new().expect("tempdir");
-        let err =
-            verify_file_hash(dir.path(), "missing.bin", "abc", "custom_read_prefix", "source")
-                .expect_err("missing file");
+        let err = verify_file_hash(
+            dir.path(),
+            "missing.bin",
+            "abc",
+            "custom_read_prefix",
+            "source",
+        )
+        .expect_err("missing file");
         assert!(err.starts_with("custom_read_prefix: "), "{err}");
     }
 

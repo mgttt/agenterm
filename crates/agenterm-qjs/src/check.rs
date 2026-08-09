@@ -116,7 +116,10 @@ pub fn check_with_project_validation(
     }
 
     let canonical_root = std::fs::canonicalize(project_root).map_err(|err| {
-        QjsError::Usage(format!("qjs_module_root: {}: {err}", project_root.display()))
+        QjsError::Usage(format!(
+            "qjs_module_root: {}: {err}",
+            project_root.display()
+        ))
     })?;
     let canonical_label = std::fs::canonicalize(label)
         .map_err(|err| QjsError::Usage(format!("qjs_module_entry: {}: {err}", label.display())))?;
@@ -237,7 +240,10 @@ mod tests {
         let source = std::fs::read_to_string(&entry_path).unwrap();
         let error = check_with_project_validation(&source, &entry_path, &inner)
             .expect_err("root-escaping import must fail check");
-        assert!(error.to_string().contains("Error resolving module"), "{error}");
+        assert!(
+            error.to_string().contains("Error resolving module"),
+            "{error}"
+        );
     }
 
     #[test]

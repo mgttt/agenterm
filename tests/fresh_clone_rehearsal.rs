@@ -32,15 +32,15 @@ fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
     let source = fs::read_to_string(&script).expect("read fresh-clone rehearsal");
     let manifest_text = fs::read_to_string(&manifest).expect("read manifest");
     assert!(manifest_text.contains("\"entry\": \"scripts/rh/fresh-clone-rehearsal.rh\""));
-    assert!(
-        !manifest_text.contains("\"entry\": \"scripts/rhai/fresh-clone-rehearsal.rhai\"")
-    );
+    assert!(!manifest_text.contains("\"entry\": \"scripts/rhai/fresh-clone-rehearsal.rhai\""));
     assert!(
         repo.join("scripts/archive/rhai/fresh-clone-rehearsal.rhai")
             .is_file()
     );
     assert!(
-        !repo.join("scripts/rhai/fresh-clone-rehearsal.rhai").exists()
+        !repo
+            .join("scripts/rhai/fresh-clone-rehearsal.rhai")
+            .exists()
     );
     for contract in [
         "AGENTERM_FRESH_CLONE_REHEARSAL_ACTIVE",

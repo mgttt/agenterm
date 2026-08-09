@@ -335,7 +335,10 @@ mod tests {
         );
         assert_eq!(authority.detach(&lease.lease_id, 42).unwrap(), renewed);
         assert_eq!(authority.leases().len(), 1);
-        assert_eq!(authority.active().map(|l| l.lease_id.as_str()), Some(other.lease_id.as_str()));
+        assert_eq!(
+            authority.active().map(|l| l.lease_id.as_str()),
+            Some(other.lease_id.as_str())
+        );
     }
 
     #[test]

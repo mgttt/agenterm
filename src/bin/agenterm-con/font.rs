@@ -160,16 +160,22 @@ impl Renderer {
     }
 
     fn raster_uncached(&self, ch: char, size_px: u16) -> Option<Arc<RasterGlyph>> {
-        if let Some(face) = self.faces.iter().find(|f| f.font.glyph_id(ch) != GlyphId(0)) {
+        if let Some(face) = self
+            .faces
+            .iter()
+            .find(|f| f.font.glyph_id(ch) != GlyphId(0))
+        {
             let scaled = face.font.as_scaled(f32::from(size_px));
             let glyph_id = scaled.glyph_id(ch);
-            let outlined = scaled.outline_glyph(glyph_id.with_scale(PxScale::from(f32::from(size_px))))?;
+            let outlined =
+                scaled.outline_glyph(glyph_id.with_scale(PxScale::from(f32::from(size_px))))?;
             let bounds = outlined.px_bounds();
             let (width, height) = clamp_glyph_dims(bounds.width(), bounds.height());
             let mut alpha = vec![0u8; width as usize * height as usize];
             outlined.draw(|x, y, coverage| {
                 if x < width && y < height {
-                    alpha[(y * width + x) as usize] = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    alpha[(y * width + x) as usize] =
+                        (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
                 }
             });
             // Absolute cell-relative placement: the caller adds offset_y to the
@@ -223,7 +229,9 @@ fn push_faces(
     let path: PathBuf = candidate
         .components
         .iter()
-        .fold(PathBuf::from(std::path::MAIN_SEPARATOR_STR), |p, c| p.join(c));
+        .fold(PathBuf::from(std::path::MAIN_SEPARATOR_STR), |p, c| {
+            p.join(c)
+        });
     let Ok(data) = fs::read(&path) else {
         return false;
     };
@@ -342,7 +350,10 @@ mod tests {
         assert!(height <= MAX_GLYPH_DIM);
         // The product itself must be safely representable and small enough
         // that the allocation this feeds is never a real concern.
-        assert!(u64::from(width) * u64::from(height) <= u64::from(MAX_GLYPH_DIM) * u64::from(MAX_GLYPH_DIM));
+        assert!(
+            u64::from(width) * u64::from(height)
+                <= u64::from(MAX_GLYPH_DIM) * u64::from(MAX_GLYPH_DIM)
+        );
     }
 
     #[test]
@@ -352,7 +363,10 @@ mod tests {
         // nonsensical (e.g. huge via a bad cast) result for any input.
         assert_eq!(clamp_glyph_dims(-5.0, -5.0), (0, 0));
         assert_eq!(clamp_glyph_dims(f32::NAN, f32::NAN), (0, 0));
-        assert_eq!(clamp_glyph_dims(f32::INFINITY, f32::INFINITY), (MAX_GLYPH_DIM, MAX_GLYPH_DIM));
+        assert_eq!(
+            clamp_glyph_dims(f32::INFINITY, f32::INFINITY),
+            (MAX_GLYPH_DIM, MAX_GLYPH_DIM)
+        );
     }
 
     #[test]
@@ -376,7 +390,14 @@ mod tests {
             cache.insert(GlyphKey { ch, size: 14 }, None);
         }
         assert_eq!(cache.values.len(), MAX_CACHED_GLYPHS);
-        assert!(cache.get(&GlyphKey { ch: '\u{1000}', size: 14 }).is_none());
+        assert!(
+            cache
+                .get(&GlyphKey {
+                    ch: '\u{1000}',
+                    size: 14
+                })
+                .is_none()
+        );
     }
 
     #[test]

@@ -24,7 +24,9 @@ pub fn blend(from: Rgb, to: Rgb, amount: f32) -> Rgb {
     let mix = |a: u8, b: u8| {
         let a = f32::from(a);
         let b = f32::from(b);
-        (a + (b - a) * amount.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8
+        (a + (b - a) * amount.clamp(0.0, 1.0))
+            .round()
+            .clamp(0.0, 255.0) as u8
     };
     Rgb(mix(from.0, to.0), mix(from.1, to.1), mix(from.2, to.2))
 }
@@ -38,10 +40,22 @@ fn palette() -> &'static [Rgb; 256] {
 
         // 0..16: ANSI standard + bright. Matches xterm's built-in set.
         let ansi: [[u8; 3]; 16] = [
-            [0x00, 0x00, 0x00], [0xCD, 0x00, 0x00], [0x00, 0xCD, 0x00], [0xCD, 0xCD, 0x00],
-            [0x00, 0x00, 0xEE], [0xCD, 0x00, 0xCD], [0x00, 0xCD, 0xCD], [0xE5, 0xE5, 0xE5],
-            [0x7F, 0x7F, 0x7F], [0xFF, 0x00, 0x00], [0x00, 0xFF, 0x00], [0xFF, 0xFF, 0x00],
-            [0x5C, 0x5C, 0xFF], [0xFF, 0x00, 0xFF], [0x00, 0xFF, 0xFF], [0xFF, 0xFF, 0xFF],
+            [0x00, 0x00, 0x00],
+            [0xCD, 0x00, 0x00],
+            [0x00, 0xCD, 0x00],
+            [0xCD, 0xCD, 0x00],
+            [0x00, 0x00, 0xEE],
+            [0xCD, 0x00, 0xCD],
+            [0x00, 0xCD, 0xCD],
+            [0xE5, 0xE5, 0xE5],
+            [0x7F, 0x7F, 0x7F],
+            [0xFF, 0x00, 0x00],
+            [0x00, 0xFF, 0x00],
+            [0xFF, 0xFF, 0x00],
+            [0x5C, 0x5C, 0xFF],
+            [0xFF, 0x00, 0xFF],
+            [0x00, 0xFF, 0xFF],
+            [0xFF, 0xFF, 0xFF],
         ];
         for (index, rgb) in ansi.iter().enumerate() {
             table[index] = Rgb(rgb[0], rgb[1], rgb[2]);
@@ -95,7 +109,10 @@ mod tests {
 
     #[test]
     fn black_and_white_corners_are_stable() {
-        assert_eq!(resolve(vt100::Color::Idx(16), Rgb(0, 0, 0), false), Rgb(0, 0, 0));
+        assert_eq!(
+            resolve(vt100::Color::Idx(16), Rgb(0, 0, 0), false),
+            Rgb(0, 0, 0)
+        );
         assert_eq!(
             resolve(vt100::Color::Idx(231), Rgb(0, 0, 0), false),
             Rgb(255, 255, 255)

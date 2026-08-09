@@ -3,9 +3,8 @@
 //! Wraps mlua + LuaJIT to provide `eval` and `check` operations,
 //! with host function injection for fleet/args/print callbacks.
 
-mod stdlib;
-pub mod check;
 pub mod cache;
+pub mod check;
 pub mod check_many;
 pub mod cli;
 pub mod compile;
@@ -13,6 +12,7 @@ pub mod corpus_scan;
 pub mod manifest;
 pub mod pack;
 pub mod qualify;
+mod stdlib;
 
 // `main.rs` is compiled as a `[[bin]]` of the root `agenterm` package (see
 // the root Cargo.toml), not as a target of this crate — it can only reach
@@ -136,11 +136,7 @@ impl LuaEngine {
 
     /// Evaluate Lua source with optional host functions, returning an i64 exit code
     /// and captured print output.
-    pub fn eval(
-        &self,
-        source: &str,
-        host: &LuaHostFunctions,
-    ) -> Result<LuaEvalResult, LuaError> {
+    pub fn eval(&self, source: &str, host: &LuaHostFunctions) -> Result<LuaEvalResult, LuaError> {
         let stdout = Arc::new(std::sync::Mutex::new(String::new()));
 
         // Inject __host table with fleet_call, args_len, arg, print.
@@ -149,7 +145,9 @@ impl LuaEngine {
 
         // Prepend fleet.lua module source so scripts can use fleet.* APIs.
         let fleet_src = fleet_source();
-        let fleet_src = fleet_src.trim_end().strip_suffix("return fleet")
+        let fleet_src = fleet_src
+            .trim_end()
+            .strip_suffix("return fleet")
             .unwrap_or(fleet_src)
             .trim_end();
         let full_source = format!("{fleet_src}\n{source}");
@@ -180,8 +178,7 @@ impl LuaEngine {
         source: &str,
         host: &LuaHostFunctions,
     ) -> Result<(LuaEvalResult, bool), LuaError> {
-        let cached = crate::cache::cached_compile(source)
-            .map_err(LuaError::Engine)?;
+        let cached = crate::cache::cached_compile(source).map_err(LuaError::Engine)?;
         let result = self.eval(source, host)?;
         Ok((result, cached.cache_hit))
     }
@@ -193,8 +190,8 @@ impl LuaEngine {
         path: &std::path::Path,
         host: &LuaHostFunctions,
     ) -> Result<(LuaEvalResult, bool), LuaError> {
-        let source =
-            std::fs::read_to_string(path).map_err(|e| LuaError::Engine(format!("read_file: {e}")))?;
+        let source = std::fs::read_to_string(path)
+            .map_err(|e| LuaError::Engine(format!("read_file: {e}")))?;
         self.eval_cached(&source, host)
     }
 
@@ -440,11 +437,12 @@ mod tests {
             .join("lua")
             .join("lib")
             .join("fleet.lua");
-        let fleet_source = std::fs::read_to_string(&fleet_path)
-            .expect("read fleet.lua");
+        let fleet_source = std::fs::read_to_string(&fleet_path).expect("read fleet.lua");
 
         // fleet.lua ends with `return fleet`; strip it so we can append test code
-        let fleet_source = fleet_source.trim_end().strip_suffix("return fleet")
+        let fleet_source = fleet_source
+            .trim_end()
+            .strip_suffix("return fleet")
             .unwrap_or(&fleet_source)
             .trim_end()
             .to_string();
@@ -473,11 +471,7 @@ mod tests {
         let host = LuaHostFunctions::default();
         let args = vec!["hello".to_string(), "world".to_string()];
         let result = engine
-            .eval_with_args(
-                "local n = __host.args_len() return n",
-                &host,
-                &args,
-            )
+            .eval_with_args("local n = __host.args_len() return n", &host, &args)
             .expect("eval_with_args");
         assert_eq!(result.value, 2);
     }
@@ -495,7 +489,11 @@ mod tests {
             )
             .expect("eval_with_args");
         assert_eq!(result.value, 0);
-        assert!(result.stdout.contains("first second"), "stdout: {}", result.stdout);
+        assert!(
+            result.stdout.contains("first second"),
+            "stdout: {}",
+            result.stdout
+        );
     }
 
     #[test]
@@ -514,7 +512,10 @@ mod tests {
         let host = LuaHostFunctions::default();
         // Without __host.fleet_call, calls should return nil gracefully
         let result = engine
-            .eval("local r = fleet.tabs.list(); return r == nil and 1 or 0", &host)
+            .eval(
+                "local r = fleet.tabs.list(); return r == nil and 1 or 0",
+                &host,
+            )
             .expect("eval");
         assert_eq!(result.value, 1, "should return nil when no fleet bridge");
     }
@@ -532,7 +533,13 @@ mod tests {
             .expect("git init");
         // Configure git user for commit
         Command::new("git")
-            .args(["-C", repo.to_str().unwrap(), "config", "user.email", "test@example.com"])
+            .args([
+                "-C",
+                repo.to_str().unwrap(),
+                "config",
+                "user.email",
+                "test@example.com",
+            ])
             .output()
             .ok();
         Command::new("git")
@@ -557,32 +564,42 @@ mod tests {
         let output_str = output_path.to_str().unwrap().to_string();
         let host = LuaHostFunctions {
             args_len: Some(Arc::new(|| 3)),
-            arg: Some(Arc::new(move |i: i64| {
-                match i {
-                    0 => Ok(repo_str.clone()),
-                    1 => Ok("dev".to_string()),
-                    2 => Ok(output_str.clone()),
-                    _ => Err("out of range".to_string()),
-                }
+            arg: Some(Arc::new(move |i: i64| match i {
+                0 => Ok(repo_str.clone()),
+                1 => Ok("dev".to_string()),
+                2 => Ok(output_str.clone()),
+                _ => Err("out of range".to_string()),
             })),
             ..Default::default()
         };
 
         // Load build_identity module, then entry point
         let lib_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap().parent().unwrap()
-            .join("scripts").join("lua").join("lib").join("build_identity.lua");
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("scripts")
+            .join("lua")
+            .join("lib")
+            .join("build_identity.lua");
         let lib_source = std::fs::read_to_string(&lib_path).expect("read lib");
         // Remove `return build_identity` so the local stays in scope
-        let lib_source = lib_source.trim_end()
+        let lib_source = lib_source
+            .trim_end()
             .strip_suffix("return build_identity")
             .unwrap_or(&lib_source)
             .trim_end()
             .to_string();
 
         let entry_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap().parent().unwrap()
-            .join("scripts").join("lua").join("build_identity.lua");
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("scripts")
+            .join("lua")
+            .join("build_identity.lua");
         let entry_source = std::fs::read_to_string(&entry_path).expect("read entry");
 
         let script = format!("{lib_source}\n{entry_source}");

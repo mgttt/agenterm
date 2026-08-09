@@ -34,8 +34,10 @@ fn explicit_gui_cli_preserves_diagnostics_and_exit_code() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("agenterm cli --deadline-ms must be from 1 to 60000"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("agenterm cli --deadline-ms must be from 1 to 60000")
+    );
 }
 
 #[test]
@@ -77,11 +79,7 @@ fn cmd_script_waits_for_explicit_agenterm_exe_and_preserves_pipeline_output() {
     let executable = agenterm_executable();
     let directory = executable.parent().expect("agenterm.exe directory");
     let output = Command::new("cmd.exe")
-        .args([
-            "/d",
-            "/c",
-            "agenterm.exe cli --version | findstr agenterm",
-        ])
+        .args(["/d", "/c", "agenterm.exe cli --version | findstr agenterm"])
         .current_dir(directory)
         .output()
         .expect("run agenterm.exe cli through cmd script");

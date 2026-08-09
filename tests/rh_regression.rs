@@ -110,8 +110,7 @@ fn check_accepts_import_via_compat() {
 fn build_rh_transpiles_native_without_compat_delegation() {
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source = std::fs::read_to_string(repo.join("scripts/rh/build.rh")).expect("read");
-    let output =
-        agenterm_rh::transpile_cdylib_with_project(&repo, &source).expect("transpile");
+    let output = agenterm_rh::transpile_cdylib_with_project(&repo, &source).expect("transpile");
     assert_eq!(
         output.execution_mode,
         agenterm_rh::CdylibExecutionMode::Native,

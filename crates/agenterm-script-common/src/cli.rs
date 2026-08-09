@@ -10,7 +10,9 @@
 
 use std::path::PathBuf;
 
-use crate::check_many::{CheckManyOptions, DEFAULT_SOURCE_BYTES, DEFAULT_WALL_TIME_MS, ParsedCheckManyCli};
+use crate::check_many::{
+    CheckManyOptions, DEFAULT_SOURCE_BYTES, DEFAULT_WALL_TIME_MS, ParsedCheckManyCli,
+};
 
 /// Parse `check-many` argv: `--manifest FILE` (required),
 /// `--project-root DIR`, `--timeout-ms N`, `--max-output-bytes N`
@@ -416,8 +418,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_profile() {
-        let err =
-            parse(&["--manifest", "m.json", "--profile", "weird"]).expect_err("bad profile");
+        let err = parse(&["--manifest", "m.json", "--profile", "weird"]).expect_err("bad profile");
         assert!(err.contains("weird"), "{err}");
     }
 

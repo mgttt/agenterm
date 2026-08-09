@@ -57,9 +57,9 @@ fn main() -> std::process::ExitCode {
             .iter()
             .cloned()
             .map(|argument| {
-                argument
-                    .into_string()
-                    .unwrap_or_else(|invalid| panic!("invalid utf-8 sequence in argument: {invalid:?}"))
+                argument.into_string().unwrap_or_else(|invalid| {
+                    panic!("invalid utf-8 sequence in argument: {invalid:?}")
+                })
             })
             .collect::<Vec<_>>();
         return match agenterm::incremental_wrapper::finalize_incremental_manifest(&arguments) {

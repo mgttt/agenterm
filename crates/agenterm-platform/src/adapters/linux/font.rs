@@ -94,7 +94,14 @@ pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
         },
         FontFileCandidate {
             name: "WenQuanYi Micro Hei",
-            components: &["usr", "share", "fonts", "truetype", "wqy", "wqy-microhei.ttc"],
+            components: &[
+                "usr",
+                "share",
+                "fonts",
+                "truetype",
+                "wqy",
+                "wqy-microhei.ttc",
+            ],
         },
         FontFileCandidate {
             name: "Noto Color Emoji",

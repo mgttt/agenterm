@@ -184,7 +184,13 @@ fn syntax_error_in_one_file() {
 
         assert!(!report.ok, "{}: expected failure report", engine.name);
         assert_eq!(report.checked_files, 2, "{}", engine.name);
-        assert_eq!(report.failures.len(), 1, "{}: {:?}", engine.name, report.failures);
+        assert_eq!(
+            report.failures.len(),
+            1,
+            "{}: {:?}",
+            engine.name,
+            report.failures
+        );
         // Engine-specific syntax-failure codes (rh_subset/rh_check vs
         // lua_check vs qjs_parse) intentionally NOT compared here — only
         // the engine-neutral exit_class/exit_code contract is shared.
@@ -215,8 +221,16 @@ fn manifest_path_escapes_root() {
 
         assert!(!report.ok, "{}", engine.name);
         assert_eq!(report.failures.len(), 1, "{}", engine.name);
-        assert_eq!(report.failures[0].code, "check_many_path", "{}", engine.name);
-        assert_eq!(report.failures[0].exit_class, "configuration", "{}", engine.name);
+        assert_eq!(
+            report.failures[0].code, "check_many_path",
+            "{}",
+            engine.name
+        );
+        assert_eq!(
+            report.failures[0].exit_class, "configuration",
+            "{}",
+            engine.name
+        );
         assert_eq!(report.exit_code(), 2, "{}", engine.name);
     }
 }
@@ -236,8 +250,16 @@ fn absolute_path_rejected() {
 
         assert!(!report.ok, "{}", engine.name);
         assert_eq!(report.failures.len(), 1, "{}", engine.name);
-        assert_eq!(report.failures[0].code, "check_many_path", "{}", engine.name);
-        assert_eq!(report.failures[0].exit_class, "configuration", "{}", engine.name);
+        assert_eq!(
+            report.failures[0].code, "check_many_path",
+            "{}",
+            engine.name
+        );
+        assert_eq!(
+            report.failures[0].exit_class, "configuration",
+            "{}",
+            engine.name
+        );
         assert_eq!(report.exit_code(), 2, "{}", engine.name);
     }
 }
@@ -256,8 +278,16 @@ fn duplicate_resolved_path() {
         assert!(!report.ok, "{}", engine.name);
         assert_eq!(report.checked_files, 1, "{}", engine.name);
         assert_eq!(report.failures.len(), 1, "{}", engine.name);
-        assert_eq!(report.failures[0].code, "check_many_duplicate", "{}", engine.name);
-        assert_eq!(report.failures[0].exit_class, "configuration", "{}", engine.name);
+        assert_eq!(
+            report.failures[0].code, "check_many_duplicate",
+            "{}",
+            engine.name
+        );
+        assert_eq!(
+            report.failures[0].exit_class, "configuration",
+            "{}",
+            engine.name
+        );
         assert_eq!(report.exit_code(), 2, "{}", engine.name);
     }
 }
@@ -276,7 +306,11 @@ fn zero_wall_time() {
 
         assert!(!report.ok, "{}", engine.name);
         assert_eq!(report.checked_files, 0, "{}", engine.name);
-        assert_eq!(report.failures[0].code, "limit_wall_time", "{}", engine.name);
+        assert_eq!(
+            report.failures[0].code, "limit_wall_time",
+            "{}",
+            engine.name
+        );
         assert_eq!(report.failures[0].exit_class, "limit", "{}", engine.name);
         assert_eq!(report.exit_code(), 3, "{}", engine.name);
     }
@@ -301,7 +335,11 @@ fn per_file_source_budget() {
 
         assert!(!report.ok, "{}", engine.name);
         assert_eq!(report.checked_files, 0, "{}", engine.name);
-        assert_eq!(report.failures[0].code, "limit_source_bytes", "{}", engine.name);
+        assert_eq!(
+            report.failures[0].code, "limit_source_bytes",
+            "{}",
+            engine.name
+        );
         assert_eq!(report.failures[0].exit_class, "limit", "{}", engine.name);
         assert_eq!(report.exit_code(), 3, "{}", engine.name);
     }
@@ -314,10 +352,16 @@ fn wrong_manifest_kind_rejected_by_each_reader() {
     // rejection matrix (minus the 4 diagonal "own kind" cells, covered by
     // the per-reader sanity check below instead).
     let readers: [(&str, ManifestReader); 4] = [
-        ("rh", |p| agenterm_rh::check_many::read_manifest(p).map_err(|e| e.to_string())),
+        ("rh", |p| {
+            agenterm_rh::check_many::read_manifest(p).map_err(|e| e.to_string())
+        }),
         ("lua", agenterm_lua::check_many::read_manifest),
-        ("qjs", |p| agenterm_qjs::check_many::read_manifest(p).map_err(|e| e.to_string())),
-        ("sql", |p| agenterm_sql::check_many::read_manifest(p).map_err(|e| e.to_string())),
+        ("qjs", |p| {
+            agenterm_qjs::check_many::read_manifest(p).map_err(|e| e.to_string())
+        }),
+        ("sql", |p| {
+            agenterm_sql::check_many::read_manifest(p).map_err(|e| e.to_string())
+        }),
     ];
 
     for (name, reader) in readers {
@@ -341,7 +385,10 @@ fn wrong_manifest_kind_rejected_by_each_reader() {
         let file = format!("a.{}", own_engine.ext);
         fs::write(dir.path().join(&file), own_engine.valid_source).unwrap();
         let manifest_path = write_manifest(dir.path(), own_engine.kind, &[&file]);
-        assert!(reader(&manifest_path).is_ok(), "{name}: expected own kind to be accepted");
+        assert!(
+            reader(&manifest_path).is_ok(),
+            "{name}: expected own kind to be accepted"
+        );
     }
 
     // Deliberate compat lock-in: rh additionally accepts the legacy rhai
@@ -350,7 +397,7 @@ fn wrong_manifest_kind_rejected_by_each_reader() {
     let dir = tempfile::tempdir().expect("tempdir");
     fs::write(dir.path().join("a.rh"), RH.valid_source).unwrap();
     let manifest_path = write_manifest(dir.path(), RH_LEGACY_RHAI_KIND, &["a.rh"]);
-    let manifest =
-        agenterm_rh::check_many::read_manifest(&manifest_path).expect("rh accepts legacy rhai kind");
+    let manifest = agenterm_rh::check_many::read_manifest(&manifest_path)
+        .expect("rh accepts legacy rhai kind");
     assert_eq!(manifest.kind, RH_LEGACY_RHAI_KIND);
 }

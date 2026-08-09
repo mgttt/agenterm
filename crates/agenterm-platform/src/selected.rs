@@ -484,10 +484,7 @@ pub mod ipc;
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;
 
-#[cfg(all(
-    windows,
-    any(feature = "pty", feature = "process")
-))]
+#[cfg(all(windows, any(feature = "pty", feature = "process")))]
 #[path = "adapters/windows/console.rs"]
 pub(crate) mod console;
 

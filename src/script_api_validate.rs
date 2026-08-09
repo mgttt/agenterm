@@ -16,8 +16,8 @@ pub fn validate_available_apis(source: &str) -> Result<(), ScriptFailure> {
 }
 
 pub use agenterm_rh::api_validate::{
-    agent_method_calls, external_function_calls, fleet_method_calls, qualified_function_calls,
-    ApiValidateError,
+    ApiValidateError, agent_method_calls, external_function_calls, fleet_method_calls,
+    qualified_function_calls,
 };
 pub use agenterm_rh::shipped_surfaces::SHIPPED_SURFACE_PATHS;
 
@@ -25,7 +25,7 @@ pub use agenterm_rh::shipped_surfaces::SHIPPED_SURFACE_PATHS;
 mod tests {
     use std::collections::HashSet;
 
-    use crate::script_catalog::{entries, ScriptApiStatus};
+    use crate::script_catalog::{ScriptApiStatus, entries};
 
     use super::qualified_function_calls;
 

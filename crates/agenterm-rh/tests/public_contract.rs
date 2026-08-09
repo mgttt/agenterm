@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use agenterm_rh::{
-    CheckManyOptions, RhError, RH_CODEGEN_REVISION, check, check_with_project_validation,
+    CheckManyOptions, RH_CODEGEN_REVISION, RhError, check, check_with_project_validation,
     read_manifest, run_check_many, transpile_cdylib,
 };
 
@@ -88,7 +88,7 @@ const FIXTURE_NAMES: [&str; 79] = [
     "try-catch.rh",
     "try-ok.rh",
     "while-count.rh",
-    "while.rh"
+    "while.rh",
 ];
 
 const CONTROL_FLOW_FIXTURES: [&str; 7] = [

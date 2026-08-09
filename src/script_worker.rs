@@ -9,9 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::script_engine::ScriptEngineBackend as _;
 #[cfg(test)]
 use crate::script_protocol::ScriptProfile;
-use crate::script_engine::ScriptEngineBackend as _;
 use crate::script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
     SCRIPT_INVOCATION_MAX_BYTES, ScriptBrokerRequest, ScriptBrokerResponse, ScriptBudgets,
@@ -248,8 +248,7 @@ fn process_concurrent_framed_worker<R: Read>(
                                 .expect("requested cancellation has an active invocation")
                                 .1
                                 .store(true, Ordering::Relaxed),
-                            ScriptCancelDisposition::TooLate
-                            | ScriptCancelDisposition::Unknown => {
+                            ScriptCancelDisposition::TooLate | ScriptCancelDisposition::Unknown => {
                                 let (code, message) = disposition
                                     .rejection()
                                     .expect("non-requested cancellation has a rejection");
@@ -284,9 +283,8 @@ fn process_concurrent_framed_worker<R: Read>(
                                 let _ = sender.send(response);
                             }
                             Some(pending) => {
-                                *pending_broker
-                                    .lock()
-                                    .expect("pending broker lock poisoned") = Some(pending);
+                                *pending_broker.lock().expect("pending broker lock poisoned") =
+                                    Some(pending);
                                 write_shared_protocol_frame(
                                     &output,
                                     &frame_id,
@@ -336,7 +334,6 @@ fn process_concurrent_framed_worker<R: Read>(
     }
     Ok(())
 }
-
 
 fn write_shared_frame(output: &SharedFrameOutput, frame: &ScriptFrame) -> anyhow::Result<()> {
     let mut output = output.lock().expect("framed stdout lock poisoned");
@@ -619,10 +616,9 @@ fn execute_inner(
     let fleet_bridge: Option<crate::script_engine::ScriptFleetBridgeFn> =
         broker.as_ref().map(|broker| {
             let broker = broker.clone();
-            let bridge: crate::script_engine::ScriptFleetBridgeFn = Arc::new(
-                move |op_id: &str, params: &str| -> Result<String, String> {
-                    let arguments =
-                        serde_json::from_str(params).unwrap_or(serde_json::json!({}));
+            let bridge: crate::script_engine::ScriptFleetBridgeFn =
+                Arc::new(move |op_id: &str, params: &str| -> Result<String, String> {
+                    let arguments = serde_json::from_str(params).unwrap_or(serde_json::json!({}));
                     broker
                         .call_json(
                             "fleet.call",
@@ -632,8 +628,7 @@ fn execute_inner(
                             }),
                         )
                         .map(|value| value.to_string())
-                },
-            );
+                });
             bridge
         });
 

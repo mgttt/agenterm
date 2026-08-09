@@ -124,6 +124,8 @@ if defined AGENTERM_BOOTSTRAP_POST_IDENTITY del /q "%AGENTERM_BOOTSTRAP_POST_IDE
 if defined AGENTERM_BOOTSTRAP_UNTRACKED del /q "%AGENTERM_BOOTSTRAP_UNTRACKED%" >nul 2>nul
 if defined AGENTERM_BOOTSTRAP_CACHE_TEMP del /q "%AGENTERM_BOOTSTRAP_CACHE_TEMP%" >nul 2>nul
 if defined AGENTERM_BOOTSTRAP_STAMP_TEMP del /q "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" >nul 2>nul
+rem Prune stale incremental caches -- never fails the caller
+if not defined AGENTERM_SKIP_INCREMENTAL_PRUNE powershell -NoProfile -ExecutionPolicy Bypass -File "%AGENTERM_BOOTSTRAP_REPO%\scripts\prune-incremental.ps1" >nul 2>nul
 exit /b 0
 
 :write_identity

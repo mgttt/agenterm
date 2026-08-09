@@ -26,10 +26,7 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 28] = [
         "duration-task-sleep-probe.rh",
         &["std::thread::sleep(std::time::Duration::from_millis("],
     ),
-    (
-        "env-current-dir-probe.rh",
-        &["rh_env_current_dir()"],
-    ),
+    ("env-current-dir-probe.rh", &["rh_env_current_dir()"]),
     (
         "env-parse-int-probe.rh",
         &["rh_env_has(", "rh_env_parse_int("],
@@ -42,14 +39,8 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 28] = [
             "rh_json_get_path(&marker_run, &[\"column\"])",
         ],
     ),
-    (
-        "json-stringify-probe.rh",
-        &["rh_json_stringify("],
-    ),
-    (
-        "path-join-probe.rh",
-        &["rh_path_join("],
-    ),
+    ("json-stringify-probe.rh", &["rh_json_stringify("]),
+    ("path-join-probe.rh", &["rh_path_join("]),
     ("process-kill-probe.rh", &["rh_process_kill(4242)"]),
     ("std-fs-write-probe.rh", &["rh_std_fs_write("]),
     (
@@ -68,30 +59,15 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 28] = [
         "system-time-unix-millis-probe.rh",
         &["rh_system_time_now_unix_millis()"],
     ),
-    (
-        "path-is-absolute-probe.rh",
-        &["rh_path_is_absolute("],
-    ),
-    (
-        "string-split-probe.rh",
-        &["rh_string_split("],
-    ),
-    (
-        "std-fs-exists-probe.rh",
-        &["rh_std_fs_exists("],
-    ),
+    ("path-is-absolute-probe.rh", &["rh_path_is_absolute("]),
+    ("string-split-probe.rh", &["rh_string_split("]),
+    ("std-fs-exists-probe.rh", &["rh_std_fs_exists("]),
     (
         "json-parse-file-probe.rh",
         &["rh_json_parse(&rh_std_fs_read_to_string("],
     ),
-    (
-        "string-to-lower-probe.rh",
-        &[".to_ascii_lowercase()"],
-    ),
-    (
-        "string-contains-probe.rh",
-        &[".contains("],
-    ),
+    ("string-to-lower-probe.rh", &[".to_ascii_lowercase()"]),
+    ("string-contains-probe.rh", &[".contains("]),
     (
         "direntry-file-name-probe.rh",
         &["for entry in rh_read_dir(", "entry.file_name"],
@@ -108,16 +84,10 @@ const NEW_PUBLIC_PROBES: [(&str, &[&str]); 28] = [
     // whose prelude now stringifies scalars (numbers/bools) instead of
     // hard-failing — the interpreter/native divergence that broke every
     // gate message concatenating a JSON number.
-    (
-        "json-scalar-concat-probe.rh",
-        &["rh_json_string_path("],
-    ),
+    ("json-scalar-concat-probe.rh", &["rh_json_string_path("]),
     // json == json must emit a real serde_json::Value equality (null-safe),
     // never the fail-closed string coercion the qualification gate died on.
-    (
-        "json-null-eq-probe.rh",
-        &["== null_json())) as INT"],
-    ),
+    ("json-null-eq-probe.rh", &["== null_json())) as INT"]),
 ];
 
 fn repo_root() -> PathBuf {

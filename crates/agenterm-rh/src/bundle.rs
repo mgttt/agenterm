@@ -46,10 +46,7 @@ pub fn bundle_project_source(root: &Path, source: &str) -> Result<String, RhErro
     let mut seen_fns = BTreeSet::new();
     for (alias, module_source) in &modules {
         let stripped = strip_import_statements(module_source)?;
-        let local = alias_fns
-            .get(alias)
-            .cloned()
-            .unwrap_or_default();
+        let local = alias_fns.get(alias).cloned().unwrap_or_default();
         let prefixed = prefix_local_fns(&stripped, alias, &local)?;
         let rewritten = rewrite_aliased_calls(&prefixed, &alias_fns)?;
         reject_duplicate_fns(&rewritten, &mut seen_fns)?;
@@ -197,8 +194,7 @@ fn literal_import_decls(source: &str) -> Result<Vec<ImportDecl>, String> {
             index += 2;
             skip_script_spacing(bytes, &mut index);
             let alias_start = index;
-            if index >= bytes.len()
-                || !(bytes[index].is_ascii_alphabetic() || bytes[index] == b'_')
+            if index >= bytes.len() || !(bytes[index].is_ascii_alphabetic() || bytes[index] == b'_')
             {
                 return Err("script_module_import_alias: missing import alias".to_owned());
             }
@@ -356,8 +352,7 @@ fn prefix_local_fns(
             while previous > 0 && bytes[previous - 1].is_ascii_whitespace() {
                 previous -= 1;
             }
-            let is_method_or_qualified =
-                previous > 0 && matches!(bytes[previous - 1], b'.' | b':');
+            let is_method_or_qualified = previous > 0 && matches!(bytes[previous - 1], b'.' | b':');
             if local_fns.contains(ident) && (is_def || (is_call && !is_method_or_qualified)) {
                 out.push_str(&mangled_name(alias, ident));
             } else {
@@ -437,10 +432,7 @@ fn rewrite_aliased_calls(
                     index += 1;
                 }
                 let name = &source[name_start..index];
-                if alias_fns
-                    .get(ident)
-                    .is_some_and(|fns| fns.contains(name))
-                {
+                if alias_fns.get(ident).is_some_and(|fns| fns.contains(name)) {
                     out.push_str(&mangled_name(ident, name));
                 } else {
                     // Keep unresolved qualified call visible for later errors.

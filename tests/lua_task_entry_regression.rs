@@ -12,9 +12,7 @@
 //! Rh, covered in `tests/rh_backend.rs`).
 
 use agenterm::script_backend::ScriptBackend;
-use agenterm::script_engine::{
-    LuaEngineBackend, ScriptEngineBackend, ScriptInvocationOptions,
-};
+use agenterm::script_engine::{LuaEngineBackend, ScriptEngineBackend, ScriptInvocationOptions};
 use serde_json::json;
 use std::sync::Mutex;
 
@@ -23,7 +21,9 @@ use std::sync::Mutex;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn with_lua_backend<T>(body: impl FnOnce() -> T) -> T {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
     unsafe {
         std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
@@ -103,7 +103,9 @@ fn lua_invocation_eval_with_print_captures_stdout() {
 
 #[test]
 fn lua_backend_not_enabled_without_env() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");

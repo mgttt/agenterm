@@ -53,7 +53,10 @@ fn dispatch(args: &[String]) -> Result<u8, String> {
         "eval" => cmd_eval(&args[2..]),
         "hash" => cmd_hash(&args[2..]),
         "run" => cmd_run(&args[2..]),
-        "version" => { println!("agenterm-lua {}", env!("CARGO_PKG_VERSION")); Ok(0) },
+        "version" => {
+            println!("agenterm-lua {}", env!("CARGO_PKG_VERSION"));
+            Ok(0)
+        }
         "pack" => {
             if args.len() < 3 {
                 return Err("pack: expected subcommand: build or load".into());
@@ -88,13 +91,18 @@ fn cmd_eval(args: &[String]) -> Result<u8, String> {
     let path = PathBuf::from(positional(args, 0, "missing argument: eval <file.lua>")?);
     let engine = crate::LuaEngine::new().map_err(|e| e.to_string())?;
     let host = crate::LuaHostFunctions::default();
-    let (result, cache_hit) = engine.eval_file_cached(&path, &host)
+    let (result, cache_hit) = engine
+        .eval_file_cached(&path, &host)
         .map_err(|e| e.to_string())?;
     if !result.stdout.is_empty() {
         print!("{}", result.stdout);
     }
     let cache_note = if cache_hit { " [cache hit]" } else { "" };
-    println!("rh eval ok: {} -> {}{cache_note}", path.display(), result.value);
+    println!(
+        "rh eval ok: {} -> {}{cache_note}",
+        path.display(),
+        result.value
+    );
     Ok(0)
 }
 
@@ -120,8 +128,7 @@ fn cmd_pack_build(args: &[String]) -> Result<u8, String> {
         "pack build requires --dir <out>",
     )?);
     let source = read_file(&path)?;
-    let _bc_path = crate::pack::build_pack_dir(&source, &dir)
-        .map_err(|e| e.to_string())?;
+    let _bc_path = crate::pack::build_pack_dir(&source, &dir).map_err(|e| e.to_string())?;
     println!("pack build ok: {}", path.display());
     println!("  output: {}", dir.display());
     Ok(0)
@@ -154,8 +161,8 @@ fn cmd_qualify(args: &[String]) -> Result<u8, String> {
     )?);
     let source = read_file(&path)?;
     let host = crate::LuaHostFunctions::default();
-    let receipt = crate::qualify::qualify_pack_dir(&source, &dir, &host)
-        .map_err(|e| e.to_string())?;
+    let receipt =
+        crate::qualify::qualify_pack_dir(&source, &dir, &host).map_err(|e| e.to_string())?;
     let receipt_path = dir.join("receipt.json");
     receipt.write(&receipt_path).map_err(|e| e.to_string())?;
     println!("qualify ok: {} -> {}", path.display(), receipt.entry_value);
@@ -178,11 +185,18 @@ fn cmd_check_many(args: &[String]) -> Result<u8, String> {
         .map_err(|e| format!("check_many_manifest: {e}"))?;
     let report = crate::check_many::run_check_many(manifest, parsed.options);
     if parsed.json {
-        println!("{}", serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
     } else if report.failures.is_empty() {
         println!("check-many: {} files ok", report.checked_files);
     } else {
-        eprintln!("check-many: {} files checked, {} failures", report.checked_files, report.failures.len());
+        eprintln!(
+            "check-many: {} files checked, {} failures",
+            report.checked_files,
+            report.failures.len()
+        );
         for f in &report.failures {
             eprintln!("  {}: {} — {}", f.path, f.code, f.message);
         }
@@ -197,8 +211,8 @@ fn cmd_corpus_scan(args: &[String]) -> Result<u8, String> {
     } else {
         std::env::current_dir().map_err(|e| e.to_string())?
     };
-    let report = crate::corpus_scan::scan_directory(&dir)
-        .map_err(|e| format!("corpus_scan: {e}"))?;
+    let report =
+        crate::corpus_scan::scan_directory(&dir).map_err(|e| format!("corpus_scan: {e}"))?;
     if report.failures == 0 {
         println!("corpus-scan: {} scripts ok", report.total_scripts);
     } else {
@@ -231,7 +245,8 @@ fn cmd_run(args: &[String]) -> Result<u8, String> {
     let engine = crate::LuaEngine::new().map_err(|e| e.to_string())?;
     let base_host = crate::LuaHostFunctions::default();
     let args_vec: Vec<String> = script_args.to_vec();
-    let result = engine.eval_with_args(&source, &base_host, &args_vec)
+    let result = engine
+        .eval_with_args(&source, &base_host, &args_vec)
         .map_err(|e| e.to_string())?;
     if !result.stdout.is_empty() {
         print!("{}", result.stdout);
@@ -271,7 +286,10 @@ fn cmd_task(args: &[String]) -> Result<u8, String> {
             let id = args.get(1).ok_or("task show <id>")?;
             for task in tasks {
                 if task["id"].as_str() == Some(id) {
-                    println!("{}", serde_json::to_string_pretty(task).map_err(|e| e.to_string())?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(task).map_err(|e| e.to_string())?
+                    );
                     return Ok(0);
                 }
             }
@@ -281,9 +299,7 @@ fn cmd_task(args: &[String]) -> Result<u8, String> {
             let id = args.get(1).ok_or("task run <id>")?;
             for task in tasks {
                 if task["id"].as_str() == Some(id) {
-                    let entry = task["entry"]
-                        .as_str()
-                        .ok_or("task_entry_missing")?;
+                    let entry = task["entry"].as_str().ok_or("task_entry_missing")?;
                     let _cwd = task["cwd"].as_str().unwrap_or(".");
                     let task_args: Vec<String> = task["args"]
                         .as_array()
@@ -331,7 +347,10 @@ fn read_file(path: &std::path::Path) -> Result<String, String> {
 }
 
 fn print_help() {
-    println!("agenterm-lua {} — LuaJIT scripting backend for AgenTerm", env!("CARGO_PKG_VERSION"));
+    println!(
+        "agenterm-lua {} — LuaJIT scripting backend for AgenTerm",
+        env!("CARGO_PKG_VERSION")
+    );
     println!();
     println!("Commands:");
     println!("  check <file.lua>              Syntax check");
@@ -384,49 +403,69 @@ fn run_framed_worker() -> Result<u8, String> {
     match operation {
         "check" => {
             match engine.check(source) {
-                Ok(()) => write_json_result(&mut stdout, invocation_id, "check", true, "", None, None)?,
+                Ok(()) => {
+                    write_json_result(&mut stdout, invocation_id, "check", true, "", None, None)?
+                }
                 Err(e) => write_json_result(
-                    &mut stdout, invocation_id, "check", false, "",
+                    &mut stdout,
+                    invocation_id,
+                    "check",
+                    false,
+                    "",
                     None,
                     Some(&format!("lua_parse: {e}")),
                 )?,
             }
             Ok(0)
         }
-        "eval" | "run" => {
-            match engine.eval(source, &host) {
-                Ok(eval_result) => write_json_result(
-                    &mut stdout, invocation_id, operation, true, &eval_result.stdout,
-                    Some(eval_result.value), None,
-                )
-                .map(|_| eval_result.value as u8),
-                Err(e) => {
-                    write_json_result(
-                        &mut stdout, invocation_id, operation, false, "",
-                        None,
-                        Some(&e.to_string()),
-                    )?;
-                    Ok(1)
-                }
+        "eval" | "run" => match engine.eval(source, &host) {
+            Ok(eval_result) => write_json_result(
+                &mut stdout,
+                invocation_id,
+                operation,
+                true,
+                &eval_result.stdout,
+                Some(eval_result.value),
+                None,
+            )
+            .map(|_| eval_result.value as u8),
+            Err(e) => {
+                write_json_result(
+                    &mut stdout,
+                    invocation_id,
+                    operation,
+                    false,
+                    "",
+                    None,
+                    Some(&e.to_string()),
+                )?;
+                Ok(1)
             }
-        }
-        _ => {
-            match engine.eval(source, &host) {
-                Ok(eval_result) => write_json_result(
-                    &mut stdout, invocation_id, operation, true, &eval_result.stdout,
-                    Some(eval_result.value), None,
-                )
-                .map(|_| eval_result.value as u8),
-                Err(e) => {
-                    write_json_result(
-                        &mut stdout, invocation_id, operation, false, "",
-                        None,
-                        Some(&e.to_string()),
-                    )?;
-                    Ok(1)
-                }
+        },
+        _ => match engine.eval(source, &host) {
+            Ok(eval_result) => write_json_result(
+                &mut stdout,
+                invocation_id,
+                operation,
+                true,
+                &eval_result.stdout,
+                Some(eval_result.value),
+                None,
+            )
+            .map(|_| eval_result.value as u8),
+            Err(e) => {
+                write_json_result(
+                    &mut stdout,
+                    invocation_id,
+                    operation,
+                    false,
+                    "",
+                    None,
+                    Some(&e.to_string()),
+                )?;
+                Ok(1)
             }
-        }
+        },
     }
 }
 

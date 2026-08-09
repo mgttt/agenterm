@@ -6,9 +6,8 @@ static WORKFLOW: LazyLock<String> = LazyLock::new(|| {
 static TASK_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../agenterm.tasks.json")).expect("task manifest")
 });
-static SAMPLES: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../scripts/rh/performance-samples.rh").replace("\r\n", "\n")
-});
+static SAMPLES: LazyLock<String> =
+    LazyLock::new(|| include_str!("../scripts/rh/performance-samples.rh").replace("\r\n", "\n"));
 
 #[test]
 fn experiment_is_manual_read_only_and_exact_source_bound() {
@@ -64,7 +63,10 @@ fn cache_strategies_are_isolated_fail_safe_and_observable() {
     assert!(WORKFLOW.contains("CARGO_INCREMENTAL:"));
     assert!(WORKFLOW.contains("RUSTC_WRAPPER:"));
     assert!(SAMPLES.contains("sample == 1 || cache != \"target\""));
-    assert!(SAMPLES.contains("command_status(\n                \"cargo\",\n                [\"clean\"]"));
+    assert!(
+        SAMPLES
+            .contains("command_status(\n                \"cargo\",\n                [\"clean\"]")
+    );
     assert!(SAMPLES.contains("[\"--zero-stats\"]"));
     assert!(SAMPLES.contains("[\"--show-stats\", \"--stats-format\", \"json\"]"));
     assert!(

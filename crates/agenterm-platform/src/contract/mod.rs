@@ -21,8 +21,6 @@ pub mod host_memory;
 pub mod ime;
 #[cfg(feature = "input")]
 pub mod input;
-#[cfg(feature = "input")]
-pub mod terminal_input;
 #[cfg(feature = "ipc")]
 pub mod ipc_transport;
 pub mod local_clock;
@@ -53,6 +51,8 @@ pub mod runtime;
 pub mod shared_memory;
 #[cfg(feature = "storage")]
 pub mod storage;
+#[cfg(feature = "input")]
+pub mod terminal_input;
 #[cfg(feature = "screenshot")]
 pub mod ui_screenshot;
 #[cfg(feature = "webview")]

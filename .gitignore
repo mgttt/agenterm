@@ -8,3 +8,4 @@
 *.swp
 *.log
 *.tmp
+crates/agenterm-wasmcore/target/

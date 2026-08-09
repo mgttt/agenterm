@@ -81,9 +81,9 @@ pub fn run_main(os_args: Vec<OsString>) -> ExitCode {
     let arguments: Vec<String> = os_args
         .into_iter()
         .map(|argument| {
-            argument.into_string().unwrap_or_else(|invalid| {
-                panic!("invalid utf-8 sequence in argument: {invalid:?}")
-            })
+            argument
+                .into_string()
+                .unwrap_or_else(|invalid| panic!("invalid utf-8 sequence in argument: {invalid:?}"))
         })
         .collect();
     match arguments.as_slice() {
@@ -94,9 +94,9 @@ pub fn run_main(os_args: Vec<OsString>) -> ExitCode {
             return public_command_exit_code(run_public_check_command(rest));
         }
         [mode, rest @ ..] if mode == "--internal-incremental-finalize" => {
-            return worker_exit_code(
-                crate::incremental_wrapper::finalize_incremental_manifest(rest),
-            );
+            return worker_exit_code(crate::incremental_wrapper::finalize_incremental_manifest(
+                rest,
+            ));
         }
         [mode] if mode == "--worker" => {
             return worker_exit_code(crate::run_legacy_worker_stdio());
@@ -363,30 +363,30 @@ fn parse_run_cli(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--project-root" => {
-                project_root = PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| RhError::Parse("missing path after --project-root".into()))?,
-                );
+                project_root =
+                    PathBuf::from(args.next().ok_or_else(|| {
+                        RhError::Parse("missing path after --project-root".into())
+                    })?);
             }
             // Legacy inert compatibility flag from agenterm-rh task/run callers.
             "--profile" => {
-                let _ = args.next().ok_or_else(|| {
-                    RhError::Parse("missing value after --profile".into())
-                })?;
+                let _ = args
+                    .next()
+                    .ok_or_else(|| RhError::Parse("missing value after --profile".into()))?;
             }
             "--timeout-ms" => {
-                let raw = args.next().ok_or_else(|| {
-                    RhError::Parse("missing value after --timeout-ms".into())
-                })?;
-                budgets.wall_time_ms = raw.parse::<u64>().map_err(|_| {
-                    RhError::Parse(format!("invalid --timeout-ms value `{raw}`"))
-                })?;
+                let raw = args
+                    .next()
+                    .ok_or_else(|| RhError::Parse("missing value after --timeout-ms".into()))?;
+                budgets.wall_time_ms = raw
+                    .parse::<u64>()
+                    .map_err(|_| RhError::Parse(format!("invalid --timeout-ms value `{raw}`")))?;
                 budgets_touched = true;
             }
             "--max-operations" => {
-                let raw = args.next().ok_or_else(|| {
-                    RhError::Parse("missing value after --max-operations".into())
-                })?;
+                let raw = args
+                    .next()
+                    .ok_or_else(|| RhError::Parse("missing value after --max-operations".into()))?;
                 budgets.operations = raw.parse::<u64>().map_err(|_| {
                     RhError::Parse(format!("invalid --max-operations value `{raw}`"))
                 })?;

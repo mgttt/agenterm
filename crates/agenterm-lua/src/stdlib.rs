@@ -31,9 +31,7 @@ pub fn inject(lua: &Lua) -> Result<(), mlua::Error> {
     )?;
     runtime_table.set(
         "temp_dir",
-        lua.create_function(|_lua, ()| {
-            Ok(std::env::temp_dir().to_string_lossy().into_owned())
-        })?,
+        lua.create_function(|_lua, ()| Ok(std::env::temp_dir().to_string_lossy().into_owned()))?,
     )?;
     runtime_table.set(
         "append_sync",
@@ -474,19 +472,20 @@ fn build_fs(lua: &Lua) -> Result<Table, mlua::Error> {
             let parent = p.parent().unwrap_or(std::path::Path::new("."));
             let expected = p.file_name().map(|n| n.to_string_lossy().into_owned());
             match expected {
-                Some(expected_name) => {
-                    match std::fs::read_dir(parent) {
-                        Ok(entries) => {
-                            for entry in entries.flatten() {
-                                if entry.file_name().to_string_lossy() == expected_name {
-                                    return Ok(entry.file_type().map(|ft| ft.is_file()).unwrap_or(false));
-                                }
+                Some(expected_name) => match std::fs::read_dir(parent) {
+                    Ok(entries) => {
+                        for entry in entries.flatten() {
+                            if entry.file_name().to_string_lossy() == expected_name {
+                                return Ok(entry
+                                    .file_type()
+                                    .map(|ft| ft.is_file())
+                                    .unwrap_or(false));
                             }
-                            Ok(false)
                         }
-                        Err(_) => Ok(false),
+                        Ok(false)
                     }
-                }
+                    Err(_) => Ok(false),
+                },
                 None => Ok(false),
             }
         })?,
@@ -503,46 +502,52 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
     // std.process.command(program, args, timeout_ms) → {success, exit_code, stdout, stderr}
     process.set(
         "command",
-        lua.create_function(|lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
-            let args = table_to_strings(&args_tbl)?;
-            let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
-            let (success, exit_code, stdout, stderr) =
-                spawn_and_capture(&program, &args, timeout)?;
-            let out = lua.create_table()?;
-            out.set("success", success)?;
-            out.set("exit_code", exit_code)?;
-            out.set("stdout", stdout)?;
-            out.set("stderr", stderr)?;
-            Ok(out)
-        })?,
+        lua.create_function(
+            |lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
+                let args = table_to_strings(&args_tbl)?;
+                let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+                let (success, exit_code, stdout, stderr) =
+                    spawn_and_capture(&program, &args, timeout)?;
+                let out = lua.create_table()?;
+                out.set("success", success)?;
+                out.set("exit_code", exit_code)?;
+                out.set("stdout", stdout)?;
+                out.set("stderr", stderr)?;
+                Ok(out)
+            },
+        )?,
     )?;
 
     // std.process.status(program, args, timeout_ms) → {success, exit_code}
     process.set(
         "status",
-        lua.create_function(|lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
-            let args = table_to_strings(&args_tbl)?;
-            let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
-            let (success, exit_code, _, _) = spawn_and_capture(&program, &args, timeout)?;
-            let out = lua.create_table()?;
-            out.set("success", success)?;
-            out.set("exit_code", exit_code)?;
-            Ok(out)
-        })?,
+        lua.create_function(
+            |lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
+                let args = table_to_strings(&args_tbl)?;
+                let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+                let (success, exit_code, _, _) = spawn_and_capture(&program, &args, timeout)?;
+                let out = lua.create_table()?;
+                out.set("success", success)?;
+                out.set("exit_code", exit_code)?;
+                Ok(out)
+            },
+        )?,
     )?;
 
     // std.process.command_status (alias for status)
     process.set(
         "command_status",
-        lua.create_function(|lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
-            let args = table_to_strings(&args_tbl)?;
-            let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
-            let (success, exit_code, _, _) = spawn_and_capture(&program, &args, timeout)?;
-            let out = lua.create_table()?;
-            out.set("success", success)?;
-            out.set("exit_code", exit_code)?;
-            Ok(out)
-        })?,
+        lua.create_function(
+            |lua, (program, args_tbl, timeout_ms): (String, Table, Option<u64>)| {
+                let args = table_to_strings(&args_tbl)?;
+                let timeout = timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000);
+                let (success, exit_code, _, _) = spawn_and_capture(&program, &args, timeout)?;
+                let out = lua.create_table()?;
+                out.set("success", success)?;
+                out.set("exit_code", exit_code)?;
+                Ok(out)
+            },
+        )?,
     )?;
 
     // std.process.stdout_file(program, args, stdout_path, timeout_ms) → {success, exit_code}
@@ -591,9 +596,19 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
         lua.create_function(|lua, ()| {
             // Use tasklist on Windows, ps on Unix
             let (prog, args) = if cfg!(windows) {
-                ("tasklist", vec!["/FO".to_string(), "CSV".to_string(), "/NH".to_string()])
+                (
+                    "tasklist",
+                    vec!["/FO".to_string(), "CSV".to_string(), "/NH".to_string()],
+                )
             } else {
-                ("ps", vec!["-eo".to_string(), "comm,pid".to_string(), "--no-headers".to_string()])
+                (
+                    "ps",
+                    vec![
+                        "-eo".to_string(),
+                        "comm,pid".to_string(),
+                        "--no-headers".to_string(),
+                    ],
+                )
             };
             let output = std::process::Command::new(prog)
                 .args(&args)
@@ -603,7 +618,9 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
             let mut entries = Vec::new();
             for line in text.lines() {
                 let line = line.trim();
-                if line.is_empty() { continue; }
+                if line.is_empty() {
+                    continue;
+                }
                 if cfg!(windows) {
                     // tasklist CSV: "name.exe","pid",...
                     let parts: Vec<&str> = line.split(',').collect();
@@ -617,7 +634,7 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.len() >= 2 {
                         let name = parts[0].to_string();
-                        if let Ok(pid) = parts[parts.len()-1].parse::<i64>() {
+                        if let Ok(pid) = parts[parts.len() - 1].parse::<i64>() {
                             entries.push(serde_json::json!({"name": name, "pid": pid}));
                         }
                     }
@@ -644,7 +661,7 @@ fn build_process(lua: &Lua) -> Result<Table, mlua::Error> {
             #[cfg(not(windows))]
             {
                 // Unix: kill via libc
-                let ret = unsafe { libc::kill(pid as i32, 9) };  // SIGKILL
+                let ret = unsafe { libc::kill(pid as i32, 9) }; // SIGKILL
                 Ok(ret == 0)
             }
         })?,
@@ -832,10 +849,7 @@ fn build_time(lua: &Lua) -> Result<Table, mlua::Error> {
 
     // std.time.Duration namespace
     let duration = lua.create_table()?;
-    duration.set(
-        "from_millis",
-        lua.create_function(|_lua, n: i64| Ok(n))?,
-    )?;
+    duration.set("from_millis", lua.create_function(|_lua, n: i64| Ok(n))?)?;
     duration.set(
         "from_secs",
         lua.create_function(|_lua, n: i64| Ok(n * 1000))?,
@@ -988,7 +1002,10 @@ mod tests {
     fn fs_exists_false() {
         let e = engine();
         let r = e
-            .eval("return std.fs.exists('/nonexistent_agenterm_test') and 1 or 0", &host())
+            .eval(
+                "return std.fs.exists('/nonexistent_agenterm_test') and 1 or 0",
+                &host(),
+            )
             .expect("eval");
         assert_eq!(r.value, 0);
     }
@@ -1094,11 +1111,7 @@ mod tests {
         std::fs::write(&src, "copied").expect("write");
         let e = engine();
         e.eval(
-            &format!(
-                "std.fs.copy([[{}]], [[{}]])",
-                src.display(),
-                dst.display()
-            ),
+            &format!("std.fs.copy([[{}]], [[{}]])", src.display(), dst.display()),
             &host(),
         )
         .expect("copy");
@@ -1194,10 +1207,7 @@ mod tests {
     fn path_join() {
         let e = engine();
         let r = e
-            .eval(
-                "local p = std.path.join('/foo', 'bar'); return #p",
-                &host(),
-            )
+            .eval("local p = std.path.join('/foo', 'bar'); return #p", &host())
             .expect("eval");
         // "/foo/bar" or "/foo\\bar" on Windows
         assert!(r.value >= 7);
@@ -1257,7 +1267,10 @@ mod tests {
     fn env_has_missing() {
         let e = engine();
         let r = e
-            .eval("return std.env.has('AGENTERM_NONEXISTENT_VAR') and 1 or 0", &host())
+            .eval(
+                "return std.env.has('AGENTERM_NONEXISTENT_VAR') and 1 or 0",
+                &host(),
+            )
             .expect("eval");
         assert_eq!(r.value, 0);
     }
@@ -1316,7 +1329,10 @@ mod tests {
     fn time_now_rfc3339() {
         let e = engine();
         let r = e
-            .eval("local s = std.time.now_rfc3339(); print(s); return #s", &host())
+            .eval(
+                "local s = std.time.now_rfc3339(); print(s); return #s",
+                &host(),
+            )
             .expect("eval");
         assert_eq!(r.value, 24, "RFC3339 with ms = 24 chars");
         // Check format: YYYY-MM-DDTHH:MM:SS.sssZ
@@ -1436,7 +1452,10 @@ mod tests {
         let e = engine();
         let r = e
             .eval(
-                &format!("local entries = std.fs.read_dir([[{}]]); return #entries", dir.path().display()),
+                &format!(
+                    "local entries = std.fs.read_dir([[{}]]); return #entries",
+                    dir.path().display()
+                ),
                 &host(),
             )
             .expect("eval");
@@ -1449,11 +1468,8 @@ mod tests {
         let p = dir.path().join("to_delete.txt");
         std::fs::write(&p, "x").unwrap();
         let e = engine();
-        e.eval(
-            &format!("std.fs.remove_file([[{}]])", p.display()),
-            &host(),
-        )
-        .expect("remove");
+        e.eval(&format!("std.fs.remove_file([[{}]])", p.display()), &host())
+            .expect("remove");
         assert!(!p.exists());
     }
 
@@ -1479,7 +1495,10 @@ mod tests {
         let p = dir.path().join("atomic.txt");
         let e = engine();
         e.eval(
-            &format!("rhai.runtime.atomic_write([[{}]], 'atomic content')", p.display()),
+            &format!(
+                "rhai.runtime.atomic_write([[{}]], 'atomic content')",
+                p.display()
+            ),
             &host(),
         )
         .expect("atomic_write");
@@ -1497,9 +1516,14 @@ mod tests {
         std::fs::write(&src, "moved").unwrap();
         let e = engine();
         e.eval(
-            &format!("std.fs.rename([[{}]], [[{}]])", src.display(), dst.display()),
+            &format!(
+                "std.fs.rename([[{}]], [[{}]])",
+                src.display(),
+                dst.display()
+            ),
             &host(),
-        ).expect("rename");
+        )
+        .expect("rename");
         assert!(!src.exists());
         assert_eq!(std::fs::read_to_string(&dst).unwrap(), "moved");
     }
@@ -1514,7 +1538,8 @@ mod tests {
         e.eval(
             &format!("std.fs.remove_dir_all([[{}]])", sub.display()),
             &host(),
-        ).expect("remove_dir_all");
+        )
+        .expect("remove_dir_all");
         assert!(!sub.exists());
     }
 
@@ -1524,10 +1549,15 @@ mod tests {
         let p = dir.path().join("sym.txt");
         std::fs::write(&p, "data").unwrap();
         let e = engine();
-        let r = e.eval(
-            &format!("local m = std.fs.symlink_metadata([[{}]]); return m.is_file and 1 or 0", p.display()),
-            &host(),
-        ).expect("symlink_metadata");
+        let r = e
+            .eval(
+                &format!(
+                    "local m = std.fs.symlink_metadata([[{}]]); return m.is_file and 1 or 0",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("symlink_metadata");
         assert_eq!(r.value, 1);
     }
 
@@ -1543,7 +1573,9 @@ mod tests {
     #[test]
     fn process_list_returns_entries() {
         let e = engine();
-        let r = e.eval("local lst = std.process.list(); return #lst", &host()).expect("list");
+        let r = e
+            .eval("local lst = std.process.list(); return #lst", &host())
+            .expect("list");
         assert!(r.value > 0, "process list must not be empty");
     }
 
@@ -1552,14 +1584,18 @@ mod tests {
     #[test]
     fn time_duration_from_millis() {
         let e = engine();
-        let r = e.eval("return std.time.Duration.from_millis(5000)", &host()).expect("duration");
+        let r = e
+            .eval("return std.time.Duration.from_millis(5000)", &host())
+            .expect("duration");
         assert_eq!(r.value, 5000);
     }
 
     #[test]
     fn time_duration_from_secs() {
         let e = engine();
-        let r = e.eval("return std.time.Duration.from_secs(3)", &host()).expect("duration");
+        let r = e
+            .eval("return std.time.Duration.from_secs(3)", &host())
+            .expect("duration");
         assert_eq!(r.value, 3000);
     }
 
@@ -1582,7 +1618,9 @@ mod tests {
     #[test]
     fn task_sleep_returns_zero() {
         let e = engine();
-        let r = e.eval("return rhai.task.sleep(10)", &host()).expect("sleep");
+        let r = e
+            .eval("return rhai.task.sleep(10)", &host())
+            .expect("sleep");
         assert_eq!(r.value, 0);
     }
 
@@ -1591,69 +1629,83 @@ mod tests {
         use std::time::Instant;
         let e = engine();
         let start = Instant::now();
-        let r = e.eval("return rhai.task.sleep(100)", &host()).expect("sleep");
+        let r = e
+            .eval("return rhai.task.sleep(100)", &host())
+            .expect("sleep");
         let elapsed = start.elapsed().as_millis();
         assert_eq!(r.value, 0);
-        assert!(elapsed >= 90, "sleep should take at least ~90ms, got {elapsed}ms");
+        assert!(
+            elapsed >= 90,
+            "sleep should take at least ~90ms, got {elapsed}ms"
+        );
     }
 
     #[test]
     fn string_split_comma() {
         let e = engine();
-        let r = e.eval(
-            "local parts = string_split('a,b,c', ','); return #parts",
-            &host(),
-        ).expect("split");
+        let r = e
+            .eval(
+                "local parts = string_split('a,b,c', ','); return #parts",
+                &host(),
+            )
+            .expect("split");
         assert_eq!(r.value, 3);
     }
 
     #[test]
     fn string_split_no_delimiter() {
         let e = engine();
-        let r = e.eval(
-            "local parts = string_split('hello', ','); return #parts",
-            &host(),
-        ).expect("split");
+        let r = e
+            .eval(
+                "local parts = string_split('hello', ','); return #parts",
+                &host(),
+            )
+            .expect("split");
         assert_eq!(r.value, 1);
     }
 
     #[test]
     fn string_split_empty_delimiter() {
         let e = engine();
-        let r = e.eval(
-            "local parts = string_split('hello', ''); return #parts",
-            &host(),
-        ).expect("split empty delim");
+        let r = e
+            .eval(
+                "local parts = string_split('hello', ''); return #parts",
+                &host(),
+            )
+            .expect("split empty delim");
         assert_eq!(r.value, 1);
     }
 
     #[test]
     fn string_split_empty_string() {
         let e = engine();
-        let r = e.eval(
-            "local parts = string_split('', ','); return #parts",
-            &host(),
-        ).expect("split empty");
+        let r = e
+            .eval(
+                "local parts = string_split('', ','); return #parts",
+                &host(),
+            )
+            .expect("split empty");
         assert_eq!(r.value, 1);
     }
 
     #[test]
     fn string_split_index_access() {
         let e = engine();
-        let r = e.eval(
-            "local p = string_split('x,y,z', ','); return p[2] == 'y' and 1 or 0",
-            &host(),
-        ).expect("split index");
+        let r = e
+            .eval(
+                "local p = string_split('x,y,z', ','); return p[2] == 'y' and 1 or 0",
+                &host(),
+            )
+            .expect("split index");
         assert_eq!(r.value, 1);
     }
 
     #[test]
     fn string_split_method_alias() {
         let e = engine();
-        let r = e.eval(
-            "local p = string.split('a,b', ','); return #p",
-            &host(),
-        ).expect("split method");
+        let r = e
+            .eval("local p = string.split('a,b', ','); return #p", &host())
+            .expect("split method");
         assert_eq!(r.value, 2);
     }
 
@@ -1685,10 +1737,15 @@ mod tests {
         let p = dir.path().join("CaseSensitive.txt");
         std::fs::write(&p, "x").unwrap();
         let e = engine();
-        let r = e.eval(
-            &format!("return std.fs.exists_case_exact([[{}]]) and 1 or 0", p.display()),
-            &host(),
-        ).expect("exists_case_exact");
+        let r = e
+            .eval(
+                &format!(
+                    "return std.fs.exists_case_exact([[{}]]) and 1 or 0",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("exists_case_exact");
         assert_eq!(r.value, 1);
     }
 
@@ -1699,10 +1756,12 @@ mod tests {
         std::fs::write(&p, "x").unwrap();
         let wrong = p.to_string_lossy().replace("exact_test", "EXACT_TEST");
         let e = engine();
-        let r = e.eval(
-            &format!("return std.fs.exists_case_exact([[{wrong}]]) and 1 or 0"),
-            &host(),
-        ).expect("exists_case_exact false");
+        let r = e
+            .eval(
+                &format!("return std.fs.exists_case_exact([[{wrong}]]) and 1 or 0"),
+                &host(),
+            )
+            .expect("exists_case_exact false");
         assert_eq!(r.value, 0, "wrong case should return false");
     }
 
@@ -1713,10 +1772,12 @@ mod tests {
         std::fs::create_dir(&sub).unwrap();
         let wrong = sub.to_string_lossy().replace("SubDir", "subdir");
         let e = engine();
-        let r = e.eval(
-            &format!("return std.fs.exists_case_exact([[{wrong}]]) and 1 or 0"),
-            &host(),
-        ).expect("exists_case_exact dir");
+        let r = e
+            .eval(
+                &format!("return std.fs.exists_case_exact([[{wrong}]]) and 1 or 0"),
+                &host(),
+            )
+            .expect("exists_case_exact dir");
         assert_eq!(r.value, 0, "wrong case dir should return false");
     }
 
@@ -1737,7 +1798,9 @@ mod tests {
     #[test]
     fn env_names_not_empty() {
         let e = engine();
-        let r = e.eval("return #std.env.names()", &host()).expect("env.names");
+        let r = e
+            .eval("return #std.env.names()", &host())
+            .expect("env.names");
         assert!(r.value > 0, "env.names must not be empty");
     }
 
@@ -1749,7 +1812,8 @@ mod tests {
         e.eval(
             &format!("std.fs.create_dir_all([[{}]])", deep.display()),
             &host(),
-        ).expect("create_dir_all");
+        )
+        .expect("create_dir_all");
         assert!(deep.is_dir());
     }
 
@@ -1762,7 +1826,8 @@ mod tests {
         e.eval(
             &format!("std.fs.remove_dir([[{}]])", sub.display()),
             &host(),
-        ).expect("remove_dir");
+        )
+        .expect("remove_dir");
         assert!(!sub.exists());
     }
 
@@ -1830,10 +1895,12 @@ mod tests {
     #[test]
     fn env_names_returns_array() {
         let e = engine();
-        let r = e.eval(
-            "local n = std.env.names(); return type(n) == 'table' and #n > 0 and 1 or 0",
-            &host(),
-        ).expect("env.names type");
+        let r = e
+            .eval(
+                "local n = std.env.names(); return type(n) == 'table' and #n > 0 and 1 or 0",
+                &host(),
+            )
+            .expect("env.names type");
         assert_eq!(r.value, 1);
     }
 
@@ -1847,7 +1914,8 @@ mod tests {
         e.eval(
             &format!("rhai.runtime.append_sync([[{}]], 'line1\\n')", p.display()),
             &host(),
-        ).expect("append_sync");
+        )
+        .expect("append_sync");
         let content = std::fs::read_to_string(&p).expect("read");
         assert_eq!(content, "line1\n");
     }
@@ -1860,11 +1928,13 @@ mod tests {
         e.eval(
             &format!("rhai.runtime.append_sync([[{}]], 'a')", p.display()),
             &host(),
-        ).expect("append1");
+        )
+        .expect("append1");
         e.eval(
             &format!("rhai.runtime.append_sync([[{}]], 'b')", p.display()),
             &host(),
-        ).expect("append2");
+        )
+        .expect("append2");
         let content = std::fs::read_to_string(&p).expect("read");
         assert_eq!(content, "ab");
     }
@@ -1874,10 +1944,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("lock_test");
         let e = engine();
-        let r = e.eval(
-            &format!("return std.fs.try_lock_exclusive([[{}]]) and 1 or 0", p.display()),
-            &host(),
-        ).expect("lock1");
+        let r = e
+            .eval(
+                &format!(
+                    "return std.fs.try_lock_exclusive([[{}]]) and 1 or 0",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("lock1");
         assert_eq!(r.value, 1, "first lock should succeed");
     }
 
@@ -1893,10 +1968,15 @@ mod tests {
             .expect("first open");
         // Second attempt should fail
         let e = engine();
-        let r = e.eval(
-            &format!("return std.fs.try_lock_exclusive([[{}]]) and 1 or 0", p.display()),
-            &host(),
-        ).expect("lock2");
+        let r = e
+            .eval(
+                &format!(
+                    "return std.fs.try_lock_exclusive([[{}]]) and 1 or 0",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("lock2");
         assert_eq!(r.value, 0, "second lock should fail");
     }
 
@@ -1905,7 +1985,9 @@ mod tests {
     #[test]
     fn fnv1a64_deterministic() {
         let e = engine();
-        let r = e.eval("return #rhai.hash.fnv1a64('hello')", &host()).expect("fnv");
+        let r = e
+            .eval("return #rhai.hash.fnv1a64('hello')", &host())
+            .expect("fnv");
         assert_eq!(r.value, 16, "fnv1a64 hex must be 16 chars");
     }
 
@@ -1927,10 +2009,15 @@ mod tests {
         let p = dir.path().join("f.txt");
         std::fs::write(&p, "hello read_to_string").unwrap();
         let e = engine();
-        let r = e.eval(
-            &format!("local s = std.fs.read_to_string([[{}]]); return #s", p.display()),
-            &host(),
-        ).expect("read_to_string");
+        let r = e
+            .eval(
+                &format!(
+                    "local s = std.fs.read_to_string([[{}]]); return #s",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("read_to_string");
         assert_eq!(r.value, 20);
     }
 
@@ -1942,7 +2029,8 @@ mod tests {
         e.eval(
             &format!("std.fs.write_bytes([[{}]], 'raw_bytes')", p.display()),
             &host(),
-        ).expect("write_bytes");
+        )
+        .expect("write_bytes");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "raw_bytes");
     }
 
@@ -1952,20 +2040,27 @@ mod tests {
         let p = dir.path().join("data.json");
         std::fs::write(&p, "{\"x\":42}").unwrap();
         let e = engine();
-        let r = e.eval(
-            &format!("local obj = std.json.parse_file([[{}]]); return obj.x", p.display()),
-            &host(),
-        ).expect("parse_file");
+        let r = e
+            .eval(
+                &format!(
+                    "local obj = std.json.parse_file([[{}]]); return obj.x",
+                    p.display()
+                ),
+                &host(),
+            )
+            .expect("parse_file");
         assert_eq!(r.value, 42);
     }
 
     #[test]
     fn temp_dir_exists() {
         let e = engine();
-        let r = e.eval(
-            "local d = rhai.runtime.temp_dir(); return std.fs.exists(d) and 1 or 0",
-            &host(),
-        ).expect("temp_dir");
+        let r = e
+            .eval(
+                "local d = rhai.runtime.temp_dir(); return std.fs.exists(d) and 1 or 0",
+                &host(),
+            )
+            .expect("temp_dir");
         assert_eq!(r.value, 1);
     }
 

@@ -22,8 +22,8 @@ impl LuaPack {
         let manifest_path = dir.join(DEFAULT_MANIFEST_FILE);
         let manifest = LuaPackManifest::read(&manifest_path)?;
         let bytecode_path = dir.join(&manifest.bytecode_file);
-        let bytecode = std::fs::read(&bytecode_path)
-            .map_err(|e| format!("pack_load_bytecode: {e}"))?;
+        let bytecode =
+            std::fs::read(&bytecode_path).map_err(|e| format!("pack_load_bytecode: {e}"))?;
         manifest.verify_bytecode(dir)?;
         Ok(Self {
             root: dir.to_path_buf(),
@@ -33,7 +33,10 @@ impl LuaPack {
     }
 
     /// Execute the loaded bytecode, returning the entry value (i64).
-    pub fn eval(&self, host: &crate::LuaHostFunctions) -> Result<crate::LuaEvalResult, crate::LuaError> {
+    pub fn eval(
+        &self,
+        host: &crate::LuaHostFunctions,
+    ) -> Result<crate::LuaEvalResult, crate::LuaError> {
         let engine = crate::LuaEngine::new()?;
         // Bytecode can't be executed via `lua.load(bytes)` in mlua directly,
         // so we re-evaluate the source from the entry file.
@@ -57,12 +60,16 @@ pub fn build_pack_dir(source: &str, dir: &Path) -> Result<PathBuf, String> {
 
     // Write bytecode file
     let bytecode_path = dir.join(DEFAULT_BYTECODE_FILE);
-    std::fs::write(&bytecode_path, &bytecode)
-        .map_err(|e| format!("pack_write_bytecode: {e}"))?;
+    std::fs::write(&bytecode_path, &bytecode).map_err(|e| format!("pack_write_bytecode: {e}"))?;
 
     // Write manifest
     let manifest_path = dir.join(DEFAULT_MANIFEST_FILE);
-    LuaPackManifest::write(&manifest_path, &source_hash, &bytecode_hash, DEFAULT_BYTECODE_FILE)?;
+    LuaPackManifest::write(
+        &manifest_path,
+        &source_hash,
+        &bytecode_hash,
+        DEFAULT_BYTECODE_FILE,
+    )?;
 
     // Write entry source (for re-evaluation)
     let entry_path = dir.join("entry.lua");
@@ -110,8 +117,7 @@ mod tests {
     #[test]
     fn pack_load_rejects_bad_manifest() {
         let dir = TempDir::new().expect("tempdir");
-        std::fs::write(dir.path().join("manifest.json"), "not json")
-            .expect("write");
+        std::fs::write(dir.path().join("manifest.json"), "not json").expect("write");
         let err = LuaPack::load(dir.path()).expect_err("bad manifest");
         assert!(err.contains("manifest"), "{err}");
     }

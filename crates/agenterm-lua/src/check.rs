@@ -161,24 +161,31 @@ mod tests {
             "local x = std.fs.exists('/tmp')\nstd.process.command('cmd', {'/c', 'echo'}, 5000)\nreturn 0"
         ).expect("check");
         assert!(result.syntax_ok);
-        assert!(result.unknown_apis.is_empty(), "unexpected unknown: {:?}", result.unknown_apis);
+        assert!(
+            result.unknown_apis.is_empty(),
+            "unexpected unknown: {:?}",
+            result.unknown_apis
+        );
     }
 
     #[test]
     fn unknown_api_detected() {
-        let result = check_with_surface_audit(
-            "std.fs.not_a_real_function('x')\nreturn 0"
-        ).expect("check");
+        let result =
+            check_with_surface_audit("std.fs.not_a_real_function('x')\nreturn 0").expect("check");
         assert!(result.syntax_ok);
         assert!(!result.unknown_apis.is_empty());
-        assert!(result.unknown_apis.iter().any(|a| a.contains("not_a_real_function")));
+        assert!(
+            result
+                .unknown_apis
+                .iter()
+                .any(|a| a.contains("not_a_real_function"))
+        );
     }
 
     #[test]
     fn fleet_api_audited() {
-        let result = check_with_surface_audit(
-            "fleet.tabs.list()\nfleet.ui.snapshot()\nreturn 0"
-        ).expect("check");
+        let result = check_with_surface_audit("fleet.tabs.list()\nfleet.ui.snapshot()\nreturn 0")
+            .expect("check");
         assert!(result.syntax_ok);
         // fleet.* not in SHIPPED_SURFACES by default — audit reports them
         // but they're valid if __host.fleet_call is provided
@@ -186,9 +193,7 @@ mod tests {
 
     #[test]
     fn unknown_fleet_api_detected() {
-        let result = check_with_surface_audit(
-            "fleet.secret.backdoor()\nreturn 0"
-        ).expect("check");
+        let result = check_with_surface_audit("fleet.secret.backdoor()\nreturn 0").expect("check");
         assert!(!result.unknown_apis.is_empty());
     }
 

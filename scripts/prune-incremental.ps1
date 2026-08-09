@@ -1,63 +1,77 @@
-# Prune stale rustc incremental-compilation caches. Windows counterpart of
-# scripts/prune-incremental.sh — see that file for why age alone does not work
-# here and why deleting these directories is safe.
+# Prune stale rustc incremental-compilation caches.
 #
-# Never fails the caller: a cleanup problem must not break a build.
+# Cargo garbage-collects old *sessions* inside one crate-unit directory, but it
+# never removes the crate-unit directories themselves. Every change to a unit's
+# fingerprint mints a fresh <crate>-<hash> directory and orphans the previous
+# one forever.
+#
+# Per-crate retention: keep the few most recently used fingerprints of each
+# crate and drop the rest. Age is a secondary sweep for crates that stopped
+# being built at all.
+#
+# Deleting these is safe: the only cost of a wrong guess is that one crate
+# unit recompiles from scratch next time.
+#
+# Never fails the caller -- a cleanup problem must not break a build.
 
-$ErrorActionPreference = 'SilentlyContinue'
+param(
+    [int]$Keep = 2,
+    [int]$AgeDays = 3
+)
 
-if ($env:AGENTERM_SKIP_INCREMENTAL_PRUNE) { exit 0 }
+$ErrorActionPreference = "Stop"
 
-$keep = 2
-if ($env:AGENTERM_INCREMENTAL_KEEP) {
-    [int]::TryParse($env:AGENTERM_INCREMENTAL_KEEP, [ref]$keep) | Out-Null
-}
-$ageDays = 3
-if ($env:AGENTERM_INCREMENTAL_MAX_AGE_DAYS) {
-    [int]::TryParse($env:AGENTERM_INCREMENTAL_MAX_AGE_DAYS, [ref]$ageDays) | Out-Null
+# Opt out entirely
+if ($env:AGENTERM_SKIP_INCREMENTAL_PRUNE) {
+    exit 0
 }
 
 $repo = git rev-parse --show-toplevel 2>$null
 if (-not $repo) { exit 0 }
 
-$cutoff = (Get-Date).AddDays(-$ageDays)
 $removed = 0
+$targets = Get-ChildItem -Path (Join-Path $repo "target*\*\incremental") -Directory -ErrorAction SilentlyContinue
+if (-not $targets) {
+    Write-Host "Cargo incremental prune: skipped (no incremental directories found)"
+    exit 0
+}
 
-$roots = Get-ChildItem -Path $repo -Directory -Filter 'target*' |
-    ForEach-Object { Get-ChildItem -Path $_.FullName -Directory } |
-    ForEach-Object { Join-Path $_.FullName 'incremental' } |
-    Where-Object { Test-Path $_ }
-
-foreach ($incremental in $roots) {
-    $units = Get-ChildItem -Path $incremental -Directory
+foreach ($incremental in $targets) {
+    $units = Get-ChildItem -LiteralPath $incremental.FullName -Directory -ErrorAction SilentlyContinue
     if (-not $units) { continue }
 
-    # Primary rule: keep the most recently used fingerprints per crate. The
-    # crate name is the unit directory minus its trailing -<hash>.
-    $units |
-        Group-Object { $_.Name -replace '-[^-]+$', '' } |
-        ForEach-Object {
-            $_.Group |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -Skip $keep |
-                ForEach-Object {
-                    Remove-Item -Recurse -Force -LiteralPath $_.FullName
-                    if (-not (Test-Path -LiteralPath $_.FullName)) { $script:removed++ }
-                }
+    # Group units by crate name (strip trailing -<hash>)
+    $byCrate = @{}
+    foreach ($unit in $units) {
+        $crateName = $unit.Name -replace '-[^-]*$', ''
+        if (-not $byCrate.ContainsKey($crateName)) {
+            $byCrate[$crateName] = @()
         }
+        $byCrate[$crateName] += $unit
+    }
 
-    # Secondary sweep: crates nobody builds any more still hold up to $keep
-    # fingerprints each.
-    Get-ChildItem -Path $incremental -Directory |
-        Where-Object { $_.LastWriteTime -lt $cutoff } |
-        ForEach-Object {
-            Remove-Item -Recurse -Force -LiteralPath $_.FullName
-            if (-not (Test-Path -LiteralPath $_.FullName)) { $script:removed++ }
+    # Per-crate: keep newest $Keep, remove the rest
+    foreach ($crate in $byCrate.Keys) {
+        $sorted = $byCrate[$crate] | Sort-Object LastWriteTime -Descending
+        $toRemove = $sorted | Select-Object -Skip $Keep
+        foreach ($unit in $toRemove) {
+            Remove-Item -LiteralPath $unit.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            if ($?) { $removed++ }
         }
+    }
+
+    # Age sweep: whole crates nobody builds anymore
+    $cutoff = (Get-Date).AddDays(-$AgeDays)
+    $old = Get-ChildItem -LiteralPath $incremental.FullName -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt $cutoff }
+    foreach ($unit in $old) {
+        Remove-Item -LiteralPath $unit.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        if ($?) { $removed++ }
+    }
 }
 
 if ($removed -gt 0) {
-    Write-Host "pruned $removed stale incremental cache unit(s)"
+    Write-Host "Cargo incremental prune: removed $removed stale cache unit(s)"
+} else {
+    Write-Host "Cargo incremental prune: nothing to remove"
 }
-
-exit 0

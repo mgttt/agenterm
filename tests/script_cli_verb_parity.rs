@@ -308,7 +308,9 @@ fn normalize_duration_ms(mut output: Output) -> Output {
             rest.find(|c: char| !c.is_ascii_digit())
         });
         let after_invocation_id =
-            redact_json_field(&after_duration, "\"invocation_id\": \"", |rest| rest.find('"'));
+            redact_json_field(&after_duration, "\"invocation_id\": \"", |rest| {
+                rest.find('"')
+            });
         output.stdout = after_invocation_id.into_bytes();
     }
     output
@@ -333,7 +335,8 @@ fn redact_json_field(
     while let Some(offset) = rest.find(needle) {
         let value_start = offset + needle.len();
         result.push_str(&rest[..value_start]);
-        let value_end = find_value_end(&rest[value_start..]).map_or(rest.len(), |o| value_start + o);
+        let value_end =
+            find_value_end(&rest[value_start..]).map_or(rest.len(), |o| value_start + o);
         result.push_str("REDACTED");
         rest = &rest[value_end..];
     }

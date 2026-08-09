@@ -19,7 +19,8 @@ fn scripts_rh_corpus_scan_from_integration_test() {
 #[test]
 fn task_manifest_corpus_scan_from_integration_test() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let manifest_text = std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
+    let manifest_text =
+        std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
     assert!(
         !manifest_text.contains(".rhai\""),
         "operational task manifest must not reference .rhai entries"

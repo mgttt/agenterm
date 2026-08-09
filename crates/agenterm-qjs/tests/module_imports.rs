@@ -36,9 +36,12 @@ fn plain_check_rejects_the_fixture_without_a_project_root() {
     // against strings built inline in a unit test.
     let entry = project_root().join("entry.js");
     let source = std::fs::read_to_string(&entry).unwrap();
-    let error =
-        check(&source, &entry.to_string_lossy()).expect_err("no loader registered without a project root");
-    assert!(error.to_string().contains("could not load module"), "{error}");
+    let error = check(&source, &entry.to_string_lossy())
+        .expect_err("no loader registered without a project root");
+    assert!(
+        error.to_string().contains("could not load module"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -74,7 +77,10 @@ fn eval_module_entry_rejects_the_escape_attempt_fixture() {
     let host = QjsHostFunctions::default();
     let error = eval_module_entry_with_host(&source, &entry, &root, &host)
         .expect_err("the escape-attempt fixture must always be rejected");
-    assert!(error.to_string().contains("Error resolving module"), "{error}");
+    assert!(
+        error.to_string().contains("Error resolving module"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -87,5 +93,8 @@ fn check_with_project_validation_also_rejects_the_escape_attempt_fixture() {
     let source = std::fs::read_to_string(&entry).unwrap();
     let error = check_with_project_validation(&source, &entry, &root)
         .expect_err("check must also reject the escape-attempt fixture");
-    assert!(error.to_string().contains("Error resolving module"), "{error}");
+    assert!(
+        error.to_string().contains("Error resolving module"),
+        "{error}"
+    );
 }

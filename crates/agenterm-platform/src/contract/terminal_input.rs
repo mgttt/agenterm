@@ -12,7 +12,9 @@
 //! encoding is exactly the kind of fiddly table work that deserves unit tests
 //! rather than a running terminal.
 
-use crate::contract::input::{KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent};
+use crate::contract::input::{
+    KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent,
+};
 
 /// Terminal input modes negotiated by the running application.
 ///
@@ -652,11 +654,25 @@ mod tests {
     #[test]
     fn shift_forces_local_selection_even_when_an_app_grabs_the_mouse() {
         assert_eq!(
-            mouse_delivery(ApplicationMouseMode::AnyMotion, true, false, false, false, true),
+            mouse_delivery(
+                ApplicationMouseMode::AnyMotion,
+                true,
+                false,
+                false,
+                false,
+                true
+            ),
             MouseDelivery::LocalSelection
         );
         assert_eq!(
-            mouse_delivery(ApplicationMouseMode::AnyMotion, false, false, false, false, true),
+            mouse_delivery(
+                ApplicationMouseMode::AnyMotion,
+                false,
+                false,
+                false,
+                false,
+                true
+            ),
             MouseDelivery::Application
         );
     }
@@ -690,7 +706,14 @@ mod tests {
     #[test]
     fn press_only_mode_ignores_release_and_motion() {
         assert_eq!(
-            mouse_delivery(ApplicationMouseMode::Press, false, false, false, false, false),
+            mouse_delivery(
+                ApplicationMouseMode::Press,
+                false,
+                false,
+                false,
+                false,
+                false
+            ),
             MouseDelivery::LocalSelection
         );
         assert_eq!(
@@ -698,17 +721,39 @@ mod tests {
             MouseDelivery::LocalSelection
         );
         assert_eq!(
-            mouse_delivery(ApplicationMouseMode::Press, false, false, false, false, true),
+            mouse_delivery(
+                ApplicationMouseMode::Press,
+                false,
+                false,
+                false,
+                false,
+                true
+            ),
             MouseDelivery::Application
         );
     }
 
     #[test]
     fn modifier_and_motion_bits_fold_into_the_button_code() {
-        assert_eq!(mouse_code_with_modifiers(0, false, mods(false, false, false)), 0);
-        assert_eq!(mouse_code_with_modifiers(0, true, mods(false, false, false)), 32);
-        assert_eq!(mouse_code_with_modifiers(0, false, mods(false, false, true)), 8);
-        assert_eq!(mouse_code_with_modifiers(0, false, mods(true, false, false)), 16);
-        assert_eq!(mouse_code_with_modifiers(MOUSE_WHEEL_UP, false, mods(false, false, false)), 64);
+        assert_eq!(
+            mouse_code_with_modifiers(0, false, mods(false, false, false)),
+            0
+        );
+        assert_eq!(
+            mouse_code_with_modifiers(0, true, mods(false, false, false)),
+            32
+        );
+        assert_eq!(
+            mouse_code_with_modifiers(0, false, mods(false, false, true)),
+            8
+        );
+        assert_eq!(
+            mouse_code_with_modifiers(0, false, mods(true, false, false)),
+            16
+        );
+        assert_eq!(
+            mouse_code_with_modifiers(MOUSE_WHEEL_UP, false, mods(false, false, false)),
+            64
+        );
     }
 }

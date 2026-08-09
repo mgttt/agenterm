@@ -39,8 +39,12 @@ pub fn eval_module_entry_with_host(
     project_root: &Path,
     host: &QjsHostFunctions,
 ) -> Result<EvalOutcome, QjsError> {
-    let canonical_root = std::fs::canonicalize(project_root)
-        .map_err(|err| QjsError::Usage(format!("qjs_module_root: {}: {err}", project_root.display())))?;
+    let canonical_root = std::fs::canonicalize(project_root).map_err(|err| {
+        QjsError::Usage(format!(
+            "qjs_module_root: {}: {err}",
+            project_root.display()
+        ))
+    })?;
     let canonical_entry = std::fs::canonicalize(entry_path).map_err(|err| {
         QjsError::Usage(format!("qjs_module_entry: {}: {err}", entry_path.display()))
     })?;
@@ -69,7 +73,9 @@ pub fn eval_module_entry_with_host(
             .map_err(|err| QjsError::Parse(err.to_string()))?;
 
         let (evaluated, promise) = declared.eval().catch(&ctx).map_err(|err| {
-            QjsError::Check(format!("{label}: module top-level evaluation failed: {err}"))
+            QjsError::Check(format!(
+                "{label}: module top-level evaluation failed: {err}"
+            ))
         })?;
 
         // Drains the QuickJS job queue until the module's top-level
@@ -79,7 +85,9 @@ pub fn eval_module_entry_with_host(
         // hand-rolled) surfaces a rejection as a catchable exception, same
         // as every other failure path here.
         promise.finish::<()>().catch(&ctx).map_err(|err| {
-            QjsError::Check(format!("{label}: module top-level evaluation failed: {err}"))
+            QjsError::Check(format!(
+                "{label}: module top-level evaluation failed: {err}"
+            ))
         })?;
 
         let entry: Function = evaluated.get("entry").map_err(|_| {
@@ -195,9 +203,17 @@ mod tests {
         let entry_path = outside.path().join("entry.js");
         std::fs::write(&entry_path, "export function entry() { return 1; }").unwrap();
         let host = QjsHostFunctions::default();
-        let error = eval_module_entry_with_host("export function entry() { return 1; }", &entry_path, dir.path(), &host)
-            .expect_err("entry outside project root");
-        assert!(error.to_string().contains("qjs_module_entry_outside_root"), "{error}");
+        let error = eval_module_entry_with_host(
+            "export function entry() { return 1; }",
+            &entry_path,
+            dir.path(),
+            &host,
+        )
+        .expect_err("entry outside project root");
+        assert!(
+            error.to_string().contains("qjs_module_entry_outside_root"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -216,7 +232,10 @@ mod tests {
         let host = QjsHostFunctions::default();
         let error = eval_module_entry_with_host(&source, &entry_path, &inner, &host)
             .expect_err("escaping import must be rejected");
-        assert!(error.to_string().contains("Error resolving module"), "{error}");
+        assert!(
+            error.to_string().contains("Error resolving module"),
+            "{error}"
+        );
     }
 
     #[test]

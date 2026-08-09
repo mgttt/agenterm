@@ -103,7 +103,11 @@ pub trait ScriptEngineBackend {
     /// Check operation. `source` may be empty only for rh's cached-pack
     /// deployment shape (see design §1.2 item 2) — non-rh engines return
     /// `Err` on empty source without any special-casing at the trait level.
-    fn check(&self, source: &str, options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError>;
+    fn check(
+        &self,
+        source: &str,
+        options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError>;
 
     /// Run/Eval operation. `ScriptOperation::Api` is short-circuited by
     /// `execute_inner`'s caller before reaching any backend (design §1.3
@@ -149,12 +153,8 @@ type ScriptArgsAccessors = (
 fn script_args_accessors(arguments: Value) -> ScriptArgsAccessors {
     let args_for_len = arguments.clone();
     let args_for_arg = arguments;
-    let args_len: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
-        args_for_len
-            .as_array()
-            .map(|a| a.len() as i64)
-            .unwrap_or(0)
-    });
+    let args_len: Arc<dyn Fn() -> i64 + Send + Sync> =
+        Arc::new(move || args_for_len.as_array().map(|a| a.len() as i64).unwrap_or(0));
     let arg: Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync> =
         Arc::new(move |index: i64| {
             args_for_arg
@@ -186,7 +186,11 @@ impl ScriptEngineBackend for RhEngineBackend {
         &["rh", "rhai"]
     }
 
-    fn check(&self, source: &str, options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+    fn check(
+        &self,
+        source: &str,
+        options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError> {
         let rh_options = RhInvocationOptions {
             project_root: options.project_root.clone(),
             arguments: options.arguments.clone(),
@@ -250,7 +254,11 @@ impl ScriptEngineBackend for LuaEngineBackend {
         &["lua"]
     }
 
-    fn check(&self, source: &str, _options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+    fn check(
+        &self,
+        source: &str,
+        _options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError> {
         if !self.enabled() {
             return Err(not_enabled_error(self.backend_id()));
         }
@@ -326,7 +334,11 @@ impl ScriptEngineBackend for QjsEngineBackend {
         &["js", "mjs"]
     }
 
-    fn check(&self, source: &str, _options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+    fn check(
+        &self,
+        source: &str,
+        _options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError> {
         if !self.enabled() {
             return Err(not_enabled_error(self.backend_id()));
         }
@@ -349,9 +361,11 @@ impl ScriptEngineBackend for QjsEngineBackend {
 
         // Wire fleet bridge
         if let Some(bridge) = fleet_bridge {
-            host.fleet_call = Some(Arc::new(move |op_id: &str, params: &str| -> Result<String, String> {
-                bridge(op_id, params)
-            }));
+            host.fleet_call = Some(Arc::new(
+                move |op_id: &str, params: &str| -> Result<String, String> {
+                    bridge(op_id, params)
+                },
+            ));
         }
 
         // Wire args_len / arg from options.arguments
@@ -399,7 +413,11 @@ impl ScriptEngineBackend for SqlEngineBackend {
         &["sql"]
     }
 
-    fn check(&self, source: &str, _options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+    fn check(
+        &self,
+        source: &str,
+        _options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError> {
         if !self.enabled() {
             return Err(not_enabled_error(self.backend_id()));
         }
@@ -423,16 +441,22 @@ impl ScriptEngineBackend for SqlEngineBackend {
         // see that struct's doc) covering only the M1-enforced subset:
         // wall_time_ms, collection_items, and output_bytes (standing in for
         // both output_bytes and string_bytes — see its doc for why).
-        let sql_budgets = options.budgets.as_ref().map(|budgets| agenterm_sql::ExecuteBudgets {
-            wall_time_ms: budgets.wall_time_ms,
-            collection_items: budgets.collection_items,
-            output_bytes: budgets.output_bytes,
-        });
+        let sql_budgets = options
+            .budgets
+            .as_ref()
+            .map(|budgets| agenterm_sql::ExecuteBudgets {
+                wall_time_ms: budgets.wall_time_ms,
+                collection_items: budgets.collection_items,
+                output_bytes: budgets.output_bytes,
+            });
 
         let outcome = agenterm_sql::execute_entry(source, "invocation.sql", sql_budgets.as_ref())
             .map_err(|e| e.to_string())?;
 
-        Ok(ScriptInvocationResult { stdout: outcome.stdout, value: outcome.value })
+        Ok(ScriptInvocationResult {
+            stdout: outcome.stdout,
+            value: outcome.value,
+        })
     }
 }
 
@@ -456,10 +480,7 @@ pub enum ScriptEngine {
 impl ScriptEngine {
     pub fn all() -> Vec<ScriptEngine> {
         #[allow(unused_mut)]
-        let mut engines = vec![
-            Self::Rh(RhEngineBackend),
-            Self::Qjs(QjsEngineBackend),
-        ];
+        let mut engines = vec![Self::Rh(RhEngineBackend), Self::Qjs(QjsEngineBackend)];
         #[cfg(feature = "script-lua")]
         engines.push(Self::Lua(LuaEngineBackend));
         #[cfg(feature = "script-sql")]
@@ -509,7 +530,11 @@ impl ScriptEngineBackend for ScriptEngine {
         }
     }
 
-    fn check(&self, source: &str, options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+    fn check(
+        &self,
+        source: &str,
+        options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError> {
         match self {
             Self::Rh(backend) => backend.check(source, options),
             #[cfg(feature = "script-lua")]
@@ -1034,10 +1059,7 @@ mod tests {
     #[test]
     fn script_engine_all_covers_every_backend_id() {
         let ids: Vec<ScriptBackend> = ScriptEngine::all().iter().map(|e| e.backend_id()).collect();
-        let mut expected = vec![
-            ScriptBackend::Rh,
-            ScriptBackend::Qjs,
-        ];
+        let mut expected = vec![ScriptBackend::Rh, ScriptBackend::Qjs];
         #[cfg(feature = "script-lua")]
         expected.push(ScriptBackend::Lua);
         #[cfg(feature = "script-sql")]

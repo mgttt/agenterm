@@ -16,8 +16,7 @@ fn dirs_fallback() -> PathBuf {
     std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            let home = std::env::var("USERPROFILE")
-                .unwrap_or_else(|_| ".".to_string());
+            let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
             PathBuf::from(home).join("AppData").join("Local")
         })
 }
@@ -42,8 +41,7 @@ pub fn cached_compile(source: &str) -> Result<CachedCompileResult, String> {
 
     // Check cache
     if cache_path.exists() {
-        let bytecode = std::fs::read(&cache_path)
-            .map_err(|e| format!("cache_read: {e}"))?;
+        let bytecode = std::fs::read(&cache_path).map_err(|e| format!("cache_read: {e}"))?;
         let hash = sha2::Sha256::digest(&bytecode);
         let bytecode_hash = hex_encode(&hash);
         return Ok(CachedCompileResult {
@@ -57,10 +55,8 @@ pub fn cached_compile(source: &str) -> Result<CachedCompileResult, String> {
     let (bytecode, bytecode_hash) = compile_lua(source)?;
 
     // Store in cache
-    std::fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("cache_create_dir: {e}"))?;
-    std::fs::write(&cache_path, &bytecode)
-        .map_err(|e| format!("cache_write: {e}"))?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("cache_create_dir: {e}"))?;
+    std::fs::write(&cache_path, &bytecode).map_err(|e| format!("cache_write: {e}"))?;
 
     Ok(CachedCompileResult {
         bytecode,

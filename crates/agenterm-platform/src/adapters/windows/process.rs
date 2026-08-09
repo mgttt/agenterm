@@ -49,10 +49,9 @@ fn write_parent_console(message: &str, to_stderr: bool) -> bool {
         windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ
             | windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE,
     );
-    opts.open("CONOUT$")
-        .is_ok_and(|mut console| {
-            console.write_all(payload.as_bytes()).is_ok() && console.flush().is_ok()
-        })
+    opts.open("CONOUT$").is_ok_and(|mut console| {
+        console.write_all(payload.as_bytes()).is_ok() && console.flush().is_ok()
+    })
 }
 
 pub(crate) fn stdout_probe_token(reader: &ChildStdout) -> Option<PipeProbeToken> {

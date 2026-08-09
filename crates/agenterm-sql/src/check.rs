@@ -113,11 +113,8 @@ mod tests {
 
     #[test]
     fn a_syntax_error_in_the_second_statement_of_a_multi_statement_source_is_caught() {
-        let error = check(
-            "SELECT 1; SELEC 2 FORM;",
-            "second_bad.sql",
-        )
-        .expect_err("syntax error in second statement should fail the whole check");
+        let error = check("SELECT 1; SELEC 2 FORM;", "second_bad.sql")
+            .expect_err("syntax error in second statement should fail the whole check");
         assert!(matches!(error, SqlError::Parse(_)));
     }
 }

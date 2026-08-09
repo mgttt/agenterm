@@ -67,10 +67,7 @@ pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
 }
 
 pub(crate) fn probe() -> FontDiscovery {
-    let families: Vec<&'static str> = candidates()
-        .iter()
-        .map(|c| c.name)
-        .collect();
+    let families: Vec<&'static str> = candidates().iter().map(|c| c.name).collect();
     FontDiscovery {
         primary_family: families.first().copied(),
         available_families: families,

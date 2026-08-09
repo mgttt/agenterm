@@ -178,7 +178,7 @@ fn categorize_path(relative: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{CallerInventoryOptions, BASELINE_FIXTURE, NEEDLE, scan_caller_inventory};
+    use super::{BASELINE_FIXTURE, CallerInventoryOptions, NEEDLE, scan_caller_inventory};
 
     #[test]
     fn caller_inventory_finds_residual_references() {
@@ -186,7 +186,7 @@ mod tests {
         let report = scan_caller_inventory(CallerInventoryOptions {
             project_root: repo.clone(),
         })
-            .expect("inventory");
+        .expect("inventory");
         assert_eq!(report.needle, NEEDLE);
         assert!(
             report.hit_count >= 20,

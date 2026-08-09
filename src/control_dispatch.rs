@@ -16,13 +16,13 @@ use crate::{
         ApplicationMouseMode, FocusSurface, MouseReportEncoding, mouse_protocol_mode_name,
         mouse_report_encoding_name,
     },
+    frontend::settings::{AppearanceField, SettingsScope},
     operations::{UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE},
     protocol::IpcResponse,
     pty::{NativeInputOwnership, NativeTerminalKey, PtyError},
     settings::clamp_tabs_width,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
-    frontend::settings::{AppearanceField, SettingsScope},
     theme::AppearancePreset,
     ui_bridge::{
         UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
@@ -1198,8 +1198,8 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
         "instance-picker-select" => {
             // `--name` deliberately, not the global `--instance`, which picks
             // the control endpoint rather than a row in this list.
-            let target = if let Some(name) = option_value(args, "--name")
-                .or_else(|| option_value(args, "--logical-instance"))
+            let target = if let Some(name) =
+                option_value(args, "--name").or_else(|| option_value(args, "--logical-instance"))
             {
                 InstancePickerTarget::Name(name.to_owned())
             } else if let Some(pid) =

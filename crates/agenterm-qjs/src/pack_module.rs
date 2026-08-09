@@ -78,7 +78,10 @@ pub fn discover_import_graph(
     project_root: &Path,
 ) -> Result<Vec<PathBuf>, QjsError> {
     let canonical_root = std::fs::canonicalize(project_root).map_err(|err| {
-        QjsError::Usage(format!("qjs_module_root: {}: {err}", project_root.display()))
+        QjsError::Usage(format!(
+            "qjs_module_root: {}: {err}",
+            project_root.display()
+        ))
     })?;
     let canonical_entry = std::fs::canonicalize(entry_path).map_err(|err| {
         QjsError::Usage(format!("qjs_module_entry: {}: {err}", entry_path.display()))
@@ -158,8 +161,8 @@ impl QjsModulePackManifest {
     // duplicate rather than a signature change to `pack_support` for one
     // caller's wording.
     pub fn write(&self, path: &Path) -> Result<(), String> {
-        let json =
-            serde_json::to_string_pretty(self).map_err(|err| format!("manifest_serialize: {err}"))?;
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|err| format!("manifest_serialize: {err}"))?;
         std::fs::write(path, json).map_err(|err| format!("manifest_write: {err}"))
     }
 
@@ -270,8 +273,8 @@ pub fn build_module_pack_dir(
 ) -> Result<PathBuf, String> {
     let graph = discover_import_graph(source, entry_path, project_root)
         .map_err(|err| format!("module_pack_discover: {err}"))?;
-    let canonical_root = std::fs::canonicalize(project_root)
-        .map_err(|err| format!("module_pack_root: {err}"))?;
+    let canonical_root =
+        std::fs::canonicalize(project_root).map_err(|err| format!("module_pack_root: {err}"))?;
     let canonical_entry =
         std::fs::canonicalize(entry_path).map_err(|err| format!("module_pack_entry: {err}"))?;
 
@@ -381,7 +384,9 @@ mod tests {
         let graph = discover_import_graph(&source, &entry, project.path()).expect("discover");
         assert_eq!(graph.len(), 2);
         assert!(graph.contains(&std::fs::canonicalize(&entry).unwrap()));
-        assert!(graph.contains(&std::fs::canonicalize(project.path().join("lib/value.js")).unwrap()));
+        assert!(
+            graph.contains(&std::fs::canonicalize(project.path().join("lib/value.js")).unwrap())
+        );
     }
 
     #[test]
@@ -397,9 +402,11 @@ mod tests {
         )
         .unwrap();
         let source = std::fs::read_to_string(&entry).unwrap();
-        let error =
-            discover_import_graph(&source, &entry, &inner).expect_err("must reject escape");
-        assert!(error.to_string().contains("Error resolving module"), "{error}");
+        let error = discover_import_graph(&source, &entry, &inner).expect_err("must reject escape");
+        assert!(
+            error.to_string().contains("Error resolving module"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -453,8 +460,12 @@ mod tests {
         )
         .unwrap();
 
-        let error = QjsModulePack::load(pack_dir.path()).expect_err("tampered file must be rejected");
-        assert!(error.contains("module_pack_content_hash_mismatch"), "{error}");
+        let error =
+            QjsModulePack::load(pack_dir.path()).expect_err("tampered file must be rejected");
+        assert!(
+            error.contains("module_pack_content_hash_mismatch"),
+            "{error}"
+        );
     }
 
     #[test]

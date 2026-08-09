@@ -1585,7 +1585,15 @@ fn render_server_strip(
     strip: &ServerStripView,
 ) {
     let (sx, sy, sw, sh) = strip.bounds;
-    fill_rect(buffer, stride, sx, sy, sw, sh, rgb_to_pixel(palette.sidebar));
+    fill_rect(
+        buffer,
+        stride,
+        sx,
+        sy,
+        sw,
+        sh,
+        rgb_to_pixel(palette.sidebar),
+    );
     // Divider along the bottom edge separates the strip from the workbench.
     fill_rect(
         buffer,
@@ -1623,7 +1631,15 @@ fn render_server_strip(
         );
     }
     let (ax, ay, aw, ah) = strip.add;
-    fill_rect(buffer, stride, ax, ay, aw, ah, rgb_to_pixel(palette.composer));
+    fill_rect(
+        buffer,
+        stride,
+        ax,
+        ay,
+        aw,
+        ah,
+        rgb_to_pixel(palette.composer),
+    );
     draw_text(
         buffer,
         stride,
@@ -1637,7 +1653,15 @@ fn render_server_strip(
     // The menu is drawn last so it sits above the strip and the workbench.
     if let Some(menu) = strip.menu.as_ref() {
         let (fx, fy, fw, fh) = menu.frame;
-        fill_rect(buffer, stride, fx, fy, fw, fh, rgb_to_pixel(palette.composer));
+        fill_rect(
+            buffer,
+            stride,
+            fx,
+            fy,
+            fw,
+            fh,
+            rgb_to_pixel(palette.composer),
+        );
         fill_rect(buffer, stride, fx, fy, fw, 1, rgb_to_pixel(palette.divider));
         fill_rect(
             buffer,

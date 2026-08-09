@@ -129,11 +129,8 @@ mod tests {
     #[test]
     fn build_pack_with_print() {
         let dir = TempDir::new().expect("tempdir");
-        build_pack_dir(
-            "function entry() { print('hello'); return 7; }",
-            dir.path(),
-        )
-        .expect("build");
+        build_pack_dir("function entry() { print('hello'); return 7; }", dir.path())
+            .expect("build");
         let pack = QjsPack::load(dir.path()).expect("load");
         let host = QjsHostFunctions::default();
         let result = pack.eval(&host).expect("eval");
@@ -162,8 +159,11 @@ mod tests {
     fn pack_load_rejects_tampered_entry_source() {
         let dir = TempDir::new().expect("tempdir");
         build_pack_dir("function entry() { return 1; }", dir.path()).expect("build");
-        std::fs::write(dir.path().join("entry.js"), "function entry() { return 999; }")
-            .expect("tamper");
+        std::fs::write(
+            dir.path().join("entry.js"),
+            "function entry() { return 999; }",
+        )
+        .expect("tamper");
         let err = QjsPack::load(dir.path()).expect_err("tampered source");
         assert!(err.contains("manifest_source_hash_mismatch"), "{err}");
     }

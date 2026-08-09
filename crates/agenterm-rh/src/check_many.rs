@@ -15,7 +15,7 @@ use agenterm_script_common::check_many::{self, CheckFailure};
 
 pub use agenterm_script_common::check_many::{
     CheckManyFailure, CheckManyManifest, CheckManyOptions, CheckManyReport, DEFAULT_SOURCE_BYTES,
-    DEFAULT_WALL_TIME_MS, FILES_MAX, MANIFEST_MAX_BYTES, ParsedCheckManyCli, PATH_MAX_BYTES,
+    DEFAULT_WALL_TIME_MS, FILES_MAX, MANIFEST_MAX_BYTES, PATH_MAX_BYTES, ParsedCheckManyCli,
     TOTAL_SOURCE_MAX_BYTES,
 };
 

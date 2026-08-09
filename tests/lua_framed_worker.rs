@@ -8,10 +8,7 @@ use serde_json::Value;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-fn send_invocation(
-    mut child: std::process::Child,
-    invocation: &Value,
-) -> Result<Value, String> {
+fn send_invocation(mut child: std::process::Child, invocation: &Value) -> Result<Value, String> {
     {
         let stdin = child.stdin.as_mut().ok_or("stdin unavailable")?;
         serde_json::to_writer(&mut *stdin, invocation).map_err(|e| e.to_string())?;
@@ -85,8 +82,7 @@ fn check_invocation(source: &str) -> Value {
 #[test]
 fn framed_worker_eval_returns_42() {
     let child = spawn_lua().expect("spawn lua");
-    let result = send_invocation(child, &eval_invocation("return 42"))
-        .expect("send invocation");
+    let result = send_invocation(child, &eval_invocation("return 42")).expect("send invocation");
     assert_eq!(result["ok"], true);
     assert_eq!(result["value"], 42);
     assert_eq!(result["exit_class"], "success");
@@ -95,21 +91,22 @@ fn framed_worker_eval_returns_42() {
 #[test]
 fn framed_worker_eval_with_print() {
     let child = spawn_lua().expect("spawn lua");
-    let result = send_invocation(
-        child,
-        &eval_invocation("print('hello framed') return 7"),
-    )
-    .expect("send invocation");
+    let result = send_invocation(child, &eval_invocation("print('hello framed') return 7"))
+        .expect("send invocation");
     assert_eq!(result["ok"], true);
     assert_eq!(result["value"], 7);
-    assert!(result["stdout"].as_str().unwrap_or("").contains("hello framed"));
+    assert!(
+        result["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .contains("hello framed")
+    );
 }
 
 #[test]
 fn framed_worker_check_valid() {
     let child = spawn_lua().expect("spawn lua");
-    let result =
-        send_invocation(child, &check_invocation("return 0")).expect("send invocation");
+    let result = send_invocation(child, &check_invocation("return 0")).expect("send invocation");
     assert_eq!(result["ok"], true);
     assert_eq!(result["exit_class"], "success");
 }
@@ -117,8 +114,7 @@ fn framed_worker_check_valid() {
 #[test]
 fn framed_worker_check_invalid_syntax() {
     let child = spawn_lua().expect("spawn lua");
-    let result =
-        send_invocation(child, &check_invocation("return !!")).expect("send invocation");
+    let result = send_invocation(child, &check_invocation("return !!")).expect("send invocation");
     assert_eq!(result["ok"], false);
     assert_eq!(result["exit_class"], "script");
 }

@@ -161,10 +161,7 @@ pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
             Some(host_args_len_call),
         )
     } else if api >= 4 {
-        module.register_host_v4(
-            host_fleet_call,
-            Some(host_std_fs_exists_call),
-        )
+        module.register_host_v4(host_fleet_call, Some(host_std_fs_exists_call))
     } else if api >= 3 {
         module.register_host_v3(host_fleet_call, None)
     } else if api >= 2 {
@@ -916,10 +913,12 @@ mod tests {
         let processes: serde_json::Value =
             serde_json::from_slice(&output[..wrote as usize]).expect("process list JSON");
         assert!(
-            processes.as_array().is_some_and(|items| items.iter().any(
-                |process| process.get("id").and_then(serde_json::Value::as_u64)
-                    == Some(u64::from(std::process::id()))
-            ))
+            processes
+                .as_array()
+                .is_some_and(|items| items.iter().any(|process| process
+                    .get("id")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(u64::from(std::process::id()))))
         );
     }
 

@@ -50,7 +50,9 @@ fn binary() -> &'static str {
 static GUI_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn gui_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    GUI_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    GUI_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn shell_program() -> String {
@@ -183,7 +185,10 @@ impl ConSession {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn agenterm-con");
-        Self { child, snapshot_path }
+        Self {
+            child,
+            snapshot_path,
+        }
     }
 
     /// Polls the snapshot file until `predicate` accepts its parsed content
@@ -263,11 +268,20 @@ fn version_and_help_are_synchronous_and_never_open_a_window() {
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("agenterm-con "));
 
-    let help = Command::new(binary()).arg("--help").output().expect("run --help");
+    let help = Command::new(binary())
+        .arg("--help")
+        .output()
+        .expect("run --help");
     assert!(help.status.success());
     let help_text = String::from_utf8_lossy(&help.stdout);
-    assert!(help_text.contains("--script"), "help must document --script");
-    assert!(help_text.contains("--emit-snapshot"), "help must document --emit-snapshot");
+    assert!(
+        help_text.contains("--script"),
+        "help must document --script"
+    );
+    assert!(
+        help_text.contains("--emit-snapshot"),
+        "help must document --emit-snapshot"
+    );
 }
 
 #[test]
@@ -313,7 +327,10 @@ fn dash_e_passthrough_reaches_the_real_child_process() {
         if let Ok(Some(_status)) = session.child.try_wait() {
             break;
         }
-        assert!(Instant::now() < deadline, "process did not exit after its child did");
+        assert!(
+            Instant::now() < deadline,
+            "process did not exit after its child did"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
 }
@@ -375,7 +392,10 @@ fn scripted_text_and_paste_both_reach_the_pty() {
     // Order matters: paste must not have raced ahead of the typed command.
     let typed_at = text.find("TYPED_MARKER").unwrap();
     let pasted_at = text.find("PASTED_MARKER").unwrap();
-    assert!(typed_at < pasted_at, "script commands ran out of order:\n{text}");
+    assert!(
+        typed_at < pasted_at,
+        "script commands ran out of order:\n{text}"
+    );
 }
 
 #[test]
@@ -439,7 +459,10 @@ fn snapshot_reports_a_live_child_until_it_exits() {
         if let Ok(Some(_)) = session.child.try_wait() {
             break;
         }
-        assert!(Instant::now() < deadline, "process never exited after its child did");
+        assert!(
+            Instant::now() < deadline,
+            "process never exited after its child did"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
 }
@@ -626,16 +649,23 @@ fn scripted_press_drag_release_extends_a_local_selection() {
         &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
     );
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
-        snapshot["selection"].is_array() && snapshot["selection"][1]["col"] != snapshot["selection"][0]["col"]
+        snapshot["selection"].is_array()
+            && snapshot["selection"][1]["col"] != snapshot["selection"][0]["col"]
     });
     // The anchor (press point) must stay put and the moving endpoint must
     // have followed the drag to the release point — a `click` alone could
     // only ever produce a single-cell selection, so this is real evidence
     // the drag path, not just press/release individually, is wired.
     assert_eq!(snapshot["selection"][0]["row"], 3, "{snapshot}");
-    assert_eq!(snapshot["selection"][0]["col"], 2, "anchor must stay at the press point: {snapshot}");
+    assert_eq!(
+        snapshot["selection"][0]["col"], 2,
+        "anchor must stay at the press point: {snapshot}"
+    );
     assert_eq!(snapshot["selection"][1]["row"], 3, "{snapshot}");
-    assert_eq!(snapshot["selection"][1]["col"], 9, "moving endpoint must follow the drag: {snapshot}");
+    assert_eq!(
+        snapshot["selection"][1]["col"], 9,
+        "moving endpoint must follow the drag: {snapshot}"
+    );
     let _ = session.child.kill();
 }
 
@@ -657,14 +687,17 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
     };
     let script = write_script(
         &dir,
-        &format!(r#"[
+        &format!(
+            r#"[
             {{"text": {} }},
             {{"wait_ms": 6000}},
             {{"wheel": {{"row": 0, "col": 0, "notches": 5}}}},
             {{"wait_ms": 200}},
             {{"wheel": {{"row": 0, "col": 0, "notches": -2}}}},
             {{"wait_ms": 200}}
-        ]"#, serde_json::to_string(&format!("{scroll_command}\r")).unwrap()),
+        ]"#,
+            serde_json::to_string(&format!("{scroll_command}\r")).unwrap()
+        ),
     );
     let args = interactive_shell_args(&script);
     let mut session = ConSession::spawn(&dir, &args);
@@ -679,7 +712,10 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
         snapshot["scroll_offset"].as_u64().unwrap_or(0) > 0
     });
     let offset_after_up = scrolled_up["scroll_offset"].as_u64().unwrap();
-    assert_eq!(offset_after_up, 5, "5 wheel-up notches must move exactly 5 lines: {scrolled_up}");
+    assert_eq!(
+        offset_after_up, 5,
+        "5 wheel-up notches must move exactly 5 lines: {scrolled_up}"
+    );
 
     let scrolled_down = session.wait_for(Duration::from_secs(10), |snapshot| {
         snapshot["scroll_offset"].as_u64() == Some(3)
@@ -724,13 +760,17 @@ fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
     // exactly the point of keeping it, not a sign the earlier investigation
     // (or this one) was wrong to look.
     let dir = scratch_dir("ctrl-wheel-zoom-cycles");
-    let mut commands = vec![r#"{"text": "echo ZOOM_TEST_MARKER\r"}"#.to_owned(), r#"{"wait_ms": 300}"#.to_owned()];
+    let mut commands = vec![
+        r#"{"text": "echo ZOOM_TEST_MARKER\r"}"#.to_owned(),
+        r#"{"wait_ms": 300}"#.to_owned(),
+    ];
     // 8..=36 is the real clamp range (`zoom_font`); overshoot on each leg so
     // every cycle actually touches both ends rather than assuming the step
     // count lines up exactly.
     for _ in 0..20 {
         commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": 40}, "ctrl": true}"#.to_owned());
-        commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": -40}, "ctrl": true}"#.to_owned());
+        commands
+            .push(r#"{"wheel": {"row": 0, "col": 0, "notches": -40}, "ctrl": true}"#.to_owned());
     }
     commands.push(r#"{"wait_ms": 250}"#.to_owned());
     commands.push(r#"{"text": "echo ZOOM_DONE\r"}"#.to_owned());
@@ -750,7 +790,10 @@ fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
     let snapshot = session.wait_for(Duration::from_secs(15), |snapshot| {
         ConSession::screen_text(snapshot).contains("ZOOM_TEST_MARKER")
     });
-    assert_eq!(snapshot["child_alive"], true, "process must still be alive: {snapshot}");
+    assert_eq!(
+        snapshot["child_alive"], true,
+        "process must still be alive: {snapshot}"
+    );
 
     // The real assertion: the *process itself* must still be running after
     // every zoom cycle, not just that the last snapshot read looked fine —
@@ -830,7 +873,10 @@ fn real_tui_less_scrolls_via_character_and_space_keys() {
         first_row.starts_with("LESS_LINE_"),
         "still expected a LESS_LINE_* row after scrolling, got {first_row:?}: {scrolled}"
     );
-    let scrolled_to: u64 = first_row.trim_start_matches("LESS_LINE_").parse().unwrap_or(0);
+    let scrolled_to: u64 = first_row
+        .trim_start_matches("LESS_LINE_")
+        .parse()
+        .unwrap_or(0);
     assert!(
         scrolled_to > 1,
         "3x 'j' + space must have advanced past line 1, top row is {first_row:?}"
@@ -930,12 +976,22 @@ fn scripted_screenshot_produces_a_valid_nonempty_png() {
 
     let deadline = Instant::now() + Duration::from_secs(10);
     while !png_path.exists() {
-        assert!(Instant::now() < deadline, "screenshot PNG was never written");
+        assert!(
+            Instant::now() < deadline,
+            "screenshot PNG was never written"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
     let bytes = std::fs::read(&png_path).expect("read screenshot");
-    assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']), "not a valid PNG signature");
-    assert!(bytes.len() > 1000, "suspiciously small PNG ({} bytes)", bytes.len());
+    assert!(
+        bytes.starts_with(&[0x89, b'P', b'N', b'G']),
+        "not a valid PNG signature"
+    );
+    assert!(
+        bytes.len() > 1000,
+        "suspiciously small PNG ({} bytes)",
+        bytes.len()
+    );
     let _ = session.child.kill();
 }
 
@@ -954,8 +1010,7 @@ fn zooming_in_while_the_shell_is_actively_producing_output_survives() {
     // between zoom steps.
     let dir = scratch_dir("grow-while-busy");
     let mut commands = vec![
-        r#"{"text": "for /l %i in (1,1,500) do @echo LINE_%i █▒░ 中文日本語\r"}"#
-            .to_owned(),
+        r#"{"text": "for /l %i in (1,1,500) do @echo LINE_%i █▒░ 中文日本語\r"}"#.to_owned(),
         r#"{"wait_ms": 200}"#.to_owned(),
     ];
     for _ in 0..30 {
@@ -1030,14 +1085,22 @@ fn rapid_ctrl_wheel_zoom_burst_against_a_repainting_tui_survives() {
 
     let mut session = ConSession::spawn(
         &dir,
-        &["--script", script.to_str().unwrap(), "-e", less.to_str().unwrap(), lines_path.to_str().unwrap()],
+        &[
+            "--script",
+            script.to_str().unwrap(),
+            "-e",
+            less.to_str().unwrap(),
+            lines_path.to_str().unwrap(),
+        ],
     );
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut last_snapshot = None;
     loop {
         if let Ok(Some(status)) = session.child.try_wait() {
             eprintln!("PROCESS SELF-EXITED: status={status:?}, last snapshot: {last_snapshot:?}");
-            panic!("CRASH REPRODUCED: agenterm-con exited on its own during rapid zoom burst against less");
+            panic!(
+                "CRASH REPRODUCED: agenterm-con exited on its own during rapid zoom burst against less"
+            );
         }
         if let Ok(bytes) = std::fs::read(&session.snapshot_path)
             && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)

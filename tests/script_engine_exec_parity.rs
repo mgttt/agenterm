@@ -82,8 +82,12 @@ impl Drop for EnvGuard {
     }
 }
 
-const ENGINES: [ScriptBackend; 4] =
-    [ScriptBackend::Rh, ScriptBackend::Lua, ScriptBackend::Qjs, ScriptBackend::Sql];
+const ENGINES: [ScriptBackend; 4] = [
+    ScriptBackend::Rh,
+    ScriptBackend::Lua,
+    ScriptBackend::Qjs,
+    ScriptBackend::Sql,
+];
 
 /// Same "not enabled" format `src/script_engine.rs`'s private
 /// `not_enabled_error` produces (`format!("{} backend not enabled", ...)`)
@@ -104,7 +108,11 @@ fn trivial_entry_value() {
     let rh_result = {
         let _env = EnvGuard::set("rh");
         engine_for(ScriptBackend::Rh)
-            .execute("fn entry() { 42 }", &ScriptInvocationOptions::default(), None)
+            .execute(
+                "fn entry() { 42 }",
+                &ScriptInvocationOptions::default(),
+                None,
+            )
             .expect("rh execute should succeed")
     };
     assert_eq!(
@@ -175,17 +183,27 @@ fn stdout_capture() {
             )
             .expect("rh execute should succeed")
     };
-    assert_eq!(rh.stdout, "hi\n", "rh: print(\"hi\") should capture \"hi\\n\"");
+    assert_eq!(
+        rh.stdout, "hi\n",
+        "rh: print(\"hi\") should capture \"hi\\n\""
+    );
 
     // lua: native `print` is overridden to append to the captured buffer,
     // one '\n' appended per call (crates/agenterm-lua/src/lib.rs:281-296).
     let lua = {
         let _env = EnvGuard::set("lua");
         engine_for(ScriptBackend::Lua)
-            .execute("print('hi') return 0", &ScriptInvocationOptions::default(), None)
+            .execute(
+                "print('hi') return 0",
+                &ScriptInvocationOptions::default(),
+                None,
+            )
             .expect("lua execute should succeed")
     };
-    assert_eq!(lua.stdout, "hi\n", "lua: print('hi') should capture \"hi\\n\"");
+    assert_eq!(
+        lua.stdout, "hi\n",
+        "lua: print('hi') should capture \"hi\\n\""
+    );
 
     // qjs: `print()` is host-bound and captured, newline-terminated per
     // call per crates/agenterm-qjs/src/eval.rs's `EvalOutcome::stdout` doc.
@@ -199,7 +217,10 @@ fn stdout_capture() {
             )
             .expect("qjs execute should succeed")
     };
-    assert_eq!(qjs.stdout, "hi\n", "qjs: print('hi') should capture \"hi\\n\"");
+    assert_eq!(
+        qjs.stdout, "hi\n",
+        "qjs: print('hi') should capture \"hi\\n\""
+    );
 
     // PARITY FINDING: all three engines produce byte-identical stdout
     // ("hi\n") for the equivalent one-line-print program — same text, same
@@ -257,11 +278,17 @@ fn check_accepts_valid_rejects_broken() {
 
         engine
             .check(fixture.valid, &options)
-            .unwrap_or_else(|error| panic!("{:?}: valid source should check clean, got {error}", fixture.backend));
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{:?}: valid source should check clean, got {error}",
+                    fixture.backend
+                )
+            });
 
-        let error = engine
-            .check(fixture.broken, &options)
-            .expect_err(&format!("{:?}: broken source should fail check", fixture.backend));
+        let error = engine.check(fixture.broken, &options).expect_err(&format!(
+            "{:?}: broken source should fail check",
+            fixture.backend
+        ));
         assert!(
             !error.is_empty(),
             "{:?}: broken-source check error should carry a non-empty diagnostic",
@@ -315,7 +342,11 @@ fn execute_missing_entry_fails_closed() {
     let lua_result = {
         let _env = EnvGuard::set("lua");
         engine_for(ScriptBackend::Lua)
-            .execute("local x = 40 + 2", &ScriptInvocationOptions::default(), None)
+            .execute(
+                "local x = 40 + 2",
+                &ScriptInvocationOptions::default(),
+                None,
+            )
             .expect("lua: source without an explicit return should NOT fail closed")
     };
     assert_eq!(
@@ -362,7 +393,11 @@ fn disabled_backend_errors() {
                 continue;
             }
             let error = engine_for(other)
-                .execute("irrelevant source", &ScriptInvocationOptions::default(), None)
+                .execute(
+                    "irrelevant source",
+                    &ScriptInvocationOptions::default(),
+                    None,
+                )
                 .expect_err(&format!(
                     "{:?} should be disabled while AGENTERM_SCRIPT_BACKEND={}",
                     other,
@@ -519,7 +554,10 @@ fn sql_stdout_is_empty() {
             None,
         )
         .expect("sql execute should succeed");
-    assert_eq!(result.stdout, "", "sql: stdout should always be empty in M1");
+    assert_eq!(
+        result.stdout, "",
+        "sql: stdout should always be empty in M1"
+    );
 }
 
 /// sql's analogue of `execute_missing_entry_fails_closed`: NOT enrolled
@@ -541,7 +579,10 @@ fn sql_execute_no_result_set_is_none_not_error() {
     let empty = engine
         .execute("", &options, None)
         .expect("sql: an empty script must not fail closed");
-    assert_eq!(empty.value, None, "sql: an empty script's value should be None");
+    assert_eq!(
+        empty.value, None,
+        "sql: an empty script's value should be None"
+    );
 
     let ddl_only = engine
         .execute(

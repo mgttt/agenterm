@@ -144,8 +144,7 @@ pub fn try_execute_rh_invocation(
             }))
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
-            let (pack, native_path) =
-                resolve_rh_pack(source, options.project_root.as_deref())?;
+            let (pack, native_path) = resolve_rh_pack(source, options.project_root.as_deref())?;
             let entry_result = crate::script_rh_host::call_pack_entry_with_host_result(
                 &native_path,
                 fleet_bridge,
@@ -304,10 +303,7 @@ mod tests {
             ScriptBackend::from_entry_path("scripts/lua/test.lua"),
             ScriptBackend::Lua
         );
-        assert_eq!(
-            ScriptBackend::from_entry_path("test.rh"),
-            ScriptBackend::Rh
-        );
+        assert_eq!(ScriptBackend::from_entry_path("test.rh"), ScriptBackend::Rh);
         assert_eq!(
             ScriptBackend::from_entry_path("test.rhai"),
             ScriptBackend::Rh

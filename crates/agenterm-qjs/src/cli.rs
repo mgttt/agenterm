@@ -63,9 +63,9 @@ use std::{
 };
 
 use crate::{
-    QJS_VERSION, QjsError, QjsHostFunctions, check, check_with_project_validation,
-    eval_entry, eval_entry_with_host, eval_module_entry_with_host, find_flag_value, positional,
-    run_check_many, wants_module_mode,
+    QJS_VERSION, QjsError, QjsHostFunctions, check, check_with_project_validation, eval_entry,
+    eval_entry_with_host, eval_module_entry_with_host, find_flag_value, positional, run_check_many,
+    wants_module_mode,
 };
 
 /// Run the `agenterm-qjs` CLI over `args` (argv **excluding** argv\[0\],
@@ -293,13 +293,11 @@ fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
             if wants_module_mode(&source) {
                 let root = project_root.ok_or_else(|| {
                     QjsError::Usage(
-                        "pack build: source uses import/export; requires --project-root DIR"
-                            .into(),
+                        "pack build: source uses import/export; requires --project-root DIR".into(),
                     )
                 })?;
-                let manifest_path =
-                    crate::build_module_pack_dir(&source, &path, &root, &dir)
-                        .map_err(QjsError::Check)?;
+                let manifest_path = crate::build_module_pack_dir(&source, &path, &root, &dir)
+                    .map_err(QjsError::Check)?;
                 println!("pack build ok (module): {}", path.display());
                 println!("  manifest: {}", manifest_path.display());
             } else {
@@ -393,8 +391,7 @@ fn run_corpus_scan_command(args: &[String]) -> Result<u8, QjsError> {
 /// for scripts using `import`/`export`.
 fn run_qualify_command(args: &[String]) -> Result<u8, QjsError> {
     let path = PathBuf::from(
-        positional(args, 0, "usage: agenterm-qjs qualify <file.js>")
-            .map_err(QjsError::Usage)?,
+        positional(args, 0, "usage: agenterm-qjs qualify <file.js>").map_err(QjsError::Usage)?,
     );
     let flags = &args[1..];
     let dir = find_flag_value(flags, "--dir")
@@ -423,8 +420,7 @@ fn run_qualify_command(args: &[String]) -> Result<u8, QjsError> {
             render_value(receipt.entry_value.as_ref())
         );
     } else {
-        let receipt =
-            crate::qualify_pack_dir(&source, &dir, &host).map_err(QjsError::Check)?;
+        let receipt = crate::qualify_pack_dir(&source, &dir, &host).map_err(QjsError::Check)?;
         receipt.write(&receipt_path).map_err(QjsError::Usage)?;
         println!(
             "qualify ok: {} -> {}",
@@ -468,8 +464,7 @@ fn read_source(path: &PathBuf) -> Result<String, QjsError> {
     // readable is a bad argument, not a syntax error in script content —
     // `check`/`compile_qjs`/`eval_entry` etc. (called with the source this
     // returns) are what produce the script-level `Parse`/`Check` failures.
-    fs::read_to_string(path)
-        .map_err(|err| QjsError::Usage(format!("{}: {err}", path.display())))
+    fs::read_to_string(path).map_err(|err| QjsError::Usage(format!("{}: {err}", path.display())))
 }
 
 /// `--project-root`, if given; otherwise the entry file's own parent

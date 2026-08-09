@@ -24,25 +24,25 @@ pub mod script_api_validate;
 pub mod script_api_view;
 pub mod script_backend;
 pub mod script_catalog;
-pub mod script_engine;
 pub mod script_clipboard;
+pub mod script_engine;
 pub mod script_error;
 pub mod script_fleet;
 pub mod script_http;
 pub mod script_image;
+pub mod script_lua_host;
+pub mod script_lua_run;
 pub mod script_net;
 pub mod script_process;
 pub mod script_project;
 pub mod script_protocol;
+pub mod script_qjs_host;
 pub mod script_rh_cache;
 pub mod script_rh_cli;
-pub mod script_rh_host;
 pub mod script_rh_cli_main;
+pub mod script_rh_host;
 pub mod script_rh_pack;
 pub mod script_rh_run;
-pub mod script_lua_host;
-pub mod script_lua_run;
-pub mod script_qjs_host;
 pub mod script_runtime;
 pub mod script_stdlib;
 pub mod script_stream;
@@ -87,7 +87,9 @@ mod server_app;
 mod terminal_runtime;
 
 #[allow(unused_imports)]
-pub use client::{run_cli_entry, run_cli_entry_with_args, run_mux_entry, run_script_entry_with_args};
+pub use client::{
+    run_cli_entry, run_cli_entry_with_args, run_mux_entry, run_script_entry_with_args,
+};
 pub use control_center::run_control_center_entry_with_args;
 #[allow(unused_imports)]
 pub use mcp_catalog::run_mcp_entry_with_args;

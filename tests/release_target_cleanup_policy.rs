@@ -36,13 +36,14 @@ fn bootstrap_exposes_one_stable_cross_platform_rustc_wrapper_path() {
 #[test]
 fn bootstrap_builds_caches_and_executes_only_the_rh_worker() {
     assert!(
+        BOOTSTRAP
+            .contains("AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\\debug\\agenterm.exe")
+    );
+    assert!(
         BOOTSTRAP.contains(
-            "AGENTERM_BOOTSTRAP_SOURCE=%AGENTERM_BOOTSTRAP_TARGET%\\debug\\agenterm.exe"
+            "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\agenterm.exe"
         )
     );
-    assert!(BOOTSTRAP.contains(
-        "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\agenterm.exe"
-    ));
     assert!(BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm"));
     assert!(!BOOTSTRAP.contains("--bin agenterm-rh"));
     assert!(!BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rhai"));

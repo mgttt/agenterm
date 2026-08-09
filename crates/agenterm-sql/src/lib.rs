@@ -50,13 +50,13 @@ pub mod corpus_scan;
 pub mod error;
 pub mod eval;
 
+pub use agenterm_script_common::cli::{find_flag_value, has_flag, positional, require_flag_value};
 pub use check::check;
 pub use check_many::{
     CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
     read_manifest, run_check_many,
 };
 pub use corpus_scan::{CorpusScanReport, FailedFile as CorpusScanFailedFile, scan_directory};
-pub use agenterm_script_common::cli::{find_flag_value, has_flag, positional, require_flag_value};
 pub use error::SqlError;
 pub use eval::{ExecuteBudgets, ExecuteOutcome, execute_entry};
 

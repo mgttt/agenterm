@@ -72,13 +72,7 @@ mod tests {
     fn write_and_read_roundtrip() {
         let dir = TempDir::new().expect("tempdir");
         let path = dir.path().join("manifest.json");
-        LuaPackManifest::write(
-            &path,
-            "abc123",
-            "def456",
-            "pack.luac",
-        )
-        .expect("write");
+        LuaPackManifest::write(&path, "abc123", "def456", "pack.luac").expect("write");
         let m = LuaPackManifest::read(&path).expect("read");
         assert_eq!(m.schema, "agenterm.lua-pack-manifest/v1");
         assert_eq!(m.version, "0.1.0");

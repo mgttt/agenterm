@@ -49,10 +49,9 @@ use crate::{
             remote_word_selection,
         },
         server_strip_ui::{
-            SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, SERVER_TABS_REFRESH, StripRect,
-            ServerCloseConfirm,
-            ServerContextAction, ServerNewDialog, ServerTabContextMenu, layout_server_add_chip,
-            ServerContextMenuRects, layout_server_context_menu, layout_server_tab_chips,
+            SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, SERVER_TABS_REFRESH, ServerCloseConfirm,
+            ServerContextAction, ServerContextMenuRects, ServerNewDialog, ServerTabContextMenu,
+            StripRect, layout_server_add_chip, layout_server_context_menu, layout_server_tab_chips,
             server_tab_chip_label,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope, appearance_preset_grid},
@@ -5465,11 +5464,7 @@ impl RemoteWindowState {
 
     /// Spawn a new replaceable GUI for `instance`, optionally pinned to `endpoint`.
     /// Returns the child PID so the caller can surface/activate it.
-    fn spawn_gui_for_instance(
-        &mut self,
-        instance: &str,
-        endpoint: Option<&str>,
-    ) -> Result<u32> {
+    fn spawn_gui_for_instance(&mut self, instance: &str, endpoint: Option<&str>) -> Result<u32> {
         let exe = std::env::current_exe().context("resolve agenterm.exe path")?;
         let short = instance.strip_prefix("custom:").unwrap_or(instance);
         let mut command = std::process::Command::new(exe);
@@ -5504,9 +5499,8 @@ impl RemoteWindowState {
         // Breakaway + ACCESS_DENIED visible fallback: agenterm-platform only.
         // Keep the child handle so we can activate its HWND after it maps.
         let (mut child, _mode) =
-            crate::platform::process::spawn_breakaway_visible_child(&mut command).map_err(
-                |error| anyhow::anyhow!("could not open instance `{short}`: {error}"),
-            )?;
+            crate::platform::process::spawn_breakaway_visible_child(&mut command)
+                .map_err(|error| anyhow::anyhow!("could not open instance `{short}`: {error}"))?;
         let child_pid = child.id();
         std::thread::Builder::new()
             .name("agenterm-as-window-activate".to_owned())
@@ -5631,9 +5625,7 @@ impl RemoteWindowState {
         self.window.request_redraw();
     }
 
-    fn server_context_menu_geometry(
-        &self,
-    ) -> Option<ServerContextMenuRects<ProductPixelRect>> {
+    fn server_context_menu_geometry(&self) -> Option<ServerContextMenuRects<ProductPixelRect>> {
         let menu = self.server_tab_context_menu.as_ref()?;
         let client = self.window.client_size();
         let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
@@ -5663,10 +5655,7 @@ impl RemoteWindowState {
         let menu = self.server_context_menu_geometry()?;
         let as_window = menu.as_window;
         let close = menu.close;
-        if x >= as_window.left
-            && x < as_window.right
-            && y >= as_window.top
-            && y < as_window.bottom
+        if x >= as_window.left && x < as_window.right && y >= as_window.top && y < as_window.bottom
         {
             return Some(ServerContextAction::NewWindow);
         }
@@ -6585,8 +6574,7 @@ impl RemoteWindowState {
         // Full-screen TUIs (alt buffer) must keep mouse pass-through even if
         // scrollback_offset is non-zero from a primary-grid glitch — otherwise
         // clicks on in-app chrome ([x], lists) become local selection.
-        let scrolled_back =
-            tab.screen.scrollback_offset != 0 && !tab.screen.alternate_screen;
+        let scrolled_back = tab.screen.scrollback_offset != 0 && !tab.screen.alternate_screen;
         let input = MouseReportInput {
             mode: product_mode,
             encoding,
@@ -7040,8 +7028,7 @@ impl RemoteWindowState {
             .classify(&tab_id, point, now, window, clicks >= 3)
         {
             crate::frontend::selection::ClickStage::Triple => {
-                if let Some((start, end)) = remote_visible_row_selection(rows, columns, point.row)
-                {
+                if let Some((start, end)) = remote_visible_row_selection(rows, columns, point.row) {
                     self.set_completed_terminal_selection(tab_id, rows, columns, start, end);
                     let _ = self.copy_terminal_selection();
                 }
@@ -9603,7 +9590,10 @@ mod tests {
         });
         assert!(
             free.get("attached").and_then(|flag| flag.as_bool()) != Some(true)
-                || free.get("client_pid").and_then(|pid| pid.as_u64()).is_none()
+                || free
+                    .get("client_pid")
+                    .and_then(|pid| pid.as_u64())
+                    .is_none()
         );
     }
 

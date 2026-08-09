@@ -303,7 +303,8 @@ fn rh_shipped_surface_is_a_superset_of_the_lua_qjs_fleet_facade() {
     // removed a declared surface, which is worth a human look either way.
     let rh_only: BTreeSet<String> = rh_ids.difference(&lua_ids).cloned().collect();
     assert_eq!(
-        rh_only, rh_only_operation_ids(),
+        rh_only,
+        rh_only_operation_ids(),
         "rh's fleet.* surplus over lua/qjs changed. If this is an \
          intentional addition/removal to rh's shipped_surfaces.rs, update \
          `rh_only_operation_ids()` in this test to match (and consider \

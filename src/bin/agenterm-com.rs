@@ -243,7 +243,10 @@ fn main() {
         .stderr(Stdio::inherit())
         .status()
         .unwrap_or_else(|error| {
-            eprintln!("agenterm: could not start {}: {error}", executable.display());
+            eprintln!(
+                "agenterm: could not start {}: {error}",
+                executable.display()
+            );
             std::process::exit(1);
         });
     std::process::exit(status.code().unwrap_or(1));

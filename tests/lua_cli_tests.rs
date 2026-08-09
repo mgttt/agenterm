@@ -20,7 +20,10 @@ fn task_list_lists_entries() {
         .output()
         .expect("task list");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("lua-check"), "should list lua-check task, got: {stdout}");
+    assert!(
+        stdout.contains("lua-check"),
+        "should list lua-check task, got: {stdout}"
+    );
     assert!(stdout.contains(".lua"), "should contain .lua entry");
 }
 
@@ -30,7 +33,13 @@ fn task_run_nonexistent_fails() {
         .expect("cwd")
         .join("agenterm.tasks.json");
     let output = lua_command()
-        .args(["task", "run", "nonexistent-task", "--manifest", &manifest.to_string_lossy()])
+        .args([
+            "task",
+            "run",
+            "nonexistent-task",
+            "--manifest",
+            &manifest.to_string_lossy(),
+        ])
         .output()
         .expect("task run");
     assert!(!output.status.success());
@@ -83,10 +92,7 @@ fn run_hello_returns_zero() {
 
 #[test]
 fn version_output() {
-    let output = lua_command()
-        .arg("version")
-        .output()
-        .expect("version");
+    let output = lua_command().arg("version").output().expect("version");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("agenterm-lua"));
     assert!(output.status.success());

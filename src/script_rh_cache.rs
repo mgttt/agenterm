@@ -3,7 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use agenterm_rh::{RH_CODEGEN_REVISION, RH_HOST_API_VERSION, RhError, RhPack, bundle_project_source};
+use agenterm_rh::{
+    RH_CODEGEN_REVISION, RH_HOST_API_VERSION, RhError, RhPack, bundle_project_source,
+};
 
 static SOURCE_CACHE: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
 
@@ -52,16 +54,11 @@ pub fn compile_source_to_cache_with_project(
         let _ = std::fs::remove_dir_all(&dir);
     }
     if let Err(error) = agenterm_rh::build_pack_dir(&bundled, &dir) {
-        if bundled != source
-            && project_root.is_some()
-            && source.contains("import ")
-        {
+        if bundled != source && project_root.is_some() && source.contains("import ") {
             let fallback_key = cache_key(source);
-            let fallback_dir =
-                std::env::temp_dir().join(format!("agenterm-rh-src-{fallback_key}"));
+            let fallback_dir = std::env::temp_dir().join(format!("agenterm-rh-src-{fallback_key}"));
             if fallback_dir.is_dir() && RhPack::load(&fallback_dir).is_ok() {
-                *SOURCE_CACHE.lock().expect("lock") =
-                    Some((fallback_key, fallback_dir.clone()));
+                *SOURCE_CACHE.lock().expect("lock") = Some((fallback_key, fallback_dir.clone()));
                 return Ok(fallback_dir);
             }
             let _ = std::fs::remove_dir_all(&fallback_dir);

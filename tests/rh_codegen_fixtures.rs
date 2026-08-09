@@ -178,7 +178,8 @@ fn rhai_array_index_property_misparse_emits_parenthesized_index_access() {
 fn snapshot_tabs_index_return_fixture_emits_path_index_not_string_index() {
     let source = crate_fixture("rh_snapshot_tabs_index_return.rh");
     agenterm_rh::check(&source).expect("check rh_snapshot_tabs_index_return");
-    let output = transpile_cdylib_with_mode(&source).expect("transpile rh_snapshot_tabs_index_return");
+    let output =
+        transpile_cdylib_with_mode(&source).expect("transpile rh_snapshot_tabs_index_return");
     assert_eq!(
         output.execution_mode,
         CdylibExecutionMode::Native,
@@ -199,7 +200,12 @@ fn snapshot_tabs_index_return_fixture_emits_path_index_not_string_index() {
         "{}",
         output.rust
     );
-    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 1, "{}", output.rust);
+    assert_eq!(
+        output.rust.matches("rh_host_eval_int(").count(),
+        1,
+        "{}",
+        output.rust
+    );
 
     let dir = std::env::temp_dir().join(format!(
         "agenterm-rh-snapshot-tabs-index-return-{}",

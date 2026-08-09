@@ -146,8 +146,12 @@ fn dispatch(args: &[String]) -> Result<u8, SqlError> {
 /// the verb the caller actually typed.
 fn run_eval_or_run_command(verb_label: &str, rest: &[String]) -> Result<(), SqlError> {
     let path = PathBuf::from(
-        positional(rest, 0, &format!("usage: agenterm-sql {verb_label} <file.sql>"))
-            .map_err(SqlError::Usage)?,
+        positional(
+            rest,
+            0,
+            &format!("usage: agenterm-sql {verb_label} <file.sql>"),
+        )
+        .map_err(SqlError::Usage)?,
     );
     let source = read_source(&path)?;
     let label = path.display().to_string();
@@ -156,7 +160,10 @@ fn run_eval_or_run_command(verb_label: &str, rest: &[String]) -> Result<(), SqlE
     if !outcome.stdout.is_empty() {
         print!("{}", outcome.stdout);
     }
-    println!("sql {verb_label} ok: {label} -> {}", render_value(outcome.value.as_ref()));
+    println!(
+        "sql {verb_label} ok: {label} -> {}",
+        render_value(outcome.value.as_ref())
+    );
     Ok(())
 }
 
@@ -230,8 +237,7 @@ fn read_source(path: &PathBuf) -> Result<String, SqlError> {
     // readable is a bad argument, not a syntax error in script content —
     // `check` (called with the source this returns) is what produces the
     // script-level `Parse` failures.
-    fs::read_to_string(path)
-        .map_err(|err| SqlError::Usage(format!("{}: {err}", path.display())))
+    fs::read_to_string(path).map_err(|err| SqlError::Usage(format!("{}: {err}", path.display())))
 }
 
 fn print_usage() {
