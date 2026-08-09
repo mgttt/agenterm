@@ -565,6 +565,41 @@ DPI 缩放变化触发、大概在哪个字号、放大还是缩小方向）才�
 
 ---
 
+### CLI. `agenterm.exe cli` 单 PE 控制入口
+
+- [~] **CLI1 GUI-subsystem 转发机制**
+  - **用户问题**：同一产品同时发布 `agenterm.exe` 与
+    `agenterm-cli.exe`，命令发现、打包和自动化入口重复；目标入口是
+    `agenterm cli list-windows`，行为与旧控制 PE 相同。
+  - **权威边界**：CLI 命令语义只由 `run_cli_entry_with_args` 拥有；
+    `crates/agenterm-platform` 只拥有 Windows 控制台附着、标准句柄和进程
+    生命周期机制，不拥有 AgenTerm 命令策略。
+  - **实现**：Windows GUI-subsystem 父进程仅附着已有父控制台，保留有效
+    pipe/file 标准句柄，只补齐缺失的 `CONIN$` / `CONOUT$` 句柄，再等待
+    同一 `agenterm.exe` 的隐藏 CLI 子进程；子进程从启动时获得有效 stdio，
+    避开 Rust 在 GUI PE 中缓存空句柄的问题。Unix 直接调用共享 CLI 入口。
+  - **安全失败**：无法解析或启动同 PE 子进程时返回非零；双击 GUI 不分配
+    控制台、不闪控制台窗；完成证据前继续交付 `agenterm-cli.exe`。
+  - **当前证据**：源码机制已落；尚无集成 Windows 树的黑盒收据，不得宣称
+    已替代独立 PE。
+  - **非目标**：不复制 CLI parser，不引入 `AllocConsole`，不把 mux/MCP
+    重新拆成独立 PE，不借此改变 IPC 或命令语义。
+- [ ] **CLI2 Windows 公共黑盒等价**
+  - **owner**：Windows 公共命令面；从 `cmd.exe` 与 PowerShell 分别覆盖
+    终端 stdout/stderr、`> file`、管道、stdin、正常/错误退出码、mux 与 MCP
+    stdio，并证明父进程等待隐藏子进程后返回准确 exit code。
+  - **成功证据**：同一场景分别调用 `agenterm cli` 与 `agenterm-cli`，输出
+    字节、错误通道和退出码一致；普通 `agenterm` GUI 启动仍无控制台闪窗。
+  - **安全失败**：任何 shell/重定向/交互场景不一致即保留兼容 PE，并把差异
+    记录为阻塞，不以“终端肉眼能看到输出”代替证据。
+- [ ] **CLI3 删除独立 `agenterm-cli` PE**
+  - **依赖**：CLI2 全绿后才开始。
+  - **delivery**：迁移 Cargo bin、artifact manifest、CI、Rhai smoke、README、
+    PRD、安装与发布清单中的所有调用；删除 `src/bin/agenterm-cli.rs`，产物与
+    预算闸证明不再生成或要求 `agenterm-cli{.exe}`。
+  - **最终串行门**：lint → Quick → Windows build → owning CLI smoke →
+    SkipSmoke/完整公共接口门；同一集成树上执行，不并行争用产物。
+
 ### R′. 发布链证据收口（配置已合，只收证 + 最小修）
 
 ```text
@@ -682,6 +717,8 @@ lua 雏形来去规避这个风险。
 | **Common-M5 / Trait-M4（2026-08-09）** | [x] 第五轮，三并发 subagent + 主 agent 收尾：① **Trait-M4 折叠**——lua/qjs 的 `try_execute_*` 函数体**全量搬进** `LuaEngineBackend`/`QjsEngineBackend` impl，旧函数 + `{Lua,Qjs}InvocationOptions/Result` 删除；**rh 有意保留**——grep 实证 `crates/agenterm-rh/src/main.rs`（根包 [[bin]]）直接调用 `try_execute_rh_invocation` 并依赖 typed `RhError` 经 `?` 传播，trait 的 String 错误无损装不下，折叠会破坏真实调用方或造成双份逻辑，故 rh impl 继续薄委托（两文件模块 doc 已记录理由）。script_backend.rs 753→370 行，净 −236；测试逐场景迁移（backend 15→8、engine 17→20），无覆盖丢失。② **执行级 parity 测试**——`tests/script_engine_exec_parity.rs` 6/6：值信封/stdout/check/disabled-error 三引擎一致；**两条真实契约分歧被钉住**：lua **没有** fail-closed entry 契约（无 return 脚本静默成功返回 Some(0)，rh/qjs 都报错）；rh 的运行时错误其实是 **AOT 编译期静态失败**（`execute` 返回 Err 不代表 entry 跑过一条指令），lua/qjs 是真运行时异常——调用方不能对 rh 做同样推断。③ **PRD SSOT 更新**——`PRD_02_10` Script engine family 章节补记共享层/trait 层/parity 体系/幽灵 surface 发现/已修 bug（101 行纯增量，全部 commit 溯源）。④ 主 agent 收尾：`tests/lua_task_entry_regression.rs` 和 `tests/rh_backend.rs` 自 rhai 退役以来**一直编译不过**（引用已删除的 `ScriptBackend::Rhai`），编译错误一直掩盖着 rh_backend 里一个断言旧行为的测试（env=rhai → None）——现在两个文件都移植到当前 API（lua 走 trait，rhai-alias 断言改锁「rhai 是 Rh 的 compat 别名」这个退役后的有意行为），11/11 + 6/6 恢复绿。合并树验证：engine 20/20、backend 8/8、worker 16/16、exec-parity 6/6、engine-parity 8/8、rh_backend 11/11、lua_task_entry 6/6 |
 
 | **SQL-M0（2026-08-09，用户拍板开工）** | [x] 第四后端 `crates/agenterm-sql` 占位落地（对标 SQL-92 + PostgreSQL，用户明确指定）。**真实现**：`check` 用 `sqlparser 0.62`（纯 Rust）PostgreSqlDialect parse-only（PG 作为 SQL-92 实用超集的单方言近似，check.rs 文档里明说这不是 SQL-92 合规性验证）；check-many/corpus-scan/CLI 参数解析**全部复用 script-common driver，零手抄**——五轮抽象的直接兑现。**诚实占位**：`eval`/`execute` fail-closed not-implemented，开放设计问题（SQL 执行到底跑在什么之上：嵌入引擎 vs 外部 DB 连接 vs host 状态虚拟表）写进 lib.rs 文档不猜答案；CLI 的 eval/run/pack/qualify/task 动词保留占位（exit 2 + 指向设计文档的稳定报错，不是 unknown command）。**接线**：`ScriptBackend::Sql` + `.sql` 映射 + `SqlEngineBackend`（4 方法 trait）+ `execute_inner` 第四分支（同 lua/qjs 的 `#[cfg(not(test))]` 门）。**§2.6 设计承诺实测成立**：4 方法零 trait 改动接入第四后端，唯一未预言的小摩擦是 execute 签名要求 total 函数（eval 桩永不返回 Ok，用显式 unreachable-error 兜底而非 panic）。**有意不做**：不 enroll 进三个 parity 套件（execute 是桩会假失败），等真 execute 落地再进。验证：sql 18/18、engine 26/26、backend 11/11、worker 16/16、两个 parity 套件不受影响 8/8+6/6、复活的 rh_backend/lua_task_entry 11/11+6/6、clippy 全净、`cargo check --workspace` 过 |
+
+| **Common-M6（2026-08-09）** | [x] 第六轮，两并发 subagent：① **sql 进 parity 套件**——`script_engine_parity.rs` 第四个 EngineSpec（fixture 取自 sql 自己的测试常量，非发明），8 场景 4 引擎宽度全绿，kind 互斥升为真 4×4 矩阵（12 拒 + 4 收）；`script_engine_exec_parity.rs` 只 enroll check 形状 + disabled-error 场景（现在 4×3=12 组合），另加 `sql_execute_placeholder_contract` 把「execute 是占位」这个契约钉在 parity 层（断言稳定 marker `sql_eval_not_implemented`，不断言整句免措辞抖动）；execute 级场景排除原因写在文件头注释。**实测无分歧**——sql 和其它三引擎在全部共享场景逐字段一致（同一共享 driver 的预期结果，但验证了不是假设）。② **pack/qualify/compile 最后手抄清理**——script-common 新 `pack_support` 模块（`verify_file_hash`——比草案多一个 `mismatch_kind` 参数，因为 qjs 测试逐字断言四种历史错误文本，单前缀设计还原不了，5 参版本 byte-for-byte 还原；`write_json_receipt`/`read_json_receipt`——lua/qjs 本就逐字相同零参数化；`hash_source`——两边确认同为 sha256→hex 包装后收编，连带删掉两份私有 hex_encode）；**明确拒绝迁移的**：manifest write/read/parse（schema 构造本就 per-engine，硬套会产生误导性错误文本零收益）、qjs `pack_module.rs`（独立 schema，报告了未来可对齐点但本轮不动）、rh native-pack（本质不同）。lua/qjs 各 −19/−21 行。验证：script-common 47/47（+9 新）、lua 124/124、qjs 84/84 不变（含两条 load-bearing 错误文本断言原样通过）、parity 8/8+7/7、sql 18/18 |
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
 [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md)。

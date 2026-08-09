@@ -9,6 +9,25 @@
 //! of where their execution envelopes agree and where they genuinely
 //! diverge (a divergence caught and asserted here is a *success* for this
 //! file, not a bug to paper over).
+//!
+//! ## Why `agenterm-sql` is (mostly) not in `ENGINES` below
+//!
+//! `agenterm-sql` is a fourth `ScriptEngineBackend` (see
+//! `crates/agenterm-sql/src/lib.rs`'s module doc and
+//! `src/script_engine.rs`'s `SqlEngineBackend`), and its `check` is real —
+//! so it does join `check_accepts_valid_rejects_broken` and
+//! `disabled_backend_errors` below, both of which only exercise `check` (or
+//! never reach parsing at all). But sql's `execute` is a deliberate
+//! fail-closed placeholder — there is no decided execution target yet
+//! (embedded engine vs. external DB vs. host-state-as-virtual-tables; see
+//! `agenterm_sql::eval`'s module doc) — so it is EXCLUDED from
+//! `trivial_entry_value`, `stdout_capture`, `execute_missing_entry_fails_closed`,
+//! and `error_not_panic`, all of which require a working `execute` to say
+//! anything meaningful. Enrolling sql there is deferred until `execute` is
+//! real, tracked at `plan/plan-v0.1.16.md` SQL-M0. Instead, sql's *current*
+//! execute contract — "fails closed with a specific not-implemented error,
+//! every time" — is pinned by its own dedicated test,
+//! `sql_execute_placeholder_contract`, below.
 
 use agenterm::script_backend::ScriptBackend;
 use agenterm::script_engine::{ScriptEngineBackend, ScriptInvocationOptions, engine_for};
@@ -52,7 +71,8 @@ impl Drop for EnvGuard {
     }
 }
 
-const ENGINES: [ScriptBackend; 3] = [ScriptBackend::Rh, ScriptBackend::Lua, ScriptBackend::Qjs];
+const ENGINES: [ScriptBackend; 4] =
+    [ScriptBackend::Rh, ScriptBackend::Lua, ScriptBackend::Qjs, ScriptBackend::Sql];
 
 /// Same "not enabled" format `src/script_engine.rs`'s private
 /// `not_enabled_error` produces (`format!("{} backend not enabled", ...)`)
@@ -208,6 +228,15 @@ fn check_accepts_valid_rejects_broken() {
             valid: "function entry() { return 42; }",
             broken: "function entry() { return 1 ",
         },
+        // sql: same fixtures as `src/script_engine.rs`'s own `#[cfg(test)]`
+        // `SQL_VALID_SOURCE`/`SQL_BROKEN_SOURCE` consts. Unlike the other
+        // three, sql's `check` needs no `fn`/`function entry()` wrapper at
+        // all — it's bare SQL parsed statement-by-statement.
+        CheckFixture {
+            backend: ScriptBackend::Sql,
+            valid: "SELECT 1;",
+            broken: "SELEC 1 FORM;",
+        },
     ];
 
     for fixture in fixtures {
@@ -229,8 +258,12 @@ fn check_accepts_valid_rejects_broken() {
         );
     }
 
-    // PARITY FINDING: all three engines agree on the check() contract —
+    // PARITY FINDING: all four engines agree on the check() contract —
     // Ok(()) for valid source, Err(non-empty diagnostic) for broken source.
+    // sql joining this scenario is not a coincidence: its check() is real
+    // (delegates to `sqlparser`), so it was always going to hold up here —
+    // unlike execute(), which is still a placeholder for sql (see this
+    // file's top-of-file doc and `sql_execute_placeholder_contract` below).
 }
 
 // ---------------------------------------------------------------------
@@ -332,10 +365,12 @@ fn disabled_backend_errors() {
         }
     }
 
-    // PARITY FINDING: all three engines agree on the "disabled backend"
+    // PARITY FINDING: all four engines agree on the "disabled backend"
     // contract — same message shape (`"{backend} backend not enabled"`)
-    // for all six (enabled, other) pairings, and the check never even
-    // reaches parsing the (deliberately garbage) source.
+    // for all twelve (enabled, other) pairings, and the check never even
+    // reaches parsing the (deliberately garbage) source. This holds for sql
+    // too even though its execute() is otherwise a placeholder: the
+    // enabled()-gate runs before anything execute-shaped is attempted.
 }
 
 // ---------------------------------------------------------------------
@@ -409,4 +444,33 @@ fn error_not_panic() {
     // before rh ever executes a single instruction. A caller cannot
     // assume "the entry function started running" from "execute()
     // returned Err" for rh the way it safely can for lua/qjs.
+}
+
+// ---------------------------------------------------------------------
+// 7. sql_execute_placeholder_contract
+// ---------------------------------------------------------------------
+
+#[test]
+fn sql_execute_placeholder_contract() {
+    let _guard = ENV_LOCK.lock().expect("lock");
+
+    // Pins sql's *current* execute() contract at the trait level: enabled,
+    // given source that checks perfectly clean, execute() still fails
+    // closed with a specific, stable "not implemented" diagnostic — never
+    // a silent success and never a different, unrelated error. See this
+    // file's top-of-file doc for why sql can't yet join
+    // trivial_entry_value/stdout_capture/execute_missing_entry_fails_closed/
+    // error_not_panic, and `src/script_engine.rs`'s own
+    // `sql_engine_execute_returns_the_not_implemented_error` test (the
+    // trait-impl-level twin of this trait-level assertion) for the exact
+    // message this is pinned against.
+    let _env = EnvGuard::set(ScriptBackend::Sql.as_str());
+    let error = engine_for(ScriptBackend::Sql)
+        .execute("SELECT 1;", &ScriptInvocationOptions::default(), None)
+        .expect_err("sql execute must fail closed, not succeed");
+    assert!(
+        error.contains("sql_eval_not_implemented"),
+        "expected sql's execute() error to carry the stable `sql_eval_not_implemented` \
+         marker, got: {error}"
+    );
 }

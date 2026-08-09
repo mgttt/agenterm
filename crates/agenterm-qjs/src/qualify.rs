@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use agenterm_script_common::pack_support::{read_json_receipt, write_json_receipt};
 use serde_json::Value as JsonValue;
 
 use crate::host::QjsHostFunctions;
@@ -22,13 +23,11 @@ pub struct QjsQualificationReceipt {
 
 impl QjsQualificationReceipt {
     pub fn write(&self, path: &Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(self).map_err(|e| format!("receipt_serialize: {e}"))?;
-        std::fs::write(path, json).map_err(|e| format!("receipt_write: {e}"))
+        write_json_receipt(path, self)
     }
 
     pub fn read(path: &Path) -> Result<Self, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("receipt_read: {e}"))?;
-        serde_json::from_slice(&bytes).map_err(|e| format!("receipt_parse: {e}"))
+        read_json_receipt(path)
     }
 }
 

@@ -7,7 +7,8 @@
 
 use std::path::Path;
 
-use agenterm_script_common::hex::{required_json_string, sha256_hex};
+use agenterm_script_common::hex::required_json_string;
+use agenterm_script_common::pack_support::verify_file_hash;
 
 /// qjs pack manifest.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,32 +65,26 @@ impl QjsPackManifest {
     /// file on disk (reproducibility check, not a load-bearing execution
     /// step — see `compile.rs`).
     pub fn verify_bytecode(&self, dir: &Path) -> Result<(), String> {
-        let path = dir.join(&self.bytecode_file);
-        let bytes = std::fs::read(&path).map_err(|e| format!("manifest_verify_bytecode_read: {e}"))?;
-        let actual = sha256_hex(&bytes);
-        if actual != self.bytecode_hash {
-            return Err(format!(
-                "manifest_bytecode_hash_mismatch: expected {}, got {actual}",
-                self.bytecode_hash
-            ));
-        }
-        Ok(())
+        verify_file_hash(
+            dir,
+            &self.bytecode_file,
+            &self.bytecode_hash,
+            "manifest_verify_bytecode_read",
+            "bytecode",
+        )
     }
 
     /// Verify the manifest's `source_hash` matches the actual entry source
     /// file on disk — this one *is* load-bearing: `pack.rs`'s `eval` re-runs
     /// this exact source.
     pub fn verify_source(&self, dir: &Path) -> Result<(), String> {
-        let path = dir.join(&self.entry_file);
-        let bytes = std::fs::read(&path).map_err(|e| format!("manifest_verify_source_read: {e}"))?;
-        let actual = sha256_hex(&bytes);
-        if actual != self.source_hash {
-            return Err(format!(
-                "manifest_source_hash_mismatch: expected {}, got {actual}",
-                self.source_hash
-            ));
-        }
-        Ok(())
+        verify_file_hash(
+            dir,
+            &self.entry_file,
+            &self.source_hash,
+            "manifest_verify_source_read",
+            "source",
+        )
     }
 }
 

@@ -1,25 +1,32 @@
 //! Cross-engine parity tests for the shared `check-many` driver
 //! (`agenterm_script_common::check_many`, re-exported unchanged through
-//! each of `agenterm-rh`, `agenterm-lua`, `agenterm-qjs`).
+//! each of `agenterm-rh`, `agenterm-lua`, `agenterm-qjs`, `agenterm-sql`).
 //!
 //! `CheckManyManifest` / `CheckManyOptions` / `CheckManyReport` are the same
-//! type across all three engines now (each crate does a bare
+//! type across all four engines now (each crate does a bare
 //! `pub use agenterm_script_common::check_many::{...}`), so this file
 //! standardizes on `agenterm_rh::check_many`'s re-export for the shared
 //! types and only reaches into each engine's own `check_many` module for
 //! the per-engine `read_manifest` / `run_check_many` entry points.
 //!
+//! `agenterm-sql` (see `crates/agenterm-sql/src/lib.rs`'s module doc) is a
+//! fourth backend whose `execute` is still a fail-closed placeholder — but
+//! its `check`/`check_many` are real, thin adapters over this exact shared
+//! driver (same as rh/lua/qjs), so it belongs in *this* file's parity net
+//! today even though it can't join `tests/script_engine_exec_parity.rs`'s
+//! execute-level scenarios yet.
+//!
 //! Each scenario below runs the *same structural situation* through all
-//! three engines (own tempdir, language-appropriate files, a manifest of
+//! four engines (own tempdir, language-appropriate files, a manifest of
 //! the engine's own `kind`) and asserts the reports agree on the
 //! engine-neutral structural fields that come straight out of the shared
 //! driver: `ok`, `checked_files`, failure count, failure `code` (for codes
 //! that are literally emitted by the shared driver, not per-engine
 //! checkers), failure `exit_class`, and `report.exit_code()`. Per-engine
 //! syntax-failure codes (`rh_subset`/`rh_check` vs `lua_check` vs
-//! `qjs_parse`) are deliberately *not* compared string-for-string — only
-//! `exit_class == "script"` and `exit_code() == 1` are asserted there, per
-//! the task brief.
+//! `qjs_parse` vs `sql_parse`) are deliberately *not* compared
+//! string-for-string — only `exit_class == "script"` and `exit_code() == 1`
+//! are asserted there, per the task brief.
 
 use std::fs;
 use std::path::Path;
@@ -30,12 +37,13 @@ use agenterm_rh::check_many::{CheckManyManifest, CheckManyOptions, CheckManyRepo
 /// structural scenario: its manifest `kind`, its source file extension, a
 /// trivially-valid source, a source that fails to parse/compile, and a
 /// `read_manifest` + `run_check_many` entry point unified into a single
-/// `Result<CheckManyReport, String>`-returning function (the three crates'
+/// `Result<CheckManyReport, String>`-returning function (the four crates'
 /// `read_manifest` return different error types — `RhError`, `String`,
-/// `QjsError` — so this is where that gets flattened for uniform
-/// assertions).
+/// `QjsError`, `SqlError` — so this is where that gets flattened for
+/// uniform assertions).
 /// A `read_manifest` entry point normalized to a single `String` error type
-/// (the three crates return `RhError`, `String`, `QjsError` respectively).
+/// (the four crates return `RhError`, `String`, `QjsError`, `SqlError`
+/// respectively).
 type ManifestReader = fn(&Path) -> Result<CheckManyManifest, String>;
 
 struct EngineSpec {
@@ -60,6 +68,11 @@ fn lua_read_and_run(path: &Path, options: CheckManyOptions) -> Result<CheckManyR
 fn qjs_read_and_run(path: &Path, options: CheckManyOptions) -> Result<CheckManyReport, String> {
     let manifest = agenterm_qjs::check_many::read_manifest(path).map_err(|err| err.to_string())?;
     Ok(agenterm_qjs::check_many::run_check_many(manifest, options))
+}
+
+fn sql_read_and_run(path: &Path, options: CheckManyOptions) -> Result<CheckManyReport, String> {
+    let manifest = agenterm_sql::check_many::read_manifest(path).map_err(|err| err.to_string())?;
+    Ok(agenterm_sql::check_many::run_check_many(manifest, options))
 }
 
 const RH: EngineSpec = EngineSpec {
@@ -91,8 +104,21 @@ const QJS: EngineSpec = EngineSpec {
     read_and_run: qjs_read_and_run,
 };
 
-fn engines() -> [EngineSpec; 3] {
-    [RH, LUA, QJS]
+// Fixtures match `agenterm_sql::check`'s own tests verbatim
+// (crates/agenterm-sql/src/check.rs's `accepts_a_valid_select` /
+// `rejects_syntax_errors`) and `src/script_engine.rs`'s
+// `SQL_VALID_SOURCE`/`SQL_BROKEN_SOURCE` test consts — not invented here.
+const SQL: EngineSpec = EngineSpec {
+    name: "sql",
+    kind: "agenterm-sql-check-manifest",
+    ext: "sql",
+    valid_source: "SELECT 1;",
+    broken_source: "SELEC 1 FORM;",
+    read_and_run: sql_read_and_run,
+};
+
+fn engines() -> [EngineSpec; 4] {
+    [RH, LUA, QJS, SQL]
 }
 
 /// Write a check-many manifest JSON with the given `kind` and file labels
@@ -284,11 +310,14 @@ fn per_file_source_budget() {
 #[test]
 fn wrong_manifest_kind_rejected_by_each_reader() {
     // Each engine's read_manifest must reject the *other* engines' kind
-    // strings.
-    let readers: [(&str, ManifestReader); 3] = [
+    // strings. 4 readers x 3 "other" kinds each = the 4x4 cross-kind
+    // rejection matrix (minus the 4 diagonal "own kind" cells, covered by
+    // the per-reader sanity check below instead).
+    let readers: [(&str, ManifestReader); 4] = [
         ("rh", |p| agenterm_rh::check_many::read_manifest(p).map_err(|e| e.to_string())),
         ("lua", agenterm_lua::check_many::read_manifest),
         ("qjs", |p| agenterm_qjs::check_many::read_manifest(p).map_err(|e| e.to_string())),
+        ("sql", |p| agenterm_sql::check_many::read_manifest(p).map_err(|e| e.to_string())),
     ];
 
     for (name, reader) in readers {

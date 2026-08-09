@@ -1,6 +1,6 @@
 //! Lua bytecode compilation: mlua Chunk::dump → bytes → SHA256 hash.
 
-use sha2::Digest;
+use agenterm_script_common::hex::sha256_hex;
 
 /// Compile Lua source to bytecode, returning (bytecode bytes, SHA256 hex hash).
 pub fn compile_lua(source: &str) -> Result<(Vec<u8>, String), String> {
@@ -10,26 +10,12 @@ pub fn compile_lua(source: &str) -> Result<(Vec<u8>, String), String> {
         .into_function()
         .map_err(|e| format!("lua_compile_parse: {e}"))?
         .dump(true);
-    let hash = sha2::Sha256::digest(&bytecode);
-    let hash_hex = hex_encode(&hash);
+    let hash_hex = sha256_hex(&bytecode);
     Ok((bytecode, hash_hex))
 }
 
 /// Hash a source string (not bytecode).
-pub fn hash_source(source: &str) -> String {
-    let hash = sha2::Sha256::digest(source.as_bytes());
-    hex_encode(&hash)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[usize::from(byte >> 4)] as char);
-        out.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    out
-}
+pub use agenterm_script_common::pack_support::hash_source;
 
 #[cfg(test)]
 mod tests {

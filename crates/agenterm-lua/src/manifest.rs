@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use agenterm_script_common::hex::{required_json_string, sha256_hex};
+use agenterm_script_common::hex::required_json_string;
+use agenterm_script_common::pack_support::verify_file_hash;
 
 /// Lua pack manifest.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,17 +53,13 @@ impl LuaPackManifest {
 
     /// Verify the manifest's bytecode_hash matches the actual bytecode file.
     pub fn verify_bytecode(&self, dir: &Path) -> Result<(), String> {
-        let path = dir.join(&self.bytecode_file);
-        let bytes =
-            std::fs::read(&path).map_err(|e| format!("manifest_verify_read: {e}"))?;
-        let actual_hex = sha256_hex(&bytes);
-        if actual_hex != self.bytecode_hash {
-            return Err(format!(
-                "manifest_bytecode_hash_mismatch: expected {}, got {}",
-                self.bytecode_hash, actual_hex
-            ));
-        }
-        Ok(())
+        verify_file_hash(
+            dir,
+            &self.bytecode_file,
+            &self.bytecode_hash,
+            "manifest_verify_read",
+            "bytecode",
+        )
     }
 }
 

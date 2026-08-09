@@ -16,7 +16,8 @@
 //! not change it, only reuses it for a second purpose (hashing).
 
 use rquickjs::{CatchResultExt, Context, Module, Runtime, WriteOptions};
-use sha2::Digest;
+
+use agenterm_script_common::hex::sha256_hex;
 
 use crate::error::QjsError;
 
@@ -34,30 +35,14 @@ pub fn compile_qjs(source: &str, label: &str) -> Result<(Vec<u8>, String), QjsEr
             .write(WriteOptions::default())
             .map_err(|err| QjsError::Check(err.to_string()))
     })?;
-    let hash = hash_bytes(&bytecode);
+    let hash = sha256_hex(&bytecode);
     Ok((bytecode, hash))
 }
 
 /// Hash a source string (not bytecode) — mirrors
-/// `agenterm_lua::compile::hash_source`.
-pub fn hash_source(source: &str) -> String {
-    hash_bytes(source.as_bytes())
-}
-
-fn hash_bytes(bytes: &[u8]) -> String {
-    let digest = sha2::Sha256::digest(bytes);
-    hex_encode(&digest)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[usize::from(byte >> 4)] as char);
-        out.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    out
-}
+/// `agenterm_lua::compile::hash_source` (both are now the same shared
+/// helper, `agenterm_script_common::pack_support::hash_source`).
+pub use agenterm_script_common::pack_support::hash_source;
 
 #[cfg(test)]
 mod tests {
