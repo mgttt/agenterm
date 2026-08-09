@@ -60,30 +60,45 @@
 //!   configuration/limit failures), but a `read_manifest` failure (e.g. a
 //!   wrong `kind`) happens before a report even exists and takes the
 //!   generic `Err(String)` → hardcoded-1 path instead.
-//! - **qjs / sql**: `main()` calls `run() -> Result<u8, QjsError | SqlError>`;
-//!   `Ok(code)` → `ExitCode::from(code)`, `Err(_)` → **always
-//!   `ExitCode::from(2)`** — one uniform "something before/around the verb's
-//!   own success path went wrong" code, covering unknown verbs, bad argv,
-//!   AND (unlike rh/lua) a `check`/`check-many` manifest-read failure,
-//!   because qjs/sql's `check` propagates its error with `?` straight out
-//!   of `run()` instead of being caught into an `Ok(0)`/`Ok(1)` the way
-//!   rh's dedicated `run_public_check_command` and lua's `cmd_check` do.
+//! - **qjs / sql** (aligned 2026-08, see below): `main()` calls
+//!   `run() -> Result<u8, QjsError | SqlError>`; `Ok(code)` →
+//!   `ExitCode::from(code)`. `Err(_)` is no longer a blanket `2` — `main()`
+//!   now reads the error's variant: `Parse`/`Check` (both script-level: the
+//!   root cause is the script/pack content — syntax error, missing
+//!   `entry()`, a thrown exception, a tampered pack, ...) → `1`; `Usage`
+//!   (usage/configuration-level: bad argv, unknown verb, missing/unreadable
+//!   flag or manifest, a `--project-root` that doesn't resolve/confine) →
+//!   `2`. This mirrors the shared
+//!   `agenterm_script_common::check_many::CheckManyReport::exit_code()`
+//!   taxonomy's own `"script"` → 1 / `"configuration"` → 2 split, applied
+//!   at the single-invocation CLI layer, not just inside `check-many`. See
+//!   `crates/agenterm-{qjs,sql}/src/main.rs`'s module docs and
+//!   `crates/agenterm-{qjs,sql}/src/error.rs`'s docs for the full
+//!   call-site-by-call-site classification.
 //!
 //! # Divergences this file locks down (found by running the real binaries)
 //!
 //! | scenario                                   | rh | lua | qjs | sql |
 //! |----------------------------------------------|----|-----|-----|-----|
-//! | `check <broken file>`                         | 1  | 1   | 2   | 2   |
+//! | `check <broken file>`                         | 1  | 1   | 1   | 1   |
 //! | `check-many` with another engine's manifest `kind` | 2  | 1   | 2   | 2   |
 //! | unknown verb                                   | 1  | 1   | 2   | 2   |
 //!
-//! Same underlying split every time: rh/lua fold *all* top-level failures
-//! (unknown verb, bad manifest, syntax error surfaced through the "public"
-//! command wrapper) into the generic 1-or-Ok(1) path, while qjs/sql fold
-//! them into the generic `Err` → 2 path. This is a real, load-bearing
-//! difference for any wrapper script that branches on exit code — "exit
-//! code == 1 means a script-level failure, not a usage error" holds for
-//! rh/lua's `check` but not for qjs/sql's.
+//! `check <broken file>` is now unified across all four engines at exit 1
+//! (2026-08: qjs/sql used to exit 2 here — a real bug, since it made a
+//! syntax error indistinguishable from a usage error on those two engines;
+//! see `crates/agenterm-{qjs,sql}/src/main.rs`'s module docs for the fix).
+//! qjs/sql now correctly distinguish script-level (1) from
+//! usage/configuration-level (2) failures at every CLI call site — the two
+//! remaining rows are not qjs/sql being wrong, they're **rh/lua's own,
+//! separate, tracked debt**: both fold *all* top-level failures (unknown
+//! verb, bad manifest `kind`, ...) into a single generic 1-or-Ok(1) path
+//! with no usage/script distinction at all, so "exit code == 1 means a
+//! script-level failure, not a usage error" still does NOT hold for rh's
+//! unknown-verb path or lua's `check-many`/unknown-verb paths. Fixing that
+//! is out of scope here deliberately (rh risks Lnx-side wrapper breakage;
+//! lua's track is separate) — tracked as rh/lua's own residue, not
+//! re-litigated by this file.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -144,7 +159,12 @@ const QJS: Engine = Engine {
     kind: "agenterm-qjs-check-manifest",
     valid_source: "function entry() { return 42; }",
     broken_source: "this is not valid js (((",
-    check_broken_exit: 2,
+    // 2026-08: was 2 (blanket `Err -> 2` in `main()`). `check <broken
+    // file>` is a script-level failure (`QjsError::Parse`) — aligned to
+    // exit 1, matching the shared `check_many` taxonomy's `script` ->  1
+    // convention. See `crates/agenterm-qjs/src/main.rs`'s module doc.
+    check_broken_exit: 1,
+    // Unknown verb is a usage-level failure (`QjsError::Usage`) — stays 2.
     unknown_verb_exit: 2,
     wrong_kind_check_many_exit: 2,
 };
@@ -156,7 +176,10 @@ const SQL: Engine = Engine {
     kind: "agenterm-sql-check-manifest",
     valid_source: "SELECT 1;",
     broken_source: "SELEC 1 FORM;",
-    check_broken_exit: 2,
+    // 2026-08: was 2, same fix as qjs (see that const's comment) —
+    // `SqlError::Parse` is script-level, now exits 1.
+    check_broken_exit: 1,
+    // Unknown verb is a usage-level failure (`SqlError::Usage`) — stays 2.
     unknown_verb_exit: 2,
     wrong_kind_check_many_exit: 2,
 };
@@ -409,6 +432,36 @@ fn unknown_verb_rejected() {
             engine.name
         );
     }
+}
+
+// ── 5b. qjs's `task` stub is an honest failure, not a silent success ────
+
+/// `agenterm-qjs task` is an informational stub (real task dispatch lives
+/// in the root `agenterm` binary, see `main.rs`'s module doc) — it used to
+/// print its redirect message and exit `0`, which is a lie to any
+/// automation caller that only checks the exit code. 2026-08: aligned with
+/// `agenterm-sql`'s reserved-verb stubs (see [`sql_reserved_verbs_stable_error`]
+/// below) to exit `2` instead, keeping the same helpful message.
+#[test]
+fn qjs_task_stub_exits_nonzero_with_redirect_message() {
+    let output = run(QJS_BIN, &["task", "list"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "qjs task: honest stub is documented to exit 2, not silently succeed; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("agenterm task list"),
+        "qjs task: expected the redirect message to name the equivalent root-binary \
+         invocation; got {stderr}"
+    );
+    assert!(
+        stderr.contains("AGENTERM_SCRIPT_BACKEND=qjs"),
+        "qjs task: expected the redirect message to mention the backend env var; got {stderr}"
+    );
 }
 
 // ── 6. sql's reserved-but-not-implemented verbs ─────────────────────────

@@ -2,11 +2,35 @@
 //! (`crates/agenterm-rh/src/main.rs`) and `agenterm-lua`
 //! (`crates/agenterm-lua/src/main.rs`): `version`, `check`, `eval`, `run`,
 //! `hash`, `pack build`/`pack load`, `qualify`, `check-many`,
-//! `corpus-scan`, `run-smoke`, `task`, `--help`. Same typed exit-code
-//! convention: `0` success, `2` usage/argv error, `1` for a
-//! runtime/qualify/pack/corpus-scan failure (matching lua's convention,
-//! not rh's `RhError`-typed one — qjs shares lua's untyped
-//! `Result<u8, String>` dispatch shape here, see `run` below).
+//! `corpus-scan`, `run-smoke`, `task`, `--help`.
+//!
+//! ## Exit-code convention (2026-08, aligned with sql — see
+//! `crates/agenterm-sql/src/main.rs`'s matching doc, and
+//! `tests/script_cli_verb_parity.rs`'s module doc for the full
+//! cross-engine divergence table this pair now narrows)
+//!
+//! `0` success; `1` a **script-level** failure — the root cause is the
+//! script/pack content itself (syntax error, missing `entry()`, `entry()`
+//! threw, a tampered pack, ...), i.e. [`QjsError::Parse`]/[`QjsError::Check`];
+//! `2` a **usage/configuration-level** failure — bad argv, an unknown verb,
+//! a missing/unreadable required flag or manifest, a `--project-root` that
+//! doesn't resolve or doesn't confine the entry file, i.e.
+//! [`QjsError::Usage`]. `main()` below reads the returned `QjsError`'s
+//! variant to pick between `1`/`2` — see `error.rs`'s doc for the full
+//! rationale and `Display` impl. This replaces an earlier version of this
+//! doc comment claiming qjs "shares lua's untyped `Result<u8, String>`
+//! dispatch shape" — that was never accurate (qjs has always used the typed
+//! `QjsError` you see threaded through this file) and, worse, `main()`
+//! itself used to fold every `Err(_)` into a blanket exit `2` regardless of
+//! variant, so `check <broken file>` (a `QjsError::Parse`, i.e.
+//! script-level) exited `2`, not `1` — the exact cross-engine divergence
+//! `tests/script_cli_verb_parity.rs` pinned and this pass fixes.
+//!
+//! `task` is a stub that now exits `2` (not `0`) — see its match arm below:
+//! printing a helpful redirect and still claiming success would be a lie to
+//! an automation caller checking the exit code, the same reasoning
+//! `agenterm-sql`'s reserved-verb stubs (`eval`/`run`/`pack`/`qualify`/
+//! `task`) already apply.
 //!
 //! Deliberately absent, forever: rh's `caller-inventory`/`compile`/
 //! `transpile`/`--worker`/`--internal-incremental-finalize` — all
@@ -49,8 +73,15 @@ fn main() -> ExitCode {
     match run(&arguments) {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
+            // Script-level (`Parse`/`Check`) -> 1, usage/configuration-level
+            // (`Usage`) -> 2 — see this file's module doc and `error.rs`'s
+            // doc for the classification rationale.
+            let exit_code = match &error {
+                QjsError::Parse(_) | QjsError::Check(_) => 1,
+                QjsError::Usage(_) => 2,
+            };
             eprintln!("{error}");
-            ExitCode::from(2)
+            ExitCode::from(exit_code)
         }
     }
 }
@@ -69,7 +100,7 @@ fn run(args: &[String]) -> Result<u8, QjsError> {
         "check" => {
             let path = PathBuf::from(
                 positional(rest, 0, "usage: agenterm-qjs check <file.js>")
-                    .map_err(QjsError::Check)?,
+                    .map_err(QjsError::Usage)?,
             );
             let project_root = find_flag_value(&rest[1..], "--project-root").map(PathBuf::from);
             let source = read_source(&path)?;
@@ -90,7 +121,7 @@ fn run(args: &[String]) -> Result<u8, QjsError> {
         "eval" => {
             let path = PathBuf::from(
                 positional(rest, 0, "usage: agenterm-qjs eval <file.js>")
-                    .map_err(QjsError::Check)?,
+                    .map_err(QjsError::Usage)?,
             );
             let project_root = find_flag_value(&rest[1..], "--project-root").map(PathBuf::from);
             let source = read_source(&path)?;
@@ -110,7 +141,7 @@ fn run(args: &[String]) -> Result<u8, QjsError> {
         "hash" => {
             let path = PathBuf::from(
                 positional(rest, 0, "usage: agenterm-qjs hash <file.js>")
-                    .map_err(QjsError::Check)?,
+                    .map_err(QjsError::Usage)?,
             );
             let source = read_source(&path)?;
             println!("{}  {}", agenterm_qjs::hash_source(&source), path.display());
@@ -137,10 +168,17 @@ fn run(args: &[String]) -> Result<u8, QjsError> {
             // presence check happens here (for `run-smoke`'s own usage
             // message) before delegating, so `run_pack_load`'s own
             // "missing dir" case can never actually fire below.
-            positional(rest, 0, "usage: agenterm-qjs run-smoke <dir>").map_err(QjsError::Check)?;
+            positional(rest, 0, "usage: agenterm-qjs run-smoke <dir>").map_err(QjsError::Usage)?;
             return run_pack_load(rest);
         }
         "task" => {
+            // Honest stub, exit 2: printing a helpful redirect while
+            // reporting success (`Ok(0)`, the previous behavior) would be a
+            // lie to an automation caller that only checks the exit code —
+            // matching `agenterm-sql`'s reserved-verb stubs (see
+            // `not_implemented_stub` in `crates/agenterm-sql/src/main.rs`),
+            // which have always exited 2 for exactly this reason. The
+            // message itself is unchanged.
             let joined = rest.join(" ");
             eprintln!(
                 "task: use `agenterm task {joined}` (root binary; set \
@@ -148,11 +186,11 @@ fn run(args: &[String]) -> Result<u8, QjsError> {
                  agenterm-qjs itself doesn't re-implement task dispatch, see \
                  plan/plan-v0.1.16.md \u{a7}1 Rh, QJS-M3"
             );
-            return Ok(0);
+            return Ok(2);
         }
         "--help" | "-h" | "help" => print_usage(),
         other => {
-            return Err(QjsError::Check(format!(
+            return Err(QjsError::Usage(format!(
                 "unknown command `{other}`; try check | eval | run | hash | pack | qualify | \
                  check-many | corpus-scan | run-smoke | task | version"
             )));
@@ -181,7 +219,7 @@ fn run_run_command(args: &[String]) -> Result<u8, QjsError> {
             0,
             "usage: agenterm-qjs run <file.js> [-- <args>...]",
         )
-        .map_err(QjsError::Check)?,
+        .map_err(QjsError::Usage)?,
     );
     let project_root = find_flag_value(&file_args[1..], "--project-root").map(PathBuf::from);
     let source = read_source(&path)?;
@@ -225,7 +263,7 @@ fn run_run_command(args: &[String]) -> Result<u8, QjsError> {
 /// [`agenterm_qjs::QjsPack`].
 fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
     let Some(subcommand) = args.first() else {
-        return Err(QjsError::Check(
+        return Err(QjsError::Usage(
             "usage: agenterm-qjs pack build <file.js> --dir <out> [--project-root DIR] | \
              pack load <dir>"
                 .into(),
@@ -236,7 +274,7 @@ fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
         "build" => {
             let path = PathBuf::from(
                 positional(rest, 0, "usage: agenterm-qjs pack build <file.js>")
-                    .map_err(QjsError::Check)?,
+                    .map_err(QjsError::Usage)?,
             );
             // Slice-based lookups — no iterator to accidentally drain, so
             // both flags can be looked up independently from the same
@@ -246,12 +284,12 @@ fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
             let flags = &rest[1..];
             let dir = find_flag_value(flags, "--dir")
                 .map(PathBuf::from)
-                .ok_or_else(|| QjsError::Check("pack build requires --dir <out>".into()))?;
+                .ok_or_else(|| QjsError::Usage("pack build requires --dir <out>".into()))?;
             let project_root = find_flag_value(flags, "--project-root").map(PathBuf::from);
             let source = read_source(&path)?;
             if wants_module_mode(&source) {
                 let root = project_root.ok_or_else(|| {
-                    QjsError::Check(
+                    QjsError::Usage(
                         "pack build: source uses import/export; requires --project-root DIR"
                             .into(),
                     )
@@ -269,7 +307,7 @@ fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
             Ok(0)
         }
         "load" => run_pack_load(rest),
-        other => Err(QjsError::Check(format!(
+        other => Err(QjsError::Usage(format!(
             "pack: unknown subcommand `{other}`; try build or load"
         ))),
     }
@@ -284,7 +322,7 @@ fn run_pack_command(args: &[String]) -> Result<u8, QjsError> {
 /// string is what actually distinguishes them, not the directory shape.
 fn run_pack_load(args: &[String]) -> Result<u8, QjsError> {
     let dir = PathBuf::from(
-        positional(args, 0, "usage: agenterm-qjs pack load <dir>").map_err(QjsError::Check)?,
+        positional(args, 0, "usage: agenterm-qjs pack load <dir>").map_err(QjsError::Usage)?,
     );
     let host = QjsHostFunctions::default();
     if pack_manifest_schema(&dir)?.starts_with("agenterm.qjs-module-pack-manifest/") {
@@ -317,15 +355,21 @@ fn run_pack_load(args: &[String]) -> Result<u8, QjsError> {
 /// Peek a pack directory's `manifest.json` for its `schema` field, without
 /// committing to parsing it as either manifest shape yet.
 fn pack_manifest_schema(dir: &Path) -> Result<String, QjsError> {
+    // Usage-level: this is the pre-flight "does a pack even live at `dir`"
+    // check (nonexistent/unreadable manifest.json, not valid JSON, no
+    // `schema` field) — a bad `<dir>` argument, not a script-content
+    // problem. `QjsModulePack::load`/`QjsPack::load` (below) are what
+    // actually verify the pack's *content* (hash/tamper checks) once this
+    // has established it's a real pack directory.
     let bytes = fs::read(dir.join("manifest.json"))
-        .map_err(|err| QjsError::Check(format!("pack_manifest_read: {err}")))?;
+        .map_err(|err| QjsError::Usage(format!("pack_manifest_read: {err}")))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|err| QjsError::Check(format!("pack_manifest_parse: {err}")))?;
+        .map_err(|err| QjsError::Usage(format!("pack_manifest_parse: {err}")))?;
     value
         .get("schema")
         .and_then(|schema| schema.as_str())
         .map(str::to_owned)
-        .ok_or_else(|| QjsError::Check("pack_manifest_missing_schema".into()))
+        .ok_or_else(|| QjsError::Usage("pack_manifest_missing_schema".into()))
 }
 
 /// `corpus-scan [--dir <dir>]` — scan a directory for `.js`/`.mjs` files
@@ -340,13 +384,13 @@ fn run_corpus_scan_command(args: &[String]) -> Result<u8, QjsError> {
         // `usage` is unreachable here: `has_flag` already guarantees the
         // flag is present, so the only way `require_flag_value` can fail
         // is the "no value follows" branch.
-        PathBuf::from(require_flag_value(args, "--dir", "unreachable").map_err(QjsError::Check)?)
+        PathBuf::from(require_flag_value(args, "--dir", "unreachable").map_err(QjsError::Usage)?)
     } else {
         std::env::current_dir()
-            .map_err(|err| QjsError::Check(format!("corpus_scan_cwd: {err}")))?
+            .map_err(|err| QjsError::Usage(format!("corpus_scan_cwd: {err}")))?
     };
     let report = agenterm_qjs::scan_directory(&dir)
-        .map_err(|err| QjsError::Check(format!("corpus_scan: {err}")))?;
+        .map_err(|err| QjsError::Usage(format!("corpus_scan: {err}")))?;
     if report.failures == 0 {
         println!("corpus-scan: {} scripts ok", report.total_scripts);
         Ok(0)
@@ -369,25 +413,28 @@ fn run_corpus_scan_command(args: &[String]) -> Result<u8, QjsError> {
 fn run_qualify_command(args: &[String]) -> Result<u8, QjsError> {
     let path = PathBuf::from(
         positional(args, 0, "usage: agenterm-qjs qualify <file.js>")
-            .map_err(QjsError::Check)?,
+            .map_err(QjsError::Usage)?,
     );
     let flags = &args[1..];
     let dir = find_flag_value(flags, "--dir")
         .map(PathBuf::from)
-        .ok_or_else(|| QjsError::Check("qualify requires --dir <out>".into()))?;
+        .ok_or_else(|| QjsError::Usage("qualify requires --dir <out>".into()))?;
     let project_root = find_flag_value(flags, "--project-root").map(PathBuf::from);
     let source = read_source(&path)?;
     let host = QjsHostFunctions::default();
     let receipt_path = dir.join("receipt.json");
     if wants_module_mode(&source) {
         let root = project_root.ok_or_else(|| {
-            QjsError::Check(
+            QjsError::Usage(
                 "qualify: source uses import/export; requires --project-root DIR".into(),
             )
         })?;
         let receipt = agenterm_qjs::qualify_module_pack_dir(&source, &path, &root, &dir, &host)
             .map_err(QjsError::Check)?;
-        receipt.write(&receipt_path).map_err(QjsError::Check)?;
+        // Output-writing failure (disk full, unwritable --dir) — not a
+        // script-content problem, matches the other write/output-encoding
+        // failures below in `run_check_many_command`.
+        receipt.write(&receipt_path).map_err(QjsError::Usage)?;
         println!(
             "qualify ok (module, {} files): {} -> {}",
             receipt.file_count,
@@ -397,7 +444,7 @@ fn run_qualify_command(args: &[String]) -> Result<u8, QjsError> {
     } else {
         let receipt =
             agenterm_qjs::qualify_pack_dir(&source, &dir, &host).map_err(QjsError::Check)?;
-        receipt.write(&receipt_path).map_err(QjsError::Check)?;
+        receipt.write(&receipt_path).map_err(QjsError::Usage)?;
         println!(
             "qualify ok: {} -> {}",
             path.display(),
@@ -414,7 +461,7 @@ fn run_check_many_command(args: &[String]) -> Result<u8, QjsError> {
     let report = run_check_many(manifest, parsed.options);
     if parsed.json {
         let encoded = serde_json::to_string_pretty(&report)
-            .map_err(|err| QjsError::Check(err.to_string()))?;
+            .map_err(|err| QjsError::Usage(err.to_string()))?;
         println!("{encoded}");
     } else if report.ok {
         println!("OK ({} files)", report.checked_files);
@@ -443,7 +490,12 @@ fn render_value(value: Option<&serde_json::Value>) -> String {
 }
 
 fn read_source(path: &PathBuf) -> Result<String, QjsError> {
-    fs::read_to_string(path).map_err(|err| QjsError::Check(format!("{}: {err}", path.display())))
+    // Usage-level: a file the caller pointed us at that isn't there/isn't
+    // readable is a bad argument, not a syntax error in script content —
+    // `check`/`compile_qjs`/`eval_entry` etc. (called with the source this
+    // returns) are what produce the script-level `Parse`/`Check` failures.
+    fs::read_to_string(path)
+        .map_err(|err| QjsError::Usage(format!("{}: {err}", path.display())))
 }
 
 /// `--project-root`, if given; otherwise the entry file's own parent

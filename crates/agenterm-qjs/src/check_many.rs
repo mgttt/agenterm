@@ -23,7 +23,10 @@ use crate::{check::check_with_project_validation, error::QjsError};
 const QJS_CHECK_MANIFEST_KIND: &str = "agenterm-qjs-check-manifest";
 
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, QjsError> {
-    check_many::read_manifest(path, &[QJS_CHECK_MANIFEST_KIND]).map_err(QjsError::Check)
+    // Unreadable manifest, malformed JSON, wrong `kind` — all
+    // usage/configuration problems, not anything about a script's content.
+    // See `error.rs`'s doc for the exit-code rationale.
+    check_many::read_manifest(path, &[QJS_CHECK_MANIFEST_KIND]).map_err(QjsError::Usage)
 }
 
 pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) -> CheckManyReport {
@@ -48,6 +51,15 @@ fn qjs_check_failure(error: QjsError) -> CheckFailure {
     match error {
         QjsError::Parse(message) => CheckFailure::new("qjs_parse", message, "script"),
         QjsError::Check(message) => CheckFailure::new("qjs_check", message, "script"),
+        // Not actually reachable today: the driver canonicalizes/confines
+        // `path`/`root` itself before calling `check_with_project_validation`
+        // (see this file's module doc), so the `Usage`-classified
+        // canonicalize/confinement errors in `check.rs` can't fire from
+        // here. Matched anyway for exhaustiveness, and classified under the
+        // same `"configuration"` `exit_class` the shared driver already
+        // uses for its own usage-level failures (see
+        // `agenterm_script_common::check_many::CheckManyReport::exit_code`).
+        QjsError::Usage(message) => CheckFailure::new("qjs_usage", message, "configuration"),
     }
 }
 
@@ -59,7 +71,9 @@ pub fn parse_check_many_cli<I>(args: I) -> Result<ParsedCheckManyCli, QjsError>
 where
     I: Iterator<Item = String>,
 {
-    agenterm_script_common::cli::parse_check_many_cli(args).map_err(QjsError::Check)
+    // Bad/missing `--manifest`, `--timeout-ms`, etc. — argv/usage, not
+    // script content.
+    agenterm_script_common::cli::parse_check_many_cli(args).map_err(QjsError::Usage)
 }
 
 #[cfg(test)]

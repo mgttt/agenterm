@@ -40,12 +40,12 @@ pub fn eval_module_entry_with_host(
     host: &QjsHostFunctions,
 ) -> Result<EvalOutcome, QjsError> {
     let canonical_root = std::fs::canonicalize(project_root)
-        .map_err(|err| QjsError::Check(format!("qjs_module_root: {}: {err}", project_root.display())))?;
+        .map_err(|err| QjsError::Usage(format!("qjs_module_root: {}: {err}", project_root.display())))?;
     let canonical_entry = std::fs::canonicalize(entry_path).map_err(|err| {
-        QjsError::Check(format!("qjs_module_entry: {}: {err}", entry_path.display()))
+        QjsError::Usage(format!("qjs_module_entry: {}: {err}", entry_path.display()))
     })?;
     if !canonical_entry.starts_with(&canonical_root) {
-        return Err(QjsError::Check(format!(
+        return Err(QjsError::Usage(format!(
             "qjs_module_entry_outside_root: {} is not inside {}",
             canonical_entry.display(),
             canonical_root.display()

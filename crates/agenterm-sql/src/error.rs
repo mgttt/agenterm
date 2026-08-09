@@ -3,18 +3,30 @@
 //! `agenterm_rh::RhError` — same shape (parse vs. other-check failure
 //! classes), not the same variants. sql has no execute/runtime phase at all
 //! yet (see `lib.rs`'s module doc and `eval.rs`), so this enum only needs to
-//! cover the two things that exist today: parse failures and everything
-//! else (I/O, manifest shape, CLI argv).
+//! cover the things that exist today: parse failures, everything else that's
+//! still script-level, and usage/configuration failures.
+//!
+//! ## Exit-code classification, mirroring `agenterm_qjs::QjsError`'s (see
+//! that file's doc for the full rationale, aligned 2026-08 with
+//! `agenterm_script_common::check_many::CheckManyReport::exit_code()`'s
+//! shared `exit_class` taxonomy): [`SqlError::Parse`]/[`SqlError::Check`]
+//! are script-level (exit `1`); [`SqlError::Usage`] is
+//! usage/configuration-level (exit `2`).
 
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SqlError {
     /// Source failed to parse as SQL (sqlparser tokenizer/parser error).
+    /// Script-level — exit `1`.
     Parse(String),
-    /// Source parsed (or wasn't reached) but failed some other check/host-side
-    /// step (I/O, manifest shape, CLI argv, project-root resolution, ...).
+    /// Source parsed (or wasn't reached) but failed some other
+    /// script-level check/execution step. Script-level — exit `1`.
     Check(String),
+    /// CLI/configuration problem: bad argv, an unknown verb, a missing or
+    /// unreadable required flag value, an unreadable/malformed manifest,
+    /// a path that can't be read. Usage-level — exit `2`.
+    Usage(String),
 }
 
 impl fmt::Display for SqlError {
@@ -22,6 +34,7 @@ impl fmt::Display for SqlError {
         match self {
             Self::Parse(message) => write!(f, "sql parse error: {message}"),
             Self::Check(message) => write!(f, "sql check error: {message}"),
+            Self::Usage(message) => write!(f, "sql usage error: {message}"),
         }
     }
 }

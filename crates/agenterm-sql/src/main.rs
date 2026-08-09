@@ -14,6 +14,25 @@
 //!   greppable error instead of "unknown command `eval`" — and gets upgraded
 //!   to real behavior later without a CLI shape change.
 //!
+//! ## Exit-code convention (2026-08, aligned with qjs — see
+//! `crates/agenterm-qjs/src/main.rs`'s matching doc, and
+//! `tests/script_cli_verb_parity.rs`'s module doc for the full
+//! cross-engine divergence table this pair now narrows)
+//!
+//! `0` success; `1` a **script-level** failure — the root cause is the
+//! script content itself (a `check` syntax error), i.e.
+//! [`SqlError::Parse`]/[`SqlError::Check`]; `2` a **usage/configuration-level**
+//! failure — bad argv, an unknown verb, a missing/unreadable required flag
+//! or manifest, a reserved-but-not-implemented verb, i.e. [`SqlError::Usage`]
+//! (or the literal `2` the reserved-verb stubs return directly, see
+//! `not_implemented_stub` below — they never construct an error at all).
+//! `main()` reads the returned `SqlError`'s variant to pick between `1`/`2`
+//! — see `error.rs`'s doc for the full rationale. Previously `main()` folded
+//! every `Err(_)` into a blanket exit `2` regardless of variant, so
+//! `check <broken file>` (a `SqlError::Parse`, i.e. script-level) exited
+//! `2`, not `1` — the exact cross-engine divergence
+//! `tests/script_cli_verb_parity.rs` pinned and this pass fixes.
+//!
 //! See `lib.rs`'s module doc for the crate-wide "what's real vs. placeholder"
 //! table and the open design question in full; `plan/design-script-engine-trait.md`
 //! §2.6 is the SSOT this crate scaffolds against.
@@ -39,8 +58,15 @@ fn main() -> ExitCode {
     match run(&arguments) {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
+            // Script-level (`Parse`/`Check`) -> 1, usage/configuration-level
+            // (`Usage`) -> 2 — see this file's module doc and `error.rs`'s
+            // doc for the classification rationale.
+            let exit_code = match &error {
+                SqlError::Parse(_) | SqlError::Check(_) => 1,
+                SqlError::Usage(_) => 2,
+            };
             eprintln!("{error}");
-            ExitCode::from(2)
+            ExitCode::from(exit_code)
         }
     }
 }
@@ -59,7 +85,7 @@ fn run(args: &[String]) -> Result<u8, SqlError> {
         "check" => {
             let path = PathBuf::from(
                 positional(rest, 0, "usage: agenterm-sql check <file.sql>")
-                    .map_err(SqlError::Check)?,
+                    .map_err(SqlError::Usage)?,
             );
             let source = read_source(&path)?;
             let label = path.display().to_string();
@@ -77,7 +103,7 @@ fn run(args: &[String]) -> Result<u8, SqlError> {
         }
         "--help" | "-h" | "help" => print_usage(),
         other => {
-            return Err(SqlError::Check(format!(
+            return Err(SqlError::Usage(format!(
                 "unknown command `{other}`; try check | check-many | corpus-scan | version \
                  (eval | run | pack | qualify | task are reserved, not implemented — see \
                  `agenterm-sql eval --help`-shaped output by just running them)"
@@ -110,7 +136,7 @@ fn run_check_many_command(args: &[String]) -> Result<u8, SqlError> {
     let report = run_check_many(manifest, parsed.options);
     if parsed.json {
         let encoded = serde_json::to_string_pretty(&report)
-            .map_err(|err| SqlError::Check(err.to_string()))?;
+            .map_err(|err| SqlError::Usage(err.to_string()))?;
         println!("{encoded}");
     } else if report.ok {
         println!("OK ({} files)", report.checked_files);
@@ -141,13 +167,13 @@ fn run_corpus_scan_command(args: &[String]) -> Result<u8, SqlError> {
         // `usage` is unreachable here: `has_flag` already guarantees the
         // flag is present, so the only way `require_flag_value` can fail
         // is the "no value follows" branch.
-        PathBuf::from(require_flag_value(args, "--dir", "unreachable").map_err(SqlError::Check)?)
+        PathBuf::from(require_flag_value(args, "--dir", "unreachable").map_err(SqlError::Usage)?)
     } else {
         std::env::current_dir()
-            .map_err(|err| SqlError::Check(format!("corpus_scan_cwd: {err}")))?
+            .map_err(|err| SqlError::Usage(format!("corpus_scan_cwd: {err}")))?
     };
     let report = agenterm_sql::scan_directory(&dir)
-        .map_err(|err| SqlError::Check(format!("corpus_scan: {err}")))?;
+        .map_err(|err| SqlError::Usage(format!("corpus_scan: {err}")))?;
     if report.failures == 0 {
         println!("corpus-scan: {} scripts ok", report.total_scripts);
         Ok(0)
@@ -164,7 +190,12 @@ fn run_corpus_scan_command(args: &[String]) -> Result<u8, SqlError> {
 }
 
 fn read_source(path: &PathBuf) -> Result<String, SqlError> {
-    fs::read_to_string(path).map_err(|err| SqlError::Check(format!("{}: {err}", path.display())))
+    // Usage-level: a file the caller pointed us at that isn't there/isn't
+    // readable is a bad argument, not a syntax error in script content —
+    // `check` (called with the source this returns) is what produces the
+    // script-level `Parse` failures.
+    fs::read_to_string(path)
+        .map_err(|err| SqlError::Usage(format!("{}: {err}", path.display())))
 }
 
 fn print_usage() {

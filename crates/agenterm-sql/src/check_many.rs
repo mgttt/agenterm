@@ -28,7 +28,9 @@ use crate::{check::check, error::SqlError};
 const SQL_CHECK_MANIFEST_KIND: &str = "agenterm-sql-check-manifest";
 
 pub fn read_manifest(path: &Path) -> Result<CheckManyManifest, SqlError> {
-    check_many::read_manifest(path, &[SQL_CHECK_MANIFEST_KIND]).map_err(SqlError::Check)
+    // Unreadable manifest, malformed JSON, wrong `kind` — usage/configuration,
+    // not script content. See `error.rs`'s doc for the exit-code rationale.
+    check_many::read_manifest(path, &[SQL_CHECK_MANIFEST_KIND]).map_err(SqlError::Usage)
 }
 
 pub fn run_check_many(manifest: CheckManyManifest, options: CheckManyOptions) -> CheckManyReport {
@@ -47,6 +49,11 @@ fn sql_check_failure(error: SqlError) -> CheckFailure {
     match error {
         SqlError::Parse(message) => CheckFailure::new("sql_parse", message, "script"),
         SqlError::Check(message) => CheckFailure::new("sql_check", message, "script"),
+        // Not reachable today: `check()` (the only thing this closure calls)
+        // never constructs `SqlError::Usage`. Matched for exhaustiveness,
+        // classified under the same `"configuration"` `exit_class` the
+        // shared driver uses for its own usage-level failures.
+        SqlError::Usage(message) => CheckFailure::new("sql_usage", message, "configuration"),
     }
 }
 
@@ -58,7 +65,9 @@ pub fn parse_check_many_cli<I>(args: I) -> Result<ParsedCheckManyCli, SqlError>
 where
     I: Iterator<Item = String>,
 {
-    agenterm_script_common::cli::parse_check_many_cli(args).map_err(SqlError::Check)
+    // Bad/missing `--manifest`, `--timeout-ms`, etc. — argv/usage, not
+    // script content.
+    agenterm_script_common::cli::parse_check_many_cli(args).map_err(SqlError::Usage)
 }
 
 #[cfg(test)]
