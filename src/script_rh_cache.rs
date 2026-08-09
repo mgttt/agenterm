@@ -101,12 +101,23 @@ pub fn loaded_pack_for_source_with_project(
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_key, compile_source_to_cache, native_path_for_source};
+    use super::{
+        RH_CODEGEN_REVISION, RH_HOST_API_VERSION, cache_key, compile_source_to_cache,
+        native_path_for_source,
+    };
 
     #[test]
     fn source_cache_key_owns_abi_and_codegen_compatibility() {
         let key = cache_key("fn entry() { 1 }");
-        assert!(key.ends_with("-api9-cg20"), "{key}");
+        // Follow the live constants: a hardcoded pin here went stale on
+        // every ABI/codegen bump without adding safety — the point is that
+        // BOTH constants appear in the key, not their specific values.
+        assert!(
+            key.ends_with(&format!(
+                "-api{RH_HOST_API_VERSION}-cg{RH_CODEGEN_REVISION}"
+            )),
+            "{key}"
+        );
         assert!(!key.contains(':'));
     }
 

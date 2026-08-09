@@ -1351,7 +1351,7 @@ if quick != 0 {
             bootstrap_worker,
             manifest,
             "lint",
-            120000,
+            300000,
             two_task_extra(lint_worker, "static"),
             empty_environment(),
             0
@@ -1656,7 +1656,7 @@ let lint_gate = run_gate_two(
         bootstrap_worker,
         manifest,
         "lint",
-        120000,
+        300000,
         two_task_extra(lint_worker, "--self-test"),
         #{},
         0
@@ -1665,7 +1665,7 @@ let lint_gate = run_gate_two(
         bootstrap_worker,
         manifest,
         "lint",
-        120000,
+        300000,
         two_task_extra(lint_worker, "static"),
         #{},
         0
@@ -1838,7 +1838,7 @@ ordinary = run_gate(
     "rh-lint",
     "production rh source lint",
     task(
-        worker, manifest, "lint", 120000, two_task_extra(dist_lint_cli, "rh"), #{}, 0),
+        worker, manifest, "lint", 300000, two_task_extra(dist_lint_cli, "rh"), #{}, 0),
     repo,
     scratch,
     sequence

@@ -139,8 +139,10 @@ mod tests {
     }
 
     #[test]
-    fn interpreted_eval_and_rh_run_are_not_forwarded() {
+    fn interpreted_eval_is_not_forwarded() {
+        // `run <path>.rh` DOES forward to eval (see
+        // run_forwards_to_eval_for_rh_paths above); the old assertion here
+        // claimed the opposite and contradicted that test in this same file.
         assert!(forward_if_rh_path(&["eval".into(), "40 + 2".into()], 1, &["eval"]).is_none());
-        assert!(forward_run_as_eval(&["run".into(), "scripts/rh/lint.rh".into()]).is_none());
     }
 }
