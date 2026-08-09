@@ -6770,13 +6770,10 @@ mod system_menu_tests {
 
     #[test]
     fn gui_launch_parser_rejects_selector_conflicts_duplicates_and_missing_values() {
+        // `--endpoint` + `--instance` is deliberately NOT here: the shared
+        // parser allows that pair for attach identity (see frontend/mod.rs
+        // `shared_gui_launch_parser_allows_endpoint_with_instance_identity`).
         let invalid = [
-            vec![
-                "--endpoint".to_owned(),
-                "tcp:127.0.0.1:48815".to_owned(),
-                "--instance".to_owned(),
-                "dev".to_owned(),
-            ],
             vec![
                 "--instance".to_owned(),
                 "main".to_owned(),

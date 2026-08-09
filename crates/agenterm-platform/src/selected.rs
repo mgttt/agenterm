@@ -554,3 +554,87 @@ pub(crate) mod process;
 ))]
 #[path = "adapters/unix/process_control.rs"]
 pub(crate) mod process_control;
+
+/// Cross-platform console-attachment surface.
+///
+/// The target `cfg`s live HERE by boundary policy (see
+/// `src/platform/boundary_tests.rs`): `process.rs` re-exports these items
+/// without any target selection of its own.
+#[cfg(feature = "process")]
+pub mod console_surface {
+    /// One duplicated caller-visible std handle. Windows: a real console /
+    /// pipe / file handle; Unix: the equivalent owned descriptor (unused —
+    /// Unix workers inherit stdio directly).
+    #[cfg(windows)]
+    pub type StdHandle = std::os::windows::io::OwnedHandle;
+    #[cfg(not(windows))]
+    pub type StdHandle = std::os::fd::OwnedFd;
+
+    /// Duplicate the caller-visible stdin/stdout/stderr handles for explicit
+    /// child stdio wiring (`[stdin, stdout, stderr]`, `None` where the
+    /// process holds no valid handle). Attach the parent console first
+    /// (`ScopedConsole`) so console-backed slots are populated. Unix returns
+    /// all-`None`: workers there inherit stdio without duplication.
+    pub fn duplicated_std_handles() -> [Option<StdHandle>; 3] {
+        #[cfg(windows)]
+        {
+            super::console::duplicate_std_handles()
+        }
+        #[cfg(not(windows))]
+        {
+            [None, None, None]
+        }
+    }
+
+    /// Opaque guard that keeps the parent console attached.
+    ///
+    /// On Windows this wraps the shared `ConsoleGuard`; the console is
+    /// released when the guard is dropped. Spawn this before any `println!`
+    /// calls in a `windows_subsystem = "windows"` binary.
+    ///
+    /// On Unix this is a zero-size no-op.
+    pub struct ScopedConsole {
+        #[cfg(windows)]
+        _inner: Option<super::console::ConsoleGuard>,
+        #[cfg(not(windows))]
+        _unused: (),
+    }
+
+    impl ScopedConsole {
+        /// Attach to the parent console. Returns `None` when there is no
+        /// parent console (double-click launch on Windows).
+        pub fn attach_parent() -> Option<Self> {
+            #[cfg(windows)]
+            {
+                super::console::ConsoleGuard::attach_parent()
+                    .ok()
+                    .map(|inner| Self {
+                        _inner: Some(inner),
+                    })
+            }
+            #[cfg(not(windows))]
+            {
+                Some(Self { _unused: () })
+            }
+        }
+
+        /// Attach to the parent console without suppressing console control
+        /// events, so `Ctrl+C` keeps its default terminate behavior. This is
+        /// the variant for CLI worker processes; the GUI host uses
+        /// `attach_parent`, which must survive child-console control events.
+        pub fn attach_parent_with_default_interrupts() -> Option<Self> {
+            #[cfg(windows)]
+            {
+                super::console::ConsoleGuard::attach_parent_with_default_interrupts()
+                    .ok()
+                    .map(|inner| Self {
+                        _inner: Some(inner),
+                    })
+            }
+            #[cfg(not(windows))]
+            {
+                Some(Self { _unused: () })
+            }
+        }
+    }
+}

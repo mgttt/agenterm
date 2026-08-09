@@ -51,8 +51,18 @@ const PRODUCT_COUPLING_MARKERS: &[&str] = &[
 
 const PLATFORM_CRATE: &str = "crates/agenterm-platform";
 
-const SUBSYSTEM_ENTRYPOINTS: &[&str] = &["src/bin/agenterm.rs", "src/bin/agenterm-cc.rs"];
+const SUBSYSTEM_ENTRYPOINTS: &[&str] = &[
+    "src/bin/agenterm.rs",
+    "src/bin/agenterm-cc.rs",
+    "src/bin/agenterm-con.rs",
+];
 const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsystem = \"windows\")]";
+
+/// The CUI trampoline is a native Win32 entrypoint BY DESIGN: `no_std`,
+/// a custom `mainCRTStartup` export, and direct `#[link]` kernel32 imports.
+/// It cannot delegate to the platform crate (the crate's runtime would blow
+/// the trampoline's 64KiB staged-size budget), so the whole file is exempt.
+const NATIVE_ENTRYPOINT_EXEMPTIONS: &[&str] = &["src/bin/agenterm-com.rs"];
 
 #[test]
 fn production_sources_use_platform_crate_as_the_only_native_boundary() {
@@ -68,6 +78,9 @@ fn production_sources_use_platform_crate_as_the_only_native_boundary() {
             .expect("source is below manifest root")
             .to_string_lossy()
             .replace('\\', "/");
+        if NATIVE_ENTRYPOINT_EXEMPTIONS.contains(&relative.as_str()) {
+            continue;
+        }
         let source = fs::read_to_string(&path).expect("read Rust source");
         // Product-specific frontends and Control Center/Fleet extensions remain
         // ordinary main-crate code: they may call the public platform API, but
@@ -89,6 +102,14 @@ fn production_sources_use_platform_crate_as_the_only_native_boundary() {
                     "{relative}:{line}: forbidden platform marker `{marker}`"
                 ));
             }
+        }
+        // Subsystem entrypoint bins exist to bridge the windows-subsystem /
+        // console divide, so they may BRANCH on the target — but the native
+        // marker check above still bars them from raw native types or
+        // links; mechanics must come through the platform crate's API
+        // (e.g. `process::StdHandle`, `process::ScopedConsole`).
+        if SUBSYSTEM_ENTRYPOINTS.contains(&relative.as_str()) {
+            continue;
         }
         if let Some((position, target)) = find_cfg_target(&production) {
             let line = production[..position]

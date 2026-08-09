@@ -1294,357 +1294,13 @@ mod tests {
             }
         }
     }
-
-    fn repl_config() -> ReplSessionWireConfig {
-        let budgets = ScriptBudgets {
-            operations: ScriptBudgets::hard_limits().operations,
-            wall_time_ms: 5_000,
-            ..ScriptBudgets::default()
-        };
-        ReplSessionWireConfig {
-            budgets,
-            arguments: Vec::new(),
-            project_root: None,
-            invocation_temp_root: None,
-        }
-    }
-
-    fn repl_client(executable: &Path) -> PersistentReplClient {
-        PersistentReplClient::spawn(
-            executable,
-            None,
-            format!("persistent-repl-{}", std::process::id()),
-            repl_config(),
-        )
-        .expect("persistent REPL")
-    }
-
-    #[test]
-    fn repl_state_uses_one_pid_and_generation_33_is_fresh_without_replay() {
-        let _test_guard = super::super::PROCESS_TEST_LOCK
-            .lock()
-            .expect("process test lock");
-        let executable = worker_executable();
-        let mut repl = repl_client(&executable);
-        let first_pid = repl.worker_pid();
-        repl.evaluate(
-            "cell-1".to_owned(),
-            "let x = 40; fn add(n) { 40 + n }".to_owned(),
-            Duration::from_secs(5),
-            no_broker,
-        )
-        .expect("first cell");
-        let persisted = repl
-            .evaluate(
-                "cell-2".to_owned(),
-                "[x, add(2)]".to_owned(),
-                Duration::from_secs(5),
-                no_broker,
-            )
-            .expect("persistent cell");
-        assert_eq!(
-            persisted
-                .value
-                .value
-                .as_ref()
-                .and_then(|value| value.value.as_ref()),
-            Some(&serde_json::json!([40, 42]))
-        );
-        assert_eq!(repl.worker_pid(), first_pid);
-        for index in 3..=PERSISTENT_WORKER_INVOCATION_LIMIT {
-            repl.evaluate(
-                format!("cell-{index}"),
-                "42".to_owned(),
-                Duration::from_secs(5),
-                no_broker,
-            )
-            .expect("bounded generation cell");
-        }
-        let replaced = repl
-            .evaluate(
-                "cell-33".to_owned(),
-                "42".to_owned(),
-                Duration::from_secs(5),
-                no_broker,
-            )
-            .expect("replacement cell");
-        let receipt = replaced.fresh_session.expect("generation receipt");
-        assert_eq!(receipt.reason, FreshSessionReason::GenerationLimit);
-        assert_eq!(receipt.old_worker_pid, first_pid);
-        assert_ne!(receipt.new_worker_pid, first_pid);
-        assert_eq!((receipt.old_generation, receipt.new_generation), (1, 2));
-        assert!(receipt.language_state_fresh && receipt.history_fresh);
-        assert!(!receipt.side_effects_replayed);
-        let state = repl
-            .query(ReplSessionQuery::State)
-            .expect("fresh state query");
-        let ReplWireQueryResult::State {
-            history, variables, ..
-        } = state.value
-        else {
-            panic!("state query shape");
-        };
-        assert_eq!(history, vec!["42"]);
-        assert!(!variables.iter().any(|variable| variable.name == "x"));
-        repl.close().expect("close REPL");
-    }
-
-    #[test]
-    fn repl_control_cooperatively_cancels_and_hard_kills_blocking_native_calls() {
-        let _test_guard = super::super::PROCESS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let executable = worker_executable();
-        let marker = std::env::temp_dir().join(format!(
-            "agenterm-repl-blocking-{}-{}.pid",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock after Unix epoch")
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&marker);
-        struct MarkerCleanup(PathBuf);
-        impl Drop for MarkerCleanup {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
-        let _marker_cleanup = MarkerCleanup(marker.clone());
-        let marker_literal = serde_json::to_string(&marker.display().to_string())
-            .expect("serialize blocking marker path");
-        let inner_source = format!(
-            "std::fs::write({marker_literal}, std::process::id().to_string()); \
-             let listener = std::net::TcpListener::bind(\"127.0.0.1:0\"); \
-             listener.accept();"
-        );
-        let executable_literal = serde_json::to_string(&executable.display().to_string())
-            .expect("serialize script worker path");
-        let inner_literal =
-            serde_json::to_string(&inner_source).expect("serialize nested blocking source");
-        let blocking_source = format!(
-            "let command = std::process::command({executable_literal}); \
-             command.args([\"eval\", \"--timeout-ms\", \"10000\", {inner_literal}]); \
-             command.output();"
-        );
-        enum ManagerEvent {
-            Ready {
-                control: PersistentReplControl,
-                worker_pid: u32,
-            },
-            Cooperative {
-                failure_code: Option<String>,
-                worker_pid: u32,
-            },
-            Finished {
-                interrupted_pid: u32,
-                replacement_pid: u32,
-                fresh_reason: FreshSessionReason,
-            },
-        }
-        let (event_tx, event_rx) = mpsc::channel();
-        let (command_tx, command_rx) = mpsc::channel();
-        let manager = thread::spawn(move || {
-            // The client, including its thread-affine concurrency permit, is
-            // created, used, replaced, queried, and closed on this one thread.
-            let mut repl = repl_client(&executable);
-            let control = repl.control();
-            let worker_pid = repl.worker_pid();
-            event_tx
-                .send(ManagerEvent::Ready {
-                    control,
-                    worker_pid,
-                })
-                .expect("publish REPL control");
-            let cancelled = repl
-                .evaluate(
-                    "cpu-loop".to_owned(),
-                    "while true {}".to_owned(),
-                    Duration::from_secs(5),
-                    no_broker,
-                )
-                .expect("cooperative result");
-            event_tx
-                .send(ManagerEvent::Cooperative {
-                    failure_code: cancelled.value.failure.map(|failure| failure.code),
-                    worker_pid: repl.worker_pid(),
-                })
-                .expect("publish cooperative result");
-
-            command_rx
-                .recv_timeout(Duration::from_secs(5))
-                .expect("begin blocking phase");
-            let blocking_pid = repl.worker_pid();
-            let interrupted = repl.evaluate(
-                "blocking-native".to_owned(),
-                blocking_source,
-                Duration::from_secs(5),
-                no_broker,
-            );
-            let interrupted_pid = match interrupted {
-                Err(PersistentReplError::Interrupted {
-                    worker_pid,
-                    fresh_required: true,
-                    ..
-                }) if worker_pid == blocking_pid => worker_pid,
-                other => panic!("expected hard interruption, got {other:?}"),
-            };
-            let fresh = repl
-                .query(ReplSessionQuery::State)
-                .expect("replacement after hard interruption")
-                .fresh_session
-                .expect("hard interruption receipt");
-            let replacement_pid = repl.worker_pid();
-            repl.close().expect("close replacement");
-            event_tx
-                .send(ManagerEvent::Finished {
-                    interrupted_pid,
-                    replacement_pid,
-                    fresh_reason: fresh.reason,
-                })
-                .expect("publish hard interruption result");
-        });
-
-        let ManagerEvent::Ready {
-            control,
-            worker_pid: initial_pid,
-        } = event_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("receive REPL control")
-        else {
-            panic!("manager did not publish ready first");
-        };
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !control.cancel().expect("cancel control") {
-            assert!(Instant::now() < deadline, "cell never became active");
-            thread::yield_now();
-        }
-        let ManagerEvent::Cooperative {
-            failure_code,
-            worker_pid,
-        } = event_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("receive cooperative result")
-        else {
-            panic!("manager did not publish cooperative result second");
-        };
-        assert_eq!(failure_code.as_deref(), Some("limit_cancelled"));
-        assert_eq!(worker_pid, initial_pid);
-
-        command_tx.send(()).expect("begin blocking phase");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let nested_pid = loop {
-            match std::fs::read_to_string(&marker) {
-                Ok(pid) => match pid.trim().parse::<u32>() {
-                    Ok(pid) => break pid,
-                    Err(_) => {
-                        assert!(
-                            Instant::now() < deadline,
-                            "nested worker published an invalid PID marker: {pid:?}"
-                        );
-                        thread::yield_now();
-                    }
-                },
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "nested blocking process never published its PID"
-                    );
-                    thread::yield_now();
-                }
-                Err(error) => panic!("failed to read nested worker PID marker: {error}"),
-            }
-        };
-        let nested_identity = crate::platform::process::start_identity(nested_pid)
-            .expect("nested worker start identity");
-        assert!(
-            control.cancel().expect("blocking cancel control"),
-            "outer cell must remain active while nested command output blocks"
-        );
-        let ManagerEvent::Finished {
-            interrupted_pid,
-            replacement_pid,
-            fresh_reason,
-        } = event_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("receive hard interruption result")
-        else {
-            panic!("manager did not publish hard interruption result third");
-        };
-        assert_eq!(interrupted_pid, initial_pid);
-        assert_ne!(replacement_pid, initial_pid);
-        assert_eq!(fresh_reason, FreshSessionReason::HardInterrupt);
-        assert!(matches!(
-            crate::platform::process::observe(interrupted_pid),
-            crate::platform::process::ProcessObservation::Dead { .. }
-        ));
-        wait_for_original_process_exit(
-            nested_pid,
-            &nested_identity,
-            Instant::now() + Duration::from_secs(2),
-        );
-        manager.join().expect("join REPL manager");
-        std::fs::remove_file(&marker).expect("remove nested worker PID marker");
-    }
-
-    #[test]
-    fn repl_worker_crash_requires_and_then_reports_explicit_fresh_session() {
-        let _test_guard = super::super::PROCESS_TEST_LOCK
-            .lock()
-            .expect("process test lock");
-        let executable = worker_executable();
-        let mut repl = repl_client(&executable);
-        let old_pid = repl.worker_pid();
-        repl.worker
-            .as_mut()
-            .expect("worker")
-            .force_worker_exit_for_test();
-        assert!(repl.query(ReplSessionQuery::State).is_err());
-        let replacement = repl
-            .query(ReplSessionQuery::State)
-            .expect("replacement query")
-            .fresh_session
-            .expect("crash replacement receipt");
-        assert_eq!(replacement.reason, FreshSessionReason::WorkerCrash);
-        assert_eq!(replacement.old_worker_pid, old_pid);
-        assert_ne!(replacement.new_worker_pid, old_pid);
-        repl.close().expect("close replacement");
-    }
-
-    #[test]
-    fn repl_control_response_timeout_reaps_and_requires_fresh_session() {
-        let _test_guard = super::super::PROCESS_TEST_LOCK
-            .lock()
-            .expect("process test lock");
-        let executable = worker_executable();
-        let mut repl = repl_client(&executable);
-        let old_pid = repl.worker_pid();
-
-        let timeout = repl
-            .next_response_with_timeout(Duration::from_millis(25))
-            .expect_err("an idle worker cannot satisfy an unsolicited response wait");
-        assert!(matches!(
-            timeout,
-            PersistentReplError::Worker(PersistentWorkerError::Supervisor(
-                SupervisorError::HardTimeout { worker_pid }
-            )) if worker_pid == old_pid
-        ));
-        assert!(repl.worker.is_none(), "timed-out worker must be reaped");
-        assert!(matches!(
-            crate::platform::process::observe(old_pid),
-            crate::platform::process::ProcessObservation::Dead { .. }
-        ));
-
-        let replacement = repl
-            .query(ReplSessionQuery::State)
-            .expect("replacement query after response timeout")
-            .fresh_session
-            .expect("protocol failure replacement receipt");
-        assert_eq!(replacement.reason, FreshSessionReason::ProtocolFailure);
-        assert_eq!(replacement.old_worker_pid, old_pid);
-        assert_ne!(replacement.new_worker_pid, old_pid);
-        repl.close().expect("close replacement");
-    }
+    // The four repl_* tests that lived here exercised the interactive REPL,
+    // which the framed worker now rejects outright
+    // ("protocol_repl_unavailable: interactive REPL was removed with the Rh
+    // interpreter" -- see script_worker.rs). They could never pass again and
+    // their spawn failure poisoned PROCESS_TEST_LOCK, cascading into the
+    // unrelated supervisor tests below. The PersistentReplClient itself is
+    // graybox-retired (no production callers) pending deletion.
 
     #[test]
     fn same_pid_reuse_crash_replacement_and_reap_are_explicit() {
@@ -1656,16 +1312,16 @@ mod tests {
         let first_pid = first.worker_pid();
         let one = first
             .invoke(
-                invocation("persistent-one", "40 + 1"),
-                Duration::from_secs(5),
+                invocation("persistent-one", "fn entry() { 40 + 1 }"),
+                Duration::from_secs(120),
                 Duration::from_millis(150),
                 no_broker,
             )
             .expect("first invocation");
         let two = first
             .invoke(
-                invocation("persistent-two", "40 + 2"),
-                Duration::from_secs(5),
+                invocation("persistent-two", "fn entry() { 40 + 2 }"),
+                Duration::from_secs(120),
                 Duration::from_millis(150),
                 no_broker,
             )
@@ -1679,8 +1335,8 @@ mod tests {
         first.force_worker_exit_for_test();
         let failure = first
             .invoke(
-                invocation("persistent-after-kill", "43"),
-                Duration::from_secs(5),
+                invocation("persistent-after-kill", "fn entry() { 43 }"),
+                Duration::from_secs(120),
                 Duration::from_millis(150),
                 no_broker,
             )
@@ -1701,8 +1357,8 @@ mod tests {
         assert_ne!(replacement_pid, first_pid);
         let recovered = replacement
             .invoke(
-                invocation("persistent-replacement", "6 * 7"),
-                Duration::from_secs(5),
+                invocation("persistent-replacement", "fn entry() { 6 * 7 }"),
+                Duration::from_secs(120),
                 Duration::from_millis(150),
                 no_broker,
             )
@@ -1725,8 +1381,8 @@ mod tests {
         );
         assert!(matches!(
             replacement.invoke(
-                invocation("persistent-over-limit", "42"),
-                Duration::from_secs(5),
+                invocation("persistent-over-limit", "fn entry() { 42 }"),
+                Duration::from_secs(120),
                 Duration::from_millis(150),
                 no_broker,
             ),

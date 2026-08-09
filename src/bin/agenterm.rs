@@ -188,8 +188,9 @@ fn run_engine_from_gui_subsystem(engine: String, args: Vec<String>) -> std::proc
 
 #[cfg(windows)]
 fn run_console_worker(internal_subcommand: &str, worker_name: &str, args: Vec<String>) -> i32 {
-    use std::os::windows::io::OwnedHandle;
     use std::process::{Command, Stdio};
+
+    use agenterm_platform::process::StdHandle;
 
     // Attach to the caller's console (when launched from a terminal) so the
     // console-backed std slots become valid, then duplicate the real
@@ -209,7 +210,7 @@ fn run_console_worker(internal_subcommand: &str, worker_name: &str, args: Vec<St
     };
     let [stdin_handle, stdout_handle, stderr_handle] =
         agenterm_platform::process::duplicated_std_handles();
-    fn stdio(handle: Option<OwnedHandle>) -> Stdio {
+    fn stdio(handle: Option<StdHandle>) -> Stdio {
         handle.map_or_else(Stdio::null, Stdio::from)
     }
     match Command::new(executable)

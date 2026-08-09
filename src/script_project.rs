@@ -230,7 +230,9 @@ impl ProjectModuleResolver {
             ));
         }
         Ok(Self {
-            files: FileModuleResolver::new_with_path(&root),
+            // Explicit extension: rhai's default is `.rhai`, which silently
+            // broke every `import` after the repo-wide `.rh` rename.
+            files: FileModuleResolver::new_with_path_and_extension(&root, "rh"),
             root,
             resolving: Mutex::new(HashSet::new()),
         })

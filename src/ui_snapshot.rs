@@ -329,11 +329,15 @@ const HEADLESS_MAX_EDGE: i32 = 16_384;
 /// Chrome heights match the GUI host shipped on *this* platform, so synthetic
 /// geometry and the window an agent may attach later agree. The two hosts
 /// currently disagree (Windows composer 104, Unix 64), so the value is also
-/// published rather than left for a caller to guess.
-#[cfg(windows)]
-const HEADLESS_COMPOSER_HEIGHT: i32 = 104;
-#[cfg(not(windows))]
-const HEADLESS_COMPOSER_HEIGHT: i32 = 64;
+/// published rather than left for a caller to guess. Routed through the
+/// platform-kind policy fact instead of a `cfg` split (boundary policy).
+fn headless_composer_height() -> i32 {
+    if crate::platform::is_windows_host() {
+        104
+    } else {
+        64
+    }
+}
 const HEADLESS_STATUS_HEIGHT: i32 = 26;
 const HEADLESS_SERVER_STRIP_HEIGHT: i32 = 34;
 
@@ -361,7 +365,7 @@ impl HeadlessViewport {
             width,
             height,
             source,
-            composer_height: HEADLESS_COMPOSER_HEIGHT,
+            composer_height: headless_composer_height(),
             status_height: HEADLESS_STATUS_HEIGHT,
             server_strip_height: HEADLESS_SERVER_STRIP_HEIGHT,
         }

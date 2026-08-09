@@ -380,7 +380,10 @@ mod tests {
 
     #[test]
     fn linux_resolved_font_matches_platform_primary() {
-        if crate::platform::is_macos_host() {
+        // Linux hosts only: on Windows this unix-module test would compare
+        // the unix frontend's fontdb pick against the WINDOWS platform
+        // primary (Consolas vs Cascadia Code) and fail spuriously.
+        if crate::platform::is_macos_host() || crate::platform::is_windows_host() {
             return;
         }
         let platform_primary =
