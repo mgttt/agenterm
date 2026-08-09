@@ -282,6 +282,78 @@ DPI 缩放变化触发、大概在哪个字号、放大还是缩小方向）才�
   这就是用户遇到的那个根因**（没有用户那台机器的字体，验证不了"哪个
   具体字形在哪个尺寸炸"），但这是一处真实、可读代码就能确认的越界写
   漏洞，修复本身站得住，不依赖复现结果。
+
+**第三轮：复现成功，根因坐实——不是字形溢出，是 resize 把宽字符劈成
+两半（`third_party/vt100/src/row.rs::Row::resize`）**
+
+用户回报"偶尔还是会自杀"。这轮不再靠静态审计，直接**驱动真实窗口**：
+`Win32_Process.Create` 出跨 job 的 `agenterm-con.exe`（agent 的 job 会杀
+子 GUI，见 `skills/agenterm-windows-gui-ops`），`SendForegroundWindow` +
+按住 Ctrl 的 `mouse_event(WHEEL)` 真滚轮，每轮 40 刻度放大 + 40 刻度缩小，
+夹杂随机窗口尺寸变化，stderr 重定向到文件（GUI 子系统进程仍然继承被
+重定向的句柄，panic 信息因此可见）。**第 3 轮就炸了**，两次独立运行都在
+第 3 轮，panic 位置一模一样：`third_party/vt100/src/screen.rs:943` 的
+`Option::unwrap()` on `None`。
+
+根因链条（每一环都可读代码确认，且有确定性单测）：
+
+1. 放大字号 → cell 变大 → `compute_grid` 算出的 **cols 变少** →
+   `apply_resize` 调 `vt100::Screen::set_size(rows, cols)`。
+2. `Grid::set_size` 对每一行调 `Row::resize(cols, …)`，它只是
+   `Vec::resize` **截断**——如果一个宽字符（CJK/emoji）正好跨在新的右
+   边界上，**续格（wide continuation）被截掉，左半格留在最后一列成了
+   孤儿**。`Row::truncate` 早就为这件事清过孤儿，`Row::resize` 没有。
+3. vt100 全crate 依赖"宽格后面必定跟着续格"这条不变量。孤儿产生后，
+   shell 往那一格写**任何一个普通窄字符**，`Screen::text` 就会去取
+   `col + 1` 的邻格并 `.unwrap()` 一个 `None` → panic。
+4. release profile 是 `panic = "abort"` → **整进程静默退出、无对话框、
+   窗口直接消失**。跟用户描述逐字吻合，也解释了"放大时才炸"（只有放大
+   才减列、才截断）。
+
+**为什么前两轮复现不出来**：缺的不是字号跨度也不是滚轮速率，是**屏幕上
+得有宽字符，且它得落在新的右边界上**。前两轮的复现脚本要么 `-e less`
+要么纯 ASCII，要么让输出走固定 grid。这台机器（和用户那台）是中文
+Windows，`cmd.exe` 开场白本身就是
+`Microsoft Windows [版本 …]` / `(c) Microsoft Corporation。保留所有权利。`
+——满屏 CJK，所以真实会话从第一帧起就带着触发条件，而脚本化测试没有。
+"偶尔"也就解释清楚了：取决于列边界正好落在哪个 CJK 字之间、以及之后
+有没有东西写到那一格。
+
+**已修**：
+- 根因修复 `Row::resize`：收缩时若新的最后一格是宽格，按 `truncate` 早
+  就在做的同一套逻辑清掉它。**只改这一处就够**——把下面那条防御性改动
+  撤掉、只留这一处，三条新测试全绿。
+- 防御性加固 `Screen::text` 里三处"宽格必有邻格"的 `.unwrap()`：改成
+  `if let Some(…)`，让将来任何未知路径再制造出孤儿时退化成一个渲染小
+  瑕疵，而不是弄死一个 conhost 替代品。**诚实说明：根因修复之后这三处
+  已经没有可达路径，所以这条改动没有能失败的测试**（实测：只撤掉根因
+  修复、只留加固，不变量测试照样 FAIL，说明加固只是遮住 abort、没有
+  修复不变量）。留着是因为 `panic = "abort"` 下这三行的代价是"整个窗口
+  消失"，不对称得离谱。
+- 三条测试（`cargo test --bin agenterm-con`）：
+  `narrow_write_over_a_wide_cell_orphaned_by_a_zoom_in_resize_survives`
+  （最小复现，改前 panic 在同一个 `screen.rs` 行号）、
+  `shrinking_a_grid_never_leaves_a_wide_cell_without_its_continuation`
+  （cols 2..=12 扫不变量，**唯一能钉死根因修复的那条**）、
+  `zoom_in_sweep_while_printing_cjk_never_aborts`（产品层：整段放大扫掠
+  × 3 种窗口尺寸 × 3 种 DPI，边扫边灌中文输出）。
+
+**修复后实测**：修好的 release 二进制连打 **24 轮 × 90 刻度 = 2160 次
+真滚轮** + 8 次窗口尺寸变化，全程存活；作为对照，**仓库里 `dist/` 那份
+旧二进制（08-08 14:33，早于所有修复）在同一套压力下第 6 轮就静默死了**，
+panic 位置同上。
+
+**顺带确认的两件事**：
+- `dist/agenterm-con.exe` 停在 08-08 14:33，早于防抖（18:59）和
+  `clamp_glyph_dims`（19:04）——**用户手上跑的一直是修复前的构建**。
+- `overflow-checks`：这轮的根因是 `.unwrap()`，不是整数回绕。评估结论是
+  **release 不该开**——`panic = "abort"` 下开 overflow-checks 只会把无害
+  的回绕升级成必然的进程死亡，方向是反的。正确姿势是让 debug 构建
+  （本来就开着 overflow-checks + debug_assertions）**真的去跑真实交互
+  路径**，也就是这轮用的驱动方式；这次正是 debug 二进制先把 panic 位置
+  喊出来的。`catch_unwind` 同理走不通：`panic = "abort"` 下 abort 发生在
+  展开之前，catch_unwind 抓不到任何东西，装上去只是自欺。
+
 4. **部分已补**：找到了那个"确定性安装、体积小、行为可预期"的 TUI 依赖——
    `less`（随 Git for Windows 一起装的 `usr\bin\less.exe`，这台机器上是
    `C:\Program Files\Git\usr\bin\less.exe`；开发机装 Git 是近乎普遍的前提，
