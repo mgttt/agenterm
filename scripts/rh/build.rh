@@ -93,9 +93,24 @@ fn promote_bootstrap_worker(repo, candidate, cache_name) {
         "2 " + std::env::get("AGENTERM_BOOTSTRAP_FINGERPRINT") + " " +
             worker_hash + "\n"
     );
-    let cache_directory = std::path::parent(cache_worker).display;
-    let _parked = artifact_files::unlock_output(cache_directory, cache_name);
+    // The task executes from an invocation copy, never from CACHE_WORKER, so
+    // the fixed LKG path is not an in-use image here. Complete both temporary
+    // files before replacing either destination. A crash between replacements
+    // leaves a hash mismatch and forces a clean seed instead of trusting bytes
+    // with stale provenance.
+    if std::fs::exists(cache_worker) {
+        require(
+            std::fs::try_remove_file(cache_worker) == 1,
+            "build_bootstrap_cache_worker_replace"
+        );
+    }
     std::fs::rename(worker_temp, cache_worker);
+    if std::fs::exists(cache_stamp) {
+        require(
+            std::fs::try_remove_file(cache_stamp) == 1,
+            "build_bootstrap_cache_stamp_replace"
+        );
+    }
     std::fs::rename(stamp_temp, cache_stamp);
     print("AgenTerm bootstrap worker: promoted last-known-good agenterm");
     0
@@ -450,12 +465,6 @@ fn entry() {
     }
     cargo_args.push(action);
     cargo_args.push("--locked");
-    // Cargo normally writes compiler diagnostics to stderr. A Windows GUI-
-    // subsystem bootstrap host cannot promise a live inherited stderr, while
-    // this task already owns a bounded stdout file. JSON diagnostics keep
-    // failures observable through that owned channel on every host.
-    cargo_args.push("--message-format");
-    cargo_args.push("json-render-diagnostics");
     if profile == "release" {
         cargo_args.push("--release");
     } else if profile == "release-fast" {
@@ -481,21 +490,55 @@ fn entry() {
     }
 
     let stdout_path = repo + ".build.stdout.tmp";
-    let cargo_code = std::process::command_stdout_file(
-        "cargo",
-        cargo_args,
-        3600000,
-        stdout_path,
-        #{
-            current_dir: repo,
-            env: environment,
-        }
-    );
+    let stderr_path = repo + ".build.stderr.tmp";
+    let cargo_command = std::process::command("cargo");
+    cargo_command.args(cargo_args);
+    cargo_command.current_dir(repo);
+    cargo_command.timeout(std::time::Duration::from_millis(3600000));
+    cargo_command.stdout_file(stdout_path);
+    cargo_command.stderr_file(stderr_path);
+    let environment_text = rh::json::stringify(environment);
+    if environment_text.contains("\"AGENTERM_BUILD_IDENTITY_VERSION\":") != 0 {
+        cargo_command.env("AGENTERM_BUILD_IDENTITY_VERSION", "" + environment.AGENTERM_BUILD_IDENTITY_VERSION);
+        cargo_command.env("AGENTERM_BUILD_GIT_COMMIT", "" + environment.AGENTERM_BUILD_GIT_COMMIT);
+        cargo_command.env("AGENTERM_BUILD_GIT_DIRTY", "" + environment.AGENTERM_BUILD_GIT_DIRTY);
+        cargo_command.env("AGENTERM_BUILD_CARGO_LOCK_SHA256", "" + environment.AGENTERM_BUILD_CARGO_LOCK_SHA256);
+        cargo_command.env("AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256", "" + environment.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256);
+        cargo_command.env("AGENTERM_BUILD_PROFILE", "" + environment.AGENTERM_BUILD_PROFILE);
+    }
+    if environment_text.contains("\"CARGO_TARGET_DIR\":") != 0 {
+        cargo_command.env("CARGO_TARGET_DIR", "" + environment.CARGO_TARGET_DIR);
+    }
+    if environment_text.contains("\"RUSTC_WRAPPER\":") != 0 {
+        cargo_command.env("RUSTC_WRAPPER", "" + environment.RUSTC_WRAPPER);
+        cargo_command.env("AGENTERM_INTERNAL_RUSTC_WRAPPER", "" + environment.AGENTERM_INTERNAL_RUSTC_WRAPPER);
+        cargo_command.env("AGENTERM_INCREMENTAL_INVOCATION_ID", "" + environment.AGENTERM_INCREMENTAL_INVOCATION_ID);
+        cargo_command.env("AGENTERM_INCREMENTAL_TARGET", "" + environment.AGENTERM_INCREMENTAL_TARGET);
+        cargo_command.env("AGENTERM_INCREMENTAL_ROOT", "" + environment.AGENTERM_INCREMENTAL_ROOT);
+        cargo_command.env("AGENTERM_INCREMENTAL_STATE", "" + environment.AGENTERM_INCREMENTAL_STATE);
+    }
+    let cargo_result = cargo_command.output();
+    let cargo_code = cargo_result.exit_code;
     if cargo_code != 0 {
         if incremental_producer != 0 {
             cleanup_incremental_state(incremental_state);
         }
-        require(cargo_code == 0, "build_cargo");
+        let cargo_failure_stdout = std::fs::read_to_string(stdout_path);
+        cargo_failure_stdout.trim();
+        if cargo_failure_stdout != "" {
+            print(cargo_failure_stdout);
+        }
+        let cargo_failure_stderr = std::fs::read_to_string(stderr_path);
+        cargo_failure_stderr.trim();
+        if cargo_failure_stderr != "" {
+            print(cargo_failure_stderr);
+        }
+        std::fs::try_remove_file(stdout_path);
+        std::fs::try_remove_file(stderr_path);
+        require(
+            cargo_code == 0,
+            "build_cargo:exit=" + cargo_code + ":" + cargo_failure_stderr
+        );
     }
     let cargo_stdout = std::fs::read_to_string(stdout_path);
     cargo_stdout.trim();
@@ -503,17 +546,24 @@ fn entry() {
         print(cargo_stdout);
     }
     std::fs::try_remove_file(stdout_path);
+    std::fs::try_remove_file(stderr_path);
 
     if action == "build" && external_target == 0 && cross_client == 0 {
         let bootstrap_name = "agenterm";
         if os_name == "windows" {
             bootstrap_name = "agenterm.exe";
         }
+        let promoted_worker =
+            std::path::join(profile_directory, bootstrap_name).display;
         promote_bootstrap_worker(
             repo,
-            std::path::join(profile_directory, bootstrap_name).display,
+            promoted_worker,
             bootstrap_name
         );
+        // The LKG may only be old enough to seed the current source. Once the
+        // candidate proves its rh entry, use that engine for every remaining
+        // nested task so new task syntax/API never falls back mid-build.
+        worker = promoted_worker;
     }
 
     if action == "clippy" {
@@ -569,6 +619,7 @@ fn entry() {
 
     if profile == "dev" && external_target == 0 {
         let dev_cleanup_failed = 0;
+        let dev_cleanup_error = "";
         if incremental_producer != 0 {
             let finalize_code = std::process::command_status(
                 stable_wrapper,
@@ -587,6 +638,7 @@ fn entry() {
             );
             if finalize_code != 0 {
                 dev_cleanup_failed = 1;
+                dev_cleanup_error = "finalize:exit=" + finalize_code;
             }
         }
         repo = repo_dir(repo_arg);
@@ -603,10 +655,12 @@ fn entry() {
             prune_arguments.push(incremental_invocation);
         }
         if dev_cleanup_failed == 0 {
-            let prune_code = std::process::command_status(
+            let prune_stdout_path = repo + ".build-prune.stdout.tmp";
+            let prune_code = std::process::command_stdout_file(
                 worker,
                 prune_arguments,
                 300000,
+                prune_stdout_path,
                 #{
                     current_dir: repo,
                     env: environment,
@@ -614,13 +668,21 @@ fn entry() {
             );
             if prune_code != 0 {
                 dev_cleanup_failed = 1;
+                let prune_stdout = std::fs::read_to_string(prune_stdout_path);
+                prune_stdout.trim();
+                dev_cleanup_error =
+                    "prune:exit=" + prune_code + ":" + prune_stdout;
             }
+            std::fs::try_remove_file(prune_stdout_path);
         }
         if dev_cleanup_failed != 0 {
             if incremental_producer != 0 {
                 cleanup_incremental_state(incremental_state);
             }
-            require(dev_cleanup_failed == 0, "build_incremental_prune");
+            require(
+                dev_cleanup_failed == 0,
+                "build_incremental_prune:" + dev_cleanup_error
+            );
         }
         if incremental_producer != 0 {
             cleanup_incremental_state(incremental_state);

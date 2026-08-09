@@ -99,9 +99,10 @@ release 可执行文件）。
 
 **构建自举：** `build.bat` / `build.sh` 仅定位或首次构建主 `agenterm`，
 再以 `agenterm rh task run ...` 进入 `scripts/rh/` 的唯一构建政策。最近一次
-通过 `agenterm rh version` 自检的主程序保存在 Cargo output 之外；源码变化
-不会先使该 LKG 失效，失败构建也不会替换它。clean clone 与无缓存 CI 只在
-stage-0 执行一次 `cargo build --bin agenterm`，不恢复独立 `agenterm-rh` bin。
+通过 `agenterm rh version` 自检的主程序保存在 Cargo output 之外；源码身份
+变化会尝试 seed 当前主程序，seed 失败则回退而不覆盖旧 LKG。clean clone 与
+无缓存 CI 在 stage-0 执行 `cargo build --bin agenterm`，不恢复独立
+`agenterm-rh` bin。
 
 **rh 切换：** 宿主经 [`src/script_backend.rs`](../src/script_backend.rs) 选择 backend；详见 [`plan/design-rh-aot.md`](design-rh-aot.md)。
 

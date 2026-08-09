@@ -435,7 +435,13 @@ pub fn run_incremental_rustc_wrapper(arguments: Vec<OsString>) -> ! {
     } else {
         true
     };
-    match Command::new(compiler).args(rustc_arguments).status() {
+    let mut rustc = Command::new(compiler);
+    rustc.args(rustc_arguments);
+    if let Err(error) = agenterm_platform::process::configure_owned_headless_command(&mut rustc) {
+        eprintln!("failed to configure wrapped rustc: {error}");
+        std::process::exit(2);
+    }
+    match rustc.status() {
         Ok(status) if poison_persisted => std::process::exit(status.code().unwrap_or(1)),
         Ok(status) if status.success() => std::process::exit(2),
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),

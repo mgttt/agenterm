@@ -16,6 +16,9 @@ rem executable open while release cleanup runs.
 if not defined AGENTERM_BOOTSTRAP_CACHE_ROOT set "AGENTERM_BOOTSTRAP_CACHE_ROOT=%LOCALAPPDATA%\AgenTerm\build-cache"
 if "%AGENTERM_BOOTSTRAP_CACHE_ROOT%"=="\AgenTerm\build-cache" set "AGENTERM_BOOTSTRAP_CACHE_ROOT=%TEMP%\AgenTerm-build-cache"
 set "AGENTERM_BOOTSTRAP_CACHE_DIR=%AGENTERM_BOOTSTRAP_CACHE_ROOT%\windows-%PROCESSOR_ARCHITECTURE%"
+set "AGENTERM_HOST_OS=windows"
+set "AGENTERM_HOST_ARCH=x86_64"
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "AGENTERM_HOST_ARCH=aarch64"
 set "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\agenterm.exe"
 set "AGENTERM_BOOTSTRAP_CACHE_STAMP=%AGENTERM_BOOTSTRAP_CACHE_DIR%\worker.stamp"
 set "AGENTERM_BOOTSTRAP_IDENTITY=%AGENTERM_BOOTSTRAP_CACHE_DIR%\identity-%RANDOM%-%RANDOM%.txt"
@@ -31,9 +34,10 @@ for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_IDENTITY%"') d
 if not defined AGENTERM_BOOTSTRAP_FINGERPRINT goto :failed
 
 call :validate_cache
-if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_ready
+if defined AGENTERM_BOOTSTRAP_CACHE_VALID if not defined AGENTERM_BOOTSTRAP_CACHE_STALE goto :cache_ready
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_START_CS
 cargo build --quiet --locked --bin agenterm
+if errorlevel 1 if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_fallback
 if errorlevel 1 goto :failed
 call :clock_cs AGENTERM_BOOTSTRAP_CARGO_END_CS
 call :elapsed_cs %AGENTERM_BOOTSTRAP_CARGO_START_CS% %AGENTERM_BOOTSTRAP_CARGO_END_CS% AGENTERM_BOOTSTRAP_CARGO_CS
@@ -55,6 +59,12 @@ move /y "%AGENTERM_BOOTSTRAP_STAMP_TEMP%" "%AGENTERM_BOOTSTRAP_CACHE_STAMP%" >nu
 if errorlevel 1 goto :failed
 set "AGENTERM_BOOTSTRAP_WORKER_STATE=rebuilt"
 set "AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=included_not_separable"
+goto :copy_worker
+
+:cache_fallback
+set "AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=0"
+set "AGENTERM_BOOTSTRAP_WORKER_STATE=reused"
+set "AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable"
 goto :copy_worker
 
 :cache_ready
@@ -92,6 +102,7 @@ exit /b 0
 
 :source_changed
 echo bootstrap worker inputs changed during build 1>&2
+if defined AGENTERM_BOOTSTRAP_CACHE_VALID goto :cache_fallback
 set "AGENTERM_BOOTSTRAP_EXIT=2"
 goto :failed_known
 
@@ -136,6 +147,7 @@ exit /b 0
 
 :validate_cache
 set "AGENTERM_BOOTSTRAP_CACHE_VALID="
+set "AGENTERM_BOOTSTRAP_CACHE_STALE="
 if not exist "%AGENTERM_BOOTSTRAP_CACHE_WORKER%" exit /b 0
 if not exist "%AGENTERM_BOOTSTRAP_CACHE_STAMP%" exit /b 0
 set "AGENTERM_BOOTSTRAP_STAMP_SCHEMA="
@@ -152,6 +164,7 @@ for /f "delims=" %%H in ('git hash-object -- "%AGENTERM_BOOTSTRAP_CACHE_WORKER%"
 if not "%AGENTERM_BOOTSTRAP_ACTUAL_CACHE_HASH%"=="%AGENTERM_BOOTSTRAP_STAMP_HASH%" exit /b 0
 set "AGENTERM_BOOTSTRAP_CACHE_HASH=%AGENTERM_BOOTSTRAP_STAMP_HASH%"
 set "AGENTERM_BOOTSTRAP_CACHE_VALID=1"
+if not "%AGENTERM_BOOTSTRAP_STAMP_FINGERPRINT%"=="%AGENTERM_BOOTSTRAP_FINGERPRINT%" set "AGENTERM_BOOTSTRAP_CACHE_STALE=1"
 exit /b 0
 
 :read_stamp

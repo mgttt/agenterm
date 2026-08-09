@@ -9,18 +9,18 @@ fn entry() {
     }
 
     let repo = std::path::absolute(args[0]).display;
-    let worker = std::path::join(repo, "target/debug/agenterm-rh").display;
+    let worker = std::path::join(repo, "target/debug/agenterm").display;
     let mode = "all";
     let json = 0;
     let internal_selftest = 0;
 
-    let rh_target = std::path::join(repo, "target/debug/agenterm-rh").display;
+    let rh_target = std::path::join(repo, "target/debug/agenterm.exe").display;
     if std::fs::exists(rh_target)
             && std::fs::metadata(rh_target).is_file
             && std::fs::metadata(rh_target).len > 0 {
         worker = rh_target;
     }
-    let rh_dist = std::path::join(repo, "dist/agenterm-rh").display;
+    let rh_dist = std::path::join(repo, "dist/agenterm.exe").display;
     if std::fs::exists(rh_dist)
             && std::fs::metadata(rh_dist).is_file
             && std::fs::metadata(rh_dist).len > 0 {
@@ -171,7 +171,7 @@ fn entry() {
         let rh_code = std::process::command_stdout_file(
             program,
             [
-                "check-many", "--manifest", selftest_manifest,
+                "rh", "check-many", "--manifest", selftest_manifest,
                 "--profile", "local",
                 "--project-root", repo,
                 "--timeout-ms", "10000",
@@ -244,23 +244,14 @@ fn entry() {
                 if std::fs::metadata(path).is_file == 0 {
                     continue;
                 }
-                let nul_code = std::process::command_status(
-                    "python3",
-                    [
-                        "-c",
-                        "import sys; data=open(sys.argv[1],'rb').read(); sys.exit(1 if b'\\x00' in data else 0)",
-                        path
-                    ],
-                    5000
-                );
-                if nul_code != 0 {
+                let text = std::fs::read_to_string(path);
+                if text.contains("\x00") {
                     return rh::fail(
                         "Tracked text hygiene errors:\n" +
                             relative_path +
                             ": embedded NUL byte"
                     );
                 }
-                let text = std::fs::read_to_string(path);
                 if text.starts_with("<<<<<<<")
                         || text.starts_with("=======")
                         || text.starts_with(">>>>>>>")
@@ -309,37 +300,37 @@ fn entry() {
                 std::fs::exists(worker) && std::fs::metadata(worker).is_file,
                 "lint_worker_missing:" + worker
             );
-            let manifest_code = std::process::command_status(
-                "python3",
-                [
-                    "-c",
-                    "import json,subprocess,sys; repo,out=sys.argv[1],sys.argv[2]; proc=subprocess.run(['git','-C',repo,'ls-files','--','scripts/rh/*.rh'], capture_output=True, text=True); proc.returncode and sys.exit(proc.returncode); files=[line.strip() for line in proc.stdout.splitlines() if line.strip()]; (not files) and sys.exit(3); open(out,'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rh-check-manifest','files':files}, indent=2)+chr(10))",
-                    repo,
-                    manifest_path
-                ],
-                10000
+            let manifest_code = std::process::command_stdout_file(
+                "git",
+                ["-C", repo, "ls-files", "--", "scripts/rh/*.rh"],
+                10000,
+                stdout_path,
+                #{ current_dir: repo }
             );
-            require(manifest_code == 0, "lint_rh_files_empty");
+            require(manifest_code == 0, "lint_rh_files_git");
+            let rh_files = [];
+            let rh_paths = std::fs::read_to_string(stdout_path);
+            for source_line in rh_paths.split("\n") {
+                let relative_path = source_line;
+                relative_path.trim();
+                if relative_path != "" {
+                    rh_files.push(relative_path);
+                }
+            }
+            require(rh_files.len > 0, "lint_rh_files_empty");
+            std::fs::write(
+                manifest_path,
+                rh::json::stringify(#{
+                    schema_version: 1,
+                    kind: "agenterm-rh-check-manifest",
+                    files: rh_files
+                }) + "\n"
+            );
 
-            let program = worker;
-            let program_rh_target =
-                std::path::join(repo, "target/debug/agenterm-rh").display;
-            if std::fs::exists(program_rh_target)
-                    && std::fs::metadata(program_rh_target).is_file
-                    && std::fs::metadata(program_rh_target).len > 0 {
-                program = program_rh_target;
-            }
-            let program_rh_dist =
-                std::path::join(repo, "dist/agenterm-rh").display;
-            if std::fs::exists(program_rh_dist)
-                    && std::fs::metadata(program_rh_dist).is_file
-                    && std::fs::metadata(program_rh_dist).len > 0 {
-                program = program_rh_dist;
-            }
             let check_code = std::process::command_stdout_file(
-                program,
+                worker,
                 [
-                    "check-many", "--manifest", manifest_path,
+                    "rh", "check-many", "--manifest", manifest_path,
                     "--profile", "local",
                     "--project-root", repo,
                     "--timeout-ms", "10000",

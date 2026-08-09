@@ -166,9 +166,11 @@ build metadata under `dist/`:
 The thin `build.bat` / `build.sh` stage-0 reuses a content-validated,
 last-known-good copy of the main `agenterm` outside Cargo output and runs the
 real build as `agenterm rh task run build`. A clean machine or CI runner seeds
-that cache once with `cargo build --bin agenterm`; failed product builds never
-replace the working copy. There is no standalone `agenterm-rh` bootstrap or
-second shell-owned build policy.
+that cache with `cargo build --bin agenterm`. When source identity changes,
+stage-0 attempts a compatible refresh but retains the prior verified copy if
+that seed fails, so broken product source cannot destroy the recovery runtime.
+There is no standalone `agenterm-rh` bootstrap or second shell-owned build
+policy.
 
 - `dist/agenterm.exe` — GUI application; `agenterm server` starts the headless
   authority as a separate process of the same PE. `agenterm rh|lua|qjs|sql`

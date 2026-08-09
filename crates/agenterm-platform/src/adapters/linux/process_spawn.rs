@@ -29,6 +29,10 @@ pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), St
     Ok(())
 }
 
+pub(crate) fn configure_owned_headless_command(_command: &mut Command) -> Result<(), String> {
+    Ok(())
+}
+
 pub(crate) fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), String> {
     // Visible GUI siblings only need a new process group on Unix.
     use std::os::unix::process::CommandExt;

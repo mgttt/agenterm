@@ -75,6 +75,16 @@ pub fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     crate::selected::process_spawn::configure_detached_command(command)
 }
 
+/// Configure an owned console child so Windows does not allocate a new console
+/// window when the parent is a GUI-subsystem process.
+///
+/// Unlike [`configure_detached_command`], this preserves the caller's Job and
+/// lifetime ownership. Standard handles remain inherited according to the
+/// caller's `Command` configuration.
+pub fn configure_owned_headless_command(command: &mut Command) -> Result<(), String> {
+    crate::selected::process_spawn::configure_owned_headless_command(command)
+}
+
 /// Configure a child that may outlive the caller Job/session while remaining a
 /// normal visible GUI process (no `CREATE_NO_WINDOW` / equivalent).
 pub fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), String> {

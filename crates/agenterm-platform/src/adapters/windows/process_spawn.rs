@@ -16,6 +16,13 @@ pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), St
     Ok(())
 }
 
+pub(crate) fn configure_owned_headless_command(command: &mut Command) -> Result<(), String> {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    command.creation_flags(CREATE_NO_WINDOW);
+    Ok(())
+}
+
 /// Break away from a caller Job while keeping a normal visible GUI console/window.
 pub(crate) fn configure_breakaway_visible_command(command: &mut Command) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;

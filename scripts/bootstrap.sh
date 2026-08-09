@@ -82,6 +82,7 @@ mkdir -p -- "$CACHE_DIR"
 write_identity "$IDENTITY_FILE"
 AGENTERM_BOOTSTRAP_FINGERPRINT=$(git hash-object -- "$IDENTITY_FILE")
 CACHE_VALID=false
+CACHE_STALE=false
 if [ -f "$CACHE_WORKER" ] && [ ! -L "$CACHE_WORKER" ] && \
         [ -f "$CACHE_STAMP" ] && [ ! -L "$CACHE_STAMP" ]; then
     stamp_schema=''; stamp_fingerprint=''; stamp_hash=''; stamp_extra=''
@@ -93,35 +94,59 @@ if [ -f "$CACHE_WORKER" ] && [ ! -L "$CACHE_WORKER" ] && \
             [ "$stamp_hash" = "$actual_hash" ] && [ -z "$stamp_extra" ]; then
         CACHE_VALID=true
         cache_hash=$stamp_hash
+        if [ "$stamp_fingerprint" != "$AGENTERM_BOOTSTRAP_FINGERPRINT" ]; then
+            CACHE_STALE=true
+        fi
     fi
 fi
 
-if [ "$CACHE_VALID" = true ]; then
+if [ "$CACHE_VALID" = true ] && [ "$CACHE_STALE" = false ]; then
     AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=0
     AGENTERM_BOOTSTRAP_WORKER_STATE=reused
     AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable
 else
     AGENTERM_BOOTSTRAP_CARGO_START_MS=$(clock_ms)
-    cargo build --quiet --locked --bin agenterm
+    if cargo build --quiet --locked --bin agenterm; then
+        seed_built=true
+    else
+        seed_built=false
+    fi
     AGENTERM_BOOTSTRAP_CARGO_END_MS=$(clock_ms)
     AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=$((
         AGENTERM_BOOTSTRAP_CARGO_END_MS - AGENTERM_BOOTSTRAP_CARGO_START_MS
     ))
-    write_identity "$POST_IDENTITY_FILE"
-    post_fingerprint=$(git hash-object -- "$POST_IDENTITY_FILE")
-    if [ "$post_fingerprint" != "$AGENTERM_BOOTSTRAP_FINGERPRINT" ]; then
-        echo "bootstrap worker inputs changed during build" >&2
+    if [ "$seed_built" = true ]; then
+        write_identity "$POST_IDENTITY_FILE"
+        post_fingerprint=$(git hash-object -- "$POST_IDENTITY_FILE")
+        if [ "$post_fingerprint" != "$AGENTERM_BOOTSTRAP_FINGERPRINT" ]; then
+            echo "bootstrap worker inputs changed during build" >&2
+            if [ "$CACHE_VALID" = true ]; then
+                AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=0
+                AGENTERM_BOOTSTRAP_WORKER_STATE=reused
+                AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable
+                seed_built=false
+            else
+                exit 2
+            fi
+        fi
+        if [ "$seed_built" = true ]; then
+            cp -- "$SOURCE" "$CACHE_TEMP"
+            chmod +x "$CACHE_TEMP"
+            cache_hash=$(git hash-object -- "$CACHE_TEMP")
+            "$CACHE_TEMP" rh version >/dev/null
+            printf '2 %s %s\n' "$AGENTERM_BOOTSTRAP_FINGERPRINT" "$cache_hash" > "$STAMP_TEMP"
+            mv -f -- "$CACHE_TEMP" "$CACHE_WORKER"
+            mv -f -- "$STAMP_TEMP" "$CACHE_STAMP"
+            AGENTERM_BOOTSTRAP_WORKER_STATE=rebuilt
+            AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=included_not_separable
+        fi
+    elif [ "$CACHE_VALID" = true ]; then
+        AGENTERM_BOOTSTRAP_CARGO_BUILD_MS=0
+        AGENTERM_BOOTSTRAP_WORKER_STATE=reused
+        AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=not_applicable
+    else
         exit 2
     fi
-    cp -- "$SOURCE" "$CACHE_TEMP"
-    chmod +x "$CACHE_TEMP"
-    cache_hash=$(git hash-object -- "$CACHE_TEMP")
-    "$CACHE_TEMP" rh version >/dev/null
-    printf '2 %s %s\n' "$AGENTERM_BOOTSTRAP_FINGERPRINT" "$cache_hash" > "$STAMP_TEMP"
-    mv -f -- "$CACHE_TEMP" "$CACHE_WORKER"
-    mv -f -- "$STAMP_TEMP" "$CACHE_STAMP"
-    AGENTERM_BOOTSTRAP_WORKER_STATE=rebuilt
-    AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE=included_not_separable
 fi
 
 AGENTERM_BOOTSTRAP_COPY_START_MS=$(clock_ms)

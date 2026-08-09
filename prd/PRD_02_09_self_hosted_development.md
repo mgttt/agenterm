@@ -15,9 +15,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] build self-hosting now converges on the main `agenterm rh` entry rather
   than the retired standalone `agenterm-rh` bin. Thin matched Windows and Unix
   stage-0 aliases reuse a hash-validated last-known-good main executable from
-  outside Cargo output; source edits do not invalidate that recovery copy, and
-  a failed product build cannot replace it. A clean clone or ephemeral CI host
-  seeds the cache once with `cargo build --bin agenterm`. A successful native
+  outside Cargo output. Source-identity drift attempts a current seed but falls
+  back without overwriting the LKG when compilation fails. A clean clone or
+  ephemeral CI host seeds the cache with `cargo build --bin agenterm`. A successful native
   build must pass `agenterm rh version` before Rh-owned promotion. Integrated
   Windows plus Linux/macOS fresh-cache and failed-build retention evidence is
   still required before this item becomes shipped.
