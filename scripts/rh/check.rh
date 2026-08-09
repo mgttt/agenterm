@@ -331,7 +331,12 @@ fn cargo_preflight_selftest_spec(environment) {
         "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
         "--", "--nocapture"
     ];
-    spec("cargo", arguments, 60000, environment, 0)
+    // Building the rhai_migration integration test links the whole agenterm
+    // crate — minutes on a cold CI target, not seconds. The old 60s wall
+    // was the windows quality gate's standing first failure
+    // (timing.json: preflight-selftest timed_out after ~70s with every
+    // later gate not_run).
+    spec("cargo", arguments, 600000, environment, 0)
 }
 
 fn cargo_clippy_all_spec(environment) {
