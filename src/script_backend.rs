@@ -226,6 +226,80 @@ pub fn rh_load_pack(
     crate::script_rh_pack::load_rh_pack(path)
 }
 
+/// dynacore invocation result — deliberately its own small type (not
+/// `crate::script_engine::ScriptInvocationResult`): dynacore packs do not go
+/// through the `ScriptEngineBackend` trait (see
+/// `try_execute_dynacore_pack_invocation`'s doc for why), so there is no
+/// reason to share that trait's result shape.
+pub struct DynacoreInvocationResult {
+    pub stdout: String,
+    pub value: Option<serde_json::Value>,
+}
+
+/// Runs a cached dynacore pack (`crate::script_dynacore_pack::cached_dynacore_pack`,
+/// configured via `AGENTERM_DYNACORE_PACK_STORE`/`AGENTERM_DYNACORE_PACK_HASH`)
+/// if one is configured. Mirrors `try_execute_rh_invocation`'s cached-native-
+/// pack shape (`resolve_rh_pack`'s `cached_rh_pack()` branch): `Ok(None)`
+/// means "no pack configured, fall through to the rh/lua/qjs/sql engines",
+/// `Ok(Some(_))` is a completed run, `Err` covers a verification failure, a
+/// step-limit abort, or a `Run`/`Eval` asked for without a fleet bridge.
+///
+/// dynacore packs are binary content-addressed artifacts, not human-authored
+/// text source — this deliberately does NOT go through the
+/// `ScriptEngineBackend` trait's `check(source)`/`execute(source)` shape
+/// (`script_engine.rs`'s trait doc: "does not cover... pack/qualify CLI
+/// verbs (engine-specific pack shapes, see design §3 non-goals)"; rh's own
+/// native pack — `script_rh_pack.rs` — takes the exact same "own path, not
+/// the trait" stance for the same reason). `script_worker.rs::execute_inner`
+/// calls this directly, before dispatching to any `ScriptEngineBackend`.
+pub fn try_execute_dynacore_pack_invocation(
+    operation: ScriptOperation,
+    fleet_bridge: Option<crate::script_dynacore_host::DynacoreFleetBridgeFn>,
+) -> Result<Option<DynacoreInvocationResult>, String> {
+    let Some(pack) = crate::script_dynacore_pack::cached_dynacore_pack() else {
+        return Ok(None);
+    };
+    // Re-verifying here (cheap — see verify.rs's own doc: "produce-time, no
+    // execution, one pass") is what actually produces the `VerifiedModule`
+    // this call needs: `VerifiedModule<'a>` borrows the `Module` it
+    // verifies, so the OnceLock-cached pack can only hold the owned
+    // `Module` (load-time verification in `load_dynacore_pack` already
+    // proved it well-formed once; this is not a new, unproven gate).
+    let verified = crate::script_dynacore_host::verify_pack(&pack.module)
+        .map_err(|fault| format!("dynacore pack failed verification: {fault:?}"))?;
+
+    match operation {
+        // Mirrors try_execute_rh_invocation's own Api arm: unreachable in
+        // practice (execute_inner short-circuits ScriptOperation::Api before
+        // any backend dispatch), kept only so this match stays exhaustive.
+        ScriptOperation::Api => Ok(None),
+        ScriptOperation::Check => Ok(Some(DynacoreInvocationResult {
+            stdout: String::new(),
+            value: None,
+        })),
+        ScriptOperation::Run | ScriptOperation::Eval => {
+            let Some(bridge) = fleet_bridge else {
+                return Err(
+                    "dynacore pack invocation requires a fleet bridge (broker) but none was supplied"
+                        .to_owned(),
+                );
+            };
+            let outcome = crate::script_dynacore_host::run_pack(&verified, &bridge);
+            match outcome.termination {
+                agenterm_dynacore::eval_core::Termination::Exited(value) => {
+                    Ok(Some(DynacoreInvocationResult {
+                        stdout: String::new(),
+                        value: Some(serde_json::Value::from(value)),
+                    }))
+                }
+                agenterm_dynacore::eval_core::Termination::StepLimitExceeded => Err(
+                    "dynacore pack exceeded its step limit before finishing".to_owned(),
+                ),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

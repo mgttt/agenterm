@@ -27,6 +27,7 @@ pub mod script_catalog;
 pub mod script_engine;
 pub mod script_clipboard;
 pub mod script_dynacore_host;
+pub mod script_dynacore_pack;
 pub mod script_error;
 pub mod script_fleet;
 pub mod script_http;
@@ -86,7 +87,7 @@ mod server_app;
 mod terminal_runtime;
 
 #[allow(unused_imports)]
-pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
+pub use client::{run_cli_entry, run_cli_entry_with_args, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;
 #[allow(unused_imports)]
 pub use mcp_catalog::run_mcp_entry_with_args;
