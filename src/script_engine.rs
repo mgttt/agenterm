@@ -1,36 +1,54 @@
 //! Unified per-engine `ScriptEngineBackend` trait + static-dispatch enum.
 //!
-//! Trait-M1/Trait-M2 of `plan/design-script-engine-trait.md`. This module
-//! defines the shared invocation types (§2.2), the `ScriptEngineBackend`
-//! trait (§2.3), thin per-engine adapter impls that delegate to the
-//! existing `try_execute_{rh,lua,qjs}_invocation` functions in
-//! `script_backend.rs` (§4 Trait-M2 — those functions are NOT modified or
-//! re-derived here), and the `ScriptEngine` static-dispatch enum (§2.4).
+//! Trait-M1-M4 of `plan/design-script-engine-trait.md`. This module defines
+//! the shared invocation types (§2.2), the `ScriptEngineBackend` trait
+//! (§2.3), the per-engine impls, and the `ScriptEngine` static-dispatch enum
+//! (§2.4). `script_worker.rs`'s `execute_inner` dispatches only through this
+//! trait (Trait-M3, commit 50ab1f7e).
 //!
-//! `script_backend.rs`'s three `try_execute_*` functions, their
-//! `*InvocationOptions`/`*InvocationResult` types, and `script_worker.rs`'s
-//! `execute_inner` are untouched by this phase (Trait-M3/M4 in the design
-//! doc would wire `execute_inner` to `ScriptEngine` — not done here).
+//! Trait-M4 folded the lua and qjs engine-specific invocation logic
+//! (host-function wiring, `agenterm_lua`/`agenterm_qjs` calls) directly into
+//! `LuaEngineBackend`/`QjsEngineBackend`'s `check`/`execute` — the old
+//! `try_execute_lua_invocation`/`try_execute_qjs_invocation` and their
+//! `LuaInvocationOptions`/`QjsInvocationOptions`/`LuaInvocationResult`/
+//! `QjsInvocationResult` types are deleted from `script_backend.rs`; nothing
+//! outside this module's own tests referenced them (verified by grep across
+//! `src/`, `tests/`, `crates/`).
+//!
+//! `RhEngineBackend` is the one exception: it still delegates to
+//! `try_execute_rh_invocation` in `script_backend.rs`, which is NOT deleted
+//! and NOT folded here. `crates/agenterm-rh/src/main.rs` — compiled as the
+//! `agenterm-rh` *binary target of the root `agenterm` package* (see root
+//! `Cargo.toml`'s `[[bin]] name = "agenterm-rh" path =
+//! "crates/agenterm-rh/src/main.rs"`, distinct from the `agenterm-rh`
+//! library crate under `crates/agenterm-rh/`) — calls
+//! `agenterm::script_backend::try_execute_rh_invocation` directly and needs
+//! its typed `agenterm_rh::RhError` return (it propagates the error with
+//! `?` into its own `Result<_, RhError>`), which this trait's `String`-typed
+//! `ScriptEngineError` cannot losslessly round-trip. Folding rh's logic into
+//! `RhEngineBackend` while also keeping `try_execute_rh_invocation` for that
+//! caller would mean maintaining the same logic twice; keeping the existing
+//! thin-delegation shape for rh only avoids that duplication. See the M4
+//! task report for the full grep trail.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::script_backend::{
-    LuaInvocationOptions, QjsInvocationOptions, RhInvocationOptions, ScriptBackend,
-    try_execute_lua_invocation, try_execute_qjs_invocation, try_execute_rh_invocation,
-};
+use crate::script_backend::{RhInvocationOptions, ScriptBackend, try_execute_rh_invocation};
 use crate::script_protocol::{ScriptBudgets, ScriptOperation};
 
 // ---------------------------------------------------------------------
 // §2.2 — shared types
 // ---------------------------------------------------------------------
 
-/// Shared invocation options across all three engines. Replaces the
+/// Shared invocation options across all three engines. Replaced the
 /// previously-duplicated `RhInvocationOptions`/`LuaInvocationOptions`/
-/// `QjsInvocationOptions` (those three still exist in `script_backend.rs`
-/// unchanged this phase — the per-engine adapters below convert into them).
+/// `QjsInvocationOptions`. Trait-M4 deleted the lua/qjs versions entirely
+/// (folded their logic in directly); `RhInvocationOptions` still exists in
+/// `script_backend.rs` — `RhEngineBackend` below converts into it — because
+/// `try_execute_rh_invocation` has a real external caller (see module doc).
 #[derive(Clone, Debug, Default)]
 pub struct ScriptInvocationOptions {
     pub project_root: Option<PathBuf>,
@@ -111,8 +129,52 @@ fn not_enabled_error(backend: ScriptBackend) -> ScriptEngineError {
     format!("{} backend not enabled", backend.as_str())
 }
 
+/// Build the `args_len`/`arg` host-function closures shared by the lua and
+/// qjs backends from a script invocation's `arguments` value.
+///
+/// `LuaHostFunctions` and `QjsHostFunctions` declare `args_len`/`arg` with
+/// structurally identical trait-object types: `Arc<dyn Fn() -> i64 + Send +
+/// Sync>` for `args_len`, and `Arc<dyn Fn(i64) -> Result<String, String> +
+/// Send + Sync>` for `arg` (aliased per-crate as `ArgFn`). Type aliases
+/// don't create distinct types, so the same pair of closures can be
+/// assigned directly to either engine's host-function struct.
+///
+/// Moved here (Trait-M4) from `script_backend.rs` — only `LuaEngineBackend`/
+/// `QjsEngineBackend::execute` call this now.
+type ScriptArgsAccessors = (
+    Arc<dyn Fn() -> i64 + Send + Sync>,
+    Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync>,
+);
+
+fn script_args_accessors(arguments: Value) -> ScriptArgsAccessors {
+    let args_for_len = arguments.clone();
+    let args_for_arg = arguments;
+    let args_len: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
+        args_for_len
+            .as_array()
+            .map(|a| a.len() as i64)
+            .unwrap_or(0)
+    });
+    let arg: Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync> =
+        Arc::new(move |index: i64| {
+            args_for_arg
+                .as_array()
+                .and_then(|a| a.get(index as usize))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+                .ok_or_else(|| format!("argument {index} is unavailable"))
+        });
+    (args_len, arg)
+}
+
 /// rh engine adapter. Delegates to `try_execute_rh_invocation` — does not
 /// re-derive native-pack resolution, host binding, or output-budget logic.
+///
+/// Unlike `LuaEngineBackend`/`QjsEngineBackend` (Trait-M4 folded their logic
+/// in directly), this adapter is intentionally left delegating: see the
+/// module doc comment for why (`crates/agenterm-rh/src/main.rs`'s bin
+/// target is a real external caller of `try_execute_rh_invocation` that
+/// needs its typed `agenterm_rh::RhError`).
 pub struct RhEngineBackend;
 
 impl ScriptEngineBackend for RhEngineBackend {
@@ -168,7 +230,13 @@ impl ScriptEngineBackend for RhEngineBackend {
     }
 }
 
-/// Lua engine adapter. Delegates to `try_execute_lua_invocation`.
+/// Lua engine adapter. Invocation logic folded in directly (Trait-M4) from
+/// the former `try_execute_lua_invocation` in `script_backend.rs` — no
+/// other caller referenced it (grep-verified across `src/`, `tests/`,
+/// `crates/`; `tests/lua_task_entry_regression.rs` referenced it too, but
+/// that file was already failing to compile beforehand — pre-existing,
+/// unrelated `ScriptBackend::Rhai` reference — so it did not count as a
+/// live caller).
 pub struct LuaEngineBackend;
 
 impl ScriptEngineBackend for LuaEngineBackend {
@@ -180,17 +248,15 @@ impl ScriptEngineBackend for LuaEngineBackend {
         &["lua"]
     }
 
-    fn check(&self, source: &str, options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
-        let lua_options = LuaInvocationOptions {
-            project_root: options.project_root.clone(),
-            arguments: options.arguments.clone(),
-            budgets: options.budgets.clone(),
-        };
-        match try_execute_lua_invocation(ScriptOperation::Check, source, lua_options, None) {
-            Ok(Some(_)) => Ok(()),
-            Ok(None) => Err(not_enabled_error(self.backend_id())),
-            Err(error) => Err(error),
+    fn check(&self, source: &str, _options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
         }
+
+        let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
+
+        engine.check(source).map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     fn execute(
@@ -199,26 +265,54 @@ impl ScriptEngineBackend for LuaEngineBackend {
         options: &ScriptInvocationOptions,
         fleet_bridge: Option<ScriptFleetBridgeFn>,
     ) -> Result<ScriptInvocationResult, ScriptEngineError> {
-        let lua_options = LuaInvocationOptions {
-            project_root: options.project_root.clone(),
-            arguments: options.arguments.clone(),
-            budgets: options.budgets.clone(),
-        };
-        // script_lua_host::LuaFleetBridgeFn is already `Arc<dyn Fn(&str, &str)
-        // -> Result<String, String> + Send + Sync>` — type-identical to
-        // ScriptFleetBridgeFn, so it passes through unchanged.
-        match try_execute_lua_invocation(ScriptOperation::Eval, source, lua_options, fleet_bridge) {
-            Ok(Some(result)) => Ok(ScriptInvocationResult {
-                stdout: result.stdout,
-                value: result.value.map(Value::from),
-            }),
-            Ok(None) => Err(not_enabled_error(self.backend_id())),
-            Err(error) => Err(error),
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
         }
+
+        let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
+
+        let mut host = agenterm_lua::LuaHostFunctions::default();
+
+        // Wire fleet bridge
+        if let Some(bridge) = fleet_bridge {
+            host.fleet_call = Some(Arc::new(
+                move |op_id: String, params: String| -> Result<String, String> {
+                    bridge(op_id.as_str(), params.as_str())
+                },
+            ));
+        }
+
+        // Wire args_len / arg from options.arguments
+        if let Some(arguments) = options.arguments.clone() {
+            let (args_len, arg) = script_args_accessors(arguments);
+            host.args_len = Some(args_len);
+            host.arg = Some(arg);
+        }
+
+        let result = engine
+            .eval(source, &host)
+            .map_err(|e| format!("lua_eval: {e}"))?;
+
+        Ok(ScriptInvocationResult {
+            stdout: result.stdout,
+            value: Some(Value::from(result.value)),
+        })
     }
 }
 
-/// qjs engine adapter. Delegates to `try_execute_qjs_invocation`.
+/// qjs engine adapter. Invocation logic folded in directly (Trait-M4) from
+/// the former `try_execute_qjs_invocation` in `script_backend.rs` — no
+/// other caller referenced it (grep-verified across `src/`, `tests/`,
+/// `crates/`).
+///
+/// Structurally mirrors `LuaEngineBackend` — same "not enabled -> error",
+/// same fleet-bridge/args wiring shape — because qjs, like lua, is an
+/// interpreted engine with no AOT/native-codegen step (unlike rh's
+/// `RhEngineBackend`, which resolves/loads a compiled native pack). `value`
+/// is `Option<serde_json::Value>` rather than lua's widened-from-`i64`
+/// because `agenterm_qjs::eval_entry_with_host` already produces a typed
+/// JSON value (via `JSON.stringify`) — a strict superset, not a divergence:
+/// any lua-shaped i64 result is also representable here.
 pub struct QjsEngineBackend;
 
 impl ScriptEngineBackend for QjsEngineBackend {
@@ -230,17 +324,13 @@ impl ScriptEngineBackend for QjsEngineBackend {
         &["js", "mjs"]
     }
 
-    fn check(&self, source: &str, options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
-        let qjs_options = QjsInvocationOptions {
-            project_root: options.project_root.clone(),
-            arguments: options.arguments.clone(),
-            budgets: options.budgets.clone(),
-        };
-        match try_execute_qjs_invocation(ScriptOperation::Check, source, qjs_options, None) {
-            Ok(Some(_)) => Ok(()),
-            Ok(None) => Err(not_enabled_error(self.backend_id())),
-            Err(error) => Err(error),
+    fn check(&self, source: &str, _options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
         }
+
+        agenterm_qjs::check(source, "invocation.js").map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     fn execute(
@@ -249,22 +339,33 @@ impl ScriptEngineBackend for QjsEngineBackend {
         options: &ScriptInvocationOptions,
         fleet_bridge: Option<ScriptFleetBridgeFn>,
     ) -> Result<ScriptInvocationResult, ScriptEngineError> {
-        let qjs_options = QjsInvocationOptions {
-            project_root: options.project_root.clone(),
-            arguments: options.arguments.clone(),
-            budgets: options.budgets.clone(),
-        };
-        // script_qjs_host::QjsFleetBridgeFn is already `Arc<dyn Fn(&str, &str)
-        // -> Result<String, String> + Send + Sync>` — type-identical to
-        // ScriptFleetBridgeFn, so it passes through unchanged.
-        match try_execute_qjs_invocation(ScriptOperation::Eval, source, qjs_options, fleet_bridge) {
-            Ok(Some(result)) => Ok(ScriptInvocationResult {
-                stdout: result.stdout,
-                value: result.value,
-            }),
-            Ok(None) => Err(not_enabled_error(self.backend_id())),
-            Err(error) => Err(error),
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
         }
+
+        let mut host = agenterm_qjs::QjsHostFunctions::default();
+
+        // Wire fleet bridge
+        if let Some(bridge) = fleet_bridge {
+            host.fleet_call = Some(Arc::new(move |op_id: &str, params: &str| -> Result<String, String> {
+                bridge(op_id, params)
+            }));
+        }
+
+        // Wire args_len / arg from options.arguments
+        if let Some(arguments) = options.arguments.clone() {
+            let (args_len, arg) = script_args_accessors(arguments);
+            host.args_len = Some(args_len);
+            host.arg = Some(arg);
+        }
+
+        let result = agenterm_qjs::eval_entry_with_host(source, "invocation.js", &host)
+            .map_err(|e| format!("qjs_eval: {e}"))?;
+
+        Ok(ScriptInvocationResult {
+            stdout: result.stdout,
+            value: result.value,
+        })
     }
 }
 
@@ -353,11 +454,7 @@ impl ScriptEngineBackend for ScriptEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script_backend::{
-        LuaInvocationOptions as LuaOpts, QjsInvocationOptions as QjsOpts,
-        RhInvocationOptions as RhOpts, try_execute_lua_invocation, try_execute_qjs_invocation,
-        try_execute_rh_invocation,
-    };
+    use crate::script_backend::{RhInvocationOptions as RhOpts, try_execute_rh_invocation};
 
     // Mirrors script_backend.rs's ENV_LOCK pattern (serialize env-var
     // manipulation across tests in this module — this is a *different*
@@ -525,27 +622,35 @@ mod tests {
     }
 
     #[test]
-    fn lua_engine_execute_matches_direct_call() {
+    fn lua_engine_execute_returns_evaluated_value() {
+        // Trait-M4: was an equivalence test against try_execute_lua_invocation
+        // (now folded/deleted); asserts the same expected shape (stdout
+        // empty, value == 42 widened to serde_json::Value) directly.
         let _guard = ENV_LOCK.lock().expect("lock");
         let _env = EnvGuard::set("lua");
         let engine = LuaEngineBackend;
         let options = ScriptInvocationOptions::default();
 
-        let via_trait = engine
+        let result = engine
             .execute(LUA_VALID_SOURCE, &options, None)
             .expect("trait execute should succeed");
 
-        let direct = try_execute_lua_invocation(
-            ScriptOperation::Eval,
-            LUA_VALID_SOURCE,
-            LuaOpts::default(),
-            None,
-        )
-        .expect("direct call should not error")
-        .expect("lua backend should be enabled");
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.value, Some(Value::from(42i64)));
+    }
 
-        assert_eq!(via_trait.stdout, direct.stdout);
-        assert_eq!(via_trait.value, direct.value.map(Value::from));
+    #[test]
+    fn lua_engine_execute_errors_when_not_enabled() {
+        // Migrated from script_backend.rs's lua_backend_not_enabled_without_env
+        // (was: try_execute_lua_invocation returns Ok(None) when the lua
+        // backend isn't selected). The trait surface has no Option-wrapping
+        // "not enabled" case, so the equivalent is an Err from execute().
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::clear();
+        let engine = LuaEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        assert!(engine.execute(LUA_VALID_SOURCE, &options, None).is_err());
     }
 
     #[test]
@@ -594,27 +699,72 @@ mod tests {
     }
 
     #[test]
-    fn qjs_engine_execute_matches_direct_call() {
+    fn qjs_engine_execute_returns_evaluated_value() {
+        // Trait-M4: was an equivalence test against try_execute_qjs_invocation
+        // (now folded/deleted); asserts the same expected shape (stdout
+        // empty, value == json!(42)) directly.
         let _guard = ENV_LOCK.lock().expect("lock");
         let _env = EnvGuard::set("qjs");
         let engine = QjsEngineBackend;
         let options = ScriptInvocationOptions::default();
 
-        let via_trait = engine
+        let result = engine
             .execute(QJS_VALID_SOURCE, &options, None)
             .expect("trait execute should succeed");
 
-        let direct = try_execute_qjs_invocation(
-            ScriptOperation::Eval,
-            QJS_VALID_SOURCE,
-            QjsOpts::default(),
-            None,
-        )
-        .expect("direct call should not error")
-        .expect("qjs backend should be enabled");
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.value, Some(serde_json::json!(42)));
+    }
 
-        assert_eq!(via_trait.stdout, direct.stdout);
-        assert_eq!(via_trait.value, direct.value);
+    #[test]
+    fn qjs_engine_execute_errors_when_not_enabled() {
+        // Migrated from script_backend.rs's qjs_backend_not_enabled_without_env
+        // (was: try_execute_qjs_invocation returns Ok(None) when the qjs
+        // backend isn't selected). The trait surface has no Option-wrapping
+        // "not enabled" case, so the equivalent is an Err from execute().
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::clear();
+        let engine = QjsEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        assert!(engine.execute(QJS_VALID_SOURCE, &options, None).is_err());
+    }
+
+    #[test]
+    fn qjs_engine_execute_wires_fleet_bridge_and_args() {
+        // Migrated from script_backend.rs's
+        // try_execute_qjs_invocation_wires_fleet_bridge_and_args — the
+        // richest surviving scenario: fleet_call AND args_len/arg wired
+        // together through a real qjs script.
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::set("qjs");
+        let engine = QjsEngineBackend;
+
+        let bridge: ScriptFleetBridgeFn = Arc::new(|op_id: &str, params: &str| {
+            if op_id == "protocol.info" && params == "{}" {
+                Ok("{\"version\":1}".to_owned())
+            } else {
+                Err(format!("unknown_op: {op_id}"))
+            }
+        });
+        let mut options = ScriptInvocationOptions::default();
+        options.arguments = Some(serde_json::json!(["first", "second"]));
+
+        let result = engine
+            .execute(
+                "function entry() { \
+                     const info = __host.fleet_call('protocol.info', '{}'); \
+                     return __host.args_len() + ':' + __host.arg(0) + ':' + info; \
+                 }",
+                &options,
+                Some(bridge),
+            )
+            .expect("execute should succeed");
+
+        assert_eq!(
+            result.value,
+            Some(serde_json::json!("2:first:{\"version\":1}"))
+        );
     }
 
     #[test]

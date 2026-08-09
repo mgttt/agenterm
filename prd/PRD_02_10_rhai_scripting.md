@@ -66,6 +66,107 @@ behavior match. See
 [`plan/design-scripting-boundary-comparison.md`](../plan/design-scripting-boundary-comparison.md)
 §2.1/§6 for the L1/L2/L3 boundary this rests on.
 
+**Shared engine layer (2026-08-08/09, four rounds, `plan/plan-v0.1.16.md` §1
+Rh Common-M1 through Common-M4/Trait-M3).** "Capability alignment" above was,
+until this work, maintained by hand — three ~300-600 line per-engine
+`check_many.rs` files kept in sync by copy-paste-and-compare (lua's and
+qjs's own doc comments literally said "aligned with agenterm-rh"). That is
+no longer accurate as a description of the current state; it is now
+structural:
+
+- **`crates/agenterm-script-common`** (Common-M1 `ec497449`, Common-M2
+  `01a16414`, Common-M4 `50ab1f7e`) unifies, as one generic implementation
+  each engine plugs a thin adapter into: the `check_many` driver (manifest/
+  report shapes, path-confinement/duplicate/budget guards, exit_class→exit-
+  code mapping), the `corpus_scan` driver (directory walk + extension filter
+  + checker closure), `hex` (sha256_hex/hex_encode/required_json_string
+  manifest helpers), and slice-based CLI argv helpers
+  (`find_flag_value`/`require_flag_value`/`positional`/`has_flag` in
+  `cli.rs`). Deliberately **not** unified — each engine's actual syntax/
+  semantic checker (different signatures, different notions of "project
+  root"), pack/qualify schemas (rh's native-codegen pack has no bytecode-
+  fingerprint analogue to lua/qjs's interpreted bytecode), and rh's own
+  `corpus.rs` (bound to the whole-project transpile pipeline, not a bare
+  check). See the crate's module doc,
+  [`crates/agenterm-script-common/src/lib.rs`](../crates/agenterm-script-common/src/lib.rs),
+  and [`plan/design-script-engine-trait.md`](../plan/design-script-engine-trait.md)
+  §0 for the full rationale, including the future `sql` backend this crate
+  boundary is meant to absorb without a fourth hand-copy.
+- **`trait ScriptEngineBackend`** (`src/script_engine.rs`, design doc §2.3)
+  is the next seam down — the root crate's per-invocation (single check /
+  single execute) call layer, not check-many/corpus-scan/pack/qualify. Its
+  minimal 4-method surface, which a future `sql` backend would also
+  implement (design §2.6): `backend_id()`, `entry_extensions()`,
+  `check(source, options) -> Result<(), ScriptEngineError>`, and
+  `execute(source, options, fleet_bridge) -> Result<ScriptInvocationResult, ScriptEngineError>`
+  (`enabled()` has a default implementation and rarely needs overriding).
+  Design phases M1 (trait + shared types, new types coexisting with the old
+  per-engine `*InvocationOptions` structs) and M2 (three thin adapter impls
+  that delegate to, rather than re-derive, the existing
+  `try_execute_{rh,lua,qjs}_invocation` functions) shipped together as
+  Common-M3/Trait-M1+M2 (`9de627f7`). M3 (switching
+  `script_worker.rs::execute_inner`'s call sites to the trait registry via a
+  new `dispatch_via_engine` helper) shipped as Common-M4/Trait-M3
+  (`50ab1f7e`). M4 (deleting the now-superseded `try_execute_*` functions
+  and their six `*InvocationOptions`/`*InvocationResult` structs) is **not**
+  done yet — it waits for M3 to settle in the shared checkout before that
+  cleanup lands.
+
+**Parity test regime** — the contract is now test-enforced, not just
+doc-comment-asserted:
+
+- [`tests/script_engine_parity.rs`](../tests/script_engine_parity.rs)
+  (Common-M2 `01a16414`): 8 structural `check-many` scenarios (all-green,
+  syntax error, relative-path escape, absolute-path rejection, duplicate
+  path, zero wall-time, single-file budget, kind mismatch plus rh's legacy
+  `rhai` kind compatibility) run through all three engines, asserting exact
+  agreement on the engine-neutral fields the shared driver itself produces
+  (`ok`, `checked_files`, failure counts, `exit_class`, `exit_code()`);
+  per-engine syntax-failure `code` strings are deliberately not compared
+  character-for-character. 8/8 green.
+- [`tests/script_fleet_facade_parity.rs`](../tests/script_fleet_facade_parity.rs)
+  (Common-M4 `50ab1f7e`): parses the actual `fleet.*` facade source files
+  (regex, no engine execution) and compares extracted catalogs. lua
+  (`scripts/lua/lib/fleet.lua`) and qjs (`scripts/qjs/lib/fleet.js`) are
+  locked as identical, 29/29 entries. rh
+  (`crates/agenterm-rh/src/shipped_surfaces.rs`) is a pinned superset, +47
+  entries over the lua/qjs 29.
+
+**Open finding — rh declares 32 `fleet.*` surfaces the host cannot
+dispatch (found and pinned 2026-08-08, `tests/script_fleet_facade_parity.rs`,
+`50ab1f7e`).** rh's `shipped_surfaces.rs` declares 76 `fleet.*` paths; 32 of
+them have no matching entry in `src/operations.rs`'s `OPERATION_CATALOG` —
+the authoritative, dispatchable operation-id list that `operation_by_id`
+actually looks up. Affected families: `ui.settings.*`, `ui.modal.*`,
+`ui.font.*`, `ui.instance-picker.*` (cancel/confirm/next/prev), `ui.window.*`
+(maximize/minimize/restore/close), plus scattered singles (`ui.tab.new`,
+`ui.tab.editor.save`/`.cancel`, `terminal.copy-selection`,
+`ui.locale.toggle`, `ui.new-terminal.open`,
+`ui.window-close.keep-server-running`). This is declared-but-unimplemented,
+not a silently dropped bug — lua/qjs's 29 operation IDs are a clean subset
+of `OPERATION_CATALOG` with no equivalent gap. It is pinned by an explicit
+32-entry allowlist in the parity test so the asymmetry can't regress
+silently, but the disposition (drop the 32 declarations vs implement the
+missing host entries) is undecided and belongs to the rh track owner, not
+this parity test.
+
+**Real bugs the abstraction work surfaced and fixed, not just refactored:**
+
+- lua's old hand-copied `check_many` resolved manifest paths with **no**
+  project-root escape check (rh and qjs both already rejected `../../../`
+  escapes) — a manifest could point outside the project. Routing lua
+  through the shared `agenterm-script-common` driver closed this for free
+  (Common-M1 `ec497449`); no prior lua test asserted the old weak behavior
+  (verified before migrating), and a targeted regression test was added.
+- the qjs argv iterator-exhaustion bug class (the `pack build --dir X
+  --project-root Y` double-flag parsing bug from QJS-M5d) is now
+  structurally prevented rather than one-off patched: the shared `cli.rs`
+  argv helpers are slice-based, not iterator-based, specifically because
+  that bug class came from iterator exhaustion (Common-M4 `50ab1f7e`). 16
+  new unit tests include the original bug's exact repro scenario as a
+  regression case, and an end-to-end smoke re-ran that precise scenario
+  post-merge to confirm no regression.
+
 ## Shipped baseline
 
 - [x] `agenterm-rh.exe` is the sole task and supervised worker front door:

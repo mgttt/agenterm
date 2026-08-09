@@ -31,7 +31,9 @@ fn rh_backend_defaults_to_rh_without_env() {
     unsafe {
         std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rhai");
     }
-    assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rhai);
+    // `rhai` is a retired backend; the env value survives as a compat alias
+    // routed to Rh (see ScriptBackend::from_env).
+    assert_eq!(ScriptBackend::from_env(), ScriptBackend::Rh);
     match prior {
         Some(value) => unsafe {
             std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
@@ -216,7 +218,12 @@ fn rh_backend_run_while_count_fixture() {
 }
 
 #[test]
-fn rhai_backend_returns_none_for_check() {
+fn rhai_env_value_routes_check_to_rh_backend() {
+    // Pre-retirement, `AGENTERM_SCRIPT_BACKEND=rhai` selected a distinct
+    // rhai backend and this probe returned None (rh not selected). After
+    // the rhai retirement (Wave 4.5-A/B), `rhai` is a compat alias for Rh,
+    // so the same env value now routes the check to the rh backend — this
+    // test locks the alias behavior.
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     unsafe {
         std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rhai");
@@ -228,7 +235,7 @@ fn rhai_backend_returns_none_for_check() {
         None,
     )
     .expect("probe");
-    assert!(probe.is_none());
+    assert!(probe.is_some(), "rhai env value should alias to the rh backend");
     unsafe {
         std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
     }

@@ -2,6 +2,15 @@
 //!
 //! Pack execution defaults to the rh AOT backend. Legacy `AGENTERM_SCRIPT_BACKEND=rhai`
 //! and `.rhai` entry paths are retired and normalize to `rh`.
+//!
+//! Trait-M4 (`plan/design-script-engine-trait.md` §4) folded the lua and
+//! qjs engine-specific invocation logic into `script_engine.rs`'s
+//! `LuaEngineBackend`/`QjsEngineBackend`; this module kept only
+//! `try_execute_rh_invocation` (and its `RhInvocationOptions`/
+//! `RhInvocationResult` types) because `crates/agenterm-rh/src/main.rs`
+//! (the `agenterm-rh` bin target of this root package, per `Cargo.toml`)
+//! calls it directly and depends on its typed `agenterm_rh::RhError`
+//! return — see `script_engine.rs`'s module doc for the full rationale.
 
 use std::{
     path::{Path, PathBuf},
@@ -65,14 +74,6 @@ impl ScriptBackend {
 
 pub fn rh_backend_enabled() -> bool {
     matches!(ScriptBackend::from_env(), ScriptBackend::Rh)
-}
-
-pub fn lua_backend_enabled() -> bool {
-    matches!(ScriptBackend::from_env(), ScriptBackend::Lua)
-}
-
-pub fn qjs_backend_enabled() -> bool {
-    matches!(ScriptBackend::from_env(), ScriptBackend::Qjs)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -163,41 +164,6 @@ fn json_value_from_entry(entry_value: i64) -> Option<serde_json::Value> {
     Some(serde_json::Value::from(entry_value))
 }
 
-/// Build the `args_len`/`arg` host-function closures shared by the lua and
-/// qjs backends from a script invocation's `arguments` value.
-///
-/// `LuaHostFunctions` and `QjsHostFunctions` declare `args_len`/`arg` with
-/// structurally identical trait-object types: `Arc<dyn Fn() -> i64 + Send +
-/// Sync>` for `args_len`, and `Arc<dyn Fn(i64) -> Result<String, String> +
-/// Send + Sync>` for `arg` (aliased per-crate as `ArgFn`). Type aliases
-/// don't create distinct types, so the same pair of closures can be
-/// assigned directly to either engine's host-function struct.
-type ScriptArgsAccessors = (
-    Arc<dyn Fn() -> i64 + Send + Sync>,
-    Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync>,
-);
-
-fn script_args_accessors(arguments: Value) -> ScriptArgsAccessors {
-    let args_for_len = arguments.clone();
-    let args_for_arg = arguments;
-    let args_len: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
-        args_for_len
-            .as_array()
-            .map(|a| a.len() as i64)
-            .unwrap_or(0)
-    });
-    let arg: Arc<dyn Fn(i64) -> Result<String, String> + Send + Sync> =
-        Arc::new(move |index: i64| {
-            args_for_arg
-                .as_array()
-                .and_then(|a| a.get(index as usize))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_owned())
-                .ok_or_else(|| format!("argument {index} is unavailable"))
-        });
-    (args_len, arg)
-}
-
 fn resolve_rh_pack(
     source: &str,
     project_root: Option<&std::path::Path>,
@@ -254,146 +220,6 @@ pub fn rh_load_pack(
     crate::script_rh_pack::load_rh_pack(path)
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct LuaInvocationOptions {
-    pub project_root: Option<PathBuf>,
-    pub arguments: Option<Value>,
-    pub budgets: Option<ScriptBudgets>,
-}
-
-pub struct LuaInvocationResult {
-    pub stdout: String,
-    pub value: Option<i64>,
-}
-
-/// Try to execute a Lua invocation. Returns `Ok(None)` if the Lua backend is not enabled.
-pub fn try_execute_lua_invocation(
-    operation: ScriptOperation,
-    source: &str,
-    options: LuaInvocationOptions,
-    fleet_bridge: Option<crate::script_lua_host::LuaFleetBridgeFn>,
-) -> Result<Option<LuaInvocationResult>, String> {
-    if !lua_backend_enabled() {
-        return Ok(None);
-    }
-
-    let engine = agenterm_lua::LuaEngine::new().map_err(|e| e.to_string())?;
-
-    match operation {
-        // Unreachable in practice: `script_worker.rs::execute_inner` short-circuits
-        // `ScriptOperation::Api` before ever calling into this backend dispatch.
-        // Kept only so this match stays exhaustive over `ScriptOperation`.
-        ScriptOperation::Api => Ok(None),
-        ScriptOperation::Check => {
-            engine.check(source).map_err(|e| e.to_string())?;
-            Ok(Some(LuaInvocationResult {
-                stdout: String::new(),
-                value: None,
-            }))
-        }
-        ScriptOperation::Run | ScriptOperation::Eval => {
-            let mut host = agenterm_lua::LuaHostFunctions::default();
-
-            // Wire fleet bridge
-            if let Some(bridge) = fleet_bridge {
-                host.fleet_call = Some(Arc::new(
-                    move |op_id: String, params: String| -> Result<String, String> {
-                        bridge(op_id.as_str(), params.as_str())
-                    },
-                ));
-            }
-
-            // Wire args_len / arg from options.arguments
-            if let Some(arguments) = options.arguments.clone() {
-                let (args_len, arg) = script_args_accessors(arguments);
-                host.args_len = Some(args_len);
-                host.arg = Some(arg);
-            }
-
-            let result = engine
-                .eval(source, &host)
-                .map_err(|e| format!("lua_eval: {e}"))?;
-
-            Ok(Some(LuaInvocationResult {
-                stdout: result.stdout,
-                value: Some(result.value),
-            }))
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct QjsInvocationOptions {
-    pub project_root: Option<PathBuf>,
-    pub arguments: Option<Value>,
-    pub budgets: Option<ScriptBudgets>,
-}
-
-pub struct QjsInvocationResult {
-    pub stdout: String,
-    pub value: Option<Value>,
-}
-
-/// Try to execute a qjs invocation. Returns `Ok(None)` if the qjs backend is not enabled.
-///
-/// Structurally mirrors `try_execute_lua_invocation` — same "not enabled ->
-/// None", same fleet-bridge/args wiring shape — because qjs, like lua, is
-/// an interpreted engine with no AOT/native-codegen step (unlike rh's
-/// `try_execute_rh_invocation`, which resolves/loads a compiled native
-/// pack). `value` is `Option<serde_json::Value>` rather than lua's
-/// `Option<i64>` because `agenterm_qjs::eval_entry_with_host` already
-/// produces a typed JSON value (via `JSON.stringify`) — a strict superset,
-/// not a divergence: any lua-shaped i64 result is also representable here.
-pub fn try_execute_qjs_invocation(
-    operation: ScriptOperation,
-    source: &str,
-    options: QjsInvocationOptions,
-    fleet_bridge: Option<crate::script_qjs_host::QjsFleetBridgeFn>,
-) -> Result<Option<QjsInvocationResult>, String> {
-    if !qjs_backend_enabled() {
-        return Ok(None);
-    }
-
-    match operation {
-        // Unreachable in practice: `script_worker.rs::execute_inner` short-circuits
-        // `ScriptOperation::Api` before ever calling into this backend dispatch.
-        // Kept only so this match stays exhaustive over `ScriptOperation`.
-        ScriptOperation::Api => Ok(None),
-        ScriptOperation::Check => {
-            agenterm_qjs::check(source, "invocation.js").map_err(|e| e.to_string())?;
-            Ok(Some(QjsInvocationResult {
-                stdout: String::new(),
-                value: None,
-            }))
-        }
-        ScriptOperation::Run | ScriptOperation::Eval => {
-            let mut host = agenterm_qjs::QjsHostFunctions::default();
-
-            // Wire fleet bridge
-            if let Some(bridge) = fleet_bridge {
-                host.fleet_call = Some(Arc::new(move |op_id: &str, params: &str| -> Result<String, String> {
-                    bridge(op_id, params)
-                }));
-            }
-
-            // Wire args_len / arg from options.arguments
-            if let Some(arguments) = options.arguments.clone() {
-                let (args_len, arg) = script_args_accessors(arguments);
-                host.args_len = Some(args_len);
-                host.arg = Some(arg);
-            }
-
-            let result = agenterm_qjs::eval_entry_with_host(source, "invocation.js", &host)
-                .map_err(|e| format!("qjs_eval: {e}"))?;
-
-            Ok(Some(QjsInvocationResult {
-                stdout: result.stdout,
-                value: result.value,
-            }))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -434,24 +260,17 @@ mod tests {
 
     #[test]
     fn lua_backend_from_env() {
+        // Trait-M4: was mixed with a try_execute_lua_invocation check-path
+        // probe and a lua_backend_enabled() assertion; both are now covered
+        // in script_engine.rs (LuaEngineBackend::enabled /
+        // lua_engine_check_valid_and_broken_source). This test stays
+        // ScriptBackend-enum-routing-only.
         let _guard = ENV_LOCK.lock().expect("lock");
         let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
         unsafe {
             std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
         }
         assert_eq!(ScriptBackend::from_env(), ScriptBackend::Lua);
-        assert!(super::lua_backend_enabled());
-
-        // Also test check path
-        let result = super::try_execute_lua_invocation(
-            ScriptOperation::Check,
-            "return 0",
-            super::LuaInvocationOptions::default(),
-            None,
-        )
-        .expect("probe")
-        .expect("lua result");
-        assert!(result.value.is_none());
 
         match prior {
             Some(value) => unsafe {
@@ -505,100 +324,18 @@ mod tests {
     }
 
     #[test]
-    fn try_execute_lua_invocation_eval() {
-        let _guard = ENV_LOCK.lock().expect("lock");
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
-        }
-        let result = super::try_execute_lua_invocation(
-            ScriptOperation::Eval,
-            "return 42",
-            super::LuaInvocationOptions::default(),
-            None,
-        )
-        .expect("probe")
-        .expect("lua result");
-        assert_eq!(result.value, Some(42));
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
-    }
-
-    #[test]
-    fn try_execute_lua_invocation_check() {
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "lua");
-        }
-        let result = super::try_execute_lua_invocation(
-            ScriptOperation::Check,
-            "return 0",
-            super::LuaInvocationOptions::default(),
-            None,
-        )
-        .expect("probe")
-        .expect("lua result");
-        assert!(result.value.is_none());
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
-    }
-
-    #[test]
-    fn lua_backend_not_enabled_without_env() {
-        let _guard = ENV_LOCK.lock().expect("lock");
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-        }
-        let result = super::try_execute_lua_invocation(
-            ScriptOperation::Eval,
-            "return 42",
-            super::LuaInvocationOptions::default(),
-            None,
-        )
-        .expect("probe");
-        assert!(result.is_none());
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
-    }
-
-    #[test]
     fn qjs_backend_from_env() {
+        // Trait-M4: was mixed with a try_execute_qjs_invocation check-path
+        // probe and a qjs_backend_enabled() assertion; both are now covered
+        // in script_engine.rs (QjsEngineBackend::enabled /
+        // qjs_engine_check_valid_and_broken_source). This test stays
+        // ScriptBackend-enum-routing-only.
         let _guard = ENV_LOCK.lock().expect("lock");
         let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
         unsafe {
             std::env::set_var("AGENTERM_SCRIPT_BACKEND", "qjs");
         }
         assert_eq!(ScriptBackend::from_env(), ScriptBackend::Qjs);
-        assert!(super::qjs_backend_enabled());
-
-        let result = super::try_execute_qjs_invocation(
-            ScriptOperation::Check,
-            "function entry() { return 0; }",
-            super::QjsInvocationOptions::default(),
-            None,
-        )
-        .expect("probe")
-        .expect("qjs result");
-        assert!(result.value.is_none());
 
         match prior {
             Some(value) => unsafe {
@@ -629,124 +366,5 @@ mod tests {
     #[test]
     fn qjs_backend_as_str() {
         assert_eq!(ScriptBackend::Qjs.as_str(), "qjs");
-    }
-
-    #[test]
-    fn try_execute_qjs_invocation_eval() {
-        let _guard = ENV_LOCK.lock().expect("lock");
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "qjs");
-        }
-        let result = super::try_execute_qjs_invocation(
-            ScriptOperation::Eval,
-            "function entry() { return 42; }",
-            super::QjsInvocationOptions::default(),
-            None,
-        )
-        .expect("probe")
-        .expect("qjs result");
-        assert_eq!(result.value, Some(serde_json::json!(42)));
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
-    }
-
-    #[test]
-    fn try_execute_qjs_invocation_check() {
-        let _guard = ENV_LOCK.lock().expect("lock");
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "qjs");
-        }
-        let result = super::try_execute_qjs_invocation(
-            ScriptOperation::Check,
-            "function entry() { return 0; }",
-            super::QjsInvocationOptions::default(),
-            None,
-        )
-        .expect("probe")
-        .expect("qjs result");
-        assert!(result.value.is_none());
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
-    }
-
-    #[test]
-    fn qjs_backend_not_enabled_without_env() {
-        let _guard = ENV_LOCK.lock().expect("lock");
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-        }
-        let result = super::try_execute_qjs_invocation(
-            ScriptOperation::Eval,
-            "function entry() { return 42; }",
-            super::QjsInvocationOptions::default(),
-            None,
-        )
-        .expect("probe");
-        assert!(result.is_none());
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
-    }
-
-    #[test]
-    fn try_execute_qjs_invocation_wires_fleet_bridge_and_args() {
-        let _guard = ENV_LOCK.lock().expect("lock");
-        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-        unsafe {
-            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "qjs");
-        }
-        let bridge: crate::script_qjs_host::QjsFleetBridgeFn =
-            std::sync::Arc::new(|op_id: &str, params: &str| {
-                if op_id == "protocol.info" && params == "{}" {
-                    Ok("{\"version\":1}".to_owned())
-                } else {
-                    Err(format!("unknown_op: {op_id}"))
-                }
-            });
-        let mut options = super::QjsInvocationOptions::default();
-        options.arguments = Some(serde_json::json!(["first", "second"]));
-        let result = super::try_execute_qjs_invocation(
-            ScriptOperation::Eval,
-            "function entry() { \
-                 const info = __host.fleet_call('protocol.info', '{}'); \
-                 return __host.args_len() + ':' + __host.arg(0) + ':' + info; \
-             }",
-            options,
-            Some(bridge),
-        )
-        .expect("probe")
-        .expect("qjs result");
-        assert_eq!(
-            result.value,
-            Some(serde_json::json!("2:first:{\"version\":1}"))
-        );
-        match prior {
-            Some(value) => unsafe {
-                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-            },
-            None => unsafe {
-                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-            },
-        }
     }
 }
