@@ -11,16 +11,28 @@ better tool whenever both are available — see
 [`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md) §0–§1
 for the measured, not-guessed, constraints that motivate the split).
 
-**Status: v1, feature-frozen, plus one scoped v2 addition.** All of the design doc's §5/§7
-acceptance criteria are met and the code is in production use (opt-in, zero cost when
-unconfigured); as of §8 the design doc records a deliberate decision to stop adding
-*intents* to this crate and put research effort elsewhere (see "What this crate does NOT
-do" below — that freeze still holds for the seven-intent path). §9 opened exactly one,
+**Status: ARCHIVED (2026-08-09).** This is not "dynacore" — see the disambiguation section
+below; `crates/agenterm-dynacore` keeps that name permanently. All of the design doc's §5/§7/§9
+acceptance criteria were met before archiving and the code stays in production use (opt-in,
+zero cost when unconfigured), but it receives no further investment. The rest of this README
+describes what exists, as a historical/reference record, not a roadmap. (Pre-archive framing,
+kept accurate below: §8 froze new *intents* on the seven-intent path; §9 opened one narrow
+exception, the **signature-registry-backed call path** described below, before the crate was
+archived outright.)
+
+<details>
+<summary>Pre-archive status line (superseded by "ARCHIVED" above, kept for history)</summary>
+
+All of the design doc's §5/§7 acceptance criteria are met and the code is in production use
+(opt-in, zero cost when unconfigured); as of §8 the design doc records a deliberate decision to
+stop adding *intents* to this crate and put research effort elsewhere (see "What this crate does
+NOT do" below — that freeze still holds for the seven-intent path). §9 opened exactly one,
 narrow exception on top of that freeze: a **signature-registry-backed call path** (see
 "v2: registry-backed calls" below) that lets a pack reach a hand-reviewed *symbol* without
 adding a new `Intent`. This is not a re-opening of v1's scope — no new `Intent`, no new
-CLI surface, no product wiring — see §9.3 for the exact boundary. This README documents
-what exists today; it is not a roadmap.
+CLI surface, no product wiring — see §9.3 for the exact boundary.
+
+</details>
 
 ## What it does
 
@@ -192,10 +204,16 @@ this is deliberate scope, not a backlog:
 
 `agenterm-nativecore` and `crates/agenterm-dynacore` are **two different, unrelated crates**
 despite the confusingly similar directory names — this has been a real, live source of
-confusion in this project more than once, so: `agenterm-dynacore` implements a fleet-call-routed
-"logic pack" (its only host-call primitive is `fleet_call(operation_id, params_json)`, routed
-through the product's `OPERATION_CATALOG`). `agenterm-nativecore` (this crate) does native
-Win32 execution with raw memory ops. They do not share `Inst`/`Op` IR definitions and neither
-depends on the other; `agenterm-nativecore` is this design track's *actual* `dynacore`
-("真身") — `agenterm-dynacore`'s name is a historical accident pending a future rename
-(design doc §7.4), not evidence that the two crates are related.
+confusion in this project more than once, so, settled plainly (2026-08-09, no longer pending):
+`agenterm-dynacore` implements a fleet-call-routed "logic pack" (its only host-call primitive is
+`fleet_call(operation_id, params_json)`, routed through the product's `OPERATION_CATALOG`).
+`agenterm-nativecore` (this crate) does native Win32 execution with raw memory ops. They do not
+share `Inst`/`Op` IR definitions and neither depends on the other.
+
+**`agenterm-dynacore` keeps the "dynacore" name permanently.** An earlier version of this
+document called this crate "the actual dynacore" pending a rename — that plan was reversed:
+the repeated confusion between the two names cost more than a rename would have saved, so
+`agenterm-dynacore` was confirmed as the one true "dynacore" and **this crate
+(`agenterm-nativecore`) is archived** (code stays, tested, opt-in, zero cost when unconfigured,
+no further feature investment). If you are looking for "dynacore", you want
+`crates/agenterm-dynacore`, not this crate.
