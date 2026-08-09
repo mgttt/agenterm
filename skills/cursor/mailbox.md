@@ -15,8 +15,8 @@
 | 产品契约 | `prd/PRD_02_21_control_center.md` / `prd/PRD_02_02_executable_family.md` |
 | 执行计划 | 边界/对照/深度 → `design-rhai-rust-boundary.md`、`design-scripting-boundary-comparison.md`、`research-rhai-kernel-depth.md`（含 §11 N 轴） |
 | LLM | 网关 Native Shell + **Rhai Logic Pack** 热更新；见 `design-llm-gateway-rhai-logic-pack.md` |
-| `origin/main` | tip `a3ec7cc0`（duty handoff） |
-| 待审合 | 无（`origin/cursor/*` ahead=0；`script-smoke-aot-pack-2fd5` 已消失） |
+| `origin/main` | tip `d4ce9b84`（duty scan；handoff 后 tip-repair） |
+| 待审合 | 无（`origin/cursor/*` ahead=0；`1-0e37`/`rh-emit-set-index-assign-1645` ahead=0） |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
 | 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
@@ -64,12 +64,12 @@
 - 下一步: 无新指令不开工
 - 阻塞: 无
 
-### 舰队值班会话 · 2026-08-08T23:22Z
+### 舰队值班会话 · 2026-08-09T00:25Z
 - 状态: IDLE — 本轮 duty 结束；无新指令不开工
-- bcId: `bc-8646f150-8a7d-41e9-9552-28f26af35a30`
-- URL: https://cursor.com/agents/bc-8646f150-8a7d-41e9-9552-28f26af35a30
+- bcId: `bc-aa513cf2-35e7-41b7-810d-7f550bce3645`
+- URL: https://cursor.com/agents/bc-aa513cf2-35e7-41b7-810d-7f550bce3645
 - 分支: `main`
-- tip: `a3ec7cc0`
+- tip: `d4ce9b84`
 - 下一步: cron 下一轮再起
 - 阻塞: 无
 
@@ -85,6 +85,7 @@
 
 ## 交接日志
 
+- 2026-08-09T00:25Z · 舰队值班会话(`bc-aa513cf2-…`) · duty: noop findings=0 main=d4ce9b84；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T23:22Z · 舰队值班会话(`bc-8646f150-…`) · duty: noop findings=0 main=b1de7971；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T22:22Z · 舰队值班会话(`bc-62243042-…`) · duty: noop findings=0 main=462f564f；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
 - 2026-08-08T21:22Z · 舰队值班会话(`bc-6e79df0a-…`) · duty: noop findings=0 main=8898d4db；待审合=无（`origin/cursor/*` ahead=0）；nudge=0 未 apply；lock 已清
