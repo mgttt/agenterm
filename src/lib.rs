@@ -26,6 +26,7 @@ pub mod script_backend;
 pub mod script_catalog;
 pub mod script_engine;
 pub mod script_clipboard;
+pub mod script_dynacore_host;
 pub mod script_error;
 pub mod script_fleet;
 pub mod script_http;
