@@ -674,9 +674,28 @@ fn execute_inner(
         );
     }
 
+    // sql backend: enabled via AGENTERM_SCRIPT_BACKEND=sql or `.sql` entry.
+    // Same #[cfg(not(test))] gate as lua/qjs above (see script_engine.rs's
+    // module doc for why: the M3 phase's per-backend gates are conservative
+    // and independent per call site, not a single shared flag). `execute`
+    // will surface `SqlEngineBackend`'s honest not-implemented error through
+    // `dispatch_via_engine`'s `configuration_error` mapping — correct
+    // fail-closed behavior for a placeholder backend, not a bug: a `check`
+    // operation still works (sql's check is real), only `run`/`eval` fail.
+    #[cfg(not(test))]
+    if crate::script_engine::SqlEngineBackend.enabled() {
+        return dispatch_via_engine(
+            &crate::script_engine::SqlEngineBackend,
+            invocation.operation,
+            &invocation.source,
+            &options,
+            fleet_bridge,
+        );
+    }
+
     Err(configuration_error(
         "script_backend_unavailable",
-        "no script backend handled this invocation; set AGENTERM_SCRIPT_BACKEND to rh, lua, or qjs with matching source",
+        "no script backend handled this invocation; set AGENTERM_SCRIPT_BACKEND to rh, lua, qjs, or sql with matching source",
     ))
 }
 

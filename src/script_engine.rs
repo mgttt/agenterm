@@ -369,6 +369,58 @@ impl ScriptEngineBackend for QjsEngineBackend {
     }
 }
 
+/// sql engine adapter — see `plan/design-script-engine-trait.md` §2.6 (the
+/// design-time prediction this scaffold validates) and
+/// `crates/agenterm-sql/src/lib.rs`'s module doc (the honest "what's real
+/// vs. placeholder" writeup this impl matches).
+///
+/// `check` is real: delegates to `agenterm_sql::check`, which really parses
+/// via `sqlparser`. `execute` is NOT real: there is no decided execution
+/// target for sql source yet (embedded engine vs. external DB connection
+/// vs. host-state-as-virtual-tables — see `agenterm_sql::eval`'s doc), so it
+/// fails closed with `agenterm_sql::eval_entry`'s error rather than
+/// pretending to run anything. `fleet_bridge` is accepted (trait shape
+/// parity with the other three engines) but unused here — §2.6 predicted
+/// exactly this ("sql 不需要 trait 新增方法，只需要 execute 内部把 fleet_bridge
+/// 参数忽略掉"), and this impl is the confirmation that held up in practice.
+pub struct SqlEngineBackend;
+
+impl ScriptEngineBackend for SqlEngineBackend {
+    fn backend_id(&self) -> ScriptBackend {
+        ScriptBackend::Sql
+    }
+
+    fn entry_extensions(&self) -> &'static [&'static str] {
+        &["sql"]
+    }
+
+    fn check(&self, source: &str, _options: &ScriptInvocationOptions) -> Result<(), ScriptEngineError> {
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
+        }
+
+        agenterm_sql::check(source, "invocation.sql").map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn execute(
+        &self,
+        source: &str,
+        _options: &ScriptInvocationOptions,
+        _fleet_bridge: Option<ScriptFleetBridgeFn>,
+    ) -> Result<ScriptInvocationResult, ScriptEngineError> {
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
+        }
+
+        // agenterm_sql::eval_entry() always returns Err today (no decided
+        // execution target — see its module doc); this just forwards that
+        // error rather than re-deriving the message here.
+        agenterm_sql::eval_entry(source, "invocation.sql").map_err(|e| e.to_string())?;
+        Err("sql_execute_unreachable: eval_entry unexpectedly succeeded".to_owned())
+    }
+}
+
 // ---------------------------------------------------------------------
 // §2.4 — enum static dispatch
 // ---------------------------------------------------------------------
@@ -381,14 +433,16 @@ pub enum ScriptEngine {
     Rh(RhEngineBackend),
     Lua(LuaEngineBackend),
     Qjs(QjsEngineBackend),
+    Sql(SqlEngineBackend),
 }
 
 impl ScriptEngine {
-    pub fn all() -> [ScriptEngine; 3] {
+    pub fn all() -> [ScriptEngine; 4] {
         [
             Self::Rh(RhEngineBackend),
             Self::Lua(LuaEngineBackend),
             Self::Qjs(QjsEngineBackend),
+            Self::Sql(SqlEngineBackend),
         ]
     }
 
@@ -398,6 +452,7 @@ impl ScriptEngine {
             ScriptBackend::Rh => Self::Rh(RhEngineBackend),
             ScriptBackend::Lua => Self::Lua(LuaEngineBackend),
             ScriptBackend::Qjs => Self::Qjs(QjsEngineBackend),
+            ScriptBackend::Sql => Self::Sql(SqlEngineBackend),
         }
     }
 }
@@ -414,6 +469,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.backend_id(),
             Self::Lua(backend) => backend.backend_id(),
             Self::Qjs(backend) => backend.backend_id(),
+            Self::Sql(backend) => backend.backend_id(),
         }
     }
 
@@ -422,6 +478,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.entry_extensions(),
             Self::Lua(backend) => backend.entry_extensions(),
             Self::Qjs(backend) => backend.entry_extensions(),
+            Self::Sql(backend) => backend.entry_extensions(),
         }
     }
 
@@ -430,6 +487,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.check(source, options),
             Self::Lua(backend) => backend.check(source, options),
             Self::Qjs(backend) => backend.check(source, options),
+            Self::Sql(backend) => backend.check(source, options),
         }
     }
 
@@ -443,6 +501,7 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Rh(backend) => backend.execute(source, options, fleet_bridge),
             Self::Lua(backend) => backend.execute(source, options, fleet_bridge),
             Self::Qjs(backend) => backend.execute(source, options, fleet_bridge),
+            Self::Sql(backend) => backend.execute(source, options, fleet_bridge),
         }
     }
 }
@@ -509,6 +568,7 @@ mod tests {
         assert!(RhEngineBackend.enabled());
         assert!(!LuaEngineBackend.enabled());
         assert!(!QjsEngineBackend.enabled());
+        assert!(!SqlEngineBackend.enabled());
     }
 
     #[test]
@@ -779,11 +839,111 @@ mod tests {
         }
     }
 
+    // ---- sql ----
+
+    const SQL_VALID_SOURCE: &str = "SELECT 1;";
+    const SQL_BROKEN_SOURCE: &str = "SELEC 1 FORM;";
+
+    #[test]
+    fn sql_engine_enabled_matches_env() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::set("sql");
+        let engine = SqlEngineBackend;
+        assert_eq!(engine.backend_id(), ScriptBackend::Sql);
+        assert!(engine.enabled());
+
+        let _env = EnvGuard::set("rh");
+        assert!(!SqlEngineBackend.enabled());
+    }
+
+    #[test]
+    fn sql_engine_check_valid_and_broken_source() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::set("sql");
+        let engine = SqlEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        engine
+            .check(SQL_VALID_SOURCE, &options)
+            .expect("valid sql source should check clean");
+        assert!(
+            engine.check(SQL_BROKEN_SOURCE, &options).is_err(),
+            "broken sql source should fail check"
+        );
+    }
+
+    #[test]
+    fn sql_engine_check_errors_when_not_enabled() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::clear();
+        let engine = SqlEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        assert!(engine.check(SQL_VALID_SOURCE, &options).is_err());
+    }
+
+    #[test]
+    fn sql_engine_execute_returns_the_not_implemented_error() {
+        // Pins the contract: sql's execute is fail-closed by design (no
+        // decided execution target — see agenterm_sql::eval's module doc),
+        // not merely "currently broken". Asserting the actual message
+        // means a future accidental regression to a *different* error (or
+        // a silent success) both get caught here.
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::set("sql");
+        let engine = SqlEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        let error = engine
+            .execute(SQL_VALID_SOURCE, &options, None)
+            .expect_err("sql execute must fail closed, not succeed");
+        assert!(
+            error.contains("sql_eval_not_implemented"),
+            "unexpected error message: {error}"
+        );
+        assert!(
+            error.contains("no execution target is decided"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn sql_engine_execute_errors_when_not_enabled() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::clear();
+        let engine = SqlEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        let error = engine
+            .execute(SQL_VALID_SOURCE, &options, None)
+            .expect_err("execute must fail when the backend isn't enabled");
+        // "not enabled" must win over "not implemented" when both are
+        // true, matching lua/qjs's same enabled()-gate-first ordering.
+        assert!(error.contains("not enabled"), "{error}");
+    }
+
+    #[test]
+    fn sql_engine_entry_extensions_match_from_entry_path() {
+        for ext in SqlEngineBackend.entry_extensions() {
+            let path = format!("script.{ext}");
+            assert_eq!(
+                ScriptBackend::from_entry_path(&path),
+                ScriptBackend::Sql,
+                "extension {ext} should route to sql"
+            );
+        }
+    }
+
     // ---- ScriptEngine enum (static dispatch) ----
 
     #[test]
     fn script_engine_for_backend_and_engine_for_agree() {
-        for id in [ScriptBackend::Rh, ScriptBackend::Lua, ScriptBackend::Qjs] {
+        for id in [
+            ScriptBackend::Rh,
+            ScriptBackend::Lua,
+            ScriptBackend::Qjs,
+            ScriptBackend::Sql,
+        ] {
             assert_eq!(ScriptEngine::for_backend(id).backend_id(), id);
             assert_eq!(engine_for(id).backend_id(), id);
         }
@@ -792,7 +952,15 @@ mod tests {
     #[test]
     fn script_engine_all_covers_every_backend_id() {
         let ids: Vec<ScriptBackend> = ScriptEngine::all().iter().map(|e| e.backend_id()).collect();
-        assert_eq!(ids, vec![ScriptBackend::Rh, ScriptBackend::Lua, ScriptBackend::Qjs]);
+        assert_eq!(
+            ids,
+            vec![
+                ScriptBackend::Rh,
+                ScriptBackend::Lua,
+                ScriptBackend::Qjs,
+                ScriptBackend::Sql,
+            ]
+        );
     }
 
     #[test]

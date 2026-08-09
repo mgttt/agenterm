@@ -1,0 +1,26 @@
+[package]
+name = "agenterm-sql"
+version = "0.1.15"
+edition = "2024"
+rust-version = "1.97"
+description = "AgenTerm sql pack language scaffold: SQL-92/PostgreSQL-benchmarked script engine, capability-aligned with agenterm-rh/agenterm-lua/agenterm-qjs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mgttt/agenterm"
+publish = false
+# No [[bin]] here — mirrors agenterm-qjs's/agenterm-rh's shape: the real
+# `agenterm-sql` binary is declared in the ROOT Cargo.toml's [[bin]] list
+# with path = "crates/agenterm-sql/src/main.rs", compiled as part of the
+# root `agenterm` package (same reason qjs/lua's bins are: so main.rs can
+# reach `agenterm::` internals once/if a real execute design lands).
+
+[lib]
+name = "agenterm_sql"
+path = "src/lib.rs"
+
+[dependencies]
+agenterm-script-common = { path = "../agenterm-script-common" }
+sqlparser = "0.62"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3.25"
+walkdir = "2"

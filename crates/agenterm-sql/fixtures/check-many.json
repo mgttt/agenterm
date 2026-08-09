@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "kind": "agenterm-sql-check-manifest",
+  "files": ["ok.sql", "syntax-error.sql"]
+}

@@ -28,6 +28,7 @@ pub enum ScriptBackend {
     Rh,
     Lua,
     Qjs,
+    Sql,
 }
 
 impl ScriptBackend {
@@ -42,6 +43,7 @@ impl ScriptBackend {
             Some("rhai") => Self::Rh,
             Some("lua") => Self::Lua,
             Some("qjs") => Self::Qjs,
+            Some("sql") => Self::Sql,
             _ => Self::Rh,
         }
     }
@@ -51,6 +53,7 @@ impl ScriptBackend {
             Self::Rh => "rh",
             Self::Lua => "lua",
             Self::Qjs => "qjs",
+            Self::Sql => "sql",
         }
     }
 
@@ -61,6 +64,9 @@ impl ScriptBackend {
         }
         if path.ends_with(".js") || path.ends_with(".mjs") {
             return Self::Qjs;
+        }
+        if path.ends_with(".sql") {
+            return Self::Sql;
         }
         if path.ends_with(".rh") {
             return Self::Rh;
@@ -366,5 +372,45 @@ mod tests {
     #[test]
     fn qjs_backend_as_str() {
         assert_eq!(ScriptBackend::Qjs.as_str(), "qjs");
+    }
+
+    #[test]
+    fn sql_backend_from_env() {
+        // Mirrors qjs_backend_from_env: ScriptBackend-enum-routing-only, no
+        // enabled()/check-path probe here (sql has no such probe yet — its
+        // check/execute story lives in script_engine.rs's SqlEngineBackend
+        // tests, once that exists).
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "sql");
+        }
+        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Sql);
+
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[test]
+    fn sql_backend_from_entry_path() {
+        assert_eq!(
+            ScriptBackend::from_entry_path("scripts/sql/test.sql"),
+            ScriptBackend::Sql
+        );
+        assert_eq!(
+            ScriptBackend::from_entry_path("test.js"),
+            ScriptBackend::Qjs
+        );
+    }
+
+    #[test]
+    fn sql_backend_as_str() {
+        assert_eq!(ScriptBackend::Sql.as_str(), "sql");
     }
 }
